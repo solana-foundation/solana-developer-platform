@@ -2,7 +2,7 @@
  * The trades list's URL state.
  *
  * The URL carries `?status=<group>&q=<text>` where `<group>` is the UI grouping
- * key (`open` | `ready` | `closed`; `all` is absent). The server refetches per
+ * key (`open` | `ready` | `closed`; `all` is absent). The list is read again per
  * navigation with the group mapped to the real statuses behind it, the
  * transactions-page pattern: filters in the URL, one parse/serialize pair as
  * the single translation, `router.replace` on change.

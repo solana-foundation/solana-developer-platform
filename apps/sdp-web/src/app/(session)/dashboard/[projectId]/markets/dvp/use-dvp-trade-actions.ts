@@ -21,16 +21,17 @@ import {
   type DvpTradeSide,
 } from "@sdp/types/dvp";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { DVP_TOAST_POSITION, dvpToastAction } from "./dvp-action-toast";
 import { freshDvpIdempotencyKey } from "./dvp-idempotency-key";
+import { dvpQueryKeys } from "./dvp-query-key";
 import { dvpErrorEnvelopeSchema } from "./dvp-trade";
 
 type DvpTradeActionName = "settle" | "cancel" | "fund" | "reclaim";
@@ -200,7 +201,7 @@ function successOf(
 }
 
 export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): DvpTradeActions {
-  const router = useRouter();
+  const invalidateReads = useInvalidateDashboardReads();
   const t = useTranslations();
   const [pending, setPending] = useState<ReadonlySet<DvpPendingAction>>(new Set());
 
@@ -256,7 +257,7 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
       const success = successOf(action, body);
       if (success === null) {
         toast.error(t("DashboardMarkets.dvp.actionUnconfirmed"), DVP_TOAST_POSITION);
-        router.refresh();
+        void invalidateReads(dvpQueryKeys.isTradeRead);
         return;
       }
       // The single biggest source of "did anything happen?": these used to
@@ -267,7 +268,7 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
         ...DVP_TOAST_POSITION,
         action: dvpToastAction(t, success.signature, cluster),
       });
-      router.refresh();
+      void invalidateReads(dvpQueryKeys.isTradeRead);
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Request failed.";
       toast.error(message, DVP_TOAST_POSITION);

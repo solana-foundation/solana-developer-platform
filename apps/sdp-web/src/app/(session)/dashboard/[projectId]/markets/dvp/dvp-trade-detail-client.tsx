@@ -1,20 +1,36 @@
 "use client";
 
-/**
- * Client boundary for the trade detail view: owns the live watch, keeps the
- * workspace a pure function of its props.
- */
-
+import { DvpTradeDetailSkeleton } from "@/app/(session)/dashboard/[projectId]/markets/markets-route-skeletons";
+import ProjectNotFound from "@/app/(session)/dashboard/[projectId]/not-found";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import type { DvpTrade } from "./dvp-trade";
 import { DvpTradeDetailWorkspace } from "./dvp-trade-detail-workspace";
-import { useDvpTradeWatch } from "./use-dvp-trade-watch";
+import { DvpTradeLoadError } from "./dvp-trade-load-error";
+import { useDvpTrade } from "./dvp-trades.data";
 
-export function DvpTradeDetailClient({ trade }: { trade: DvpTrade }) {
-  // The counterparty's deposit is the one event nothing announces, so an open
-  // trade watches for it here rather than waiting to be reloaded by hand.
-  useDvpTradeWatch(trade);
+/**
+ * One trade's page. A trade outside the caller's scope answers 404 upstream by design, so an absent
+ * trade and an unauthorized one are indistinguishable here, which is the point: neither reveals
+ * that the other exists. Every other failure is a failure to find out, never an absence: a DvP
+ * trade holds both parties' money in escrow, so "gone" is the worst possible wrong answer.
+ */
+export function DvpTradeDetailClient({ tradeId }: { tradeId: string }) {
+  const { data: trade, error, mutate } = useDvpTrade(tradeId);
   const { canWrite } = useDashboardWorkspace().dashboardAccess.capabilities;
-  return <DvpTradeDetailWorkspace canWrite={canWrite} cluster={useSolanaCluster()} trade={trade} />;
+  const cluster = useSolanaCluster();
+  if (trade !== undefined) {
+    return <DvpTradeDetailWorkspace canWrite={canWrite} cluster={cluster} trade={trade} />;
+  }
+  if (error === undefined) {
+    return <DvpTradeDetailSkeleton />;
+  }
+  if (error.status === 404) {
+    return <ProjectNotFound />;
+  }
+  return (
+    <DvpTradeLoadError
+      message={error.message === "" ? null : error.message}
+      onRetry={() => void mutate()}
+    />
+  );
 }

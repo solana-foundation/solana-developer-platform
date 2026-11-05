@@ -1,30 +1,35 @@
 import { dashboardJson } from "@/lib/dashboard-response";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
+const TRADE_LIST_PARAMS = ["limit", "status", "settlementAvailability", "q"] as const;
+
 /**
- * The upstream list takes only `limit` (1..100). Validating here rather than
- * forwarding the query wholesale keeps an unknown parameter from reaching the
- * API as a silently ignored filter — a caller who thinks they filtered and did
- * not is worse served than one who gets a 400.
+ * The upstream list takes `limit` (1..100) and the server-side filters the trades page sends.
+ * Validating here rather than forwarding the query wholesale keeps an unknown parameter from
+ * reaching the API as a silently ignored filter — a caller who thinks they filtered and did not is
+ * worse served than one who gets a 400. The filter values themselves are the API's to judge.
  */
 function tradesQuery(
   request: Request
 ): { ok: true; query: string } | { ok: false; message: string } {
   const url = new URL(request.url);
-  for (const key of url.searchParams.keys()) {
-    if (key !== "limit") {
-      return { ok: false, message: `Unsupported query parameter: ${key}` };
+  const forwarded = new URLSearchParams();
+  for (const [name, value] of url.searchParams) {
+    if (!(TRADE_LIST_PARAMS as readonly string[]).includes(name)) {
+      return { ok: false, message: `Unsupported query parameter: ${name}` };
     }
+    if (forwarded.has(name)) {
+      return { ok: false, message: `Repeated query parameter: ${name}` };
+    }
+    forwarded.set(name, value);
   }
 
-  const limit = url.searchParams.get("limit");
-  if (limit === null) {
-    return { ok: true, query: "" };
-  }
-  if (!/^\d+$/.test(limit) || Number(limit) < 1 || Number(limit) > 100) {
+  const limit = forwarded.get("limit");
+  if (limit !== null && (!/^\d+$/.test(limit) || Number(limit) < 1 || Number(limit) > 100)) {
     return { ok: false, message: "limit must be an integer between 1 and 100" };
   }
-  return { ok: true, query: `?limit=${limit}` };
+  const query = forwarded.toString();
+  return { ok: true, query: query === "" ? "" : `?${query}` };
 }
 
 export async function GET(request: Request) {

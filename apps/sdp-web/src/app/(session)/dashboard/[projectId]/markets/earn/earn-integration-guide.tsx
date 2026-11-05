@@ -33,8 +33,8 @@ import {
 } from "./earn-integration-snippets";
 import { formatProviderApy } from "./earn-market-presentation";
 import { useEarnStrategies } from "./earn-program-data";
+import { useEarnProviderAccess } from "./earn-provider-access";
 import {
-  type EarnProviderAccess,
   type EarnVaultDepositAvailability,
   earnVaultDepositAvailability,
   earnVaultDepositOnlyEnvironment,
@@ -42,7 +42,6 @@ import {
 
 type EarnIntegrationGuideProps = {
   apiBaseUrl?: string | null;
-  providerAccess: EarnProviderAccess | null;
   strategyId?: string;
 };
 
@@ -143,20 +142,21 @@ function useIntegrationCatalogue(sdpEnvironment: SdpEnvironment) {
 
 export function EarnIntegrationGuide({
   apiBaseUrl,
-  providerAccess,
   strategyId: initialStrategyId,
 }: EarnIntegrationGuideProps) {
   const t = useTranslations();
   const locale = useLocale();
   const { sdpEnvironment } = useDashboardWorkspace();
   const { strategies, error, isLoading } = useIntegrationCatalogue(sdpEnvironment);
+  const { providerAccess } = useEarnProviderAccess();
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(
     initialStrategyId ?? null
   );
   const [activeSectionId, setActiveSectionId] = useState<keyof EarnIntegrationSections>(
     GUIDE_SECTIONS[0].id
   );
-  if (isLoading) return <EarnIntegrationGuideSkeleton />;
+  // The first selectable strategy is the default selection, so availability waits for access.
+  if (isLoading || providerAccess === undefined) return <EarnIntegrationGuideSkeleton />;
 
   const options = (strategies ?? []).map((strategy) => {
     const availability = earnVaultDepositAvailability(strategy, sdpEnvironment, providerAccess);

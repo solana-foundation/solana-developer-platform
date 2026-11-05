@@ -9,11 +9,13 @@ import { RecordBlock } from "@/components/refresh-record";
 import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { formatEpochSecondsOr, formatTokenValue, shortenMarketAddress } from "./earn-format";
 import {
   cancelEarnVaultWithdrawalRequest,
   useEarnVaultWithdrawalRequests,
 } from "./earn-program-data";
+import { earnQueryKeys } from "./earn-query-key";
 import {
   earnVaultParRedemptionStatusPresentation,
   isEarnVaultParRedemptionCancelable,
@@ -134,7 +136,8 @@ function WithdrawalRequestItem({
 /** Durable recovery surface for queued requests that outlive their create modal. */
 export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () => void }) {
   const t = useTranslations();
-  const { withdrawalRequests, error, refresh } = useEarnVaultWithdrawalRequests();
+  const invalidateReads = useInvalidateDashboardReads();
+  const { withdrawalRequests, error } = useEarnVaultWithdrawalRequests();
   const cancelKeys = useRef(new Map<string, string>());
   const observedOpenRequestIds = useRef<ReadonlySet<string> | null>(null);
   const reportedDisappearances = useRef(new Set<string>());
@@ -196,7 +199,7 @@ export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () 
     }
     cancelKeys.current.delete(id);
     setCancelResults((current) => ({ ...current, [id]: result.data }));
-    refresh();
+    void invalidateReads(earnQueryKeys.isMoneyMovementRead);
   }
 
   return (

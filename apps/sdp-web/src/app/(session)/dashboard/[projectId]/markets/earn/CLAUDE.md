@@ -84,6 +84,9 @@ api/dashboard/markets/earn/
   vault-positions/route.ts           GET list (keyset cursor)
   movements/route.ts                 GET the cross-provider ledger feed
                                      (keyset cursor + equality filters)
+  provider-access/route.ts           GET this organization's Earn provider
+                                     access: runs `loadEarnProviderAccess()`
+                                     per request, null when unverifiable
 ```
 
 `provider-query.ts` holds SEVEN validators with deliberately different failure
@@ -160,18 +163,22 @@ nothing else; the program create still sends the body `requestId` form.
   per-project configuration, the public `/embedded-yield/integrate/:token`
   handoff page and its `/v1/earn/button-configurations/*` API; migration 0074
   dropped its table. Do not reintroduce persisted presentation state here.)
-- Both routes are `dynamic = "force-dynamic"` and resolve
-  `loadEarnProviderAccess()` server-side per request. Provider access is
-  organization-scoped; caching it would hand one org's entitlement to another.
+- Pages await no sdp-api call. Both routes read provider access in the browser
+  (`useEarnProviderAccess`, `./earn-provider-access.ts`) from the
+  `provider-access` BFF route, which resolves `loadEarnProviderAccess()` per
+  request. Provider access is organization-scoped: the read is keyed by
+  Project and mode like every dashboard read, and the cache is dropped when
+  the identity changes.
 - Gates by segment: `../layout.tsx` holds `markets()`, which every Markets
   surface shares, and each Earn segment (`../embedded-yield`,
   `../treasury-solutions`) holds `earn()` in its own layout (`notFound()`), so
   DvP is not hidden by it. Pages hold no flag checks: a new Earn route goes
   under one of those segments.
 - Loading states come from `../markets-route-skeletons`, with distinct portfolio,
-  configuration and integration-guide shapes. The shell's navigation-loading
-  resolver (`lib/dashboard-navigation-loading.ts`) maps each pathname to the
-  same route-specific skeleton used by its `loading.tsx` boundary.
+  configuration and integration-guide shapes. No Markets route has a
+  `loading.tsx`: each component renders its skeleton while its reads load, and
+  the shell's navigation-loading resolver (`lib/dashboard-navigation-loading.ts`)
+  maps each pathname to the same route-specific skeleton.
 - The portfolio's zero-position state is the empty state alone: the live value
   and its counts are hidden at zero positions because a zero hero and empty
   counts read as data rather than "nothing yet". Its Integrate action repeats
@@ -562,7 +569,8 @@ Two rules hold it together:
   style and environment are static facts and may be read in the browser.
   Organization entitlement and provider configuration are request-scoped and
   must not be guessed there — they arrive as `providerAccess` from the server
-  component, and `null` disables the action.
+  (the `provider-access` read), and `null` or a failed read disables the
+  action.
 - **Disabled with an explanation beats hidden.** An unavailable strategy still
   renders its row, its APY and a badge naming why. Hiding it makes a customer
   hunt for a strategy they were shown yesterday.

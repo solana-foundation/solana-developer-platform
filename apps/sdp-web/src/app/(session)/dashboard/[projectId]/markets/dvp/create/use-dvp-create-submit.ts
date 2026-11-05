@@ -17,10 +17,12 @@ import {
   dvpToastAction,
 } from "@/app/(session)/dashboard/[projectId]/markets/dvp/dvp-action-toast";
 import { freshDvpIdempotencyKey } from "@/app/(session)/dashboard/[projectId]/markets/dvp/dvp-idempotency-key";
+import { dvpQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/dvp/dvp-query-key";
 import { dvpErrorEnvelopeSchema } from "@/app/(session)/dashboard/[projectId]/markets/dvp/dvp-trade";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { TOKEN_2022_PROGRAM } from "./dvp-create.data";
@@ -62,6 +64,7 @@ const createdEnvelopeSchema = z.object({
 export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
   const router = useRouter();
   const href = useProjectHref();
+  const invalidateReads = useInvalidateDashboardReads();
   const t = useTranslations();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,6 +157,7 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
         ...DVP_TOAST_POSITION,
         action: dvpToastAction(t, createSignature, cluster),
       });
+      void invalidateReads(dvpQueryKeys.isTradeRead);
       router.push(href(`${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/${createdId}`));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Create failed.");

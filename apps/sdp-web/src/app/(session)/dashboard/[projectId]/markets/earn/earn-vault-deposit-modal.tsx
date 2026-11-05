@@ -36,6 +36,7 @@ import { EarnFlowTransition } from "@/app/(session)/dashboard/[projectId]/market
 import { EarnOutcomeMark } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-outcome-mark";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { fetchResultAnswer } from "@/lib/idempotency";
 import { settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useProjectHref } from "@/lib/use-dashboard-project";
@@ -64,6 +65,7 @@ import {
   useEarnVaultDepositOutcome,
 } from "./earn-program-data";
 import { strategySourceLabel, strategyToken } from "./earn-program-presentation";
+import { earnQueryKeys } from "./earn-query-key";
 import {
   forgetVaultDepositFloor,
   recallVaultDepositFloor,
@@ -1087,6 +1089,7 @@ export function EarnVaultDepositModal({
   onMovementUpdated,
 }: EarnVaultDepositModalProps) {
   const t = useTranslations();
+  const invalidateReads = useInvalidateDashboardReads();
   const { wallets, error: walletsError, isLoading: walletsLoading } = useEarnFundingWallets();
   const [walletId, setWalletId] = useState<string | null>(null);
   const [amountInput, setAmountInput] = useState("");
@@ -1335,6 +1338,8 @@ export function EarnVaultDepositModal({
     // A retired key can never be replayed, so its remembered floor is dead
     // weight the next fresh derivation must not inherit.
     if (retired || slippageRefused) forgetVaultDepositFloor(fingerprint);
+    // Every answer, since one whose outcome is unknown may still have moved money.
+    void invalidateReads(earnQueryKeys.isMoneyMovementRead);
     if (controller.signal.aborted) return;
     const resolution = resolveDepositSubmission(
       result,

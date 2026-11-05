@@ -86,9 +86,12 @@ function WizardFooter({
 export function DvpCreateWorkspace({
   cluster,
   context,
+  onRetryContext,
 }: {
   cluster: SolanaCluster;
   context: DvpCreateContext;
+  /** Re-reads whichever of the form's options failed. */
+  onRetryContext: () => void;
 }) {
   const t = useTranslations();
   const router = useRouter();
@@ -133,7 +136,20 @@ export function DvpCreateWorkspace({
       steps={steps}
     >
       <div className="grid gap-5">
-        {context.error ? <Callout variant="danger">{context.error}</Callout> : null}
+        {context.error ? (
+          <Callout variant="danger">
+            <p>{context.error}</p>
+            <Button
+              className="mt-3"
+              onClick={onRetryContext}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              {t("DashboardMarkets.dvp.retry")}
+            </Button>
+          </Callout>
+        ) : null}
 
         {cluster === "devnet" ? null : (
           <Callout variant="warning">

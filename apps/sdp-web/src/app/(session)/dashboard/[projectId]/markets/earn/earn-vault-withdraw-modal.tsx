@@ -20,6 +20,7 @@ import { EarnFlowStepper } from "@/app/(session)/dashboard/[projectId]/markets/e
 import { EarnFlowTransition } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-flow-transition";
 import { EarnOutcomeMark } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-outcome-mark";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { fetchResultAnswer } from "@/lib/idempotency";
 import { settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useModalFocus } from "@/lib/use-modal-focus";
@@ -35,8 +36,8 @@ import {
   fetchEarnVaultWithdrawalPreview,
   useEarnVaultWithdrawalOutcome,
 } from "./earn-program-data";
+import { earnQueryKeys } from "./earn-query-key";
 import type { VaultSubmissionObserver } from "./earn-vault-movement";
-
 import {
   mergeObservedVaultMovement,
   observableVaultMovement,
@@ -737,6 +738,7 @@ export function EarnVaultWithdrawModal({
   settlement = "atomic",
 }: EarnVaultWithdrawModalProps) {
   const t = useTranslations();
+  const invalidateReads = useInvalidateDashboardReads();
   const [amountInput, setAmountInput] = useState("");
   // Declared per provider in @sdp/types: non-null means this provider REQUIRES
   // an explicit exit floor derived from a live quote. Null renders no slippage
@@ -897,6 +899,8 @@ export function EarnVaultWithdrawModal({
     // A retired key can never be replayed, so its remembered floor is dead
     // weight the next fresh derivation must not inherit.
     if (retired || slippageRefused) forgetVaultWithdrawalFloor(fingerprint);
+    // Every answer, since one whose outcome is unknown may still have moved money.
+    void invalidateReads(earnQueryKeys.isMoneyMovementRead);
     if (controller.signal.aborted) return;
     const resolution = resolveWithdrawalSubmission(
       result,

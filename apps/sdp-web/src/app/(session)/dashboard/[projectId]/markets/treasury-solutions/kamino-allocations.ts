@@ -1,9 +1,9 @@
 "use client";
 
 import type { EarnStrategy } from "@sdp/types/earn";
-import useSWR from "swr";
 import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
-import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { type DashboardRequestKey, dashboardRequestKey } from "@/lib/dashboard-request-key";
+import { readDashboardRequest, useDashboardKeyScope, useDashboardSWR } from "@/lib/dashboard-swr";
 import {
   KAMINO_ALLOCATIONS_MAX_VAULTS,
   type KaminoVaultAllocationsBatch,
@@ -56,24 +56,33 @@ export function kaminoAllocationsVaults(
 }
 
 /**
- * One BFF read of at most `KAMINO_ALLOCATIONS_MAX_VAULTS` vaults. The request
- * states its cluster explicitly for the BFF's mainnet-only gate, and the store
- * behind it independently refuses a value that is not a public key or that the
- * strategy catalogue does not front (each vault is interpolated into an
- * upstream URL).
+ * The table's vaults, split into BFF reads of at most `KAMINO_ALLOCATIONS_MAX_VAULTS` and merged
+ * under the one key. Each request states its cluster explicitly for the BFF's mainnet-only gate,
+ * and the store behind it independently refuses a value that is not a public key or that the
+ * strategy catalogue does not front (each vault is interpolated into an upstream URL). Each answer
+ * is re-parsed with the schema module the route parsed upstream with: the client trusts nothing
+ * about a response it did not shape.
  */
-async function readKaminoAllocationsBatch(
-  vaults: readonly string[]
+async function readKaminoAllocations(
+  key: DashboardRequestKey
 ): Promise<KaminoVaultAllocationsBatch["vaults"]> {
-  const result = await dashboardFetch<unknown>(
-    `/api/dashboard/markets/earn/kamino-allocations?vaults=${vaults
-      .map(encodeURIComponent)
-      .join(",")}&cluster=mainnet-beta`
+  const vaults = String(key[3]?.vaults ?? "").split(",");
+  const batches: string[][] = [];
+  for (let start = 0; start < vaults.length; start += KAMINO_ALLOCATIONS_MAX_VAULTS) {
+    batches.push(vaults.slice(start, start + KAMINO_ALLOCATIONS_MAX_VAULTS));
+  }
+  const reads = await Promise.all(
+    batches.map((batch) =>
+      readDashboardRequest(
+        dashboardRequestKey({ projectId: key[0], mode: key[1] }, key[2], {
+          ...key[3],
+          vaults: batch.join(","),
+        }),
+        kaminoVaultAllocationsBatchSchema
+      )
+    )
   );
-  if (!result.ok) throw new Error(result.error);
-  // Re-parsed with the same schema module the route parsed upstream with: the
-  // client trusts nothing about a response it did not shape.
-  return kaminoVaultAllocationsBatchSchema.parse(result.data).vaults;
+  return Object.fromEntries(reads.flatMap((read) => Object.entries(read.vaults)));
 }
 
 /**
@@ -85,16 +94,10 @@ async function readKaminoAllocationsBatch(
  * @returns The parsed reads keyed by vault, the read's error, and its loading state.
  */
 export function useKaminoVaultAllocations(vaults: readonly string[]) {
-  const { data, error, isLoading } = useSWR<KaminoVaultAllocationsBatch["vaults"], Error>(
-    vaults.length > 0 ? earnQueryKeys.kaminoAllocations({ vaults: vaults.join(",") }) : null,
-    async () => {
-      const batches: string[][] = [];
-      for (let start = 0; start < vaults.length; start += KAMINO_ALLOCATIONS_MAX_VAULTS) {
-        batches.push(vaults.slice(start, start + KAMINO_ALLOCATIONS_MAX_VAULTS));
-      }
-      const reads = await Promise.all(batches.map(readKaminoAllocationsBatch));
-      return Object.fromEntries(reads.flatMap((read) => Object.entries(read)));
-    },
+  const scope = useDashboardKeyScope();
+  const { data, error, isLoading } = useDashboardSWR(
+    vaults.length > 0 ? earnQueryKeys.kaminoAllocations(scope, { vaults: vaults.join(",") }) : null,
+    readKaminoAllocations,
     {
       refreshInterval: ALLOCATIONS_REFRESH_MS,
       revalidateOnFocus: false,

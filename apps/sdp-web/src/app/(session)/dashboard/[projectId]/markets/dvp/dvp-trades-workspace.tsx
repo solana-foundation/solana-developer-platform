@@ -5,7 +5,7 @@
  *
  * The filters live in the URL (`?status=<group>&q=<text>`, the transactions
  * pattern): the group and the debounced search text are pushed with
- * `router.replace` inside a transition, and the server refetches with them —
+ * `router.replace` inside a transition, and the list is read again with them —
  * the list is capped with no cursor, so a client-side search would make an
  * older matching trade unfindable.
  *
@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { Fragment, type ReactNode, useState } from "react";
+import { DvpTradesSkeleton } from "@/app/(session)/dashboard/[projectId]/markets/markets-route-skeletons";
 import {
   formatTimestamp,
   shortenAddress,
@@ -51,6 +52,7 @@ import { useProjectHref } from "@/lib/use-dashboard-project";
 import { type UrlTableQueryAdapter, useUrlTableFilters } from "@/lib/use-url-table-filters";
 import { InboundRows } from "./dvp-inbound-rows";
 import { DvpPartyCell } from "./dvp-party-cell";
+import { DVP_TRADES_PAGE_SIZE } from "./dvp-query-key";
 import { DvpStatusBadge } from "./dvp-status";
 import {
   type DvpTrade,
@@ -61,7 +63,12 @@ import {
   matchesAddressQuery,
   overFundedLegs,
 } from "./dvp-trade";
-import { DVP_TRADES_PAGE_SIZE, type DvpInboundTrade } from "./dvp-trades.data";
+import {
+  type DvpInboundTrade,
+  type DvpTradesFilters,
+  useDvpInboundTrades,
+  useDvpTrades,
+} from "./dvp-trades.data";
 import { resolveTradesListState } from "./dvp-trades-list-state";
 import {
   type DvpTradesUrlStatus,
@@ -548,19 +555,59 @@ function TradesCardBody({
 }
 
 export function DvpTradesWorkspace({
-  trades,
-  inbound,
-  error,
+  filters,
   searchQuery,
   statusFilter,
 }: {
-  trades: DvpTrade[];
-  /** Trades another organization created that name one of this project's wallets. */
-  inbound: DvpInboundTrade[];
-  error: string | null;
+  /** The trades read's filters, parsed from the URL. */
+  filters: DvpTradesFilters;
   /** The active URL search text ("" when none), not the live input value. */
   searchQuery: string;
   /** The active URL status group for the trades list. */
+  statusFilter: DvpTradesUrlStatus;
+}) {
+  const tradesRead = useDvpTrades(filters);
+  const inboundRead = useDvpInboundTrades();
+  if (
+    (tradesRead.data === undefined && tradesRead.error === undefined) ||
+    (inboundRead.data === undefined && inboundRead.error === undefined)
+  ) {
+    return <DvpTradesSkeleton />;
+  }
+  return (
+    <DvpTradesList
+      inbound={inboundRead.data ?? []}
+      inboundFailed={inboundRead.error !== undefined}
+      listFailed={tradesRead.error !== undefined}
+      onRetryInbound={() => void inboundRead.mutate()}
+      onRetryList={() => void tradesRead.mutate()}
+      searchQuery={searchQuery}
+      statusFilter={statusFilter}
+      trades={tradesRead.data ?? []}
+    />
+  );
+}
+
+function DvpTradesList({
+  trades,
+  inbound,
+  inboundFailed,
+  listFailed,
+  onRetryInbound,
+  onRetryList,
+  searchQuery,
+  statusFilter,
+}: {
+  /** Rows for the URL's filters; only read while `listFailed` is false. */
+  trades: DvpTrade[];
+  /** Trades another organization created that name one of this project's wallets. */
+  inbound: DvpInboundTrade[];
+  /** The inbound read failed: the waiting segment says so rather than reading as none. */
+  inboundFailed: boolean;
+  listFailed: boolean;
+  onRetryInbound: () => void;
+  onRetryList: () => void;
+  searchQuery: string;
   statusFilter: DvpTradesUrlStatus;
 }) {
   const t = useTranslations();
@@ -628,9 +675,18 @@ export function DvpTradesWorkspace({
       {/* An error and a table of nothing say different things, and showing
           both says the list is empty when the truth is that it could not be
           read. The error stands alone. */}
-      {error ? (
+      {inboundFailed ? (
+        <Callout live title={t("DashboardMarkets.dvp.inboundErrorTitle")} variant="warning">
+          <Button onClick={onRetryInbound} size="sm" type="button" variant="secondary">
+            {t("DashboardMarkets.dvp.retry")}
+          </Button>
+        </Callout>
+      ) : null}
+      {listFailed ? (
         <Callout live title={t("DashboardMarkets.dvp.listErrorTitle")} variant="danger">
-          {error}
+          <Button onClick={onRetryList} size="sm" type="button" variant="secondary">
+            {t("DashboardMarkets.dvp.retry")}
+          </Button>
         </Callout>
       ) : (
         <DashboardWorkspaceCard>
