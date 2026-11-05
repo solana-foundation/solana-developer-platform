@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { DEFAULT_SDP_AI_GUIDE_URL, SDP_AI_GUIDE_DOCS_SLUG } from "@sdp/types/site";
-import { canonicalSite, getDocsMarkdownPath, getDocsPagePath } from "@/lib/site";
+import { canonicalSite, docsSearchApiPath, getDocsMarkdownPath, getDocsPagePath } from "@/lib/site";
 
 describe("docs page URLs", () => {
   it("maps the root index to the home page in browser and agent links", () => {
@@ -20,6 +20,23 @@ describe("docs page URLs", () => {
       "/docs/payments/send-basic-payment"
     );
     assert.equal(getDocsPagePath("indexing"), "/docs/indexing");
+  });
+});
+
+// platform.solana.com forwards only /docs/* and a few root files to this app
+// (apps/sdp-web/next.config.ts), so the dialog's default /api/search reached the
+// dashboard's sign-in redirect and every search failed.
+describe("search endpoint", () => {
+  it("sits under /docs, which platform.solana.com forwards", () => {
+    assert.match(docsSearchApiPath, /^\/docs\//);
+  });
+
+  it("is a route of this app", () => {
+    const appDir = path.resolve(import.meta.dirname, "../src/app");
+    assert.ok(
+      existsSync(path.join(appDir, docsSearchApiPath, "route.ts")),
+      `src/app${docsSearchApiPath}/route.ts does not exist`
+    );
   });
 });
 

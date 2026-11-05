@@ -1,4 +1,4 @@
-import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { Tabs } from "fumadocs-ui/components/tabs";
 import defaultMdxComponents from "fumadocs-ui/mdx";
 import { ActionLinks } from "@/components/docs-shell/action-links";
 import { ApiEndpoint } from "@/components/docs-shell/api-endpoint";
@@ -22,6 +22,7 @@ import {
   MDXTableHeader,
   MDXUnorderedList,
 } from "@/components/docs-shell/mdx-elements";
+import { Tab } from "@/components/docs-shell/tab";
 import { EnvConfigurator } from "@/components/EnvConfigurator";
 
 type MDXComponents = Record<string, unknown>;
