@@ -210,7 +210,11 @@ function describe(
 /** The dashboard page an alert links to, relative to the dashboard origin. */
 function dashboardPath(kind: AdminAlertKind, details: AdminAlertDetails): string {
   const projectId = details.project?.id;
-  if (kind.startsWith("member_")) return "/members";
+  if (kind.startsWith("member_")) {
+    return projectId
+      ? `/dashboard/${projectId}/settings?tab=members`
+      : `/dashboard?return_to=${encodeURIComponent("/dashboard/settings?tab=members")}`;
+  }
   if (!projectId) return "/dashboard";
   if (kind === "money_movement") return `/dashboard/${projectId}/payments/transactions`;
   if (kind.startsWith("api_key_")) return `/dashboard/${projectId}/api-keys`;

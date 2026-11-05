@@ -83,7 +83,7 @@ describe("dashboardFetch", () => {
   });
 
   it("does not overwrite an explicitly selected content type", async () => {
-    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/custody`);
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/wallets`);
     const fetchMock = noContentFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 

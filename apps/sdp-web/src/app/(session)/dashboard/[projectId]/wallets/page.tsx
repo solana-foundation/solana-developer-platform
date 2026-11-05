@@ -73,19 +73,19 @@ async function getCustodyWallets(
   return json.data?.wallets ?? [];
 }
 
-export default async function CustodyPage() {
+export default async function WalletsPage() {
   const [t, { orgId }] = await Promise.all([getTranslations(), auth()]);
   if (!orgId) {
     redirect("/dashboard");
   }
 
-  const trace = createTimedTrace("dashboard.custody.page");
+  const trace = createTimedTrace("dashboard.wallets.page");
 
   try {
     const { organizationClient, projectClient } = await trace.step("create_sdp_api_clients", () =>
       createRequestScopedSdpApiClients({
-        organizationTraceContext: trace.childContext("dashboard.custody.org.api"),
-        projectTraceContext: trace.childContext("dashboard.custody.api"),
+        organizationTraceContext: trace.childContext("dashboard.wallets.org.api"),
+        projectTraceContext: trace.childContext("dashboard.wallets.api"),
       })
     );
     const onboarding = await trace.step("fetch_onboarding_status", () =>

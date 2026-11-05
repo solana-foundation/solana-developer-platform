@@ -38,7 +38,7 @@ function renderBalance(initialBalances: CustodyWalletTokenBalance[] = [balance(1
 }
 
 beforeEach(() => {
-  setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/custody`);
+  setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/wallets`);
 });
 
 afterEach(() => {
