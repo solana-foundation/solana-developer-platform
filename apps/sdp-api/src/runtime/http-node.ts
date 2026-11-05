@@ -34,7 +34,9 @@ export function createNodeHttpApp(app: Hono<{ Bindings: Env }>): Hono<{ Bindings
     appendVary(c.res.headers, "Accept-Encoding");
   });
   nodeApp.use("*", compression);
-  nodeApp.route("/", app);
+  // mount, not route: route() copies the inner routes into this app's router and
+  // drops the inner notFound, so unmatched paths would get Hono's plain-text 404.
+  nodeApp.mount("/", app.fetch, { replaceRequest: false });
 
   return nodeApp;
 }
