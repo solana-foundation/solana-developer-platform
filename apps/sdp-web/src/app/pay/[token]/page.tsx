@@ -1,5 +1,6 @@
 import { refreshThemeProps } from "@sdp/design-tokens";
-import { SOLANA_CLUSTER_LABELS, type SolanaCluster } from "@sdp/types/well-known-tokens";
+import type { PaymentRequestStatus } from "@sdp/types/payments";
+import { SOLANA_CLUSTER_LABELS } from "@sdp/types/well-known-tokens";
 import { Badge } from "@sdp/ui/badge";
 import { ArrowUpRightIcon, BanIcon, CheckCircle2Icon, ClockIcon, XIcon } from "lucide-react";
 import { notFound } from "next/navigation";
@@ -13,22 +14,11 @@ import { SolanaQrCode } from "@/components/solana-qr-code";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { findPublicSdpApiBaseUrl } from "@/lib/sdp-api-base-url";
 import { PayExpiry } from "./pay-expiry";
+import { payLinkSchema } from "./pay-link";
 import { PayStatusWatch } from "./pay-status-watch";
 import { payTokenSchema } from "./pay-token";
 
 export const dynamic = "force-dynamic";
-
-type PayStatus = "awaiting_payment" | "paid" | "canceled" | "expired";
-
-interface PayRequest {
-  amount: string;
-  tokenSymbol: string;
-  recipient: string;
-  status: PayStatus;
-  expiresAt: string | null;
-  network: SolanaCluster;
-  solanaPayUrl: string | null;
-}
 
 interface StatusPanel {
   icon: ReactNode;
@@ -53,7 +43,7 @@ function getStatusPanels(t: Awaited<ReturnType<typeof getTranslations>>) {
       title: t("Shared.pay.requestCanceled"),
       body: t("Shared.pay.requestCanceledDescription"),
     },
-  } as const satisfies Record<Exclude<PayStatus, "awaiting_payment">, StatusPanel>;
+  } as const satisfies Record<Exclude<PaymentRequestStatus, "awaiting_payment">, StatusPanel>;
 }
 
 /**
@@ -120,11 +110,12 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
     // A refused or failed read is not a missing link: the error page lets the payer retry.
     throw new Error(`Pay link read failed (${response.status})`);
   }
-  const [request, t, locale] = await Promise.all([
-    response.json() as Promise<PayRequest>,
+  const [body, t, locale] = await Promise.all([
+    response.json(),
     getTranslations(),
     getRequestLocale(),
   ]);
+  const request = payLinkSchema.parse(body);
 
   const payUrl =
     request.solanaPayUrl && isRenderablePayUrl(request.solanaPayUrl) ? request.solanaPayUrl : null;

@@ -1,10 +1,10 @@
 "use client";
 
-import { PAYMENT_REQUEST_STATUSES } from "@sdp/types/payments";
+import type { PAYMENT_REQUEST_STATUSES } from "@sdp/types/payments";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
-import { z } from "zod";
 import { payQueryKeys } from "@/app/pay/pay-query-key";
+import { payLinkSchema } from "./pay-link";
 
 /**
  * How often an open link is read again. The API marks a request paid within 30s of its payment
@@ -15,10 +15,8 @@ const PAY_WATCH_INTERVAL_MS = 10_000;
 
 type PayStatus = (typeof PAYMENT_REQUEST_STATUSES)[number];
 
-const payStatusSchema = z.object({
-  status: z.enum(PAYMENT_REQUEST_STATUSES),
-  solanaPayUrl: z.string().nullable(),
-});
+/** The watch needs only the status and whether the link can be paid. */
+const payStatusSchema = payLinkSchema.pick({ status: true, solanaPayUrl: true });
 
 /** What the page is drawn from: the status, and whether the API offers a way to pay. */
 interface PayState {
