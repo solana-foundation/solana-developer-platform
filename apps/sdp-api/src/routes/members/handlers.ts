@@ -425,9 +425,15 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
       throw error;
     }
     // Clerk may have created the invitation before the call failed.
-    const delivered = await findDeliveredInvitation(clerk, clerkOrgId, invitationId);
+    let delivered: { id: string } | null = null;
+    try {
+      delivered = await findDeliveredInvitation(clerk, clerkOrgId, invitationId);
+    } finally {
+      if (delivered === null) {
+        await failUnsentInvitation(c, invitation, clerkError);
+      }
+    }
     if (delivered === null) {
-      await failUnsentInvitation(c, invitation, clerkError);
       throw error;
     }
     clerkInvitation = delivered;
@@ -508,28 +514,14 @@ function isClerkRefusal(clerkError: ClerkRequestError | null): boolean {
 
 /**
  * The invitation a create that threw may still have made: Clerk can commit it
- * and send its email when its answer never arrives. A lookup Clerk cannot
- * answer either finds none.
+ * and send its email when its answer never arrives.
  */
 async function findDeliveredInvitation(
   clerk: ClerkOrganizationsService,
   clerkOrgId: string,
   sdpInvitationId: string
 ): Promise<{ id: string } | null> {
-  let tagged: Array<{ clerkInvitationId: string; sdpInvitationId: string }>;
-  try {
-    tagged = await clerk.listSdpTaggedPendingInvitations(clerkOrgId);
-  } catch (error) {
-    // Clerk answered with an error, our timeout fired, or the connection broke.
-    const clerkUnreachable =
-      error instanceof ClerkRequestError ||
-      (error instanceof DOMException && error.name === "TimeoutError") ||
-      (error instanceof TypeError && error.cause instanceof Error);
-    if (clerkUnreachable) {
-      return null;
-    }
-    throw error;
-  }
+  const tagged = await clerk.listSdpTaggedPendingInvitations(clerkOrgId);
   const match = tagged.find((entry) => entry.sdpInvitationId === sdpInvitationId);
   return match === undefined ? null : { id: match.clerkInvitationId };
 }
