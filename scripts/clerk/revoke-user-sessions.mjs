@@ -13,6 +13,8 @@
 // Reads CLERK_SECRET_KEY from the environment; the key's instance decides which
 // Clerk users and sessions it can see. Never prints a token.
 
+import { z } from "zod";
+
 const API = "https://api.clerk.com/v1";
 const PAGE_SIZE = 100;
 const CONCURRENCY = 4;
@@ -54,23 +56,42 @@ async function clerk(path, init = {}, attempt = 1) {
   return response.json();
 }
 
+// Clerk's list endpoints answer a bare array or, paginated, `{ data, total_count }`.
+const listOf = (item) => z.union([z.array(item), z.object({ data: z.array(item) })]);
+const rowsOf = (parsed) => (Array.isArray(parsed) ? parsed : parsed.data);
+const UserList = listOf(z.object({ id: z.string().regex(/^user_[A-Za-z0-9]+$/) }));
+const SessionList = listOf(
+  z.object({
+    id: z.string().regex(/^sess_[A-Za-z0-9]+$/),
+    user_id: z.string(),
+    status: z.string(),
+    created_at: z.number().int().positive(),
+  })
+);
+
 async function resolveUserId({ email, userId }) {
   if (userId) return userId;
-  const users = await clerk(`/users?email_address=${encodeURIComponent(email)}&limit=2`);
-  const list = Array.isArray(users) ? users : users.data;
-  if (list.length !== 1)
-    throw new Error(`expected one Clerk user for ${email}, found ${list.length}`);
-  return list[0].id;
+  const users = rowsOf(
+    UserList.parse(await clerk(`/users?email_address=${encodeURIComponent(email)}&limit=2`))
+  );
+  if (users.length !== 1) {
+    throw new Error(`expected one Clerk user for ${email}, found ${users.length}`);
+  }
+  return users[0].id;
 }
 
 async function activeSessions(userId) {
   const sessions = [];
   for (let offset = 0; ; offset += PAGE_SIZE) {
-    const page = await clerk(
-      `/sessions?user_id=${encodeURIComponent(userId)}&status=active&limit=${PAGE_SIZE}&offset=${offset}`
+    const rows = rowsOf(
+      SessionList.parse(
+        await clerk(
+          `/sessions?user_id=${encodeURIComponent(userId)}&status=active&limit=${PAGE_SIZE}&offset=${offset}`
+        )
+      )
     );
-    const rows = Array.isArray(page) ? page : page.data;
-    sessions.push(...rows);
+    // Revoke only what the query asked for, whatever else the API returns.
+    sessions.push(...rows.filter((row) => row.user_id === userId && row.status === "active"));
     if (rows.length < PAGE_SIZE) return sessions;
   }
 }
