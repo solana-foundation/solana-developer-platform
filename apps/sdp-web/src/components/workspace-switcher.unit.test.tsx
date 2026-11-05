@@ -5,6 +5,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as workspaceContext from "@/contexts/dashboard-workspace-context";
 import { setDashboardUrl } from "@/test/dashboard-navigation";
 import { EnglishI18n } from "@/test/i18n";
 import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
@@ -44,9 +45,6 @@ vi.mock("@clerk/nextjs", () => ({
     userMemberships: { data: [{ organization: mocks.acme }, { organization: mocks.globex }] },
   }),
 }));
-vi.mock("@/contexts/dashboard-workspace-context", () => ({
-  useDashboardWorkspace: () => ({ ...mocks.workspace, selectProject: mocks.selectProject }),
-}));
 
 function showProject(project: Project) {
   setDashboardUrl(`/dashboard/${project.id}/payments`, {});
@@ -76,6 +74,9 @@ beforeEach(() => {
   mocks.switching.mockReset();
   mocks.setActive.mockReset();
   mocks.setActive.mockResolvedValue(undefined);
+  vi.mocked(vi.spyOn(workspaceContext, "useDashboardWorkspace"), {
+    partial: true,
+  }).mockImplementation(() => ({ ...mocks.workspace, selectProject: mocks.selectProject }));
 });
 
 afterEach(() => {
@@ -161,6 +162,21 @@ describe("WorkspaceSwitcher", () => {
     expect(mocks.switching.mock.calls).toEqual([[true]]);
     pending.resolve();
     await waitFor(() => expect(mocks.switching.mock.calls).toEqual([[true], [false]]));
+  });
+
+  it("holds every menu item, Organization settings included, while a switch is pending", async () => {
+    mocks.setActive.mockReturnValue(Promise.withResolvers<void>().promise);
+    showProject(SANDBOX_PROJECT);
+    const { user, trigger } = await openSwitcher();
+
+    await user.click(screen.getByRole("menuitem", { name: /Globex$/ }));
+    await user.click(trigger);
+
+    expect(
+      [/Acme$/, /^Sandbox/, "Organization settings"].map((name) =>
+        screen.getByRole("menuitem", { name }).getAttribute("aria-disabled")
+      )
+    ).toEqual(["true", "true", "true"]);
   });
 
   it("reports a refused switch and makes the current workspace usable again", async () => {

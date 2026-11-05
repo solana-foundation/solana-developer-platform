@@ -21,6 +21,7 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { formatDateTime } from "@/lib/date-format";
 import { useZodForm } from "@/lib/use-zod-form";
 import { useReportAccountError } from "./account-errors";
+import { isLiveSession } from "./account-sessions";
 
 const PASSWORD_SCHEMA = z.object({
   currentPassword: z.string(),
@@ -148,7 +149,7 @@ function SessionsSection({ user }: { user: UserResource }) {
   const { session: currentSession } = useSession();
   const sessions = useSWR(accountQueryKeys.sessions({ userId: user.id }), () => user.getSessions());
   const activeSessions = (sessions.data ?? [])
-    .filter((session) => ["active", "pending"].includes(session.status))
+    .filter(isLiveSession)
     .toSorted(
       (left, right) =>
         Number(right.id === currentSession?.id) - Number(left.id === currentSession?.id)
