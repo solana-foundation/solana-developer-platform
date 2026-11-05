@@ -88,11 +88,11 @@ export const deleteWalletRequestSchema = deleteWalletSchemaBase
   .extend({
     provider: orgCustodyProviderSchema.optional().openapi({
       description: "Optional consistency assertion for the Provider of the wallet being deleted.",
-      example: "anchorage",
+      example: "privy",
     }),
     walletId: walletIdParamSchema.openapi({
       description: "Provider wallet ID to delete from its exact owning target.",
-      example: "anchorage_wallet_123",
+      example: "privy_wallet_123",
     }),
   })
   .openapi({ description: "Delete wallet request body." });
@@ -345,7 +345,7 @@ export const deleteWalletResponseSchema = z
   .object({
     walletId: walletIdParamSchema.openapi({
       description: "Wallet ID that was deleted.",
-      example: "anchorage_wallet_123",
+      example: "privy_wallet_123",
     }),
     deleted: z.literal(true).openapi({
       description: "Deletion confirmation flag.",

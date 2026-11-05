@@ -34,7 +34,7 @@ describe("dashboard layout", () => {
         action: null,
         children: {
           type: SelectExistingOrganizationPanel,
-          props: { sessionOrganization: "refused" },
+          props: { refusal: "no-access" },
         },
       },
     });
@@ -61,7 +61,7 @@ describe("dashboard layout", () => {
       props: {
         children: {
           type: SelectExistingOrganizationPanel,
-          props: { sessionOrganization: "invitation-expired" },
+          props: { refusal: "invitation-expired" },
         },
       },
     });
@@ -83,7 +83,7 @@ describe("dashboard layout", () => {
       props: {
         children: {
           type: SelectExistingOrganizationPanel,
-          props: { sessionOrganization: "unlinked" },
+          props: { refusal: "unlinked" },
         },
       },
     });
@@ -104,6 +104,42 @@ describe("dashboard layout", () => {
 
     await expect(DashboardLayout({ children: "dashboard page" })).resolves.toBe("dashboard page");
     expect(onboarding).not.toHaveBeenCalled();
+  });
+
+  it("says the organization is suspended when SDP refuses the session for that", async () => {
+    vi.spyOn(sdpApi, "requestMemberRole").mockRejectedValue(
+      new sdpApi.SdpApiResponseError(
+        403,
+        JSON.stringify({
+          error: {
+            code: "FORBIDDEN",
+            message: "This organization is suspended. Contact SDP support to restore access.",
+            details: { reason: "organization_suspended" },
+          },
+        })
+      )
+    );
+
+    const layout = await DashboardLayout({ children: "dashboard page" });
+
+    expect(layout).toMatchObject({
+      props: {
+        children: {
+          type: SelectExistingOrganizationPanel,
+          props: { refusal: "organization-suspended" },
+        },
+      },
+    });
+  });
+
+  it("propagates any other 403 of the member read", async () => {
+    vi.spyOn(sdpApi, "requestMemberRole").mockRejectedValue(
+      new sdpApi.SdpApiResponseError(403, "forbidden")
+    );
+
+    await expect(DashboardLayout({ children: "dashboard page" })).rejects.toThrow(
+      "SDP API request failed (403): forbidden"
+    );
   });
 
   it("propagates any other failure of the member read", async () => {

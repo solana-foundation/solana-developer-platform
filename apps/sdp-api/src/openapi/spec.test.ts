@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { CUSTODY_PROVIDER_CATALOG_BY_ID, CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import {
   IDEMPOTENCY_REQUIRED_ROUTES,
   INTERNAL_IDEMPOTENCY_REQUIRED_ROUTES,
@@ -812,6 +813,64 @@ describe("OpenAPI spec", () => {
         "`onramp.read` or `offramp.read` for a ramp transfer"
       );
     }
+  });
+
+  // A custody provider publishes where the channel offers it in either mode, and
+  // local signing (self-hosted only) never does. Pinned so a promotion is a visible change.
+  it("names only Privy as a custody provider on stable, every one but local on experimental", () => {
+    const stable = createPublicOpenApiDocument({ releaseChannel: "stable" });
+    const serialized = JSON.stringify(stable);
+    expect(CUSTODY_PROVIDERS.filter((provider) => serialized.includes(`"${provider}"`))).toEqual([
+      "privy",
+    ]);
+    // Prose too: no description names a provider stable does not offer.
+    const unpublishedLabels = CUSTODY_PROVIDERS.filter((provider) => provider !== "privy").map(
+      (provider) => CUSTODY_PROVIDER_CATALOG_BY_ID[provider].label
+    );
+    expect(unpublishedLabels.filter((label) => serialized.includes(label))).toEqual([]);
+    expect(serialized).not.toMatch(/fireblocks|coinbase/i);
+    expect(createPublicSurfaceManifest("stable").custodyProviders).toEqual(["privy"]);
+
+    const paths = stable.paths;
+    expect(paths).toBeDefined();
+    const createBody = getJsonSchema(paths?.["/v1/wallets"]?.post?.requestBody);
+    const managedOwner = z
+      .object({ properties: z.object({ provider: z.object({ enum: z.array(z.string()) }) }) })
+      .parse(z.object({ anyOf: z.array(z.unknown()) }).parse(createBody).anyOf[0]);
+    expect(managedOwner.properties.provider.enum).toEqual(["privy"]);
+    const initialize = z
+      .object({ oneOf: z.array(z.unknown()) })
+      .parse(getJsonSchema(paths?.["/v1/wallets/initialize"]?.post?.requestBody));
+    expect(initialize.oneOf).toHaveLength(1);
+    expect(JSON.stringify(initialize)).toContain('"privy"');
+
+    for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
+      expect(JSON.stringify(createPublicOpenApiDocument({ releaseChannel }))).not.toContain(
+        '"local"'
+      );
+    }
+    expect(JSON.stringify(createOpenApiDocument())).toContain('"local"');
+
+    const experimentalCreate = getJsonSchema(
+      createPublicOpenApiDocument(EXPERIMENTAL).paths?.["/v1/wallets"]?.post?.requestBody
+    );
+    expect(JSON.stringify(experimentalCreate)).toContain(
+      JSON.stringify(CUSTODY_PROVIDERS.filter((provider) => provider !== "local"))
+    );
+  });
+
+  it("drops a custody provider's own transfer fields where the channel does not publish it", () => {
+    const transfer = (releaseChannel: "stable" | "experimental") =>
+      JSON.stringify(
+        getJsonSchema(
+          createPublicOpenApiDocument({ releaseChannel }).paths?.[
+            "/v1/payments/transfers/{transferId}"
+          ]?.get?.responses?.["200"]
+        )
+      );
+    expect(transfer("stable")).not.toMatch(/fireblocks/i);
+    expect(transfer("experimental")).toContain('"fireblocks"');
+    expect(transfer("experimental")).not.toContain("x-sdp-custody-provider");
   });
 
   // Provider availability lists every family in one response, so a channel

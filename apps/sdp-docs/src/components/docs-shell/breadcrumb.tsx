@@ -1,8 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { Fragment } from "react";
-
-export type BreadcrumbItem = { name: string; url: string };
+import type { BreadcrumbItem } from "@/lib/breadcrumbs";
 
 type DocsBreadcrumbProps = {
   items: BreadcrumbItem[];

@@ -10,6 +10,7 @@
  */
 
 import type { ActionModule } from "@sdp/types/actions";
+import type { ManagedCustodyProvider } from "@sdp/types/custody";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { SdpModule } from "@sdp/types/release-channels";
 
@@ -88,6 +89,27 @@ export const DOCS_TUTORIALS: readonly {
     module: "issuance",
   },
 ];
+
+/**
+ * The custody providers `<CustodyProviderTable />` lists, in display order.
+ * Local signing is left out: it runs only in a self-hosted deployment, which
+ * the self-hosting pages cover. Names repeat `CUSTODY_PROVIDER_CATALOG_BY_ID`
+ * labels because this file stays free of runtime workspace imports.
+ */
+export const DOCS_CUSTODY_PROVIDERS = {
+  privy: { name: "Privy", description: "Embedded wallet infrastructure platform" },
+  fireblocks: { name: "Fireblocks", description: "Digital asset infrastructure company" },
+  coinbase_cdp: { name: "Coinbase CDP", description: "Embedded wallets for developers" },
+  para: { name: "Para", description: "Wallet and authentication suite" },
+  turnkey: { name: "Turnkey", description: "Non-custodial wallet infrastructure platform" },
+  dfns: { name: "DFNS", description: "Digital asset wallet infrastructure" },
+  ibm_haven: {
+    name: "IBM Digital Asset Haven",
+    description: "Institutional custody on IBM Digital Asset Haven",
+  },
+  anchorage: { name: "Anchorage", description: "Regulated institutional crypto custody" },
+  utila: { name: "Utila", description: "Vault-backed wallet signing through service accounts" },
+} as const satisfies Record<ManagedCustodyProvider, { name: string; description: string }>;
 
 /** One ramp provider's capabilities; its page is /docs/payments/ramps-<provider>. */
 export type RampProviderEntry = {

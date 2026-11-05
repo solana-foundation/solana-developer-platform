@@ -130,6 +130,20 @@ describe("API playground release channel", () => {
     expect(JSON.parse(body)).toMatchObject({ provider: expect.any(String) });
   });
 
+  it("offers only the custody providers the channel publishes", () => {
+    const providersIn = (releaseChannel: "stable" | "experimental") =>
+      filterPlaygroundEndpointsToReleaseChannel(
+        getOpenApiPlaygroundEndpoints("wallets"),
+        releaseChannel
+      )
+        .find((endpoint) => endpoint.id === "list-wallets")
+        ?.pathFields.find((field) => field.key === "provider")
+        ?.options?.map((option) => option.value);
+    expect(providersIn("stable")).toEqual(["privy"]);
+    expect(providersIn("experimental")).toContain("fireblocks");
+    expect(providersIn("experimental")).not.toContain("local");
+  });
+
   it("uses the channel's generated transfer fields and response examples", () => {
     const endpoints = filterPlaygroundEndpointsToReleaseChannel(
       getOpenApiPlaygroundEndpoints("payments"),

@@ -40,24 +40,30 @@ const ENTRY_ROW_CLASS =
   "flex min-h-12 w-full items-center gap-3 rounded-control bg-fill px-3 py-2 text-body text-primary transition-colors hover:bg-fill-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50";
 
 /**
- * How the session's organization stands with SDP here: none is active, SDP
- * refuses the active one (or refuses it because the person's invitation
- * expired), or this deployment does not know it (SDP answers `linked: false`,
- * as for an organization another deployment created).
+ * Why SDP refused the session's organization, as the dashboard layout read it.
+ * `unlinked` is an organization this deployment does not know (SDP answers
+ * `linked: false`, as for one another deployment created).
  */
-export type SessionOrganization = "none" | "refused" | "invitation-expired" | "unlinked";
+export type OrganizationRefusal =
+  | "no-access"
+  | "invitation-expired"
+  | "organization-suspended"
+  | "unlinked";
 
-type EntryState = "invitation-expired" | "no-access" | "create" | "select" | "select-unlinked";
+type EntryState =
+  | Exclude<OrganizationRefusal, "unlinked">
+  | "create"
+  | "select"
+  | "select-unlinked";
 
 function resolveEntryState(params: {
-  sessionOrganization: SessionOrganization;
+  refusal: OrganizationRefusal | null;
   isLoaded: boolean;
   hasChoices: boolean;
 }): EntryState {
-  if (params.sessionOrganization === "invitation-expired") return "invitation-expired";
-  if (params.sessionOrganization === "refused") return "no-access";
+  if (params.refusal !== null && params.refusal !== "unlinked") return params.refusal;
   if (params.isLoaded && !params.hasChoices) return "create";
-  if (params.sessionOrganization === "unlinked") return "select-unlinked";
+  if (params.refusal === "unlinked") return "select-unlinked";
   return "select";
 }
 
@@ -70,6 +76,11 @@ function entryCopy(
       return {
         title: t("Shared.SharedComponents.invitationExpiredTitle"),
         description: t("Shared.SharedComponents.invitationExpiredDescription"),
+      };
+    case "organization-suspended":
+      return {
+        title: t("Shared.SharedComponents.organizationSuspendedTitle"),
+        description: t("Shared.SharedComponents.organizationSuspendedDescription"),
       };
     case "no-access":
       return {
@@ -102,16 +113,16 @@ function entryCopy(
  * Entry state for a signed-in person with no organization selected for the
  * session: their organizations to pick from, their pending invitations to
  * accept, or, with neither, the step that creates their organization in SDP
- * (ADR 0012). When SDP refused the session's organization, or this deployment
- * does not know it, the same choices are offered under that explanation.
- * Organizations this deployment does not link are never offered.
+ * (ADR 0012). With a `refusal`, the session's organization is one SDP refused
+ * or this deployment does not know, so the same choices are offered under that
+ * explanation. Organizations this deployment does not link are never offered.
  *
- * @param props.sessionOrganization - How the session's organization stands with SDP here.
+ * @param props.refusal - Why SDP refused the session's organization, or null.
  */
 export function SelectExistingOrganizationPanel({
-  sessionOrganization,
+  refusal,
 }: {
-  sessionOrganization: SessionOrganization;
+  refusal: OrganizationRefusal | null;
 }) {
   const t = useTranslations();
   const router = useRouter();
@@ -126,7 +137,7 @@ export function SelectExistingOrganizationPanel({
     loadedMemberships.map((membership) => membership.organization.id)
   );
   // The organization SDP refused or does not know is no way forward, so it is not offered again.
-  const excludedActiveId = sessionOrganization === "none" ? undefined : activeOrganization?.id;
+  const excludedActiveId = refusal === null ? undefined : activeOrganization?.id;
   const memberships = loadedMemberships.filter(
     (membership) =>
       membership.organization.id !== excludedActiveId &&
@@ -137,7 +148,7 @@ export function SelectExistingOrganizationPanel({
   const isReady = isLoaded && isResolved;
   const copy = entryCopy(
     resolveEntryState({
-      sessionOrganization,
+      refusal,
       isLoaded: isReady,
       hasChoices: memberships.length > 0 || invitations.length > 0,
     }),
