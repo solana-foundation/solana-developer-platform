@@ -281,40 +281,17 @@ test.describe
       }
     });
 
-    test("logout clears snapshots in both tabs and Back cannot restore private pages", async ({
+    test("logout closes the dashboard in both tabs and Back cannot restore private pages", async ({
       page,
     }, testInfo) => {
       await expectContacts(page, primaryProject, contactA, contactB);
       const otherTab = await page.context().newPage();
       await expectContacts(otherTab, primaryProject, contactA, contactB);
-      for (const tab of [page, otherTab]) {
-        await tab.evaluate(() => {
-          localStorage.setItem("sdp.dashboard.cache.logout-fixture", "private organization data");
-          sessionStorage.setItem("sdp.dashboard.cache.logout-fixture", "private organization data");
-        });
-      }
       await signOut(page);
       expect(
         (await page.context().cookies()).find((cookie) => cookie.name === "sdp_selected_project_id")
       ).toBeUndefined();
       for (const tab of [page, otherTab]) {
-        await expect
-          .poll(() =>
-            tab.evaluate(() => ({
-              local: localStorage.getItem("sdp.dashboard.cache.logout-fixture"),
-              session: sessionStorage.getItem("sdp.dashboard.cache.logout-fixture"),
-            }))
-          )
-          .toEqual({ local: null, session: null });
-        await expect
-          .poll(() =>
-            tab.evaluate(() =>
-              [localStorage, sessionStorage].flatMap((storage) =>
-                Object.keys(storage).filter((key) => key.startsWith("sdp.dashboard.cache."))
-              )
-            )
-          )
-          .toEqual([]);
         await expect(tab.locator("[data-sdp-dashboard-shell]")).toHaveCount(0);
       }
       await page.goBack();
@@ -340,9 +317,6 @@ test.describe
       await recordClerkSession(page);
       await page.goto("/dashboard");
       await expectContacts(page, primaryProject, contactA, contactB);
-      await expect
-        .poll(() => page.evaluate(() => localStorage.getItem("sdp.dashboard.cache.logout-fixture")))
-        .toBeNull();
       await testInfo.attach("signed-back-in", {
         body: await page.screenshot({ path: testInfo.outputPath("browser.png") }),
         contentType: "image/png",

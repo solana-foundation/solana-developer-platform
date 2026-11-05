@@ -29,12 +29,12 @@ import {
   useId,
   useState,
 } from "react";
+import useSWR from "swr";
 import {
   getPageCount,
   getPageSummary,
 } from "@/app/(session)/dashboard/[projectId]/issuance/pagination.utils";
 import { useTranslations } from "@/i18n/provider";
-import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { useDebounce } from "@/lib/use-debounce";
 import { fetchTokenAllowlistLabels, fetchTokenAllowlistPage } from "./asset-profile/allowlist.data";
 import { TOKEN_ALLOWLIST_KEY, TOKEN_ALLOWLIST_LABELS_KEY } from "./asset-profile/allowlist-cache";
@@ -886,11 +886,10 @@ function ControlListEntries({
   // Distinct labels for the whole control list, fetched server-side so the
   // filter covers every entry rather than just the loaded page. The response
   // also provides the unfiltered count rendered above the list.
-  const { data: labelsData, error: labelsError } = usePersistedDashboardSWR(
+  const { data: labelsData, error: labelsError } = useSWR(
     [TOKEN_ALLOWLIST_LABELS_KEY, tokenId] as const,
     ([, id]: readonly [string, string]) => fetchTokenAllowlistLabels(id),
-    { revalidateOnFocus: true, revalidateIfStale: true },
-    { key: `token.${tokenId}.allowlist-labels`, ttlMs: 30_000 }
+    { revalidateOnFocus: true, revalidateIfStale: true }
   );
   const labels = labelsData?.labels ?? [];
   const totalEntries = labelsData?.total ?? 0;
@@ -912,7 +911,7 @@ function ControlListEntries({
   const searchParam = debouncedQuery.length > 0 ? debouncedQuery : null;
   const labelParam = activeLabel !== ALL_LABELS && activeLabel.length > 0 ? activeLabel : null;
 
-  const { data, error, isLoading, isValidating } = usePersistedDashboardSWR(
+  const { data, error, isLoading, isValidating } = useSWR(
     [TOKEN_ALLOWLIST_KEY, tokenId, searchParam ?? "", labelParam ?? "", page] as const,
     () =>
       fetchTokenAllowlistPage(tokenId, {
@@ -921,11 +920,7 @@ function ControlListEntries({
         search: searchParam,
         label: labelParam,
       }),
-    { revalidateOnFocus: true, revalidateIfStale: true, keepPreviousData: true },
-    {
-      key: `token.${tokenId}.allowlist.${searchParam ?? ""}.${labelParam ?? ""}.${page}`,
-      ttlMs: 30_000,
-    }
+    { revalidateOnFocus: true, revalidateIfStale: true, keepPreviousData: true }
   );
 
   const entries = data?.entries ?? [];
