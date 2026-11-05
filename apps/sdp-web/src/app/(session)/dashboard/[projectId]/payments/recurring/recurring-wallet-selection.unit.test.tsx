@@ -16,6 +16,7 @@ import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { sentDashboardRequests, stubDashboardFetch } from "@/test/dashboard-fetch";
 import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navigation";
 import { RecurringPaymentCreateWorkspace } from "./recurring-payment-create-workspace";
 import {
@@ -341,6 +342,13 @@ describe("Recurring Payment lifecycle actions", () => {
     collectionAttempts: PaymentSubscriptionCollectionAttempt[]
   ) {
     vi.stubGlobal("fetch", async () => Response.json({ data: { wallets: [source] } }));
+    renderDetailWorkspace(recurringPayment, collectionAttempts);
+  }
+
+  function renderDetailWorkspace(
+    recurringPayment: typeof recurring,
+    collectionAttempts: PaymentSubscriptionCollectionAttempt[]
+  ) {
     render(
       <RecurringPaymentDetailWorkspace
         recurringPayment={recurringPayment}
@@ -411,5 +419,64 @@ describe("Recurring Payment lifecycle actions", () => {
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Resume schedule" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Cancel schedule" })).toBeNull();
+  });
+
+  const outcomeUnknown = () =>
+    Response.json(
+      { error: { code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN", message: "outcome unknown" } },
+      { status: 409 }
+    );
+
+  async function runAction(schedule: typeof recurring, label: string, answer: () => Response) {
+    const fetchMock = stubDashboardFetch(({ method }) =>
+      method === "POST" ? answer() : Response.json({ data: { wallets: [source] } })
+    );
+    const walletReads = () =>
+      sentDashboardRequests(fetchMock).filter(
+        (request) => request.method === "GET" && request.path.startsWith("/api/dashboard/wallets")
+      ).length;
+    renderDetailWorkspace(schedule, []);
+    const button = await screen.findByRole("button", { name: label });
+    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
+    const before = walletReads();
+
+    fireEvent.click(button);
+
+    await waitFor(() => expect(walletReads()).toBeGreaterThan(before));
+  }
+
+  it.each<{ label: string; schedule: typeof recurring }>([
+    { label: "Activate schedule", schedule: { ...recurring, status: "pending_activation" } },
+    {
+      label: "Collect now",
+      schedule: {
+        ...recurring,
+        subscriptionId: "psub_test",
+        nextCollectionDueAt: "2020-01-01T00:00:00.000Z",
+      },
+    },
+    {
+      label: "Resume schedule",
+      schedule: {
+        ...recurring,
+        status: "paused",
+        pausedReason: "failed_attempts",
+        subscriptionId: "psub_test",
+      },
+    },
+  ])("reads the balances again once $label succeeds", async ({ label, schedule }) => {
+    await runAction(schedule, label, () => Response.json({ data: { recurringPayment: schedule } }));
+  });
+
+  it("reads the balances again when a collection's outcome is unknown", async () => {
+    await runAction(
+      {
+        ...recurring,
+        subscriptionId: "psub_test",
+        nextCollectionDueAt: "2020-01-01T00:00:00.000Z",
+      },
+      "Collect now",
+      outcomeUnknown
+    );
   });
 });

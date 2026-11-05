@@ -124,6 +124,54 @@ describe("RecurringPaymentsWorkspace contacts", () => {
       "/api/dashboard/counterparty/cpty_found",
     ]);
   });
+
+  it("says a name is loading until its read settles, keeping the names read for the last page", async () => {
+    const otherContact = Promise.withResolvers<Response>();
+    stubDashboardFetch(({ path }) => {
+      if (path.startsWith("/api/dashboard/payments/recurring-payments?")) {
+        const pageTwo = path.includes("page=2");
+        const ids = pageTwo ? ["cpty_found", "cpty_other"] : ["cpty_found"];
+        return Response.json({
+          data: {
+            recurringPayments: ids.map((counterpartyId) => ({
+              ...schedule,
+              id: `prp_${counterpartyId}`,
+              counterpartyId,
+            })),
+            total: 30,
+            page: pageTwo ? 2 : 1,
+            pageSize: 25,
+          },
+        });
+      }
+      if (path.startsWith("/api/dashboard/wallets"))
+        return Response.json({ data: { wallets: [] } });
+      return path === "/api/dashboard/counterparty/cpty_other"
+        ? otherContact.promise
+        : Response.json({ data: { counterparty: contact } });
+    });
+    const page = (pageNumber: number) => (
+      <EnglishI18n>
+        <DashboardReadsProvider>
+          <RecurringPaymentsWorkspace
+            listState={{ page: pageNumber, pageSize: 25, status: null }}
+            issuanceEnabled={false}
+          />
+        </DashboardReadsProvider>
+      </EnglishI18n>
+    );
+    const view = render(page(1));
+    expect(await screen.findByText(/to Northwind$/)).toBeTruthy();
+
+    view.rerender(page(2));
+
+    expect(await screen.findByText(/to Loading…$/)).toBeTruthy();
+    expect(screen.getByText(/to Northwind$/)).toBeTruthy();
+    expect(screen.queryByText(/to Counterparty unavailable$/)).toBeNull();
+    otherContact.resolve(Response.json({ error: { message: "unavailable" } }, { status: 503 }));
+    expect(await screen.findByText(/to Counterparty unavailable$/)).toBeTruthy();
+    expect(screen.queryByText(/to Loading…$/)).toBeNull();
+  });
 });
 
 describe("RecurringPaymentsWorkspace pagination", () => {

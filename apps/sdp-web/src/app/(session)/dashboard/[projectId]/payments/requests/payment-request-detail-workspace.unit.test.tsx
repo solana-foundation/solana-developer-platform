@@ -182,6 +182,26 @@ describe("PaymentRequestDetailWorkspace payment link", () => {
     expect(screen.queryByRole("img", { name: "QR code for the payment link" })).toBeNull();
   });
 
+  it.each([
+    { status: 403, retried: false },
+    { status: 503, retried: true },
+  ])(
+    "asks for the link again after a $status only when it may answer differently: $retried",
+    async ({ status, retried }) => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const fetchMock = renderDetail(false, (request) =>
+        request.path === `${DETAIL_PATH}/link` ? refused(status) : detailReads(request)
+      );
+      await screen.findByText("Anyone with the link");
+
+      await vi.advanceTimersByTimeAsync(20_000);
+      const linkReads = sentDashboardReads(fetchMock).filter(
+        (read) => read.path === `${DETAIL_PATH}/link`
+      );
+      expect(linkReads.length > 1).toBe(retried);
+    }
+  );
+
   it("shows the pay link and its QR code", async () => {
     await renderRecord(false, paymentRequest);
 

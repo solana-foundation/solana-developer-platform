@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ proxyToSdpApi: vi.fn() }));
 vi.mock("@/lib/sdp-api", () => mocks);
+vi.mock("@/i18n/server", () => ({ getTranslations: async () => (key: string) => key }));
 
 import { GET } from "./route";
 

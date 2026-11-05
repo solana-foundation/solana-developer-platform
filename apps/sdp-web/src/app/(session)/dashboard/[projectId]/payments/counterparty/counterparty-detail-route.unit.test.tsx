@@ -1,12 +1,18 @@
 // @vitest-environment jsdom
 
 import type { Counterparty } from "@sdp/types/counterparties";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { sentDashboardReads, stubDashboardFetch } from "@/test/dashboard-fetch";
+import {
+  sentDashboardReads,
+  sentDashboardRequests,
+  stubDashboardFetch,
+} from "@/test/dashboard-fetch";
+import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { DashboardReadsProvider } from "@/test/dashboard-reads";
 import { CounterpartyDetailRoute } from "./counterparty-detail-workspace";
+import { useCounterpartyDirectory } from "./use-counterparty-directory";
 
 vi.mock("@/contexts/dashboard-workspace-context", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/contexts/dashboard-workspace-context")>()),
@@ -22,7 +28,13 @@ vi.mock("@/components/dashboard-workspace-panel", () => ({
   DashboardWorkspaceOverviewPanel: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("./add-external-account-dialog", () => ({ AddExternalAccountDialog: () => null }));
-vi.mock("./delete-counterparty-dialog", () => ({ DeleteCounterpartyDialog: () => null }));
+vi.mock("./delete-counterparty-dialog", () => ({
+  DeleteCounterpartyDialog: ({ onConfirm }: { onConfirm: () => void }) => (
+    <button type="button" onClick={onConfirm}>
+      confirm delete
+    </button>
+  ),
+}));
 
 const CONTACT_PATH = "/api/dashboard/counterparty/cpty_test";
 
@@ -88,9 +100,15 @@ function renderRoute() {
   );
 }
 
+function DirectoryRead() {
+  useCounterpartyDirectory();
+  return null;
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  resetDashboardNavigation();
 });
 
 describe("CounterpartyDetailRoute", () => {
@@ -126,5 +144,35 @@ describe("CounterpartyDetailRoute", () => {
     expect(
       await screen.findByText("DashboardPayments.counterparty.detail.paymentsNotLoaded")
     ).toBeTruthy();
+  });
+
+  it("leaves for the list on delete, reading the other contact reads again but never this contact", async () => {
+    const fetchMock = serveContact(200, 0, null);
+    render(
+      <DashboardReadsProvider>
+        <CounterpartyDetailRoute counterpartyId="cpty_test" rampsEnabled={false} />
+        <DirectoryRead />
+      </DashboardReadsProvider>
+    );
+    await screen.findByText("DashboardPayments.counterparty.detail.addresses");
+    const gets = (matches: (path: string) => boolean) =>
+      sentDashboardRequests(fetchMock).filter(
+        (request) => request.method === "GET" && matches(request.path)
+      ).length;
+    const ownReads = (path: string) => path.startsWith(CONTACT_PATH);
+    const directoryReads = (path: string) => path.startsWith("/api/dashboard/counterparty?");
+    await waitFor(() => expect(gets(directoryReads)).toBe(1));
+    const ownBefore = gets(ownReads);
+
+    act(() => screen.getByRole("button", { name: "confirm delete" }).click());
+
+    await waitFor(() =>
+      expect(dashboardRouter.push).toHaveBeenCalledWith(
+        "/dashboard/prj_test_sandbox/payments/counterparty"
+      )
+    );
+    await waitFor(() => expect(gets(directoryReads)).toBe(2));
+    expect(gets(ownReads)).toBe(ownBefore);
+    expect(screen.queryByText("NotFound.backToOverview")).toBeNull();
   });
 });

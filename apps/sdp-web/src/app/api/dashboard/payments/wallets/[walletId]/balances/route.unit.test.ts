@@ -1,7 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { MessageKey } from "@/i18n/messages";
 
 const mocks = vi.hoisted(() => ({ proxyToSdpApi: vi.fn() }));
 vi.mock("@/lib/sdp-api", () => mocks);
+vi.mock("@/i18n/server", async () => {
+  const { getMessages } = await import("@/i18n/messages");
+  const { translate } = await import("@/i18n/translate");
+  return {
+    getTranslations: async () => (key: MessageKey) => translate(getMessages("en"), key),
+  };
+});
 
 import { GET } from "./route";
 
@@ -32,7 +40,7 @@ describe("wallet balance confirmation context", () => {
       params: Promise.resolve({ walletId: "wallet%E0%A4%A" }),
     });
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: { message: "Invalid wallet id" } });
+    expect(await response.json()).toEqual({ error: { message: "Invalid wallet ID." } });
     expect(mocks.proxyToSdpApi).not.toHaveBeenCalled();
   });
   it.each(["-1", "01", "1.5", "9007199254740992", "1&minimumSlot=2"])(
