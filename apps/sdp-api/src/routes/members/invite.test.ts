@@ -7,7 +7,11 @@ import { app } from "@/index";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import { readAuditActions } from "@/test/helpers/audit-logs";
 import { clerkHeaders } from "@/test/helpers/clerk";
-import { type ClerkBackend, stubClerkBackend } from "@/test/helpers/clerk-backend";
+import {
+  type ClerkBackend,
+  type ClerkBackendAnswer,
+  stubClerkBackend,
+} from "@/test/helpers/clerk-backend";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { readInvitationStatus, seedInvitation } from "@/test/helpers/invitations";
@@ -40,11 +44,8 @@ const CLERK_LIST_REQUEST = {
   path: `/organizations/${CLERK_ORG_ID}/invitations?status=pending&limit=100&offset=0`,
   body: null,
 };
-const CLERK_REVOKE_REQUEST = {
-  method: "POST",
-  path: `/organizations/${CLERK_ORG_ID}/invitations/${CLERK_INVITATION_ID}/revoke`,
-  body: null,
-};
+const CLERK_SERVER_ERROR = { status: 500, body: { errors: [] } };
+const OTHER_TAGGED_INVITATION = { id: "orginv_invite_retry", sdpInvitationId: "inv_invite_retry" };
 
 const invitationRowSchema = z.object({
   id: z.string(),
@@ -94,24 +95,30 @@ function clerkCreateRequest(sdpInvitationId: string) {
   };
 }
 
-function clerkPendingAnswers(sdpInvitationId: string) {
-  const pending = { email_address: INVITEE_EMAIL, status: "pending" };
-  return [
-    {
-      status: 200,
-      body: {
-        data: [
-          { ...pending, id: CLERK_INVITATION_ID, private_metadata: { sdpInvitationId } },
-          {
-            ...pending,
-            id: "orginv_invite_retry",
-            private_metadata: { sdpInvitationId: "inv_invite_retry" },
-          },
-        ],
-      },
+function clerkPendingList(
+  tagged: Array<{ id: string; sdpInvitationId: string }>
+): ClerkBackendAnswer {
+  return {
+    status: 200,
+    body: {
+      data: tagged.map(({ id, sdpInvitationId }) => ({
+        id,
+        email_address: INVITEE_EMAIL,
+        status: "pending",
+        private_metadata: { sdpInvitationId },
+      })),
     },
-    { status: 200, body: { id: CLERK_INVITATION_ID, status: "revoked" } },
-  ];
+  };
+}
+
+function answerOnCreate(answers: (sdpInvitationId: string) => ClerkBackendAnswer[]) {
+  const createInvitation = ClerkOrganizationsService.prototype.createOrganizationInvitation;
+  vi.spyOn(ClerkOrganizationsService.prototype, "createOrganizationInvitation").mockImplementation(
+    async function (this: ClerkOrganizationsService, params) {
+      clerk.answer(...answers(params.sdpInvitationId));
+      return createInvitation.call(this, params);
+    }
+  );
 }
 
 async function invitationAuditEntries(invitationId: string) {
@@ -338,46 +345,51 @@ describe("POST /v1/members/invite", () => {
     ]);
   });
 
-  it("fails the claimed invitation and withdraws only the Clerk invitation tagged with its id when Clerk answers 5xx", async () => {
-    const createInvitation = ClerkOrganizationsService.prototype.createOrganizationInvitation;
-    vi.spyOn(
-      ClerkOrganizationsService.prototype,
-      "createOrganizationInvitation"
-    ).mockImplementation(async function (this: ClerkOrganizationsService, params) {
-      clerk.answer(
-        { status: 500, body: { errors: [] } },
-        ...clerkPendingAnswers(params.sdpInvitationId)
-      );
-      return createInvitation.call(this, params);
+  it("adopts the Clerk invitation tagged with its id when Clerk answers 5xx to the create", async () => {
+    answerOnCreate((sdpInvitationId) => [
+      CLERK_SERVER_ERROR,
+      clerkPendingList([OTHER_TAGGED_INVITATION, { id: CLERK_INVITATION_ID, sdpInvitationId }]),
+    ]);
+
+    const response = await invite(INVITEE_EMAIL);
+
+    expect(response.status).toBe(201);
+    const [row] = await invitationRows();
+    expect(row).toMatchObject({ status: "pending", clerk_invitation_id: CLERK_INVITATION_ID });
+    expect(clerk.requests).toEqual([clerkCreateRequest(row.id), CLERK_LIST_REQUEST]);
+    expect(await response.json()).toEqual({
+      data: {
+        invitation: {
+          id: row.id,
+          email: INVITEE_EMAIL,
+          role: "admin",
+          expiresAt: row.expires_at,
+          clerkInvitationId: CLERK_INVITATION_ID,
+        },
+      },
+      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
     });
+  });
+
+  it("fails the claimed invitation when Clerk answers 5xx and lists no invitation tagged with its id", async () => {
+    answerOnCreate(() => [CLERK_SERVER_ERROR, clerkPendingList([OTHER_TAGGED_INVITATION])]);
 
     expect((await invite(INVITEE_EMAIL)).status).toBe(500);
     const rows = await invitationRows();
     expect(rows).toEqual([
-      expect.objectContaining({
-        email: INVITEE_EMAIL,
-        status: "failed",
-        clerk_invitation_id: null,
-      }),
+      expect.objectContaining({ status: "failed", clerk_invitation_id: null }),
     ]);
-    expect(clerk.requests).toEqual([
-      clerkCreateRequest(rows[0].id),
-      CLERK_LIST_REQUEST,
-      CLERK_REVOKE_REQUEST,
-    ]);
+    expect(clerk.requests).toEqual([clerkCreateRequest(rows[0].id), CLERK_LIST_REQUEST]);
   });
 
-  it("fails the claimed invitation and withdraws only the Clerk invitation tagged with its id when the Clerk call times out", async () => {
-    vi.spyOn(
-      ClerkOrganizationsService.prototype,
-      "createOrganizationInvitation"
-    ).mockImplementation(async (params) => {
-      clerk.answer(...clerkPendingAnswers(params.sdpInvitationId));
-      throw new DOMException("The operation timed out", "TimeoutError");
-    });
+  it("fails the claimed invitation when the Clerk call times out and Clerk cannot list its invitations", async () => {
+    vi.spyOn(ClerkOrganizationsService.prototype, "createOrganizationInvitation").mockRejectedValue(
+      new DOMException("The operation timed out", "TimeoutError")
+    );
+    clerk.answer(CLERK_SERVER_ERROR);
 
     expect((await invite(INVITEE_EMAIL)).status).toBe(500);
-    expect(clerk.requests).toEqual([CLERK_LIST_REQUEST, CLERK_REVOKE_REQUEST]);
+    expect(clerk.requests).toEqual([CLERK_LIST_REQUEST]);
     expect((await invitationRows()).map((row) => row.status)).toEqual(["failed"]);
   });
 
