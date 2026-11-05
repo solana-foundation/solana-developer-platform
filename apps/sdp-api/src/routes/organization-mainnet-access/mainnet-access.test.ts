@@ -2,7 +2,7 @@ import { hashString } from "@sdp/payments/hash";
 import { SDP_TERMS } from "@sdp/types/mainnet-access";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db/client";
+import { getDb, type PreparedStatement } from "@/db/client";
 import { app } from "@/index";
 import { correctMainnetAccess } from "@/services/mainnet-access.service";
 import { syncProviderAccessFromClerk } from "@/services/provider-availability.service";
@@ -10,6 +10,11 @@ import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fi
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
+import {
+  organizationCreator,
+  organizationStatements,
+  seedOrganization,
+} from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -26,27 +31,34 @@ let adminToken: string;
 let memberToken: string;
 let iterable: MockInstance<typeof fetch>;
 
-async function seedOrganization(): Promise<void> {
+async function seedMainnetAccessOrganization(): Promise<void> {
   const db = getDb(env);
-  await db
-    .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-    .bind(ORGANIZATION_ID, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
-    .run();
+  const statements: PreparedStatement[] = [];
   for (const [user, role] of [
     [{ id: TEST_USER.id, email: TEST_USER.email }, "admin"],
     [MEMBER_USER, "member"],
   ] as const) {
-    await db
-      .prepare("INSERT INTO users (id, email, name, status) VALUES (?, ?, ?, 'active')")
-      .bind(user.id, user.email, role === "admin" ? "Ada Admin" : null)
-      .run();
-    await db
-      .prepare(
-        "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, ?, 'active')"
-      )
-      .bind(`mem_${user.id}`, ORGANIZATION_ID, user.id, role)
-      .run();
+    statements.push(
+      db
+        .prepare("INSERT INTO users (id, email, name, status) VALUES (?, ?, ?, 'active')")
+        .bind(user.id, user.email, role === "admin" ? "Ada Admin" : null),
+      db
+        .prepare(
+          "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, ?, 'active')"
+        )
+        .bind(`mem_${user.id}`, ORGANIZATION_ID, user.id, role)
+    );
   }
+  await db.batch([
+    ...organizationStatements(db, {
+      id: ORGANIZATION_ID,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: TEST_ORG.status,
+      creator: organizationCreator(ORGANIZATION_ID),
+    }),
+    ...statements,
+  ]);
   await seedDefaultProjects(db, {
     organizationId: ORGANIZATION_ID,
     createdBy: TEST_USER.id,
@@ -159,7 +171,7 @@ function sentEmails() {
 describe("Organization mainnet access (HOO-2427)", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
-    await seedOrganization();
+    await seedMainnetAccessOrganization();
     env.ITERABLE_API_URL = ITERABLE_API_URL;
     env.ITERABLE_API_KEY = ITERABLE_TEST_KEY;
     env.ITERABLE_TRANSACTIONAL_CAMPAIGN_ID = "4242";
@@ -418,10 +430,13 @@ describe("Organization mainnet access (HOO-2427)", () => {
 
   it("refuses an admin naming another organization, recording nothing on either", async () => {
     const foreign = "org_mainnet_foreign";
-    await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(foreign, "Foreign", "foreign-org", TEST_ORG.tier, TEST_ORG.status)
-      .run();
+    await seedOrganization(getDb(env), {
+      id: foreign,
+      name: "Foreign",
+      slug: "foreign-org",
+      status: TEST_ORG.status,
+      creator: organizationCreator(foreign),
+    });
     const path = `/v1/organizations/${foreign}/mainnet-access`;
     const headers = { Authorization: `Bearer ${adminToken}`, "Content-Type": "application/json" };
 

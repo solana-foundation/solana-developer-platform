@@ -26,10 +26,10 @@ describe("0116 BVNK off-ramp provider data removal", () => {
   it("removes provider_data.bvnk.offramp and keeps the rest of the bvnk payload", async () => {
     await client.query("BEGIN");
     await client.query(
-      `INSERT INTO organizations (id, name, slug) VALUES ('org_0116', 'Org 0116', 'org-0116')`
+      `INSERT INTO users (id, email) VALUES ('usr_0116', 'owner-0116@example.test')`
     );
     await client.query(
-      `INSERT INTO users (id, email) VALUES ('usr_0116', 'owner-0116@example.test')`
+      `INSERT INTO organizations (id, name, slug, created_by_user_id) VALUES ('org_0116', 'Org 0116', 'org-0116', 'usr_0116')`
     );
     await client.query(
       `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)

@@ -5,6 +5,7 @@ import { TEST_ORG } from "@/test/fixtures/organizations";
 import { clerkHeaders } from "@/test/helpers/clerk";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, organizationStatements } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -65,11 +66,6 @@ async function seedDirectory(memberCount: number): Promise<void> {
   const statements = [
     db
       .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Member Directory', 'member-directory', 'individual', 'active')"
-      )
-      .bind(ORGANIZATION_ID),
-    db
-      .prepare(
         `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
          VALUES ('aoi_directory', 'clerk', ?, ?, 'member-directory')`
       )
@@ -124,7 +120,16 @@ async function seedDirectory(memberCount: number): Promise<void> {
     );
   }
 
-  await db.batch(statements);
+  await db.batch([
+    ...organizationStatements(db, {
+      id: ORGANIZATION_ID,
+      name: "Member Directory",
+      slug: "member-directory",
+      status: "active",
+      creator: organizationCreator(ORGANIZATION_ID),
+    }),
+    ...statements,
+  ]);
 }
 
 /** The signed-in caller, one of the seeded members; API keys cannot list members (HOO-2099). */

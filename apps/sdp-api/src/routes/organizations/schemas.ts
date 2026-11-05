@@ -30,7 +30,6 @@ export const updateOrgSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   settings: z
     .strictObject({
-      defaultEnvironment: z.enum(["sandbox", "production"]).optional(),
       allowedIpAddresses: z
         .array(organizationAllowedIpSchema)
         .max(MAX_ORGANIZATION_ALLOWED_IPS)

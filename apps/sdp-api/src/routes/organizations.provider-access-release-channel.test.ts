@@ -1,8 +1,7 @@
 import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createApp } from "@/app";
-import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { env } from "@/test/helpers/env";
 import {
@@ -37,12 +36,6 @@ async function rampsEnabled(on: typeof app, releaseChannel: string) {
 
 describe("GET /v1/organizations/:orgId/provider-access release channel", () => {
   installPaymentsRouteTestHooks();
-  beforeEach(async () => {
-    await getDb(env)
-      .prepare("UPDATE organizations SET tier = 'enterprise' WHERE id = ?")
-      .bind(TEST_ORG.id)
-      .run();
-  });
 
   it("follows the ramp provider stages the app runs", async () => {
     const onExperimental = await rampsEnabled(app, "experimental");

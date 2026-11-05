@@ -12,11 +12,7 @@ import {
 let client: Client;
 let tenant: Awaited<ReturnType<typeof seedOrgProject>>;
 
-function insertOrganization(
-  id: string,
-  createdByUserId: string | null,
-  status: OrganizationStatus
-) {
+function insertOrganization(id: string, createdByUserId: string, status: OrganizationStatus) {
   return client.query(
     "INSERT INTO organizations (id, name, slug, created_by_user_id, status) VALUES ($1, $1, $1, $2, $3)",
     [id, createdByUserId, status]
@@ -43,7 +39,9 @@ afterEach(async () => {
 
 describe("0173/0174 one organization created per user", () => {
   it("rejects a second organization while the creator's first is not deleted", async () => {
-    await insertOrganization("org_0174_first", tenant.userId, "suspended");
+    await client.query("UPDATE organizations SET status = 'suspended' WHERE id = $1", [
+      tenant.organizationId,
+    ]);
 
     await expect(
       insertOrganization("org_0174_second", tenant.userId, "active")
@@ -54,14 +52,18 @@ describe("0173/0174 one organization created per user", () => {
   });
 
   it("frees the slot once the first organization is deleted, and refuses to revive it", async () => {
-    await insertOrganization("org_0174_first", tenant.userId, "active");
-    await client.query("UPDATE organizations SET status = 'deleted' WHERE id = 'org_0174_first'");
+    await client.query("UPDATE organizations SET status = 'deleted' WHERE id = $1", [
+      tenant.organizationId,
+    ]);
 
     await insertOrganization("org_0174_second", tenant.userId, "active");
 
     await expectSqlstate(
       client,
-      () => client.query("UPDATE organizations SET status = 'active' WHERE id = 'org_0174_first'"),
+      () =>
+        client.query("UPDATE organizations SET status = 'active' WHERE id = $1", [
+          tenant.organizationId,
+        ]),
       UNIQUE_VIOLATION
     );
     const { rows } = await client.query<{ id: string; status: OrganizationStatus }>(
@@ -69,19 +71,9 @@ describe("0173/0174 one organization created per user", () => {
       [tenant.userId]
     );
     expect(rows).toEqual([
-      { id: "org_0174_first", status: "deleted" },
+      { id: tenant.organizationId, status: "deleted" },
       { id: "org_0174_second", status: "active" },
     ]);
-  });
-
-  it("lets legacy organizations with no recorded creator coexist", async () => {
-    await insertOrganization("org_0174_legacy", null, "active");
-
-    const { rows } = await client.query<{ id: string }>(
-      "SELECT id FROM organizations WHERE created_by_user_id IS NULL AND id = ANY($1) ORDER BY id",
-      [[tenant.organizationId, "org_0174_legacy"]]
-    );
-    expect(rows).toEqual([{ id: tenant.organizationId }, { id: "org_0174_legacy" }]);
   });
 
   it("rejects a creator that is not an existing user", async () => {

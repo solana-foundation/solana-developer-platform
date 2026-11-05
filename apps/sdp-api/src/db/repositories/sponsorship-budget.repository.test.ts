@@ -3,6 +3,7 @@ import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
@@ -52,9 +53,14 @@ describe("SponsorshipBudgetRepository", () => {
     await db.execute(
       "TRUNCATE sponsorship_budget_policy_revisions, sponsorship_budget_reservations, sponsorship_budget_policies, sponsorship_reconciliation_state"
     );
-    await db.execute(
-      "INSERT INTO organizations (id, name, slug) VALUES ('org_1', 'org_1', 'sponsorship-budget-org') ON CONFLICT (id) DO NOTHING"
-    );
+    await seedOrganization(db, {
+      id: "org_1",
+      name: "org_1",
+      slug: "sponsorship-budget-org",
+      status: "active",
+      creator: { id: "usr_sponsorship_budget", email: "sponsorship-budget@example.test" },
+      onConflict: "do-nothing",
+    });
     await db.execute(
       "INSERT INTO users (id, email) VALUES ('usr_sponsorship_budget', 'sponsorship-budget@example.test') ON CONFLICT (id) DO NOTHING"
     );

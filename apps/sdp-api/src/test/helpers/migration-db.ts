@@ -44,13 +44,14 @@ export async function seedOrgProject(
   // constraints as the platform, and 0081's forced row-level security would
   // otherwise reject every seed insert.
   await client.query("SET app.tenant_isolation_identity = 'system'");
-  await client.query("INSERT INTO organizations (id, name, slug) VALUES ($1, $1, $1)", [
-    organizationId,
-  ]);
   await client.query("INSERT INTO users (id, email) VALUES ($1, $2)", [
     userId,
     `${tag}@example.test`,
   ]);
+  await client.query(
+    "INSERT INTO organizations (id, name, slug, created_by_user_id) VALUES ($1, $1, $1, $2)",
+    [organizationId, userId]
+  );
   await client.query(
     `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
      VALUES

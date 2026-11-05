@@ -15,6 +15,7 @@ import { mapPrivateChannelWithdrawalRow } from "@/db/repositories/private-channe
 import { createPrivateChannelTransferRepository } from "@/db/repositories/repository-factory";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { env } from "@/test/helpers/env";
+import { organizationStatements } from "@/test/helpers/organizations";
 import { rpcHttpError } from "@/test/helpers/rpc-errors";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { createChannelDeposit, listChannelDeposits } from "./deposit";
@@ -65,14 +66,13 @@ beforeEach(async () => {
   };
   const db = getDb(env);
   await db.batch([
-    db
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'PC execution', 'pc-execution', 'enterprise', 'active')"
-      )
-      .bind(scope.organizationId),
-    db.prepare(
-      "INSERT INTO users (id, email, status) VALUES ('usr_pc_execution', 'pc-execution@example.com', 'active')"
-    ),
+    ...organizationStatements(db, {
+      id: scope.organizationId,
+      name: "PC execution",
+      slug: "pc-execution",
+      status: "active",
+      creator: { id: "usr_pc_execution", email: "pc-execution@example.com" },
+    }),
     db
       .prepare(
         "INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by) VALUES (?, ?, 'PC', 'pc-execution', 'sandbox', 'active', 'usr_pc_execution')"

@@ -12,7 +12,7 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import type { updateProjectSchema } from "@/routes/projects/schemas";
 import { AuditService } from "@/services/audit.service";
 import { ProjectService } from "@/services/project.service";
-import { getOrganizationTierState } from "@/services/provider-availability.service";
+import { getOrganizationSettings } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -40,8 +40,8 @@ export const listProjects = async (c: AppContext) => {
     projectList = await projectService.listProjects(auth.organizationId, { includeArchived });
   }
 
-  const orgState = await getOrganizationTierState(db, auth.organizationId);
-  const productionEnabled = orgState.settings?.enableProductionProject === true;
+  const settings = await getOrganizationSettings(db, auth.organizationId);
+  const productionEnabled = settings?.enableProductionProject === true;
   const projects = productionEnabled
     ? projectList
     : projectList.filter((project) => project.environment !== "production");

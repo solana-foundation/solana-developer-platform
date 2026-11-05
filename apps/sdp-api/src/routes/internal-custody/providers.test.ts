@@ -8,6 +8,11 @@ import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
+import {
+  organizationCreator,
+  organizationStatements,
+  seedOrganization,
+} from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -76,12 +81,13 @@ function buildApp(options: { injectJwt?: boolean } = {}) {
 async function seedBaseline(): Promise<void> {
   const db = getDb(env);
   await db.batch([
-    db
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "enterprise", "active"),
-    db
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-      .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
+    ...organizationStatements(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: TEST_USER,
+    }),
     db
       .prepare(
         `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
@@ -346,16 +352,13 @@ describe("internal custody providers", () => {
     const otherProjectId = `${TEST_PROJECT.id}_production`;
     const otherOrganizationId = "org_setup_status_other";
     const otherOrganizationSandboxProjectId = "prj_setup_status_other_sandbox";
-    await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(
-        otherOrganizationId,
-        "Setup Status Other Org",
-        "setup-status-other",
-        "enterprise",
-        "active"
-      )
-      .run();
+    await seedOrganization(getDb(env), {
+      id: otherOrganizationId,
+      name: "Setup Status Other Org",
+      slug: "setup-status-other",
+      status: "active",
+      creator: organizationCreator(otherOrganizationId),
+    });
     await seedDefaultProjects(getDb(env), {
       organizationId: otherOrganizationId,
       createdBy: TEST_USER.id,
@@ -451,10 +454,13 @@ describe("internal custody providers", () => {
   });
 
   it("does not leak another organization's setup", async () => {
-    await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind("org_setup_status_other", "Other", "other-setup-status", "standard", "active")
-      .run();
+    await seedOrganization(getDb(env), {
+      id: "org_setup_status_other",
+      name: "Other",
+      slug: "other-setup-status",
+      status: "active",
+      creator: organizationCreator("org_setup_status_other"),
+    });
     await seedDefaultProjects(getDb(env), {
       organizationId: "org_setup_status_other",
       createdBy: TEST_USER.id,

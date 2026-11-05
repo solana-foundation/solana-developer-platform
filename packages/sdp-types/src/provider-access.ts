@@ -11,7 +11,6 @@ import { HASTRA_DEPLOYMENTS } from "./hastra-programs";
 import { JUPITER_LEND_EARN_PROGRAM_IDS } from "./jupiter-lend-programs";
 import { KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT, KAMINO_KVAULT_PROGRAM_IDS } from "./kamino-programs";
 import { ONDO_DEPLOYMENTS } from "./ondo-programs";
-import { normalizeOrganizationTier, type OrganizationTier } from "./organizations";
 import { VEDA_DEPLOYMENTS } from "./veda-programs";
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
@@ -606,7 +605,6 @@ export interface OrganizationProviderEntitlements {
 }
 
 export interface OrganizationProviderAvailabilityResponse {
-  tier: OrganizationTier;
   providers: OrganizationProviderAvailability;
 }
 
@@ -734,22 +732,15 @@ export const GENERAL_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
 };
 
 export function resolveOrganizationProviderEntitlements(input: {
-  tier: string | null | undefined;
   providerOverrides?: OrganizationProviderOverrides | null;
-}): { tier: OrganizationTier; providers: OrganizationProviderEntitlements } {
-  const tier = normalizeOrganizationTier(input.tier);
-  // `tier` is retained in the response for backwards compatibility, but provider
-  // access is organization-scoped: general providers are available to every org,
-  // while manual providers require an explicit provider override.
-  const defaults = GENERAL_PROVIDER_DEFAULTS;
-
+}): OrganizationProviderEntitlements {
   return {
-    tier,
-    providers: {
-      custody: applyOverrides(defaults.custody, input.providerOverrides?.custody),
-      compliance: applyOverrides(defaults.compliance, input.providerOverrides?.compliance),
-      ramps: applyOverrides(defaults.ramps, input.providerOverrides?.ramps),
-      earn: applyOverrides(defaults.earn, input.providerOverrides?.earn),
-    },
+    custody: applyOverrides(GENERAL_PROVIDER_DEFAULTS.custody, input.providerOverrides?.custody),
+    compliance: applyOverrides(
+      GENERAL_PROVIDER_DEFAULTS.compliance,
+      input.providerOverrides?.compliance
+    ),
+    ramps: applyOverrides(GENERAL_PROVIDER_DEFAULTS.ramps, input.providerOverrides?.ramps),
+    earn: applyOverrides(GENERAL_PROVIDER_DEFAULTS.earn, input.providerOverrides?.earn),
   };
 }

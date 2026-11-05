@@ -14,6 +14,7 @@ import {
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
+import { organizationStatements } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -56,21 +57,21 @@ let clerkToken: string;
 
 async function seedActor(): Promise<void> {
   const db = getDb(env);
-  await db.execute(
-    `INSERT INTO organizations (id, name, slug, tier, status)
-     VALUES (?, 'BYOK Release Channel', 'byok-release-channel', 'individual', 'active')`,
-    [ORGANIZATION_ID]
-  );
-  await db.execute(
-    `INSERT INTO users (id, email, email_verified, status)
-     VALUES (?, 'byok-release-channel@example.com', 1, 'active')`,
-    [USER_ID]
-  );
-  await db.execute(
-    `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-     VALUES ('mem_byok_release_channel', ?, ?, 'admin', 'active')`,
-    [ORGANIZATION_ID, USER_ID]
-  );
+  await db.batch([
+    ...organizationStatements(db, {
+      id: ORGANIZATION_ID,
+      name: "BYOK Release Channel",
+      slug: "byok-release-channel",
+      status: "active",
+      creator: { id: USER_ID, email: "byok-release-channel@example.com" },
+    }),
+    db
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+     VALUES ('mem_byok_release_channel', ?, ?, 'admin', 'active')`
+      )
+      .bind(ORGANIZATION_ID, USER_ID),
+  ]);
   await seedDefaultProjects(db, {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,

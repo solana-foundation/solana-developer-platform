@@ -23,14 +23,14 @@ let client: Client;
 async function seedCounterpartyPair(suffix: string): Promise<void> {
   const slug = suffix.replaceAll("_", "-");
   await client.query(
-    `INSERT INTO organizations (id, name, slug) VALUES
-       ('org_a_${suffix}', 'Org A ${suffix}', 'org-a-${slug}'),
-       ('org_b_${suffix}', 'Org B ${suffix}', 'org-b-${slug}')`
-  );
-  await client.query(
     `INSERT INTO users (id, email) VALUES
        ('usr_a_${suffix}', 'owner-a-${slug}@example.test'),
        ('usr_b_${suffix}', 'owner-b-${slug}@example.test')`
+  );
+  await client.query(
+    `INSERT INTO organizations (id, name, slug, created_by_user_id) VALUES
+       ('org_a_${suffix}', 'Org A ${suffix}', 'org-a-${slug}', 'usr_a_${suffix}'),
+       ('org_b_${suffix}', 'Org B ${suffix}', 'org-b-${slug}', 'usr_b_${suffix}')`
   );
   await client.query(
     `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by) VALUES

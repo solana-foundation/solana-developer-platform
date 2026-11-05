@@ -1,5 +1,4 @@
 import { createClerkClient } from "@clerk/backend";
-import type { OrganizationTier } from "@sdp/types/organizations";
 import { getE2EEnv } from "../env";
 
 export type ClerkTestIdentity = {
@@ -219,10 +218,7 @@ export function resolveClerkTestIdentity(): Promise<ClerkTestIdentity> {
   return getE2EEnv().useExternalApi ? resolveReadOnlyClerkTestUser() : ensureClerkTestUser();
 }
 
-export async function setClerkOrganizationTier(
-  organizationId: string,
-  tier: OrganizationTier
-): Promise<void> {
+export async function setClerkOrganizationProviderAccess(organizationId: string): Promise<void> {
   const organization = await requestClerk<ClerkOrganizationRecord>(
     `/organizations/${organizationId}`
   );
@@ -232,7 +228,6 @@ export async function setClerkOrganizationTier(
     ...privateMetadata,
     sdp: {
       ...sdpMetadata,
-      tier,
       enableProductionProject: true,
       providerOverrides: undefined,
     },

@@ -40,10 +40,10 @@ afterEach(async () => {
 
 async function seedOrganizationAndProjects(): Promise<void> {
   await client.query(
-    `INSERT INTO organizations (id, name, slug) VALUES ('org_0113', 'Org 0113', 'org-0113')`
+    `INSERT INTO users (id, email) VALUES ('usr_0113', 'owner-0113@example.test')`
   );
   await client.query(
-    `INSERT INTO users (id, email) VALUES ('usr_0113', 'owner-0113@example.test')`
+    `INSERT INTO organizations (id, name, slug, created_by_user_id) VALUES ('org_0113', 'Org 0113', 'org-0113', 'usr_0113')`
   );
   await client.query(
     `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)

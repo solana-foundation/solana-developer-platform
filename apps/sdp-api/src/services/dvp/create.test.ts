@@ -38,6 +38,7 @@ import {
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
+import { organizationStatements } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -210,22 +211,24 @@ describe("createDvpTrade", () => {
     originalSettlementAuthority = env.DVP_SETTLEMENT_AUTHORITY;
     env.DVP_SETTLEMENT_AUTHORITY = SETTLEMENT_AUTHORITY;
     const db = getDb(env);
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
-    await db.execute("UPDATE organizations SET settings = ? WHERE id = ?", [
-      JSON.stringify({ providerOverrides: { custody: { local: true } } }),
-      TEST_ORG.id,
+    await db.batch([
+      ...organizationStatements(db, {
+        id: TEST_ORG.id,
+        name: TEST_ORG.name,
+        slug: TEST_ORG.slug,
+        status: "active",
+        creator: TEST_USER,
+        onConflict: "update",
+      }),
+      db
+        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+        .bind(JSON.stringify({ providerOverrides: { custody: { local: true } } }), TEST_ORG.id),
+      db
+        .prepare(
+          "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
+        )
+        .bind(TEST_USER.id, TEST_USER.email),
     ]);
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
-      )
-      .bind(TEST_USER.id, TEST_USER.email)
-      .run();
     await seedDefaultProjects(db, {
       organizationId: TEST_ORG.id,
       createdBy: TEST_USER.id,
@@ -327,7 +330,6 @@ describe("createDvpTrade", () => {
     try {
       await seedConnectionAuthority();
       const db = getDb(env);
-      await db.execute("UPDATE organizations SET tier = 'enterprise' WHERE id = ?", [TEST_ORG.id]);
       await db.execute("DELETE FROM dvp_settlement_wallets WHERE project_id = ?", [
         TEST_PROJECT_ID,
       ]);

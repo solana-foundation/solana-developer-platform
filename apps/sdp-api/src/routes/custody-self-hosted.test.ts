@@ -5,6 +5,7 @@ import { app } from "@/index";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { clerkAdminHeaders } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -82,18 +83,17 @@ function clearManagedProviderEnv(): void {
   writeManagedProviderEnv({});
 }
 
-async function seedAuth(tier: "individual" | "enterprise" = "individual"): Promise<void> {
+async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
 
-  await getDb(env).batch([
-    getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, tier, "active"),
-    getDb(env)
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-      .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-  ]);
+  await seedOrganization(getDb(env), {
+    id: TEST_ORG.id,
+    name: TEST_ORG.name,
+    slug: TEST_ORG.slug,
+    status: "active",
+    creator: TEST_USER,
+  });
   await seedDefaultProjects(getDb(env), {
     organizationId: TEST_ORG.id,
     createdBy: TEST_USER.id,
@@ -140,7 +140,7 @@ describe("Custody routes — self-hosted deployment mode", () => {
   });
 
   it("POST /v1/wallets/initialize with a non-configured provider returns 403", async () => {
-    await seedAuth("individual");
+    await seedAuth();
 
     const res = await app.request(
       "/v1/wallets/initialize",
@@ -161,8 +161,6 @@ describe("Custody routes — self-hosted deployment mode", () => {
 
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { message: string } };
-    // In self-hosted mode the message must NOT mention "enterprise tier"
-    expect(body.error.message).not.toContain("enterprise tier");
     expect(body.error.message.toLowerCase()).toMatch(/dfns|not configured|disabled/);
   });
 });
@@ -187,7 +185,7 @@ describe("Custody routes — managed-mode regression", () => {
   });
 
   it("requires manual activation for local custody in managed mode", async () => {
-    await seedAuth("individual");
+    await seedAuth();
 
     const res = await app.request(
       "/v1/wallets/initialize",

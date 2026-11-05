@@ -7,6 +7,7 @@ import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT, TEST_PROJECT_API_KEY } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
@@ -46,46 +47,21 @@ describe("TokenService", () => {
     db = getDb(env);
     tokenService = new TokenService(db);
 
-    await db
-      .prepare("DELETE FROM frozen_accounts")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM issued_tokens")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM project_members")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM api_keys WHERE project_id IS NOT NULL")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM projects")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM users")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM organizations")
-      .run()
-      .catch(() => {});
+    await db.prepare("DELETE FROM frozen_accounts").run();
+    await db.prepare("DELETE FROM issued_tokens").run();
+    await db.prepare("DELETE FROM project_members").run();
+    await db.prepare("DELETE FROM api_keys WHERE project_id IS NOT NULL").run();
+    await db.prepare("DELETE FROM projects").run();
+    await db.prepare("DELETE FROM organizations").run();
+    await db.prepare("DELETE FROM users").run();
 
-    await db
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
-
-    await db
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-      .bind(TEST_USER.id, TEST_USER.email)
-      .run();
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: TEST_USER,
+    });
 
     await seedDefaultProjects(db, {
       organizationId: TEST_ORG.id,

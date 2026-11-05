@@ -55,11 +55,10 @@ export interface Env extends ManagedRpcEnv {
   // it is unset or not a valid http(s) origin.
   PUBLIC_API_ORIGIN?: string;
 
-  // Deployment mode. "managed" (default) uses tier-based provider entitlements
-  // synced from Clerk. "self_hosted" treats every configured provider as
-  // entitled regardless of org tier, so the platform runs with whatever
-  // provider env vars are present. Per-org providerOverrides still apply as
-  // a disable-only mechanism.
+  // Deployment mode. "managed" (default) uses the provider entitlements synced
+  // from Clerk. "self_hosted" treats every configured provider as entitled, so
+  // the platform runs with whatever provider env vars are present. Per-org
+  // providerOverrides still apply as a disable-only mechanism.
   SDP_DEPLOYMENT_MODE?: "managed" | "self_hosted";
 
   // Release channel: which modules this deployment can run at all (`@sdp/types`

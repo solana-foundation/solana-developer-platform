@@ -12,6 +12,7 @@ import { seedClerkIdentity } from "@/test/helpers/clerk";
 import { seedTestCustodyRows, type TestCustodyConfigRow } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
@@ -47,21 +48,21 @@ function createApp() {
   return app;
 }
 
-async function seedOrganization() {
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, tier, status)
-         VALUES (?, 'Onboarding test', 'onboarding-test', 'enterprise', 'active')`
-      )
-      .bind(ORGANIZATION_ID),
-    getDb(env)
-      .prepare(
-        `INSERT INTO users (id, email, email_verified, name, status)
-         VALUES (?, 'onboarding@example.com', 1, 'Onboarding user', 'active')`
-      )
-      .bind(USER_ID),
-  ]);
+async function seedOnboardingOrganization() {
+  await getDb(env)
+    .prepare(
+      `INSERT INTO users (id, email, email_verified, name, status)
+       VALUES (?, 'onboarding@example.com', 1, 'Onboarding user', 'active')`
+    )
+    .bind(USER_ID)
+    .run();
+  await seedOrganization(getDb(env), {
+    id: ORGANIZATION_ID,
+    name: "Onboarding test",
+    slug: "onboarding-test",
+    status: "active",
+    creator: { id: USER_ID, email: "onboarding@example.com" },
+  });
   await seedClerkIdentity(getDb(env), {
     userId: USER_ID,
     email: "onboarding@example.com",
@@ -91,30 +92,6 @@ function custodyConfig(
     organizationId: ORGANIZATION_ID,
     configEncrypted: "encrypted",
   };
-}
-
-async function seedDefaultSandboxCustodyWallet() {
-  await seedTestCustodyRows(env, {
-    configs: [
-      custodyConfig({
-        id: "cfg_onboarding_test",
-        projectId: PROJECT_ID,
-        provider: "privy",
-        status: "active",
-      }),
-    ],
-    wallets: [
-      {
-        id: "cw_onboarding_test",
-        owner: { kind: "config", custodyConfigId: "cfg_onboarding_test" },
-        walletId: "wallet_onboarding_test",
-        publicKey: "11111111111111111111111111111111",
-        label: "Onboarding wallet",
-        purpose: null,
-        status: "active",
-      },
-    ],
-  });
 }
 
 async function seedPrivyConnection(params: {
@@ -163,56 +140,26 @@ async function getSetup() {
 describe("organization onboarding handlers", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
-    await seedOrganization();
+    await seedOnboardingOrganization();
   });
 
-  it("starts a newly created organization at custody", async () => {
-    expect(await getSetup()).toEqual({
-      status: "not_started",
-      currentStep: "custody",
-      custodyProviders: [],
-      completedAt: null,
-      version: 1,
-      canManage: true,
-    });
-  });
-
-  it("moves to in progress once the default sandbox custody config exists", async () => {
-    await seedDefaultSandboxCustodyWallet();
-
-    expect(await getSetup()).toEqual({
-      status: "in_progress",
-      currentStep: "custody",
-      custodyProviders: ["privy"],
-      completedAt: null,
-      version: 1,
-      canManage: true,
-    });
-  });
-
-  it("moves to in progress on an active BYOK connection alone", async () => {
+  it("lists the provider of an active BYOK connection alone", async () => {
     await seedPrivyConnection({
       connectionId: "cconn_onboarding_active",
       lastCheckStatus: "success",
     });
 
-    expect(await getSetup()).toEqual({
-      status: "in_progress",
-      currentStep: "custody",
-      custodyProviders: ["privy"],
-      completedAt: null,
-      version: 1,
-      canManage: true,
-    });
+    expect(await getSetup()).toEqual({ custodyProviders: ["privy"], canManage: true });
   });
 
   it("lists distinct active sandbox providers in catalog order", async () => {
-    await getDb(env)
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, tier, status)
-         VALUES ('org_onboarding_other', 'Onboarding other', 'onboarding-other', 'enterprise', 'active')`
-      )
-      .run();
+    await seedOrganization(getDb(env), {
+      id: "org_onboarding_other",
+      name: "Onboarding other",
+      slug: "onboarding-other",
+      status: "active",
+      creator: organizationCreator("org_onboarding_other"),
+    });
     await seedDefaultProjects(getDb(env), {
       organizationId: "org_onboarding_other",
       createdBy: USER_ID,
@@ -284,13 +231,6 @@ describe("organization onboarding handlers", () => {
       lastCheckStatus: "retry_unknown",
     });
 
-    expect(await getSetup()).toEqual({
-      status: "not_started",
-      currentStep: "custody",
-      custodyProviders: [],
-      completedAt: null,
-      version: 1,
-      canManage: true,
-    });
+    expect(await getSetup()).toEqual({ custodyProviders: [], canManage: true });
   });
 });

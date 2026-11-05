@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } fr
 import { getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { type SeededDefaultProjects, seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { loadProjectRpcClient, probeProjectRpcDeployment } from "./project-rpc";
@@ -130,14 +131,13 @@ describe("loadProjectRpcClient", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     const db = getDb(env);
-    await db
-      .prepare("INSERT INTO organizations (id, name, slug) VALUES (?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
-    await db
-      .prepare("INSERT INTO users (id, email) VALUES (?, ?)")
-      .bind(TEST_USER.id, TEST_USER.email)
-      .run();
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: TEST_USER,
+    });
     projects = await seedDefaultProjects(db, {
       organizationId: TEST_ORG.id,
       createdBy: TEST_USER.id,

@@ -34,11 +34,11 @@ afterEach(async () => {
 describe("0073_private_channel_principals legacy reconciliation", () => {
   it("resolves duplicate names and wallet owners before creating narrower indexes", async () => {
     await client.query(
-      "INSERT INTO organizations (id, name, slug) VALUES ('org_0073', 'Org 0073', 'org-0073')"
-    );
-    await client.query(
       `INSERT INTO users (id, email) VALUES
          ('usr_0073', 'owner-0073@example.test')`
+    );
+    await client.query(
+      "INSERT INTO organizations (id, name, slug, created_by_user_id) VALUES ('org_0073', 'Org 0073', 'org-0073', 'usr_0073')"
     );
     await client.query(
       `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)

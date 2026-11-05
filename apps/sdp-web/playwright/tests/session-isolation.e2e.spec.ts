@@ -27,6 +27,7 @@ let productionProject: string;
 let secondProject: string;
 let secondOrgId: string;
 let secondLocalOrg: string;
+let secondCreator: string;
 const contactIds = [`cp_${randomUUID()}`, `cp_${randomUUID()}`];
 
 async function expectContacts(page: Page, projectId: string, own: string, other: string) {
@@ -82,11 +83,16 @@ test.describe
         await db.query("BEGIN");
         secondLocalOrg = `org_session_${randomUUID()}`;
         secondProject = `prj_${randomUUID()}`;
+        secondCreator = `usr_session_${randomUUID()}`;
+        await db.query("INSERT INTO users (id, email) VALUES ($1, $2)", [
+          secondCreator,
+          `${secondCreator}@example.com`,
+        ]);
         await db.query(
-          `INSERT INTO organizations (id, name, slug, tier, status, settings, onboarding_completed_at, onboarding_version)
-         SELECT $1, $2, $3, tier, status, settings, onboarding_completed_at, onboarding_version
+          `INSERT INTO organizations (id, name, slug, status, settings, created_by_user_id)
+         SELECT $1, $2, $3, status, settings, $5
          FROM organizations WHERE id = (SELECT organization_id FROM projects WHERE id = $4)`,
-          [secondLocalOrg, secondName, `session-${randomUUID()}`, primaryProject]
+          [secondLocalOrg, secondName, `session-${randomUUID()}`, primaryProject, secondCreator]
         );
         await db.query(
           `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id)
@@ -140,6 +146,7 @@ test.describe
             await db.query("DELETE FROM counterparties WHERE id = ANY($1::text[])", [contactIds]);
             // The fixture's organization owns its projects, memberships and auth mapping.
             await db.query("DELETE FROM organizations WHERE id = $1", [secondLocalOrg]);
+            await db.query("DELETE FROM users WHERE id = $1", [secondCreator]);
             await db.query("COMMIT");
           } catch (error) {
             await db.query("ROLLBACK");

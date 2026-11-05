@@ -57,6 +57,11 @@ import {
   TEST_PROJECT_CACHED_KEY,
 } from "@/test/fixtures/tokens";
 import { ensureTestClerkIssuer, signTestClerkJwt } from "@/test/helpers/clerk";
+import {
+  organizationCreator,
+  organizationStatements,
+  seedOrganization,
+} from "@/test/helpers/organizations";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
@@ -90,7 +95,10 @@ export const apiTestSupport = {
   KoraClient,
   resolveEarnExecutionClient,
   resolveKoraEndpoint,
+  organizationCreator,
+  organizationStatements,
   runAsMoneyPrincipal,
+  seedOrganization,
   seedTestDatabase,
   signTestClerkJwt,
   submitExternalWalletDeposit,

@@ -157,7 +157,6 @@ function demoProviderAvailability(
   rampProviders: readonly RampProviderId[]
 ): OrganizationProviderAvailabilityResponse {
   return {
-    tier: "enterprise",
     providers: {
       custody: allOn(CUSTODY_PROVIDERS),
       compliance: allOn(COMPLIANCE_PROVIDERS),

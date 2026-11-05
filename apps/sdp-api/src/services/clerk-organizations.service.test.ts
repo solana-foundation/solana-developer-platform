@@ -14,13 +14,15 @@ describe("ClerkOrganizationsService.updateOrganizationPrivateMetadata", () => {
       .mockResolvedValueOnce(Response.json({ id: "org_1", private_metadata: {} }));
     const service = new ClerkOrganizationsService({ ...env, CLERK_SECRET_KEY: "sk_test_1" });
 
-    await service.updateOrganizationPrivateMetadata("org_1", { sdp: { tier: "individual" } });
+    await service.updateOrganizationPrivateMetadata("org_1", {
+      sdp: { enableProductionProject: true },
+    });
 
     const [url, init] = fetchSpy.mock.calls[0] ?? [];
     expect(url).toBe("https://api.clerk.com/v1/organizations/org_1/metadata");
     expect(init?.method).toBe("PUT");
     expect(JSON.parse(String(init?.body))).toEqual({
-      private_metadata: { sdp: { tier: "individual" } },
+      private_metadata: { sdp: { enableProductionProject: true } },
     });
   });
 });

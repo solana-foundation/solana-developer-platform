@@ -7,7 +7,7 @@ import type {
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { z } from "zod";
 import { adminAlertEmailsCron } from "@/cron/admin-alert-emails";
-import { getDb } from "@/db/client";
+import { getDb, type PreparedStatement } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import type { PaymentTransferDirection } from "@/db/repositories/payments.repository";
 import { app } from "@/index";
@@ -16,6 +16,7 @@ import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fi
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, organizationStatements } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -73,28 +74,35 @@ function audit(entry: Omit<SystemAuditLogEntry, "organizationId">) {
   );
 }
 
-async function seedOrganization(): Promise<void> {
+async function seedAdminAlertsOrganization(): Promise<void> {
   const db = getDb(env);
-  await db
-    .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-    .bind(ORGANIZATION_ID, "Acme Pay", TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
-    .run();
+  const statements: PreparedStatement[] = [];
   for (const [user, role, name] of [
     [{ id: TEST_USER.id, email: TEST_USER.email }, "admin", "Ada Admin"],
     [OTHER_ADMIN, "admin", null],
     [MEMBER, "member", "Max Member"],
   ] as const) {
-    await db
-      .prepare("INSERT INTO users (id, email, name, status) VALUES (?, ?, ?, 'active')")
-      .bind(user.id, user.email, name)
-      .run();
-    await db
-      .prepare(
-        "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, ?, 'active')"
-      )
-      .bind(`mem_${user.id}`, ORGANIZATION_ID, user.id, role)
-      .run();
+    statements.push(
+      db
+        .prepare("INSERT INTO users (id, email, name, status) VALUES (?, ?, ?, 'active')")
+        .bind(user.id, user.email, name),
+      db
+        .prepare(
+          "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, ?, 'active')"
+        )
+        .bind(`mem_${user.id}`, ORGANIZATION_ID, user.id, role)
+    );
   }
+  await db.batch([
+    ...organizationStatements(db, {
+      id: ORGANIZATION_ID,
+      name: "Acme Pay",
+      slug: TEST_ORG.slug,
+      status: TEST_ORG.status,
+      creator: organizationCreator(ORGANIZATION_ID),
+    }),
+    ...statements,
+  ]);
   await seedDefaultProjects(db, {
     organizationId: ORGANIZATION_ID,
     createdBy: TEST_USER.id,
@@ -294,7 +302,7 @@ describe("admin alert emails (HOO-2299)", () => {
 
   beforeEach(async () => {
     await seedTestDatabase(env);
-    await seedOrganization();
+    await seedAdminAlertsOrganization();
     await resetCursors(windowStart);
     env.ITERABLE_API_URL = "https://api.iterable.com";
     env.ITERABLE_API_KEY = "0123456789abcdef0123456789abcdef";

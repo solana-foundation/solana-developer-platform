@@ -150,7 +150,6 @@ async function bootstrapWalletRouteFixture(browser: Browser, input: { labelPrefi
       provider: "privy",
       walletCount: 1,
       walletLabel,
-      tier: "enterprise",
     });
     const wallet = fixtures.wallets[0];
     if (!wallet) {
@@ -172,7 +171,6 @@ test.describe
           provider: "privy",
           walletCount: 1,
           walletLabel,
-          tier: "enterprise",
         })
       );
 
@@ -466,7 +464,6 @@ test.describe
             provider: "privy",
             walletCount: 1,
             walletLabel: `Wallet Enter Prerequisite ${Date.now().toString(36).toUpperCase()}`,
-            tier: "enterprise",
           });
           return {
             bearerToken: session.bearerToken,
@@ -550,7 +547,6 @@ test.describe
             bearerToken: session.getBearerToken,
             provider: "privy",
             walletCount: 1,
-            tier: "enterprise",
           });
           const api = createLocalApiClient(
             getBootstrapApiBaseUrl(),
@@ -641,7 +637,6 @@ test.describe
           bearerToken: session.getBearerToken,
           provider: "privy",
           walletCount: 1,
-          tier: "enterprise",
         })
       );
 

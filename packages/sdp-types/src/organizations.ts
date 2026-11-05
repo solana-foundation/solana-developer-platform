@@ -6,9 +6,6 @@ import type { CustodyProvider } from "./custody";
 import type { OrganizationProviderOverrides } from "./provider-access";
 import type { OrganizationRole } from "./roles";
 
-export const ORGANIZATION_TIERS = ["individual", "enterprise"] as const;
-export type OrganizationTier = (typeof ORGANIZATION_TIERS)[number];
-
 /**
  * `provisioning` is an organization SDP is still creating (ADR 0012): it holds
  * its creator's one-organization slot but may not authenticate until active.
@@ -103,7 +100,6 @@ export interface Organization {
   id: string; // org_xxxxxxxxxxxx
   name: string;
   slug: string;
-  tier: OrganizationTier;
   status: OrganizationStatus;
   settings: OrganizationSettings | null;
   createdAt: string;
@@ -111,13 +107,7 @@ export interface Organization {
 }
 
 export interface OrganizationSettings {
-  defaultEnvironment?: "sandbox" | "production";
   allowedIpAddresses?: string[];
-  /**
-   * Pre-enforcement allowlist parked by migration 0055 — never applied, any
-   * shape (predates validation). Re-apply by sending it as `allowedIpAddresses`.
-   */
-  legacyAllowedIpAddresses?: unknown;
   providerOverrides?: OrganizationProviderOverrides;
   /**
    * Set from Clerk org `private_metadata.sdp.enableProductionProject` by the
@@ -131,35 +121,6 @@ export interface OrganizationSettings {
    * configuration changes (HOO-2299); unset or `true` sends them. Turning it off is itself emailed.
    */
   alertEmails?: boolean;
-  customRateLimits?: {
-    requestsPerMinute?: number;
-    requestsPerDay?: number;
-  };
-}
-
-const LEGACY_ORGANIZATION_TIER_ALIASES = {
-  standard: "individual",
-  starter: "individual",
-  pro: "enterprise",
-  growth: "enterprise",
-} as const;
-
-export function isOrganizationTier(value: string | null | undefined): value is OrganizationTier {
-  return ORGANIZATION_TIERS.includes(value as OrganizationTier);
-}
-
-export function normalizeOrganizationTier(value: string | null | undefined): OrganizationTier {
-  if (!value) {
-    return "enterprise";
-  }
-
-  if (isOrganizationTier(value)) {
-    return value;
-  }
-
-  const legacyTier =
-    LEGACY_ORGANIZATION_TIER_ALIASES[value as keyof typeof LEGACY_ORGANIZATION_TIER_ALIASES];
-  return legacyTier ?? "individual";
 }
 
 /**
@@ -168,11 +129,7 @@ export function normalizeOrganizationTier(value: string | null | undefined): Org
  * active BYOK connection in the default sandbox project.
  */
 export interface OrganizationOnboardingSetup {
-  status: "not_started" | "in_progress" | "complete";
-  currentStep: "custody" | "complete";
   custodyProviders: CustodyProvider[];
-  completedAt: string | null;
-  version: number;
   canManage: boolean;
 }
 

@@ -8,6 +8,7 @@ import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations"
 import { stubClerkBackend } from "@/test/helpers/clerk-backend";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
@@ -15,16 +16,12 @@ import { clearKVStores } from "@/test/mocks/kv";
 let clerkToken: string;
 
 async function seedOrganizationMember(role: "admin" | "member"): Promise<void> {
-  await getDb(env).batch([
-    getDb(env)
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-      .bind(TEST_USER.id, TEST_USER.email, 0, TEST_USER.status),
-    getDb(env)
-      .prepare(
-        "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, ?, ?)"
-      )
-      .bind(TEST_MEMBER.id, TEST_ORG.id, TEST_USER.id, role, "active"),
-  ]);
+  await getDb(env)
+    .prepare(
+      "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, ?, ?)"
+    )
+    .bind(TEST_MEMBER.id, TEST_ORG.id, TEST_USER.id, role, "active")
+    .run();
   clerkToken = await signSeededClerkMember(env, getDb(env), TEST_USER.id, TEST_ORG.id);
 }
 
@@ -47,10 +44,13 @@ describe("Organizations routes", () => {
   });
   describe("GET /v1/organizations/:orgId", () => {
     beforeEach(async () => {
-      await getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
-        .run();
+      await seedOrganization(getDb(env), {
+        id: TEST_ORG.id,
+        name: TEST_ORG.name,
+        slug: TEST_ORG.slug,
+        status: TEST_ORG.status,
+        creator: organizationCreator(TEST_ORG.id),
+      });
       await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
     });
     it("returns organization details", async () => {
@@ -75,7 +75,7 @@ describe("Organizations routes", () => {
       await getDb(env)
         .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
         .bind(
-          JSON.stringify({ defaultEnvironment: "production", webhookSecret: "whsec_synthetic" }),
+          JSON.stringify({ enableProductionProject: true, webhookSecret: "whsec_synthetic" }),
           TEST_ORG.id
         )
         .run();
@@ -90,60 +90,13 @@ describe("Organizations routes", () => {
           id: TEST_ORG.id,
           name: TEST_ORG.name,
           slug: TEST_ORG.slug,
-          tier: TEST_ORG.tier,
           status: TEST_ORG.status,
-          settings: { defaultEnvironment: "production" },
+          settings: { enableProductionProject: true },
           createdAt: expect.any(String),
           updatedAt: expect.any(String),
         },
         meta: { requestId: expect.any(String), timestamp: expect.any(String) },
       });
-    });
-    it("returns internal error when organization tier is invalid in storage", async () => {
-      await getDb(env)
-        .prepare("UPDATE organizations SET tier = ? WHERE id = ?")
-        .bind("totally-invalid-tier", TEST_ORG.id)
-        .run();
-      const res = await app.request(
-        `/v1/organizations/${TEST_ORG.id}`,
-        {
-          headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-        },
-        env
-      );
-      expect(res.status).toBe(500);
-      const body = (await res.json()) as {
-        error: {
-          code: string;
-        };
-      };
-      expect(body.error.code).toBe("INTERNAL_ERROR");
-    });
-    it("refuses a key whose organization's stored status is not one it knows", async () => {
-      await getDb(env)
-        .prepare("UPDATE organizations SET status = ? WHERE id = ?")
-        .bind("unknown", TEST_ORG.id)
-        .run();
-      const res = await app.request(
-        `/v1/organizations/${TEST_ORG.id}`,
-        {
-          headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-        },
-        env
-      );
-      // Authentication admits only an `active` organization, so an unknown status
-      // fails closed there rather than reaching the route.
-      expect(res.status).toBe(401);
-      const body = (await res.json()) as {
-        error: {
-          code: string;
-        };
-      };
-      expect(body.error.code).toBe("REVOKED_API_KEY");
     });
     it("rejects unauthenticated requests", async () => {
       const res = await app.request(`/v1/organizations/${TEST_ORG.id}`, {}, env);
@@ -185,10 +138,13 @@ describe("Organizations routes", () => {
   });
   describe("PATCH /v1/organizations/:orgId", () => {
     beforeEach(async () => {
-      await getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
-        .run();
+      await seedOrganization(getDb(env), {
+        id: TEST_ORG.id,
+        name: TEST_ORG.name,
+        slug: TEST_ORG.slug,
+        status: TEST_ORG.status,
+        creator: TEST_USER,
+      });
       await seedOrganizationMember("admin");
     });
     afterEach(() => {
@@ -219,7 +175,6 @@ describe("Organizations routes", () => {
           id: TEST_ORG.id,
           name: "Updated Name",
           slug: TEST_ORG.slug,
-          tier: TEST_ORG.tier,
           status: TEST_ORG.status,
           settings: null,
           createdAt: expect.any(String),
@@ -234,25 +189,6 @@ describe("Organizations routes", () => {
           body: { name: "Updated Name" },
         },
       ]);
-    });
-    it("updates organization settings", async () => {
-      const res = await app.request(
-        `/v1/organizations/${TEST_ORG.id}`,
-        {
-          method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${clerkToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            settings: {
-              defaultEnvironment: "production",
-            },
-          }),
-        },
-        env
-      );
-      expect(res.status).toBe(200);
     });
     it("rejects empty update", async () => {
       const res = await app.request(
