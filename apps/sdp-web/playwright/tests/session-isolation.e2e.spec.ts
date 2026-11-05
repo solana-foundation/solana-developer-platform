@@ -241,11 +241,11 @@ test.describe
     test("project switching keeps Sandbox contacts out of Production", async ({ page }) => {
       await expectContacts(page, primaryProject, contactA, contactB);
       await page.getByRole("button", { name: primaryName, exact: true }).click();
-      await page.getByRole("menuitem", { name: "Default Production Project", exact: true }).click();
+      await page.getByRole("menuitem", { name: /^Production/ }).click();
       await expect(page).toHaveURL(new RegExp(`/dashboard/${productionProject}/payments`));
       await expect(page.getByRole("row", { name: new RegExp(contactA) })).toHaveCount(0);
       await page.getByRole("button", { name: primaryName, exact: true }).click();
-      await page.getByRole("menuitem", { name: "Default Sandbox Project", exact: true }).click();
+      await page.getByRole("menuitem", { name: /^Sandbox/ }).click();
       await expect(page).toHaveURL(new RegExp(`/dashboard/${primaryProject}/payments`));
       await expectContacts(page, primaryProject, contactA, contactB);
     });
