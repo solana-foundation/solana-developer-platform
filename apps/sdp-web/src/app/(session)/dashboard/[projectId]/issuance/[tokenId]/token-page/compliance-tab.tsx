@@ -18,6 +18,7 @@ import { formatTokenDay } from "@/app/(session)/dashboard/[projectId]/issuance/i
 import { PAYMENTS_TABLE_CELL } from "@/app/(session)/dashboard/[projectId]/payments/payments-table";
 import { RecordBlock, RecordStack } from "@/components/refresh-record";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import type { TokenTabProps } from "./token-page.shared";
 import { TokenTable } from "./token-table";
 
@@ -225,6 +226,7 @@ function ComplianceEntryRow({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   return (
     <TableRow>
       <TableCell
@@ -238,7 +240,7 @@ function ComplianceEntryRow({
       <TableCell className={`${PAYMENTS_TABLE_CELL} text-primary`}>
         {entry.status === "pending"
           ? t("DashboardIssuance.newDesign.compliance.pending")
-          : formatTokenDay(entry.createdAt, locale)}
+          : formatTokenDay(entry.createdAt, locale, timeZone)}
       </TableCell>
       <TableCell className="text-right">
         {canManageTokenAdmin ? (

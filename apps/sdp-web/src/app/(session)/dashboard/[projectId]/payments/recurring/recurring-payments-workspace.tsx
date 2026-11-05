@@ -34,6 +34,7 @@ import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspac
 import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
 import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   RECURRING_LIST_DEFAULT_PAGE_SIZE,
@@ -335,6 +336,7 @@ function RecurringPaymentRow({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const router = useRouter();
   const projectHref = useProjectHref();
   const href = projectHref(scheduleHref(recurringPayment.id));
@@ -373,7 +375,7 @@ function RecurringPaymentRow({
         )}
       >
         {recurringPayment.nextCollectionDueAt
-          ? formatDate(recurringPayment.nextCollectionDueAt, locale)
+          ? formatDate(recurringPayment.nextCollectionDueAt, locale, timeZone)
           : t("DashboardPayments.recurring.notScheduled")}
       </TableCell>
       {/* A schedule has no stop date yet: it runs until it is paused or canceled. */}
