@@ -13,7 +13,6 @@ import type { z } from "zod";
 import { readApiErrorMessage } from "@/lib/api-error";
 import { dashboardReadRequest } from "@/lib/dashboard-fetch";
 import {
-  type DashboardJsonValue,
   type DashboardKeyScope,
   type DashboardPostReadKey,
   type DashboardRequestKey,
@@ -84,19 +83,17 @@ export async function readDashboardRequest<Schema extends z.ZodType>(
 }
 
 /**
- * A POST read (an estimate or quote that changes nothing). The key's path is the URL; `jsonBody`
- * is the body, and the key's params must determine it (pass `key[3]` itself, or build both from
- * one value), so two keys share an entry only when they would send the same request.
+ * A POST read (an estimate or quote that changes nothing): the key's path is the URL and its
+ * serialized body is sent as is, so two keys share an entry only when they send the same request.
  */
 export async function readDashboardPostRequest<Schema extends z.ZodType>(
   key: DashboardPostReadKey,
-  schema: Schema,
-  jsonBody: DashboardJsonValue
+  schema: Schema
 ): Promise<z.infer<Schema>> {
   const response = await dashboardReadRequest(
     key[2],
     { projectId: key[0], demo: key[1] === "demo" },
-    jsonBody
+    key[3].body
   );
   return parseDashboardRead(response, schema);
 }
@@ -179,12 +176,13 @@ export function useInvalidateDashboardReads() {
             return offScreen;
           },
           undefined,
-          { revalidate: false }
+          // With no hook mounted this fetches nothing, but it drops the key's in-flight request,
+          // so a remount starts its own instead of joining one whose answer predates the write.
+          { revalidate: true }
         ),
       ]);
-      // The clear above records a mutation, so a request already in flight for an off-screen key
-      // cannot land afterwards. Deleting the entry as well makes the next mount start loading:
-      // the cleared entry would otherwise keep its last `isLoading: false` for one render.
+      // Deleting the cleared entry makes the next mount start loading: it would otherwise keep
+      // its last `isLoading: false` for one render.
       for (const serializedKey of offScreenKeys) {
         cache.delete(serializedKey);
       }

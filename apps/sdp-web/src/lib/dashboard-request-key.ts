@@ -44,15 +44,23 @@ export function dashboardRequestKey(
     : [scope.projectId, scope.mode, path, params];
 }
 
-/** A POST read's key: its params are the JSON body, so they are required. */
-export type DashboardPostReadKey = Extract<DashboardRequestKey, { length: 4 }>;
+/**
+ * A POST read's key: its params hold the serialized JSON body, which is exactly what is sent, so
+ * the key alone decides the request.
+ */
+export type DashboardPostReadKey = readonly [
+  projectId: string,
+  mode: DashboardMode,
+  path: `/api/${string}`,
+  params: { readonly body: string },
+];
 
 export function dashboardPostReadKey(
   scope: DashboardKeyScope,
   path: `/api/${string}`,
-  params: DashboardRequestParams
+  body: { readonly [field: string]: DashboardJsonValue }
 ): DashboardPostReadKey {
-  return [scope.projectId, scope.mode, path, params];
+  return [scope.projectId, scope.mode, path, { body: JSON.stringify(body) }];
 }
 
 const requestKeyHeadSchema = z.tuple([
