@@ -45,21 +45,43 @@ export async function fetchCounterparties(
   }
 }
 
+/**
+ * One counterparty read that tells a missing record from a failed read: the API answers 404 for
+ * an archived counterparty as for one that never existed, so a record something still points at
+ * (a recurring payment's recipient) is `missing` because it was archived (HOO-2634).
+ */
+export type CounterpartyLookup =
+  | { kind: "found"; counterparty: Counterparty }
+  | { kind: "missing" }
+  | { kind: "failed" };
+
+export async function lookupCounterparty(
+  request: SdpApiClient["request"],
+  counterpartyId: string
+): Promise<CounterpartyLookup> {
+  try {
+    const response = await request(`/v1/counterparties/${encodeURIComponent(counterpartyId)}`);
+    if (response.status === 404) {
+      return { kind: "missing" };
+    }
+    if (!response.ok) {
+      return { kind: "failed" };
+    }
+
+    const json = (await response.json()) as { data?: CounterpartyResponse };
+    const counterparty = json.data?.counterparty;
+    return counterparty ? { kind: "found", counterparty } : { kind: "failed" };
+  } catch {
+    return { kind: "failed" };
+  }
+}
+
 export async function fetchCounterparty(
   request: SdpApiClient["request"],
   counterpartyId: string
 ): Promise<Counterparty | null> {
-  try {
-    const response = await request(`/v1/counterparties/${encodeURIComponent(counterpartyId)}`);
-    if (!response.ok) {
-      return null;
-    }
-
-    const json = (await response.json()) as { data?: CounterpartyResponse };
-    return json.data?.counterparty ?? null;
-  } catch {
-    return null;
-  }
+  const lookup = await lookupCounterparty(request, counterpartyId);
+  return lookup.kind === "found" ? lookup.counterparty : null;
 }
 
 /** The most contacts the Contact list loads for local search and filtering. */
