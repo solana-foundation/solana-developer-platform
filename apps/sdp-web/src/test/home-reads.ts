@@ -19,6 +19,7 @@ export interface IssuedTokenListing {
   name: string;
   mintAddress: string;
   symbol: string;
+  decimals: number;
 }
 
 export function walletAggregateResponse(

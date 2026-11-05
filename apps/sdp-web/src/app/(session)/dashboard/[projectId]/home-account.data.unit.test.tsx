@@ -47,6 +47,7 @@ const ISSUED_TOKENS = [
     name: "Acme",
     mintAddress: "mint_test_acme",
     symbol: "ACME",
+    decimals: 6,
     imageUrl: null,
   },
 ];

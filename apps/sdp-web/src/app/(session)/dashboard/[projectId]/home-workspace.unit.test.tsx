@@ -96,7 +96,7 @@ const BALANCES: CustodyWalletTokenBalance[] = [
   },
 ];
 const ISSUED: IssuedTokenListing[] = [
-  { id: "tok_test_acme", name: "Acme", mintAddress: ISSUED_MINT, symbol: "ACME" },
+  { id: "tok_test_acme", name: "Acme", mintAddress: ISSUED_MINT, symbol: "ACME", decimals: 0 },
 ];
 
 function renderWorkspace(custodyEnabled: boolean, issuanceEnabled: boolean) {
