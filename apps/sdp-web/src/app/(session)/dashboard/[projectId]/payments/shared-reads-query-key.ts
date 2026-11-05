@@ -13,6 +13,10 @@ export const sharedReadQueryKeys = {
     dashboardRequestKey(scope, "/api/dashboard/counterparty", options),
   organizationProviderAccess: (scope: DashboardKeyScope) =>
     dashboardRequestKey(scope, "/api/dashboard/organizations/current/provider-access"),
+  privateChannelInstance: (scope: DashboardKeyScope) =>
+    dashboardRequestKey(scope, "/api/dashboard/private-channels/instance"),
+  apiKey: (scope: DashboardKeyScope, options: { keyId: string }) =>
+    dashboardRequestKey(scope, `/api/dashboard/api-keys/${encodeURIComponent(options.keyId)}`),
   issuedTokens: (scope: DashboardKeyScope, options: { pageSize: number }) =>
     dashboardRequestKey(scope, "/api/dashboard/issuance/tokens", options),
 };
