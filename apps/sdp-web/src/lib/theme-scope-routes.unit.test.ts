@@ -17,6 +17,7 @@ describe("themeScopeForPath", () => {
     "/dashboard/wallets",
     "/dashboard/wallets/setup",
     "/dashboard/wallets/fb_wallet",
+    "/dashboard/wallets/connections",
     "/dashboard/issuance",
     "/dashboard/issuance/create",
     "/dashboard/issuance/tok_1",
@@ -24,7 +25,6 @@ describe("themeScopeForPath", () => {
     "/dashboard/markets/treasury-solutions",
     "/dashboard/markets/embedded-yield",
     "/dashboard/markets/embedded-yield/configure",
-    "/dashboard/markets/embedded-yield/integrate",
     "/dashboard/account",
     "/dashboard/settings",
   ])("puts %s in the refresh scope", (pathname) => {
@@ -33,8 +33,6 @@ describe("themeScopeForPath", () => {
 
   it.each([
     "/dashboard/tokens",
-    "/dashboard/wallets/connections",
-    "/dashboard/wallets/switch",
     "/dashboard/wallets/fb_wallet/policy",
     "/dashboard/wallets/fb_wallet/policy/audit",
     "/dashboard/wallets/setup/extra",

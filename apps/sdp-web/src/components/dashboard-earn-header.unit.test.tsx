@@ -46,11 +46,8 @@ describe("Markets dashboard headers", () => {
     expect(config.routeTabs).toBeUndefined();
   });
 
-  it.each([
-    "/dashboard/markets/embedded-yield/configure",
-    "/dashboard/markets/embedded-yield/integrate",
-  ])("sets the way back to Embedded Yield over the integration's title at %s", (pathname) => {
-    const config = getDashboardPageConfig(pathname, t);
+  it("sets the way back to Embedded Yield over the integration's title", () => {
+    const config = getDashboardPageConfig("/dashboard/markets/embedded-yield/configure", t);
 
     expect(config).toMatchObject({
       title: "DashboardMarkets.earnProgram.configureShort",
@@ -133,7 +130,6 @@ describe("dashboard route headers", () => {
     ["/dashboard/api-keys/key_1/edit", "Shared.dashboardShell.editApiKey"],
     ["/dashboard/wallets", "Shared.dashboardShell.wallets"],
     ["/dashboard/wallets/setup", "Shared.dashboardShell.createWallet"],
-    ["/dashboard/wallets/connections", "Shared.dashboardShell.connections"],
     ["/dashboard/wallets/wallet_1", "Shared.dashboardShell.wallet"],
     ["/dashboard/issuance", "Shared.dashboardShell.issuance"],
     ["/dashboard/issuance/create", "DashboardIssuance.newDesign.draft.pageTitle"],

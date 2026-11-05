@@ -83,6 +83,7 @@ describe("dashboard workspace tab URL state", () => {
   it.each([
     ["/dashboard/payments", "members", false],
     ["/dashboard/payments", "security", false],
+    ["/dashboard/payments", "playground", true],
   ])("from %s, Settings clears the %s tab: %s", (previousPathname, tab, cleared) => {
     expect(
       shouldClearDashboardTabAfterPathnameChange({

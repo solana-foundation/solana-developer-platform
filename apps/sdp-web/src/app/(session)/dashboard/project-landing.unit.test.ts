@@ -71,10 +71,6 @@ async function expectRedirect(render: Promise<unknown>, url: string): Promise<vo
   expect(nextNavigationMock.redirect.mock.calls).toEqual([[url]]);
 }
 
-function renderLanding(searchParams: { return_to?: string }) {
-  return DashboardLandingPage({ searchParams: Promise.resolve(searchParams) });
-}
-
 function renderProjectPage(projectId: string, pathname: string) {
   setPageRequest(pathname);
   return ProjectLayout({
@@ -95,52 +91,23 @@ describe("bare dashboard landing", () => {
   it("lands on the last-used project while the organization lists it", async () => {
     setLastUsedProjectCookie(PRODUCTION_PROJECT.id);
 
-    await expectRedirect(renderLanding({}), `/dashboard/${PRODUCTION_PROJECT.id}`);
+    await expectRedirect(DashboardLandingPage(), `/dashboard/${PRODUCTION_PROJECT.id}`);
   });
 
   it("lands on the sandbox when the last-used project is no longer listed", async () => {
     setLastUsedProjectCookie(OTHER_ORGANIZATION_PROJECT.id);
 
-    await expectRedirect(renderLanding({}), `/dashboard/${SANDBOX_PROJECT.id}`);
+    await expectRedirect(DashboardLandingPage(), `/dashboard/${SANDBOX_PROJECT.id}`);
   });
 
   it("lands on the sandbox without a last-used project", async () => {
-    await expectRedirect(renderLanding({}), `/dashboard/${SANDBOX_PROJECT.id}`);
+    await expectRedirect(DashboardLandingPage(), `/dashboard/${SANDBOX_PROJECT.id}`);
   });
 
-  it("returns to the requested page and query inside the last-used project", async () => {
-    setLastUsedProjectCookie(PRODUCTION_PROJECT.id);
-
-    await expectRedirect(
-      renderLanding({ return_to: "/dashboard/payments/transactions?tab=x" }),
-      `/dashboard/${PRODUCTION_PROJECT.id}/payments/transactions?tab=x`
-    );
-  });
-
-  it("replaces a project named in the requested page with the landing project", async () => {
-    setLastUsedProjectCookie(PRODUCTION_PROJECT.id);
-
-    await expectRedirect(
-      renderLanding({ return_to: `/dashboard/${OTHER_ORGANIZATION_PROJECT.id}/api-keys?tab=x` }),
-      `/dashboard/${PRODUCTION_PROJECT.id}/api-keys?tab=x`
-    );
-  });
-
-  it.each([
-    ["//evil.com", `/dashboard/${SANDBOX_PROJECT.id}`],
-    ["https://evil.com/dashboard", `/dashboard/${SANDBOX_PROJECT.id}`],
-    ["/dashboard//evil.com", `/dashboard/${SANDBOX_PROJECT.id}//evil.com`],
-  ])("keeps a crafted return_to %s inside the dashboard", async (returnTo, url) => {
-    await expectRedirect(renderLanding({ return_to: returnTo }), url);
-  });
-
-  it("waits on the workspace loading page with the requested page while no project is provisioned", async () => {
+  it("waits on the workspace loading page while no project is provisioned", async () => {
     sdpApi.listSdpProjects.mockResolvedValue([]);
 
-    await expectRedirect(
-      renderLanding({ return_to: "/dashboard/payments?tab=x" }),
-      `/workspace-loading?return_to=${encodeURIComponent("/dashboard/payments?tab=x")}`
-    );
+    await expectRedirect(DashboardLandingPage(), "/workspace-loading");
   });
 });
 

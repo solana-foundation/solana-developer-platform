@@ -30,7 +30,6 @@ describe("dashboard loading route", () => {
     ["/dashboard/markets/treasury-solutions", "treasury-solutions"],
     ["/dashboard/markets/embedded-yield", "embedded-yield-portfolio"],
     ["/dashboard/markets/embedded-yield/configure", "embedded-yield-configure"],
-    ["/dashboard/markets/embedded-yield/integrate", "embedded-yield-integrate"],
     ["/dashboard/tokens", "token-holdings"],
     ["/dashboard/api-keys", "api-keys-list"],
     ["/dashboard/api-keys/new", "api-key-new"],
@@ -89,13 +88,12 @@ describe("integrations route", () => {
 });
 
 describe("dashboard navigation active state", () => {
-  it.each([
-    "/dashboard/markets/treasury-solutions",
-    "/dashboard/markets/embedded-yield",
-    "/dashboard/markets/embedded-yield/integrate",
-  ])("keeps Markets active at %s", (pathname) => {
-    expect(isDashboardNavItemActive(pathname, "/dashboard/markets")).toBe(true);
-  });
+  it.each(["/dashboard/markets/treasury-solutions", "/dashboard/markets/embedded-yield"])(
+    "keeps Markets active at %s",
+    (pathname) => {
+      expect(isDashboardNavItemActive(pathname, "/dashboard/markets")).toBe(true);
+    }
+  );
 
   it("keeps each Markets child active only on its own route", () => {
     expect(

@@ -242,7 +242,7 @@ describe("proxy request project", () => {
   });
 
   it("drops a browser-sent project on a page outside any project", async () => {
-    for (const path of ["/dashboard", "/dashboard//evil.com", "/settings"]) {
+    for (const path of ["/dashboard", "/dashboard/payments", "/dashboard//evil.com", "/settings"]) {
       const response = await runProxy(
         dashboardRequest(path, { method: "GET", headers: { "x-project-id": SANDBOX_PROJECT.id } })
       );
