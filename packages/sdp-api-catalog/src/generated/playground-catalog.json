@@ -8860,7 +8860,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -9082,7 +9082,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -9149,7 +9149,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -9248,7 +9248,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -9346,7 +9346,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -9444,7 +9444,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -9561,7 +9561,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -9747,7 +9747,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -9969,7 +9969,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -10036,7 +10036,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -10135,7 +10135,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -10233,7 +10233,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -10331,7 +10331,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -10448,7 +10448,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
