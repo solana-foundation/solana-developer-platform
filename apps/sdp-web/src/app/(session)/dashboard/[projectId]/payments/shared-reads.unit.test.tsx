@@ -1,15 +1,17 @@
 // @vitest-environment jsdom
 
+import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ISSUANCE_MAX_PAGE_SIZE } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-list-query";
+import { DashboardReadError } from "@/lib/dashboard-swr";
 import { PaymentsDemoProvider } from "@/lib/payments-demo/payments-demo-context";
 import { sentDashboardReads, stubDashboardFetch } from "@/test/dashboard-fetch";
 import { resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { DashboardReadsProvider } from "@/test/dashboard-reads";
 import { SANDBOX_PROJECT } from "@/test/projects";
-import { useIssuedTokens, useWalletSummaries } from "./shared-reads";
+import { useIssuedTokens, useOrganizationProviderAccess, useWalletSummaries } from "./shared-reads";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
@@ -152,6 +154,53 @@ describe("useIssuedTokens", () => {
     await act(() => Promise.resolve());
 
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.current.data).toBeUndefined();
+  });
+});
+
+describe("useOrganizationProviderAccess", () => {
+  const [EARN_PROVIDER] = EARN_PROVIDERS;
+  const ACCESS = { entitled: true, configured: true, enabled: false };
+
+  it("reads under the key's Project, keeping every ramp and only the Earn providers it knows", async () => {
+    const fetchMock = stubDashboardFetch(() =>
+      Response.json({
+        data: {
+          providers: {
+            ramps: { moonpay: ACCESS, ramp_test_new: ACCESS },
+            earn: { [EARN_PROVIDER]: ACCESS, earn_test_new: ACCESS },
+          },
+        },
+      })
+    );
+
+    const { result } = renderHook(() => useOrganizationProviderAccess(), {
+      wrapper: DashboardReadsProvider,
+    });
+
+    await waitFor(() =>
+      expect(result.current.data).toEqual({
+        ramps: { moonpay: ACCESS, ramp_test_new: ACCESS },
+        earn: { [EARN_PROVIDER]: ACCESS },
+      })
+    );
+    expect(sentDashboardReads(fetchMock)).toEqual([
+      {
+        path: "/api/dashboard/organizations/current/provider-access",
+        projectId: SANDBOX_PROJECT.id,
+        demo: null,
+      },
+    ]);
+  });
+
+  it("surfaces a failed read as an error with no access", async () => {
+    stubDashboardFetch(() => new Response("down", { status: 503 }));
+
+    const { result } = renderHook(() => useOrganizationProviderAccess(), {
+      wrapper: DashboardReadsProvider,
+    });
+
+    await waitFor(() => expect(result.current.error).toBeInstanceOf(DashboardReadError));
     expect(result.current.data).toBeUndefined();
   });
 });
