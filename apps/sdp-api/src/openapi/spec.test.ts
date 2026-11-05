@@ -7,7 +7,12 @@ import {
 import { RAMP_ONLY_TRANSFER_STATUSES } from "@sdp/types/payments";
 import { COMPLIANCE_PROVIDERS } from "@sdp/types/provider-access";
 import { SDP_RELEASE_CHANNEL_NAMES, SDP_RELEASE_CHANNELS } from "@sdp/types/release-channels";
-import type { OpenAPIObject } from "openapi3-ts/oas30";
+import type {
+  OpenAPIObject,
+  PathItemObject,
+  ReferenceObject,
+  ResponseObject,
+} from "openapi3-ts/oas30";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { ERROR_CODES } from "@/lib/errors";
@@ -77,23 +82,34 @@ function getWalletListItemSchema(value: unknown): TestJsonSchema {
   return getJsonSchema(value).properties?.data?.properties?.wallets?.items ?? {};
 }
 
-const errorEnvelopeSchema = z.object({
-  properties: z.object({
-    error: z.object({
-      properties: z.object({ code: z.object({ enum: z.array(z.string()).optional() }) }),
+const OPERATION_METHODS = ["get", "put", "post", "delete", "patch"] as const;
+
+const errorEnvelopeResponseSchema = z.object({
+  content: z.object({
+    "application/json": z.object({
+      schema: z.object({
+        properties: z.object({
+          error: z.object({
+            properties: z.object({ code: z.object({ enum: z.array(z.string()).optional() }) }),
+          }),
+        }),
+      }),
     }),
   }),
 });
 
-/** The codes each error envelope under `node` allows, wherever in the document it sits. */
-function errorEnvelopeCodes(node: unknown): (string[] | undefined)[] {
-  if (Array.isArray(node)) return node.flatMap(errorEnvelopeCodes);
-  if (typeof node !== "object" || node === null) return [];
-  const nested = Object.values(node).flatMap(errorEnvelopeCodes);
-  const envelope = errorEnvelopeSchema.safeParse(node);
-  return envelope.success
-    ? [envelope.data.properties.error.properties.code.enum, ...nested]
-    : nested;
+/** The codes each operation's error envelope allows, one entry per error response. */
+function errorEnvelopeCodes(doc: OpenAPIObject): (string[] | undefined)[] {
+  return Object.values(doc.paths)
+    .flatMap((pathItem: PathItemObject) => OPERATION_METHODS.map((method) => pathItem[method]))
+    .filter((operation) => operation !== undefined)
+    .flatMap((operation) => Object.values<ResponseObject | ReferenceObject>(operation.responses))
+    .flatMap((response) => {
+      const envelope = errorEnvelopeResponseSchema.safeParse(response);
+      return envelope.success
+        ? [envelope.data.content["application/json"].schema.properties.error.properties.code.enum]
+        : [];
+    });
 }
 
 describe("OpenAPI spec", () => {
