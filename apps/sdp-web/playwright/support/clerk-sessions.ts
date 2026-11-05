@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
+import { z } from "zod";
 
 /**
  * Where a run records the Clerk sessions it signs in, one empty file per
@@ -10,6 +11,7 @@ import type { Page } from "@playwright/test";
  */
 const SESSIONS_DIR = path.join(__dirname, "../.clerk/sessions");
 const SESSION_ID = /^sess_[A-Za-z0-9]+$/;
+const ClerkSessionId = z.string().regex(SESSION_ID);
 
 /** Longest one revoke request may take before it is abandoned. */
 const REVOKE_REQUEST_TIMEOUT_MS = 10_000;
@@ -29,19 +31,17 @@ export const REVOKE_DEADLINE_MS = 60_000;
  *   so a missing id means sign-in did not do what the test assumes.
  */
 export async function recordClerkSession(page: Page): Promise<void> {
-  const sessionId = await page.evaluate(() => {
-    const clerk: unknown = Reflect.get(globalThis, "Clerk");
-    if (typeof clerk !== "object" || clerk === null) return null;
-    const session: unknown = Reflect.get(clerk, "session");
-    if (typeof session !== "object" || session === null) return null;
-    const id: unknown = Reflect.get(session, "id");
-    return typeof id === "string" ? id : null;
-  });
-  if (!sessionId || !SESSION_ID.test(sessionId)) {
+  // The page only reads the value out (zod does not run in the browser);
+  // `Object(...)` keeps each read safe when Clerk or its session is missing.
+  const raw: unknown = await page.evaluate(() =>
+    Reflect.get(Object(Reflect.get(Object(Reflect.get(globalThis, "Clerk")), "session")), "id")
+  );
+  const sessionId = ClerkSessionId.safeParse(raw);
+  if (!sessionId.success) {
     throw new Error("Cannot record the Clerk session: the signed-in page has no valid session id");
   }
   fs.mkdirSync(SESSIONS_DIR, { recursive: true });
-  fs.writeFileSync(path.join(SESSIONS_DIR, sessionId), "");
+  fs.writeFileSync(path.join(SESSIONS_DIR, sessionId.data), "");
 }
 
 /**
