@@ -213,7 +213,7 @@ the repo:
 
 ## Release Channels
 
-Each docs deployment documents only what its release channel publishes. The API decides that (`createPublicSurfaceManifest` in `apps/sdp-api/src/openapi/spec.ts`: modules, ramp providers and the actions an API key can be granted, Earn's hold included, plus the rate limits every channel enforces); `generate:api` writes it to `src/generated/public-surface.json` from `SDP_RELEASE_CHANNEL` (required on Vercel; `experimental` when unset elsewhere, which is what the committed file holds).
+Each docs deployment documents only what its release channel publishes. The API decides that (`createPublicSurfaceManifest` in `apps/sdp-api/src/openapi/spec.ts`: modules, ramp and custody providers and the actions an API key can be granted, Earn's hold included, plus the rate limits every channel enforces); `generate:api` writes it to `src/generated/public-surface.json` from `SDP_RELEASE_CHANNEL` (required on Vercel; `experimental` when unset elsewhere, which is what the committed file holds).
 
 Before documenting a new ramp provider, follow
 `docs/contributing/ramp-provider-safety.md` and verify its sandbox settlement
@@ -222,7 +222,7 @@ delivery.
 
 Gates follow module declarations, never sentences:
 - A page about one module takes `module: issuance` (or `ramps`, …) frontmatter; a page about one ramp provider takes `rampProvider: moonpay` (ramp provider pages are `payments/ramps-<provider>.mdx`). Outside the channel the page leaves `source` (it 404s and drops out of the sidebar, search, sitemap and the Markdown route) and the `llms*.txt` files.
-- Shared pages never name a module. Module-specific content lives on that module's pages; where a shared page lists modules, providers, tutorials or operations, it places a generated block instead: `<ModuleTable />`, `<ModuleCapabilities />`, `<RampProviderMatrix />`, `<TutorialLinks />`, `<ApiKeyGrantsTable />`, and `<RateLimitTable />` for the API's limits. The blocks render from `src/lib/docs-catalog.ts` (add a module or provider there) and the manifest.
+- Shared pages never name a module. Module-specific content lives on that module's pages; where a shared page lists modules, providers, tutorials or operations, it places a generated block instead: `<ModuleTable />`, `<ModuleCapabilities />`, `<RampProviderMatrix />`, `<CustodyProviderTable />`, `<TutorialLinks />`, `<ApiKeyGrantsTable />`, and `<RateLimitTable />` for the API's limits. The blocks render from `src/lib/docs-catalog.ts` (add a module or provider there) and the manifest.
 - `remarkDocsBlocks` (`src/lib/docs-blocks.ts`) expands the blocks before Fumadocs extracts headings and search text; `expandDocsBlocks` puts the same Markdown into raw MDX for the llms files, the Markdown route and the link checker. A `rotate-providers` code fence shows only published providers.
 - A guide request that matches the public operation's example uses
   `<ApiExample operation="create-wallet" />` (or `language="ts"` / `"py"`).
@@ -262,8 +262,11 @@ keep Swagger UI for their own release channel.
   Shared OpenAPI properties declare `MODULE_GATE` when a module owns the whole
   field; `pruneUnpublishedValues` removes it and its required entry on excluded
   channels. `TRANSFER_STATUS_GATE` scopes transfer status filtering to that
-  schema. `DESCRIPTION_GATE` supplies alternate shared prose when its module
-  is excluded, preserving the full description for experimental and internal
+  schema. `CUSTODY_MODE_GATE` narrows a field to the custody providers its
+  channel offers in that mode, and `CUSTODY_PROVIDER_GATE` drops a provider's
+  own fields (Fireblocks transfer tracking) where it is not published.
+  `DESCRIPTION_GATE` supplies alternate shared prose when its module is
+  excluded, preserving the full description for experimental and internal
   documents. Keep ownership on the source schema, not in the docs generator.
   It also drives `Run in dashboard` on operation pages
   (`src/lib/playground-link.ts`): only catalogued method/path pairs get a link.
