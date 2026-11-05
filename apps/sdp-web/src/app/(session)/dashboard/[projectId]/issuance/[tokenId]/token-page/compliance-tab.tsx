@@ -17,6 +17,7 @@ import { issuanceQueryKeys } from "@/app/(session)/dashboard/[projectId]/issuanc
 import { formatTokenDay } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-token-state";
 import { PAYMENTS_TABLE_CELL } from "@/app/(session)/dashboard/[projectId]/payments/payments-table";
 import { RecordBlock, RecordStack } from "@/components/refresh-record";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
 import type { TokenTabProps } from "./token-page.shared";
@@ -26,6 +27,31 @@ const PAGE_SIZE = 25;
 
 type AccessControlMode = TokenTabProps["ops"]["accessControlMode"];
 type AllowlistEntry = TokenAllowlistPage["entries"][number];
+type Translate = ReturnType<typeof useTranslations>;
+
+/** A count's message for exactly one and for any other number. */
+interface CountMessages {
+  one: MessageKey;
+  other: MessageKey;
+}
+
+const ENTRY_COUNT: CountMessages = {
+  one: "DashboardIssuance.newDesign.compliance.entriesOne",
+  other: "DashboardIssuance.newDesign.compliance.entries",
+};
+
+const ACCOUNT_COUNT: CountMessages = {
+  one: "DashboardIssuance.newDesign.compliance.accountsOne",
+  other: "DashboardIssuance.newDesign.compliance.accounts",
+};
+
+/**
+ * "1 entry", "3 entries": the singular message for exactly one, as the dashboard's other counts
+ * choose it. A catalog cannot hold an ICU plural, which `translate` would show verbatim.
+ */
+function formatCount(t: Translate, messages: CountMessages, count: number): string {
+  return t(count === 1 ? messages.one : messages.other, { count });
+}
 
 /** The token's access list, a page at a time; nothing is read while the token has none. */
 function useComplianceEntries(tokenId: string, mode: AccessControlMode) {
@@ -124,7 +150,7 @@ function ComplianceListBlock({
             )}
           </span>
           <span className="text-body font-medium text-primary tabular-nums">
-            {t("DashboardIssuance.newDesign.compliance.entries", { count: list.total })}
+            {formatCount(t, ENTRY_COUNT, list.total)}
           </span>
         </span>
         <span className="flex flex-col gap-1">
@@ -133,11 +159,8 @@ function ComplianceListBlock({
           </span>
           <span className="text-body font-medium text-primary tabular-nums">
             {token.mintAddress
-              ? (ops.frozenAccountsError ??
-                t("DashboardIssuance.newDesign.compliance.accounts", {
-                  count: ops.frozenAccountsTotal,
-                }))
-              : t("DashboardIssuance.newDesign.compliance.accounts", { count: 0 })}
+              ? (ops.frozenAccountsError ?? formatCount(t, ACCOUNT_COUNT, ops.frozenAccountsTotal))
+              : formatCount(t, ACCOUNT_COUNT, 0)}
           </span>
         </span>
       </div>
