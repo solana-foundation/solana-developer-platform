@@ -8,7 +8,6 @@ import { useUiTranslations } from "./i18n";
 import { ModalCloseButton } from "./modal-close-button";
 import { playEntrance } from "./motion";
 import { PortalContainerProvider } from "./portal-container";
-import { useThemeScopeAttributes } from "./theme-scope";
 import { useEscapeKey } from "./use-escape-key";
 
 type ModalSize = "sm" | "md" | "lg" | "xl";
@@ -71,7 +70,6 @@ export function Modal({
   const backdropRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const canClose = Boolean(onClose) && !closeDisabled;
-  const themeScopeAttributes = useThemeScopeAttributes();
 
   // The state re-renders the portal container; the ref reaches the entrance in the same commit.
   const attachPanel = useCallback((node: HTMLDivElement | null) => {
@@ -109,7 +107,6 @@ export function Modal({
 
   return createPortal(
     <div
-      {...themeScopeAttributes}
       ref={backdropRef}
       className="fixed inset-0 z-50 overflow-y-auto overscroll-contain bg-[rgba(18,18,19,0.44)]"
     >

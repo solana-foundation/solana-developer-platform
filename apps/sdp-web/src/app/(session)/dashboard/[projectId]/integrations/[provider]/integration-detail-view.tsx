@@ -3,19 +3,19 @@ import { Button } from "@sdp/ui/button";
 import { VenetianMaskIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import type {
-  ConnectionsFilters,
-  ConnectionsPageResult,
-  ConnectionsProjectSummary,
-} from "@/app/(session)/dashboard/[projectId]/custody/connections/connections.data";
-import { CUSTODY_CAPABILITY_LABEL_KEYS } from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
-import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/custody/wallet-provider-mark";
 import {
   CustodyConnectionCount,
   CustodyConnectionsSection,
 } from "@/app/(session)/dashboard/[projectId]/integrations/custody-connections-section";
 import type { IntegrationDetail } from "@/app/(session)/dashboard/[projectId]/integrations/integration-detail";
 import { custodyUseCasesInDeploymentReleaseChannel } from "@/app/(session)/dashboard/[projectId]/integrations/integration-feature-gates";
+import type {
+  ConnectionsFilters,
+  ConnectionsPageResult,
+  ConnectionsProjectSummary,
+} from "@/app/(session)/dashboard/[projectId]/wallets/connections/connections.data";
+import { CUSTODY_CAPABILITY_LABEL_KEYS } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
+import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
 import { docsHref } from "@/components/dashboard-nav";
 import { getTranslations } from "@/i18n/server";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";

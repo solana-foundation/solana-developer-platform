@@ -123,7 +123,7 @@ const STATUS_TEXT_TONE = {
 } as const satisfies Record<BadgeVariant, StatusTone>;
 
 /**
- * A status badge's variant as the refresh design's status text tone, so a list that sets
+ * A status badge's variant as the design's status text tone, so a list that sets
  * statuses as words reads the same meaning the badge did: a plain badge is a state still
  * moving, an outline one a state that lapsed without harm.
  *

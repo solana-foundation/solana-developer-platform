@@ -10,7 +10,6 @@ import { cn } from "./cn";
 import { formatDateValue, parseDateValue, pickerLocale } from "./date-value";
 import { useUiLocale, useUiTranslations } from "./i18n";
 import { Input } from "./input";
-import { useThemeScopeAttributes } from "./theme-scope";
 
 /** "Oct 1, 2026" in English, "1 oct. 2026" in French: shown in the field and read back from it. */
 const DISPLAY_FORMAT = "PP";
@@ -93,7 +92,6 @@ export function DateField({
 }: DateFieldProps) {
   const t = useUiTranslations();
   const locale = pickerLocale(useUiLocale());
-  const themeScopeAttributes = useThemeScopeAttributes();
   const [open, setOpen] = useState(false);
   // What is being typed; null while the field shows the chosen day.
   const [draft, setDraft] = useState<string | null>(null);
@@ -148,13 +146,7 @@ export function DateField({
         }
       />
       <Popover.Portal>
-        <Popover.Positioner
-          {...themeScopeAttributes}
-          className="z-50"
-          side="bottom"
-          align="end"
-          sideOffset={4}
-        >
+        <Popover.Positioner className="z-50" side="bottom" align="end" sideOffset={4}>
           {/* Flat: a card-paper panel on the design's 1px ring (outside the box, so the panel
               keeps the calendar's 212px), without the shadow the design adds under it. */}
           <Popover.Popup className="rounded-[var(--corner-card)] bg-surface-sunken outline-none ring-1 ring-border-subtle">

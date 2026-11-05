@@ -306,12 +306,15 @@ function apiReferenceSlugs(folderMetas: Map<string, DocsMeta>): string[] {
   if (!pages) {
     throw new Error('Missing content/docs/reference/api/meta.json; run "pnpm generate:api" first');
   }
-  // A family is a folder: its table is the folder's index.
-  return pages.map((page) =>
-    folderMetas.has(`reference/api/${page}`)
-      ? `reference/api/${page}/index`
-      : `reference/api/${page}`
-  );
+  // The directory first, then each family; a family is a folder whose table is its index.
+  return [
+    "reference/api/index",
+    ...pages.map((page) =>
+      folderMetas.has(`reference/api/${page}`)
+        ? `reference/api/${page}/index`
+        : `reference/api/${page}`
+    ),
+  ];
 }
 
 function buildKeyPages(

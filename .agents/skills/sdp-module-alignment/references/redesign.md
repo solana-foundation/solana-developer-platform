@@ -1,74 +1,58 @@
-# Refresh design checks (B1-B9)
+# Design checks (B1-B8)
 
-Dashboard checks for putting a module's pages on the 2026 refresh design.
+Dashboard checks for putting a module's pages on the 2026 design.
 `web/` = `apps/sdp-web/src/`, `dash/` = `web/app/(session)/dashboard/[projectId]/`,
 `ui/` = `packages/sdp-ui/src/`. Visual values come from
-`packages/sdp-design-tokens` (README: layers, the `refresh:` variant, page
-column); structural taste comes from `.agents/skills/sdp-ui-designer` (its CSS
-bundle is the pre-refresh prototype, so take its rules, not its values).
+`packages/sdp-design-tokens` (README: layers, the page column); structural taste
+comes from `.agents/skills/sdp-ui-designer` (its CSS bundle is a handoff
+reference, so take its rules, not its values).
 
-#2568 deleted the legacy design and its flags (`withLegacyDesign`,
-`useNewDesign`, `DesignSwitch`, `new-design*`). There is no fork and no flag:
-rewrite each page in place and add its route to the refresh scope in the same
-PR. Production shows a module's refresh pages only once the module is in
-production's release channel.
+One design renders the whole dashboard: the tokens on `:root` style every
+element, so a page is in it by construction, with no flag, route list or
+attribute to join. What a module's pages must match is the design's primitives
+and layout (B2), the header page config (B1), and the token scales for type,
+spacing and the page column. A module's pages reach production once the module
+is in production's release channel.
 
 ## Contents
 
-- B1 Theme scope route
-- B2 Header page config
-- B3 Page composition: legacy to refresh map
-- B4 Dialogs and wizards
-- B5 Loading states and layout shift
-- B6 Copy
-- B7 Phone widths
-- B8 API Playground tab
-- B9 Tests, smoke specs and doc sync
+- B1 Header page config
+- B2 Page composition: legacy patterns and the design's replacements
+- B3 Dialogs and wizards
+- B4 Loading states and layout shift
+- B5 Copy
+- B6 Phone widths
+- B7 API Playground tab
+- B8 Tests, smoke specs and doc sync
 
-## B1 Theme scope route
-
-- **Condition:** each rewritten page's path matches a regex in `REFRESH_ROUTES`
-  (`web/lib/theme-scope-routes.ts`), and siblings that keep the base design
-  do not (DvP under `/dashboard/markets/dvp` is the standing example).
-- **Verify:** scanner B1 evaluates `themeScopeForPath` for every `page.tsx`
-  under the module and prints `refresh` or `BASE`.
-- **Done:** every page reads `refresh`; `web/lib/theme-scope-routes.unit.test.ts`
-  has a row per new path plus a negative row for each sibling that stays base;
-  the route list in `packages/sdp-design-tokens/README.md` ("In the dashboard
-  the shell sets the attribute") names the module. Every Earn redesign PR
-  touched all three.
-- **Today:** DvP (all pages), Rings and most of Private Channels (all but the
-  connect form) are `BASE`; Issuance, Payments, Wallets and Earn are refresh.
-
-## B2 Header page config
+## B1 Header page config
 
 - **Condition:** the module's pages get a config from its area's function in
   `web/components/dashboard-header.tsx` (`get<Area>RoutePageConfig`; a Markets
   sub-module such as DvP is a set of branches in `getMarketsRoutePageConfig`,
   shared with Earn, and shares `markets-route-skeletons.tsx`,
-  `markets-landing.tsx` and the `DashboardMarkets.*` copy). Comments that
-  justify a centred title on a detail page predate the refresh: revisit them.
-  - top-level pages: `titlePosition: "left"`, `contentWidthClass:
-    REFRESH_PAGE_WIDTH` (`max-w-page`, 852 px; forms and settings use
-    `max-w-flow`, 660 px);
+  `markets-landing.tsx` and the `DashboardMarkets.*` copy). A comment that
+  justifies a centred title on a detail page predates the design: revisit it.
+  - top-level pages: `titlePosition: "left"`, `contentWidthClass: PAGE_WIDTH`
+    (`max-w-page`, 852 px; forms and settings use `max-w-flow`, 660 px);
   - sub-pages: `backAction: { href, label }` instead of an in-page Back button;
   - the page's one primary action as `headerAction` (link only; `capability`
     hides it from a viewer who would only reach a refusal; `download` for
     exports);
   - no `max-w-none` plus a module-owned `max-w-[90rem]` frame.
-- **Verify:** scanner B2 prints the header lines that name the module; read the
-  config function. Centered titles and `max-w-none` mark a base page.
+- **Verify:** scanner B1 prints the header lines that name the module; read the
+  config function. A centred title or `max-w-none` is drift.
 - **Done:** header unit tests cover each path (Earn's are in
   `web/components/dashboard-earn-header.unit.test.tsx`).
 - **Earn:** Markets rendered a centred "Markets" title and a full-width rule on
   every page with Earn's own 90rem frame; each page now has its own left title
   in the page column.
 
-## B3 Page composition: legacy to refresh map
+## B2 Page composition: legacy patterns and the design's replacements
 
 Rewrite the composition, keep data hooks and trackers single-copy.
 
-| Legacy pattern                                                                                | Refresh replacement                                                                                                                                                                  |
+| Legacy pattern                                                                                | Replacement                                                                                                                                                                          |
 | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Bordered `Card` per section, cards inside cards                                               | `RecordStack`, `RecordBlock`, `RecordRow`, `RecordLine`, `StateBand` (`web/components/refresh-record.tsx`)                                                                           |
 | Row of stat cards with big numbers (`text-[32px]`)                                            | One hero figure in `text-amount` plus a stat or summary line (Payments' available balance, Earn's `EarnSummary` in `dash/markets/earn/earn-page-blocks.tsx`)                         |
@@ -84,26 +68,26 @@ Rewrite the composition, keep data hooks and trackers single-copy.
 - **Rules that still hold:** mono only on code; table bodies one style, no
   bold, sentence case; numbers tabular; actions inside their block; a row's
   read-only and role gates move with its actions.
-- **Variants, not forks:** when a shared component looks different in refresh,
-  add a `refresh:` variant; when structure differs, branch on
-  `useThemeScope() === "refresh"`.
-- **Verify:** scanner B3 (legacy layout leads, Card-wrapped sections, `+` count
-  of refresh primitives). Rings and Private Channels show 69-72 Card hits each.
-- **Done:** zero B3 leads on rewritten pages, or each remaining one justified
+- **Variants, not forks:** when a shared component needs to look different for
+  one module, add a prop or a variant to the shared component; never fork it
+  per module.
+- **Verify:** scanner B2 (legacy layout leads, Card-wrapped sections, `+` count
+  of the design's primitives). Rings and Private Channels show 69-72 Card hits each.
+- **Done:** zero B2 leads on rewritten pages, or each remaining one justified
   (a layout width in rem with no token).
 
-## B4 Dialogs and wizards
+## B3 Dialogs and wizards
 
-- **Condition:** `@sdp/ui/modal` (it re-stamps the theme scope for portaled
-  content; `placement: "top"` keeps a multi-step dialog's top edge still as
-  steps change height), one width per family of flows, progress through
-  `@sdp/ui/wizard-step-progress` (its live region announces the step name),
-  summaries through `@sdp/ui/detail-list`, warnings through `Callout`, status
-  as words. Every control that changes the flow is disabled while a request is
-  in flight. Enter continues an input step and never confirms a money step.
+- **Condition:** `@sdp/ui/modal` (`placement: "top"` keeps a multi-step
+  dialog's top edge still as steps change height), one width per family of
+  flows, progress through `@sdp/ui/wizard-step-progress` (its live region
+  announces the step name), summaries through `@sdp/ui/detail-list`, warnings
+  through `Callout`, status as words. Every control that changes the flow is
+  disabled while a request is in flight. Enter continues an input step and
+  never confirms a money step.
 - **Money never truncates:** amounts use `DetailRow fit="figure"` (whole, one
   line, the label wraps); names use `wrap`.
-- **Verify:** scanner B4 (hand-rolled overlays or steppers, `+` count of the
+- **Verify:** scanner B3 (hand-rolled overlays or steppers, `+` count of the
   three primitives).
 - **Done:** tests pin Enter behavior on input vs review steps and the in-flight
   disabled state.
@@ -111,7 +95,7 @@ Rewrite the composition, keep data hooks and trackers single-copy.
   that re-centred every step, phone amounts truncated, "Backing: klend"; all
   fixed by #2586 (`Modal` gained `placement`, `DetailRow` gained `fit`).
 
-## B5 Loading states and layout shift
+## B4 Loading states and layout shift
 
 - **Condition:** each route has a `loading.tsx` whose skeleton draws the ready
   page's footprint (same column widths, same row heights, same groups), and
@@ -119,12 +103,12 @@ Rewrite the composition, keep data hooks and trackers single-copy.
 - **Verify:** measure CLS per width at 1440 and 390 with a `layout-shift`
   `PerformanceObserver` (buffered) on a cold load; clear the persisted SWR
   cache (`localStorage` keys `sdp.dashboard.cache.*`) first, or the page paints
-  cached data and never shows its loading state. Scanner B5 flags leftover
+  cached data and never shows its loading state. Scanner B4 flags leftover
   design-switch code.
 - **Done:** CLS 0 at both widths, stated in the PR; skeleton unit tests share
   the layout constants with the page (Earn's `markets-route-skeletons.tsx`).
 
-## B6 Copy
+## B5 Copy
 
 - **Condition:** new copy goes only in the English catalogs,
   `apps/sdp-web/messages/en/dashboard-<area>.json` or `shared.json` (DvP's copy
@@ -145,7 +129,7 @@ Rewrite the composition, keep data hooks and trackers single-copy.
   callout and snippets; the fee note "The custody wallet signs. SDP covers the
   network fee." reads as if the wallet pays.
 
-## B7 Phone widths
+## B6 Phone widths
 
 - **Condition:** at 360-390 px no table scrolls inside a card, primary actions
   stay on screen, status reads under the primary value, long notes wrap inside
@@ -155,7 +139,7 @@ Rewrite the composition, keep data hooks and trackers single-copy.
   project holds no positions.
 - **Done:** phone screenshots in the PR body.
 
-## B8 API Playground tab
+## B7 API Playground tab
 
 - **Condition:** Wallets and Payments pair an Overview tab with an API
   Playground tab (`playgroundHeaderTabs` in `dashboard-header.tsx`,
@@ -163,18 +147,18 @@ Rewrite the composition, keep data hooks and trackers single-copy.
   playground catalog (`PlaygroundModule` in
   `apps/sdp-api/scripts/generate-playground-catalog.ts`), which reads the public
   OpenAPI document; the playground proxy 404s anything outside the catalog.
-- **Verify:** scanner B8.
+- **Verify:** scanner B7.
 - **Done:** either the tab ships with the family, or the module's notes say why
   it is blocked (Earn: held from the public OpenAPI until PRO-2038).
 
-## B9 Tests, smoke specs and doc sync
+## B8 Tests, smoke specs and doc sync
 
 - Tests that pin legacy markup (column sets, widths, centred headers) are
-  rewritten, not deleted; each refresh layout gets its own tests.
+  rewritten, not deleted; each page's layout gets its own tests.
 - `pnpm check:ui-flow-coverage`: every top-level dashboard section (the folder
   under `dash/`, so DvP and Earn share `markets`) needs a row in
   `docs/testing/ui-flow-matrix.md`. A row reading `GAP` means no end-to-end
-  spec covers the section: a release-readiness lead (scanner B9 prints it).
+  spec covers the section: a release-readiness lead (scanner B8 prints it).
 - Stage smoke (`apps/sdp-web/playwright/tests/gcp-read-only-*.e2e.spec.ts`)
   runs after merge against stage; a renamed link or heading it selects is
   updated in the same PR, or the release is held.

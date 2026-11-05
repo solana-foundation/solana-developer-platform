@@ -7,11 +7,7 @@ import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-r
 import type { PaymentsDashboardWallet, RampProviderEstimateResult } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { RAMP_PROVIDER_SURFACING } from "@sdp/types/provider-access";
-import { Modal } from "@sdp/ui/modal";
-import { useThemeScope } from "@sdp/ui/theme-scope";
-import { AnimatePresence, domMax, LazyMotion, m } from "motion/react";
-import Image from "next/image";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { useRampEstimate } from "@/app/(session)/dashboard/[projectId]/payments/ramps/hooks/use-ramp-estimate";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -22,7 +18,6 @@ import {
   findRampPair,
   offrampPairs,
   onrampPairs,
-  RAMP_PROVIDER_LOGOS,
   RAMP_PROVIDER_OPTIONS,
   type RampDirection,
   type RampPair,
@@ -32,7 +27,7 @@ import {
   surfacedRampProviderOptions,
 } from "@/lib/ramps";
 import { CurrencyPairSelector } from "./currency-pair-selector";
-import { ProviderCard, ProviderQuoteCard } from "./provider-card";
+import { ProviderQuoteCard } from "./provider-card";
 import {
   buildProviderExclusion,
   getDirectionSupport,
@@ -253,8 +248,8 @@ function tilesInStaticOrder(
 }
 
 /**
- * The refresh surface's provider tiles, one radio group: every provider in a fixed order, the
- * ones that can take the ramp with their estimates, the others with their first reason.
+ * The provider tiles, one radio group: every provider in a fixed order, the ones that can take
+ * the ramp with their estimates, the others with their first reason.
  */
 function ProviderQuoteTiles({
   direction,
@@ -316,126 +311,6 @@ function ProviderQuoteTiles({
   );
 }
 
-/**
- * The provider list outside refresh surfaces: the heading with a count of unavailable providers
- * that opens their reasons, then a scrolling list of the available providers' cards.
- */
-function ProviderCardList({
-  availableProviders,
-  unavailableCount,
-  selectedProvider,
-  estimatesByProvider,
-  estimatesLoading,
-  onProviderSelect,
-  onShowUnavailable,
-}: ProviderChoiceProps & { unavailableCount: number; onShowUnavailable: () => void }) {
-  const t = useTranslations();
-  return (
-    <div className="space-y-2.5">
-      <div className="flex items-center gap-3">
-        <p className="shrink-0 text-xl font-medium text-primary">
-          {t("DashboardPayments.ramps.chooseProvider")}
-        </p>
-        {unavailableCount > 0 ? (
-          <button
-            type="button"
-            onClick={onShowUnavailable}
-            className="rounded-full bg-fill-subtle px-2 py-0.5 text-xs leading-none font-medium text-tertiary transition-colors hover:bg-fill-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tertiary focus-visible:ring-offset-2"
-          >
-            {t("DashboardPayments.ramps.unavailableCount", {
-              count: unavailableCount,
-            })}
-          </button>
-        ) : null}
-        <div className="h-px flex-1 bg-fill-strong" />
-      </div>
-
-      <div className="-mx-1.5 h-96 overflow-y-auto px-1.5 py-1">
-        <LazyMotion features={domMax}>
-          <m.div layout className="space-y-2">
-            <AnimatePresence mode="popLayout" initial={false}>
-              {availableProviders.map((option) => (
-                <ProviderCard
-                  key={option.id}
-                  option={option}
-                  active={selectedProvider === option.id}
-                  estimate={estimatesByProvider.get(option.id)}
-                  estimateLoading={estimatesLoading}
-                  onSelect={() => onProviderSelect(option.id)}
-                />
-              ))}
-            </AnimatePresence>
-
-            {availableProviders.length === 0 ? (
-              <m.p
-                layout
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="py-2 text-sm text-tertiary"
-              >
-                {t("DashboardPayments.ramps.noProvidersAvailable")}
-              </m.p>
-            ) : null}
-          </m.div>
-        </LazyMotion>
-      </div>
-    </div>
-  );
-}
-
-/** A dialog listing every provider that cannot take this ramp, with all of its reasons. */
-function UnavailableProvidersModal({
-  open,
-  providerExclusions,
-  onClose,
-}: {
-  open: boolean;
-  providerExclusions: readonly ProviderExclusion[];
-  onClose: () => void;
-}) {
-  const t = useTranslations();
-  return (
-    <Modal
-      isOpen={open && providerExclusions.length > 0}
-      onClose={onClose}
-      ariaLabel={t("DashboardPayments.ramps.unavailableProviders")}
-      size="md"
-    >
-      <div className="px-5 py-5">
-        <h2 className="pr-10 text-lg font-medium text-primary">
-          {t("DashboardPayments.ramps.unavailableProviders")}
-        </h2>
-        <div className="mt-4 max-h-96 space-y-3 overflow-y-auto pr-1">
-          {providerExclusions.map((exclusion) => (
-            <div
-              key={exclusion.option.id}
-              className="rounded-xl border border-border-default bg-fill-subtle p-3"
-            >
-              <div className="flex items-start gap-3">
-                <Image
-                  src={RAMP_PROVIDER_LOGOS[exclusion.option.id]}
-                  alt=""
-                  width={32}
-                  height={32}
-                  className="size-8 shrink-0 rounded-lg object-contain"
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-primary">{exclusion.option.title}</p>
-                  <div className="mt-2 space-y-1 text-sm text-tertiary">
-                    {exclusion.reasons.map((reason) => (
-                      <p key={reason}>{reason}</p>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
 export function RampPairProviderSelector({
   direction,
   enabledRampProviders,
@@ -456,8 +331,6 @@ export function RampPairProviderSelector({
 }: RampPairProviderSelectorProps) {
   const { sdpEnvironment } = useDashboardWorkspace();
   const demo = usePaymentsDemo();
-  const refresh = useThemeScope() === "refresh";
-  const [unavailableDialogOpen, setUnavailableDialogOpen] = useState(false);
   const pairs = demoRampPairs(
     pairsForDirection(direction, sdpEnvironment, enabledRampProviders),
     demo
@@ -521,39 +394,21 @@ export function RampPairProviderSelector({
   );
 
   return (
-    <div className="space-y-7 refresh:space-y-6">
+    <div className="space-y-6">
       <RampSelectionProvider value={selectionContextValue}>
         <div className="flex flex-col gap-2">
           <CurrencyPairSelector />
         </div>
       </RampSelectionProvider>
 
-      {refresh ? (
-        <ProviderQuoteTiles
-          direction={direction}
-          availableProviders={availableProviders}
-          providerExclusions={providerExclusions}
-          selectedProvider={selectedProvider}
-          estimatesByProvider={estimatesByProvider}
-          estimatesLoading={estimatesLoading}
-          onProviderSelect={onProviderSelect}
-        />
-      ) : (
-        <ProviderCardList
-          availableProviders={availableProviders}
-          unavailableCount={providerExclusions.length}
-          selectedProvider={selectedProvider}
-          estimatesByProvider={estimatesByProvider}
-          estimatesLoading={estimatesLoading}
-          onProviderSelect={onProviderSelect}
-          onShowUnavailable={() => setUnavailableDialogOpen(true)}
-        />
-      )}
-
-      <UnavailableProvidersModal
-        open={unavailableDialogOpen}
+      <ProviderQuoteTiles
+        direction={direction}
+        availableProviders={availableProviders}
         providerExclusions={providerExclusions}
-        onClose={() => setUnavailableDialogOpen(false)}
+        selectedProvider={selectedProvider}
+        estimatesByProvider={estimatesByProvider}
+        estimatesLoading={estimatesLoading}
+        onProviderSelect={onProviderSelect}
       />
     </div>
   );

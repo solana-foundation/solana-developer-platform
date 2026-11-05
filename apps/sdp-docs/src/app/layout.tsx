@@ -1,4 +1,3 @@
-import { refreshThemeProps } from "@sdp/design-tokens";
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import Script from "next/script";
@@ -8,8 +7,8 @@ import { DocsSearchDialog } from "@/components/docs-shell/search-dialog";
 import { docsOrigin, docsUrl } from "@/lib/site";
 import "./globals.css";
 
-// The refresh design's faces, loaded from @sdp/design-tokens the way sdp-web loads them. tokens.css
-// reads the two variables inside [data-sdp-theme="refresh"], which <html> carries.
+// The design's faces, loaded from @sdp/design-tokens the way sdp-web loads them. tokens.css reads
+// the two variables on :root.
 const seasonSans = localFont({
   src: [
     {
@@ -52,7 +51,6 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      {...refreshThemeProps}
       className={`${seasonSans.variable} ${geistMono.variable}`}
       suppressHydrationWarning
     >

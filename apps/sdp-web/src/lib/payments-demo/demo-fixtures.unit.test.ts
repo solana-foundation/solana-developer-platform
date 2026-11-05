@@ -597,7 +597,7 @@ describe("Contacts", () => {
       total: number;
       accounts: CounterpartyAccountSummary[];
       accountsTotal: number;
-    }>(await CounterpartyPage({ searchParams: Promise.resolve({}) }));
+    }>(await CounterpartyPage());
     expect(props.total).toBe(7);
     expect(props.counterparties).toHaveLength(7);
     expect(props.accountsTotal).toBe(7);

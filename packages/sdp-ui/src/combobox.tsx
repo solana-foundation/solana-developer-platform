@@ -3,9 +3,7 @@
 import { CheckIcon, ChevronDownIcon, SearchIcon } from "lucide-react";
 import { Popover } from "radix-ui";
 import {
-  cloneElement,
   type Dispatch,
-  isValidElement,
   type ReactNode,
   type SetStateAction,
   useEffect,
@@ -20,9 +18,6 @@ import { Input } from "./input";
 import { Label } from "./label";
 import { Modal } from "./modal";
 import { usePortalContainer } from "./portal-container";
-import { useThemeScope, useThemeScopeAttributes } from "./theme-scope";
-
-const DEFAULT_ICON_CLASS = "size-5 shrink-0 text-tertiary";
 
 export type ComboboxSize = "md" | "lg" | "xl";
 export type ComboboxVariant = "popover" | "dialog";
@@ -32,13 +27,6 @@ const SIZE_CLASSES = {
   lg: "h-[var(--input-height-lg)] rounded-[var(--input-radius-lg)] px-[var(--input-padding-x-lg)]",
   xl: "h-[var(--input-height-xl)] rounded-[var(--input-radius-xl)] px-[var(--input-padding-x-xl)]",
 } as const satisfies Record<ComboboxSize, string>;
-
-function withIconClass(node: ReactNode): ReactNode {
-  if (!isValidElement<{ className?: string }>(node)) {
-    return node;
-  }
-  return cloneElement(node, { className: cn(DEFAULT_ICON_CLASS, node.props.className) });
-}
 
 export interface ComboboxOption {
   value: string;
@@ -51,13 +39,13 @@ export interface ComboboxOption {
   disabled?: boolean;
 }
 
-// On a refresh surface an option is one line, as the design's lists are: the name, then its
-// detail beside it in the tertiary ink.
+// An option is one line, as the design's lists are: the name, then its detail beside it in the
+// tertiary ink.
 function ComboboxOptionContent({ option }: { option: ComboboxOption }) {
   return (
     <>
       {option.icon ? <span className="shrink-0">{option.icon}</span> : null}
-      <span className="min-w-0 flex-1 refresh:flex refresh:items-baseline refresh:gap-2">
+      <span className="flex min-w-0 flex-1 items-baseline gap-2">
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate text-primary">{option.label}</span>
           {option.badge ? (
@@ -67,7 +55,7 @@ function ComboboxOptionContent({ option }: { option: ComboboxOption }) {
           ) : null}
         </span>
         {option.description ? (
-          <span className="block truncate text-sm text-tertiary refresh:min-w-0 refresh:text-body">
+          <span className="block min-w-0 truncate text-body text-tertiary">
             {option.description}
           </span>
         ) : null}
@@ -90,7 +78,6 @@ interface ComboboxProps {
   placeholder?: string;
   searchable?: boolean;
   searchPlaceholder?: string;
-  icon?: ReactNode;
   trailing?: ReactNode;
   size?: ComboboxSize;
   variant?: ComboboxVariant;
@@ -201,6 +188,12 @@ function useComboboxState({
     () => options.find((option) => option.value === value) ?? null,
     [options, value]
   );
+  const selectedLabelRepeats = useMemo(
+    () =>
+      selected !== null &&
+      options.some((option) => option !== selected && option.label === selected.label),
+    [options, selected]
+  );
 
   const filtered = useMemo(
     () => filterComboboxOptions(options, query, searchable, queryOption),
@@ -260,6 +253,7 @@ function useComboboxState({
     activeIndex,
     setActiveIndex,
     selected,
+    selectedLabelRepeats,
     filtered,
     handleOpenChange,
     close,
@@ -301,12 +295,18 @@ function ComboboxLabel({
   );
 }
 
-/** What the trigger shows: the chosen option, or the placeholder while nothing is chosen. */
+/**
+ * What the trigger shows: the chosen option, or the placeholder while nothing is chosen. The
+ * choice shows its label alone unless another option shares that label, when its description
+ * is what tells them apart.
+ */
 function ComboboxSelection({
   selected,
+  selectedLabelRepeats,
   placeholder,
 }: {
   selected: ComboboxOption | null;
+  selectedLabelRepeats: boolean;
   placeholder: string;
 }) {
   return (
@@ -322,11 +322,8 @@ function ComboboxSelection({
               {selected.badge}
             </Badge>
           ) : null}
-          {/* An underline field shows the choice alone; the list still carries the detail. */}
-          {selected.description ? (
-            <span className="truncate text-sm text-tertiary refresh:hidden">
-              {selected.description}
-            </span>
+          {selectedLabelRepeats && selected.description ? (
+            <span className="truncate text-meta text-tertiary">{selected.description}</span>
           ) : null}
         </span>
       ) : (
@@ -339,12 +336,13 @@ function ComboboxSelection({
 interface ComboboxTriggerProps
   extends Pick<
     ComboboxProps,
-    "className" | "icon" | "trailing" | "disabled" | "validationError" | "variant"
+    "className" | "trailing" | "disabled" | "validationError" | "variant"
   > {
   labelId: string;
   open: boolean;
   size: ComboboxSize;
   selected: ComboboxOption | null;
+  selectedLabelRepeats: boolean;
   placeholder: string;
   /** Opens or closes the dialog variant; the popover variant leaves this to Radix. */
   onToggle: () => void;
@@ -360,11 +358,11 @@ function ComboboxTrigger({
   variant,
   size,
   className,
-  icon,
   trailing,
   disabled,
   validationError,
   selected,
+  selectedLabelRepeats,
   placeholder,
   onToggle,
 }: ComboboxTriggerProps) {
@@ -379,25 +377,21 @@ function ComboboxTrigger({
       disabled={disabled}
       onClick={variant === "dialog" ? onToggle : undefined}
       className={cn(
-        "flex w-full items-center gap-2 border border-transparent bg-fill-subtle text-base transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50",
-        // Refresh surfaces draw the trigger as an underline field (radius and inset come from
-        // the scope's input tokens).
-        "refresh:border-x-0 refresh:border-t-0 refresh:border-b-border-default refresh:bg-transparent refresh:hover:border-b-border-strong refresh:focus-visible:border-b-primary refresh:focus-visible:ring-0",
-        // Underline fields carry no leading icon; the label names the field.
-        "refresh:[&>svg:first-child]:hidden",
+        // An underline field: radius and inset come from the input tokens.
+        "flex w-full items-center gap-2 border border-x-0 border-t-0 border-transparent border-b-border-default bg-transparent text-base transition-colors hover:border-b-border-strong focus-visible:border-b-primary focus-visible:outline-none focus-visible:ring-0 disabled:cursor-not-allowed disabled:opacity-50",
         SIZE_CLASSES[size],
         className,
         validationError && "border-error-border hover:border-error-border"
       )}
     >
-      {withIconClass(icon)}
-      <ComboboxSelection selected={selected} placeholder={placeholder} />
+      <ComboboxSelection
+        selected={selected}
+        selectedLabelRepeats={selectedLabelRepeats}
+        placeholder={placeholder}
+      />
       {trailing ? <span className="shrink-0">{trailing}</span> : null}
       <ChevronDownIcon
-        className={cn(
-          "size-5 shrink-0 text-tertiary transition-transform refresh:size-4 refresh:text-secondary",
-          open && "rotate-180"
-        )}
+        className={cn("size-4 shrink-0 text-secondary transition-transform", open && "rotate-180")}
       />
     </button>
   );
@@ -410,8 +404,6 @@ function ComboboxTrigger({
  */
 function ComboboxSearch({
   labelId,
-  variant,
-  refresh,
   query,
   onQueryChange,
   activeIndex,
@@ -421,8 +413,6 @@ function ComboboxSearch({
   placeholder,
 }: {
   labelId: string;
-  variant: ComboboxVariant;
-  refresh: boolean;
   query: string;
   onQueryChange: (query: string) => void;
   activeIndex: number;
@@ -432,17 +422,11 @@ function ComboboxSearch({
   placeholder: string;
 }) {
   return (
-    // A refresh search row sits over the list's one divider; its field draws no underline of
-    // its own, so the panel shows a single line under the search, as the design does.
-    <div
-      className={cn(
-        "border-b border-border-default",
-        variant === "dialog" ? "p-3" : "p-2",
-        "refresh:border-border-subtle refresh:p-1"
-      )}
-    >
+    // The search row sits over the list's one divider; its field draws no underline of its own,
+    // so the panel shows a single line under the search, as the design does.
+    <div className="border-b border-border-subtle p-1">
       <div className="relative">
-        <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-tertiary refresh:left-2.5" />
+        <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-tertiary" />
         <Input
           autoFocus
           aria-activedescendant={activeIndex >= 0 ? `${labelId}-option-${activeIndex}` : undefined}
@@ -467,9 +451,9 @@ function ComboboxSearch({
             }
           }}
           placeholder={placeholder}
-          size={refresh ? "xl" : undefined}
-          className="pl-9 refresh:pl-7.5 refresh:[&>span:first-child]:border-b-0"
-          inputClassName="refresh:text-body"
+          size="xl"
+          className="pl-7.5 [&>span:first-child]:border-b-0"
+          inputClassName="text-body!"
         />
       </div>
     </div>
@@ -480,7 +464,6 @@ function ComboboxSearch({
 function ComboboxOptionRow({
   option,
   id,
-  variant,
   active,
   highlighted,
   onHighlight,
@@ -488,7 +471,6 @@ function ComboboxOptionRow({
 }: {
   option: ComboboxOption;
   id: string;
-  variant: ComboboxVariant;
   active: boolean;
   highlighted: boolean;
   onHighlight: () => void;
@@ -501,10 +483,8 @@ function ComboboxOptionRow({
       disabled={option.disabled}
       aria-disabled={option.disabled || undefined}
       className={cn(
-        "flex w-full items-center gap-3 rounded-[var(--select-item-radius)] text-left transition-colors",
-        variant === "dialog" ? "px-3.5 py-3" : "px-3 py-2.5",
         // The design's 36px rows: 14px text, 10px in from the panel's edge.
-        "refresh:min-h-9 refresh:gap-1.5 refresh:px-2.5 refresh:py-2 refresh:text-body",
+        "flex min-h-9 w-full items-center gap-1.5 rounded-[var(--select-item-radius)] px-2.5 py-2 text-left text-body transition-colors",
         // The arrow keys may land on a disabled option, so it keeps the
         // highlight: a keyboard user must see where the cursor is.
         highlighted && "bg-[var(--select-item-highlight-bg)]",
@@ -547,13 +527,7 @@ function ComboboxOptionList({
 }) {
   const t = useUiTranslations();
   return (
-    <div
-      className={cn(
-        "overflow-y-auto",
-        variant === "dialog" ? "max-h-96 p-2" : "max-h-56 p-1.5",
-        "refresh:p-1"
-      )}
-    >
+    <div className={cn("overflow-y-auto p-1", variant === "dialog" ? "max-h-96" : "max-h-56")}>
       {isLoading ? (
         <p className="px-3 py-6 text-center text-sm text-tertiary">
           {t("Shared.SharedComponents.loading")}
@@ -568,7 +542,6 @@ function ComboboxOptionList({
             key={option.value}
             id={`${labelId}-option-${index}`}
             option={option}
-            variant={variant}
             active={option.value === value}
             highlighted={index === activeIndex}
             onHighlight={() => setActiveIndex(index)}
@@ -592,7 +565,6 @@ export function Combobox({
   placeholder,
   searchable = true,
   searchPlaceholder,
-  icon,
   trailing,
   size = "xl",
   variant = "popover",
@@ -610,8 +582,6 @@ export function Combobox({
   const resolvedSearchPlaceholder = searchPlaceholder ?? t("Shared.SharedComponents.search");
   const labelId = useId();
   const portalContainer = usePortalContainer();
-  const themeScopeAttributes = useThemeScopeAttributes();
-  const refresh = useThemeScope() === "refresh";
   const {
     open,
     query,
@@ -619,6 +589,7 @@ export function Combobox({
     activeIndex,
     setActiveIndex,
     selected,
+    selectedLabelRepeats,
     filtered,
     handleOpenChange,
     close,
@@ -633,11 +604,11 @@ export function Combobox({
       variant={variant}
       size={size}
       className={className}
-      icon={icon}
       trailing={trailing}
       disabled={disabled}
       validationError={validationError}
       selected={selected}
+      selectedLabelRepeats={selectedLabelRepeats}
       placeholder={resolvedPlaceholder}
       onToggle={() => handleOpenChange(!open)}
     />
@@ -648,8 +619,6 @@ export function Combobox({
       {searchable ? (
         <ComboboxSearch
           labelId={labelId}
-          variant={variant}
-          refresh={refresh}
           query={query}
           onQueryChange={setQuery}
           activeIndex={activeIndex}
@@ -673,11 +642,7 @@ export function Combobox({
         onSelect={(option) => selectOption(option, false)}
       />
 
-      {footer ? (
-        <div className="border-t border-border-default refresh:border-border-subtle">
-          {footer(close)}
-        </div>
-      ) : null}
+      {footer ? <div className="border-t border-border-subtle">{footer(close)}</div> : null}
     </>
   );
 
@@ -708,14 +673,13 @@ export function Combobox({
         <Popover.Root open={open} onOpenChange={handleOpenChange}>
           {trigger}
           <Popover.Portal container={portalContainer ?? undefined}>
-            {/* On a refresh surface the panel is the design's: card paper, 4px under the field, on
-                a 1px ring rather than the design system's shadow (the UI stays flat). */}
+            {/* The panel is the design's: card paper, 4px under the field, on a 1px ring rather
+                than the design system's shadow (the UI stays flat). */}
             <Popover.Content
-              {...themeScopeAttributes}
-              sideOffset={refresh ? 4 : 8}
+              sideOffset={4}
               align="start"
               style={{ width: "max(var(--radix-popover-trigger-width), 240px)" }}
-              className="z-50 overflow-hidden rounded-[var(--select-popup-radius)] bg-[var(--select-popup-bg)] shadow-[var(--select-popup-shadow)] refresh:bg-surface-sunken refresh:shadow-none refresh:ring-1 refresh:ring-border-subtle"
+              className="z-50 overflow-hidden rounded-[var(--select-popup-radius)] bg-surface-sunken shadow-none ring-1 ring-border-subtle"
             >
               {panel}
             </Popover.Content>
