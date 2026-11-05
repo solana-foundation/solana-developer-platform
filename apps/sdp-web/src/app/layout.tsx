@@ -3,7 +3,8 @@ import localFont from "next/font/local";
 import { AppToaster } from "@/components/app-toaster";
 import { ThemeProvider } from "@/contexts/theme-context";
 import { I18nProvider } from "@/i18n/provider";
-import { getI18nRequest, getTranslations } from "@/i18n/server";
+import { getI18nRequest, getRequestTimeZone, getTranslations } from "@/i18n/server";
+import { TimeZoneProvider } from "@/i18n/time-zone";
 import "./globals.css";
 import Script from "next/script";
 
@@ -70,7 +71,10 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const { locale, messages } = await getI18nRequest();
+  const [{ locale, messages }, timeZone] = await Promise.all([
+    getI18nRequest(),
+    getRequestTimeZone(),
+  ]);
 
   return (
     <html
@@ -96,8 +100,10 @@ export default async function RootLayout({
       <body>
         <ThemeProvider>
           <I18nProvider locale={locale} messages={messages}>
-            {children}
-            <AppToaster />
+            <TimeZoneProvider timeZone={timeZone}>
+              {children}
+              <AppToaster />
+            </TimeZoneProvider>
           </I18nProvider>
         </ThemeProvider>
       </body>

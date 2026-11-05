@@ -36,6 +36,7 @@ import {
 import { TokenMark } from "@/components/token-mark";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useWalletActivity } from "./use-wallet-activity";
 import { WalletActivityTable } from "./wallet-activity-table";
@@ -121,6 +122,7 @@ function BalanceBlock({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const { flags } = useDashboardWorkspace();
   return (
     <RecordBlock title={t("DashboardCustody.balance")} quiet>
@@ -169,7 +171,7 @@ function BalanceBlock({
             )}
           </RecordFact>
           <RecordFact label={t("DashboardCustody.created")} last>
-            {formatDate(wallet.createdAt, locale) ?? "—"}
+            {formatDate(wallet.createdAt, locale, timeZone) ?? "—"}
           </RecordFact>
           <RecordFact label={t("DashboardCustody.address")}>
             <span className="truncate tabular-nums" title={wallet.publicKey}>

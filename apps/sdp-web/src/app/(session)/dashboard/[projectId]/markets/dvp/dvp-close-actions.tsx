@@ -17,7 +17,8 @@ import { Button } from "@sdp/ui/button";
 import { Modal } from "@sdp/ui/modal";
 import { useState } from "react";
 import { formatTimestamp } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import type { DvpTrade } from "./dvp-trade";
 import { canCancelDvpTrade, dvpTimestampToIso } from "./dvp-trade";
 import type { DvpPendingAction } from "./use-dvp-trade-actions";
@@ -32,6 +33,8 @@ export function DvpCloseActions({
   trade: DvpTrade;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
+  const timeZone = useTimeZone();
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   if (!canCancelDvpTrade(trade)) {
     return null;
@@ -63,7 +66,12 @@ export function DvpCloseActions({
                 <span className="text-tertiary" suppressHydrationWarning>
                   {" "}
                   {t("DashboardMarkets.dvp.settleTooEarly", {
-                    when: formatTimestamp(dvpTimestampToIso(trade.earliestSettlementTimestamp), t),
+                    when: formatTimestamp(
+                      dvpTimestampToIso(trade.earliestSettlementTimestamp),
+                      t,
+                      locale,
+                      timeZone
+                    ),
                   })}
                 </span>
               ) : null}

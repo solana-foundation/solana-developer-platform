@@ -22,6 +22,7 @@ import { WizardFrame } from "@/components/wizard-frame";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { fetchResultAnswer } from "@/lib/idempotency";
 import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
@@ -222,6 +223,7 @@ function AmountField({ amount, onChange }: { amount: string; onChange: (next: st
 function ExpiryField({ expiry, onChange }: { expiry: string; onChange: (next: string) => void }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const expiresAt = resolveExpiryDate(expiry);
   return (
     <div className="flex flex-col gap-1.5">
@@ -238,7 +240,7 @@ function ExpiryField({ expiry, onChange }: { expiry: string; onChange: (next: st
       <FieldHint>
         {expiresAt
           ? t("DashboardPayments.requests.linkStopsWorking", {
-              date: formatDateTime(expiresAt.toISOString(), locale) ?? "",
+              date: formatDateTime(expiresAt.toISOString(), locale, timeZone) ?? "",
             })
           : t("DashboardPayments.requests.linkStaysLive")}
       </FieldHint>

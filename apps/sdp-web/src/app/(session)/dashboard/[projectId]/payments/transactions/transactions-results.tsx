@@ -24,6 +24,7 @@ import {
   PAYMENTS_TABLE_HEAD,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-table";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { transactionHref } from "@/lib/payments-routes";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useTransactionFilters } from "./transaction-filters-context";
@@ -41,6 +42,7 @@ export function TransactionsResults({
   counterpartyNames: ReadonlyMap<string, string>;
 }) {
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const t = useTranslations();
   const href = useProjectHref();
   const statusOf = useTransactionStatus();
@@ -131,7 +133,7 @@ export function TransactionsResults({
                       <span className="block text-meta text-tertiary md:hidden">{contact}</span>
                     ) : null}
                     <span className="block text-meta text-tertiary md:hidden">
-                      {formatDateTime(transaction.createdAt, locale)}
+                      {formatDateTime(transaction.createdAt, locale, timeZone)}
                     </span>
                   </TableCell>
                   <TableCell
@@ -172,7 +174,7 @@ export function TransactionsResults({
                       "hidden whitespace-nowrap text-secondary md:table-cell"
                     )}
                   >
-                    {formatDateTime(transaction.createdAt, locale)}
+                    {formatDateTime(transaction.createdAt, locale, timeZone)}
                   </TableCell>
                 </TableRow>
               );

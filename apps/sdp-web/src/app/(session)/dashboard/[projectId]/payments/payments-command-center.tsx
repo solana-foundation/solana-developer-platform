@@ -17,7 +17,7 @@ import { ActionTile } from "@/components/ui/action-tile";
 import { getEnabledRampProviders, isRampsEnabled } from "@/flags/ramps";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import type { MessageKey } from "@/i18n/messages";
-import { getRequestLocale, getTranslations } from "@/i18n/server";
+import { getRequestLocale, getRequestTimeZone, getTranslations } from "@/i18n/server";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { filterEnabledRampProviderAccess } from "@/lib/provider-availability";
@@ -439,12 +439,13 @@ function transferRow(
   context: {
     t: Translate;
     locale: string;
+    timeZone: string;
     projectId: string;
     walletsById: ReadonlyMap<string, PaymentsDashboardWallet>;
     issuedTokenSymbolsByMint: Readonly<Record<string, string>>;
   }
 ): Parameters<typeof ActivityRow>[0] {
-  const { t, locale, projectId, walletsById, issuedTokenSymbolsByMint } = context;
+  const { t, locale, timeZone, projectId, walletsById, issuedTokenSymbolsByMint } = context;
   const counterparty = resolveCommandCenterCounterparty(transfer);
   const direction =
     transfer.direction === "inbound" || transfer.direction === "outbound"
@@ -484,7 +485,7 @@ function transferRow(
       tone: PAYMENT_STATUS_TONE[transfer.status],
     },
     amount,
-    when: formatElapsedShort(transfer.createdAt, locale),
+    when: formatElapsedShort(transfer.createdAt, locale, timeZone),
   };
 }
 
@@ -494,12 +495,13 @@ function batchRow(
   context: {
     t: Translate;
     locale: string;
+    timeZone: string;
     projectId: string;
     walletsById: ReadonlyMap<string, PaymentsDashboardWallet>;
     issuedTokenSymbolsByMint: Readonly<Record<string, string>>;
   }
 ): Parameters<typeof ActivityRow>[0] {
-  const { t, locale, projectId, walletsById, issuedTokenSymbolsByMint } = context;
+  const { t, locale, timeZone, projectId, walletsById, issuedTokenSymbolsByMint } = context;
   const summary = summarizeBatch(batch, recipients);
   const wallet = walletName(walletsById, batch.sourceCustodyWalletId);
   const kind = t(ACTIVITY_KIND_MESSAGE_KEYS.batch);
@@ -516,15 +518,16 @@ function batchRow(
       resolveTransferTokenLabel(batch.token, issuedTokenSymbolsByMint),
       locale
     ),
-    when: formatElapsedShort(batch.createdAt, locale),
+    when: formatElapsedShort(batch.createdAt, locale, timeZone),
   };
 }
 
 async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromise }) {
-  const [{ request }, t, locale, projectId] = await Promise.all([
+  const [{ request }, t, locale, timeZone, projectId] = await Promise.all([
     apiClientPromise,
     getTranslations(),
     getRequestLocale(),
+    getRequestTimeZone(),
     requestProjectId(),
   ]);
   const trace = createTimedTrace("dashboard.payments.overview.activity");
@@ -554,6 +557,7 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
   const context = {
     t,
     locale,
+    timeZone,
     projectId,
     walletsById: new Map((wallets.data ?? []).map((wallet) => [wallet.id, wallet])),
     issuedTokenSymbolsByMint: Object.fromEntries(

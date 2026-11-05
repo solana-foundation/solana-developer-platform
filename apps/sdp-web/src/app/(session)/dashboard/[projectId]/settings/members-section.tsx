@@ -5,7 +5,7 @@ import { cn } from "@sdp/ui/cn";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { listMembers, type Member, type PendingInvitation } from "@/app/(session)/members/actions";
-import { getTranslations } from "@/i18n/server";
+import { getRequestLocale, getRequestTimeZone, getTranslations } from "@/i18n/server";
 import { readableApiError } from "@/lib/sdp-api-error";
 import { InvitationActions } from "./invitation-actions";
 import { InviteMemberForm } from "./invite-member-form";
@@ -15,12 +15,17 @@ import { MembersPagination } from "./members-pagination";
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
 
-function formatJoined(value: string): string {
+function formatJoined(value: string, locale: string, timeZone: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  return date.toLocaleDateString(locale, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone,
+  });
 }
 
 function roleLabel(role: OrganizationRole, t: Translate): string {
@@ -39,7 +44,11 @@ function roleLabel(role: OrganizationRole, t: Translate): string {
 }
 
 export async function MembersSection({ page }: { page: number }) {
-  const t = await getTranslations();
+  const [t, locale, timeZone] = await Promise.all([
+    getTranslations(),
+    getRequestLocale(),
+    getRequestTimeZone(),
+  ]);
 
   let members: Member[] = [];
   let invitations: PendingInvitation[] = [];
@@ -123,7 +132,7 @@ export async function MembersSection({ page }: { page: number }) {
                       {roleLabel(member.role, t)}
                     </TableCell>
                     <TableCell className="text-secondary text-sm">
-                      {formatJoined(member.createdAt)}
+                      {formatJoined(member.createdAt, locale, timeZone)}
                     </TableCell>
                     <TableCell className="text-right">
                       <MemberActions
@@ -150,7 +159,9 @@ export async function MembersSection({ page }: { page: number }) {
                       <Badge variant="warning">{t("Shared.members.statusPending")}</Badge>
                     </span>
                     <span className="block truncate text-muted text-xs">
-                      {t("Shared.members.invitedOn", { date: formatJoined(invitation.createdAt) })}
+                      {t("Shared.members.invitedOn", {
+                        date: formatJoined(invitation.createdAt, locale, timeZone),
+                      })}
                     </span>
                   </TableCell>
                   <TableCell className="text-secondary text-sm">

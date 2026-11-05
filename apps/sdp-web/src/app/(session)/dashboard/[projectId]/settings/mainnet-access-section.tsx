@@ -5,7 +5,7 @@ import { Badge } from "@sdp/ui/badge";
 import { Callout } from "@sdp/ui/callout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
 import { DetailList, DetailRow } from "@sdp/ui/detail-list";
-import { getRequestLocale, getTranslations } from "@/i18n/server";
+import { getRequestLocale, getRequestTimeZone, getTranslations } from "@/i18n/server";
 import { loadMainnetAccess } from "./mainnet-access-actions";
 import { MainnetAccessRequestHost, MainnetAccessResendButton } from "./mainnet-access-request";
 
@@ -15,14 +15,15 @@ function countryLabel(code: CountryCode): string {
   return flag ? `${flag} ${name}` : name;
 }
 
-/** One formatter per locale for the life of the server, not one per render. */
+/** One formatter per locale and viewer zone for the life of the server, not one per render. */
 const MEDIUM_DATE_FORMATS = new Map<string, Intl.DateTimeFormat>();
 
-function mediumDateFormat(locale: string): Intl.DateTimeFormat {
-  const cached = MEDIUM_DATE_FORMATS.get(locale);
+function mediumDateFormat(locale: string, timeZone: string): Intl.DateTimeFormat {
+  const key = `${locale} ${timeZone}`;
+  const cached = MEDIUM_DATE_FORMATS.get(key);
   if (cached) return cached;
-  const format = new Intl.DateTimeFormat(locale, { dateStyle: "medium" });
-  MEDIUM_DATE_FORMATS.set(locale, format);
+  const format = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone });
+  MEDIUM_DATE_FORMATS.set(key, format);
   return format;
 }
 
@@ -31,12 +32,13 @@ function mediumDateFormat(locale: string): Intl.DateTimeFormat {
  * it declared and accepted once it asked. Changes go through the SDP alias, never this card.
  */
 export async function MainnetAccessSection() {
-  const [t, locale, loaded] = await Promise.all([
+  const [t, locale, timeZone, loaded] = await Promise.all([
     getTranslations(),
     getRequestLocale(),
+    getRequestTimeZone(),
     loadMainnetAccess(),
   ]);
-  const dateFormat = mediumDateFormat(locale);
+  const dateFormat = mediumDateFormat(locale, timeZone);
   const formatDate = (iso: string) => dateFormat.format(new Date(iso));
 
   return (

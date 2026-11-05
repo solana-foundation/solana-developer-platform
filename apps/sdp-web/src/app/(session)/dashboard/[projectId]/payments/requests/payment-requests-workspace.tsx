@@ -28,6 +28,7 @@ import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspac
 import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import {
@@ -91,6 +92,7 @@ function PaymentRequestsTable({
   onCopyLink: ((request: PaymentRequest) => void) | null;
 }) {
   const t = useTranslations();
+  const timeZone = useTimeZone();
   return (
     <div className="overflow-x-auto refresh:-mx-3">
       <Table className="min-w-[760px] rounded-none border-0">
@@ -149,7 +151,7 @@ function PaymentRequestsTable({
               <TableCell
                 className={cn(PAYMENTS_TABLE_CELL, "whitespace-nowrap text-secondary tabular-nums")}
               >
-                {formatDateTime(request.createdAt, locale)}
+                {formatDateTime(request.createdAt, locale, timeZone)}
               </TableCell>
               {onCopyLink ? (
                 <TableCell className="text-right whitespace-nowrap">

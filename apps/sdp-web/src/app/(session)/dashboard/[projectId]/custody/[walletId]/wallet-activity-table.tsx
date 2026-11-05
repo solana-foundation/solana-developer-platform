@@ -22,6 +22,7 @@ import {
 import { RowDisclosureButton } from "@/components/row-disclosure-button";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useOpenRow } from "@/lib/use-open-row";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
@@ -139,6 +140,7 @@ export function WalletActivityTable({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const detailsId = useId();
   const openRow = useOpenRow();
   const incoming = t("DashboardCustody.incoming");
@@ -226,7 +228,7 @@ export function WalletActivityTable({
                       "whitespace-nowrap text-secondary tabular-nums"
                     )}
                   >
-                    {formatDate(row.createdAt, locale) ?? "—"}
+                    {formatDate(row.createdAt, locale, timeZone) ?? "—"}
                   </TableCell>
                   <TableCell className={cn(PAYMENTS_TABLE_CELL, "text-right")}>
                     <RowDisclosureButton

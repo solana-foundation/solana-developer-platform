@@ -11,6 +11,7 @@ import {
   formatWalletMeta,
 } from "@/app/(session)/dashboard/[projectId]/custody/wallet-format-utils";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
 /**
@@ -50,6 +51,7 @@ export function ConnectionWalletsCard({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const href = useProjectHref();
 
   return (
@@ -109,7 +111,7 @@ export function ConnectionWalletsCard({
                   )}
                 </TableCell>
                 <TableCell className="hidden text-xs text-secondary @2xl/connection-wallets:table-cell">
-                  {formatCreatedDate(wallet.createdAt, locale)}
+                  {formatCreatedDate(wallet.createdAt, locale, timeZone)}
                 </TableCell>
               </TableRow>
             ))}

@@ -18,6 +18,7 @@ import {
 import { RecordBlock, RecordLine, RecordStack } from "@/components/refresh-record";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 import type { WalletPageView } from "./wallet-detail.shared";
 
@@ -136,6 +137,7 @@ function LabelBlock({ wallet }: { wallet: WalletPageView }) {
 function OwnershipBlock({ wallet }: { wallet: WalletPageView }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const { isBusy, canRunSignerCheck, runSignerCheck, lastProof } = useWalletActions({
     walletId: wallet.walletId,
     supportsSignerCheck: wallet.supportsSignerCheck,
@@ -159,7 +161,7 @@ function OwnershipBlock({ wallet }: { wallet: WalletPageView }) {
           >
             {lastProof ? (
               t("DashboardCustody.walletProofPassed", {
-                time: formatDateTime(lastProof.at, locale) ?? "",
+                time: formatDateTime(lastProof.at, locale, timeZone) ?? "",
               })
             ) : (
               <span className="text-tertiary">{t("DashboardCustody.walletProofNever")}</span>
@@ -207,6 +209,7 @@ function OwnershipBlock({ wallet }: { wallet: WalletPageView }) {
 export function WalletSettingsTab({ wallet }: { wallet: WalletPageView }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   return (
     <RecordStack>
       <LabelBlock wallet={wallet} />
@@ -224,7 +227,7 @@ export function WalletSettingsTab({ wallet }: { wallet: WalletPageView }) {
             label={t("DashboardCustody.created")}
             hint={t("DashboardCustody.walletCreatedFixedInfo")}
           >
-            {formatDate(wallet.createdAt, locale) ?? "—"}
+            {formatDate(wallet.createdAt, locale, timeZone) ?? "—"}
           </RecordLine>
         </dl>
       </RecordBlock>

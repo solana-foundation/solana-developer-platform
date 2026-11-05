@@ -13,6 +13,7 @@ import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/
 import { formatCreatedDate } from "@/app/(session)/dashboard/[projectId]/custody/wallet-format-utils";
 import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/custody/wallet-provider-mark";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { AddWalletDialog } from "./add-wallet-dialog";
 import { CancelSetupDialog } from "./cancel-setup-dialog";
 import { ConnectionCredentialsSection } from "./connection-credentials-section";
@@ -63,7 +64,10 @@ function ConnectionHeaderCard({
   t: ReturnType<typeof useTranslations>;
 }) {
   const locale = useLocale();
-  const formattedCreated = listItem ? formatCreatedDate(listItem.createdAt, locale) : null;
+  const timeZone = useTimeZone();
+  const formattedCreated = listItem
+    ? formatCreatedDate(listItem.createdAt, locale, timeZone)
+    : null;
 
   return (
     <header className="rounded-2xl border border-border-default bg-surface-raised p-6">

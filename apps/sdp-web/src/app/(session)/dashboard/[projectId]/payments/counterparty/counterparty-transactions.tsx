@@ -24,6 +24,7 @@ import { providerTransferDetailRows } from "@/app/(session)/dashboard/[projectId
 import { rampPhaseCopy } from "@/app/(session)/dashboard/[projectId]/payments/ramps/ramp-phase";
 import { MemoJsonView } from "@/app/(session)/dashboard/[projectId]/payments/wizard-summary-list";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { explorerTxUrl } from "@/lib/explorer";
 import { getRampProviderLabel, getRampProviderLogo } from "@/lib/ramps";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
@@ -82,6 +83,8 @@ function TransferDetailRows({
   onViewMemoJson: () => void;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
+  const timeZone = useTimeZone();
   const cluster = useSolanaCluster();
   const isInbound = isInboundTransfer(transfer);
   const walletAddress = isInbound ? transfer.destination : transfer.source;
@@ -182,13 +185,13 @@ function TransferDetailRows({
       {transfer.confirmedAt ? (
         <DetailRow
           label={t("DashboardPayments.ramps.completed")}
-          value={formatTimestamp(transfer.confirmedAt, t)}
+          value={formatTimestamp(transfer.confirmedAt, t, locale, timeZone)}
         />
       ) : null}
       {transfer.updatedAt ? (
         <DetailRow
           label={t("DashboardPayments.transferDetails.lastUpdated")}
-          value={formatTimestamp(transfer.updatedAt, t)}
+          value={formatTimestamp(transfer.updatedAt, t, locale, timeZone)}
         />
       ) : null}
     </div>
@@ -208,6 +211,7 @@ export function TransferDetailModal({
   const cluster = useSolanaCluster();
   const [memoJsonOpen, setMemoJsonOpen] = useState(false);
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const isInbound = isInboundTransfer(transfer);
   const signature = transfer.signature;
   const flow = resolveTransferFlow(transfer);
@@ -230,7 +234,9 @@ export function TransferDetailModal({
               {formatPaymentTransferType(transfer.type, t)}
             </h2>
             {transfer.createdAt ? (
-              <p className="text-sm text-secondary">{formatTimestamp(transfer.createdAt, t)}</p>
+              <p className="text-sm text-secondary">
+                {formatTimestamp(transfer.createdAt, t, locale, timeZone)}
+              </p>
             ) : null}
           </div>
           <TransferStatusBadge status={transfer.status} />

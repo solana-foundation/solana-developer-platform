@@ -11,7 +11,7 @@ import {
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
 import { resolvePlaygroundApiBaseUrl } from "@/app/(session)/dashboard/[projectId]/playground-api-data";
 import { SolanaQrCode } from "@/components/solana-qr-code";
-import { getRequestLocale, getTranslations } from "@/i18n/server";
+import { getRequestLocale, getRequestTimeZone, getTranslations } from "@/i18n/server";
 import { findPublicSdpApiBaseUrl } from "@/lib/sdp-api-base-url";
 import { PayStatusWatch } from "./pay-status-watch";
 
@@ -82,6 +82,7 @@ function isRenderablePayUrl(value: string): boolean {
 export default async function PayPage({ params }: { params: Promise<{ token: string }> }) {
   const t = await getTranslations();
   const locale = await getRequestLocale();
+  const timeZone = await getRequestTimeZone();
   const { token } = await params;
   const apiBaseUrl = resolvePlaygroundApiBaseUrl();
   if (!apiBaseUrl) {
@@ -162,7 +163,7 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
               label={t("Shared.pay.expires")}
               value={
                 request.expiresAt
-                  ? formatTimestamp(request.expiresAt, t, locale)
+                  ? formatTimestamp(request.expiresAt, t, locale, timeZone)
                   : t("Shared.pay.noExpiry")
               }
             />
