@@ -16,6 +16,13 @@ import {
   useTransition,
 } from "react";
 import { SWRConfig } from "swr";
+import {
+  clearOrganizationSwitch,
+  requestedOrganizationSwitch,
+  requestOrganizationSwitch,
+  settleOrganizationSwitch,
+  settleOrganizationSwitchOnRender,
+} from "@/contexts/requested-organization-switch";
 import type { DashboardFlags } from "@/flags/dashboard";
 import type { DashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
@@ -24,11 +31,6 @@ import { projectHref } from "@/lib/dashboard-project-path";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { readDashboardTabFromUrl, useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { setIdempotencyKeyScope } from "@/lib/idempotency-key-store";
-import {
-  clearOrganizationSwitch,
-  requestedOrganizationSwitch,
-  requestOrganizationSwitch,
-} from "@/lib/requested-organization-switch";
 import { useDashboardPathname, useProjectId } from "@/lib/use-dashboard-project";
 import { shouldClearDashboardTabAfterPathnameChange } from "./dashboard-workspace-url-state";
 
@@ -156,6 +158,7 @@ export function DashboardWorkspaceProvider({
       requestOrganizationSwitch(organizationId);
       try {
         await setActive({ organization: organizationId });
+        settleOrganizationSwitch(organizationId);
       } catch (error) {
         clearOrganizationSwitch();
         throw error;
@@ -173,9 +176,7 @@ export function DashboardWorkspaceProvider({
     if (dashboardScopeIsFresh) {
       // Clerk and the server agree again: a later mismatch is a new one.
       alignedOrganizationIdRef.current = null;
-      if (requestedOrganizationSwitch() === serverDashboardCacheScope.orgId) {
-        clearOrganizationSwitch();
-      }
+      settleOrganizationSwitchOnRender(serverDashboardCacheScope.orgId);
       return;
     }
     const requestedOrganizationId = requestedOrganizationSwitch();
