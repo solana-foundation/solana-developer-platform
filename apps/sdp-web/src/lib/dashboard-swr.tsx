@@ -13,6 +13,7 @@ import { readApiErrorMessage } from "@/lib/api-error";
 import { dashboardReadRequest } from "@/lib/dashboard-fetch";
 import {
   type DashboardKeyScope,
+  type DashboardPostReadKey,
   type DashboardRequestKey,
   dashboardRequestUrl,
   isDashboardRequestKey,
@@ -86,13 +87,13 @@ export async function readDashboardRequest<Schema extends z.ZodType>(
  * would send the same request.
  */
 export async function readDashboardPostRequest<Schema extends z.ZodType>(
-  key: DashboardRequestKey,
+  key: DashboardPostReadKey,
   schema: Schema
 ): Promise<z.infer<Schema>> {
   const response = await dashboardReadRequest(
     key[2],
     { projectId: key[0], demo: key[1] === "demo" },
-    key[3] ?? {}
+    key[3]
   );
   return parseDashboardRead(response, schema);
 }

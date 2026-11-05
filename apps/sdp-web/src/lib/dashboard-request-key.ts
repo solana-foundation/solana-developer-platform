@@ -33,6 +33,17 @@ export function dashboardRequestKey(
     : [scope.projectId, scope.mode, path, params];
 }
 
+/** A POST read's key: its params are the JSON body, so they are required. */
+export type DashboardPostReadKey = Extract<DashboardRequestKey, { length: 4 }>;
+
+export function dashboardPostReadKey(
+  scope: DashboardKeyScope,
+  path: `/api/${string}`,
+  params: DashboardRequestParams
+): DashboardPostReadKey {
+  return [scope.projectId, scope.mode, path, params];
+}
+
 export function isDashboardRequestKey(key: unknown): key is DashboardRequestKey {
   return (
     Array.isArray(key) &&
