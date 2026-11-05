@@ -35,22 +35,23 @@ describe("GET /api/dashboard/payments/transfers", () => {
     mocks.proxyToSdpApi.mockResolvedValue(new Response(null, { status: 204 }));
   });
 
-  it.each(["?custodyWalletId=cwlt_1&includeObserved=true", "?wallet=provider-wallet"])(
-    "passes the filtered query %s straight to the SDP API to accept or reject",
-    async (query) => {
-      const request = new Request(
-        `https://dashboard.example/api/dashboard/payments/transfers${query}`
-      );
+  it.each([
+    "?custodyWalletId=cwlt_1&includeObserved=true",
+    "?wallet=provider-wallet",
+    "?includeObserved=false&page=1&pageSize=5&type=onramp%2Cofframp",
+  ])("passes the filtered query %s straight to the SDP API to accept or reject", async (query) => {
+    const request = new Request(
+      `https://dashboard.example/api/dashboard/payments/transfers${query}`
+    );
 
-      await GET(request);
+    await GET(request);
 
-      expect(mocks.proxyToSdpApi).toHaveBeenCalledWith({
-        request,
-        traceSource: "route.dashboard.payments.transfers.get",
-        path: `/v1/payments/transfers${query}`,
-      });
-    }
-  );
+    expect(mocks.proxyToSdpApi).toHaveBeenCalledWith({
+      request,
+      traceSource: "route.dashboard.payments.transfers.get",
+      path: `/v1/payments/transfers${query}`,
+    });
+  });
 
   it("refuses the unfiltered aggregate without the tab's Project header", async () => {
     mocks.proxyFailure.mockReturnValue(new Response(null, { status: 400 }));

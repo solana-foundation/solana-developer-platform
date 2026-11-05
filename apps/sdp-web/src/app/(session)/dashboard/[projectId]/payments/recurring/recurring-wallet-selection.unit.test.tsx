@@ -18,7 +18,10 @@ import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navigation";
 import { RecurringPaymentCreateWorkspace } from "./recurring-payment-create-workspace";
-import { RecurringPaymentDetailWorkspace } from "./recurring-payment-detail-workspace";
+import {
+  RecurringPaymentDetailRoute,
+  RecurringPaymentDetailWorkspace,
+} from "./recurring-payment-detail-workspace";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
@@ -45,6 +48,7 @@ const source: PaymentsDashboardWallet = {
   walletId: "privy_shared",
   publicKey: "11111111111111111111111111111111",
   label: "Treasury",
+  custodyConfigId: "ccfg_test",
   isRuntimeExecutionAllowed: true,
   balances: [{ token: "USDC", mint: MINT, amount: "10000000", uiAmount: "10", decimals: 6 }],
 };
@@ -119,84 +123,35 @@ afterEach(() => {
 });
 
 describe("Recurring Payment exact source selection", () => {
-  it("does not carry a previous wallet preload into another Project's inventory", async () => {
-    let inventory = [source];
-    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
-      if (String(input).includes("/wallets?"))
-        return Response.json({ data: { wallets: inventory } });
-      return Response.json({
-        data: { counterparties: [counterparty], accounts: [account], total: 1 },
-      });
-    });
-    const first = render(
-      <RecurringPaymentCreateWorkspace
-        wallets={[source]}
-        walletsError={null}
-        issuedTokenSymbolsByMint={{}}
-        issuedTokensByMint={{}}
-        counterpartiesResult={{ ok: true, data: [counterparty] }}
-      />,
-      { wrapper }
-    );
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Contact" }));
-    await user.click(screen.getByRole("button", { name: /Receiver/ }));
-    first.unmount();
-
-    const other = { ...source, id: "cwlt_other_project", label: "Other Project" };
-    inventory = [other];
-    render(
-      <RecurringPaymentDetailWorkspace
-        recurringPayment={{
-          ...recurring,
-          projectId: "proj_other",
-          sourceCustodyWalletId: other.id,
-        }}
-        wallet={other}
-        wallets={[other]}
-        issuedTokensByMint={{}}
-        counterpartyAccounts={[account]}
-        counterpartyLabel="Receiver"
-        collectionAttempts={[]}
-        collectionAttemptsTotal={0}
-      />,
-      { wrapper }
-    );
-    await user.click(screen.getByRole("button", { name: "Edit" }));
-    await user.click(screen.getByRole("button", { name: "Funding wallet" }));
-    expect(await screen.findByRole("button", { name: /Other Project/ })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Treasury/ })).toBeNull();
-  });
-
   it("saves a pending payment with a Connection wallet even when signing is unavailable", async () => {
-    const unavailable = { ...source, isRuntimeExecutionAllowed: false };
+    const unavailable: PaymentsDashboardWallet = {
+      id: source.id,
+      walletId: source.walletId,
+      publicKey: source.publicKey,
+      label: source.label,
+      custodyConnectionId: "ccon_test",
+      isRuntimeExecutionAllowed: false,
+      balances: source.balances,
+    };
     const writes: unknown[] = [];
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).includes("/wallets?"))
         return Response.json({ data: { wallets: [unavailable] } });
-      if (String(input).includes("/accounts?"))
-        return Response.json({ data: { accounts: [account] } });
       if (init?.method === "POST") writes.push(JSON.parse(String(init.body)));
       return Response.json({
         data: {
           counterparties: [counterparty],
+          accounts: [account],
           total: 1,
+          page: 1,
+          pageSize: 100,
           recurringPayment: { ...recurring, status: "pending_activation" },
         },
       });
     });
-    render(
-      <RecurringPaymentCreateWorkspace
-        wallets={[unavailable]}
-        walletsError={null}
-        issuedTokenSymbolsByMint={{}}
-        issuedTokensByMint={{}}
-        counterpartiesResult={{ ok: true, data: [counterparty] }}
-      />,
-      { wrapper }
-    );
+    render(<RecurringPaymentCreateWorkspace issuanceEnabled={false} />, { wrapper });
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Contact" }));
+    await user.click(await screen.findByRole("button", { name: "Contact" }));
     await user.click(screen.getByRole("button", { name: /Receiver/ }));
     // The contact's only Solana address is the destination; no field asks for it.
     await user.click(screen.getByRole("button", { name: "Source wallet" }));
@@ -335,6 +290,21 @@ describe("Recurring Payment exact source selection", () => {
     );
     expect(await screen.findAllByText("Select a currency.")).toHaveLength(2);
     expect(writes).toEqual([]);
+  });
+});
+
+describe("Recurring Payment detail read", () => {
+  it("shows the Project's not-found page for a schedule the API does not hold", async () => {
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) =>
+      String(input).startsWith("/api/dashboard/payments/recurring-payments/prp_test")
+        ? Response.json({ error: { message: "Recurring payment not found" } }, { status: 404 })
+        : Response.json({ data: { wallets: [source] } })
+    );
+    render(<RecurringPaymentDetailRoute recurringPaymentId="prp_test" issuanceEnabled={false} />, {
+      wrapper,
+    });
+
+    expect(await screen.findByRole("link", { name: "Back to Overview" })).toBeTruthy();
   });
 });
 

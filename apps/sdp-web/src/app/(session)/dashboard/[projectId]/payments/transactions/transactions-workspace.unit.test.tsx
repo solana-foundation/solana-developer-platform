@@ -4,42 +4,21 @@ import {
   UNIFIED_TRANSACTION_MODULES,
   type UnifiedTransactionModule,
 } from "@sdp/types/unified-transactions";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { sentDashboardReads, stubDashboardFetch } from "@/test/dashboard-fetch";
+import { DashboardReadsProvider } from "@/test/dashboard-reads";
+import { EnglishI18n } from "@/test/i18n";
+import { stubMatchMedia } from "@/test/media-queries";
 import { enabledPaymentTransactionKinds } from "./transaction-modules";
 import type { TransactionFilters } from "./transactions-query";
 import { TransactionsWorkspace } from "./transactions-workspace";
-
-// jsdom implements no matchMedia, while the workspace's motion components read
-// it through useReducedMotion.
-if (!window.matchMedia) {
-  window.matchMedia = ((query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    addListener: () => {},
-    removeListener: () => {},
-    dispatchEvent: () => false,
-  })) as unknown as typeof window.matchMedia;
-}
 
 const replace = vi.fn();
 
 vi.mock("@/lib/dashboard-url-state", () => ({
   replaceDashboardSearchParams: (updates: Record<string, string | null>) => replace(updates),
-}));
-vi.mock("@/lib/dashboard-fetch", () => ({
-  dashboardFetch: async () => ({
-    ok: true,
-    data: { data: { transactions: [], nextCursor: null } },
-    status: 200,
-  }),
 }));
 vi.mock("@/lib/use-solana-cluster", () => ({ useSolanaCluster: () => "devnet" }));
 vi.mock("next/navigation", () => ({
@@ -74,31 +53,69 @@ vi.mock("@sdp/ui/filter-menu", () => ({
   ),
 }));
 
+const reads = { walletsFail: false };
+
+function serveReads() {
+  return stubDashboardFetch(({ path }) => {
+    if (path.startsWith("/api/dashboard/wallets")) {
+      return reads.walletsFail
+        ? Response.json({ error: { message: "unavailable" } }, { status: 503 })
+        : Response.json({
+            data: {
+              wallets: [
+                {
+                  id: "cwlt_1",
+                  walletId: "wallet_1",
+                  label: "Treasury",
+                  publicKey: "Pub111",
+                  custodyConfigId: "ccfg_test",
+                  isRuntimeExecutionAllowed: true,
+                },
+              ],
+            },
+          });
+    }
+    if (path.startsWith("/api/dashboard/counterparty?")) {
+      return Response.json({
+        data: {
+          counterparties: [{ id: "cpty_42", displayName: "Acme Treasury", entityType: "business" }],
+          total: 1,
+        },
+      });
+    }
+    return Response.json({ data: { transactions: [], nextCursor: null } });
+  });
+}
+
 function renderWorkspace(
   filters: TransactionFilters,
   modules: readonly UnifiedTransactionModule[]
 ) {
-  return render(
-    <SWRConfig value={{ provider: () => new Map() }}>
-      <I18nProvider locale="en" messages={getMessages("en")}>
+  const fetchMock = serveReads();
+  const view = render(
+    <EnglishI18n>
+      <DashboardReadsProvider>
         <TransactionsWorkspace
           initialFilters={filters}
-          initialResult={{ transactions: [], nextCursor: null }}
-          issuedTokensByMint={{}}
-          wallets={[{ id: "cwlt_1", label: "Treasury", publicKey: "Pub111" }]}
-          counterparties={[{ id: "cpty_42", name: "Acme Treasury" }]}
+          issuanceEnabled={false}
           modules={modules}
           paymentKinds={enabledPaymentTransactionKinds({ ramps: true })}
         />
-      </I18nProvider>
-    </SWRConfig>
+      </DashboardReadsProvider>
+    </EnglishI18n>
   );
+  return { ...view, fetchMock };
 }
 
 beforeEach(() => {
   replace.mockReset();
+  reads.walletsFail = false;
+  stubMatchMedia();
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("TransactionsWorkspace", () => {
   it("commits a search only once it has three characters", () => {
@@ -118,10 +135,10 @@ describe("TransactionsWorkspace", () => {
     );
   });
 
-  it("names an active contact filter and clears it from its chip", () => {
+  it("names an active contact filter and clears it from its chip", async () => {
     renderWorkspace({ counterpartyId: "cpty_42", cursors: [] }, UNIFIED_TRANSACTION_MODULES);
 
-    expect(screen.getByText("Acme Treasury")).toBeDefined();
+    expect(await screen.findByText("Acme Treasury")).toBeDefined();
     act(() => fireEvent.click(screen.getByLabelText("Clear Contact filter")));
     expect(replace).toHaveBeenLastCalledWith(expect.objectContaining({ counterpartyId: null }));
   });
@@ -141,6 +158,31 @@ describe("TransactionsWorkspace", () => {
       ...container.querySelectorAll('[data-filter-section="type"] [data-filter-option]'),
     ].map((option) => option.getAttribute("data-filter-option")?.split(":")[0]);
     expect(new Set(types)).toEqual(new Set(["payments"]));
+  });
+
+  it("loads each filter's options on its own, and retries only the one that failed", async () => {
+    reads.walletsFail = true;
+    const { container, fetchMock } = renderWorkspace({ cursors: [] }, UNIFIED_TRANSACTION_MODULES);
+    const section = (id: string) => {
+      const element = container.querySelector<HTMLElement>(`[data-filter-section="${id}"]`);
+      if (element === null) throw new Error(`no ${id} filter`);
+      return within(element);
+    };
+    const contactReads = () =>
+      sentDashboardReads(fetchMock).filter((read) =>
+        read.path.startsWith("/api/dashboard/counterparty?")
+      );
+
+    expect(section("contact").getByText("Loading options…")).toBeDefined();
+    expect(section("token").queryByText("Loading options…")).toBeNull();
+    expect(await section("wallet").findByText("These options did not load.")).toBeDefined();
+    await waitFor(() => expect(section("contact").getByLabelText("Acme Treasury")).toBeDefined());
+
+    reads.walletsFail = false;
+    act(() => fireEvent.click(section("wallet").getByRole("button", { name: "Retry" })));
+
+    expect(await section("wallet").findByLabelText("Treasury")).toBeDefined();
+    expect(contactReads()).toHaveLength(1);
   });
 
   it("writes a new page size and restarts on the first page", () => {

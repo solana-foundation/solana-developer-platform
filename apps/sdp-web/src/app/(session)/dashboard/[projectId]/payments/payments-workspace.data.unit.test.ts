@@ -1,13 +1,15 @@
 import type { Counterparty } from "@sdp/types/counterparties";
 import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DashboardReadError } from "@/lib/dashboard-swr";
+import { SANDBOX_PROJECT } from "@/test/projects";
 import { setWindowPathname } from "@/test/window-location";
+import { paymentsQueryKeys } from "./payments-query-key";
 import {
   counterpartyListComplete,
   createTransfer,
   createTransferBatch,
-  estimateTransferBatch,
-  fetchRampEstimates,
+  readRampEstimates,
   TransferRequestError,
 } from "./payments-workspace.data";
 
@@ -98,31 +100,25 @@ describe("Payments write requests", () => {
     expect(refusal).toMatchObject({ status: 422, message: "Insufficient balance" });
   });
 
-  it("uses the exact custody wallet id for batch estimate and create", async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse({ data: { estimate: { transactionCount: 1 } } }))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: { batch: { id: "batch_1" }, recipients: [], transfers: [] },
-        })
-      );
-    vi.stubGlobal("fetch", fetch);
-    const request = {
-      sourceCustodyWalletId: "cwlt_1",
-      token: "mint",
-      recipients: [{ counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount: "1" }],
-    };
+  it("uses the exact custody wallet id for a batch create", async () => {
+    const bodies: unknown[] = [];
+    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return jsonResponse({ data: { batch: { id: "batch_1" }, recipients: [], transfers: [] } });
+    });
 
-    await estimateTransferBatch(request, t);
-    await createTransferBatch(request, t, { value: "idem_batch_1", persisted: true });
-
-    for (const [, init] of fetch.mock.calls) {
-      expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+    await createTransferBatch(
+      {
         sourceCustodyWalletId: "cwlt_1",
-      });
-      expect(JSON.parse(String((init as RequestInit).body))).not.toHaveProperty("source");
-    }
+        token: "mint",
+        recipients: [{ counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount: "1" }],
+      },
+      t,
+      { value: "idem_batch_1", persisted: true }
+    );
+
+    expect(bodies).toEqual([expect.objectContaining({ sourceCustodyWalletId: "cwlt_1" })]);
+    expect(bodies[0]).not.toHaveProperty("source");
   });
 
   it("surfaces a disabled batch movement with the API's actionable refusal", async () => {
@@ -161,16 +157,13 @@ describe("Payments write requests", () => {
   });
 });
 
-describe("fetchRampEstimates", () => {
-  beforeEach(() => setWindowPathname("/dashboard/prj_test_sandbox/payments/deposit"));
+describe("readRampEstimates", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  const request = {
-    direction: "onramp",
-    assetRail: "sol.solana",
-    fiatCurrency: "USD",
-    amount: "25",
-  } as const;
+  const request = paymentsQueryKeys.rampEstimate(
+    { projectId: SANDBOX_PROJECT.id, mode: "live" },
+    { direction: "onramp", assetRail: "sol.solana", fiatCurrency: "USD", amount: "25" }
+  );
   const estimate = {
     provider: "stripe",
     direction: "onramp",
@@ -198,7 +191,7 @@ describe("fetchRampEstimates", () => {
       )
     );
 
-    expect(await fetchRampEstimates(request, t)).toEqual([
+    expect(await readRampEstimates(request, t)).toEqual([
       {
         provider: "moonpay",
         status: "error",
@@ -225,7 +218,7 @@ describe("fetchRampEstimates", () => {
       )
     );
 
-    expect(await fetchRampEstimates(request, t)).toEqual([
+    expect(await readRampEstimates(request, t)).toEqual([
       outOfRange,
       { provider: "stripe", status: "unsupported" },
     ]);
@@ -239,9 +232,7 @@ describe("fetchRampEstimates", () => {
       )
     );
 
-    await expect(fetchRampEstimates(request, t)).rejects.toThrow(
-      "DashboardPayments.workspace.rampEstimateMissing"
-    );
+    await expect(readRampEstimates(request, t)).rejects.toBeInstanceOf(DashboardReadError);
   });
 
   it.each([{ totalFiatAmount: "26,02" }, { fees: { currency: "USD", total: "1.02 USD" } }])(
@@ -260,9 +251,7 @@ describe("fetchRampEstimates", () => {
         )
       );
 
-      await expect(fetchRampEstimates(request, t)).rejects.toThrow(
-        "DashboardPayments.workspace.rampEstimateMissing"
-      );
+      await expect(readRampEstimates(request, t)).rejects.toBeInstanceOf(DashboardReadError);
     }
   );
 });

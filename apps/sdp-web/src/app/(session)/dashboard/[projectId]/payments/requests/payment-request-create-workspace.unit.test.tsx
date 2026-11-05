@@ -5,7 +5,6 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
-import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getMessages } from "@/i18n/messages";
@@ -14,6 +13,7 @@ import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { PaymentsDemoProvider } from "@/lib/payments-demo/payments-demo-context";
 import { stubClipboard } from "@/test/clipboard";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { DashboardReadsProvider } from "@/test/dashboard-reads";
 import { createdRequestLinkCopied, forgetCreatedRequestLink } from "./created-request-link";
 import { PaymentRequestCreateWorkspace } from "./payment-request-create-workspace";
 import { deriveTokenOptions } from "./payment-requests-page.data";
@@ -40,13 +40,32 @@ const wallet: PaymentsDashboardWallet = {
   walletId: "wallet_treasury",
   publicKey: "11111111111111111111111111111111",
   label: "Treasury",
+  custodyConfigId: "ccfg_test",
   isRuntimeExecutionAllowed: true,
 };
+
+/** Answers the wallet read with `wallets`; every other request goes to `send`. */
+function serveWallets(
+  wallets: readonly PaymentsDashboardWallet[] | null,
+  send: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+) {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (!String(input).startsWith("/api/dashboard/wallets")) return send(input, init);
+    return wallets === null
+      ? Response.json({ error: { message: "unavailable" } }, { status: 503 })
+      : Response.json({ data: { wallets } });
+  });
+}
+
+async function renderCreate() {
+  render(<PaymentRequestCreateWorkspace />, { wrapper });
+  await screen.findByRole("textbox", { name: "Amount" });
+}
 
 function wrapper({ children }: { children: ReactNode }) {
   return (
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>{children}</SWRConfig>
+      <DashboardReadsProvider>{children}</DashboardReadsProvider>
     </I18nProvider>
   );
 }
@@ -68,14 +87,27 @@ afterEach(() => {
 });
 
 describe("New request page", () => {
-  it("says there is nowhere to be paid into when the project has no wallet", () => {
-    render(<PaymentRequestCreateWorkspace wallets={[]} walletsError={null} />, { wrapper });
+  it("says there is nowhere to be paid into when the project has no wallet", async () => {
+    serveWallets([], () => Promise.reject(new Error("not sent")));
+    render(<PaymentRequestCreateWorkspace />, { wrapper });
 
-    expect(screen.getByText("There is no wallet to be paid into")).toBeTruthy();
+    expect(await screen.findByText("There is no wallet to be paid into")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Open Wallets" }).getAttribute("href")).toBe(
       "/dashboard/prj_test_sandbox/wallets"
     );
     expect(screen.queryByRole("button", { name: "Create and copy link" })).toBeNull();
+  });
+
+  it("says the wallets did not load, and reads them again on Try again", async () => {
+    serveWallets(null, () => Promise.reject(new Error("not sent")));
+    render(<PaymentRequestCreateWorkspace />, { wrapper });
+
+    const retry = await screen.findByRole("button", { name: "Try again" });
+    expect(screen.getByText("Couldn't load your wallets")).toBeTruthy();
+    serveWallets([wallet], () => Promise.reject(new Error("not sent")));
+    await userEvent.click(retry);
+
+    expect(await screen.findByRole("textbox", { name: "Amount" })).toBeTruthy();
   });
 
   it("creates the request, copies its link from inside the press and opens the request", async () => {
@@ -87,9 +119,9 @@ describe("New request page", () => {
         answer = resolve;
       });
     });
-    vi.stubGlobal("fetch", send);
+    serveWallets([wallet], send);
     const success = vi.spyOn(toast, "success");
-    render(<PaymentRequestCreateWorkspace wallets={[wallet]} walletsError={null} />, { wrapper });
+    await renderCreate();
     const user = userEvent.setup();
     const clipboard = stubClipboard("writes");
     const create = () => screen.getByRole("button", { name: "Create and copy link" });
@@ -171,11 +203,11 @@ describe("New request page", () => {
     const clipboard = stubClipboard("writes");
     render(
       <PaymentsDemoProvider value>
-        <PaymentRequestCreateWorkspace wallets={[wallet]} walletsError={null} />
+        <PaymentRequestCreateWorkspace />
       </PaymentsDemoProvider>,
       { wrapper }
     );
-    await user.click(screen.getByRole("button", { name: "Destination wallet" }));
+    await user.click(await screen.findByRole("button", { name: "Destination wallet" }));
     await user.click(screen.getByRole("button", { name: /Treasury/ }));
     await createLater(user, sends, 0);
 
@@ -192,7 +224,7 @@ describe("New request page", () => {
   // body under a new key, and a first attempt that did create could be repeated.
   it("resends the first attempt's expiry and key when the user retries", async () => {
     const sends: { body: z.infer<typeof sentCreateBodySchema>; key: string | null }[] = [];
-    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
+    serveWallets([wallet], async (_input, init) => {
       sends.push({
         body: sentCreateBodySchema.parse(JSON.parse(String(init?.body))),
         key: new Headers(init?.headers).get("Idempotency-Key"),
@@ -200,7 +232,7 @@ describe("New request page", () => {
       if (sends.length === 1) throw new TypeError("network down");
       return Response.json({ data: { id: "preq_1", publicToken: "tok_1" } });
     });
-    render(<PaymentRequestCreateWorkspace wallets={[wallet]} walletsError={null} />, { wrapper });
+    await renderCreate();
     const user = userEvent.setup();
     const create = () => screen.getByRole("button", { name: "Create and copy link" });
 
@@ -237,7 +269,7 @@ describe("New request page", () => {
   /** Records each create's body and key; the answers are given in order. */
   function recordSends(...answers: ("lost" | "outcome_unknown" | number)[]) {
     const sends: RecordedSend[] = [];
-    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
+    serveWallets([wallet], async (_input, init) => {
       sends.push({
         body: sentCreateBodySchema.parse(JSON.parse(String(init?.body))),
         key: new Headers(init?.headers).get("Idempotency-Key"),
@@ -259,7 +291,7 @@ describe("New request page", () => {
 
   /** Fills the form for `amount` with a one-hour expiry. */
   async function fillRequest(user: ReturnType<typeof userEvent.setup>, amount: string) {
-    render(<PaymentRequestCreateWorkspace wallets={[wallet]} walletsError={null} />, { wrapper });
+    await renderCreate();
     await user.type(screen.getByRole("textbox", { name: "Amount" }), amount);
     await user.click(screen.getByRole("button", { name: "Destination wallet" }));
     await user.click(screen.getByRole("button", { name: /Treasury/ }));
@@ -360,10 +392,10 @@ describe("New request page", () => {
   });
 
   it("frees the form when creating the link throws", async () => {
-    vi.stubGlobal("fetch", async () => {
+    serveWallets([wallet], async () => {
       throw new Error("offline");
     });
-    render(<PaymentRequestCreateWorkspace wallets={[wallet]} walletsError={null} />, { wrapper });
+    await renderCreate();
     const user = userEvent.setup();
     const create = () => screen.getByRole("button", { name: "Create and copy link" });
 
@@ -378,7 +410,8 @@ describe("New request page", () => {
   });
 
   it("keeps create off for an amount the API would refuse", async () => {
-    render(<PaymentRequestCreateWorkspace wallets={[wallet]} walletsError={null} />, { wrapper });
+    serveWallets([wallet], () => Promise.reject(new Error("not sent")));
+    await renderCreate();
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Destination wallet" }));
     await user.click(screen.getByRole("button", { name: /Treasury/ }));
