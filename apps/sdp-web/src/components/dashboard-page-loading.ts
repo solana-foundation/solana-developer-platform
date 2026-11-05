@@ -1,12 +1,12 @@
 "use client";
 
 import type { ComponentType } from "react";
-import DashboardLoading from "@/app/(session)/dashboard/[projectId]/(home)/loading";
 import AllowlistLoading from "@/app/(session)/dashboard/[projectId]/allowlist/loading";
 import ApiKeyEditLoading from "@/app/(session)/dashboard/[projectId]/api-keys/[keyId]/edit/loading";
 import { ApiKeysListSkeleton } from "@/app/(session)/dashboard/[projectId]/api-keys/api-key-page-skeletons";
 import ApiKeyNewLoading from "@/app/(session)/dashboard/[projectId]/api-keys/new/loading";
 import { HeliusRingsSkeleton } from "@/app/(session)/dashboard/[projectId]/helius-rings/helius-rings-skeleton";
+import { HomePageSkeleton } from "@/app/(session)/dashboard/[projectId]/home-page-skeleton";
 import {
   IntegrationDetailSkeleton,
   IntegrationsFlagsSkeleton,
@@ -72,7 +72,7 @@ function resolveCurrentPageLoadingComponent(
 ): ComponentType<PageLoadingProps> {
   switch (route) {
     case "home":
-      return DashboardLoading;
+      return HomePageSkeleton;
     case "integrations":
       return IntegrationsFlagsSkeleton;
     case "integration-detail":
