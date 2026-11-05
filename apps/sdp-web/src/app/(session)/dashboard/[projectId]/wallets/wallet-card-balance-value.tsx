@@ -7,7 +7,7 @@ import {
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
 import { useWalletSummaries } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
 import { useTranslations } from "@/i18n/provider";
-import { useWalletBalances } from "./custody-reads";
+import { useWalletBalances, WALLET_BALANCE_REFRESH } from "./custody-reads";
 
 /**
  * A wallet's total from the one read of every wallet's balances that all the cards share. A
@@ -15,7 +15,10 @@ import { useWalletBalances } from "./custody-reads";
  */
 export function WalletCardBalanceValue({ walletId }: { walletId: string }) {
   const t = useTranslations();
-  const { data: batchWallets, error: batchError } = useWalletSummaries({ includeBalances: true });
+  const { data: batchWallets, error: batchError } = useWalletSummaries(
+    { includeBalances: true },
+    WALLET_BALANCE_REFRESH
+  );
   const batchBalances = batchWallets?.find((wallet) => wallet.walletId === walletId)?.balances;
   const batchFailed =
     batchError !== undefined || (batchWallets !== undefined && batchBalances === undefined);

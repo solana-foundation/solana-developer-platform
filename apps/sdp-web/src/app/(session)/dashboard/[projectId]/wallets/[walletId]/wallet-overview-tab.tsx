@@ -20,7 +20,7 @@ import {
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-table";
 import { UnpricedHoldingsHint } from "@/app/(session)/dashboard/[projectId]/payments/unpriced-holdings-hint";
 import {
-  useIssuedTokenNames,
+  useIssuedTokensByMint,
   useWalletBalances,
   useWalletSymbols,
 } from "@/app/(session)/dashboard/[projectId]/wallets/custody-reads";
@@ -225,7 +225,7 @@ function TokensTable({
   const locale = useLocale();
   const projectHref = useProjectHref();
   const { data: balances, error, mutate } = useWalletBalances(walletId);
-  const issuedTokens = useIssuedTokenNames(issuanceEnabled);
+  const issuedTokens = useIssuedTokensByMint(issuanceEnabled);
   const issuedSettled =
     !issuanceEnabled || issuedTokens.data !== undefined || issuedTokens.error !== undefined;
   if (balances === undefined) {

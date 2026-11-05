@@ -1,5 +1,6 @@
 "use client";
 
+import type { CustodyWalletSummary } from "@sdp/types/custody";
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { ListEmptyState } from "@sdp/ui/list-empty-state";
@@ -36,7 +37,7 @@ import { useDashboardTab, useDashboardUrlState } from "@/lib/dashboard-url-state
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useDebounce } from "@/lib/use-debounce";
 import { syncWalletFavorites, type WalletFavorite } from "@/lib/wallet-favorites";
-import type { CustodyWalletListItem, useCustodyWallets } from "./custody-reads";
+import { type useCustodyWallets, WALLET_BALANCE_REFRESH } from "./custody-reads";
 import { useWalletFavoriteToggle } from "./use-wallet-favorite-toggle";
 import { WalletActionsMenu } from "./wallet-actions-menu";
 import { WalletFavoriteButton } from "./wallet-favorite-button";
@@ -66,7 +67,7 @@ const REFRESHED_AT_FORMAT: Intl.DateTimeFormatOptions = { dateStyle: "medium", t
 const WALLET_SEARCH_THRESHOLD = 6;
 
 interface WalletItem {
-  wallet: CustodyWalletListItem;
+  wallet: CustodyWalletSummary;
   provider: KnownCustodyProvider | null;
   name: string;
   /** "Transfers · Fireblocks": the purpose, when it has one, then the provider. */
@@ -75,7 +76,7 @@ interface WalletItem {
 }
 
 function toWalletItem(
-  wallet: CustodyWalletListItem,
+  wallet: CustodyWalletSummary,
   t: ReturnType<typeof useTranslations>,
   projectHref: (dashboardPath: string) => string
 ): WalletItem {
@@ -338,7 +339,10 @@ function WalletsToolbar({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const { data, error, isValidating, mutate } = useWalletSummaries({ includeBalances: true });
+  const { data, error, isValidating, mutate } = useWalletSummaries(
+    { includeBalances: true },
+    WALLET_BALANCE_REFRESH
+  );
   const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
   const refreshedAtFormat = useMemo(
     () => new Intl.DateTimeFormat(locale, REFRESHED_AT_FORMAT),

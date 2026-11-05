@@ -3,7 +3,6 @@
 import { Button } from "@sdp/ui/button";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
-import { useRouter } from "next/navigation";
 import { type FormEvent, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
@@ -29,7 +28,6 @@ const LABEL_MAX_LENGTH = 100;
 function LabelBlock({ wallet }: { wallet: WalletPageView }) {
   const t = useTranslations();
   const { flags } = useDashboardWorkspace();
-  const router = useRouter();
   const refreshWalletInventory = useWalletInventoryRefresh();
   const saved = wallet.label ?? "";
   const [draft, setDraft] = useState(saved);
@@ -60,8 +58,6 @@ function LabelBlock({ wallet }: { wallet: WalletPageView }) {
           position: "bottom-right",
         });
         refreshWalletInventory();
-        // The wallet's record heads the page from the server.
-        router.refresh();
         return;
       }
       toast.error(t("DashboardCustody.unableToUpdateWalletLabel"), {

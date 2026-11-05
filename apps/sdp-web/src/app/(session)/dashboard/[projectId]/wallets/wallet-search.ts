@@ -1,10 +1,5 @@
 import type { CustodyWalletSummary } from "@sdp/types/custody";
 
-type SearchableWallet = Pick<
-  CustodyWalletSummary,
-  "label" | "walletId" | "publicKey" | "provider" | "purpose"
-> & { status: string };
-
 export const WALLET_SEARCH_QUERY_PARAM = "query";
 export const WALLET_SEARCH_MAX_LENGTH = 200;
 
@@ -12,10 +7,10 @@ export function normalizeWalletSearchQuery(query: string): string {
   return query.trim().replace(/\s+/g, " ").slice(0, WALLET_SEARCH_MAX_LENGTH);
 }
 
-export function filterWallets<Wallet extends SearchableWallet>(
-  wallets: Wallet[],
+export function filterWallets(
+  wallets: CustodyWalletSummary[],
   query: string
-): Wallet[] {
+): CustodyWalletSummary[] {
   const tokens = normalizeWalletSearchQuery(query).toLocaleLowerCase().split(" ").filter(Boolean);
   if (tokens.length === 0) return wallets;
 

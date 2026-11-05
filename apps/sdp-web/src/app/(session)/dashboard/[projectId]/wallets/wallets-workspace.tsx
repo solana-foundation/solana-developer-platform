@@ -12,8 +12,7 @@ import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
-import { useCustodyWallets } from "./custody-reads";
-import type { KnownCustodyProvider } from "./provider-catalog";
+import { useConnectedCustodyProviders, useCustodyWallets } from "./custody-reads";
 import { WalletsOverview } from "./wallets-overview";
 
 const WalletsPlayground = dynamic(
@@ -27,22 +26,15 @@ const WalletsPlayground = dynamic(
   }
 );
 
-interface WalletsWorkspaceProps {
-  apiBaseUrl: string | null;
-  connectedProviders: KnownCustodyProvider[];
-  configsError: string | null;
-}
-
-export function WalletsWorkspace({
-  apiBaseUrl,
-  connectedProviders,
-  configsError,
-}: WalletsWorkspaceProps) {
+export function WalletsWorkspace({ apiBaseUrl }: { apiBaseUrl: string | null }) {
   const t = useTranslations();
   const { dashboardAccess } = useDashboardWorkspace();
   const walletsRead = useCustodyWallets();
   const walletsError =
     walletsRead.error === undefined ? null : t("DashboardCustody.unableToLoadWallets");
+  const providersRead = useConnectedCustodyProviders();
+  const configsError =
+    providersRead.error === undefined ? null : t("DashboardCustody.unableToLoadWalletProviders");
   const isPlaygroundTab = useDashboardTab() === "playground";
 
   useEffect(() => {
@@ -85,12 +77,14 @@ export function WalletsWorkspace({
             id: "playground",
             className: dashboardWorkspacePlaygroundPanelClassName,
             content:
-              walletsRead.data === undefined && walletsError === null ? (
+              (walletsRead.data === undefined && walletsError === null) ||
+              (providersRead.data === undefined && configsError === null) ? (
                 <ApiPlaygroundShellSkeleton />
               ) : (
                 <WalletsPlayground
                   apiBaseUrl={apiBaseUrl}
-                  connectedProviders={connectedProviders}
+                  // A failed read leaves the examples without providers; the playground names it.
+                  connectedProviders={providersRead.data ?? []}
                   configsError={configsError}
                   // A failed read leaves the examples without wallets; the playground names the failure.
                   wallets={(walletsRead.data ?? []).map((wallet) => ({

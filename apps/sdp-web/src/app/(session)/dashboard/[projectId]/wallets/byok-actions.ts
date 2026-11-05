@@ -123,7 +123,6 @@ async function runCompletion(connectionId: string): Promise<PrivyByokSubmitResul
   }
 
   if (result.completion.status === "success") {
-    revalidatePath(await requestProjectHref("/dashboard/wallets"));
     // The provider page now owns the connections list, so it has to see the
     // new row too.
     revalidatePath(

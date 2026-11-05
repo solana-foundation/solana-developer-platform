@@ -20,6 +20,10 @@ function walletPath(walletId: string) {
 
 export const custodyQueryKeys = {
   wallets: (scope: DashboardKeyScope) => dashboardRequestKey(scope, "/api/dashboard/wallets"),
+  configs: (scope: DashboardKeyScope) =>
+    dashboardRequestKey(scope, "/api/dashboard/wallets/configs"),
+  wallet: (scope: DashboardKeyScope, { walletId }: { walletId: string }) =>
+    dashboardRequestKey(scope, walletPath(walletId)),
   walletBalances: (scope: DashboardKeyScope, { walletId }: { walletId: string }) =>
     dashboardRequestKey(
       scope,
@@ -32,9 +36,7 @@ export const custodyQueryKeys = {
     dashboardRequestKey(scope, `${walletPath(walletId)}/activity`, {
       limit: limit === WALLET_ACTIVITY_LIMIT ? undefined : limit,
     }),
-  issuedTokenNames: (scope: DashboardKeyScope) =>
-    dashboardRequestKey(scope, "/api/dashboard/issuance/tokens", { page: 1, pageSize: 100 }),
-  /** Any wallet's record, balances or activity, and the wallet lists every module reads. */
+  /** Any wallet's record, balances or activity, the custody configs, and the wallet lists. */
   isWalletReadKey: (key: DashboardRequestKey) =>
     readsWalletsPath(key) || readsWalletBalancesPath(key),
   /** The wallet inventories other features read (payments, Earn, issuance pickers). */
