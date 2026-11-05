@@ -16959,7 +16959,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/estimate-payment
 
 `POST /v1/payments/transfer-batches/estimate`
 
-`warnings` lists what would make the batch fail: a native SOL amount below the rent-exempt minimum sent to an address with no account, or a source wallet left below the minimum; create refuses those with 409 `AMOUNT_BELOW_RENT_MINIMUM`.
+`warnings` lists what would make the batch fail: a native SOL amount below the rent-exempt minimum sent to an address with no account, or a source wallet left below the minimum; create refuses those with 409 `AMOUNT_BELOW_RENT_MINIMUM`. Returns 503 `ESTIMATE_NOT_AVAILABLE` when Solana RPC cannot price a chunk's fee; the estimate stores nothing, so retry it.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `transfer_batches.read` action.
 
@@ -17146,6 +17146,10 @@ Estimate transaction chunking and fees for a transfer batch.
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 

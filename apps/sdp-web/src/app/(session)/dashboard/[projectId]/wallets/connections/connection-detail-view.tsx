@@ -15,6 +15,7 @@ import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { EntityLink } from "@/components/entity-link";
 import { RecordBlock, RecordLine, RecordStack } from "@/components/refresh-record";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { AddWalletDialog } from "./add-wallet-dialog";
 import { CancelSetupDialog } from "./cancel-setup-dialog";
@@ -220,6 +221,7 @@ function ConnectionDetails({
   t: ReturnType<typeof useTranslations>;
 }) {
   const locale = useLocale();
+  const timeZone = useTimeZone();
   return (
     <RecordBlock title={t("DashboardCustody.connectionDetailsTitle")}>
       <dl>
@@ -238,7 +240,7 @@ function ConnectionDetails({
         ) : null}
         {listItem ? (
           <RecordLine label={t("DashboardCustody.created")}>
-            {formatCreatedDate(listItem.createdAt, locale)}
+            {formatCreatedDate(listItem.createdAt, locale, timeZone)}
           </RecordLine>
         ) : null}
       </dl>

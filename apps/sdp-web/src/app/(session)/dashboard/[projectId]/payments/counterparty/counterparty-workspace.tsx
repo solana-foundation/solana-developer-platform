@@ -33,6 +33,7 @@ import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspac
 import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
 import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
@@ -299,6 +300,7 @@ function CounterpartyRow({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const router = useRouter();
   const toProjectHref = useProjectHref();
   const href = toProjectHref(counterpartyHref(counterparty.id));
@@ -333,7 +335,7 @@ function CounterpartyRow({
       <TableCell
         className={cn(PAYMENTS_TABLE_CELL, "whitespace-nowrap text-secondary tabular-nums")}
       >
-        {formatDate(counterparty.createdAt, locale)}
+        {formatDate(counterparty.createdAt, locale, timeZone)}
       </TableCell>
       <TableCell className="text-right">
         <DropdownMenu>

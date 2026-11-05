@@ -32,6 +32,7 @@ import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { explorerTxUrl } from "@/lib/explorer";
 import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
 import { getRampProviderLabel } from "@/lib/ramps";
@@ -390,6 +391,7 @@ function ProofSection({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const cluster = useSolanaCluster();
   return (
     <RecordSection title={t("DashboardPayments.transactionDetail.proof")}>
@@ -417,11 +419,11 @@ function ProofSection({
               : t("DashboardPayments.transactionDetail.devnet")}
           </RecordRow>
           <RecordRow label={t("DashboardPayments.transactions.created")}>
-            {formatDateTime(transaction.createdAt, locale) ?? transaction.createdAt}
+            {formatDateTime(transaction.createdAt, locale, timeZone) ?? transaction.createdAt}
           </RecordRow>
           {updatedAt ? (
             <RecordRow label={t("DashboardPayments.transactionDetail.updated")}>
-              {formatDateTime(updatedAt, locale) ?? updatedAt}
+              {formatDateTime(updatedAt, locale, timeZone) ?? updatedAt}
             </RecordRow>
           ) : null}
         </RecordList>

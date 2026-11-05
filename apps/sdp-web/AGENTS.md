@@ -43,6 +43,17 @@ mainnet the API prices no mint, so SOL arrives unpriced on devnet. Value a
 token by its market price or, for a well-known USD stablecoin, by its mint;
 never by its symbol, since anyone can mint a "USDC".
 
+A date a viewer reads is formatted in their zone, passed as `timeZone`:
+`useTimeZone()` in a client component, `await getRequestTimeZone()` on the
+server (`src/i18n`). Left to the environment, the server formats in UTC and
+the browser in the viewer's zone, and the page fails to hydrate. The browser
+stores its zone in the `sdp-time-zone` cookie so the server renders the next
+page in it; without the cookie the server renders UTC and `useTimeZone`
+switches to the browser's zone after hydration. A server component cannot
+correct itself, so a date a first-time visitor reads (the public pay page's
+expiry) renders in a client component. `suppressHydrationWarning` is no fix:
+React keeps the server's text and never corrects it.
+
 Dashboard pages live under `app/(session)/dashboard/[projectId]/`, and the Project comes from the URL alone:
 
 - Server code (pages, server actions, route handlers) calls `createSdpApiClient()`, `requestProjectId()` and `requestProjectHref(path)` from `@/lib/sdp-api`; they read the request's `x-project-id`, which `proxy.ts` sets from the URL. Keep signatures Project-free: no `projectId` parameters, no reads of the selection cookie.

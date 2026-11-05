@@ -7,8 +7,15 @@ import {
 import { RAMP_ONLY_TRANSFER_STATUSES } from "@sdp/types/payments";
 import { COMPLIANCE_PROVIDERS } from "@sdp/types/provider-access";
 import { SDP_RELEASE_CHANNEL_NAMES, SDP_RELEASE_CHANNELS } from "@sdp/types/release-channels";
+import type {
+  OpenAPIObject,
+  PathItemObject,
+  ReferenceObject,
+  ResponseObject,
+} from "openapi3-ts/oas30";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { ERROR_CODES } from "@/lib/errors";
 import { declaredIdempotency, declaredIdempotencyRecovery } from "@/middleware/idempotency";
 import {
   ANONYMOUS_MAX_REQUESTS,
@@ -72,6 +79,36 @@ function literalEarnPaths(source: string): string[] {
 
 function getWalletListItemSchema(value: unknown): TestJsonSchema {
   return getJsonSchema(value).properties?.data?.properties?.wallets?.items ?? {};
+}
+
+const OPERATION_METHODS = ["get", "put", "post", "delete", "patch"] as const;
+
+const errorEnvelopeResponseSchema = z.object({
+  content: z.object({
+    "application/json": z.object({
+      schema: z.object({
+        properties: z.object({
+          error: z.object({
+            properties: z.object({ code: z.object({ enum: z.array(z.string()).optional() }) }),
+          }),
+        }),
+      }),
+    }),
+  }),
+});
+
+/** The codes each operation's error envelope allows, one entry per error response. */
+function errorEnvelopeCodes(doc: OpenAPIObject): (string[] | undefined)[] {
+  return Object.values(doc.paths)
+    .flatMap((pathItem: PathItemObject) => OPERATION_METHODS.map((method) => pathItem[method]))
+    .filter((operation) => operation !== undefined)
+    .flatMap((operation) => Object.values<ResponseObject | ReferenceObject>(operation.responses))
+    .flatMap((response) => {
+      const envelope = errorEnvelopeResponseSchema.safeParse(response);
+      return envelope.success
+        ? [envelope.data.content["application/json"].schema.properties.error.properties.code.enum]
+        : [];
+    });
 }
 
 describe("OpenAPI spec", () => {
@@ -759,6 +796,23 @@ describe("OpenAPI spec", () => {
       expect([...leaked]).toEqual([]);
     });
   }
+
+  // Error codes name no module, so no channel prunes them: an envelope that lists fewer codes
+  // than the API answers with fails a client that checks the enum.
+  it("lists every ErrorCode in each error envelope of every document", () => {
+    const documents = [
+      createOpenApiDocument(),
+      ...SDP_RELEASE_CHANNEL_NAMES.map((releaseChannel) =>
+        createPublicOpenApiDocument({ releaseChannel })
+      ),
+    ];
+    for (const doc of documents) {
+      const lists = errorEnvelopeCodes(doc);
+      expect(lists.length).toBeGreaterThan(0);
+      const distinct = [...new Map(lists.map((codes) => [JSON.stringify(codes), codes])).values()];
+      expect(distinct).toEqual([ERROR_CODES]);
+    }
+  });
 
   it.each(["stable", "beta"] as const)(
     "%s hides ramp-only transfer fields and prose",

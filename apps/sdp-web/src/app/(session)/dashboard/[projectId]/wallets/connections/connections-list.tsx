@@ -11,6 +11,7 @@ import { usePathname, useRouter } from "next/navigation";
 import type { MouseEvent, ReactNode } from "react";
 import { PaginatedFooter } from "@/components/ui/paginated-footer";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { failureHint, statusLabel } from "./connection-status-presentation";
 import {
@@ -31,10 +32,15 @@ const LIFECYCLE_TONES: Record<CustodyConnectionListItem["status"], StatusTone> =
   deactivated: "neutral",
 };
 
-function formatCreated(value: string, locale: string): string {
+function formatCreated(value: string, locale: string, timeZone: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString(locale, { month: "short", day: "numeric", year: "numeric" });
+  return date.toLocaleDateString(locale, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone,
+  });
 }
 
 function walletsPart(
@@ -128,6 +134,7 @@ export function ConnectionsList({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const router = useRouter();
   const pathname = usePathname();
   const href = useProjectHref();
@@ -207,7 +214,7 @@ export function ConnectionsList({
                 </span>
               </TableCell>
               <TableCell className="hidden align-top py-3 text-right text-secondary tabular-nums sm:table-cell">
-                {formatCreated(connection.createdAt, locale)}
+                {formatCreated(connection.createdAt, locale, timeZone)}
               </TableCell>
               <TableCell className="align-top py-3 text-right text-tertiary">
                 <ChevronRightIcon aria-hidden className="ml-auto size-4" />
