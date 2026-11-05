@@ -431,7 +431,7 @@ function ComboboxSearch({
           placeholder={placeholder}
           size="xl"
           className="pl-7.5 [&>span:first-child]:border-b-0"
-          inputClassName="text-body"
+          inputClassName="text-body!"
         />
       </div>
     </div>

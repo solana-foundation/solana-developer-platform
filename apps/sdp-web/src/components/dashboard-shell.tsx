@@ -5,7 +5,7 @@ import { Badge } from "@sdp/ui/badge";
 import { cn } from "@sdp/ui/cn";
 import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { isKnownCustodyProvider } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
@@ -47,7 +47,6 @@ import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { DashboardFlags } from "@/flags/dashboard";
 import { useTranslations } from "@/i18n/provider";
-import { signInHref } from "@/lib/clerk-config";
 import { setTabShowsDemo } from "@/lib/dashboard-fetch";
 import {
   isDashboardNavItemActive,
@@ -399,8 +398,6 @@ export function DashboardShell({
   } = flags;
   const t = useTranslations();
   const { isSignedIn, orgId } = useAuth();
-  const router = useRouter();
-  const browserPathname = usePathname();
   const pathname = useDashboardPathname();
   useSyncDashboardUrlStateWithRouter();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
@@ -493,13 +490,11 @@ export function DashboardShell({
   // The dashboard's own URL store rather than useSearchParams: list filters update the query
   // shallowly, and an export has to follow them.
   const { searchParams: urlSearchParams } = useDashboardUrlState();
-  const search = urlSearchParams.toString();
-  const signInReturnTo = search ? `${browserPathname}?${search}` : browserPathname;
   const routeAction =
     pageConfig.headerAction &&
     (!pageConfig.headerAction.capability ||
       dashboardAccess.capabilities[pageConfig.headerAction.capability]) ? (
-      <DashboardHeaderAction action={pageConfig.headerAction} search={search} />
+      <DashboardHeaderAction action={pageConfig.headerAction} search={urlSearchParams.toString()} />
     ) : null;
   // A read-only member sees why no page offers a write, in the slot a route's action would take.
   const readOnlyBadge = dashboardAccess.capabilities.canWrite ? null : (
@@ -608,14 +603,8 @@ export function DashboardShell({
     }
   }, [pathname]);
 
-  // A session that ends while the shell is open goes to sign-in and comes back here, as the
-  // proxy sends a signed-out request.
-  useEffect(() => {
-    if (isSignedIn === false) {
-      router.replace(signInHref(signInReturnTo));
-    }
-  }, [isSignedIn, router, signInReturnTo]);
-
+  // Signed out, the shell holds the loading screen: Clerk navigates a sign-out to sign-in itself,
+  // and any other session end refreshes the route, which the proxy redirects to sign-in.
   if (!isSignedIn || !orgId) {
     return (
       <DashboardLoadingScreen pathname={pathname} flags={flags} isSidebarOpen={isSidebarOpen} />

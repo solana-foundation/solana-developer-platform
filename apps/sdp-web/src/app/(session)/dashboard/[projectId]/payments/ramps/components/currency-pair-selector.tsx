@@ -97,9 +97,7 @@ function RampAmountField() {
   const offrampMax = maxPayoutAmount(offrampBalance);
   return (
     <div className="flex flex-col gap-2">
-      <Label className="text-tertiary" htmlFor={`${direction}-ramp-amount`}>
-        {t("DashboardPayments.ramps.amount")}
-      </Label>
+      <Label htmlFor={`${direction}-ramp-amount`}>{t("DashboardPayments.ramps.amount")}</Label>
       <Input
         id={`${direction}-ramp-amount`}
         type="number"
