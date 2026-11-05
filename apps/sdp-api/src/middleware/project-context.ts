@@ -25,10 +25,11 @@ export interface ProjectContextOptions {
   /**
    * Take the project from this path parameter instead of the `x-project-id`
    * header, for routes that address a project in their URL (`/v1/projects/:projectId`).
-   * Dashboard actors there keep organization-level project permissions, so the
-   * project is resolved within the organization without a membership check;
-   * the handlers keep their own authorization. API keys must name their own
-   * project (`apiKeyProjectAccessMiddleware` runs first).
+   * A dashboard actor needs the same access as through the header: the project
+   * must be active and the user must have a `project_members` row for it
+   * (`findMemberProject`), or the request gets 404. The handlers keep their own
+   * authorization. API keys must name their own project
+   * (`apiKeyProjectAccessMiddleware` runs first).
    */
   projectIdParam?: string;
 }

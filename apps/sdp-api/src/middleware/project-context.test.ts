@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { AppError } from "@/lib/errors";
+import { appErrorResponse } from "@/lib/response";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
@@ -56,7 +57,7 @@ function buildPathApp() {
   );
   app.onError((error, c) => {
     if (error instanceof AppError) {
-      return c.json(error.toResponse(), error.statusCode as 400 | 401 | 403 | 404);
+      return appErrorResponse(c, error);
     }
     return c.json({ error: { code: "INTERNAL_ERROR" } }, 500);
   });
