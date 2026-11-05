@@ -188,6 +188,12 @@ function useComboboxState({
     () => options.find((option) => option.value === value) ?? null,
     [options, value]
   );
+  const selectedLabelRepeats = useMemo(
+    () =>
+      selected !== null &&
+      options.some((option) => option !== selected && option.label === selected.label),
+    [options, selected]
+  );
 
   const filtered = useMemo(
     () => filterComboboxOptions(options, query, searchable, queryOption),
@@ -247,6 +253,7 @@ function useComboboxState({
     activeIndex,
     setActiveIndex,
     selected,
+    selectedLabelRepeats,
     filtered,
     handleOpenChange,
     close,
@@ -288,12 +295,18 @@ function ComboboxLabel({
   );
 }
 
-/** What the trigger shows: the chosen option, or the placeholder while nothing is chosen. */
+/**
+ * What the trigger shows: the chosen option, or the placeholder while nothing is chosen. The
+ * choice shows its label alone unless another option shares that label, when its description
+ * is what tells them apart.
+ */
 function ComboboxSelection({
   selected,
+  selectedLabelRepeats,
   placeholder,
 }: {
   selected: ComboboxOption | null;
+  selectedLabelRepeats: boolean;
   placeholder: string;
 }) {
   return (
@@ -308,6 +321,9 @@ function ComboboxSelection({
             <Badge variant={selected.badgeVariant} className="shrink-0">
               {selected.badge}
             </Badge>
+          ) : null}
+          {selectedLabelRepeats && selected.description ? (
+            <span className="truncate text-meta text-tertiary">{selected.description}</span>
           ) : null}
         </span>
       ) : (
@@ -326,6 +342,7 @@ interface ComboboxTriggerProps
   open: boolean;
   size: ComboboxSize;
   selected: ComboboxOption | null;
+  selectedLabelRepeats: boolean;
   placeholder: string;
   /** Opens or closes the dialog variant; the popover variant leaves this to Radix. */
   onToggle: () => void;
@@ -345,6 +362,7 @@ function ComboboxTrigger({
   disabled,
   validationError,
   selected,
+  selectedLabelRepeats,
   placeholder,
   onToggle,
 }: ComboboxTriggerProps) {
@@ -366,7 +384,11 @@ function ComboboxTrigger({
         validationError && "border-error-border hover:border-error-border"
       )}
     >
-      <ComboboxSelection selected={selected} placeholder={placeholder} />
+      <ComboboxSelection
+        selected={selected}
+        selectedLabelRepeats={selectedLabelRepeats}
+        placeholder={placeholder}
+      />
       {trailing ? <span className="shrink-0">{trailing}</span> : null}
       <ChevronDownIcon
         className={cn("size-4 shrink-0 text-secondary transition-transform", open && "rotate-180")}
@@ -567,6 +589,7 @@ export function Combobox({
     activeIndex,
     setActiveIndex,
     selected,
+    selectedLabelRepeats,
     filtered,
     handleOpenChange,
     close,
@@ -585,6 +608,7 @@ export function Combobox({
       disabled={disabled}
       validationError={validationError}
       selected={selected}
+      selectedLabelRepeats={selectedLabelRepeats}
       placeholder={resolvedPlaceholder}
       onToggle={() => handleOpenChange(!open)}
     />
