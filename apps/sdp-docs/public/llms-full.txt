@@ -15760,6 +15760,10 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 
   Same fields as `400`.
 
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
 - **`503`** Service Unavailable
 
   Same fields as `400`.
@@ -16341,6 +16345,10 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -17800,6 +17808,14 @@ Create a custody-executed outbound transfer batch.
 
   Same fields as `400`.
 
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -18744,6 +18760,14 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -19805,6 +19829,10 @@ Creates an SDP-custody outbound recurring payment intent. Activation and collect
 
   Same fields as `400`.
 
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -20516,6 +20544,14 @@ Updates a recurring payment. Pending payments are edited directly. Active metada
 
   Same fields as `400`.
 
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -21205,6 +21241,14 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
   Same fields as `400`.
 
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -21539,6 +21583,14 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -22233,6 +22285,14 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
   Same fields as `400`.
 
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -22651,6 +22711,14 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -23246,6 +23314,10 @@ Create payment request payload.
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -24216,6 +24288,10 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `paymen
 
   Same fields as `400`.
 
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -24508,6 +24584,10 @@ Creates an SDP subscription plan record. Prepare the on-chain Solana subscriptio
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -25069,6 +25149,10 @@ Optional overrides used when preparing the Solana subscriptions create-plan tran
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -26440,6 +26524,10 @@ Inputs for preparing the subscriber-signed Solana subscription authorization tra
 
   Same fields as `400`.
 
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -26727,6 +26815,10 @@ Empty request body for preparing subscriber-signed subscription lifecycle transa
 
   Same fields as `400`.
 
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -27001,6 +27093,10 @@ Empty request body for preparing subscriber-signed subscription lifecycle transa
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -27392,6 +27488,10 @@ Inputs for preparing the collector-signed Solana subscriptions transfer transact
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 

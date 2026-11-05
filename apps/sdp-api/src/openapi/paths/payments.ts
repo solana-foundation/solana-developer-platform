@@ -171,7 +171,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Transfer executed",
         content: jsonContent(transferResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 502, 503]),
     },
   });
 
@@ -194,7 +194,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Transfer list",
         content: jsonContent(transferListResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
     },
   });
 
@@ -271,7 +271,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Transfer batch created",
         content: jsonContent(transferBatchResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 502, 503]),
     },
   });
 
@@ -295,7 +295,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Failed recipients resent",
         content: jsonContent(transferBatchResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 502, 503]),
     },
   });
 
@@ -365,7 +365,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Recurring payment created",
         content: jsonContent(paymentRecurringPaymentResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 503]),
     },
   });
 
@@ -415,7 +415,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Recurring payment updated",
         content: jsonContent(paymentRecurringPaymentResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 502, 503]),
     },
   });
 
@@ -438,7 +438,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Recurring payment activated",
         content: jsonContent(paymentRecurringPaymentResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 502, 503]),
     },
   });
 
@@ -461,7 +461,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Recurring payment canceled",
         content: jsonContent(paymentRecurringPaymentResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 502, 503]),
     },
   });
 
@@ -487,7 +487,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Payment request created",
         content: jsonContent(createdPaymentRequestResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 503]),
     },
   });
 
@@ -579,7 +579,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Payment request canceled",
         content: jsonContent(paymentRequestResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 502]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 502, 503]),
     },
   });
 
@@ -602,7 +602,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Recurring payment collection result",
         content: jsonContent(paymentRecurringPaymentCollectionResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 502, 503]),
     },
   });
 
@@ -624,7 +624,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Recurring payment resumed",
         content: jsonContent(paymentRecurringPaymentResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 502, 503]),
     },
   });
 
@@ -696,7 +696,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription plan created",
         content: jsonContent(paymentSubscriptionPlanResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 503]),
     },
   });
 
@@ -745,7 +745,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription plan creation prepared",
         content: jsonContent(preparePaymentSubscriptionPlanResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
     },
   });
 
@@ -868,7 +868,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription authorization prepared",
         content: jsonContent(preparePaymentSubscriptionAuthorizationResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
     },
   });
 
@@ -895,7 +895,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription cancellation prepared",
         content: jsonContent(preparePaymentSubscriptionLifecycleResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
     },
   });
 
@@ -922,7 +922,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription resume prepared",
         content: jsonContent(preparePaymentSubscriptionLifecycleResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
     },
   });
 
@@ -949,7 +949,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription collection prepared",
         content: jsonContent(preparePaymentSubscriptionCollectionResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
     },
   });
 
