@@ -28,6 +28,10 @@ while IFS= read -r -d '' entry; do
   if [[ "$name" =~ $secret_name ]] || [[ "$value" =~ $credentialed_url ]]; then
     while IFS= read -r line || [ -n "$line" ]; do
       if [ "${#line}" -ge "$min_length" ]; then
+        # Actions decodes %25 and %0D in command data, so escape them, or the
+        # mask it registers is not the value (a "%25" in a password, say).
+        line="${line//%/%25}"
+        line="${line//$'\r'/%0D}"
         printf '::add-mask::%s\n' "$line"
       fi
     done <<<"$value"

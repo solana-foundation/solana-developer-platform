@@ -34,6 +34,14 @@ grep -qxF '::add-mask::production' <<<"$out" && fail "non-secret value was maske
 grep -qxF '::add-mask::true' <<<"$out" && fail "boolean was masked"
 grep -qxF '::add-mask::abc' <<<"$out" && fail "short value was masked"
 
+# Percent signs and carriage returns are escaped, so Actions decodes the
+# command back to the exact value.
+out=$(run_masked DATABASE_URL='postgresql://sdp:pass%25word@db.internal:5432/sdp')
+grep -qxF '::add-mask::postgresql://sdp:pass%2525word@db.internal:5432/sdp' <<<"$out" ||
+  fail "percent-encoded password not escaped: $out"
+out=$(run_masked CLERK_SECRET_KEY=$'sk_live_abcdef\r123456')
+grep -qxF '::add-mask::sk_live_abcdef%0D123456' <<<"$out" || fail "carriage return not escaped: $out"
+
 # A multi-line secret (a PEM) is masked line by line.
 pem=$'-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----'
 out=$(run_masked FIREBLOCKS_PRIVATE_KEY="$pem")
