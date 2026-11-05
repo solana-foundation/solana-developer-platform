@@ -401,6 +401,68 @@ function CredentialsBlock({
 }
 
 /**
+ * What the lifecycle read came back as. A failed read is not the same as "there are none", and
+ * the rest of the page is still true, so it gets its own notice inviting a retry.
+ */
+type CredentialsRead =
+  | { kind: "restricted" }
+  | { kind: "unavailable" }
+  | { kind: "loaded"; lifecycle: CustodyCredentialLifecycle };
+
+function credentialsRead(
+  lifecycle: CustodyCredentialLifecycle | "restricted" | null
+): CredentialsRead {
+  if (lifecycle === "restricted") return { kind: "restricted" };
+  return lifecycle ? { kind: "loaded", lifecycle } : { kind: "unavailable" };
+}
+
+function CredentialsContent({
+  canManageCustody,
+  connectionId,
+  lifecycle,
+  provider,
+}: {
+  canManageCustody: boolean;
+  connectionId: string;
+  lifecycle: CustodyCredentialLifecycle | "restricted" | null;
+  provider: CustodyProvider;
+}) {
+  const t = useTranslations();
+  const read = credentialsRead(lifecycle);
+  switch (read.kind) {
+    case "restricted":
+      return (
+        <CredentialsNotice
+          title={t("DashboardCustody.credentialsTitle")}
+          variant="neutral"
+          message={t("DashboardCustody.credentialsRestricted")}
+        />
+      );
+    case "unavailable":
+      return (
+        <CredentialsNotice
+          title={t("DashboardCustody.credentialsTitle")}
+          variant="warning"
+          message={t("DashboardCustody.credentialsUnavailable")}
+        />
+      );
+    case "loaded":
+      return (
+        <CredentialsBlock
+          canManageCustody={canManageCustody}
+          connectionId={connectionId}
+          lifecycle={read.lifecycle}
+          provider={provider}
+        />
+      );
+    default: {
+      const exhaustive: never = read;
+      throw new Error(`Unknown credentials read: ${JSON.stringify(exhaustive)}`);
+    }
+  }
+}
+
+/**
  * The credentials behind this connection, and what can be done to them.
  *
  * Three shapes, decided by the data rather than by the caller:
@@ -430,7 +492,6 @@ export function ConnectionCredentialsSection({
   rotation: RotationState;
   onRotationChange: (rotation: RotationState) => void;
 }) {
-  const t = useTranslations();
   const { availableLifecycle, canAct } = resolveCredentialActions(lifecycle, canManageCustody);
 
   return (
@@ -443,28 +504,12 @@ export function ConnectionCredentialsSection({
         rotation={rotation}
         onRotationChange={onRotationChange}
       />
-      {lifecycle === "restricted" ? (
-        <CredentialsNotice
-          title={t("DashboardCustody.credentialsTitle")}
-          variant="neutral"
-          message={t("DashboardCustody.credentialsRestricted")}
-        />
-      ) : lifecycle ? (
-        <CredentialsBlock
-          canManageCustody={canManageCustody}
-          connectionId={connection.id}
-          lifecycle={lifecycle}
-          provider={provider}
-        />
-      ) : (
-        // A failed read is not the same as "there are none", and the rest of the page
-        // is still true, so this says so and invites a retry.
-        <CredentialsNotice
-          title={t("DashboardCustody.credentialsTitle")}
-          variant="warning"
-          message={t("DashboardCustody.credentialsUnavailable")}
-        />
-      )}
+      <CredentialsContent
+        canManageCustody={canManageCustody}
+        connectionId={connection.id}
+        lifecycle={lifecycle}
+        provider={provider}
+      />
     </>
   );
 }
