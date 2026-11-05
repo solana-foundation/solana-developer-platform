@@ -105,10 +105,12 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
     // A refused or failed read is not a missing link: the error page lets the payer retry.
     throw new Error(`Pay link read failed (${response.status})`);
   }
-  const request = (await response.json()) as PayRequest;
-  const t = await getTranslations();
-  const locale = await getRequestLocale();
-  const timeZone = await getRequestTimeZone();
+  const [request, t, locale, timeZone] = await Promise.all([
+    response.json() as Promise<PayRequest>,
+    getTranslations(),
+    getRequestLocale(),
+    getRequestTimeZone(),
+  ]);
 
   const payUrl =
     request.solanaPayUrl && isRenderablePayUrl(request.solanaPayUrl) ? request.solanaPayUrl : null;

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act } from "@testing-library/react";
+import { useLayoutEffect } from "react";
 import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,16 +17,19 @@ const CREATED_AT = "2026-11-04T22:14:00.000Z";
 
 let root: Root | null = null;
 
-function CreatedAt({ onRender }: { onRender?: (timeZone: string) => void }) {
+/** The date in the zone `useTimeZone` gives; `onCommit` hears each zone before it is painted. */
+function CreatedAt({ onCommit }: { onCommit?: (timeZone: string) => void }) {
   const timeZone = useTimeZone();
-  onRender?.(timeZone);
+  useLayoutEffect(() => {
+    onCommit?.(timeZone);
+  }, [onCommit, timeZone]);
   return <span>{formatDateTime(CREATED_AT, "en-US", timeZone)}</span>;
 }
 
-function page(servedTimeZone: string, onRender?: (timeZone: string) => void) {
+function page(servedTimeZone: string, onCommit?: (timeZone: string) => void) {
   return (
     <TimeZoneProvider timeZone={servedTimeZone}>
-      <CreatedAt onRender={onRender} />
+      <CreatedAt onCommit={onCommit} />
     </TimeZoneProvider>
   );
 }
@@ -88,15 +92,15 @@ describe("TimeZoneProvider and useTimeZone", () => {
 
   it("starts a page the browser renders itself in the browser's zone", () => {
     vi.stubEnv("TZ", "America/Chicago");
-    const rendered: string[] = [];
+    const committed: string[] = [];
     const container = document.createElement("div");
     document.body.append(container);
     act(() => {
       root = createRoot(container);
-      root.render(page("UTC", (timeZone) => rendered.push(timeZone)));
+      root.render(page("UTC", (timeZone) => committed.push(timeZone)));
     });
 
-    expect(new Set(rendered)).toEqual(new Set(["America/Chicago"]));
+    expect(committed).toEqual(["America/Chicago"]);
   });
 });
 

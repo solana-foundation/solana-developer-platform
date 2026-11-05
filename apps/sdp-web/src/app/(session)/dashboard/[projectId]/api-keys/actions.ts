@@ -276,9 +276,11 @@ export async function saveApiKeyAuthoringAction(
 }
 
 export async function rotateApiKeyAction(formData: FormData) {
-  const t = await getTranslations();
-  const locale = await getRequestLocale();
-  const timeZone = await getRequestTimeZone();
+  const [t, locale, timeZone] = await Promise.all([
+    getTranslations(),
+    getRequestLocale(),
+    getRequestTimeZone(),
+  ]);
   const keyId = String(formData.get("keyId") ?? "").trim();
   const gracePeriodHours = Math.min(168, Math.max(0, parsePositiveInt(formData.get("grace"), 24)));
 
