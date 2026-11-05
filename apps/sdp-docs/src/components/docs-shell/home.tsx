@@ -1,5 +1,4 @@
 import type { CustodyProvider } from "@sdp/types/custody";
-import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import { ORGANIZATION_RPC_PROVIDERS, type OrganizationRpcProvider } from "@sdp/types/organizations";
 import {
   COMPLIANCE_PROVIDERS,
@@ -38,10 +37,6 @@ const RAMP_PARTNERS = {
   stripe: { name: "Stripe", logo: "stripe" },
 } as const satisfies Record<RampProviderId, Partner>;
 const PUBLISHED_RAMP_PROVIDERS = new Set(publicSurface.rampProviders);
-const PUBLISHED_CUSTODY_PROVIDERS: ReadonlySet<CustodyProvider> = new Set(
-  publicSurface.custodyProviders
-);
-
 const RPC_PARTNERS = {
   default: null,
   alchemy: { name: "Alchemy", logo: "alchemy" },
@@ -127,9 +122,8 @@ const NEXT_PATHS = [
 
 /** A concise start page with one product model and one route to first success. */
 export function DocsHome() {
-  const custodyPartners = CUSTODY_PROVIDERS.filter((provider) =>
-    PUBLISHED_CUSTODY_PROVIDERS.has(provider)
-  ).flatMap((provider) => {
+  // The manifest lists custody providers in catalog order.
+  const custodyPartners = publicSurface.custodyProviders.flatMap((provider) => {
     const partner = CUSTODY_PARTNERS[provider];
     return partner ? [partner] : [];
   });
