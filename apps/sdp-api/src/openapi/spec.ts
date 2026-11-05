@@ -8,6 +8,7 @@ import {
   actionVerbOf,
 } from "@sdp/types/actions";
 import type { RateLimitTier } from "@sdp/types/api-keys";
+import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types/custody";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import {
   SDP_MODULES,
@@ -380,7 +381,8 @@ export function createPublicOpenApiDocument(options: PublicOpenApiDocumentOption
 /**
  * What a release channel's public surfaces may name, for consumers that cannot
  * load this package (the docs site's MDX pipeline): the modules and ramp
- * providers the public document publishes, Earn's hold included, the actions
+ * providers the public document publishes, Earn's hold included, the custody
+ * providers it names (in any mode), the actions
  * an API key may be granted in it (per module, in registry order), the
  * full vocabularies to validate tags against, and the rate limits every
  * channel enforces (`middleware/rate-limit.ts`), so the docs never restate them.
@@ -389,6 +391,7 @@ export type PublicSurfaceManifest = {
   releaseChannel: SdpReleaseChannel;
   modules: SdpModule[];
   rampProviders: RampProviderId[];
+  custodyProviders: CustodyProvider[];
   grantableActions: { module: ActionModule; verbs: ActionVerb[] }[];
   allModules: SdpModule[];
   allRampProviders: RampProviderId[];
@@ -408,6 +411,7 @@ export function createPublicSurfaceManifest(
     releaseChannel,
     modules: SDP_MODULES.filter((module) => modules.has(module)),
     rampProviders: RAMP_PROVIDERS.filter(published),
+    custodyProviders: CUSTODY_PROVIDERS.filter(published),
     grantableActions: ACTION_MODULE_NAMES.map((module) => ({
       module,
       verbs: actionsInModule(module)
