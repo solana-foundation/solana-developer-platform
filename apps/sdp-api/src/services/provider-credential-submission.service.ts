@@ -23,6 +23,7 @@ import {
   resolveRegistrationPayload,
   retireFireblocksCsr,
 } from "@/services/custody/fireblocks-registration.service";
+import { assertPrivyCredentialAccepted } from "@/services/custody/privy-credential";
 import {
   admitByokCustodySetup,
   refuseCustodySetup,
@@ -180,6 +181,16 @@ async function submitProviderCredentialIntent(
   const fingerprint = await computeSubmissionFingerprint(context);
 
   const { credentialLabel: _label, scope: _scope, ...fields } = input.fields;
+  if ("appId" in fields) {
+    try {
+      await assertPrivyCredentialAccepted(c.env, fields);
+    } catch (error) {
+      await auditFailure(c, context.audit, context.auditBase, {
+        reason: "provider_preflight_refused",
+      });
+      throw error;
+    }
+  }
   const setup = await prepareSetup(context, fingerprint);
   if (setup.kind === "replay") {
     return setup.result;

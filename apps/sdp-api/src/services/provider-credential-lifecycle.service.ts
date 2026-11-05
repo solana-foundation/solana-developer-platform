@@ -38,6 +38,7 @@ import {
   resolveRegistrationPayload,
   retireFireblocksCsr,
 } from "@/services/custody/fireblocks-registration.service";
+import { assertPrivyCredentialAccepted } from "@/services/custody/privy-credential";
 import { assertCustodyProviderAvailable } from "@/services/provider-availability.service";
 import {
   assertCredentialCreationSettled,
@@ -187,6 +188,9 @@ export async function rotateProviderCredential(
     throw conflict(ROTATION_UNAVAILABLE);
   }
 
+  if ("appId" in fields) {
+    await assertPrivyCredentialAccepted(c.env, fields);
+  }
   await resolveRegistrationPayload(c, target.credential.provider, fields, idempotencyKey);
   const result = await submitRotationCandidate(
     context,
