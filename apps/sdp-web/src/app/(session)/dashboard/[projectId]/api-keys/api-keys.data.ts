@@ -3,6 +3,7 @@
 import { type Action, isAction } from "@sdp/types/actions";
 import { API_KEY_STATUSES, API_KEY_WALLET_SCOPES, SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import { z } from "zod";
+import { useApiKey } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
 import { useDashboardKeyScope, useDashboardRead } from "@/lib/dashboard-swr";
 import type { ApiKeyAuthoringExistingKey } from "./api-key-authoring";
 import { apiKeysQueryKeys } from "./api-keys-query-key";
@@ -29,19 +30,6 @@ const apiKeyListResponseSchema = z.object({
   data: z.object({ apiKeys: z.array(apiKeyRecordSchema) }),
 });
 
-const apiKeyForAuthoringResponseSchema = z.object({
-  data: z.object({
-    id: z.string().min(1),
-    name: z.string(),
-    environment: z.enum(SDP_ENVIRONMENTS),
-    grants: z.array(actionSchema),
-    expiresAt: z.string().nullable(),
-    walletScope: z.enum(API_KEY_WALLET_SCOPES),
-    walletIds: z.array(z.string()),
-    allowedIps: z.array(z.string()).nullable(),
-  }) satisfies z.ZodType<ApiKeyAuthoringExistingKey>,
-});
-
 export function useApiKeys() {
   const scope = useDashboardKeyScope();
   const response = useDashboardRead(apiKeysQueryKeys.list(scope), apiKeyListResponseSchema);
@@ -49,11 +37,7 @@ export function useApiKeys() {
 }
 
 export function useApiKeyForAuthoring(keyId: string) {
-  const scope = useDashboardKeyScope();
-  const response = useDashboardRead(
-    apiKeysQueryKeys.key(scope, { keyId }),
-    apiKeyForAuthoringResponseSchema,
-    { keepPreviousData: false }
-  );
-  return { ...response, data: response.data?.data };
+  const response = useApiKey(keyId, { keepPreviousData: false });
+  const apiKey: ApiKeyAuthoringExistingKey | undefined = response.data;
+  return { ...response, data: apiKey };
 }
