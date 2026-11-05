@@ -52,8 +52,13 @@ describe("custody query keys", () => {
     const nonMatches = [
       sharedReadQueryKeys.counterparties(SCOPE, { page: 1, pageSize: 20 }),
       sharedReadQueryKeys.issuedTokens(SCOPE, { pageSize: 100 }),
-      paymentsQueryKeys.actionCounterparties(),
-      paymentsQueryKeys.walletDeposits("wal_test_1"),
+      "payments-action-counterparties",
+      [
+        SANDBOX_PROJECT.id,
+        "live",
+        "/api/dashboard/payments/transfers",
+        { custodyWalletId: "wal_test_1" },
+      ],
     ];
     expect(matches.map(custodyQueryKeys.isWalletInventoryKey)).toEqual(matches.map(() => true));
     expect(nonMatches.map(custodyQueryKeys.isWalletInventoryKey)).toEqual(
