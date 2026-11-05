@@ -62,7 +62,7 @@ export function memberStatusMayMoveMoney(status: string): boolean {
   return MEMBER_STATUSES_THAT_MAY_MOVE_MONEY.some((allowed) => allowed === status);
 }
 
-export const INVITATION_STATUSES = ["pending", "accepted", "expired", "revoked"] as const;
+export const INVITATION_STATUSES = ["pending", "accepted", "expired", "revoked", "failed"] as const;
 export type InvitationStatus = (typeof INVITATION_STATUSES)[number];
 /**
  * `details.reason` on the 401 that refuses a person whose newest invitation to

@@ -20,6 +20,7 @@ import { callerMayPerform } from "@/middleware/require-action";
 import type { ValidatedBodyContext, ValidatedContext } from "@/middleware/validate";
 import { listActiveApiKeysCreatedBy } from "@/services/api-key.service";
 import { AuditService } from "@/services/audit.service";
+import { ClerkRequestError } from "@/services/clerk-error";
 import { findClerkOrganizationId } from "@/services/clerk-organization-provisioning.service";
 import {
   type ClerkOrganizationInvitation,
@@ -406,12 +407,22 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
   }
 
   const clerk = new ClerkOrganizationsService(c.env);
-  const clerkInvitation = await clerk.createOrganizationInvitationUnlessMember({
-    organizationId: clerkOrgId,
-    emailAddress: normalizedEmail,
-    expiresInDays: INVITATION_TTL_DAYS,
-    redirectUrl,
-  });
+  let clerkInvitation: ClerkOrganizationInvitation | null;
+  try {
+    clerkInvitation = await clerk.createOrganizationInvitationUnlessMember({
+      organizationId: clerkOrgId,
+      emailAddress: normalizedEmail,
+      expiresInDays: INVITATION_TTL_DAYS,
+      redirectUrl,
+    });
+  } catch (error) {
+    await failUnsentInvitation(
+      c,
+      { id: invitationId, email: normalizedEmail, clerk_invitation_id: null },
+      error instanceof ClerkRequestError ? error : null
+    );
+    throw error;
+  }
 
   // The address already holds the Clerk membership, typically from accepting
   // an earlier Clerk invitation whose SDP invitation then expired or was
@@ -480,6 +491,50 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
     },
   });
 };
+
+/**
+ * A pending row would still admit its address at sign-in, so a Clerk step that
+ * threw fails it, which also frees the address for a retry. A Clerk 4xx created
+ * nothing; a timeout or 5xx may have, so the address's Clerk invitations go too.
+ */
+async function failUnsentInvitation(
+  c: AppContext,
+  invitation: OrganizationInvitation,
+  clerkError: ClerkRequestError | null
+): Promise<void> {
+  const { organizationId, userId } = resolveActor(c);
+  const clerkCode = clerkError === null ? null : clerkError.clerkCode;
+  await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
+    const failed = await tx
+      .prepare(
+        `UPDATE invitations SET status = 'failed'
+          WHERE id = ? AND organization_id = ? AND status = 'pending'`
+      )
+      .bind(invitation.id, organizationId)
+      .run();
+    return {
+      entry:
+        failed === 0
+          ? null
+          : {
+              action: "invite",
+              resourceType: "invitation",
+              resourceId: invitation.id,
+              metadata: { email: invitation.email, clerkCode },
+              organizationId,
+              userId,
+              status: "failure",
+            },
+      result: undefined,
+    };
+  });
+
+  const clerkRefused =
+    clerkError !== null && clerkError.clerkStatus >= 400 && clerkError.clerkStatus < 500;
+  if (!clerkRefused) {
+    await revokeClerkInvitations(c, organizationId, invitation);
+  }
+}
 
 export const updateMemberRole = async (c: ValidatedBodyContext<typeof updateMemberRoleSchema>) => {
   const { organizationId, userId } = resolveActor(c);

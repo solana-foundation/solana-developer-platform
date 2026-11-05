@@ -138,12 +138,7 @@ export class ClerkOrganizationsService {
     try {
       return await this.createOrganizationInvitation(params);
     } catch (error) {
-      // The code is Clerk's contract; its wording is the fallback should the
-      // code ever change.
-      if (
-        error instanceof ClerkRequestError &&
-        (error.clerkCode === CLERK_ALREADY_A_MEMBER || /already a member/i.test(error.message))
-      ) {
+      if (error instanceof ClerkRequestError && error.clerkCode === CLERK_ALREADY_A_MEMBER) {
         return null;
       }
       throw error;
