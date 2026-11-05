@@ -518,7 +518,7 @@ function ResponseBody({
   );
 }
 
-export interface ApiPlaygroundLayoutProps {
+interface ApiPlaygroundLayoutProps {
   endpoints: ApiPlaygroundEndpointConfig[];
   activeEndpoint: ApiPlaygroundEndpointConfig;
   onEndpointChange: (endpointId: string) => void;
