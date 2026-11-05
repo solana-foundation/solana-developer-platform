@@ -1,6 +1,9 @@
 "use client";
 
+import { type Action, isAction } from "@sdp/types/actions";
+import { API_KEY_WALLET_SCOPES, SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
+import type { PrivateChannelInstance } from "@sdp/types/private-channels";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import type { SWRConfiguration } from "swr";
 import { z } from "zod";
@@ -91,6 +94,43 @@ const organizationProviderAccessResponseSchema = z.object({
       ramps: z.record(z.string(), providerAvailabilityEntrySchema),
       earn: knownProviderEntries(EARN_PROVIDERS),
     }),
+  }),
+});
+
+const privateChannelInstanceResponseSchema = z.object({
+  data: z.object({
+    instance: z
+      .object({
+        id: z.string(),
+        organizationId: z.string(),
+        projectId: z.string(),
+        isActive: z.boolean(),
+        createdBy: z.string().nullable(),
+        createdAt: z.string(),
+        updatedAt: z.string(),
+        gatewayUrl: z.string(),
+        chainRpcUrl: z.string(),
+        escrowProgramId: z.string(),
+        withdrawProgramId: z.string(),
+        escrowInstanceAddr: z.string(),
+        authUrl: z.string(),
+      })
+      .nullable() satisfies z.ZodType<PrivateChannelInstance | null>,
+  }),
+});
+
+const apiKeyGrantSchema = z.string().refine((value): value is Action => isAction(value));
+
+const apiKeyResponseSchema = z.object({
+  data: z.object({
+    id: z.string().min(1),
+    name: z.string(),
+    environment: z.enum(SDP_ENVIRONMENTS),
+    grants: z.array(apiKeyGrantSchema),
+    expiresAt: z.string().nullable(),
+    walletScope: z.enum(API_KEY_WALLET_SCOPES),
+    walletIds: z.array(z.string()),
+    allowedIps: z.array(z.string()).nullable(),
   }),
 });
 
@@ -185,4 +225,28 @@ export function useOrganizationProviderAccess() {
     organizationProviderAccessResponseSchema
   );
   return { ...response, data: response.data?.data.providers };
+}
+
+/**
+ * The Project's Private Channels instance: `undefined` while it loads, `null` when there is none.
+ * Pass the Private Channels flag as `enabled`; nothing is read while it is off.
+ */
+export function usePrivateChannelInstance(enabled: boolean) {
+  const scope = useDashboardKeyScope();
+  const response = useDashboardRead(
+    enabled ? sharedReadQueryKeys.privateChannelInstance(scope) : null,
+    privateChannelInstanceResponseSchema
+  );
+  return { ...response, data: response.data?.data.instance };
+}
+
+/** One API key by id; `null` reads nothing. */
+export function useApiKey(keyId: string | null, config?: { keepPreviousData: boolean }) {
+  const scope = useDashboardKeyScope();
+  const response = useDashboardRead(
+    keyId === null ? null : sharedReadQueryKeys.apiKey(scope, { keyId }),
+    apiKeyResponseSchema,
+    config
+  );
+  return { ...response, data: response.data?.data };
 }

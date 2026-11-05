@@ -83,9 +83,8 @@ export async function readDashboardRequest<Schema extends z.ZodType>(
 }
 
 /**
- * A POST read (an estimate or quote that changes nothing) keyed like any other read: the key's
- * path is the URL and its params are the JSON body, so two keys share an entry only when they
- * would send the same request.
+ * A POST read (an estimate or quote that changes nothing): the key's path is the URL and its
+ * serialized body is sent as is, so two keys share an entry only when they send the same request.
  */
 export async function readDashboardPostRequest<Schema extends z.ZodType>(
   key: DashboardPostReadKey,
@@ -94,7 +93,7 @@ export async function readDashboardPostRequest<Schema extends z.ZodType>(
   const response = await dashboardReadRequest(
     key[2],
     { projectId: key[0], demo: key[1] === "demo" },
-    key[3]
+    key[3].body
   );
   return parseDashboardRead(response, schema);
 }
@@ -115,9 +114,9 @@ function mountedReadsOf(cache: Cache): Map<string, number> {
  * `useSWR` for a request key, counted while mounted so an invalidation can tell a read on screen
  * (refetch, keep its data) from one that is not (clear it). Every dashboard read goes through here.
  */
-export function useDashboardSWR<Data>(
-  key: DashboardRequestKey | null,
-  fetcher: (requestKey: DashboardRequestKey) => Promise<Data>,
+export function useDashboardSWR<Data, Key extends DashboardRequestKey = DashboardRequestKey>(
+  key: Key | null,
+  fetcher: (requestKey: Key) => Promise<Data>,
   config?: SWRConfiguration<Data, DashboardReadError>
 ): SWRResponse<Data, DashboardReadError> {
   const { cache } = useSWRConfig();
@@ -165,12 +164,28 @@ export function useInvalidateDashboardReads() {
       const mountedReads = mountedReadsOf(cache);
       const isMatch = (key: Arguments): key is DashboardRequestKey =>
         isDashboardRequestKey(key) && matches(key);
+      const offScreenKeys: string[] = [];
       await Promise.all([
         mutate((key) => isMatch(key) && mountedReads.has(unstable_serialize(key))),
-        mutate((key) => isMatch(key) && !mountedReads.has(unstable_serialize(key)), undefined, {
-          revalidate: false,
-        }),
+        mutate(
+          (key) => {
+            const offScreen = isMatch(key) && !mountedReads.has(unstable_serialize(key));
+            if (offScreen) {
+              offScreenKeys.push(unstable_serialize(key));
+            }
+            return offScreen;
+          },
+          undefined,
+          // With no hook mounted this fetches nothing, but it drops the key's in-flight request,
+          // so a remount starts its own instead of joining one whose answer predates the write.
+          { revalidate: true }
+        ),
       ]);
+      // Deleting the cleared entry makes the next mount start loading: it would otherwise keep
+      // its last `isLoading: false` for one render.
+      for (const serializedKey of offScreenKeys) {
+        cache.delete(serializedKey);
+      }
     },
     [cache, mutate]
   );
