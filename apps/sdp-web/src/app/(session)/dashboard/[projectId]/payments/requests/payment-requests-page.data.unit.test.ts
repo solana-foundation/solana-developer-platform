@@ -2,6 +2,7 @@ import type { PaymentRequest } from "@sdp/types/payments";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 import {
+  fetchPaymentRequestCanceler,
   fetchPaymentRequestDetail,
   fetchPaymentRequestLinkToken,
   loadPaymentRequestsList,
@@ -261,5 +262,70 @@ describe("loadPaymentRequestsList", () => {
       totalIsExact: true,
       hasNextPage: false,
     });
+  });
+});
+
+describe("fetchPaymentRequestCanceler", () => {
+  const canceled = (overrides: Partial<PaymentRequest>) =>
+    requestRow("preq_1", {
+      status: "canceled",
+      canceledAt: "2026-09-15T00:00:00.000Z",
+      ...overrides,
+    });
+  const json = <T>(body: T, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const member = (id: string, name: string | null, email = `${id}@example.com`) => ({
+    user: { id, email, name },
+  });
+  const unused = async (): Promise<Response> => {
+    throw new Error("not read");
+  };
+
+  it("reads nothing for a request that is not canceled", async () => {
+    expect(await fetchPaymentRequestCanceler(unused, requestRow("preq_1"))).toBeNull();
+  });
+
+  it("names the API key from the Project's keys", async () => {
+    const paths: string[] = [];
+    const request = async (path: string) => {
+      paths.push(path);
+      return json({ data: { id: "key_1", name: "Checkout bot" } });
+    };
+
+    expect(
+      await fetchPaymentRequestCanceler(request, canceled({ canceledByApiKeyId: "key_1" }))
+    ).toEqual({ kind: "api_key", id: "key_1", name: "Checkout bot" });
+    expect(paths).toEqual(["/v1/api-keys/key_1"]);
+  });
+
+  it("names the member by name, else email, reading pages until it finds them", async () => {
+    const paths: string[] = [];
+    const membersRequest = async (path: string) => {
+      paths.push(path);
+      return path.includes("page=1&")
+        ? json({ data: { members: [member("usr_1", "Ada")], meta: { hasMore: true } } })
+        : json({ data: { members: [member("usr_2", " ")], meta: { hasMore: false } } });
+    };
+
+    expect(
+      await fetchPaymentRequestCanceler(membersRequest, canceled({ canceledByUserId: "usr_2" }))
+    ).toEqual({ kind: "member", id: "usr_2", name: "usr_2@example.com" });
+    expect(paths).toEqual(["/v1/members?page=1&pageSize=100", "/v1/members?page=2&pageSize=100"]);
+  });
+
+  it("leaves the name out when the read is refused, fails, or finds nobody", async () => {
+    const refused = async () => json({ error: { message: "Forbidden" } }, 403);
+    const broken = async () => json({ unexpected: true });
+    const empty = async () => json({ data: { members: [], meta: { hasMore: false } } });
+
+    expect(
+      await fetchPaymentRequestCanceler(refused, canceled({ canceledByApiKeyId: "key_1" }))
+    ).toEqual({ kind: "api_key", id: "key_1", name: null });
+    expect(
+      await fetchPaymentRequestCanceler(broken, canceled({ canceledByUserId: "usr_1" }))
+    ).toEqual({ kind: "member", id: "usr_1", name: null });
+    expect(
+      await fetchPaymentRequestCanceler(empty, canceled({ canceledByUserId: "usr_1" }))
+    ).toEqual({ kind: "member", id: "usr_1", name: null });
   });
 });

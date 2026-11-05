@@ -1576,11 +1576,17 @@
       "dangerZone": "Danger zone",
       "cancelEffect": "The link stops accepting payments. Cannot be undone.",
       "cancelRequestEllipsis": "Cancel request…",
+      "canceledByApiKey": "The API key “{name}”",
+      "canceledByUnnamedApiKey": "An API key",
+      "canceledByUnnamedMember": "A member",
       "why": {
         "paid": "Settled to the destination wallet. Nothing further to do.",
         "awaiting": "The link is live and nobody has paid it yet. It does not expire.",
         "awaitingUntil": "The link is live and nobody has paid it yet. It stops working on {date}.",
         "canceled": "Canceled before anyone paid it. The link is dead and cannot be reopened.",
+        "canceledBy": "{actor} canceled it before anyone paid. The link is dead and cannot be reopened.",
+        "canceledOn": "Canceled on {date}, before anyone paid. The link is dead and cannot be reopened.",
+        "canceledByOn": "{actor} canceled it on {date}, before anyone paid. The link is dead and cannot be reopened.",
         "expired": "The link ran past its window before anyone paid. Send a new one."
       }
     },

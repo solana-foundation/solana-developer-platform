@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowPagination } from "@sdp/ui/arrow-pagination";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
 export function MembersPagination({
@@ -11,11 +11,11 @@ export function MembersPagination({
 }) {
   const router = useRouter();
   const href = useProjectHref();
-  const searchParams = useSearchParams();
   const pageCount = Math.max(1, Math.ceil(meta.total / meta.pageSize));
 
   const goToPage = (nextPage: number) => {
-    const params = new URLSearchParams(searchParams.toString());
+    // The live URL, not useSearchParams: a shallow tab switch (?tab=members) never reaches Next's copy.
+    const params = new URLSearchParams(window.location.search);
     // Page 1 is the default, so it stays out of the URL.
     if (nextPage <= 1) {
       params.delete("membersPage");

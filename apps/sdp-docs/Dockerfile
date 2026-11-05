@@ -28,6 +28,7 @@ COPY packages/sdp-fee-payment/package.json ./packages/sdp-fee-payment/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
 COPY packages/sdp-custody/package.json ./packages/sdp-custody/
 COPY packages/sdp-redaction/package.json ./packages/sdp-redaction/
+COPY packages/sdp-ip/package.json ./packages/sdp-ip/
 COPY packages/sdp-solana/package.json ./packages/sdp-solana/
 COPY packages/sdp-issuance/package.json ./packages/sdp-issuance/
 COPY patches ./patches
@@ -50,6 +51,7 @@ COPY packages/sdp-fee-payment ./packages/sdp-fee-payment
 COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-custody ./packages/sdp-custody
 COPY packages/sdp-redaction ./packages/sdp-redaction
+COPY packages/sdp-ip ./packages/sdp-ip
 COPY packages/sdp-solana ./packages/sdp-solana
 COPY packages/sdp-issuance ./packages/sdp-issuance
 

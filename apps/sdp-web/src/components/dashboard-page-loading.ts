@@ -26,7 +26,10 @@ import {
   MarketsLandingFlagsSkeleton,
   TreasurySolutionsSkeleton,
 } from "@/app/(session)/dashboard/[projectId]/markets/markets-route-skeletons";
-import { SettingsPageSkeleton } from "@/app/(session)/dashboard/[projectId]/operations-card-page-skeletons";
+import {
+  AccountPageSkeleton,
+  SettingsPageSkeleton,
+} from "@/app/(session)/dashboard/[projectId]/operations-card-page-skeletons";
 import CounterpartyDirectoryLoading from "@/app/(session)/dashboard/[projectId]/payments/counterparty/loading";
 import { PaymentsPageSkeleton } from "@/app/(session)/dashboard/[projectId]/payments/payments-page-skeleton";
 import {
@@ -145,6 +148,8 @@ function resolveCurrentPageLoadingComponent(
       return ApiKeyEditLoading;
     case "settings":
       return SettingsPageSkeleton;
+    case "account":
+      return AccountPageSkeleton;
     case "helius-rings":
       return HeliusRingsSkeleton;
     case "allowlist":

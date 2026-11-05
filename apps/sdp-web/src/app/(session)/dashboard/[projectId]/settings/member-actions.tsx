@@ -1,5 +1,6 @@
 "use client";
 
+import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import { ORGANIZATION_ROLES, type OrganizationRole } from "@sdp/types/roles";
 import { Button } from "@sdp/ui/button";
 import {
@@ -14,18 +15,45 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
+import { z } from "zod";
 import { API_KEYS_PAGE_PATH } from "@/app/(session)/dashboard/[projectId]/api-keys/api-key-flash";
-import {
-  changeMemberRole,
-  listMemberApiKeys,
-  type MemberApiKey,
-  removeMember,
-} from "@/app/(session)/members/actions";
+import { RecordFacts } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
 import { EntityLink } from "@/components/entity-link";
 import { useTranslations } from "@/i18n/provider";
+import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { projectHref } from "@/lib/dashboard-project-path";
+import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
+import { fetchResultAnswer, IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 import { membersQueryKeys } from "./members-query-key";
+
+const memberApiKeysSchema = z.object({
+  apiKeys: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      keyPrefix: z.string(),
+      projectId: z.string(),
+      projectName: z.string(),
+      environment: z.enum(SDP_ENVIRONMENTS),
+      createdAt: z.string(),
+    })
+  ),
+});
+
+type MemberApiKey = z.infer<typeof memberApiKeysSchema>["apiKeys"][number];
+
+function memberPath(memberId: string): string {
+  return `/api/dashboard/members/${encodeURIComponent(memberId)}`;
+}
+
+async function fetchMemberApiKeys(memberId: string): Promise<MemberApiKey[]> {
+  const result = await dashboardFetch(`${memberPath(memberId)}/api-keys`);
+  if (!result.ok) {
+    throw new Error(result.error);
+  }
+  return z.object({ data: memberApiKeysSchema }).parse(result.data).data.apiKeys;
+}
 
 export function MemberActions({
   memberId,
@@ -68,14 +96,21 @@ export function MemberActions({
     const input = JSON.stringify(["role", memberId, nextRole]);
     startTransition(async () => {
       const key = actionKey.keyFor(input);
-      const result = await changeMemberRole(memberId, nextRole, key);
-      actionKey.settled(input, key, result);
-      if (result.status === "error") {
-        toast.error(t("Shared.members.roleChangeFailed", { error: result.message }));
+      const result = await dashboardFetch(memberPath(memberId), {
+        method: "PATCH",
+        headers: { [IDEMPOTENCY_KEY_HEADER]: key },
+        body: { role: nextRole },
+      });
+      actionKey.settled(input, key, {
+        status: result.ok ? "success" : "error",
+        answer: fetchResultAnswer(result),
+      });
+      if (!result.ok) {
+        toast.error(t("Shared.members.roleChangeFailed", { error: result.error }));
         return;
       }
       toast.success(t("Shared.members.roleChanged", { member: label }));
-      router.refresh();
+      refreshKeepingDashboardUrl(router);
     });
   };
 
@@ -93,7 +128,7 @@ export function MemberActions({
   // explicit "remove anyway". SWR reads it again on focus, after a revoke.
   const { data: apiKeys, error: apiKeysError } = useSWR(
     isConfirmOpen ? membersQueryKeys.memberApiKeys({ memberId }) : null,
-    ([, id]) => listMemberApiKeys(id)
+    ([, id]) => fetchMemberApiKeys(id)
   );
   const isApiKeysLoading = isConfirmOpen && !apiKeys && !apiKeysError;
   const isApiKeysFailed = !apiKeys && Boolean(apiKeysError);
@@ -105,17 +140,23 @@ export function MemberActions({
     const input = JSON.stringify(["remove", memberId]);
     startTransition(async () => {
       const key = actionKey.keyFor(input);
-      const result = await removeMember(memberId, key);
-      actionKey.settled(input, key, result);
+      const result = await dashboardFetch(memberPath(memberId), {
+        method: "DELETE",
+        headers: { [IDEMPOTENCY_KEY_HEADER]: key },
+      });
+      actionKey.settled(input, key, {
+        status: result.ok ? "success" : "error",
+        answer: fetchResultAnswer(result),
+      });
 
-      if (result.status === "error") {
-        toast.error(t("Shared.members.removeFailed", { error: result.message }));
+      if (!result.ok) {
+        toast.error(t("Shared.members.removeFailed", { error: result.error }));
         return;
       }
 
       setConfirmOpen(false);
       toast.success(t("Shared.members.removed", { member: label }));
-      router.refresh();
+      refreshKeepingDashboardUrl(router);
     });
   };
 
@@ -208,8 +249,8 @@ function MemberApiKeys({ apiKeys, label }: { apiKeys: MemberApiKey[]; label: str
           <li key={apiKey.id} className="flex items-center gap-3 px-3 py-2">
             <div className="min-w-0 flex-1">
               <p className="truncate text-primary">{apiKey.name}</p>
-              <p className="truncate text-tertiary text-xs">
-                {apiKey.keyPrefix}… · {apiKey.projectName}
+              <p className="text-tertiary text-xs">
+                <RecordFacts facts={[`${apiKey.keyPrefix}…`, apiKey.projectName]} />
               </p>
             </div>
             <EntityLink

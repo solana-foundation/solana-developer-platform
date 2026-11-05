@@ -49,27 +49,76 @@ import {
   cancelPaymentRequest,
   deriveTokenOptions,
   fetchPaymentRequestFromBrowser,
+  type PaymentRequestCanceler,
 } from "./payment-requests-page.data";
 
 type Translate = ReturnType<typeof useTranslations>;
 
+/**
+ * Who canceled it, as the band names them: the key's or member's name, else "an API key" or "a
+ * member". Null when the request does not say who did.
+ */
+function cancelerLabel(
+  request: PaymentRequest,
+  canceler: PaymentRequestCanceler | null,
+  t: Translate
+): string | null {
+  const id = request.canceledByApiKeyId ?? request.canceledByUserId;
+  if (!id) return null;
+  const name = canceler?.id === id ? canceler.name : null;
+  if (request.canceledByApiKeyId) {
+    return name
+      ? t("DashboardPayments.requestDetail.canceledByApiKey", { name })
+      : t("DashboardPayments.requestDetail.canceledByUnnamedApiKey");
+  }
+  return name ?? t("DashboardPayments.requestDetail.canceledByUnnamedMember");
+}
+
 /** Why a request is in its state, in the design's words; an open one says until when. */
 function requestWhy(
-  status: PaymentRequest["status"],
+  request: PaymentRequest,
   expires: string | null,
+  canceler: PaymentRequestCanceler | null,
+  locale: string,
   t: Translate
 ): string {
-  if (status === "paid") {
-    return t("DashboardPayments.requestDetail.why.paid");
+  const status = request.status;
+  switch (status) {
+    case "paid":
+      return t("DashboardPayments.requestDetail.why.paid");
+    case "awaiting_payment":
+      return expires
+        ? t("DashboardPayments.requestDetail.why.awaitingUntil", { date: expires })
+        : t("DashboardPayments.requestDetail.why.awaiting");
+    case "expired":
+      return t("DashboardPayments.requestDetail.why.expired");
+    case "canceled":
+      return canceledWhy(request, canceler, locale, t);
+    default: {
+      const unhandled: never = status;
+      throw new Error(`Unhandled payment request status: ${String(unhandled)}`);
+    }
   }
-  if (status === "awaiting_payment") {
-    return expires
-      ? t("DashboardPayments.requestDetail.why.awaitingUntil", { date: expires })
-      : t("DashboardPayments.requestDetail.why.awaiting");
+}
+
+/** A canceled request's why: who canceled it and when, as far as both are known. */
+function canceledWhy(
+  request: PaymentRequest,
+  canceler: PaymentRequestCanceler | null,
+  locale: string,
+  t: Translate
+): string {
+  const actor = cancelerLabel(request, canceler, t);
+  const date = request.canceledAt ? formatDateTime(request.canceledAt, locale) : null;
+  if (actor && date) {
+    return t("DashboardPayments.requestDetail.why.canceledByOn", { actor, date });
   }
-  return status === "canceled"
-    ? t("DashboardPayments.requestDetail.why.canceled")
-    : t("DashboardPayments.requestDetail.why.expired");
+  if (actor) {
+    return t("DashboardPayments.requestDetail.why.canceledBy", { actor });
+  }
+  return date
+    ? t("DashboardPayments.requestDetail.why.canceledOn", { date })
+    : t("DashboardPayments.requestDetail.why.canceled");
 }
 
 /** The page's origin never changes while it is open, so there is nothing to subscribe to. */
@@ -140,9 +189,9 @@ function CopyLinkContent({ copied }: { copied: boolean }) {
  * The request's pay link on this origin, as the design lays it out: its QR code on a 128px tile,
  * the link beside it, and the copy, share and QR download under the link. A demo request lives
  * in this browser only, so it shows no code or link that would open a page that cannot find it,
- * and its actions say so instead of handing out a link nobody can open. Opened by the
- * new-request page, the link is marked and Copy link reads Copied; when that copy failed, a line
- * says so while the request can still be paid.
+ * and its actions say so instead of handing out a link nobody can open. It shows only while the
+ * request can be paid. Opened by the new-request page, the link is marked and Copy link reads
+ * Copied; when that copy failed, a line says so.
  */
 function RequestPaymentLink({
   request,
@@ -239,7 +288,7 @@ function RequestPaymentLink({
             {payLink || null}
           </span>
         )}
-        {linkCopiedOnCreate === false && request.status === "awaiting_payment" ? (
+        {linkCopiedOnCreate === false ? (
           <p className="mt-2.5 text-body text-secondary">
             {t("DashboardPayments.requests.paymentLinkCopyFailed")}
           </p>
@@ -249,7 +298,7 @@ function RequestPaymentLink({
         <div className="mt-2.5 flex flex-wrap items-center gap-2 [&_button]:[--button-height-md:1.875rem]">
           <Button
             type="button"
-            variant={request.status === "awaiting_payment" ? "default" : "outline"}
+            variant="default"
             size="sm"
             disabled={!origin}
             onClick={() => void copyLink()}
@@ -417,6 +466,8 @@ interface PaymentRequestDetailWorkspaceProps {
   publicToken: string | null;
   /** The destination wallet's label, when it has one. */
   walletName: string | null;
+  /** Who canceled the request as the server read it; null when it is not canceled. */
+  canceler?: PaymentRequestCanceler | null;
   /** Set when the requests could not be read; the page says so and offers a retry. */
   error?: string;
 }
@@ -429,6 +480,7 @@ export function PaymentRequestDetailWorkspace({
   request,
   publicToken,
   walletName,
+  canceler = null,
   error,
 }: PaymentRequestDetailWorkspaceProps) {
   const t = useTranslations();
@@ -456,6 +508,7 @@ export function PaymentRequestDetailWorkspace({
       request={request}
       publicToken={publicToken}
       walletName={walletName}
+      canceler={canceler}
       linkCopiedOnCreate={linkCopiedOnCreate}
     />
   );
@@ -466,15 +519,24 @@ function PaymentRequestRecord({
   request: served,
   publicToken,
   walletName,
+  canceler,
   linkCopiedOnCreate,
 }: {
   request: PaymentRequest;
   publicToken: string | null;
   walletName: string | null;
+  canceler: PaymentRequestCanceler | null;
   /** Whether the new-request page that opened this page copied the link; null otherwise. */
   linkCopiedOnCreate: boolean | null;
 }) {
   const request = useWatchedPaymentRequest(served);
+  const router = useRouter();
+  // Who canceled is read on the server, so a cancel the watch sees first refreshes the page once;
+  // the refreshed request is canceled, so it does not refresh again.
+  const canceledUnderWatch = served.status === "awaiting_payment" && request.status === "canceled";
+  useEffect(() => {
+    if (canceledUnderWatch) router.refresh();
+  }, [canceledUnderWatch, router]);
   const t = useTranslations();
   const projectHref = useProjectHref();
   const locale = useLocale();
@@ -493,6 +555,9 @@ function PaymentRequestRecord({
     [sdpEnvironment]
   );
 
+  const linkLive =
+    request.status === "awaiting_payment" &&
+    (now === null || isPaymentRequestPayableAt(request, now));
   const symbol = tokenSymbolByMint.get(request.token) ?? shortenAddress(request.token);
   const expires = request.expiresAt ? formatDateTime(request.expiresAt, locale) : null;
 
@@ -504,7 +569,7 @@ function PaymentRequestRecord({
         <RecordStateBand
           state={t(REQUEST_STATUS_TRANSLATION_KEYS[request.status])}
           tone={REQUEST_STATUS_TONE[request.status]}
-          why={requestWhy(request.status, expires, t)}
+          why={requestWhy(request, expires, canceler, locale, t)}
           action={
             request.status === "paid" && request.fulfilledByTransferId ? (
               <Button asChild variant="outline" size="sm">
@@ -521,8 +586,10 @@ function PaymentRequestRecord({
             {formatDecimalAmount(request.amount, locale)} {symbol}
           </RecordAmount>
           {/* The pay link is a bearer credential: only a member who may manage payment
-              requests receives its token (APE-849). */}
-          {publicToken ? (
+              requests receives its token (APE-849). Once paid, canceled or expired the link only
+              says so, so the page stops handing it out: the server and first client render go by
+              the status, then the clock decides an expiry the API has not reported yet. */}
+          {publicToken && linkLive ? (
             <RequestPaymentLink
               request={request}
               publicToken={publicToken}
