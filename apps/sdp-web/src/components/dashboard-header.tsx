@@ -296,6 +296,49 @@ function MobileNavButton({ onClick }: { onClick: () => void }) {
 }
 
 /**
+ * The page's h1 with what sits around it: a mark before it (and a description under it), or a
+ * status badge after it on its line.
+ */
+function PageTitleLine({
+  title,
+  mark,
+  description,
+  badge,
+}: {
+  title: string;
+  mark?: ReactNode;
+  description?: string;
+  badge?: ReactNode;
+}) {
+  const heading = (
+    <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
+      {title}
+    </h1>
+  );
+  if (mark) {
+    return (
+      <div className="flex min-w-0 items-center gap-4">
+        {/* A flex box, so an inline mark sits on no line box and the row is the mark's height. */}
+        <span className="flex shrink-0">{mark}</span>
+        <div className="min-w-0">
+          {heading}
+          {description ? <p className="mt-1 text-body text-secondary">{description}</p> : null}
+        </div>
+      </div>
+    );
+  }
+  if (badge) {
+    return (
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        {heading}
+        {badge}
+      </div>
+    );
+  }
+  return heading;
+}
+
+/**
  * The title block. On a phone it is the design's three rows: the navigation button, the
  * title 8px under it, then the page's action 16px under that. From md the button goes and the
  * action sits on the title's row. Any utilities (Payments' demo mode switch) sit at the far right
@@ -350,31 +393,7 @@ export function StackedDashboardTopBar({
               {above}
             </div>
           ) : null}
-          {mark ? (
-            <div className="flex min-w-0 items-center gap-4">
-              {/* A flex box, so an inline mark sits on no line box and the row is the mark's height. */}
-              <span className="flex shrink-0">{mark}</span>
-              <div className="min-w-0">
-                <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
-                  {title}
-                </h1>
-                {description ? (
-                  <p className="mt-1 text-body text-secondary">{description}</p>
-                ) : null}
-              </div>
-            </div>
-          ) : badge ? (
-            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-              <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
-                {title}
-              </h1>
-              {badge}
-            </div>
-          ) : (
-            <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
-              {title}
-            </h1>
-          )}
+          <PageTitleLine title={title} mark={mark} description={description} badge={badge} />
         </div>
       )}
       {/* An empty state whose action repeats this one (New, Add) hides it: the shell's

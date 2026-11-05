@@ -239,6 +239,168 @@ function useDateFormatter() {
 }
 
 /**
+ * The rotation the page holds, kept mounted across dismissal and refresh so an unresolved one
+ * resumes with the original payload, key and credential target; offers to resume it once its
+ * dialog is closed.
+ */
+function RotationController({
+  availableLifecycle,
+  canAct,
+  connectionId,
+  provider,
+  rotation,
+  onRotationChange,
+}: {
+  availableLifecycle: CustodyCredentialLifecycle | null;
+  canAct: boolean;
+  connectionId: string;
+  provider: CustodyProvider;
+  rotation: RotationState;
+  onRotationChange: (rotation: RotationState) => void;
+}) {
+  const t = useTranslations();
+  if (!rotation.lifecycle) return null;
+  return (
+    <>
+      <RotateCredentialsModal
+        isOpen={rotation.open}
+        onClose={(preserveAttempt) =>
+          onRotationChange({
+            lifecycle: preserveAttempt ? rotation.lifecycle : null,
+            open: false,
+          })
+        }
+        lifecycle={availableLifecycle ?? rotation.lifecycle}
+        provider={provider}
+        connectionId={connectionId}
+        canRotate={canAct}
+      />
+      {rotation.open ? null : (
+        <Callout variant="warning" title={t("DashboardCustody.rotateUnknownTitle")}>
+          <p>{t("DashboardCustody.rotateResumeHint")}</p>
+          <Button
+            className="mt-3"
+            size="sm"
+            variant="secondary"
+            onClick={() => onRotationChange({ lifecycle: rotation.lifecycle, open: true })}
+          >
+            {t("DashboardCustody.rotateResumeAction")}
+          </Button>
+        </Callout>
+      )}
+    </>
+  );
+}
+
+/** The credentials block once the lifecycle has been read. */
+function CredentialsBlock({
+  canManageCustody,
+  connectionId,
+  lifecycle,
+  provider,
+}: {
+  canManageCustody: boolean;
+  connectionId: string;
+  lifecycle: CustodyCredentialLifecycle;
+  provider: CustodyProvider;
+}) {
+  const t = useTranslations();
+  const { pending, run } = useCustodyAction();
+  const [rollbackOpen, setRollbackOpen] = useState(false);
+  const { managedHere, currentInUse, canAct } = resolveCredentialActions(
+    lifecycle,
+    canManageCustody
+  );
+  const credential = lifecycle.providerCredential;
+  const candidate = lifecycle.rotationCandidate;
+  const rollbackAvailable = canAct && canRollBack(lifecycle).available && !pending;
+  const unused =
+    managedHere && credential.status === "active" && lifecycle.impact.connections.length === 0;
+
+  // Both take the id rather than closing over `candidate`, because only the
+  // branch that renders these buttons knows a candidate exists.
+  const handleSettleCandidate = async (candidateId: string) => {
+    await run(() => completeRotationAction(candidateId, provider, connectionId), {
+      successTitle: t("DashboardCustody.rotateSuccessTitle"),
+      failedTitle: t("DashboardCustody.rotateFailedTitle"),
+      unknownTitle: t("DashboardCustody.rotateUnknownTitle"),
+    });
+  };
+
+  const handleCancelCandidate = async (candidateId: string) => {
+    await run(() => cancelRotationAction(candidateId, provider, connectionId), {
+      successTitle: t("DashboardCustody.rotationCancelledTitle"),
+      failedTitle: t("DashboardCustody.rotationCancelFailedTitle"),
+      unknownTitle: t("DashboardCustody.rotationCancelUnknownTitle"),
+    });
+  };
+
+  return (
+    <RecordBlock
+      title={t("DashboardCustody.credentialsTitle")}
+      hint={t("DashboardCustody.credentialsHint")}
+      aside={
+        lifecycle.rollback && canAct ? (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!rollbackAvailable}
+            onClick={() => setRollbackOpen(true)}
+          >
+            {t("DashboardCustody.rollbackSecretAction")}
+          </Button>
+        ) : null
+      }
+    >
+      {candidate ? (
+        <PendingRotationCallout
+          canCancel={
+            candidate.status === "pending" || (candidate.status === "creating" && currentInUse)
+          }
+          canManageCustody={canManageCustody}
+          currentInUse={currentInUse}
+          onCancel={() => handleCancelCandidate(candidate.id)}
+          onSettle={() => handleSettleCandidate(candidate.id)}
+          pending={pending}
+          t={t}
+        />
+      ) : null}
+
+      {managedHere ? null : (
+        <Callout variant="neutral">{t("DashboardCustody.credentialDeploymentExplainer")}</Callout>
+      )}
+
+      <CredentialRows
+        canAct={canAct}
+        connectionId={connectionId}
+        lifecycle={lifecycle}
+        managedHere={managedHere}
+        pending={pending}
+        t={t}
+      />
+
+      {credential.status === "deactivated" ? (
+        <p className="text-body text-tertiary">
+          {t("DashboardCustody.deactivateCredentialsSuccessDescription")}
+        </p>
+      ) : null}
+      {unused ? (
+        <p className="text-body text-tertiary">{t("DashboardCustody.credentialNoLongerUsed")}</p>
+      ) : null}
+      {canAct ? (
+        <RollbackDialog
+          isOpen={rollbackOpen}
+          onClose={() => setRollbackOpen(false)}
+          lifecycle={lifecycle}
+          provider={provider}
+          connectionId={connectionId}
+        />
+      ) : null}
+    </RecordBlock>
+  );
+}
+
+/**
  * The credentials behind this connection, and what can be done to them.
  *
  * Three shapes, decided by the data rather than by the caller:
@@ -269,159 +431,40 @@ export function ConnectionCredentialsSection({
   onRotationChange: (rotation: RotationState) => void;
 }) {
   const t = useTranslations();
-  const { pending, run } = useCustodyAction();
-  const [rollbackOpen, setRollbackOpen] = useState(false);
-  const { availableLifecycle, managedHere, currentInUse, canAct } = resolveCredentialActions(
-    lifecycle,
-    canManageCustody
-  );
-  const rotationModal = rotation.lifecycle ? (
-    <>
-      <RotateCredentialsModal
-        isOpen={rotation.open}
-        onClose={(preserveAttempt) =>
-          onRotationChange({
-            lifecycle: preserveAttempt ? rotation.lifecycle : null,
-            open: false,
-          })
-        }
-        lifecycle={availableLifecycle ?? rotation.lifecycle}
-        provider={provider}
-        connectionId={connection.id}
-        canRotate={canAct}
-      />
-      {!rotation.open ? (
-        <Callout variant="warning" title={t("DashboardCustody.rotateUnknownTitle")}>
-          <p>{t("DashboardCustody.rotateResumeHint")}</p>
-          <Button
-            className="mt-3"
-            size="sm"
-            variant="secondary"
-            onClick={() => onRotationChange({ lifecycle: rotation.lifecycle, open: true })}
-          >
-            {t("DashboardCustody.rotateResumeAction")}
-          </Button>
-        </Callout>
-      ) : null}
-    </>
-  ) : null;
+  const { availableLifecycle, canAct } = resolveCredentialActions(lifecycle, canManageCustody);
 
-  if (lifecycle === "restricted") {
-    return (
-      <>
-        {rotationModal}
+  return (
+    <>
+      <RotationController
+        availableLifecycle={availableLifecycle}
+        canAct={canAct}
+        connectionId={connection.id}
+        provider={provider}
+        rotation={rotation}
+        onRotationChange={onRotationChange}
+      />
+      {lifecycle === "restricted" ? (
         <CredentialsNotice
           title={t("DashboardCustody.credentialsTitle")}
           variant="neutral"
           message={t("DashboardCustody.credentialsRestricted")}
         />
-      </>
-    );
-  }
-
-  // A failed read is not the same as "there are none", and the rest of the page
-  // is still true, so this says so and invites a retry.
-  if (!lifecycle) {
-    return (
-      <>
-        {rotationModal}
+      ) : lifecycle ? (
+        <CredentialsBlock
+          canManageCustody={canManageCustody}
+          connectionId={connection.id}
+          lifecycle={lifecycle}
+          provider={provider}
+        />
+      ) : (
+        // A failed read is not the same as "there are none", and the rest of the page
+        // is still true, so this says so and invites a retry.
         <CredentialsNotice
           title={t("DashboardCustody.credentialsTitle")}
           variant="warning"
           message={t("DashboardCustody.credentialsUnavailable")}
         />
-      </>
-    );
-  }
-
-  const credential = lifecycle.providerCredential;
-  const candidate = lifecycle.rotationCandidate;
-  const rollbackAvailable = canAct && canRollBack(lifecycle).available && !pending;
-
-  // Both take the id rather than closing over `candidate`, because only the
-  // branch that renders these buttons knows a candidate exists.
-  const handleSettleCandidate = async (candidateId: string) => {
-    await run(() => completeRotationAction(candidateId, provider, connection.id), {
-      successTitle: t("DashboardCustody.rotateSuccessTitle"),
-      failedTitle: t("DashboardCustody.rotateFailedTitle"),
-      unknownTitle: t("DashboardCustody.rotateUnknownTitle"),
-    });
-  };
-
-  const handleCancelCandidate = async (candidateId: string) => {
-    await run(() => cancelRotationAction(candidateId, provider, connection.id), {
-      successTitle: t("DashboardCustody.rotationCancelledTitle"),
-      failedTitle: t("DashboardCustody.rotationCancelFailedTitle"),
-      unknownTitle: t("DashboardCustody.rotationCancelUnknownTitle"),
-    });
-  };
-
-  return (
-    <>
-      {rotationModal}
-      <RecordBlock
-        title={t("DashboardCustody.credentialsTitle")}
-        hint={t("DashboardCustody.credentialsHint")}
-        aside={
-          lifecycle.rollback && canAct ? (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!rollbackAvailable}
-              onClick={() => setRollbackOpen(true)}
-            >
-              {t("DashboardCustody.rollbackSecretAction")}
-            </Button>
-          ) : null
-        }
-      >
-        {candidate ? (
-          <PendingRotationCallout
-            canCancel={
-              candidate.status === "pending" || (candidate.status === "creating" && currentInUse)
-            }
-            canManageCustody={canManageCustody}
-            currentInUse={currentInUse}
-            onCancel={() => handleCancelCandidate(candidate.id)}
-            onSettle={() => handleSettleCandidate(candidate.id)}
-            pending={pending}
-            t={t}
-          />
-        ) : null}
-
-        {managedHere ? null : (
-          <Callout variant="neutral">{t("DashboardCustody.credentialDeploymentExplainer")}</Callout>
-        )}
-
-        <CredentialRows
-          canAct={canAct}
-          connectionId={connection.id}
-          lifecycle={lifecycle}
-          managedHere={managedHere}
-          pending={pending}
-          t={t}
-        />
-
-        {credential.status === "deactivated" ? (
-          <p className="text-body text-tertiary">
-            {t("DashboardCustody.deactivateCredentialsSuccessDescription")}
-          </p>
-        ) : null}
-        {managedHere &&
-        credential.status === "active" &&
-        lifecycle.impact.connections.length === 0 ? (
-          <p className="text-body text-tertiary">{t("DashboardCustody.credentialNoLongerUsed")}</p>
-        ) : null}
-        {canAct ? (
-          <RollbackDialog
-            isOpen={rollbackOpen}
-            onClose={() => setRollbackOpen(false)}
-            lifecycle={lifecycle}
-            provider={provider}
-            connectionId={connection.id}
-          />
-        ) : null}
-      </RecordBlock>
+      )}
     </>
   );
 }
