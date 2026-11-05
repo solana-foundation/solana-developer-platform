@@ -1,6 +1,5 @@
 import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import { z } from "zod";
-import { CUSTODY_MODE_GATE } from "@/openapi/release-channel-values";
 import {
   connectionWalletOwnerSchema as connectionWalletOwnerSchemaBase,
   createManagedWalletSchema as createManagedWalletSchemaBase,
@@ -19,7 +18,6 @@ import {
 } from "./base";
 
 export const initializeSigningRequestSchema = withOpenApi(initializeSigningSchemaBase, {
-  [CUSTODY_MODE_GATE]: "managed",
   description:
     "Initialize wallet signing provider for the project resolved from the request context.",
 });
@@ -38,7 +36,6 @@ const managedWalletOwnerOpenApiSchema = managedWalletOwnerSchemaBase
   .omit({ connectionId: true })
   .extend({
     provider: orgCustodyProviderSchema.openapi({
-      [CUSTODY_MODE_GATE]: "managed",
       description:
         "Provider whose Managed config owns the new wallet. A project holds one active config per provider.",
       example: "privy",
@@ -328,8 +325,7 @@ const orgCustodyConfigBaseSchema = z.object({
   projectId: projectIdParamSchema
     .nullable()
     .openapi({ description: "Optional project scope for this config." }),
-  // Configs are Managed: a Custody Connection (BYOK) is not one.
-  provider: orgCustodyProviderSchema.openapi({ [CUSTODY_MODE_GATE]: "managed" }),
+  provider: orgCustodyProviderSchema,
   status: z.enum(["active", "inactive"]).openapi({
     description: "Config status.",
     example: "active",

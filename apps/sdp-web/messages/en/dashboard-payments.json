@@ -1027,6 +1027,7 @@
       "interval": "Interval",
       "nextPayment": "Next payment",
       "counterpartyUnavailable": "Counterparty unavailable",
+      "counterpartyArchived": "Archived counterparty",
       "payment": "Recurring payment",
       "receivingWallet": "Receiving wallet",
       "starts": "Starts",

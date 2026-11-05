@@ -1,4 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
+import type { OrganizationStatus } from "@sdp/types/organizations";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -771,6 +772,41 @@ describe("Auth Middleware", () => {
     it("refuses a key whose organization was deleted", async () => {
       await getDb(env)
         .prepare("UPDATE organizations SET status = 'deleted' WHERE id = ?")
+        .bind(TEST_ORG.id)
+        .run();
+
+      const res = await keyed("/context");
+      expect(res.status).toBe(401);
+      const body = errorBodySchema.parse(await res.json());
+      expect(body.error.code).toBe("REVOKED_API_KEY");
+    });
+
+    it("names a suspended organization rather than blaming the key, and admits it on resume (HOO-2009)", async () => {
+      const setStatus = (status: OrganizationStatus) =>
+        getDb(env)
+          .prepare("UPDATE organizations SET status = ? WHERE id = ?")
+          .bind(status, TEST_ORG.id)
+          .run();
+      await setStatus("suspended");
+
+      const res = await keyed("/context");
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({
+        error: {
+          code: "FORBIDDEN",
+          message: expect.stringContaining("suspended"),
+          details: { reason: "organization_suspended" },
+        },
+      });
+
+      await setStatus("active");
+      expect((await keyed("/context")).status).toBe(200);
+    });
+
+    it("keeps a dead key's own refusal while its organization is suspended (HOO-2009)", async () => {
+      await updateKey("status", "revoked");
+      await getDb(env)
+        .prepare("UPDATE organizations SET status = 'suspended' WHERE id = ?")
         .bind(TEST_ORG.id)
         .run();
 

@@ -104,7 +104,9 @@ import {
   assertRecurringPaymentSourceWallet,
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
+  notCollectable,
   readSavedSend,
+  recipientUnavailable,
   recurringPaymentErrorMessage,
   sendSubscriptionInstructions,
 } from "./shared";
@@ -140,7 +142,7 @@ function assertCollectibleRecurringPayment(
     row.subscription_id === null ||
     row.next_collection_due_at === null
   ) {
-    throw conflict("Recurring payment must be active before collection");
+    throw notCollectable(row);
   }
 }
 
@@ -1956,9 +1958,7 @@ async function admitCollectionDestination(input: {
       recurring_payment_id: input.recurringPayment.id,
     });
   }
-  throw conflict(
-    "Recurring payment recipient is unavailable; cancel this schedule and create a new one"
-  );
+  throw recipientUnavailable();
 }
 
 export async function collectRecurringPayment(input: {
@@ -1981,7 +1981,7 @@ export async function collectRecurringPayment(input: {
 }): Promise<RecurringPaymentCollectionResult> {
   assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
   if (!hasRecoverableRecurringPaymentCollection(input.recurringPayment.status)) {
-    throw conflict("Recurring payment must be active before collection");
+    throw notCollectable(input.recurringPayment);
   }
   if (!input.recurringPayment.subscription_id || !input.recurringPayment.next_collection_due_at) {
     throw conflict("Recurring payment is missing subscription records");
@@ -2020,7 +2020,7 @@ export async function collectRecurringPayment(input: {
   if (recovered) return recovered;
   refuseCanceledCollection(input.recurringPayment, subscription);
   if (!isCollectableRecurringPaymentStatus(input.recurringPayment.status)) {
-    throw conflict("Recurring payment must be active before collection");
+    throw notCollectable(input.recurringPayment);
   }
   assertCollectibleRecurringPayment(input.recurringPayment);
   const recurringPayment = input.recurringPayment;
