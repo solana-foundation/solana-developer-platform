@@ -2,7 +2,7 @@ import { hashString } from "@sdp/payments/hash";
 import { SDP_TERMS } from "@sdp/types/mainnet-access";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db/client";
+import { getDb, type PreparedStatement } from "@/db/client";
 import { app } from "@/index";
 import { correctMainnetAccess } from "@/services/mainnet-access.service";
 import { syncProviderAccessFromClerk } from "@/services/provider-availability.service";
@@ -10,7 +10,11 @@ import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fi
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
-import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
+import {
+  organizationCreator,
+  organizationStatements,
+  seedOrganization,
+} from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -29,28 +33,32 @@ let iterable: MockInstance<typeof fetch>;
 
 async function seedMainnetAccessOrganization(): Promise<void> {
   const db = getDb(env);
-  await seedOrganization(db, {
-    id: ORGANIZATION_ID,
-    name: TEST_ORG.name,
-    slug: TEST_ORG.slug,
-    status: TEST_ORG.status,
-    creator: organizationCreator(ORGANIZATION_ID),
-  });
+  const statements: PreparedStatement[] = [];
   for (const [user, role] of [
     [{ id: TEST_USER.id, email: TEST_USER.email }, "admin"],
     [MEMBER_USER, "member"],
   ] as const) {
-    await db
-      .prepare("INSERT INTO users (id, email, name, status) VALUES (?, ?, ?, 'active')")
-      .bind(user.id, user.email, role === "admin" ? "Ada Admin" : null)
-      .run();
-    await db
-      .prepare(
-        "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, ?, 'active')"
-      )
-      .bind(`mem_${user.id}`, ORGANIZATION_ID, user.id, role)
-      .run();
+    statements.push(
+      db
+        .prepare("INSERT INTO users (id, email, name, status) VALUES (?, ?, ?, 'active')")
+        .bind(user.id, user.email, role === "admin" ? "Ada Admin" : null),
+      db
+        .prepare(
+          "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, ?, 'active')"
+        )
+        .bind(`mem_${user.id}`, ORGANIZATION_ID, user.id, role)
+    );
   }
+  await db.batch([
+    ...organizationStatements(db, {
+      id: ORGANIZATION_ID,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: TEST_ORG.status,
+      creator: organizationCreator(ORGANIZATION_ID),
+    }),
+    ...statements,
+  ]);
   await seedDefaultProjects(db, {
     organizationId: ORGANIZATION_ID,
     createdBy: TEST_USER.id,

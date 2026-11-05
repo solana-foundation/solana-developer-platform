@@ -11,7 +11,7 @@ import {
   TEST_PROJECT_CACHED_KEY,
 } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { seedOrganization } from "@/test/helpers/organizations";
+import { organizationStatements } from "@/test/helpers/organizations";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
 
@@ -23,27 +23,27 @@ describe("Issuance routes — metered quota", () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
     await clearKVStores(env);
     const db = getDb(env);
-    await seedOrganization(db, {
-      id: TEST_ORG.id,
-      name: TEST_ORG.name,
-      slug: TEST_ORG.slug,
-      status: "active",
-      creator: TEST_USER,
-      onConflict: "do-nothing",
-    });
-    await db
-      .prepare(
-        "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active') ON CONFLICT (id) DO NOTHING"
-      )
-      .bind(TEST_USER.id, TEST_USER.email)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+    await db.batch([
+      ...organizationStatements(db, {
+        id: TEST_ORG.id,
+        name: TEST_ORG.name,
+        slug: TEST_ORG.slug,
+        status: "active",
+        creator: TEST_USER,
+        onConflict: "do-nothing",
+      }),
+      db
+        .prepare(
+          "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active') ON CONFLICT (id) DO NOTHING"
+        )
+        .bind(TEST_USER.id, TEST_USER.email),
+      db
+        .prepare(
+          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
          VALUES (?, ?, 'Quota Project', ?, 'sandbox', 'active', ?) ON CONFLICT (id) DO NOTHING`
-      )
-      .bind(TEST_PROJECT.id, TEST_ORG.id, TEST_PROJECT.slug, TEST_USER.id)
-      .run();
+        )
+        .bind(TEST_PROJECT.id, TEST_ORG.id, TEST_PROJECT.slug, TEST_USER.id),
+    ]);
     // After the organization and project, so the key's row is seeded with it.
     const keyHash = await hashString(TEST_PROJECT_API_KEY.raw, env.API_KEY_PEPPER);
     await seedApiKeyRow(env, keyHash, TEST_PROJECT_CACHED_KEY);

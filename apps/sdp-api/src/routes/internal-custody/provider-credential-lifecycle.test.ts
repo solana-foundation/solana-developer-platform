@@ -21,7 +21,7 @@ import {
   type TestStoredProviderCredential,
 } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
-import { seedOrganization } from "@/test/helpers/organizations";
+import { organizationStatements } from "@/test/helpers/organizations";
 import { DEFAULT_PROJECT_NAME, seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
@@ -81,14 +81,14 @@ function buildApp() {
 
 async function seedActor(): Promise<void> {
   const db = getDb(env);
-  await seedOrganization(db, {
-    id: ORGANIZATION_ID,
-    name: "Credential Lifecycle",
-    slug: "credential-lifecycle",
-    status: "active",
-    creator: { id: USER_ID, email: "provider-credential-lifecycle@example.com" },
-  });
   await db.batch([
+    ...organizationStatements(db, {
+      id: ORGANIZATION_ID,
+      name: "Credential Lifecycle",
+      slug: "credential-lifecycle",
+      status: "active",
+      creator: { id: USER_ID, email: "provider-credential-lifecycle@example.com" },
+    }),
     db
       .prepare(
         `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)

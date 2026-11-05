@@ -13,7 +13,7 @@ import { TEST_PRODUCTION_PROJECT, TEST_PROJECT } from "@/test/fixtures/tokens";
 import { clerkHeaders, clerkHeadersWithoutProject } from "@/test/helpers/clerk";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
-import { seedOrganization } from "@/test/helpers/organizations";
+import { organizationStatements } from "@/test/helpers/organizations";
 import { DEFAULT_PROJECT_NAME, seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
@@ -49,38 +49,35 @@ describe("Projects Routes", () => {
     // Delete in FK-safe order: api_keys → project_members → projects.
     // The migration added ON DELETE RESTRICT from api_keys.project_id, so
     // projects can't be wiped until referring keys are gone.
-    await db.prepare("DELETE FROM api_keys").run();
-    await db.prepare("DELETE FROM project_members").run();
-    await db.prepare("DELETE FROM projects").run();
-
-    // Seed organization
-    await seedOrganization(db, {
-      id: TEST_ORG.id,
-      name: TEST_ORG.name,
-      slug: TEST_ORG.slug,
-      status: "active",
-      creator: TEST_USER,
-      onConflict: "update",
-    });
-
-    // Seed user
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
-      )
-      .bind(TEST_USER.id, TEST_USER.email)
-      .run();
-
-    // Seed an org-admin dashboard session. Human actors intentionally retain
-    // org-wide project management, even for projects they do not belong to.
-    await db
-      .prepare(
-        `INSERT OR REPLACE INTO organization_members
+    await db.batch([
+      db.prepare("DELETE FROM api_keys"),
+      db.prepare("DELETE FROM project_members"),
+      db.prepare("DELETE FROM projects"),
+      // Seed organization
+      ...organizationStatements(db, {
+        id: TEST_ORG.id,
+        name: TEST_ORG.name,
+        slug: TEST_ORG.slug,
+        status: "active",
+        creator: TEST_USER,
+        onConflict: "update",
+      }),
+      // Seed user
+      db
+        .prepare(
+          "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
+        )
+        .bind(TEST_USER.id, TEST_USER.email),
+      // Seed an org-admin dashboard session. Human actors intentionally retain
+      // org-wide project management, even for projects they do not belong to.
+      db
+        .prepare(
+          `INSERT OR REPLACE INTO organization_members
          (id, organization_id, user_id, role, status)
          VALUES ('mem_test_projects', ?, ?, 'admin', 'active')`
-      )
-      .bind(TEST_ORG.id, TEST_USER.id)
-      .run();
+        )
+        .bind(TEST_ORG.id, TEST_USER.id),
+    ]);
     clerkToken = await signSeededClerkMember(env, db, TEST_USER.id, TEST_ORG.id);
 
     await seedDefaultProjects(db, {

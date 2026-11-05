@@ -24,7 +24,11 @@ import {
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
-import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
+import {
+  organizationCreator,
+  organizationStatements,
+  seedOrganization,
+} from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -176,18 +180,21 @@ describe("custody Connection deactivation", () => {
     custodyReleaseChannel.outOfChannelMode = null;
     await seedTestDatabase(env);
     const db = getDb(env);
-    await seedOrganization(db, {
-      id: ORG,
-      name: "Deactivation",
-      slug: "connection-deactivation",
-      status: "active",
-      creator: { id: USER, email: "connection-deactivation@example.com" },
-    });
-    await db.execute(
-      `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-      VALUES ('mem_connection_deactivation', ?, ?, 'admin', 'active')`,
-      [ORG, USER]
-    );
+    await db.batch([
+      ...organizationStatements(db, {
+        id: ORG,
+        name: "Deactivation",
+        slug: "connection-deactivation",
+        status: "active",
+        creator: { id: USER, email: "connection-deactivation@example.com" },
+      }),
+      db
+        .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+      VALUES ('mem_connection_deactivation', ?, ?, 'admin', 'active')`
+        )
+        .bind(ORG, USER),
+    ]);
     await seedDefaultProjects(db, {
       organizationId: ORG,
       createdBy: USER,

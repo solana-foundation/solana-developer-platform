@@ -18,7 +18,7 @@ import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { EARN_ENABLED_FLAGS, EARN_FLAG_OFF_CASES } from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
-import { seedOrganization } from "@/test/helpers/organizations";
+import { organizationStatements } from "@/test/helpers/organizations";
 import {
   archiveProject,
   type SeededDefaultProjects,
@@ -373,18 +373,21 @@ async function seedApiKey(
 
 async function seedOrganizationWithMember(organizationId: string, userId: string): Promise<void> {
   const db = getDb(env);
-  await seedOrganization(db, {
-    id: organizationId,
-    name: organizationId,
-    slug: organizationId.replaceAll("_", "-"),
-    status: "active",
-    creator: { id: userId, email: `${userId}@example.com` },
-  });
-  await db.execute(
-    `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-     VALUES (?, ?, ?, 'admin', 'active')`,
-    [`mem_${userId}`, organizationId, userId]
-  );
+  await db.batch([
+    ...organizationStatements(db, {
+      id: organizationId,
+      name: organizationId,
+      slug: organizationId.replaceAll("_", "-"),
+      status: "active",
+      creator: { id: userId, email: `${userId}@example.com` },
+    }),
+    db
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+     VALUES (?, ?, ?, 'admin', 'active')`
+      )
+      .bind(`mem_${userId}`, organizationId, userId),
+  ]);
 }
 
 async function seedFixture(): Promise<void> {

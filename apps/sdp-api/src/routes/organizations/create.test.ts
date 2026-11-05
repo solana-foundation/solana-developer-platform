@@ -17,7 +17,7 @@ import {
   stubClerkBackend,
 } from "@/test/helpers/clerk-backend";
 import { env } from "@/test/helpers/env";
-import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
+import { organizationCreator, organizationStatements } from "@/test/helpers/organizations";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
 
@@ -301,19 +301,19 @@ describe("POST /v1/organizations", () => {
   it("refuses a session naming an organization SDP links and a request with none, reaching Clerk for neither", async () => {
     const db = getDb(env);
     const creator = organizationCreator("org_linked");
-    await seedOrganization(db, {
-      id: "org_linked",
-      name: "Linked",
-      slug: "linked",
-      status: "active",
-      creator,
-    });
-    await db
-      .prepare(
+    await db.batch([
+      ...organizationStatements(db, {
+        id: "org_linked",
+        name: "Linked",
+        slug: "linked",
+        status: "active",
+        creator,
+      }),
+      db.prepare(
         `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
          VALUES ('aoi_linked', 'clerk', 'org_clerk_already_active', 'org_linked', 'linked')`
-      )
-      .run();
+      ),
+    ]);
     const withOrganization = await signTestClerkJwt({
       clerkUserId: CLERK_USER_ID,
       clerkOrgId: "org_clerk_already_active",

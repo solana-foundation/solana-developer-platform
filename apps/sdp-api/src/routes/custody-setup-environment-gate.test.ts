@@ -16,7 +16,7 @@ import { seedProjectApiKey, type TestApiKeyMaterial } from "@/test/helpers/api-k
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
-import { seedOrganization } from "@/test/helpers/organizations";
+import { organizationStatements } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -101,18 +101,21 @@ function cachedApiKey(environment: SdpEnvironment): SeededApiKey {
 
 async function seedFixture(): Promise<void> {
   const db = getDb(env);
-  await seedOrganization(db, {
-    id: ORGANIZATION_ID,
-    name: "Custody Setup Gate",
-    slug: "custody-setup-gate",
-    status: "active",
-    creator: { id: USER_ID, email: "custody-setup-gate@example.com" },
-  });
-  await db.execute(
-    `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-     VALUES ('mem_custody_setup_gate', ?, ?, 'admin', 'active')`,
-    [ORGANIZATION_ID, USER_ID]
-  );
+  await db.batch([
+    ...organizationStatements(db, {
+      id: ORGANIZATION_ID,
+      name: "Custody Setup Gate",
+      slug: "custody-setup-gate",
+      status: "active",
+      creator: { id: USER_ID, email: "custody-setup-gate@example.com" },
+    }),
+    db
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+     VALUES ('mem_custody_setup_gate', ?, ?, 'admin', 'active')`
+      )
+      .bind(ORGANIZATION_ID, USER_ID),
+  ]);
   await seedDefaultProjects(db, {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,

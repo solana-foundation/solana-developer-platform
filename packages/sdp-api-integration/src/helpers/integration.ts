@@ -33,8 +33,8 @@ const {
   getDb,
   hashString,
   KoraAdapter,
+  organizationStatements,
   runAsMoneyPrincipal,
-  seedOrganization,
   seedTestDatabase,
   signTestClerkJwt,
   TEST_ORG,
@@ -179,55 +179,51 @@ async function resetIntegrationApiState(apiKeyHash: string): Promise<void> {
     .run()
     .catch(() => {});
 
-  await seedOrganization(db, {
-    id: TEST_ORG.id,
-    name: TEST_ORG.name,
-    slug: TEST_ORG.slug,
-    status: "active",
-    creator: TEST_USER,
-    settings: getOrganizationSettingsForIntegration(),
-    onConflict: "update",
-  });
-
-  await db
-    .prepare(
-      "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
-    )
-    .bind(TEST_USER.id, TEST_USER.email)
-    .run();
-
-  await db
-    .prepare(
-      `INSERT OR REPLACE INTO projects (id, organization_id, name, slug, environment, status, created_by)
+  await db.batch([
+    ...organizationStatements(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: TEST_USER,
+      settings: getOrganizationSettingsForIntegration(),
+      onConflict: "update",
+    }),
+    db
+      .prepare(
+        "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
+      )
+      .bind(TEST_USER.id, TEST_USER.email),
+    db
+      .prepare(
+        `INSERT OR REPLACE INTO projects (id, organization_id, name, slug, environment, status, created_by)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
-    )
-    .bind(
-      TEST_PROJECT.id,
-      TEST_PROJECT.organizationId,
-      TEST_PROJECT.name,
-      TEST_PROJECT.slug,
-      TEST_PROJECT.environment,
-      TEST_PROJECT.status,
-      TEST_PROJECT.createdBy
-    )
-    .run();
-
-  await db
-    .prepare(
-      `INSERT OR REPLACE INTO api_keys
+      )
+      .bind(
+        TEST_PROJECT.id,
+        TEST_PROJECT.organizationId,
+        TEST_PROJECT.name,
+        TEST_PROJECT.slug,
+        TEST_PROJECT.environment,
+        TEST_PROJECT.status,
+        TEST_PROJECT.createdBy
+      ),
+    db
+      .prepare(
+        `INSERT OR REPLACE INTO api_keys
        (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
        VALUES (?, ?, ?, ?, 'Project Test Key', ?, ?, ?, 'active')`
-    )
-    .bind(
-      TEST_PROJECT_API_KEY.id,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
-      TEST_USER.id,
-      TEST_PROJECT_API_KEY.prefix,
-      apiKeyHash,
-      [...API_KEY_GRANTABLE_ACTIONS]
-    )
-    .run();
+      )
+      .bind(
+        TEST_PROJECT_API_KEY.id,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_USER.id,
+        TEST_PROJECT_API_KEY.prefix,
+        apiKeyHash,
+        [...API_KEY_GRANTABLE_ACTIONS]
+      ),
+  ]);
 }
 
 export async function cleanupIntegrationSuite() {

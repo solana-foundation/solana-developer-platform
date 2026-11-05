@@ -8,7 +8,11 @@ import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
-import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
+import {
+  organizationCreator,
+  organizationStatements,
+  seedOrganization,
+} from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -76,14 +80,14 @@ function buildApp(options: { injectJwt?: boolean } = {}) {
 
 async function seedBaseline(): Promise<void> {
   const db = getDb(env);
-  await seedOrganization(db, {
-    id: TEST_ORG.id,
-    name: TEST_ORG.name,
-    slug: TEST_ORG.slug,
-    status: "active",
-    creator: TEST_USER,
-  });
   await db.batch([
+    ...organizationStatements(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: TEST_USER,
+    }),
     db
       .prepare(
         `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)

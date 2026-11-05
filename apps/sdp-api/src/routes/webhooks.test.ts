@@ -13,7 +13,7 @@ import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { readInvitationStatus, seedInvitation } from "@/test/helpers/invitations";
 import { organizationMember, seedOrganizationMembers } from "@/test/helpers/organization-members";
-import { seedOrganization } from "@/test/helpers/organizations";
+import { organizationStatements, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
@@ -403,14 +403,14 @@ describe("Clerk webhooks", () => {
     const keyId = "key_webhook_cache_invalidation";
     const keyHash = await hashString(rawKey, env.API_KEY_PEPPER);
     const db = getDb(env);
-    await seedOrganization(db, {
-      id: orgId,
-      name: "Cache Invalidation Org",
-      slug: orgId,
-      status: "active",
-      creator: { id: userId, email: "webhook-cache@example.com" },
-    });
     await db.batch([
+      ...organizationStatements(db, {
+        id: orgId,
+        name: "Cache Invalidation Org",
+        slug: orgId,
+        status: "active",
+        creator: { id: userId, email: "webhook-cache@example.com" },
+      }),
       db
         .prepare(`INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
            VALUES (?, 'clerk', ?, ?, ?)`)

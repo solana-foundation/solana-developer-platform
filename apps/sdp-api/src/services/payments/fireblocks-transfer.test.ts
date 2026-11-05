@@ -16,7 +16,7 @@ import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
-import { seedOrganization } from "@/test/helpers/organizations";
+import { organizationStatements } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -104,17 +104,20 @@ beforeEach(async () => {
   await seedTestDatabase(env);
   await clearKVStores(env);
   const db = getDb(env);
-  await seedOrganization(db, {
-    id: ORGANIZATION_ID,
-    name: "Fireblocks BYOK",
-    slug: "fireblocks-byok",
-    status: "active",
-    creator: { id: USER_ID, email: "fireblocks-byok@example.com" },
-  });
-  await db.execute(
-    "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES ('mem_fireblocks_byok', ?, ?, 'admin', 'active')",
-    [ORGANIZATION_ID, USER_ID]
-  );
+  await db.batch([
+    ...organizationStatements(db, {
+      id: ORGANIZATION_ID,
+      name: "Fireblocks BYOK",
+      slug: "fireblocks-byok",
+      status: "active",
+      creator: { id: USER_ID, email: "fireblocks-byok@example.com" },
+    }),
+    db
+      .prepare(
+        "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES ('mem_fireblocks_byok', ?, ?, 'admin', 'active')"
+      )
+      .bind(ORGANIZATION_ID, USER_ID),
+  ]);
   await seedDefaultProjects(db, {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,
