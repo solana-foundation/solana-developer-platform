@@ -1653,7 +1653,8 @@ Authentication and authorization failures are always machine-distinguishable: th
 | --- | --- | --- | --- |
 | No API key on a keyed-only request | 401 | `UNAUTHORIZED` | |
 | Malformed or unknown key | 401 | `INVALID_API_KEY` | |
-| Key has been revoked, its organization was deleted or suspended, or its project was archived | 401 | `REVOKED_API_KEY` | |
+| Key has been revoked, its organization was deleted, or its project was archived | 401 | `REVOKED_API_KEY` | |
+| Key is live but its organization is suspended; the key works again once SDP resumes it | 403 | `FORBIDDEN` | `reason: "organization_suspended"` |
 | Key past its expiry or rotation deadline | 401 | `EXPIRED_API_KEY` | |
 | Request origin not in the key's or the organization's IP allowlist | 403 | `FORBIDDEN` | `reason: "ip_not_allowed"` |
 | Route only a signed-in dashboard member may use, such as managing keys, members or the organization | 403 | `FORBIDDEN` | `reason: "human_session_required"` |

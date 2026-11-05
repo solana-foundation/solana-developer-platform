@@ -1,7 +1,7 @@
 import { refreshThemeProps } from "@sdp/design-tokens";
 import { SOLANA_CLUSTER_LABELS, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { Badge } from "@sdp/ui/badge";
-import { ArrowUpRightIcon, CheckCircle2Icon, ClockIcon, XIcon } from "lucide-react";
+import { ArrowUpRightIcon, BanIcon, CheckCircle2Icon, ClockIcon, XIcon } from "lucide-react";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import {
@@ -54,6 +54,18 @@ function getStatusPanels(t: Awaited<ReturnType<typeof getTranslations>>) {
       body: t("Shared.pay.requestCanceledDescription"),
     },
   } as const satisfies Record<Exclude<PayStatus, "awaiting_payment">, StatusPanel>;
+}
+
+/**
+ * An open request the API offers no Solana Pay link for, such as one whose organization SDP has
+ * suspended (HOO-2009). The payer is told it can't be paid rather than shown an empty card.
+ */
+function getUnavailablePanel(t: Awaited<ReturnType<typeof getTranslations>>): StatusPanel {
+  return {
+    icon: <BanIcon className="size-12 text-tertiary" />,
+    title: t("Shared.pay.requestUnavailable"),
+    body: t("Shared.pay.requestUnavailableDescription"),
+  };
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
@@ -111,8 +123,12 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
 
   const payUrl =
     request.solanaPayUrl && isRenderablePayUrl(request.solanaPayUrl) ? request.solanaPayUrl : null;
-  const statusPanel =
-    request.status === "awaiting_payment" ? null : getStatusPanels(t)[request.status];
+  let statusPanel: StatusPanel | null = null;
+  if (request.status !== "awaiting_payment") {
+    statusPanel = getStatusPanels(t)[request.status];
+  } else if (!payUrl) {
+    statusPanel = getUnavailablePanel(t);
+  }
   // The watch reads from the payer's browser, so it takes the address a browser can reach.
   const publicApiBaseUrl = findPublicSdpApiBaseUrl({
     NEXT_PUBLIC_SDP_API_BASE_URL: process.env.NEXT_PUBLIC_SDP_API_BASE_URL,
@@ -128,6 +144,7 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
         <PayStatusWatch
           statusUrl={`${publicApiBaseUrl}/pay/${encodeURIComponent(token)}`}
           status={request.status}
+          payable={request.solanaPayUrl !== null}
         />
       ) : null}
       <div className="w-full max-w-md overflow-hidden rounded-card border border-border-default bg-surface-raised">
