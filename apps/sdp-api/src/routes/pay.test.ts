@@ -207,6 +207,28 @@ describe("Public payment request routes", () => {
     }
   );
 
+  it("withholds the Solana Pay link while the request's organization is suspended (HOO-2009)", async () => {
+    const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+    const setStatus = (status: string) =>
+      getDb(env)
+        .prepare("UPDATE organizations SET status = ? WHERE id = ?")
+        .bind(status, TEST_ORG.id)
+        .run();
+    const read = async () => {
+      const response = await app.request(`/pay/${request.public_token}`, {}, env);
+      expect(response.status).toBe(200);
+      return z
+        .object({ status: z.string(), solanaPayUrl: z.string().nullable() })
+        .parse(await response.json());
+    };
+
+    await setStatus("suspended");
+    expect(await read()).toEqual({ status: "awaiting_payment", solanaPayUrl: null });
+
+    await setStatus("active");
+    expect((await read()).solanaPayUrl).toMatch(/^solana:/);
+  });
+
   it("refuses to build a transaction for a canceled request", async () => {
     const sponsorship = stubSponsorship();
     const request = await cancelSeededPaymentRequest(

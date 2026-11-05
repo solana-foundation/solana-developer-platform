@@ -1,9 +1,11 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
+import { organizationStatusMayStartMoney } from "@sdp/types/organizations";
 import { isPaymentRequestPayableAt } from "@sdp/types/payments";
 import { getSdpDocsOrigin } from "@sdp/types/site";
 import { encodeURL } from "@solana/pay";
 import type { Context } from "hono";
+import { getDb } from "@/db/client";
 import { badRequest, rateLimited } from "@/lib/errors";
 import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -21,11 +23,25 @@ const REQUEST_LABEL = "Solana Developer Platform";
 const REQUEST_ICON = `${getSdpDocsOrigin()}/icon.svg`;
 
 /**
+ * Whether the request's organization may still start money. A suspended or
+ * deleted organization's link stays readable, but the page offers no way to
+ * pay it (HOO-2009); the transaction request refuses it the same way.
+ */
+async function organizationMayTakePayment(env: Env, organizationId: string): Promise<boolean> {
+  const row = await getDb(env)
+    .prepare("SELECT status FROM organizations WHERE id = ?")
+    .bind(organizationId)
+    .first<{ status: string }>();
+  return row !== null && organizationStatusMayStartMoney(row.status);
+}
+
+/**
  * The public view of a payment request, with the Solana Pay transaction-request link while it
  * can still be paid.
  *
  * @param c - The request context, under `paymentRequestScope`.
- * @returns The request's amount, token, recipient, status, and Solana Pay URL.
+ * @returns The request's amount, token, recipient, status, and Solana Pay URL (null while the
+ *   request cannot be paid, including while its organization is suspended).
  */
 export async function getPaymentRequest(c: Context<{ Bindings: Env }, "/:token">) {
   const request = await findPaymentRequest(c.env, c.req.param("token"));
@@ -36,7 +52,9 @@ export async function getPaymentRequest(c: Context<{ Bindings: Env }, "/:token">
     isPaymentRequestPayableAt(
       { status: request.status, expiresAt: request.expires_at },
       Date.now()
-    ) && request.custody_wallet_id !== null;
+    ) &&
+    request.custody_wallet_id !== null &&
+    (await organizationMayTakePayment(c.env, request.organization_id));
 
   let solanaPayUrl: string | null = null;
   if (payable) {
