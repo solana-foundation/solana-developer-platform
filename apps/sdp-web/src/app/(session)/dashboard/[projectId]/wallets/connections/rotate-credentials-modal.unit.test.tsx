@@ -99,7 +99,7 @@ function RotationHost({
     <>
       {rotatable ? (
         <button type="button" onClick={() => setRotation({ lifecycle: rotatable, open: true })}>
-          Rotate secret…
+          Rotate secret
         </button>
       ) : null}
       <ConnectionCredentialsSection
@@ -230,7 +230,7 @@ describe("rotation recovery", () => {
         })
       );
       const view = render(section(lifecycle));
-      await userEvent.click(screen.getByRole("button", { name: "Rotate secret…" }));
+      await userEvent.click(screen.getByRole("button", { name: "Rotate secret" }));
       await submitCredentials();
       await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1));
 
@@ -373,7 +373,7 @@ describe("rotation recovery", () => {
         })
       );
       const view = render(section(lifecycle));
-      await userEvent.click(screen.getByRole("button", { name: "Rotate secret…" }));
+      await userEvent.click(screen.getByRole("button", { name: "Rotate secret" }));
       await submitCredentials();
       await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1));
       await userEvent.click(screen.getByRole("button", { name: "Retry" }));
@@ -397,7 +397,7 @@ describe("rotation recovery", () => {
       }
       expect(screen.queryByRole("dialog")).toBeNull();
       expect(screen.queryByLabelText("New Privy app secret")).toBeNull();
-      expect(screen.queryByRole("button", { name: "Rotate secret…" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Rotate secret" })).toBeNull();
 
       view.rerender(
         section(
@@ -467,7 +467,7 @@ describe("rotation recovery", () => {
       })
     );
     render(section(lifecycle));
-    await userEvent.click(screen.getByRole("button", { name: "Rotate secret…" }));
+    await userEvent.click(screen.getByRole("button", { name: "Rotate secret" }));
     await submitCredentials();
     await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1));
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
@@ -499,14 +499,14 @@ describe("rotation recovery", () => {
   it("discards an unsubmitted draft on Cancel instead of offering to resume it", async () => {
     const rotation = mockApi();
     render(section(lifecycle));
-    await userEvent.click(screen.getByRole("button", { name: "Rotate secret…" }));
+    await userEvent.click(screen.getByRole("button", { name: "Rotate secret" }));
     await userEvent.type(screen.getByLabelText("App ID"), "draft-app-id");
     await userEvent.type(screen.getByLabelText("New Privy app secret"), "draft-secret");
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByRole("button", { name: "Resume rotation" })).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "Rotate secret…" }));
+    await userEvent.click(screen.getByRole("button", { name: "Rotate secret" }));
     expect(screen.getByLabelText("App ID")).toHaveProperty("value", "");
     expect(screen.getByLabelText("New Privy app secret")).toHaveProperty("value", "");
     expect(screen.getByLabelText("New Privy app secret")).toHaveProperty("disabled", false);

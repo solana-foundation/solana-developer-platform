@@ -184,14 +184,14 @@ describe("credentials section", () => {
     expect(html).toContain("take effect on restart");
     expect(html).toContain("Not tracked by SDP");
     expect(html).not.toContain("In use since");
-    expect(html).not.toContain("Roll back secret…");
+    expect(html).not.toContain("Roll back secret");
   });
 
   it("offers the previous secret back while it is restorable", () => {
     const html = renderManaged(makeLifecycle({ rollback: restorable(19.5) }));
 
     expect(html).toContain("Restorable for 19 h, until ");
-    expect(buttonDisabled(html, "Roll back secret…")).toBe(false);
+    expect(buttonDisabled(html, "Roll back secret")).toBe(false);
   });
 
   it("keeps rollback disabled behind a waiting rotation and says why", () => {
@@ -205,7 +205,7 @@ describe("credentials section", () => {
     expect(html).toContain("A rotation is waiting to finish.");
     expect(html).toContain("still in use");
     expect(buttonDisabled(html, "Cancel rotation")).toBe(false);
-    expect(buttonDisabled(html, "Roll back secret…")).toBe(true);
+    expect(buttonDisabled(html, "Roll back secret")).toBe(true);
     expect(html).toContain("Cancel the waiting rotation before rolling back.");
   });
 
@@ -218,7 +218,7 @@ describe("credentials section", () => {
     });
 
     expect(html).toContain("Restorable for 19 h");
-    expect(html).not.toContain("Roll back secret…");
+    expect(html).not.toContain("Roll back secret");
   });
 
   it.each([

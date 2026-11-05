@@ -246,7 +246,7 @@ describe("connection header", () => {
 
     expect(within(header).getByRole("heading", { name: "Production signing" })).toBeTruthy();
     expect(within(header).getByText("Active")).toBeTruthy();
-    await userEvent.click(within(header).getByRole("button", { name: "Rotate secret…" }));
+    await userEvent.click(within(header).getByRole("button", { name: "Rotate secret" }));
     expect(await screen.findByRole("dialog", { name: "Rotate credentials" })).toBeTruthy();
   });
 });
