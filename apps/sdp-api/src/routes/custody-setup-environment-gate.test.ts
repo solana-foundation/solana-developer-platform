@@ -443,6 +443,7 @@ describe("Custody setup by project environment", () => {
   });
 
   it("submits and completes BYOK Privy in a Production project", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({ data: [] }));
     const connectionId = await submittedConnectionId(await submit("production", "gate-prod-byok"));
     stubSuccessfulPrivyInstallation(connectionId);
 
@@ -450,7 +451,7 @@ describe("Custody setup by project environment", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(completionBody("production", connectionId));
-    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(fetch).toHaveBeenCalledTimes(4);
     expect(
       await getDb(env).queryOne(
         "SELECT project_id, provider, status, provider_account_fingerprint FROM custody_connections WHERE id = ?",
@@ -473,6 +474,7 @@ describe("Custody setup by project environment", () => {
     const initialized = await initialize("sandbox", "privy");
     expect(initialized.status).toBe(201);
     const { data: managed } = (await initialized.json()) as { data: { configId: string } };
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({ data: [] }));
     const connectionId = await submittedConnectionId(await submit("sandbox", "gate-sandbox-byok"));
     stubSuccessfulPrivyInstallation(connectionId);
     const completed = await complete("sandbox", connectionId);
@@ -525,6 +527,7 @@ describe("Custody setup by project environment", () => {
     "admits a below-stable BYOK pair the release channel offers through submission and completion in a %s project",
     async (environment) => {
       custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
+      vi.mocked(fetch).mockResolvedValueOnce(Response.json({ data: [] }));
 
       const connectionId = await submittedConnectionId(
         await submit(environment, `gate-${environment}-beta`)
@@ -557,6 +560,7 @@ describe("Custody setup by project environment", () => {
     });
 
     it("reads a Production installation the gate refuses without logging, and logs its refused completion exactly once", async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(Response.json({ data: [] }));
       const connectionId = await submittedConnectionId(
         await submit("production", "gate-prod-read-then-complete")
       );
@@ -592,6 +596,7 @@ describe("Custody setup by project environment", () => {
     });
 
     it("replays a Production submission the gate refuses without logging, and logs a refused new submission exactly once", async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(Response.json({ data: [] }));
       await submittedConnectionId(await submit("production", "gate-prod-log-replay"));
       custodyReleaseChannel.outOfChannelMode = "byok";
 
