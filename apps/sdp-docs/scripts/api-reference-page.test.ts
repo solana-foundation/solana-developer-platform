@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ApiFamily, ApiOperation, ApiSchema } from "@sdp/api-catalog/reference";
 import { structure } from "fumadocs-core/mdx-plugins/remark-structure";
+import remarkGfm from "remark-gfm";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
@@ -785,6 +786,27 @@ describe("fact separators", () => {
 
   it("keeps the dots as text in the Markdown agents get", () => {
     assert.equal(expandDocsBlocks(facts, "content/docs/reference/api/widgets/list.mdx"), facts);
+  });
+});
+
+describe("method badges", () => {
+  const table = "| Method | Endpoint |\n| --- | --- |\n| `GET` | `/v1/widgets` |\n";
+  const compiled = (path: string) => {
+    const processor = unified()
+      .use(remarkParse)
+      .use(remarkGfm)
+      .use(remarkMdx)
+      .use(remarkDocsBlocks, { surface: publicSurface });
+    return JSON.stringify(processor.runSync(processor.parse(table), { path }));
+  };
+
+  it("colours a table's method cell on a generated reference page, and only there", () => {
+    const page = compiled("/repo/apps/sdp-docs/content/docs/reference/api/widgets/index.mdx");
+    assert.equal(page.match(/"launch-api-method"/g)?.length, 1);
+    assert.ok(page.includes('"name":"data-method","value":"GET"'));
+    assert.ok(page.includes('"type":"inlineCode","value":"/v1/widgets"'));
+    const guide = compiled("/repo/apps/sdp-docs/content/docs/guides/widgets.mdx");
+    assert.ok(!guide.includes("launch-api-method"));
   });
 });
 
