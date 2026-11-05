@@ -414,11 +414,13 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
       emailAddress: normalizedEmail,
       expiresInDays: INVITATION_TTL_DAYS,
       redirectUrl,
+      sdpInvitationId: invitationId,
     });
   } catch (error) {
     await failUnsentInvitation(
       c,
-      { id: invitationId, email: normalizedEmail, clerk_invitation_id: null },
+      clerkOrgId,
+      { id: invitationId, email: normalizedEmail },
       error instanceof ClerkRequestError ? error : null
     );
     throw error;
@@ -495,11 +497,14 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
 /**
  * A pending row would still admit its address at sign-in, so a Clerk step that
  * threw fails it, which also frees the address for a retry. A Clerk 4xx created
- * nothing; a timeout or 5xx may have, so the address's Clerk invitations go too.
+ * nothing; a timeout or 5xx may have, so the Clerk invitation tagged with this
+ * row's id is withdrawn. Matching the tag, not the address, leaves alone the
+ * invitation a concurrent retry for the address may already have created.
  */
 async function failUnsentInvitation(
   c: AppContext,
-  invitation: OrganizationInvitation,
+  clerkOrgId: string,
+  invitation: { id: string; email: string },
   clerkError: ClerkRequestError | null
 ): Promise<void> {
   const { organizationId, userId } = resolveActor(c);
@@ -531,8 +536,18 @@ async function failUnsentInvitation(
 
   const clerkRefused =
     clerkError !== null && clerkError.clerkStatus >= 400 && clerkError.clerkStatus < 500;
-  if (!clerkRefused) {
-    await revokeClerkInvitations(c, organizationId, invitation);
+  if (clerkRefused) {
+    return;
+  }
+  const clerk = new ClerkOrganizationsService(c.env);
+  const pending = await clerk.listPendingOrganizationInvitations(clerkOrgId);
+  for (const entry of pending) {
+    if (entry.private_metadata?.sdpInvitationId === invitation.id) {
+      await clerk.revokeOrganizationInvitation({
+        organizationId: clerkOrgId,
+        invitationId: entry.id,
+      });
+    }
   }
 }
 

@@ -17,6 +17,7 @@ export interface ClerkOrganizationInvitation {
   url?: string;
   /** Clerk's own record of who sent it — a valid Clerk user by construction. */
   inviter_id?: string;
+  private_metadata?: { sdpInvitationId?: string } | null;
 }
 
 export interface ClerkOrganization {
@@ -100,6 +101,8 @@ export class ClerkOrganizationsService {
    * @param params.emailAddress - The address to invite.
    * @param params.expiresInDays - How long Clerk's link lives; matches the SDP invitation.
    * @param params.redirectUrl - Where Clerk's link lands: the dashboard's sign-in page.
+   * @param params.sdpInvitationId - The SDP invitation it delivers, stored on it so a call
+   *   that failed without returning its id can still find exactly this invitation.
    * @returns The Clerk invitation.
    */
   async createOrganizationInvitation(params: {
@@ -107,12 +110,14 @@ export class ClerkOrganizationsService {
     emailAddress: string;
     expiresInDays: number;
     redirectUrl: string;
+    sdpInvitationId: string;
   }): Promise<ClerkOrganizationInvitation> {
     const payload = {
       email_address: params.emailAddress,
       role: "org:member",
       expires_in_days: params.expiresInDays,
       redirect_url: params.redirectUrl,
+      private_metadata: { sdpInvitationId: params.sdpInvitationId },
     };
 
     return this.request<ClerkOrganizationInvitation>(
