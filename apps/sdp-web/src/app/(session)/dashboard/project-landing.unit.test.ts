@@ -61,6 +61,7 @@ vi.mock("@/contexts/network-debug-context", () => ({
 vi.mock("@/components/dashboard-shell", () => ({ DashboardShell: dashboardShell.passThrough }));
 
 import ProjectLayout from "./[projectId]/layout";
+import { ProjectOrganizationSwitch } from "./[projectId]/project-organization-switch";
 import DashboardLandingPage from "./page";
 
 const WORKSPACE_LOADING_REDIRECT = "/workspace-loading?return_to=%2Fdashboard";
@@ -157,37 +158,45 @@ describe("project-scoped dashboard layout", () => {
     expect(nextNavigationMock.redirect).not.toHaveBeenCalled();
   });
 
-  it("moves a page of an unlisted project under the sandbox, whatever was last used", async () => {
+  it("hands a page of an unlisted project to the organization switch, falling back to the sandbox whatever was last used", async () => {
     setLastUsedProjectCookie(PRODUCTION_PROJECT.id);
 
-    await expectRedirect(
-      renderProjectPage(
-        OTHER_ORGANIZATION_PROJECT.id,
-        `/dashboard/${OTHER_ORGANIZATION_PROJECT.id}/api-keys`
-      ),
-      `/dashboard/${SANDBOX_PROJECT.id}/api-keys`
+    const layout = await renderProjectPage(
+      OTHER_ORGANIZATION_PROJECT.id,
+      `/dashboard/${OTHER_ORGANIZATION_PROJECT.id}/api-keys`
     );
+
+    expect(layout).toMatchObject({
+      type: ProjectOrganizationSwitch,
+      props: {
+        projectId: OTHER_ORGANIZATION_PROJECT.id,
+        sessionOrganizationId: "org_test",
+        fallbackHref: `/dashboard/${SANDBOX_PROJECT.id}/api-keys`,
+      },
+    });
+    expect(dashboardShell.DashboardWorkspaceProvider).not.toHaveBeenCalled();
+    expect(nextNavigationMock.redirect).not.toHaveBeenCalled();
   });
 
   it("keeps a crafted double-slash path under an unlisted project inside the dashboard", async () => {
-    await expectRedirect(
-      renderProjectPage(
-        OTHER_ORGANIZATION_PROJECT.id,
-        `/dashboard/${OTHER_ORGANIZATION_PROJECT.id}//evil.com`
-      ),
-      `/dashboard/${SANDBOX_PROJECT.id}//evil.com`
+    const layout = await renderProjectPage(
+      OTHER_ORGANIZATION_PROJECT.id,
+      `/dashboard/${OTHER_ORGANIZATION_PROJECT.id}//evil.com`
     );
+
+    expect(layout).toMatchObject({
+      props: { fallbackHref: `/dashboard/${SANDBOX_PROJECT.id}//evil.com` },
+    });
   });
 
-  it("waits on the workspace loading page while no project is provisioned", async () => {
+  it("falls back to the workspace loading page while no project is provisioned", async () => {
     sdpApi.listSdpProjects.mockResolvedValue([]);
 
-    await expectRedirect(
-      renderProjectPage(
-        OTHER_ORGANIZATION_PROJECT.id,
-        `/dashboard/${OTHER_ORGANIZATION_PROJECT.id}/payments`
-      ),
-      WORKSPACE_LOADING_REDIRECT
+    const layout = await renderProjectPage(
+      OTHER_ORGANIZATION_PROJECT.id,
+      `/dashboard/${OTHER_ORGANIZATION_PROJECT.id}/payments`
     );
+
+    expect(layout).toMatchObject({ props: { fallbackHref: WORKSPACE_LOADING_REDIRECT } });
   });
 });

@@ -2,7 +2,14 @@ import { NextFetchEvent } from "next/dist/server/web/spec-extension/fetch-event"
 import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
 
-const clerk = vi.hoisted(() => ({ protect: vi.fn(async () => undefined) }));
+const clerk = vi.hoisted(() => {
+  const protect = vi.fn(async () => undefined);
+  const auth = Object.assign(
+    vi.fn(async () => ({ userId: null as string | null })),
+    { protect }
+  );
+  return { protect, auth };
+});
 
 vi.mock("@clerk/nextjs/server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@clerk/nextjs/server")>();
@@ -10,14 +17,10 @@ vi.mock("@clerk/nextjs/server", async (importOriginal) => {
     ...actual,
     clerkMiddleware:
       (
-        handler: (
-          auth: { protect: typeof clerk.protect },
-          request: NextRequest,
-          event: NextFetchEvent
-        ) => unknown
+        handler: (auth: typeof clerk.auth, request: NextRequest, event: NextFetchEvent) => unknown
       ) =>
       (request: NextRequest, event: NextFetchEvent) =>
-        handler({ protect: clerk.protect }, request, event),
+        handler(clerk.auth, request, event),
   };
 });
 
@@ -317,5 +320,19 @@ describe("demoSessionCookiesToDrop", () => {
       });
       expect(demoSessionCookiesToDrop(request)).toEqual([]);
     }
+  });
+});
+
+describe("signed-out workspace hints", () => {
+  it("expires the last-selected project on the sign-in page", async () => {
+    const request = new NextRequest("https://dashboard.example.com/sign-in", {
+      headers: { cookie: `sdp_selected_project_id=${PRODUCTION_PROJECT.id}` },
+    });
+    const response = await proxy(
+      request,
+      new NextFetchEvent({ page: "/sign-in", request, context: undefined })
+    );
+    expect(response?.headers.get("set-cookie")).toContain("sdp_selected_project_id=;");
+    expect(response?.headers.get("set-cookie")).toContain("Max-Age=0");
   });
 });

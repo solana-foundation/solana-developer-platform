@@ -10,7 +10,7 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 const status: QuickStartStatus = {
-  custodyProvider: null,
+  hasWallet: false,
   apiKeyCount: 0,
   lastCallAt: null,
 };
@@ -34,7 +34,7 @@ describe("resolveQuickStartSteps", () => {
   it("lets a connected provider win over an earlier skip", async () => {
     const { resolveQuickStartSteps } = await import("./dashboard-quick-start");
     const steps = resolveQuickStartSteps({
-      status: { ...status, custodyProvider: "privy" },
+      status: { ...status, hasWallet: true },
       skipped: { custody: "2026-09-20T09:00:00.000Z" },
     });
     expect(steps[0]).toEqual({ id: "custody", state: "done" });
@@ -52,7 +52,7 @@ describe("resolveQuickStartSteps", () => {
     const done = resolveQuickStartSteps({
       status: {
         ...status,
-        custodyProvider: "privy",
+        hasWallet: true,
         lastCallAt: "2026-09-25T09:30:00.000Z",
         apiKeyCount: 1,
       },

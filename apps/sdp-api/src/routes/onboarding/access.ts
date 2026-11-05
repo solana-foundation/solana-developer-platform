@@ -3,7 +3,11 @@ import { getDb } from "@/db/client";
 import { createOrganizationRepository } from "@/db/repositories/repository-factory";
 import { unauthorized } from "@/lib/errors";
 import { readActiveOrganizationSettings } from "@/lib/organization-access";
-import { findPendingInvitation } from "@/services/organization-membership.service";
+import {
+  findPendingInvitation,
+  invitationExpired,
+  uninvitedRefusal,
+} from "@/services/organization-membership.service";
 import type { Env } from "@/types/env";
 
 export async function authorizeOnboardingSession(c: Context<{ Bindings: Env }>) {
@@ -33,8 +37,14 @@ export async function authorizeOnboardingSession(c: Context<{ Bindings: Env }>) 
       organizationId: session.organizationId,
       email: session.email,
     });
-    if (!invitation || new Date(invitation.expiresAt) <= new Date()) {
-      throw unauthorized("No pending invitation to this organization");
+    if (!invitation) {
+      throw await uninvitedRefusal(getDb(c.env), {
+        organizationId: session.organizationId,
+        email: session.email,
+      });
+    }
+    if (new Date(invitation.expiresAt) <= new Date()) {
+      throw invitationExpired();
     }
   }
 

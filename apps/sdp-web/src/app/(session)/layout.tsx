@@ -1,6 +1,7 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import { ui } from "@clerk/ui";
 import type { ReactNode } from "react";
+import { DashboardSessionCleanup } from "@/components/dashboard-session-cleanup";
 import { getTranslations } from "@/i18n/server";
 import { ALLOWED_SATELLITE_REDIRECT_ORIGINS, SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/clerk-config";
 
@@ -39,6 +40,7 @@ export default async function SessionLayout({ children }: { children: ReactNode 
       allowedRedirectOrigins={ALLOWED_SATELLITE_REDIRECT_ORIGINS}
       afterSignOutUrl={SIGN_IN_PATH}
     >
+      <DashboardSessionCleanup />
       {children}
     </ClerkProvider>
   );

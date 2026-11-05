@@ -12,7 +12,7 @@ import {
 } from "@/lib/dashboard-quick-start";
 
 const STATUS: QuickStartStatus = {
-  custodyProvider: "privy",
+  hasWallet: true,
   apiKeyCount: 1,
   lastCallAt: null,
 };
@@ -128,6 +128,26 @@ describe("useQuickStart", () => {
 
     act(() => invalidateQuickStartStatus());
     await waitFor(() => expect(statusReads(spy)).toBeGreaterThan(0));
+  });
+
+  // Greptile (#2727): the wallet step reads the open project, so one project's status must not
+  // stand in for another's after a switch.
+  it("keeps each project's status apart", async () => {
+    mocks.workspace.selectedProjectId = "prj_a";
+    const spy = answer({ status: STATUS });
+    const { result, rerender } = renderHook(() => useQuickStart(), { wrapper });
+    act(() => invalidateQuickStartStatus());
+    await waitFor(() => expect(statusReads(spy)).toBeGreaterThan(0));
+    expect(result.current.steps.map((step) => step.state)).toEqual(["done", "pending"]);
+
+    const emptyProject = { ...STATUS, hasWallet: false };
+    mocks.workspace.selectedProjectId = "prj_b";
+    mocks.workspace.initialQuickStartStatus = emptyProject;
+    answer({ status: emptyProject });
+    rerender();
+    await waitFor(() =>
+      expect(result.current.steps.map((step) => step.state)).toEqual(["pending", "pending"])
+    );
   });
 
   it("keeps the last known status when a re-read fails", async () => {

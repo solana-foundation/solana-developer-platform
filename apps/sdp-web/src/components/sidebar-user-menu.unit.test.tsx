@@ -8,10 +8,13 @@ import { EnglishI18n } from "@/test/i18n";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { SidebarUserMenu } from "./sidebar-user-menu";
 
+const clerk = vi.hoisted(() => ({ loaded: true }));
+
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@sentry/nextjs", () => ({ getFeedback: () => undefined }));
 vi.mock("@clerk/nextjs", () => ({
   useUser: () => ({
+    isLoaded: clerk.loaded,
     user: {
       fullName: "Jane Doe",
       imageUrl: "",
@@ -30,9 +33,18 @@ vi.mock("@/contexts/network-debug-context", () => ({
 
 afterEach(() => {
   cleanup();
+  clerk.loaded = true;
 });
 
 describe("SidebarUserMenu", () => {
+  it("reserves the account row while Clerk resolves the user", () => {
+    clerk.loaded = false;
+    render(<SidebarUserMenu collapsed={false} menuSide="right" />, { wrapper: EnglishI18n });
+
+    expect(screen.getByRole("status").getAttribute("aria-busy")).toBe("true");
+    expect(screen.queryByRole("button", { name: "Account menu" })).toBeNull();
+  });
+
   it("opens on the identity and lists Account settings inside the URL's Project", async () => {
     setDashboardUrl(`/dashboard/${PRODUCTION_PROJECT.id}/payments`, {});
     const user = userEvent.setup();

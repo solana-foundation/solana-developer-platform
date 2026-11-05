@@ -158,8 +158,13 @@ Fireblocks transaction ID, status and substatus are visible in SDP. COMPLETED wi
 Solana signature records confirmation only after the external ID, vault, asset, destination,
 and exact decimal payment/net amounts match the stored intent. Missing or mismatched details
 stay processing for reconciliation. The existing chain-finality job checks finalization.
-Terminal provider failures record their reason. The transaction details page refreshes every
-15 seconds while pending. The five-minute local signing timeout does not apply to these intents.
+Terminal provider failures record their reason. A policy block (`BLOCKED` with
+`BLOCKED_BY_POLICY`) records the custody policy refusal instead: the message a refused signature
+gets and `CUSTODY_POLICY_REFUSED`, which a replay of the key answers with 422 (HOO-2478). RAW
+signing answers the same block with 422 `CUSTODY_POLICY_REFUSED`; a `BLOCKED` without that
+sub-status keeps the 400 `SIGNING_BLOCKED` raw-signing hint. The transaction details page
+refreshes every 15 seconds while pending. The five-minute local signing timeout does not apply
+to these intents.
 Existing failed RAW attempts remain failed and are never retried by this implementation.
 
 Privy and other signing operations retain solana-keychain. Fireblocks' separate Signer check
