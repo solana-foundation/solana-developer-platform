@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { SOL_MINT, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED } from "@solana/kit";
@@ -1238,7 +1239,7 @@ describe("Payments routes — ramps", () => {
   describe("sandbox simulation", () => {
     installStripeTestEnv();
 
-    async function seedAwaitingOnramp(transferId: string, provider: string): Promise<void> {
+    async function seedAwaitingOnramp(transferId: string, provider: RampProviderId): Promise<void> {
       const now = new Date().toISOString();
       await getDb(env)
         .prepare(
@@ -1261,7 +1262,7 @@ describe("Payments routes — ramps", () => {
     }
 
     // The public document lists no 2xx for this route: pin that every live provider refuses.
-    it.each(["moonpay", "stripe"])(
+    it.each(RAMP_PROVIDERS)(
       "answers 400 for a %s on-ramp awaiting payment and leaves it unpaid",
       async (provider) => {
         const transferId = `xfr_simulate_${provider}`;
