@@ -4565,7 +4565,7 @@ The configurator also requires these. The stack starts without them, but most le
 | `CLERK_ISSUER` | Clerk issuer URL. Without it, dashboard sessions can't be verified, so sign-in fails. |
 | `FRONTEND_URL` | The dashboard URL the browser loads. With `ENVIRONMENT=production`, the compose default, the API accepts only Clerk sessions issued to this origin, and won't start if it isn't an `http(s)` URL. |
 | `SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL` | The devnet endpoint Sandbox projects read and send through. Without it, they get `503 RPC_UNAVAILABLE`. |
-| `SIGNING_PROVIDER` | The configurator's default signer, `local` unless you change it. The API reads it only at startup, where `local` (also its value when unset) requires `SDP_DEPLOYMENT_MODE=self_hosted`. |
+| `SIGNING_PROVIDER` | The configurator writes `local` unless you pick another provider. The API reads it only at startup, where `local` (also its value when unset) requires `SDP_DEPLOYMENT_MODE=self_hosted`. |
 | `CUSTODY_PRIVATE_KEY` | With local signing selected: SDP offers the local signer only while this is set. |
 | `CREDENTIAL_FINGERPRINT_PEPPER` | Without it, saving or rotating provider credentials in the dashboard fails. Keep it stable. |
 

@@ -241,29 +241,29 @@ export const FIELDS: EnvField[] = [
     defaultValue: "local",
     required: true,
     options: SIGNING_PROVIDER_OPTIONS,
-    help: "Providers whose credentials are available from this deployment. The runtime default is chosen below; dashboard-stored Connections are configured separately.",
+    help: "Providers this deployment holds credentials for. Not written to the file: it only picks which credential fields appear. Dashboard-stored Connections are configured separately.",
   },
   {
     key: "SIGNING_PROVIDER",
     section: "signing",
     kind: "select",
-    label: "Default signing provider",
+    label: "Startup signing provider",
     defaultValue: "local",
     required: true,
     optionsWhen: (v) =>
       parseList(v.SIGNING_PROVIDERS).map(
         (p) => SIGNING_PROVIDER_OPTIONS.find((o) => o.value === p) ?? { value: p, label: p }
       ),
-    help: "Global fallback provider, used when an org/project has no custody config of its own.",
+    help: "Read only at startup, where local needs SDP_DEPLOYMENT_MODE=self_hosted, which this file always sets. Each project picks its own signer when you set up custody in the dashboard.",
   },
   {
     key: "CUSTODY_PRIVATE_KEY",
     section: "signing",
     kind: "password",
-    label: "Signing key (base58)",
+    label: "Local signer key (base58)",
     required: true,
     visibleWhen: listIncludes("SIGNING_PROVIDERS", "local"),
-    help: "Base58 private key the local signer uses. Generate one and fund it on your network.",
+    help: "SDP offers the local signer only while this is set, and never signs with it: each project's local signer generates its own keypair.",
   },
   {
     key: "FIREBLOCKS_API_KEY",

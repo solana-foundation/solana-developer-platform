@@ -45,7 +45,7 @@ const CONFIG_STEPS: ConfigStep[] = [
     id: "signing",
     label: "Signing",
     title: "Local devnet signing",
-    description: "Generate a local signer for devnet, then name a Kora if one sponsors your fees.",
+    description: "Keep local signing for devnet, then name a Kora if one sponsors your fees.",
     sections: ["signing", "fee", "secrets"],
   },
   {
@@ -431,7 +431,6 @@ export function EnvConfigurator() {
   const [values, setValues] = useState<Values>(initialValues);
   const [copied, setCopied] = useState(false);
   const [activeStepId, setActiveStepId] = useState<StepId>("start");
-  const [localSignerPublicKey, setLocalSignerPublicKey] = useState("");
   const [localSignerError, setLocalSignerError] = useState("");
   const [localSignerGenerating, setLocalSignerGenerating] = useState(false);
   const [localSignerAttempted, setLocalSignerAttempted] = useState(false);
@@ -461,11 +460,10 @@ export function EnvConfigurator() {
     setLocalSignerError("");
     try {
       const keypair = await generateLocalSignerKeypair();
-      setLocalSignerPublicKey(keypair.publicKey);
       setValues((prev) => ({ ...prev, CUSTODY_PRIVATE_KEY: keypair.privateKey }));
     } catch {
       setLocalSignerError(
-        "This browser could not generate an Ed25519 keypair. Paste a base58 devnet key instead."
+        "This browser could not generate an Ed25519 keypair. Paste a base58 keypair instead."
       );
     } finally {
       setLocalSignerGenerating(false);
@@ -508,7 +506,6 @@ export function EnvConfigurator() {
     });
 
     if (key === "CUSTODY_PRIVATE_KEY") {
-      setLocalSignerPublicKey("");
       setLocalSignerError("");
     }
   }
@@ -658,19 +655,12 @@ export function EnvConfigurator() {
             <div className="sdp-cfg-form">
               <div className="sdp-cfg-box sdp-cfg-status">
                 <div>
-                  <h4>Generated local signer</h4>
-                  {localSignerPublicKey ? (
-                    <p>
-                      Fund this devnet address for transaction fees:{" "}
-                      <span className="sdp-cfg-code">{localSignerPublicKey}</span>
-                    </p>
-                  ) : (
-                    <p>
-                      {localSignerGenerating
-                        ? "Generating a local Ed25519 signer in this browser."
-                        : "Paste a base58 keypair or regenerate one here."}
-                    </p>
-                  )}
+                  <h4>Local signer key</h4>
+                  <p>
+                    {localSignerGenerating
+                      ? "Generating a key in this browser."
+                      : "SDP never signs with this key, so it needs no SOL. Regenerate it here, or paste a base58 keypair below."}
+                  </p>
                   {localSignerError ? <p className="sdp-cfg-note">{localSignerError}</p> : null}
                 </div>
                 <button
@@ -679,7 +669,7 @@ export function EnvConfigurator() {
                   onClick={() => void generateLocalSigner()}
                   type="button"
                 >
-                  {localSignerGenerating ? "Generating" : "Regenerate signer"}
+                  {localSignerGenerating ? "Generating" : "Regenerate key"}
                 </button>
               </div>
               {renderFieldSections(activeStep)}
