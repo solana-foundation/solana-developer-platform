@@ -127,6 +127,7 @@ describe("useDashboardRead", () => {
 describe("readDashboardPostRequest", () => {
   const ESTIMATE_PATH = "/api/dashboard/payments/ramps/onramp/estimate";
   const ESTIMATE_PARAMS = { amount: "25.00", fiatCurrency: "USD" };
+  const BATCH_ESTIMATE_PATH = "/api/dashboard/payments/transfers/batch/estimate";
 
   it.each([
     ["live", null],
@@ -140,7 +141,7 @@ describe("readDashboardPostRequest", () => {
       ESTIMATE_PARAMS
     );
 
-    await expect(readDashboardPostRequest(key, amountSchema)).resolves.toEqual({
+    await expect(readDashboardPostRequest(key, amountSchema, ESTIMATE_PARAMS)).resolves.toEqual({
       data: { amount: 7 },
     });
     expect(sentDashboardRequests(fetchMock)).toEqual([
@@ -151,13 +152,33 @@ describe("readDashboardPostRequest", () => {
     ]);
   });
 
+  it("posts a nested body verbatim", async () => {
+    const fetchMock = stubDashboardFetch(() => dashboardDataResponse(200, { amount: 7 }));
+    const body = {
+      recipients: [
+        { address: "addr_test_1", amount: "1.5" },
+        { address: "addr_test_2", amount: "2" },
+      ],
+      memo: null,
+    };
+    const key = dashboardPostReadKey(SCOPE, BATCH_ESTIMATE_PATH, {
+      serializedRequest: JSON.stringify(body),
+    });
+
+    await readDashboardPostRequest(key, amountSchema, body);
+
+    expect(sentDashboardRequests(fetchMock)).toEqual([
+      { path: BATCH_ESTIMATE_PATH, method: "POST", idempotencyKey: null, body },
+    ]);
+  });
+
   it("fails a refused read like a GET read", async () => {
     stubDashboardFetch(() =>
       Response.json({ error: { code: "VALIDATION_ERROR", message: "Too small" } }, { status: 422 })
     );
     const key = dashboardPostReadKey(SCOPE, ESTIMATE_PATH, ESTIMATE_PARAMS);
 
-    const read = readDashboardPostRequest(key, amountSchema);
+    const read = readDashboardPostRequest(key, amountSchema, ESTIMATE_PARAMS);
 
     await expect(read).rejects.toBeInstanceOf(DashboardReadError);
     await expect(read).rejects.toMatchObject({
@@ -205,6 +226,19 @@ function useSharedKeyReads({
   };
 }
 
+function useOffScreenRead({
+  mounted,
+  fetcher,
+}: {
+  mounted: boolean;
+  fetcher: () => Promise<string>;
+}) {
+  return {
+    invalidate: useInvalidateDashboardReads(),
+    read: useDashboardSWR(mounted ? WALLETS_KEY : null, fetcher),
+  };
+}
+
 describe("useInvalidateDashboardReads", () => {
   it("refetches a mounted matching read without blanking it, and leaves the others alone", async () => {
     const fetchMock = stubCountingReads();
@@ -246,6 +280,28 @@ describe("useInvalidateDashboardReads", () => {
     await waitFor(() => expect(result.current.wallets.data).toEqual({ data: { amount: 2 } }));
   });
 
+  it("never lets a read that was in flight before the write land after it", async () => {
+    const stale = Promise.withResolvers<string>();
+    const fetcher = vi
+      .fn<() => Promise<string>>()
+      .mockReturnValueOnce(stale.promise)
+      .mockResolvedValueOnce("fresh");
+    const { result, rerender } = renderHook(useOffScreenRead, {
+      wrapper: DashboardReadsProvider,
+      initialProps: { mounted: true, fetcher },
+    });
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    rerender({ mounted: false, fetcher });
+
+    await act(() => result.current.invalidate(readsUnderPath("/api/dashboard/wallets")));
+    stale.resolve("stale");
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+    rerender({ mounted: true, fetcher });
+
+    expect(result.current.read.data).toBeUndefined();
+    await waitFor(() => expect(result.current.read.data).toBe("fresh"));
+  });
+
   it("keeps a read on screen while another component reading the same key unmounts", async () => {
     let answer = "before";
     const fetcher = vi.fn(async () => answer);
@@ -270,22 +326,24 @@ describe("useInvalidateDashboardReads", () => {
   });
 
   it("never touches a key that is not a request key, whatever the predicate matches", async () => {
-    const fetchMock = stubCountingReads();
+    const walletsFetcher = vi.fn(async () => "wallets");
     const labelFetcher = vi.fn(async () => "label");
     const { result } = renderHook(
       () => ({
         invalidate: useInvalidateDashboardReads(),
-        wallets: useDashboardRead(WALLETS_KEY, amountSchema),
+        wallets: useDashboardSWR(WALLETS_KEY, walletsFetcher),
         label: useSWR(LABEL_KEY, labelFetcher),
       }),
       { wrapper: DashboardReadsProvider }
     );
-    await waitFor(() => expect(result.current.label.data).toBe("label"));
-    await waitFor(() => expect(result.current.wallets.data).toBeDefined());
+    await waitFor(() => {
+      expect(result.current.wallets.data).toBe("wallets");
+      expect(result.current.label.data).toBe("label");
+    });
 
     await act(() => result.current.invalidate(() => true));
 
-    await waitFor(() => expect(readsOf(fetchMock, "/api/dashboard/wallets")).toBe(2));
+    await waitFor(() => expect(walletsFetcher).toHaveBeenCalledTimes(2));
     expect(labelFetcher).toHaveBeenCalledTimes(1);
     expect(result.current.label.data).toBe("label");
   });
