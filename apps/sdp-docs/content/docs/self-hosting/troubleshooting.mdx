@@ -47,10 +47,10 @@ The API and migrations wait for Postgres to report healthy before they start. If
 
 ## Dashboard sign-in fails
 
-Most sign-in failures are Clerk configuration. Check `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, and `CLERK_ISSUER` against your Clerk application, and that the keys belong to the instance (development or production) you mean to use. Then look for these in the API logs:
+Most sign-in failures are Clerk configuration. Check `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, and `CLERK_ISSUER` against your Clerk application, and that the keys belong to the instance (development or production) you mean to use. Then look for these messages:
 
-- `Clerk token missing organization` or `Clerk token has no usable email claim`: the session token lacks the claims in the [Clerk setup guide](https://github.com/solana-foundation/solana-developer-platform/blob/main/apps/sdp-api/docs/self-hosting/clerk-setup.md).
-- `Clerk session refused: not issued to the dashboard`: `FRONTEND_URL` isn't the origin the dashboard loads from. With `ENVIRONMENT=production`, the API accepts only sessions issued to that origin.
+- `Clerk token missing organization` or `Clerk token has no usable email claim`, in the failing request's `401` response: the session token lacks the claims in the [Clerk setup guide](https://github.com/solana-foundation/solana-developer-platform/blob/main/apps/sdp-api/docs/self-hosting/clerk-setup.md).
+- `Clerk session refused: not issued to the dashboard`, in the API logs: `FRONTEND_URL` isn't the origin the dashboard loads from. With `ENVIRONMENT=production`, the API accepts only sessions issued to that origin.
 
 ## The local signer isn't offered
 
