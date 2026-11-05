@@ -38,6 +38,10 @@ ease-out, compositor properties only, with nothing left on the element afterward
 under reduced motion. `Modal` opens with it, except when it takes over from a dialog that closed
 a moment before, so a loading dialog giving way to the real one does not blink its backdrop.
 Dialogs still close at once: callers often derive `isOpen` from the state their content reads.
+It also holds the design's mark on something just made (`playMark`): the tile's paper held for
+55% of 1.4 s, then cleared, on an element with no background of its own, under the same
+reduced-motion rule. A payment request's page marks the link the new-request page opened it
+with.
 
 `shiki-code` holds the Shiki highlighting every code surface shares, with the one css-variables
 theme. `code-block` and `paginated-footer` stay in sdp-web: the first still reads the app's
