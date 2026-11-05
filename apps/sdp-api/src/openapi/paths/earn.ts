@@ -375,8 +375,9 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
       "signature is genuine (the owner's, and the fee payer's when the build named one), " +
       "records the movement, then broadcasts. Requires the Idempotency-Key header: " +
       "a retry with the same key resolves the original movement (`replayed: true`), and each " +
-      "built transaction is consumable exactly once. A build whose blockhash has expired is " +
-      "refused with 409 TRANSACTION_EXPIRED before anything is recorded; build again.",
+      "built transaction is consumable exactly once. Signed builds remain admissible after " +
+      "blockhash expiry because the owner may already have broadcast them. Retain the signed " +
+      "bytes and poll the recorded movement; do not replace an uncertain signed intent.",
     security,
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
@@ -461,8 +462,8 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     description:
       "The exit mirror of the deposit submit: signature verified over the exact built message, " +
       "movement recorded before broadcast, Idempotency-Key required, one submission per built " +
-      "transaction. A build whose blockhash has expired is refused with 409 TRANSACTION_EXPIRED " +
-      "before anything is recorded; build again.",
+      "transaction. Expired signed builds remain admissible for recovery of independently " +
+      "broadcast transactions. Authenticated exits remain available when Earn is disabled.",
     security,
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
@@ -580,7 +581,14 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     description:
       "Verifies every signature over the exact built message, records the request before " +
       "broadcast, then sends it. Idempotency-Key is required. A same-key retry returns the " +
-      "original durable request; the build is consumable exactly once.",
+      "original durable request; the build is consumable exactly once. Expiry releases only " +
+      "the unsigned reservation, retaining the build for late submission. Reclaiming a released " +
+      "or replaced reservation requires successful finalized execution of the exact signed " +
+      "transaction. Until that proof is visible, retry the same bytes and key after a 409 CONFLICT. " +
+      "A par redemption whose original cycle already closed is refused for operator history " +
+      "reconciliation, so a late receipt cannot claim a newer request at the reused address. " +
+      "Finalized failed par transactions return 400 TRANSACTION_FAILED. An unresolved " +
+      "16-signature online history window returns 503 and requires support reconciliation.",
     security,
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
@@ -654,7 +662,9 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
       "Builds the owner-signed recovery transaction. A solver request becomes cancellable only " +
       "at expiredCancelable because fulfilment is permitted through its deadline. A cancelable " +
       "operator redemption may be revoked while pending; cancellation leaves the owner with " +
-      "the intermediate token rather than recreating the original shares.",
+      "the intermediate token rather than recreating the original shares. Requires earn.manage " +
+      "and remains available without production entitlement or when Earn is disabled. " +
+      "Organization suspension still blocks authentication.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -681,7 +691,9 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     description:
       "Verifies the signed recovery transaction, records it before broadcast and returns the " +
       "same durable request. Idempotency-Key is required. Keep polling until cancelled, " +
-      "fulfilled or failed because provider fulfilment may race recovery.",
+      "fulfilled or failed because provider fulfilment may race recovery. Requires earn.manage " +
+      "and remains available without production entitlement or when Earn is disabled. " +
+      "Organization suspension still blocks authentication.",
     security,
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,

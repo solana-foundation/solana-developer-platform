@@ -6,23 +6,28 @@ import type {
   EarnVaultQueuedWithdrawalRequestPlan,
   EarnVaultTransactionPlan,
 } from "@sdp/earn/types";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
+import { getTransaction, type ParsedTransaction, type SolanaRpc } from "@sdp/rpc/solana";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import { address } from "@solana/kit";
+import { address, type Signature } from "@solana/kit";
 import { type DatabaseClient as AppDb, getDb } from "@/db/client";
 import {
+  type CreateSignedQueuedWithdrawalRequestInput,
   createPostgresEarnVaultWithdrawalRequestsRepository,
   type EarnExternalWalletWithdrawalRequestTransactionRow,
   type EarnVaultWithdrawalMechanism,
   type EarnVaultWithdrawalRequestActionRow,
   type EarnVaultWithdrawalRequestRow,
+  type EarnVaultWithdrawalRequestsRepository,
   generateEarnExternalWalletWithdrawalRequestTransactionId,
   generateEarnVaultWithdrawalRequestActionId,
   generateEarnVaultWithdrawalRequestId,
   generateEarnVaultWithdrawalRequestReservationId,
+  QueuedWithdrawalLeaseConflictError,
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
-import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
+import { AppError, badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import {
   buildEarnVaultParRedemptionFingerprint,
   buildEarnVaultQueuedWithdrawalCancelFingerprint,
@@ -47,6 +52,7 @@ import {
 } from "./vault-execution.service";
 import { verifySignedExternalWalletTransaction } from "./vault-external-wallet.service";
 import { readConfirmedBlockHeight } from "./vault-intent-execution.service";
+import { findClosingParEventInHistoryPage } from "./vault-queued-withdrawal-reconciliation.service";
 import { rethrowVaultProviderFailure } from "./vault-refusals";
 import { rawSimulationDetails } from "./vault-simulation-error";
 import { resolveVaultSponsorship, type VaultFeeMode, vaultRentPayer } from "./vault-sponsorship";
@@ -1094,7 +1100,7 @@ export async function submitExternalQueuedWithdrawalAction(
       terms,
       transactionId: build.id,
     });
-    result = await repository.createSignedRequest({
+    const persistenceInput = {
       requestId: generateEarnVaultWithdrawalRequestId(),
       actionId: generateEarnVaultWithdrawalRequestActionId(),
       organizationId: input.actor.organizationId,
@@ -1126,7 +1132,14 @@ export async function submitExternalQueuedWithdrawalAction(
       externalWalletTransactionId: build.id,
       createdBy: input.actor.userId ?? null,
       initiatedByKeyId: input.actor.apiKeyId ?? null,
-    });
+    } satisfies CreateSignedQueuedWithdrawalRequestInput;
+    // A consumed build replays from the ledger even during an RPC outage.
+    const recorded =
+      build.consumed_action_id !== null
+        ? { ...(await repository.createSignedRequest(persistenceInput)), alreadyFinalized: false }
+        : await recordSignedExternalQueuedRequest(env, repository, persistenceInput);
+    result = recorded;
+    if (recorded.alreadyFinalized) return result;
   } else {
     if (!build.withdrawal_request_id) {
       throw internalError(`Queued cancellation build ${build.id} names no request`);
@@ -1154,4 +1167,114 @@ export async function submitExternalQueuedWithdrawalAction(
     });
   }
   return broadcastQueuedAction(env, result);
+}
+
+/**
+ * Late submissions may describe money already escrowed by the owner's wallet.
+ * A released or replaced transient lease can be reclaimed only with successful
+ * finalized execution of the exact message verified against the retained build.
+ */
+export async function recordSignedExternalQueuedRequest(
+  env: Env,
+  repository: Pick<EarnVaultWithdrawalRequestsRepository, "createSignedRequest">,
+  input: CreateSignedQueuedWithdrawalRequestInput
+): Promise<QueuedWithdrawalMutationResult & { alreadyFinalized: boolean }> {
+  let parTransaction: ParsedTransaction | null = null;
+  if (input.mechanism === "operator_redemption") {
+    const rpc = createClusterRpc();
+    // SAFETY: submit verified the signature against the retained unsigned build.
+    parTransaction = await getTransaction(rpc, input.signature as Signature, "finalized");
+    if (parTransaction !== null) {
+      if (!parTransaction.executionResultKnown) {
+        throw internalError(
+          "Finalized redemption execution is unavailable; retry the original signed intent"
+        );
+      }
+      if (parTransaction.err !== null) {
+        throw new AppError(
+          "TRANSACTION_FAILED",
+          "This signed redemption failed on chain. Build a new transaction."
+        );
+      }
+      await assertParCreationNotClosed(env, rpc, input, parTransaction);
+    }
+  }
+  try {
+    return {
+      ...(await repository.createSignedRequest(input)),
+      alreadyFinalized: parTransaction !== null && parTransaction.err === null,
+    };
+  } catch (error) {
+    if (!(error instanceof QueuedWithdrawalLeaseConflictError)) throw error;
+    // SAFETY: submit verified this signature and every byte against the stored
+    // unsigned build before constructing the persistence input.
+    const transaction =
+      input.mechanism === "operator_redemption"
+        ? parTransaction
+        : await getTransaction(createClusterRpc(), input.signature as Signature, "finalized");
+    if (transaction === null || !transaction.executionResultKnown || transaction.err !== null) {
+      throw error;
+    }
+    const recorded = await repository.createSignedRequest({
+      ...input,
+      recoverFinalizedExternalBuild: true,
+    });
+    return { ...recorded, alreadyFinalized: true };
+  }
+}
+
+async function assertParCreationNotClosed(
+  env: Env,
+  rpc: SolanaRpc,
+  input: CreateSignedQueuedWithdrawalRequestInput,
+  transaction: ParsedTransaction
+): Promise<void> {
+  const client = resolveVaultParRedemptionClient(env, input.provider, createVaultDeadline());
+  if (!client) throw notImplemented(input.provider, "par redemptions");
+  if (transaction.blockTime === null || transaction.blockTime === undefined) {
+    throw internalError(
+      "Finalized redemption creation time is unavailable; retry the original signed intent"
+    );
+  }
+  const historyLimit = 16;
+  const history = await rpc
+    .getSignaturesForAddress(address(input.requestAddress), {
+      commitment: "finalized",
+      limit: historyLimit,
+      // SAFETY: this is the verified signature of the retained owner-signed build.
+      until: input.signature as Signature,
+    })
+    .send();
+  const closing = await findClosingParEventInHistoryPage(
+    env,
+    {
+      getTransaction: (signature, config) => rpc.getTransaction(signature, config),
+      getSignaturesForAddress: (requestAddress, config) =>
+        rpc.getSignaturesForAddress(requestAddress, config),
+    },
+    {
+      id: input.requestId,
+      environment: input.environment,
+      vault_address: input.vaultAddress,
+      request_address: input.requestAddress,
+      creation_signature: input.signature,
+      share_decimals: input.shareDecimals,
+      asset_decimals: input.assetDecimals,
+    },
+    client,
+    history
+  );
+  if (closing === null && history.length === historyLimit) {
+    throw new AppError(
+      "SERVICE_UNAVAILABLE",
+      "Redemption history exceeds online recovery limits. Contact SDP support to reconcile the original signed intent."
+    );
+  }
+  // A reusable PDA cannot identify its cycle. Never let a historical request
+  // claim the current cycle after its own funds have already exited.
+  if (closing !== null && BigInt(closing.event.occurredAt) >= transaction.blockTime) {
+    throw conflict(
+      "This redemption already closed on chain. Contact SDP support to reconcile its history."
+    );
+  }
 }

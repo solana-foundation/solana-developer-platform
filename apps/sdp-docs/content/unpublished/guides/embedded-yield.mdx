@@ -18,7 +18,20 @@ All endpoints live under `/v1/earn`. Every code sample uses one Solana SDK, `@so
 
 Every request sends `Authorization: Bearer <SDP_API_KEY>` and runs in your project's environment (sandbox runs on devnet). A build can name a `feePayer`, and your backend submits the signed bytes to SDP, which records the movement or request before broadcast and reconciles it to a terminal state.
 
-**The key.** Create an API key for your project in the dashboard and grant it Earn `execute` (which includes `earn.read`); grant `earn.manage` too if it builds external-wallet withdrawal cancellations or manages programs. Cancelling a queued withdrawal signs or sponsors a transaction, so it takes `execute`. Start in sandbox, which runs on devnet. A strategy is depositable when `fundable` is `true` and `status` is `active`.
+**The key.** Create an API key for your project in the dashboard and grant it
+Earn `execute` (which includes `earn.read`). Grant `earn.manage` for cancellation
+builds and submits or program setup. Cancellation remains available after
+production access is removed or starts are disabled; a live
+credential with the required grants and wallet scope is still required. Start
+in sandbox, which runs on devnet. A strategy is depositable when `fundable` is
+`true` and `status` is `active`.
+
+An organization suspension still blocks authentication, including recovery
+routes. This is the organization's incident-control policy.
+
+If Earn or Markets is disabled, new deposits and the strategy catalogue are
+blocked. Authenticated position/history reads and withdrawal or cancellation
+previews, builds and submits remain available for existing funds.
 
 ## Endpoints
 
@@ -114,7 +127,11 @@ const signedTransaction = getBase64EncodedWireTransaction(signed);
 
 Any wallet library works as long as it returns the signed transaction as base64; the submit only checks signatures.
 
-A built transaction expires with its blockhash, about a minute. If the customer walks away, build a fresh one: submitting an expired build is refused with `409 TRANSACTION_EXPIRED` before anything is recorded.
+A blockhash limits when a transaction can first land. An unsigned abandoned
+build can be replaced after expiry. Keep every signed transaction and its
+idempotency key until its outcome is resolved: the wallet may already have
+broadcast it. Submit the original signed bytes even after expiry and poll the
+recorded movement.
 
 **Submit.** The `Idempotency-Key` header is required. Reuse the same key when retrying: a retry returns the original movement with `replayed: true` instead of moving money twice, and each built transaction is consumable exactly once.
 
@@ -195,6 +212,10 @@ What to know when sponsoring:
 - **The fee payer is committed at build time.** It is inside the signed message, so it cannot be swapped at submit; rebuild if you need a different sponsor.
 - **Keep a SOL float.** The sponsor pays the fee on every sponsored transaction and the rent on every first deposit. The build simulates with your sponsor as the payer and refuses with a 400 naming it when it cannot pay.
 - **Kamino rent stays in the customer's share account.** A full exit leaves the empty account open; it does not automatically refund you or the customer. A recorded creation claim cannot prove who funded the live account. The owner can authorize a separate close in their wallet; SDP has no rent-reclaim endpoint yet. Do not count retained rent as vault principal or earnings.
+- **Hastra transient rent returns to its current payer.** The temporary wYLDS
+  account created for an exit refunds the wallet funding that exit. Historical
+  share-account funding does not redirect that refund. Hastra request-account
+  rent follows the provider program and returns to the owner.
 - **Mind the clock.** Build, customer signature, your co-signature, and submit must all fit inside the blockhash window. Co-sign programmatically, not through a manual approval step.
 - Passing the customer's own address as `feePayer` means the default; the build does not echo it. Program-derived addresses cannot sign, so an off-curve fee payer can never be submitted.
 - Applies to `withdrawal-transactions` identically, and to the standalone swap transaction of a split swap-funded deposit.
@@ -393,6 +414,20 @@ if (canRecover) {
 
 A request transaction and a cancellation transaction are lifecycle actions, not payouts. Never add either to the customer's available payout-asset balance. Only `fulfilled` creates the corresponding withdrawal movement. On `cancelled`, refresh the original share balance for a solver request, or the position's `parIntermediate` for an operator redemption, which can then be redeemed with `intermediateAmount`.
 
+Asynchronous build metadata survives blockhash expiry. If its unsigned
+reservation was released or replaced, a late signed request needs proof that
+the exact transaction succeeded at finality. Retry `409 CONFLICT` with the same
+signed bytes and key while that proof becomes visible. It cannot replace
+another recorded request. If a par redemption already closed on chain, its
+late receipt returns `409 CONFLICT` and needs support to reconcile the history;
+it cannot claim a newer cycle at the reused address.
+Finalized failed par transactions return `400 TRANSACTION_FAILED`; build a new
+transaction. An unresolved 16-signature history window returns `503` and needs
+support reconciliation rather than an unbounded search during submission.
+An expired create becomes `failed` only after
+repeated checks find no finalized transaction, provider request or close event;
+unknown or incomplete history stays recoverable.
+
 ## Floors and previews
 
 Both previews work for every provider and are the figures to show a customer before they confirm. Whether a build also takes a protection floor depends on the strategy row:
@@ -418,14 +453,13 @@ Recovery across that split is yours: persist the swap signature and the `followU
 
 | Call | Rule |
 | --- | --- |
-| Builds | No `Idempotency-Key`. A build moves no money and expires with its blockhash. |
+| Builds | No `Idempotency-Key`. A build moves no money. Expiry permits replacing an unsigned draft; signed builds stay recoverable. |
 | Submits | `Idempotency-Key` header required. Same key on retry returns the original movement or asynchronous request (`replayed: true`). Use a different key for a later cancellation action. |
 
 | Response | Meaning | What to do |
 | --- | --- | --- |
 | `400` | The request or the current vault state must change. | Fix the request or show the message; do not retry unchanged. |
-| `409 TRANSACTION_EXPIRED` | The build's blockhash expired before submit. Nothing was recorded. | Build again and have the customer sign the new transaction. |
-| `409 CONFLICT` (any other message) | The build was already consumed under a different idempotency key, or the key was reused with a different body. | Look up the existing movement or asynchronous request; do not rebuild blindly. |
+| `409 CONFLICT` | A key or build was reused, another request occupies the provider address, or a released asynchronous reservation needs finalized execution proof. | Look up the existing intent. For a late signed submission, retry its exact bytes and key while finality becomes visible; do not rebuild blindly. |
 | `422 SIGNING_REJECTED` | A fee sponsor refused the transaction by policy. | The same transaction will be refused again; change it. |
 | `503 PROVIDER_UNAVAILABLE` | Live provider or RPC state could not be read. | Retry the read-only preview or build with bounded backoff. |
 | Timeout or 5xx on a submit | Outcome uncertain. | Retry the exact signed bytes with the same `Idempotency-Key`. |

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import type { EarnVaultPosition, EarnVaultWithdrawal } from "@sdp/types/earn";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
@@ -116,7 +116,11 @@ describe("EarnVaultWithdrawModal", () => {
     const user = userEvent.setup();
     renderModal();
 
-    await user.type(screen.getByLabelText("Amount"), "2{Enter}");
+    await user.type(screen.getByLabelText("Amount"), "2");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Continue" }).getAttribute("disabled")).toBeNull()
+    );
+    await user.keyboard("{Enter}");
     expect(flowProgress()).toEqual({ step: "Review", label: "Review, Step 2 of 4" });
 
     await user.keyboard("{Enter}");

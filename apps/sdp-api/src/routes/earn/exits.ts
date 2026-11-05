@@ -74,3 +74,31 @@ export function isEarnExitOrRead(method: string, path: string): boolean {
   }
   return movement === "read" || MOVEMENTS[movement].kind === "exit";
 }
+
+// Only existing-position history belongs in the feature-off surface. Catalogue
+// reads and any newly added route stay gated until deliberately classified.
+const EARN_RECOVERY_READS: readonly RegExp[] = [
+  /^\/external-wallet\/positions(?:\/summary)?$/,
+  /^\/external-wallet\/movements(?:\/[^/]+)?$/,
+  /^\/external-wallet\/earnings$/,
+  /^\/external-wallet\/withdrawal-requests(?:\/[^/]+)?$/,
+  /^\/vault-deposits(?:\/[^/]+)?$/,
+  /^\/vault-withdrawals(?:\/[^/]+)?$/,
+  /^\/vault-withdrawal-requests(?:\/[^/]+)?$/,
+  /^\/vault-positions$/,
+  /^\/vault-share-reconciliation$/,
+  /^\/movements$/,
+  /^\/programs(?:\/[^/]+)?$/,
+  /^\/programs\/[^/]+\/deposits$/,
+  /^\/programs\/[^/]+\/withdrawals(?:\/[^/]+)?$/,
+];
+
+/** Authenticated exits and their history remain available with Earn disabled. */
+export function isEarnRecoveryRoute(method: string, path: string): boolean {
+  if (!path.startsWith(`${EARN_MOUNT_PATH}/`)) return false;
+  if (method === "GET" || method === "HEAD") {
+    const routePath = path.slice(EARN_MOUNT_PATH.length);
+    return EARN_RECOVERY_READS.some((candidate) => candidate.test(routePath));
+  }
+  return isEarnExitOrRead(method, path);
+}

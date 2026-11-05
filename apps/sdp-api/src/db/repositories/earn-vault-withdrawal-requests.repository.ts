@@ -8,7 +8,17 @@ import {
   fulfilledQueueQuantity,
   queuedFulfillmentMovementId,
 } from "@/db/repositories/earn-movements.repository";
-import { conflict } from "@/lib/errors";
+import { AppError, conflict } from "@/lib/errors";
+
+/** A signed external build can recover this conflict with finalized evidence. */
+export class QueuedWithdrawalLeaseConflictError extends AppError {
+  constructor() {
+    super(
+      "CONFLICT",
+      "This queued withdrawal build no longer owns its provider nonce. Retry the original signed transaction after finality; do not replace an uncertain signed intent."
+    );
+  }
+}
 
 export type EarnVaultWithdrawalRequestStatus =
   | "creating"
@@ -188,6 +198,8 @@ export interface CreateSignedQueuedWithdrawalRequestInput {
   /** Exact transient shared-PDA lease that this signed request is promoting. */
   pdaLeaseToken: string;
   externalWalletTransactionId?: string;
+  /** Only after the exact externally signed transaction succeeded at finality. */
+  recoverFinalizedExternalBuild?: boolean;
   createdBy?: string | null;
   initiatedByKeyId?: string | null;
 }
@@ -328,6 +340,7 @@ export interface EarnVaultWithdrawalRequestsRepository {
   observeExpiredUnknownSignature(input: {
     actionId: string;
     organizationId: string;
+    evidence: "cancel_signature" | "absent_creation";
   }): Promise<"first" | "repeat" | "gone">;
   advanceRequest(input: {
     withdrawalRequestId: string;
@@ -589,8 +602,29 @@ async function promoteRequestAddressLease(
     environment: SdpEnvironment;
     requestAddress: string;
     expectedLeaseToken: string;
+    recoverFinalizedExternalBuild: boolean;
   }
 ): Promise<void> {
+  if (request.recoverFinalizedExternalBuild) {
+    // This records an already-finalized owner action, never a fresh spend.
+    // Do not replace another durable request, even if RLS hides its tenant.
+    const recovered = await db
+      .prepare(
+        `INSERT INTO earn_vault_withdrawal_request_pda_leases (
+           environment, request_address, lease_token, expires_at, occupied
+         ) VALUES (?, ?, ?, '9999-12-31T23:59:59.999Z', TRUE)
+         ON CONFLICT (environment, request_address) DO UPDATE SET
+           lease_token = EXCLUDED.lease_token,
+           expires_at = EXCLUDED.expires_at,
+           last_valid_block_height = NULL, occupied = TRUE
+         WHERE NOT earn_vault_withdrawal_request_pda_leases.occupied
+         RETURNING lease_token`
+      )
+      .bind(request.environment, request.requestAddress, request.id)
+      .first<{ lease_token: string }>();
+    if (recovered?.lease_token !== request.id) throw new QueuedWithdrawalLeaseConflictError();
+    return;
+  }
   const promoted = await db
     .prepare(
       `UPDATE earn_vault_withdrawal_request_pda_leases
@@ -604,9 +638,7 @@ async function promoteRequestAddressLease(
     .bind(request.id, request.environment, request.requestAddress, request.expectedLeaseToken)
     .first<{ lease_token: string }>();
   if (promoted?.lease_token !== request.id) {
-    throw conflict(
-      "This queued withdrawal build no longer owns its provider nonce. Build and sign a fresh transaction."
-    );
+    throw new QueuedWithdrawalLeaseConflictError();
   }
 }
 
@@ -916,6 +948,9 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
     },
 
     async createSignedRequest(input) {
+      if (input.recoverFinalizedExternalBuild && !input.externalWalletTransactionId) {
+        throw new Error("Finalized build recovery requires an external-wallet build");
+      }
       // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: idempotency, PDA ownership, and request/action persistence must commit atomically.
       return db.transaction(async (executor) => {
         const tx = asTransactionalClient(executor);
@@ -1061,6 +1096,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           environment: input.environment,
           requestAddress: input.requestAddress,
           expectedLeaseToken: input.pdaLeaseToken,
+          recoverFinalizedExternalBuild: input.recoverFinalizedExternalBuild === true,
         });
         return { request: mapRequest(requestRow), action: mapAction(actionRow), replayed: false };
       });
@@ -1209,6 +1245,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                   confirmed_at = CASE WHEN ? THEN COALESCE(confirmed_at, sdp_iso_now()) ELSE NULL END,
                   settled_at = CASE WHEN ? = 'finalized' THEN sdp_iso_now() ELSE NULL END,
                   unknown_signature_observed_at = NULL,
+                  absent_creation_observed_at = NULL,
                   updated_at = sdp_iso_now()
             WHERE id = ? AND organization_id = ? AND status = ANY (?::text[])
             RETURNING *`
@@ -1237,6 +1274,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                 SET status = 'failed', failure_reason = ?,
                     confirmed_at = NULL, settled_at = NULL,
                     unknown_signature_observed_at = NULL,
+                    absent_creation_observed_at = NULL,
                     updated_at = sdp_iso_now()
               WHERE id = ? AND organization_id = ?
                 AND status = ANY (?::text[])
@@ -1336,29 +1374,35 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
     },
 
     async observeExpiredUnknownSignature(input) {
+      // Older revisions only observed the status cache. They must not count
+      // toward a create's stronger, corroborated transaction-absence proof.
+      const column =
+        input.evidence === "absent_creation"
+          ? "absent_creation_observed_at"
+          : "unknown_signature_observed_at";
       const first = await db
         .prepare(
           `UPDATE earn_vault_withdrawal_request_actions
-              SET unknown_signature_observed_at = sdp_iso_now(),
+              SET ${column} = sdp_iso_now(),
                   updated_at = sdp_iso_now()
-            WHERE id = ? AND organization_id = ? AND status = 'requested'
-              AND unknown_signature_observed_at IS NULL
+            WHERE id = ? AND organization_id = ? AND status = ANY (?::text[])
+              AND ${column} IS NULL
             RETURNING id`
         )
-        .bind(input.actionId, input.organizationId)
+        .bind(input.actionId, input.organizationId, [...ACTION_SOURCES.failed])
         .first<{ id: string }>();
       if (first) return "first";
       const existing = await db
         .prepare(
-          `SELECT unknown_signature_observed_at,
-                  unknown_signature_observed_at::timestamptz <=
+          `SELECT ${column} AS observed_at,
+                  ${column}::timestamptz <=
                     clock_timestamp() - INTERVAL '30 seconds' AS old_enough
              FROM earn_vault_withdrawal_request_actions
-            WHERE id = ? AND organization_id = ? AND status = 'requested'`
+            WHERE id = ? AND organization_id = ? AND status = ANY (?::text[])`
         )
-        .bind(input.actionId, input.organizationId)
-        .first<{ unknown_signature_observed_at: string | null; old_enough: boolean }>();
-      if (!existing?.unknown_signature_observed_at) return "gone";
+        .bind(input.actionId, input.organizationId, [...ACTION_SOURCES.failed])
+        .first<{ observed_at: string | null; old_enough: boolean }>();
+      if (!existing?.observed_at) return "gone";
       return existing.old_enough ? "repeat" : "first";
     },
 
@@ -1610,8 +1654,9 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
     async hasUnconsumedExternalBuilds(params) {
       const row = await db
         .prepare(
-          `SELECT 1 AS present FROM earn_external_wallet_withdrawal_request_transactions
-            WHERE environment = ? AND consumed_action_id IS NULL
+          `SELECT 1 AS present FROM earn_external_wallet_withdrawal_request_transactions b
+            JOIN earn_vault_withdrawal_request_reservations r ON r.id = b.id
+            WHERE b.environment = ? AND b.consumed_action_id IS NULL
             LIMIT 1`
         )
         .bind(params.environment)
@@ -1624,22 +1669,16 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
         const tx = asTransactionalClient(executor);
         const expired = await tx
           .prepare(
-            `DELETE FROM earn_external_wallet_withdrawal_request_transactions
-              WHERE environment = ? AND consumed_action_id IS NULL
-                AND last_valid_block_height < ?
-              RETURNING id`
+            `DELETE FROM earn_vault_withdrawal_request_reservations r
+              USING earn_external_wallet_withdrawal_request_transactions b
+              WHERE r.id = b.id AND b.environment = ?
+                AND b.consumed_action_id IS NULL AND b.last_valid_block_height < ?
+              RETURNING r.id`
           )
           .bind(params.environment, params.currentBlockHeight)
           .all<{ id: string }>();
         const ids = expired.results.map((row) => row.id);
         if (ids.length > 0) {
-          await tx
-            .prepare(
-              `DELETE FROM earn_vault_withdrawal_request_reservations
-                WHERE id = ANY (?::text[])`
-            )
-            .bind(ids)
-            .run();
           await tx
             .prepare(
               `DELETE FROM earn_vault_withdrawal_request_pda_leases
@@ -1660,15 +1699,6 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           if (input.currentBlockHeight === undefined) {
             throw new Error("Current block height is required for a queued request build");
           }
-          await tx
-            .prepare(
-              `DELETE FROM earn_external_wallet_withdrawal_request_transactions
-                WHERE environment = ? AND request_address = ?
-                  AND action = 'request' AND consumed_action_id IS NULL
-                  AND last_valid_block_height < ?`
-            )
-            .bind(input.environment, input.requestAddress, input.currentBlockHeight)
-            .run();
           await tx
             .prepare(
               `DELETE FROM earn_vault_withdrawal_request_reservations

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { app } from "@/index";
 import { earnRoutes } from "@/routes/earn";
+import { isEarnRecoveryRoute } from "@/routes/earn/exits";
 import { type EarnAuthzTenant, seedEarnApiKey, seedEarnAuthzTenant } from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -47,7 +48,7 @@ const EARN_ROUTE_ACTIONS = {
   "POST /external-wallet/withdrawal-request-cancel-transactions": "earn.manage",
   "POST /external-wallet/withdrawals": "earn.execute",
   "POST /external-wallet/withdrawal-requests": "earn.execute",
-  "POST /external-wallet/withdrawal-request-cancellations": "earn.execute",
+  "POST /external-wallet/withdrawal-request-cancellations": "earn.manage",
   "GET /external-wallet/withdrawal-requests": "earn.read",
   "GET /external-wallet/withdrawal-requests/:withdrawalRequestId": "earn.read",
   "GET /movements": "earn.read",
@@ -279,13 +280,33 @@ describe("Clerk callers are membership-checked, per route (EARN-027)", () => {
 });
 
 describe("feature gate", () => {
-  it("EARN_ENABLED off darkens every route with 403", async () => {
-    env.EARN_ENABLED = "false";
-    const raw = rawKeyBySet.get(grantSetId(EARN_ACTIONS));
-    assert(raw, "Expected seeded API key");
-    for (const route of ROUTES) {
-      const res = await requestAsKey(route, raw, {});
-      expect(res.status, route).toBe(403);
+  it.each(["EARN_ENABLED", "MARKETS_ENABLED"] as const)(
+    "%s off gates entries while preserving authenticated recovery",
+    async (flag) => {
+      env[flag] = "false";
+      const raw = rawKeyBySet.get(grantSetId(EARN_ACTIONS));
+      assert(raw, "Expected seeded API key");
+      for (const route of ROUTES) {
+        const res = await requestAsKey(route, raw, {});
+        const { method, path } = requestPath(route);
+        if (!isEarnRecoveryRoute(method, path)) {
+          expect(res.status, route).toBe(403);
+          continue;
+        }
+        if (res.status === 403) {
+          const body = errorBodySchema.parse(await res.json());
+          expect(body.error.message, route).not.toContain("Earn is not enabled");
+        }
+        const anonymous = await app.request(
+          path,
+          {
+            method,
+            headers: { "x-forwarded-for": uniqueClientIp() },
+          },
+          env
+        );
+        expect(anonymous.status, route).toBe(401);
+      }
     }
-  });
+  );
 });

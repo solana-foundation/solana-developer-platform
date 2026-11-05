@@ -56,6 +56,16 @@ type ClosingParLifecycleEvent = Extract<
   EarnVaultParRedemptionLifecycleEvent,
   { kind: "redemptionCancelled" | "redemptionFulfilled" }
 >;
+type ParLifecycleContext = Pick<
+  EarnVaultWithdrawalRequestRow,
+  | "id"
+  | "environment"
+  | "vault_address"
+  | "request_address"
+  | "creation_signature"
+  | "share_decimals"
+  | "asset_decimals"
+>;
 
 interface ClosingEventObservation {
   signature: string;
@@ -143,7 +153,7 @@ function awaitsChain(
 }
 
 /**
- * Prove the absence of every action whose blockhash the confirmed height shows expired while its
+ * Prove the absence of every action whose blockhash the finalized height shows expired while its
  * batch status was null, by re-reading those statuses at the height's slot
  * (`reReadExpiredStatuses`), before any expired request or cancel recovery runs.
  *
@@ -151,7 +161,7 @@ function awaitsChain(
  * @param environment - The environment the actions belong to, for the failure log.
  * @param rows - The claimed actions.
  * @param statuses - The batch statuses, by index.
- * @param height - The confirmed height read and the slot it was read at.
+ * @param height - The finalized height read and the slot it was read at.
  * @returns The statuses with every expired action's re-read applied, and the indexes of expired
  * actions whose re-read failed, which stay unjudged this tick.
  */
@@ -184,7 +194,7 @@ async function proveExpiredActions(
 }
 
 /**
- * Read the confirmed height a batch's actions are judged against, once and only when one of them
+ * Read the finalized height a batch's actions are judged against, once and only when one of them
  * still waits on the chain, then prove each expired action's absence at that height's slot.
  *
  * @param rpc - The cluster's pool client.
@@ -210,7 +220,7 @@ async function readActionExpiry(
   if (!rows.some((row, index) => awaitsChain(row, statuses[index]))) return unjudged;
   let height: ChainHeight;
   try {
-    height = await getChainHeight(rpc, "confirmed");
+    height = await getChainHeight(rpc, "finalized");
   } catch (error) {
     stats.errors += 1;
     getLogger().error(
@@ -228,9 +238,9 @@ async function readActionExpiry(
 }
 
 /**
- * Delete the open cluster scope's expired, unconsumed external-wallet builds. A build expires
- * against the confirmed height of its own environment's cluster, and with nothing to expire the
- * cluster is not asked at all. A failed read defers the cleanup to the next tick.
+ * Release expired unsigned-build reservations without deleting recovery
+ * metadata. A wallet may already have broadcast its transaction independently.
+ * Only the build's own cluster can prove its blockhash expired.
  *
  * @param ledger - The two queue repository reads and writes the cleanup uses.
  */
@@ -240,7 +250,7 @@ export async function cleanupAbandonedExternalBuilds(
   const { environment } = currentClusterScope();
   try {
     if (!(await ledger.hasUnconsumedExternalBuilds({ environment }))) return;
-    const height = await createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send();
+    const height = await createClusterRpc().getBlockHeight({ commitment: "finalized" }).send();
     await ledger.cleanupExpiredExternalBuilds({
       environment,
       currentBlockHeight: height.toString(),
@@ -444,31 +454,20 @@ export async function reconcileAction(
     return "unchanged";
   }
 
-  // An already-submitted CREATE may have fallen out of this RPC's history;
-  // its live request is reconciled through the PDA sweep. A submitted CANCEL
-  // needs one extra recovery rule: once its blockhash expired, a still-live
-  // expired PDA proves the cancel did not finalize and must reopen retry.
   if (actionRow.status === "confirmed") return "unchanged";
-  if (
-    actionRow.status === "submitted" &&
-    chain.currentHeight !== null &&
-    chain.currentHeight > BigInt(actionRow.last_valid_block_height)
-  ) {
-    if (actionRow.action === "cancel") {
-      return recoverExpiredUnknownAction(env, ledger, actionRow, chain.rpc);
-    }
-    return "unchanged";
-  }
   if (actionRow.status !== "requested" && actionRow.status !== "submitted") return "unchanged";
   if (
     chain.currentHeight !== null &&
     chain.currentHeight > BigInt(actionRow.last_valid_block_height)
   ) {
-    const observation = await ledger.observeExpiredUnknownSignature({
-      actionId: actionRow.id,
-      organizationId: actionRow.organization_id,
-    });
-    if (observation !== "repeat") return "unchanged";
+    if (actionRow.action === "cancel" && actionRow.status === "requested") {
+      const observation = await ledger.observeExpiredUnknownSignature({
+        actionId: actionRow.id,
+        organizationId: actionRow.organization_id,
+        evidence: "cancel_signature",
+      });
+      if (observation !== "repeat") return "unchanged";
+    }
     // A null signature lookup is not proof that the signed transaction never
     // landed: RPC history can omit an old signature while the queue PDA is
     // still live (or has already closed). Consult provider state before making
@@ -601,10 +600,7 @@ async function recoverExpiredUnknownAction(
     return "advanced";
   }
 
-  // For a CREATE, an absent PDA plus absent history still is not proof of
-  // non-landing. Leaving the action requested is intentionally conservative:
-  // the fair claim cursor retries it without orphaning a possible escrow.
-  return "unchanged";
+  return recoverAbsentCreation(env, ledger, actionRow, request, rpc);
 }
 
 async function recoverExpiredUnknownParAction(
@@ -691,7 +687,61 @@ async function recoverExpiredUnknownParAction(
     });
     return "advanced";
   }
-  return "unchanged";
+  return recoverAbsentCreation(env, ledger, actionRow, request, rpc);
+}
+
+/**
+ * Release a never-landed create only after finalized expiry, a slot-fenced
+ * signature miss, absent provider state/history, and two spaced transaction
+ * history misses. Provider-proven obligations remain recoverable indefinitely.
+ */
+async function recoverAbsentCreation(
+  env: Env,
+  ledger: QueueLedger,
+  actionRow: EarnVaultWithdrawalRequestActionRow,
+  request: EarnVaultWithdrawalRequestRow,
+  rpc: RawHistoryRpc
+): Promise<"advanced" | "failed" | "unchanged"> {
+  const transaction = await rpc
+    // SAFETY: the durable signature came from the verified signed intent.
+    .getTransaction(actionRow.signature as Signature, {
+      commitment: "finalized",
+      encoding: "json",
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
+    })
+    .send();
+  if (transaction !== null) {
+    if (transaction.meta === null || transaction.meta.err === undefined) {
+      throw new Error(
+        `Queued withdrawal action ${actionRow.id} has no historical execution result`
+      );
+    }
+    if (transaction.meta.err !== null) {
+      await failAction(ledger, actionRow, describeError(transaction.meta.err));
+      return "failed";
+    }
+    await projectFinalizedAction(env, ledger, actionRow, rpc, transaction);
+    await ledger.advanceAction({
+      actionId: actionRow.id,
+      organizationId: actionRow.organization_id,
+      toStatus: "finalized",
+    });
+    return "advanced";
+  }
+  if (request.nonce !== null || request.creation_timestamp !== null) return "unchanged";
+  const observation = await ledger.observeExpiredUnknownSignature({
+    actionId: actionRow.id,
+    organizationId: actionRow.organization_id,
+    evidence: "absent_creation",
+  });
+  if (observation !== "repeat") return "unchanged";
+  const recovered = await ledger.failActionAndRecoverRequest({
+    actionId: actionRow.id,
+    organizationId: actionRow.organization_id,
+    failureReason:
+      "Transaction blockhash expired without a provider request or finalized transaction",
+  });
+  return recovered === null ? "unchanged" : "failed";
 }
 
 async function failAction(
@@ -708,16 +758,25 @@ async function failAction(
 
 async function transactionObservation(
   rpc: RawHistoryRpc,
-  signature: string
+  signature: string,
+  observed?: RawTransactionResponse
 ): Promise<{ logs: readonly string[] | null; blockTime: string | null } | null> {
-  const transaction = await rpc
-    .getTransaction(signature as Signature, {
-      commitment: "finalized",
-      encoding: "json",
-      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
-    })
-    .send();
-  if (!transaction || transaction.meta?.err) return null;
+  const transaction =
+    observed ??
+    (await rpc
+      .getTransaction(signature as Signature, {
+        commitment: "finalized",
+        encoding: "json",
+        maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
+      })
+      .send());
+  if (
+    transaction === null ||
+    transaction.meta === null ||
+    transaction.meta.err === undefined ||
+    transaction.meta.err !== null
+  )
+    return null;
   return {
     logs: transaction.meta?.logMessages ?? null,
     blockTime:
@@ -729,9 +788,10 @@ async function transactionObservation(
 
 async function transactionLogs(
   rpc: RawHistoryRpc,
-  signature: string
+  signature: string,
+  observed?: RawTransactionResponse
 ): Promise<readonly string[] | null> {
-  return (await transactionObservation(rpc, signature))?.logs ?? null;
+  return (await transactionObservation(rpc, signature, observed))?.logs ?? null;
 }
 
 async function lifecycleEvents(
@@ -755,7 +815,7 @@ async function lifecycleEvents(
 async function parLifecycleEvents(
   env: Env,
   client: EarnVaultParRedemptionProvider,
-  request: EarnVaultWithdrawalRequestRow,
+  request: ParLifecycleContext,
   observation: { logs: readonly string[] | null; blockTime: string | null } | null
 ): Promise<readonly EarnVaultParRedemptionLifecycleEvent[]> {
   return client.decodeParRedemptionLifecycleEvents(
@@ -775,7 +835,8 @@ async function projectFinalizedAction(
   env: Env,
   ledger: QueueLedger,
   actionRow: EarnVaultWithdrawalRequestActionRow,
-  rpc: RawHistoryRpc
+  rpc: RawHistoryRpc,
+  observed?: RawTransactionResponse
 ): Promise<void> {
   const request = await ledger.getById({
     organizationId: actionRow.organization_id,
@@ -784,12 +845,12 @@ async function projectFinalizedAction(
   });
   if (!request) throw new Error(`Missing queued withdrawal ${actionRow.withdrawal_request_id}`);
   if (request.mechanism === "operator_redemption") {
-    await projectFinalizedParAction(env, ledger, actionRow, request, rpc);
+    await projectFinalizedParAction(env, ledger, actionRow, request, rpc, observed);
     return;
   }
   const client = resolveVaultQueuedWithdrawClient(env, request.provider, createVaultDeadline());
   if (!client) throw new Error(`Queued withdrawal provider ${request.provider} is unavailable`);
-  const logs = await transactionLogs(rpc, actionRow.signature);
+  const logs = await transactionLogs(rpc, actionRow.signature, observed);
   const events = await lifecycleEvents(env, client, request, logs);
   if (actionRow.action === "request") {
     const event = events.find(
@@ -840,11 +901,12 @@ async function projectFinalizedParAction(
   ledger: QueueLedger,
   actionRow: EarnVaultWithdrawalRequestActionRow,
   request: EarnVaultWithdrawalRequestRow,
-  rpc: RawHistoryRpc
+  rpc: RawHistoryRpc,
+  observed?: RawTransactionResponse
 ): Promise<void> {
   const client = resolveVaultParRedemptionClient(env, request.provider, createVaultDeadline());
   if (!client) throw new Error(`Par-redemption provider ${request.provider} is unavailable`);
-  const observation = await transactionObservation(rpc, actionRow.signature);
+  const observation = await transactionObservation(rpc, actionRow.signature, observed);
   const events = await parLifecycleEvents(env, client, request, observation);
   if (actionRow.action === "request") {
     const event = events.find(
@@ -1267,6 +1329,9 @@ export async function findClosingEventInHistoryPage(
 ): Promise<ClosingEventObservation | null> {
   return observeHistoryNewestFirst(history, async (signature) => {
     const logs = await transactionLogs(rpc, signature);
+    if (logs === null) {
+      throw new Error(`Queued withdrawal history ${signature} has no readable finalized logs`);
+    }
     const events = await lifecycleEvents(env, client, request, logs);
     const event = events.find(
       (candidate) =>
@@ -1282,12 +1347,15 @@ export async function findClosingEventInHistoryPage(
 export async function findClosingParEventInHistoryPage(
   env: Env,
   rpc: RawHistoryRpc,
-  request: EarnVaultWithdrawalRequestRow,
+  request: ParLifecycleContext,
   client: EarnVaultParRedemptionProvider,
   history: readonly RawSignatureInfo[]
 ): Promise<ClosingParEventObservation | null> {
   return observeHistoryNewestFirst(history, async (signature) => {
     const observation = await transactionObservation(rpc, signature);
+    if (observation === null || observation.logs === null || observation.blockTime === null) {
+      throw new Error(`Par-redemption history ${signature} has no readable finalized lifecycle`);
+    }
     const events = await parLifecycleEvents(env, client, request, observation);
     const event = events.find(
       (candidate) =>
@@ -1303,7 +1371,7 @@ export async function findClosingParEventInHistoryPage(
 async function findClosingParEvent(
   env: Env,
   rpc: RawHistoryRpc,
-  request: EarnVaultWithdrawalRequestRow,
+  request: ParLifecycleContext,
   client: EarnVaultParRedemptionProvider
 ): Promise<ClosingParEventObservation | null> {
   let before: Signature | undefined;

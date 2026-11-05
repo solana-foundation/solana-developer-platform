@@ -9,7 +9,7 @@ import { requestGate } from "@/middleware/request-gate";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
-import { isEarnExitOrRead } from "./exits";
+import { isEarnExitOrRead, isEarnRecoveryRoute } from "./exits";
 import {
   createEarnExternalWalletDeposit,
   createEarnExternalWalletDepositTransaction,
@@ -99,12 +99,10 @@ import {
 export const earnRoutes = new Hono<{ Bindings: Env }>();
 const earn = new Hono<{ Bindings: Env }>();
 
-// Gate the whole family behind the Earn feature flag until it is ready for
-// prime time. Off by default; enable per-environment with EARN_ENABLED plus its
-// parent MARKETS_ENABLED — isEarnEnabled owns that hierarchy, so no separate
-// markets check belongs here.
+// Disable new commitments without removing authenticated recovery for money
+// already deployed. isEarnEnabled owns the parent MARKETS_ENABLED hierarchy.
 async function requireEarnFeature(c: Context<{ Bindings: Env }>, next: Next) {
-  if (!isEarnEnabled(c.env)) {
+  if (!isEarnEnabled(c.env) && !isEarnRecoveryRoute(c.req.method, c.req.path)) {
     throw new AppError("FORBIDDEN", "Earn is not enabled for this environment");
   }
   await next();
@@ -445,7 +443,7 @@ earn.post(
 );
 earn.post(
   "/external-wallet/withdrawal-request-cancellations",
-  requireAction("earn.execute"),
+  requireAction("earn.manage"),
   validateBody(earnExternalWalletSubmitSchema),
   createEarnExternalWalletWithdrawalRequestCancellation
 );

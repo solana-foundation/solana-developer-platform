@@ -198,12 +198,33 @@ active. Atomic failed-action recovery owns that transition. A rejected create
 may leave `closed_or_unknown` as failed only before provider existence is
 established by a nonce or creation timestamp.
 
-Each tick first deletes abandoned external request/cancel builds whose
-blockhash expired, against the block height of the build's OWN environment's
-cluster pool, and reads that height only when the environment holds an
-unconsumed build (`hasUnconsumedExternalBuilds`, the DELETE's own predicate), so
-an idle tick asks no cluster anything. A cluster without a pool defers its
-cleanup; it never borrows the other cluster's height.
+After finalized blockhash expiry, creates with no provider PDA, authenticated
+close event or finalized transaction need two complete observations at least
+30 seconds apart before atomic failure releases their occupancy. Migration
+0212 separates this evidence from older status-cache misses. Provider-proven
+requests and incomplete history remain unknown. Both requested and submitted
+creates use this rule, including a crash after persistence but before send.
+
+Each tick releases expired external request reservations using the finalized
+height of their own cluster. It retains unsigned builds, including cancellation
+builds, for independently broadcast transactions. A late verified submit may
+reclaim a missing or replaced transient lease only after the exact transaction
+succeeded at finality; it cannot replace durable occupancy. Queue submits add
+no chain read; reclaim adds one finalized transaction read and skips broadcast.
+Unconsumed par submits add one finalized creation read, then scan closing
+history when that creation landed (one page of at most 16 signatures plus
+each candidate's transaction, at most 18 RPC calls including creation). An
+unresolved full page defers to operator recovery rather than scanning more.
+A same-or-later close refuses
+adoption of that historical cycle, even while its old lease remains. Consumed
+builds replay directly from the ledger without RPC.
+Finalized failed par transactions are refused before claiming a request PDA.
+Absent-create recovery adds one transaction read after provider history, reused
+for lifecycle projection if found. Hastra rent routing adds no RPC.
+
+The cleanup height is read only while the environment holds an unconsumed
+build reservation, so retained metadata adds no idle RPC. Missing cluster
+configuration defers cleanup; it never borrows the other cluster's height.
 
 Open requests are a durable due queue, not a full-table poll.
 `next_check_at` is both the next useful provider read and a two-minute claim
@@ -1558,6 +1579,14 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
 
 ## Gate asymmetry — DO NOT BREAK (ADR 0002 exit-safety)
 
+- **Earn/Markets disabled**: new commitments and catalogue reads are refused.
+  Authenticated existing-position reads, exit previews/builds/submits and
+  cancellations remain available. `isEarnRecoveryRoute` is fail-closed for
+  new routes. Key grants, tenant/project ownership and wallet scope still apply.
+  All cancellation routes require `earn.manage`; the movement is an exit,
+  including after production access is removed or starts are disabled. An
+  organization suspension still denies authentication under the organization
+  lifecycle policy; this route exception does not override that control.
 - **Money-in** (`POST /programs`, `PUT /programs/:programId`):
   `assertProviderAvailable` (entitlement + enablement + credentials).
 - **New positions only** (`POST /programs`, vault deposits): surfacing, the

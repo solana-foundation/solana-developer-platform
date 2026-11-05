@@ -40,6 +40,25 @@ at these boundaries can duplicate transfers, strand tracking, or misstate balanc
   recording signed intent, including expired builds. An owner may already have
   broadcast independently. The original signed bytes and signature remain
   available for reconciliation; expiry is not a reason to request a new signature.
+- Asynchronous unsigned-build expiry releases reservations, never the durable
+  message or tenant/owner/terms metadata. After a lease was released or replaced,
+  only successful finalized execution of the verified signed message permits
+  adoption. Durable occupancy remains authoritative across tenants. Par submits
+  also inspect finalized closing history before recording a successful old
+  transaction, including while its original lease still exists. A closed cycle
+  needs operator history repair and cannot claim a later use of the same PDA.
+- An expired requested or submitted queue create releases occupancy only after
+  two complete, spaced observations find no signature, finalized transaction,
+  provider obligation or authenticated close event. Incomplete history defers
+  recovery. Migration 0212 starts this stronger evidence separately from older
+  status-cache misses; provider-proven requests never become failed by absence.
+- Earn and Markets feature flags stop new commitments and catalogue discovery.
+  Authenticated exit/history routes stay available. Cancellation releases an
+  obligation and is an exit requiring `earn.manage`, including after production
+  entitlement is removed or starts are disabled. Organization suspension still
+  blocks authentication; wallet, credential and tenant checks remain required.
+- Hastra's fresh temporary-account rent refunds the current exit's payer.
+  Historical share-account funding cannot redirect newly paid rent.
 - A processed or confirmed RPC error cannot fail a requested/submitted movement.
   Finalized execution errors can. Missing provider history and closed requests
   continue to mean unknown unless authenticated final evidence resolves them.
@@ -74,6 +93,11 @@ Postgres repository tests exercise the real constraints and transactions.
 Apply 0123 before the new payout writer. Rollback keeps the expanded schema:
 older writers are handled by the trigger, and initiated commands still use the
 same constraints. There is no production backfill or infrastructure change.
+
+Apply additive migration 0212 before the queue recovery writer. Older images
+ignore its nullable observation column. Build metadata already deleted by an
+older cleanup needs separate operator recovery; this migration cannot recreate
+an unknown owner-signed message or its tenant attribution.
 
 These tests do not certify provider solvency, liquidity, issuer fulfillment,
 RPC truthfulness or custody availability. Browser storage can be cleared and

@@ -5,6 +5,7 @@ import { getDb } from "@/db/client";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
+import { recordSignedExternalQueuedRequest } from "@/services/earn/vault-queued-withdraw.service";
 import { reconcileEarnVaultQueuedWithdrawals } from "@/services/earn/vault-queued-withdrawal-reconciliation.service";
 import { ENVIRONMENT_CLUSTER_CASES, installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
@@ -318,6 +319,85 @@ describe("Earn queued withdrawal repository", () => {
     ).resolves.toMatchObject({ id: retry.request.id });
   });
 
+  it.each(["requested", "submitted"] as const)(
+    "requires new, spaced absence evidence for an upgraded %s create",
+    async (status) => {
+      const created = await createRequest();
+      if (status === "submitted") {
+        await repository.advanceAction({
+          actionId: created.action.id,
+          organizationId: ORG,
+          toStatus: status,
+        });
+      }
+      const db = getDb(env);
+      await db
+        .prepare(
+          "UPDATE earn_vault_withdrawal_request_actions SET unknown_signature_observed_at = '2000-01-01T00:00:00.000Z' WHERE id = ?"
+        )
+        .bind(created.action.id)
+        .run();
+      const evidence = {
+        actionId: created.action.id,
+        organizationId: ORG,
+        evidence: "absent_creation",
+      } as const;
+      await expect(repository.observeExpiredUnknownSignature(evidence)).resolves.toBe("first");
+      await expect(repository.observeExpiredUnknownSignature(evidence)).resolves.toBe("first");
+      await db
+        .prepare(
+          "UPDATE earn_vault_withdrawal_request_actions SET absent_creation_observed_at = '2000-01-01T00:00:00.000Z' WHERE id = ?"
+        )
+        .bind(created.action.id)
+        .run();
+      await expect(repository.observeExpiredUnknownSignature(evidence)).resolves.toBe("repeat");
+      await repository.failActionAndRecoverRequest({
+        actionId: created.action.id,
+        organizationId: ORG,
+        failureReason: "corroborated expiry",
+      });
+      await expect(repository.observeExpiredUnknownSignature(evidence)).resolves.toBe("gone");
+      const retry = requestInput({ requestAddress: created.request.request_address });
+      await reserveInput(retry);
+      await expect(repository.createSignedRequest(retry)).resolves.toMatchObject({
+        replayed: false,
+      });
+    }
+  );
+
+  it("replays the observation-column expansion without changing existing intents", async () => {
+    const created = await createRequest();
+    const migration = readFileSync(
+      new URL(
+        "../migrations/postgres/0212_earn_queue_absent_creation_observation.sql",
+        import.meta.url
+      ),
+      "utf8"
+    );
+    const rollback = new Error("rollback migration fixture");
+    await expect(
+      getDb(env).transaction(async (tx) => {
+        await tx.execute(
+          "ALTER TABLE earn_vault_withdrawal_request_actions DROP COLUMN absent_creation_observed_at"
+        );
+        await tx.execute(migration);
+        await tx.execute(migration);
+        expect(
+          await tx.queryOne(
+            "SELECT status, signature, signed_transaction, absent_creation_observed_at FROM earn_vault_withdrawal_request_actions WHERE id = ?",
+            [created.action.id]
+          )
+        ).toMatchObject({
+          status: "requested",
+          signature: created.action.signature,
+          signed_transaction: created.action.signed_transaction,
+          absent_creation_observed_at: null,
+        });
+        throw rollback;
+      })
+    ).rejects.toBe(rollback);
+  });
+
   it("rolls back the action when failed-create request recovery cannot commit", async () => {
     const created = await createRequest();
     const db = getDb(env);
@@ -534,7 +614,7 @@ describe("Earn queued withdrawal repository", () => {
       currentBlockHeight: "50",
     });
 
-    // The gate and the DELETE share one predicate: unconsumed, in this environment.
+    // Only outstanding reservations need cleanup; the build remains recoverable.
     await expect(repository.hasUnconsumedExternalBuilds({ environment: "sandbox" })).resolves.toBe(
       true
     );
@@ -547,6 +627,185 @@ describe("Earn queued withdrawal repository", () => {
     await expect(repository.hasUnconsumedExternalBuilds({ environment: "sandbox" })).resolves.toBe(
       false
     );
+    await expect(
+      repository.getExternalWalletTransaction({
+        organizationId: ORG,
+        transactionId: "earn_external_wallet_withdrawal_request_transaction_cleanup_gate",
+      })
+    ).resolves.toMatchObject({ unsigned_transaction: "AQ==", consumed_action_id: null });
+    await expect(
+      repository.cleanupExpiredExternalBuilds({
+        environment: "sandbox",
+        currentBlockHeight: "102",
+      })
+    ).resolves.toBe(0);
+  });
+
+  describe("late external-wallet submission", () => {
+    const clusterRpc = installClusterRpcResponder();
+
+    async function expiredBuild() {
+      return repository.createExternalWalletTransaction({
+        id: "earn_external_wallet_withdrawal_request_transaction_late",
+        organizationId: ORG,
+        projectId: PROJECT,
+        environment: "sandbox",
+        provider: "veda",
+        positionId: EXTERNAL_POSITION,
+        action: "request",
+        ownerAddress: EXTERNAL_OWNER,
+        vaultAddress: VAULT,
+        tokenMint: TOKEN_MINT,
+        shareMint: SHARE_MINT,
+        requestAddress: "LateQueueRequestAddress1111111111111111",
+        shares: "1",
+        quotedAssets: "0.99",
+        shareDecimals: 6,
+        assetDecimals: 6,
+        discountBps: 25,
+        maturityTimestamp: "1700000060",
+        deadlineTimestamp: "1700000120",
+        unsignedTransaction: "AQ==",
+        lastValidBlockHeight: "100",
+        currentBlockHeight: "50",
+      });
+    }
+
+    function historicalTransaction(err: string | null = null) {
+      return {
+        slot: 123,
+        blockTime: 1_700_000_000,
+        transaction: { message: { accountKeys: [], instructions: [] }, signatures: [] },
+        meta: {
+          err,
+          fee: 5_000,
+          preBalances: [],
+          postBalances: [],
+          preTokenBalances: [],
+          postTokenBalances: [],
+        },
+      };
+    }
+
+    it("recovers a finalized signed build after cleanup and replays it without RPC", async () => {
+      const build = await expiredBuild();
+      await repository.cleanupExpiredExternalBuilds({
+        environment: "sandbox",
+        currentBlockHeight: "101",
+      });
+      clusterRpc.answer("getTransaction", historicalTransaction());
+      const input = requestInput({
+        positionId: EXTERNAL_POSITION,
+        custodyWalletId: null,
+        ownerAddress: EXTERNAL_OWNER,
+        requestAddress: build.request_address,
+        pdaLeaseToken: build.id,
+        externalWalletTransactionId: build.id,
+      });
+      const recovered = await runInEnvironmentClusterScope("sandbox", () =>
+        recordSignedExternalQueuedRequest(env, repository, input)
+      );
+      expect(recovered).toMatchObject({
+        alreadyFinalized: true,
+        replayed: false,
+        request: { status: "creating" },
+      });
+      expect(clusterRpc.calls.filter((call) => call.method === "getTransaction")).toHaveLength(1);
+      await expect(
+        repository.getExternalWalletTransaction({ organizationId: ORG, transactionId: build.id })
+      ).resolves.toMatchObject({
+        consumed_action_id: recovered.action.id,
+      });
+      const before = clusterRpc.calls.length;
+      const replay = await runInEnvironmentClusterScope("sandbox", () =>
+        recordSignedExternalQueuedRequest(env, repository, input)
+      );
+      expect(replay.replayed).toBe(true);
+      expect(replay.request.id).toBe(recovered.request.id);
+      expect(clusterRpc.calls).toHaveLength(before);
+    });
+
+    it("cannot replace another durable occupancy even with finalized execution", async () => {
+      const build = await expiredBuild();
+      await repository.cleanupExpiredExternalBuilds({
+        environment: "sandbox",
+        currentBlockHeight: "101",
+      });
+      await getDb(env)
+        .prepare(
+          "INSERT INTO earn_vault_withdrawal_request_pda_leases (environment, request_address, lease_token, expires_at, occupied) VALUES ('sandbox', ?, 'other-durable-request', '9999-12-31T23:59:59.999Z', TRUE)"
+        )
+        .bind(build.request_address)
+        .run();
+      clusterRpc.answer("getTransaction", historicalTransaction());
+      const input = requestInput({
+        positionId: EXTERNAL_POSITION,
+        custodyWalletId: null,
+        ownerAddress: EXTERNAL_OWNER,
+        requestAddress: build.request_address,
+        pdaLeaseToken: build.id,
+        externalWalletTransactionId: build.id,
+      });
+      await expect(
+        runInEnvironmentClusterScope("sandbox", () =>
+          recordSignedExternalQueuedRequest(env, repository, input)
+        )
+      ).rejects.toThrow(/no longer owns/);
+      expect(
+        await getDb(env)
+          .prepare(
+            "SELECT lease_token, occupied FROM earn_vault_withdrawal_request_pda_leases WHERE environment = 'sandbox' AND request_address = ?"
+          )
+          .bind(build.request_address)
+          .first()
+      ).toEqual({ lease_token: "other-durable-request", occupied: true });
+      await expect(
+        repository.getExternalWalletTransaction({ organizationId: ORG, transactionId: build.id })
+      ).resolves.toMatchObject({ consumed_action_id: null });
+      await expect(
+        repository.getById({
+          organizationId: ORG,
+          environment: "sandbox",
+          withdrawalRequestId: input.requestId,
+        })
+      ).resolves.toBeNull();
+    });
+
+    it.each([
+      null,
+      historicalTransaction("AccountNotFound"),
+      { ...historicalTransaction(), meta: null },
+    ])("keeps an expired build recoverable without finalized success: %j", async (transaction) => {
+      const build = await expiredBuild();
+      await repository.cleanupExpiredExternalBuilds({
+        environment: "sandbox",
+        currentBlockHeight: "101",
+      });
+      clusterRpc.respond("getTransaction", () => ({ result: transaction }));
+      const input = requestInput({
+        positionId: EXTERNAL_POSITION,
+        custodyWalletId: null,
+        ownerAddress: EXTERNAL_OWNER,
+        requestAddress: build.request_address,
+        pdaLeaseToken: build.id,
+        externalWalletTransactionId: build.id,
+      });
+      await expect(
+        runInEnvironmentClusterScope("sandbox", () =>
+          recordSignedExternalQueuedRequest(env, repository, input)
+        )
+      ).rejects.toThrow(/no longer owns/);
+      await expect(
+        repository.getExternalWalletTransaction({ organizationId: ORG, transactionId: build.id })
+      ).resolves.toMatchObject({ consumed_action_id: null });
+      await expect(
+        repository.getById({
+          organizationId: ORG,
+          environment: "sandbox",
+          withdrawalRequestId: input.requestId,
+        })
+      ).resolves.toBeNull();
+    });
   });
 
   it("lets another tenant take over an expired build through the shared PDA lease", async () => {
@@ -658,6 +917,20 @@ describe("Earn queued withdrawal repository", () => {
         withdrawalRequestId: stale.requestId,
       })
     ).resolves.toBeNull();
+
+    // Finalized execution may reclaim a transient successor, including one
+    // hidden by RLS, but not a durable occupied request.
+    const recovered = await runWithTenantDatabaseIdentity({ organizationId: ORG }, () =>
+      repository.createSignedRequest({ ...stale, recoverFinalizedExternalBuild: true })
+    );
+    expect(recovered.request.id).toBe(stale.requestId);
+    const occupied = await getDb(env)
+      .prepare(
+        "SELECT lease_token, occupied FROM earn_vault_withdrawal_request_pda_leases WHERE environment = 'sandbox' AND request_address = ?"
+      )
+      .bind(requestAddress)
+      .first<{ lease_token: string; occupied: boolean }>();
+    expect(occupied).toEqual({ lease_token: stale.requestId, occupied: true });
   });
 
   it("rejects custody signing after its expired lease was replaced", async () => {
