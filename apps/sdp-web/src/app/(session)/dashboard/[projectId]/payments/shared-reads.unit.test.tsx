@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { API_KEY_WALLET_SCOPES, SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
+import type { PrivateChannelInstance } from "@sdp/types/private-channels";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -11,7 +13,13 @@ import { sentDashboardReads, stubDashboardFetch } from "@/test/dashboard-fetch";
 import { resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { DashboardReadsProvider } from "@/test/dashboard-reads";
 import { SANDBOX_PROJECT } from "@/test/projects";
-import { useIssuedTokens, useOrganizationProviderAccess, useWalletSummaries } from "./shared-reads";
+import {
+  useApiKey,
+  useIssuedTokens,
+  useOrganizationProviderAccess,
+  usePrivateChannelInstance,
+  useWalletSummaries,
+} from "./shared-reads";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
@@ -202,5 +210,64 @@ describe("useOrganizationProviderAccess", () => {
 
     await waitFor(() => expect(result.current.error).toBeInstanceOf(DashboardReadError));
     expect(result.current.data).toBeUndefined();
+  });
+});
+
+describe("usePrivateChannelInstance and useApiKey", () => {
+  const INSTANCE: PrivateChannelInstance = {
+    id: "pci_test_1",
+    organizationId: "org_test",
+    projectId: SANDBOX_PROJECT.id,
+    isActive: true,
+    createdBy: null,
+    createdAt: "2026-11-01T00:00:00.000Z",
+    updatedAt: "2026-11-01T00:00:00.000Z",
+    gatewayUrl: "https://gateway.test",
+    chainRpcUrl: "https://rpc.test",
+    escrowProgramId: "escrow_program_test",
+    withdrawProgramId: "withdraw_program_test",
+    escrowInstanceAddr: "escrow_instance_test",
+    authUrl: "https://auth.test",
+  };
+  const [SANDBOX_ENVIRONMENT] = SDP_ENVIRONMENTS;
+  const [ALL_WALLETS] = API_KEY_WALLET_SCOPES;
+  const API_KEY = {
+    id: "key_test/1",
+    name: "Test key",
+    environment: SANDBOX_ENVIRONMENT,
+    grants: [],
+    expiresAt: null,
+    walletScope: ALL_WALLETS,
+    walletIds: [],
+    allowedIps: null,
+  };
+
+  it("sends nothing for an instance read that is off or an API key that is null", async () => {
+    const fetchMock = stubDashboardFetch(() => Response.json({ data: { instance: null } }));
+    renderHook(() => [usePrivateChannelInstance(false), useApiKey(null)], {
+      wrapper: DashboardReadsProvider,
+    });
+    await act(() => Promise.resolve());
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([[INSTANCE], [null]])("returns the Project's instance, or null: %j", async (instance) => {
+    stubDashboardFetch(() => Response.json({ data: { instance } }));
+    const { result } = renderHook(() => usePrivateChannelInstance(true), {
+      wrapper: DashboardReadsProvider,
+    });
+
+    await waitFor(() => expect(result.current.data).toEqual(instance));
+  });
+
+  it("reads one API key at its encoded id", async () => {
+    const fetchMock = stubDashboardFetch(() => Response.json({ data: API_KEY }));
+    const { result } = renderHook(() => useApiKey(API_KEY.id), { wrapper: DashboardReadsProvider });
+
+    await waitFor(() => expect(result.current.data).toEqual(API_KEY));
+    expect(sentDashboardReads(fetchMock).map((read) => read.path)).toEqual([
+      "/api/dashboard/api-keys/key_test%2F1",
+    ]);
   });
 });

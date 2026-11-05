@@ -4,17 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 
-const { mockUsePersistedDashboardSWR } = vi.hoisted(() => ({
-  mockUsePersistedDashboardSWR: vi.fn(),
+const { mockUseSWR } = vi.hoisted(() => ({
+  mockUseSWR: vi.fn(),
 }));
 
 vi.mock("@/i18n/provider", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
-vi.mock("@/lib/dashboard-swr", () => ({
-  usePersistedDashboardSWR: mockUsePersistedDashboardSWR,
-}));
+vi.mock("swr", () => ({ default: mockUseSWR }));
 
 import { WalletCardBalanceValue } from "./wallet-card-balance-value";
 
@@ -42,14 +40,14 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  mockUsePersistedDashboardSWR.mockReset();
+  mockUseSWR.mockReset();
   restoreWindowLocation();
   vi.unstubAllGlobals();
 });
 
 describe("WalletCardBalanceValue", () => {
   it("excludes unavailable balances while preserving a known empty wallet", async () => {
-    mockUsePersistedDashboardSWR.mockReturnValue({ data: undefined });
+    mockUseSWR.mockReturnValue({ data: undefined });
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
@@ -59,49 +57,45 @@ describe("WalletCardBalanceValue", () => {
       )
     );
     renderBalance();
-    const fetchBatch = mockUsePersistedDashboardSWR.mock.calls[0]?.[1];
+    const fetchBatch = mockUseSWR.mock.calls[0]?.[1];
     expect(await fetchBatch()).toEqual({ "empty-wallet": [] });
   });
 
   it("recovers an omitted wallet through its own balance endpoint", () => {
-    mockUsePersistedDashboardSWR
+    mockUseSWR
       .mockReturnValueOnce({ data: { "other-wallet": [] }, error: undefined })
       .mockReturnValueOnce({ data: [balance(10)], error: undefined });
     expect(renderBalance()).toContain("$10.00");
-    expect(mockUsePersistedDashboardSWR.mock.calls[1]?.[0]).toBe(
-      `wallet-card-balance-fallback:${WALLET_ID}`
-    );
+    expect(mockUseSWR.mock.calls[1]?.[0]).toBe(`wallet-card-balance-fallback:${WALLET_ID}`);
   });
 
   it("keeps the per-wallet fallback dormant when the shared batch succeeds", () => {
-    mockUsePersistedDashboardSWR
+    mockUseSWR
       .mockReturnValueOnce({ data: { [WALLET_ID]: [balance(12)] }, error: undefined })
       .mockReturnValueOnce({ data: undefined, error: undefined });
 
     const markup = renderBalance();
 
-    expect(mockUsePersistedDashboardSWR).toHaveBeenCalledTimes(2);
-    expect(mockUsePersistedDashboardSWR.mock.calls[1]?.[0]).toBeNull();
+    expect(mockUseSWR).toHaveBeenCalledTimes(2);
+    expect(mockUseSWR.mock.calls[1]?.[0]).toBeNull();
     expect(markup).toContain("$12.00");
     expect(markup).not.toContain("DashboardCustody.stale");
   });
 
   it("loads only this wallet through the fallback when the shared batch fails", () => {
-    mockUsePersistedDashboardSWR
+    mockUseSWR
       .mockReturnValueOnce({ data: undefined, error: new Error("batch unavailable") })
       .mockReturnValueOnce({ data: [balance(10)], error: undefined });
 
     const markup = renderBalance();
 
-    expect(mockUsePersistedDashboardSWR.mock.calls[1]?.[0]).toBe(
-      `wallet-card-balance-fallback:${WALLET_ID}`
-    );
+    expect(mockUseSWR.mock.calls[1]?.[0]).toBe(`wallet-card-balance-fallback:${WALLET_ID}`);
     expect(markup).toContain("$10.00");
     expect(markup).not.toContain("DashboardCustody.stale");
   });
 
   it("keeps stale data marked when both the shared batch and this wallet fail", () => {
-    mockUsePersistedDashboardSWR
+    mockUseSWR
       .mockReturnValueOnce({
         data: { [WALLET_ID]: [balance(3)] },
         error: new Error("batch unavailable"),
