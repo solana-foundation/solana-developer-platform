@@ -181,6 +181,10 @@ async function submitProviderCredentialIntent(
   const fingerprint = await computeSubmissionFingerprint(context);
 
   const { credentialLabel: _label, scope: _scope, ...fields } = input.fields;
+  const setup = await prepareSetup(context, fingerprint);
+  if (setup.kind === "replay") {
+    return setup.result;
+  }
   if ("appId" in fields) {
     try {
       await assertPrivyCredentialAccepted(c.env, fields);
@@ -190,10 +194,6 @@ async function submitProviderCredentialIntent(
       });
       throw error;
     }
-  }
-  const setup = await prepareSetup(context, fingerprint);
-  if (setup.kind === "replay") {
-    return setup.result;
   }
 
   await resolveRegistrationPayload(c, input.provider, fields, idempotencyKey);
