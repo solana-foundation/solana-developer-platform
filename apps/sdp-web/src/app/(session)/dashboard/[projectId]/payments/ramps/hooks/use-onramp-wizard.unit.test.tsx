@@ -82,11 +82,14 @@ function transferFixture(
 }
 
 const PROPS: UseRampWizardProps = {
-  wallets: [WALLET],
-  walletsError: null,
   enabledRampProviders: ["moonpay"],
   rampProviderAccess: null,
-  counterpartiesResult: { ok: true, data: [] },
+  counterparties: {
+    result: { ok: true, data: [] },
+    loading: false,
+    retry: vi.fn(),
+    addCreated: vi.fn(),
+  },
   selectedCounterparty: null,
   initialCounterpartyId: "counterparty-test",
   onExit: vi.fn(),
@@ -148,9 +151,6 @@ beforeEach(() => {
     const method = init?.method ?? "GET";
     if (url.startsWith("/api/dashboard/wallets")) {
       return Promise.resolve(Response.json({ data: { wallets: [WALLET] } }));
-    }
-    if (url.startsWith("/api/dashboard/counterparty?page=")) {
-      return Promise.resolve(Response.json({ data: { counterparties: [], total: 0 } }));
     }
     if (url.startsWith("/api/dashboard/counterparty/counterparty-test/requirements")) {
       return Promise.resolve(Response.json({ data: REQUIREMENTS_READY }));
@@ -360,7 +360,7 @@ describe("useOnrampWizard: Previous while the quote is in flight (APE-466)", () 
   function renderWizard(): WizardRender {
     return renderHook(
       () => {
-        const wizard = useOnrampWizard({ ...PROPS, wallets: [WALLET, WALLET_B] });
+        const wizard = useOnrampWizard(PROPS);
         renders.push({
           awaitingQuote:
             wizard.isLastStep &&

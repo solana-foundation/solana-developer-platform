@@ -7,11 +7,14 @@ import type {
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig, useSWRConfig } from "swr";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, type Mock, vi } from "vitest";
 import { z } from "zod";
-import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import { sharedReadQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads-query-key";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { type DashboardKeyScope, dashboardRequestUrl } from "@/lib/dashboard-request-key";
+import { readsOf, sentDashboardRequests } from "@/test/dashboard-fetch";
+import { SANDBOX_PROJECT } from "@/test/projects";
 import { useBatchSendWizard } from "./use-batch-send-wizard";
 import { useOfframpWizard } from "./use-offramp-wizard";
 import { useOnchainSendWizard } from "./use-onchain-send-wizard";
@@ -36,9 +39,13 @@ const wallet: PaymentsDashboardWallet = {
   walletId: "privy_shared",
   publicKey: "11111111111111111111111111111111",
   label: "Treasury",
+  custodyConfigId: "cc_test",
   isRuntimeExecutionAllowed: true,
   balances: [{ token: "SOL", mint: MINT, amount: "10000000000", uiAmount: "10", decimals: 9 }],
 };
+const SCOPE: DashboardKeyScope = { projectId: SANDBOX_PROJECT.id, mode: "live" };
+const WALLETS_KEY = sharedReadQueryKeys.walletSummaries(SCOPE, { includeBalances: true });
+const WALLETS_URL = dashboardRequestUrl(WALLETS_KEY);
 
 function wrapper({ children }: { children: ReactNode }) {
   return (
@@ -53,77 +60,96 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const TRANSFERS_PATH = "/api/dashboard/payments/transfers";
+
+function transferPosts(fetchMock: Mock<typeof fetch>) {
+  return sentDashboardRequests(fetchMock).filter(
+    (request) => request.path === TRANSFERS_PATH && request.method === "POST"
+  );
+}
+
+/** An offramp driven to its funding step, quoted by a hosted provider with a deposit address. */
+async function renderFundableOfframp() {
+  const source = {
+    ...wallet,
+    balances: [{ token: "USDC", mint: MINT, amount: "10000000", uiAmount: "10", decimals: 6 }],
+  };
+  const rampTransfer = {
+    id: "transfer_ramp",
+    custodyWalletId: source.id,
+    providerWalletId: source.walletId,
+    status: "awaiting_payment",
+    signature: null,
+    rampsMemo: {},
+    cryptoDeposit: { destinationAddress: wallet.publicKey, amount: "1" },
+  };
+  const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+    const url = String(input);
+    if (url.includes("/wallets?")) return Response.json({ data: { wallets: [source] } });
+    if (url.includes("/requirements"))
+      return Response.json({
+        data: { provider: "moonpay", direction: "offramp", status: "ready" },
+      });
+    if (url.endsWith("/quote"))
+      return Response.json({
+        data: {
+          transferId: "transfer_ramp",
+          quote: {
+            id: "quote_ramp",
+            provider: "moonpay",
+            status: "pending",
+            deliveryMode: "hosted",
+            hostedUrl: "https://sell-sandbox.moonpay.com/",
+          },
+        },
+      });
+    if (url.includes("/transfers/")) return Response.json({ data: { transfer: rampTransfer } });
+    if (url === TRANSFERS_PATH && init?.method === "POST")
+      return Response.json({ data: { transfer: { ...rampTransfer, status: "processing" } } });
+    return Response.json({ error: { message: "Unexpected request" } }, { status: 400 });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const { result } = renderHook(
+    () => ({
+      wizard: useOfframpWizard({
+        enabledRampProviders: ["moonpay"],
+        rampProviderAccess: null,
+        counterparties: {
+          result: { ok: true, data: [] },
+          loading: false,
+          retry: vi.fn(),
+          addCreated: vi.fn(),
+        },
+        selectedCounterparty: null,
+        initialCounterpartyId: "cpty_receiver",
+        onExit: vi.fn(),
+      }),
+      mutate: useSWRConfig().mutate,
+    }),
+    { wrapper }
+  );
+  await waitFor(() => expect(result.current.wizard.liveWallets).toHaveLength(1));
+  act(() => {
+    result.current.wizard.setField("walletId", source.id);
+    result.current.wizard.setField("amount", "1");
+    result.current.wizard.selectProvider("moonpay");
+  });
+  await act(() => result.current.wizard.handlePrimary());
+  await waitFor(() => expect(result.current.wizard.canProceed).toBe(true));
+  await act(() => result.current.wizard.handlePrimary());
+  await act(() => result.current.wizard.handlePrimary());
+  await waitFor(() => expect(result.current.wizard.canSendOnchain).toBe(true));
+  return { result, source, fetchMock };
+}
+
 describe("wallet selection during payments", () => {
   it("blocks offramp funding after runtime disablement while preserving its quote", async () => {
-    const source = {
-      ...wallet,
-      balances: [{ token: "USDC", mint: MINT, amount: "10000000", uiAmount: "10", decimals: 6 }],
-    };
-    const sent: unknown[] = [];
-    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("/wallets?")) return Response.json({ data: { wallets: [source] } });
-      if (url.includes("/requirements"))
-        return Response.json({
-          data: { provider: "moonpay", direction: "offramp", status: "ready" },
-        });
-      if (url.endsWith("/quote"))
-        return Response.json({
-          data: {
-            transferId: "transfer_ramp",
-            quote: {
-              id: "quote_ramp",
-              provider: "moonpay",
-              status: "pending",
-              deliveryMode: "hosted",
-              hostedUrl: "https://sell-sandbox.moonpay.com/",
-            },
-          },
-        });
-      if (url.includes("/transfers/"))
-        return Response.json({
-          data: {
-            transfer: {
-              id: "transfer_ramp",
-              status: "awaiting_payment",
-              cryptoDeposit: { destinationAddress: wallet.publicKey, amount: "1" },
-            },
-          },
-        });
-      if (init?.method === "POST") sent.push(JSON.parse(String(init.body)));
-      return Response.json({ data: { counterparties: [], total: 0 } });
-    });
-    const { result } = renderHook(
-      () => ({
-        wizard: useOfframpWizard({
-          wallets: [source],
-          walletsError: null,
-          enabledRampProviders: ["moonpay"],
-          rampProviderAccess: null,
-          counterpartiesResult: { ok: true, data: [] },
-          selectedCounterparty: null,
-          initialCounterpartyId: "cpty_receiver",
-          onExit: vi.fn(),
-        }),
-        mutate: useSWRConfig().mutate,
-      }),
-      { wrapper }
-    );
-    act(() => {
-      result.current.wizard.setField("walletId", source.id);
-      result.current.wizard.setField("amount", "1");
-      result.current.wizard.selectProvider("moonpay");
-    });
-    await act(() => result.current.wizard.handlePrimary());
-    await waitFor(() => expect(result.current.wizard.canProceed).toBe(true));
-    await act(() => result.current.wizard.handlePrimary());
-    await act(() => result.current.wizard.handlePrimary());
-    await waitFor(() => expect(result.current.wizard.canSendOnchain).toBe(true));
+    const { result, source, fetchMock } = await renderFundableOfframp();
 
     await act(() =>
       result.current.mutate(
-        paymentsQueryKeys.actionWallets(),
-        [{ ...source, isRuntimeExecutionAllowed: false }],
+        WALLETS_KEY,
+        { data: { wallets: [{ ...source, isRuntimeExecutionAllowed: false }] } },
         false
       )
     );
@@ -132,7 +158,30 @@ describe("wallet selection during payments", () => {
     expect(result.current.wizard.liveWalletsError).toBeNull();
     expect(result.current.wizard.sourceWalletHint).toBe("Signing is disabled for this wallet.");
     await act(() => result.current.wizard.sendCryptoToDeposit());
-    expect(sent).toEqual([]);
+    expect(transferPosts(fetchMock)).toEqual([]);
+  });
+
+  it("funds the payout under its transfer id with no key of its own, then reads the wallets again", async () => {
+    const { result, source, fetchMock } = await renderFundableOfframp();
+    const walletReads = readsOf(fetchMock, WALLETS_URL);
+
+    await act(() => result.current.wizard.sendCryptoToDeposit());
+
+    expect(transferPosts(fetchMock)).toEqual([
+      {
+        path: TRANSFERS_PATH,
+        method: "POST",
+        idempotencyKey: null,
+        body: {
+          transferId: "transfer_ramp",
+          sourceCustodyWalletId: source.id,
+          destination: wallet.publicKey,
+          token: MINT,
+          amount: "1",
+        },
+      },
+    ]);
+    await waitFor(() => expect(readsOf(fetchMock, WALLETS_URL)).toBe(walletReads + 1));
   });
 
   it("stops a batch at review when its selected Connection loses signing admission", async () => {
@@ -148,7 +197,7 @@ describe("wallet selection during payments", () => {
       if (String(input).includes("/wallets?"))
         return Response.json({ data: { wallets: [wallet] } });
       if (String(input).includes("/accounts?"))
-        return Response.json({ data: { accounts: [recipient], total: 1 } });
+        return Response.json({ data: { accounts: [recipient], total: 1, page: 1, pageSize: 6 } });
       if (String(input).endsWith("/estimate"))
         return Response.json({
           data: {
@@ -171,8 +220,6 @@ describe("wallet selection during payments", () => {
     const { result } = renderHook(
       () => ({
         wizard: useBatchSendWizard({
-          wallets: [wallet],
-          walletsError: null,
           issuedTokenSymbolsByMint: {},
           cluster: "devnet",
           onExit: vi.fn(),
@@ -190,11 +237,15 @@ describe("wallet selection during payments", () => {
     expect(result.current.wizard.currentStepId).toBe("REVIEW");
     await act(() =>
       result.current.mutate(
-        paymentsQueryKeys.actionWallets(),
-        [
-          { ...wallet, isRuntimeExecutionAllowed: false },
-          { ...wallet, id: "cwlt_other" },
-        ],
+        WALLETS_KEY,
+        {
+          data: {
+            wallets: [
+              { ...wallet, isRuntimeExecutionAllowed: false },
+              { ...wallet, id: "cwlt_other" },
+            ],
+          },
+        },
         false
       )
     );
@@ -234,7 +285,7 @@ describe("wallet selection during payments", () => {
       if (String(input).includes("/wallets?"))
         return Response.json({ data: { wallets: [wallet] } });
       if (String(input).includes("/accounts?"))
-        return Response.json({ data: { accounts: recipients, total: 2 } });
+        return Response.json({ data: { accounts: recipients, total: 2, page: 1, pageSize: 6 } });
       if (String(input).endsWith("/estimate")) {
         const body = postedBatchSchema.parse(JSON.parse(String(init?.body)));
         if (body.recipients.length === 2) {
@@ -259,8 +310,6 @@ describe("wallet selection during payments", () => {
     const { result } = renderHook(
       () =>
         useBatchSendWizard({
-          wallets: [wallet],
-          walletsError: null,
           issuedTokenSymbolsByMint: {},
           cluster: "devnet",
           onExit: vi.fn(),
@@ -313,11 +362,21 @@ describe("wallet selection during payments", () => {
               accounts: [
                 {
                   id: "cpa_receiver",
+                  organizationId: "org_test",
+                  projectId: SANDBOX_PROJECT.id,
+                  counterpartyId: "cpty_receiver",
                   accountKind: "crypto_wallet",
-                  status: "active",
+                  label: null,
                   details: { address: "11111111111111111111111111111111" },
+                  providerAccountData: {},
+                  status: "active",
+                  createdAt: "2026-10-20T00:00:00.000Z",
+                  updatedAt: "2026-10-20T00:00:00.000Z",
                 },
               ],
+              total: 1,
+              page: 1,
+              pageSize: 100,
             },
           });
         sent.push(JSON.parse(String(init?.body)));
@@ -326,8 +385,6 @@ describe("wallet selection during payments", () => {
       const { result } = renderHook(
         () => ({
           wizard: useOnchainSendWizard({
-            wallets: [wallet],
-            walletsError: null,
             issuedTokenSymbolsByMint: {},
             counterpartyId: "cpty_receiver",
             onExit: vi.fn(),
@@ -350,8 +407,15 @@ describe("wallet selection during payments", () => {
       const other = { ...wallet, id: "cwlt_other" };
       await act(() =>
         result.current.mutate(
-          paymentsQueryKeys.actionWallets(),
-          change === "removed" ? [other] : [{ ...wallet, isRuntimeExecutionAllowed: false }, other],
+          WALLETS_KEY,
+          {
+            data: {
+              wallets:
+                change === "removed"
+                  ? [other]
+                  : [{ ...wallet, isRuntimeExecutionAllowed: false }, other],
+            },
+          },
           false
         )
       );
@@ -363,7 +427,7 @@ describe("wallet selection during payments", () => {
       await act(() => result.current.wizard.handlePrimary());
       expect(sent).toEqual([]);
       await act(() =>
-        result.current.mutate(paymentsQueryKeys.actionWallets(), [other, wallet], false)
+        result.current.mutate(WALLETS_KEY, { data: { wallets: [other, wallet] } }, false)
       );
       expect(sent).toEqual([]);
       await act(() => result.current.wizard.handlePrimary());

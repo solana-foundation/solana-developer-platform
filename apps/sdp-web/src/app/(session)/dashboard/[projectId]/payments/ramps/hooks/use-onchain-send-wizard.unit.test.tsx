@@ -7,12 +7,17 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import { sharedReadQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads-query-key";
 import { resetTransferIdempotencyStateForTests } from "@/app/(session)/dashboard/[projectId]/payments/transfer-idempotency";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { type DashboardKeyScope, dashboardRequestUrl } from "@/lib/dashboard-request-key";
 import { stubClerkSession } from "@/test/clerk";
+import { readsOf } from "@/test/dashboard-fetch";
+import { SANDBOX_PROJECT } from "@/test/projects";
 import { useOnchainSendWizard } from "./use-onchain-send-wizard";
 
 const mocks = vi.hoisted(() => ({
@@ -36,6 +41,13 @@ vi.mock("sonner", () => ({
 
 const DESTINATION = "11111111111111111111111111111111";
 const SECOND_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const SCOPE: DashboardKeyScope = { projectId: SANDBOX_PROJECT.id, mode: "live" };
+const WALLETS_URL = dashboardRequestUrl(
+  sharedReadQueryKeys.walletSummaries(SCOPE, { includeBalances: true })
+);
+const ACCOUNTS_URL = dashboardRequestUrl(
+  paymentsQueryKeys.counterpartyAccounts(SCOPE, "counterparty-test")
+);
 
 const cryptoAccount: CounterpartyAccount = {
   id: "account-crypto",
@@ -118,14 +130,13 @@ function wrapper({ children }: { children: ReactNode }) {
   );
 }
 
-function renderWizard(onExit = vi.fn(), sourceWallets = wallets) {
+function renderWizard() {
+  const onExit = vi.fn();
   return {
     onExit,
     ...renderHook(
       () =>
         useOnchainSendWizard({
-          wallets: sourceWallets,
-          walletsError: null,
           issuedTokenSymbolsByMint: {},
           counterpartyId: "counterparty-test",
           onExit,
@@ -135,13 +146,16 @@ function renderWizard(onExit = vi.fn(), sourceWallets = wallets) {
   };
 }
 
-async function resolveAccounts() {
+type WizardResult = ReturnType<typeof renderWizard>["result"];
+
+async function resolveAccounts(result: WizardResult) {
   await waitFor(() => expect(accountsResponse).not.toBeNull());
   await act(async () => accountsResponse?.());
+  await waitFor(() => expect(result.current.liveWallets).not.toHaveLength(0));
 }
 
-async function prepareReview(result: ReturnType<typeof renderWizard>["result"], memo = "") {
-  await resolveAccounts();
+async function prepareReview(result: WizardResult, memo = "") {
+  await resolveAccounts(result);
   act(() => result.current.setField("accountId", cryptoAccount.id));
   await act(async () => result.current.handlePrimary());
   act(() => result.current.selectWallet("wallet-usdc"));
@@ -170,10 +184,10 @@ beforeEach(() => {
   transferStatus = 200;
   fetchMock.mockReset().mockImplementation((input, init) => {
     const url = String(input);
-    if (url === "/api/dashboard/wallets?view=summary&includeBalances=true") {
+    if (url === WALLETS_URL) {
       return Promise.resolve(Response.json({ data: { wallets } }));
     }
-    if (url === "/api/dashboard/counterparty/counterparty-test/accounts?pageSize=100") {
+    if (url === ACCOUNTS_URL) {
       return new Promise<Response>((resolve) => {
         accountsResponse = () =>
           resolve(
@@ -181,13 +195,11 @@ beforeEach(() => {
               data: {
                 accounts: [
                   cryptoAccount,
-                  {
-                    ...cryptoAccount,
-                    id: "account-bank",
-                    accountKind: "bank_account",
-                    details: { accountNumberLast4: "1234" },
-                  },
+                  { ...cryptoAccount, id: "account-old", status: "archived" },
                 ],
+                total: 2,
+                page: 1,
+                pageSize: 100,
               },
             })
           );
@@ -234,6 +246,7 @@ describe("useOnchainSendWizard", () => {
         ...wallets[0],
         id: "byok",
         provider: "fireblocks",
+        custodyConfigId: undefined,
         custodyConnectionId: "cconn_fb",
         balances,
       },
@@ -241,12 +254,12 @@ describe("useOnchainSendWizard", () => {
     const fallback = fetchMock.getMockImplementation();
     if (!fallback) throw new Error("Missing fetch fixture");
     fetchMock.mockImplementation((input, init) =>
-      String(input) === "/api/dashboard/wallets?view=summary&includeBalances=true"
+      String(input) === WALLETS_URL
         ? Promise.resolve(Response.json({ data: { wallets: sourceWallets } }))
         : fallback(input, init)
     );
-    const { result } = renderWizard(vi.fn(), sourceWallets);
-    await resolveAccounts();
+    const { result } = renderWizard();
+    await resolveAccounts(result);
     act(() => {
       result.current.setField("accountId", cryptoAccount.id);
       result.current.selectWallet("managed");
@@ -275,7 +288,7 @@ describe("useOnchainSendWizard", () => {
     expect(result.current.canProceed).toBe(false);
     expect(result.current.accountsLoading).toBe(true);
 
-    await resolveAccounts();
+    await resolveAccounts(result);
     await waitFor(() => expect(result.current.accountsLoading).toBe(false));
     expect(result.current.cryptoAccounts).toEqual([cryptoAccount]);
 
@@ -292,7 +305,7 @@ describe("useOnchainSendWizard", () => {
 
   it("selects wallet assets, checks balances, and builds review submissions", async () => {
     const { result } = renderWizard();
-    await resolveAccounts();
+    await resolveAccounts(result);
     act(() => result.current.setField("accountId", cryptoAccount.id));
     await act(async () => result.current.handlePrimary());
 
@@ -394,9 +407,27 @@ describe("useOnchainSendWizard", () => {
     expect(mocks.toastError).toHaveBeenCalledTimes(3);
   });
 
+  it.each([
+    { name: "a sent transfer", status: 200 },
+    { name: "a transfer whose answer was lost", status: 503 },
+  ])(
+    "reads the wallets again after $name, and leaves the contact's addresses alone",
+    async ({ status }) => {
+      transferStatus = status;
+      const { result } = renderWizard();
+      await prepareReview(result);
+      const walletReads = readsOf(fetchMock, WALLETS_URL);
+
+      await act(async () => result.current.handlePrimary());
+
+      await waitFor(() => expect(readsOf(fetchMock, WALLETS_URL)).toBe(walletReads + 1));
+      expect(readsOf(fetchMock, ACCOUNTS_URL)).toBe(1);
+    }
+  );
+
   it("selects a newly added account and closes the dialog", async () => {
     const { result } = renderWizard();
-    await resolveAccounts();
+    await resolveAccounts(result);
     act(() => result.current.setAddAccountOpen(true));
     act(() => result.current.handleAccountAdded(cryptoAccount));
 

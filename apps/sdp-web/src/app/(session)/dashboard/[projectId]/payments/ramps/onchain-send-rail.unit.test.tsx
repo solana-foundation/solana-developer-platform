@@ -3,6 +3,8 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { CounterpartyOptions } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/use-all-counterparties";
+import type { CounterpartiesResult } from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
@@ -40,6 +42,8 @@ const reviewWizard = {
   liveWalletsError: null,
   cryptoAccounts: [],
   accountsLoading: false,
+  accountsError: false,
+  retryAccounts: vi.fn(),
   counterpartyId: "cpty_test",
   selectedWallet: null,
   selectedAccount: null,
@@ -63,13 +67,15 @@ const reviewWizard = {
   handleSecondary: vi.fn(),
 } satisfies OnchainSendWizard;
 
+function contactsRead(result: CounterpartiesResult, loading: boolean): CounterpartyOptions {
+  return { result, loading, retry: vi.fn(), addCreated: vi.fn() };
+}
+
 const railProps: RailProps = {
-  wallets: [],
-  walletsError: null,
   issuedTokenSymbolsByMint: {},
   enabledRampProviders: [],
   rampProviderAccess: null,
-  counterpartiesResult: { ok: true, data: [] },
+  counterparties: contactsRead({ ok: true, data: [] }, false),
   selectedCounterparty: null,
   counterpartyId: "cpty_test",
   counterpartyName: "Ada Trading",
@@ -181,5 +187,41 @@ describe("OnchainSendRail while sending", () => {
     expect(send.getAttribute("aria-disabled")).toBe("true");
     expect(screen.getByText("Sending and confirming on Solana…")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+  });
+});
+
+describe("OnchainSendRail before anyone can be paid", () => {
+  const detailsWizard = {
+    ...reviewWizard,
+    stepIndex: 0,
+    currentStepId: "DETAILS",
+    isLastStep: false,
+  } satisfies OnchainSendWizard;
+
+  it.each<[string, CounterpartyOptions, boolean]>([
+    ["have loaded empty", contactsRead({ ok: true, data: [] }, false), true],
+    ["are still loading", contactsRead({ ok: true, data: [] }, true), false],
+    [
+      "failed to load",
+      contactsRead({ ok: false, data: [], error: "Failed to load counterparties." }, false),
+      false,
+    ],
+  ])("shows the empty state only when the contacts %s", (_state, counterparties, empty) => {
+    mocks.wizard = detailsWizard;
+    render(
+      <OnchainSendRail
+        {...railProps}
+        counterparties={counterparties}
+        contact={{
+          counterpartiesResult: counterparties.result,
+          loading: counterparties.loading,
+          onRetry: counterparties.retry,
+          onChange: vi.fn(),
+        }}
+      />,
+      { wrapper }
+    );
+
+    expect(screen.queryByText("There is nobody to pay yet") !== null).toBe(empty);
   });
 });
