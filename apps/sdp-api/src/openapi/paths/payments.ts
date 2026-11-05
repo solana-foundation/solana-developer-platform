@@ -598,7 +598,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     operationId: "collectPaymentRecurringPayment",
     description:
       "Manually starts a due active SDP-custody recurring payment collection, creating a linked payment transfer and collection attempt.\n\n" +
-      "Before a new collection, SDP requires an active counterparty and account in the schedule's project. If either is archived or unavailable, the schedule pauses with `pausedReason` `destination_unavailable` and the request returns `409` without signing. An earlier in-flight collection still recovers.\n\n" +
+      "Before a new collection, SDP requires an active counterparty and account in the schedule's project. If either is archived or unavailable, the schedule pauses with `pausedReason` `destination_unavailable` and the request returns `409` without signing. That `409`, and every later collect or resume while the recipient stays unavailable, tells the caller to cancel the schedule and create a new one. An earlier in-flight collection still recovers.\n\n" +
       "If submission cannot be confirmed immediately, a `200` response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation.\n\n" +
       "When the source wallet cannot cover the amount, the request returns `400` `TRANSACTION_FAILED`, and the failed collection attempt and its transfer record the same reason in `error`, so the collection history shows why.",
     security: [{ apiKeyAuth: [] }],
@@ -622,7 +622,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
     summary: "Resume recurring payment",
     operationId: "resumePaymentRecurringPayment",
-    description: `Resumes a paused SDP-custody recurring payment. SDP pauses a recurring payment when a due period fails ${RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause} times, at once when the custody provider's policy refuses to sign a collection, or before a new collection when its counterparty or account is archived or unavailable.\n\nResume requires both recipient records to be active. Its on-chain subscription is still in place, so nothing is signed: the recurring payment returns to active, the failure count starts again, and a due period that has already ended moves to the next one. A canceled recurring payment cannot be resumed.`,
+    description: `Resumes a paused SDP-custody recurring payment. SDP pauses a recurring payment when a due period fails ${RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause} times, at once when the custody provider's policy refuses to sign a collection, or before a new collection when its counterparty or account is archived or unavailable.\n\nResume requires both recipient records to be active; while either is archived or unavailable it returns 409, telling the caller to cancel the schedule and create a new one. Its on-chain subscription is still in place, so nothing is signed: the recurring payment returns to active, the failure count starts again, and a due period that has already ended moves to the next one. A canceled recurring payment cannot be resumed.`,
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyRequiredRerunHeaders,

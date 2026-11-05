@@ -4,6 +4,7 @@ import localFont from "next/font/local";
 import Script from "next/script";
 import "fumadocs-ui/style.css";
 import { RootProvider } from "fumadocs-ui/provider/next";
+import { DocsSearchDialog } from "@/components/docs-shell/search-dialog";
 import { docsOrigin, docsUrl } from "@/lib/site";
 import "./globals.css";
 
@@ -71,7 +72,7 @@ export default function RootLayout({
         )}
       </head>
       <body className="antialiased">
-        <RootProvider>{children}</RootProvider>
+        <RootProvider search={{ SearchDialog: DocsSearchDialog }}>{children}</RootProvider>
       </body>
     </html>
   );

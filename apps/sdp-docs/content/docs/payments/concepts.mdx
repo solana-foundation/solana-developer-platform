@@ -23,7 +23,7 @@ Amounts are decimal strings in whole-token units: `"100.00"` is 100 tokens, what
 
 ## Fees and sponsorship
 
-SDP pays the network fee, and the rent for any new recipient token account, on each transfer it signs. The source wallet needs only the tokens it sends, with no SOL for fees. Sponsorship has limits. When the sponsor can't pay, SDP refuses the transfer rather than charge the source wallet.
+SDP pays the network fee, and the rent for any new recipient token account, on each transfer it signs from a Privy wallet. Those wallets need only the tokens they send, with no SOL for fees. Sponsorship has limits: when the sponsor can't pay, SDP refuses the transfer rather than charge the source wallet. A provider that submits its own transfers pays their fees from its own account, and SDP does not sponsor them.
 
 ## The transfer data model
 

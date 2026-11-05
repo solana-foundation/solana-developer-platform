@@ -996,3 +996,28 @@ export async function refuseIfSubscriptionAuthorityRevokedSince(
     }
   });
 }
+
+/**
+ * The 409 for a start on a schedule whose counterparty or account is archived
+ * or no longer in the project (HOO-2634): the recipient cannot come back on
+ * this schedule, so collect and resume both say what to do instead.
+ */
+export function recipientUnavailable(): AppError {
+  return conflict(
+    "Recurring payment recipient is unavailable; cancel this schedule and create a new one"
+  );
+}
+
+/**
+ * The 409 for a collection on a schedule that is not active: the recipient
+ * guidance for one paused because its recipient is unavailable, else the
+ * generic refusal.
+ */
+export function notCollectable(
+  row: Pick<PaymentRecurringPaymentRow, "status" | "paused_reason">
+): AppError {
+  if (row.status === "paused" && row.paused_reason === "destination_unavailable") {
+    return recipientUnavailable();
+  }
+  return conflict("Recurring payment must be active before collection");
+}

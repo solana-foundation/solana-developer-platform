@@ -476,7 +476,19 @@ Source: https://platform.solana.com/docs/guides/setup-wallets
 
 A **custody wallet** is a Solana keypair whose key a custody provider holds. SDP sends each signing request to the provider that holds the wallet's key. Set up a provider, then create wallets for transfers and other onchain operations.
 
-The dashboard lists the custody providers your project can use. That list depends on this deployment and on your project's environment.
+## Supported providers
+
+| Provider | Description |
+| --- | --- |
+| **Privy** | Embedded wallet infrastructure platform |
+| **Fireblocks** | Digital asset infrastructure company |
+| **Coinbase CDP** | Embedded wallets for developers |
+| **Para** | Wallet and authentication suite |
+| **Turnkey** | Non-custodial wallet infrastructure platform |
+| **DFNS** | Digital asset wallet infrastructure |
+| **IBM Digital Asset Haven** | Institutional custody on IBM Digital Asset Haven |
+| **Anchorage** | Regulated institutional crypto custody |
+| **Utila** | Vault-backed wallet signing through service accounts |
 
 <Tabs items={["Dashboard", "API"]}>
 <Tab value="Dashboard">
@@ -1743,7 +1755,7 @@ Amounts are decimal strings in whole-token units: `"100.00"` is 100 tokens, what
 
 ## Fees and sponsorship
 
-SDP pays the network fee, and the rent for any new recipient token account, on each transfer it signs. The source wallet needs only the tokens it sends, with no SOL for fees. Sponsorship has limits. When the sponsor can't pay, SDP refuses the transfer rather than charge the source wallet.
+SDP pays the network fee, and the rent for any new recipient token account, on each transfer it signs from a Privy wallet. Those wallets need only the tokens they send, with no SOL for fees. Sponsorship has limits: when the sponsor can't pay, SDP refuses the transfer rather than charge the source wallet. A provider that submits its own transfers pays their fees from its own account, and SDP does not sponsor them.
 
 ## The transfer data model
 
@@ -5304,12 +5316,6 @@ Initialize wallet signing provider for the project resolved from the request con
 
 One of:
 
-- **provider: "local"**
-
-  - **`provider`** · `string` · required · always `local`
-
-  - **`walletLabel`** · `string` · max length 100
-
 - **provider: "fireblocks"**
 
   - **`provider`** · `string` · required · always `fireblocks`
@@ -5458,7 +5464,7 @@ curl -X POST 'https://api.solana.com/v1/wallets/initialize' \
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
-    "provider": "local"
+    "provider": "fireblocks"
   }'
 ```
 
@@ -5471,7 +5477,7 @@ const res = await fetch("https://api.solana.com/v1/wallets/initialize", {
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    "provider": "local"
+    "provider": "fireblocks"
   })
 });
 ```
@@ -5482,7 +5488,7 @@ import os, requests, uuid
 r = requests.post("https://api.solana.com/v1/wallets/initialize",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
   json={
-    "provider": "local"
+    "provider": "fireblocks"
   })
 ```
 
@@ -5552,7 +5558,7 @@ Any of:
 
 - **Create a wallet under the project's Managed config for provider.** · must not include `connectionId`
 
-  - **`provider`** · `string` · required · one of `local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, `dfns`, `ibm_haven`, `anchorage`, `utila` · example `privy`
+  - **`provider`** · `string` · required · one of `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, `dfns`, `ibm_haven`, `anchorage`, `utila` · example `privy`
 
     Provider whose Managed config owns the new wallet. A project holds one active config per provider.
 
@@ -5602,7 +5608,7 @@ Any of:
 
         Owning Custody Connection ID.
 
-      - **`provider`** · `string` · one of `local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, `dfns`, `ibm_haven`, `anchorage`, `utila` · example `privy`
+      - **`provider`** · `string` · example `privy`
 
         Wallet signing provider.
 
@@ -5851,11 +5857,11 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 
 Delete wallet request body.
 
-- **`provider`** · `string` · one of `local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, `dfns`, `ibm_haven`, `anchorage`, `utila` · example `anchorage`
+- **`provider`** · `string` · one of `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, `dfns`, `ibm_haven`, `anchorage`, `utila` · example `privy`
 
   Optional consistency assertion for the Provider of the wallet being deleted.
 
-- **`walletId`** · `string` · required · min length 1 · example `anchorage_wallet_123`
+- **`walletId`** · `string` · required · min length 1 · example `privy_wallet_123`
 
   Provider wallet ID to delete from its exact owning target.
 
@@ -5867,7 +5873,7 @@ Delete wallet request body.
 
     Delete wallet response payload.
 
-    - **`walletId`** · `string` · required · min length 1 · example `anchorage_wallet_123`
+    - **`walletId`** · `string` · required · min length 1 · example `privy_wallet_123`
 
       Wallet ID that was deleted.
 
@@ -5945,8 +5951,8 @@ curl -X DELETE 'https://api.solana.com/v1/wallets' \
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
-    "provider": "anchorage",
-    "walletId": "anchorage_wallet_123"
+    "provider": "privy",
+    "walletId": "privy_wallet_123"
   }'
 ```
 
@@ -5959,8 +5965,8 @@ const res = await fetch("https://api.solana.com/v1/wallets", {
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    "provider": "anchorage",
-    "walletId": "anchorage_wallet_123"
+    "provider": "privy",
+    "walletId": "privy_wallet_123"
   })
 });
 ```
@@ -5971,8 +5977,8 @@ import os, requests, uuid
 r = requests.delete("https://api.solana.com/v1/wallets",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
   json={
-    "provider": "anchorage",
-    "walletId": "anchorage_wallet_123"
+    "provider": "privy",
+    "walletId": "privy_wallet_123"
   })
 ```
 
@@ -5981,7 +5987,7 @@ r = requests.delete("https://api.solana.com/v1/wallets",
 ```json tab="200"
 {
   "data": {
-    "walletId": "anchorage_wallet_123",
+    "walletId": "privy_wallet_123",
     "deleted": true
   },
   "meta": {
@@ -6023,7 +6029,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 
 ## Query parameters
 
-- **`provider`** · `string` · one of `local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, `dfns`, `ibm_haven`, `anchorage`, `utila` · example `privy`
+- **`provider`** · `string` · one of `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, `dfns`, `ibm_haven`, `anchorage`, `utila` · example `privy`
 
   Wallet signing provider.
 
@@ -6061,7 +6067,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 
         Owning Custody Connection ID.
 
-      - **`provider`** · `string` · one of `local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, `dfns`, `ibm_haven`, `anchorage`, `utila` · example `privy`
+      - **`provider`** · `string` · example `privy`
 
         Wallet signing provider.
 
@@ -6293,7 +6299,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 
         Optional project scope for this config.
 
-      - **`provider`** · `string` · required · one of `local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, `dfns`, `ibm_haven`, `anchorage`, `utila` · example `privy`
+      - **`provider`** · `string` · required · example `privy`
 
         Wallet signing provider.
 
@@ -6429,7 +6435,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 
 ## Query parameters
 
-- **`provider`** · `string` · one of `local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, `dfns`, `ibm_haven`, `anchorage`, `utila` · example `privy`
+- **`provider`** · `string` · one of `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, `dfns`, `ibm_haven`, `anchorage`, `utila` · example `privy`
 
   Wallet signing provider.
 
@@ -7004,7 +7010,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 
         Owning Custody Connection ID.
 
-      - **`provider`** · `string` · required · one of `local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, `dfns`, `ibm_haven`, `anchorage`, `utila` · example `privy`
+      - **`provider`** · `string` · required · example `privy`
 
         Wallet custody provider.
 
@@ -7250,7 +7256,7 @@ Update wallet request body.
 
         Owning Custody Connection ID.
 
-      - **`provider`** · `string` · one of `local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, `dfns`, `ibm_haven`, `anchorage`, `utila` · example `privy`
+      - **`provider`** · `string` · example `privy`
 
         Wallet signing provider.
 
@@ -8176,7 +8182,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `projec
 
         - **`family`** · `string` · required · always `custody`
 
-        - **`provider`** · `string` · required · one of `local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, `dfns`, `ibm_haven`, `anchorage`, `utila`
+        - **`provider`** · `string` · required
 
         - **`modes`** · `string[]` · required · each one of `managed`, `byok`
 
@@ -26332,7 +26338,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/collect-payment-
 
 `POST /v1/payments/recurring-payments/{id}/collect`
 
-Before a new collection, SDP requires an active counterparty and account in the schedule's project. If either is archived or unavailable, the schedule pauses with `pausedReason` `destination_unavailable` and the request returns `409` without signing. An earlier in-flight collection still recovers.
+Before a new collection, SDP requires an active counterparty and account in the schedule's project. If either is archived or unavailable, the schedule pauses with `pausedReason` `destination_unavailable` and the request returns `409` without signing. That `409`, and every later collect or resume while the recipient stays unavailable, tells the caller to cancel the schedule and create a new one. An earlier in-flight collection still recovers.
 
 If submission cannot be confirmed immediately, a `200` response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation.
 
@@ -27113,7 +27119,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/resume-payment-r
 
 SDP pauses a recurring payment when a due period fails 5 times, at once when the custody provider's policy refuses to sign a collection, or before a new collection when its counterparty or account is archived or unavailable.
 
-Resume requires both recipient records to be active. Its on-chain subscription is still in place, so nothing is signed: the recurring payment returns to active, the failure count starts again, and a due period that has already ended moves to the next one. A canceled recurring payment cannot be resumed.
+Resume requires both recipient records to be active; while either is archived or unavailable it returns 409, telling the caller to cancel the schedule and create a new one. Its on-chain subscription is still in place, so nothing is signed: the recurring payment returns to active, the failure count starts again, and a due period that has already ended moves to the next one. A canceled recurring payment cannot be resumed.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurring.execute` action.
 
