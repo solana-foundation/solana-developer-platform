@@ -47,6 +47,7 @@ import { toast } from "sonner";
 import { z } from "zod";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { readApiErrorMessage } from "@/lib/api-error";
 import {
   type DashboardFetchResult,
   dashboardFetch,
@@ -57,8 +58,8 @@ import {
   type DashboardRequestKey,
   dashboardRequestUrl,
 } from "@/lib/dashboard-request-key";
-import { useDashboardKeyScope, useDashboardSWR } from "@/lib/dashboard-swr";
-import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
+import { DashboardReadError, useDashboardKeyScope, useDashboardSWR } from "@/lib/dashboard-swr";
+import { apiErrorCode, IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { useCadencedDashboardSWR } from "@/lib/use-cadenced-swr";
 import { EARN_PAGE_SIZE, earnQueryKeys } from "./earn-query-key";
 import { earnVaultHoldingValue } from "./earn-vault-holding";
@@ -110,19 +111,30 @@ function pageUrl(key: DashboardRequestKey, page: Readonly<Record<string, string 
 async function requestJson<T>(
   scope: DashboardKeyScope,
   path: string
-): Promise<{ status: number; body: T | undefined }> {
+): Promise<{ status: number; body: T | undefined; failure: DashboardReadError }> {
   const response = await dashboardReadRequest(
     path,
     { projectId: scope.projectId, demo: scope.mode === "demo" },
     undefined
   );
+  const text = await response.text();
   let body: T | undefined;
   try {
-    body = (await response.json()) as T;
+    body = JSON.parse(text) as T;
   } catch {
     body = undefined;
   }
-  return { status: response.status, body };
+  const failure = new DashboardReadError(
+    response.status,
+    apiErrorCode(text),
+    readApiErrorMessage(body)
+  );
+  return { status: response.status, body, failure };
+}
+
+/** A success whose body breaks the read's contract (pagination, freshness, shape). */
+function unreadableAnswer(): DashboardReadError {
+  return new DashboardReadError(200, null, null);
 }
 
 /**
@@ -132,9 +144,9 @@ async function requestJson<T>(
  * not an error.)
  */
 async function requestJsonOk<T>(scope: DashboardKeyScope, path: string): Promise<T> {
-  const { status, body } = await requestJson<T>(scope, path);
+  const { status, body, failure } = await requestJson<T>(scope, path);
   if (status < 200 || status >= 300 || !body) {
-    throw new Error(errorMessage(body, status));
+    throw failure;
   }
   return body;
 }
@@ -143,19 +155,11 @@ async function requestJsonOk<T>(scope: DashboardKeyScope, path: string): Promise
 async function readResult(
   scope: DashboardKeyScope,
   path: string
-): Promise<{ ok: true; data: unknown } | { ok: false; error: string }> {
-  const { status, body } = await requestJson<unknown>(scope, path);
+): Promise<{ ok: true; data: unknown } | { ok: false; error: DashboardReadError }> {
+  const { status, body, failure } = await requestJson<unknown>(scope, path);
   return status >= 200 && status < 300 && body !== undefined
     ? { ok: true, data: body }
-    : { ok: false, error: errorMessage(body, status) };
-}
-
-function errorMessage(body: unknown, status: number): string {
-  if (body && typeof body === "object" && "error" in body) {
-    const error = (body as { error?: { message?: string } }).error;
-    if (error?.message) return error.message;
-  }
-  return `Request failed (${status})`;
+    : { ok: false, error: failure };
 }
 
 /** BFF path for one program's sub-resources — the one place it is spelled. */
@@ -221,7 +225,7 @@ export async function fetchEarnProgramsState(key: DashboardRequestKey): Promise<
   const programs: EarnProgram[] = [];
 
   for (let page = 1; page <= EARN_PAGE_LIMIT; page += 1) {
-    const { status, body } = await requestJson<{ data: ListEarnProgramsResponse }>(
+    const { status, body, failure } = await requestJson<{ data: ListEarnProgramsResponse }>(
       keyScope(key),
       // UNFILTERED by provider, deliberately. Positions must show every program
       // the organization holds — a filter pinned to one provider hides money,
@@ -241,7 +245,7 @@ export async function fetchEarnProgramsState(key: DashboardRequestKey): Promise<
     // otherwise fall into the throw.
     if (status === 503) return { kind: "unconfigured" };
     if (status < 200 || status >= 300 || !body) {
-      throw new Error(errorMessage(body, status));
+      throw failure;
     }
 
     programs.push(...body.data.programs);
@@ -249,12 +253,12 @@ export async function fetchEarnProgramsState(key: DashboardRequestKey): Promise<
       return { kind: "ready", programs };
     }
     if (body.data.programs.length < EARN_PAGE_SIZE) {
-      throw new Error("Earn programs pagination ended before the reported total");
+      throw unreadableAnswer();
     }
   }
 
   // A partial portfolio is worse than an error because it can hide money.
-  throw new Error("Earn programs pagination exceeded its safety limit");
+  throw unreadableAnswer();
 }
 
 /**
@@ -342,11 +346,11 @@ export async function fetchEarnStrategies(key: DashboardRequestKey): Promise<Ear
       return strategies;
     }
     if (body.data.strategies.length < EARN_PAGE_SIZE) {
-      throw new Error("Earn strategies pagination ended before the reported total");
+      throw unreadableAnswer();
     }
   }
 
-  throw new Error("Earn strategies pagination exceeded its safety limit");
+  throw unreadableAnswer();
 }
 
 export function useEarnStrategies(options?: { cluster?: SolanaCluster }) {
@@ -394,8 +398,6 @@ interface PositionPage<Position> {
  *   can hide money.
  */
 async function fetchAllCursorPages<T>(input: {
-  /** Names the collection in the thrown pagination errors. */
-  subject: string;
   pageSize: number;
   fetchPage: (
     before: string | undefined
@@ -412,17 +414,17 @@ async function fetchAllCursorPages<T>(input: {
 
     const nextCursor = result.nextCursor;
     if (!nextCursor || nextCursor === before || seenCursors.has(nextCursor)) {
-      throw new Error(`${input.subject} pagination did not advance`);
+      throw unreadableAnswer();
     }
     if (result.items.length < input.pageSize) {
-      throw new Error(`${input.subject} pagination returned a short page while reporting more`);
+      throw unreadableAnswer();
     }
     seenCursors.add(nextCursor);
     before = nextCursor;
   }
 
   // A partial portfolio is worse than an error because it can hide money.
-  throw new Error(`${input.subject} pagination exceeded its safety limit`);
+  throw unreadableAnswer();
 }
 
 /**
@@ -432,12 +434,10 @@ async function fetchAllCursorPages<T>(input: {
 async function fetchAllPositionPages<Position>(
   scope: DashboardKeyScope,
   path: (query: URLSearchParams) => string,
-  subject: string,
   afterMovementIds: readonly string[] = [],
   observeMinimumSlot?: (slot: number) => void
 ): Promise<Position[]> {
   return fetchAllCursorPages<Position>({
-    subject,
     pageSize: EARN_PAGE_SIZE,
     async fetchPage(before) {
       const query = new URLSearchParams({ limit: String(EARN_PAGE_SIZE) });
@@ -451,7 +451,7 @@ async function fetchAllPositionPages<Position>(
         const context = earnBalanceReadContextSchema.safeParse(body.data.balanceReadContext);
         const acknowledgedMovements = new Set(context.success ? context.data.afterMovementIds : []);
         if (!context.success || afterMovementIds.some((id) => !acknowledgedMovements.has(id))) {
-          throw new Error("Vault position read did not establish confirmation freshness");
+          throw unreadableAnswer();
         }
         observeMinimumSlot?.(context.data.minimumSlot);
       }
@@ -477,7 +477,6 @@ export async function fetchEarnVaultPositions(
   return fetchAllPositionPages<EarnVaultPosition>(
     keyScope(key),
     (query) => `${key[2]}?${query}`,
-    "Vault positions",
     afterMovementIds,
     observeMinimumSlot
   );
@@ -505,7 +504,7 @@ function vaultBalanceReadBatches(
   const byPosition = new Map<string, string[]>();
   for (const id of movementIds) {
     const positionId = positionIds?.get(id);
-    if (!positionId) throw new Error("Missing position for batched balance verification");
+    if (!positionId) throw unreadableAnswer();
     const group = byPosition.get(positionId) ?? [];
     group.push(id);
     byPosition.set(positionId, group);
@@ -570,8 +569,7 @@ export async function readEarnVaultPositions(
       const byId = new Map(positions.map((position) => [position.id, position]));
       for (const id of batch) {
         const positionId = positionIds?.get(id);
-        if (!positionId || batchSlot === undefined)
-          throw new Error("Missing position balance verification");
+        if (!positionId || batchSlot === undefined) throw unreadableAnswer();
         // Multiple batches for one position must use the greatest proven slot,
         // even when confirmation arrival order differs from chain slot order.
         if ((verified.get(positionId)?.slot ?? -1) <= batchSlot)
@@ -697,8 +695,7 @@ export async function fetchEarnExternalWalletPositions(
   return fetchAllPositionPages<EarnExternalWalletPosition>(
     scope,
     (query) =>
-      `/api/dashboard/markets/earn/external-wallet/positions/${encodeURIComponent(ownerAddress)}?${query}`,
-    "External-wallet positions"
+      `/api/dashboard/markets/earn/external-wallet/positions/${encodeURIComponent(ownerAddress)}?${query}`
   );
 }
 
@@ -776,7 +773,7 @@ export async function fetchEarnExternalWalletPositionSummary(
   const body = await requestJsonOk<unknown>(keyScope(key), dashboardRequestUrl(key));
   const parsed = earnExternalWalletSummaryResponseSchema.safeParse(body);
   if (!parsed.success) {
-    throw new Error("Invalid external-wallet position summary response");
+    throw unreadableAnswer();
   }
   return parsed.data.data.summary;
 }
@@ -915,20 +912,18 @@ interface VaultMovementPage<T> {
 
 async function fetchAllVaultMovementPages<T>(input: {
   key: DashboardRequestKey;
-  resource: "deposits" | "withdrawals";
   parsePage: (value: unknown) => VaultMovementPage<T> | null;
 }): Promise<T[]> {
   return fetchAllCursorPages<T>({
-    subject: `Vault ${input.resource}`,
     pageSize: EARN_PAGE_SIZE,
     async fetchPage(before) {
       const result = await readResult(
         keyScope(input.key),
         before === undefined ? dashboardRequestUrl(input.key) : pageUrl(input.key, { before })
       );
-      if (!result.ok) throw new Error(result.error);
+      if (!result.ok) throw result.error;
       const body = input.parsePage(result.data);
-      if (!body) throw new Error(`Invalid vault ${input.resource} response`);
+      if (!body) throw unreadableAnswer();
       return body;
     },
   });
@@ -953,7 +948,6 @@ async function fetchAllVaultMovementPages<T>(input: {
 async function fetchEarnVaultDeposits(key: DashboardRequestKey): Promise<EarnVaultDepositRecord[]> {
   return fetchAllVaultMovementPages({
     key,
-    resource: "deposits",
     parsePage(value) {
       const parsed = earnVaultDepositsPageSchema.safeParse(value);
       if (!parsed.success) return null;
@@ -1333,7 +1327,6 @@ const earnVaultWithdrawalsPageSchema = z.object({
 async function fetchEarnVaultWithdrawals(key: DashboardRequestKey): Promise<EarnVaultWithdrawal[]> {
   return fetchAllVaultMovementPages({
     key,
-    resource: "withdrawals",
     parsePage(value) {
       const parsed = earnVaultWithdrawalsPageSchema.safeParse(value);
       if (!parsed.success) return null;
@@ -1696,16 +1689,15 @@ export async function fetchEarnVaultWithdrawalRequests(
   key: DashboardRequestKey
 ): Promise<EarnVaultWithdrawalRequestRecord[]> {
   return fetchAllCursorPages<EarnVaultWithdrawalRequestRecord>({
-    subject: "Queued withdrawal requests",
     pageSize: EARN_PAGE_SIZE,
     async fetchPage(before) {
       const result = await readResult(
         keyScope(key),
         before === undefined ? dashboardRequestUrl(key) : pageUrl(key, { before })
       );
-      if (!result.ok) throw new Error(result.error);
+      if (!result.ok) throw result.error;
       const parsed = queuedRequestPageSchema.safeParse(result.data);
-      if (!parsed.success) throw new Error("Invalid queued withdrawal request page");
+      if (!parsed.success) throw unreadableAnswer();
       return {
         items: parsed.data.data.withdrawalRequests,
         hasMore: parsed.data.data.hasMore,
@@ -1842,23 +1834,23 @@ export async function fetchEarnProgramWithdrawals(
 
     const ledgerPage = body.data;
     if (ledgerPage.page !== page || ledgerPage.pageSize !== EARN_PAGE_SIZE) {
-      throw new Error("Earn withdrawal ledger pagination did not match the requested page");
+      throw unreadableAnswer();
     }
     if (!Number.isSafeInteger(ledgerPage.total) || ledgerPage.total < 0) {
-      throw new Error("Earn withdrawal ledger reported an invalid total");
+      throw unreadableAnswer();
     }
 
     withdrawals.push(...ledgerPage.withdrawals);
     if (withdrawals.length === ledgerPage.total) return withdrawals;
     if (withdrawals.length > ledgerPage.total) {
-      throw new Error("Earn withdrawal ledger returned more rows than its reported total");
+      throw unreadableAnswer();
     }
     if (ledgerPage.withdrawals.length < EARN_PAGE_SIZE) {
-      throw new Error("Earn withdrawal ledger pagination ended before the reported total");
+      throw unreadableAnswer();
     }
   }
 
-  throw new Error("Earn withdrawal ledger pagination exceeded its safety limit");
+  throw unreadableAnswer();
 }
 
 /** Passing no program id issues no ledger request. */

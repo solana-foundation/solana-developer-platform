@@ -257,7 +257,7 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
       const success = successOf(action, body);
       if (success === null) {
         toast.error(t("DashboardMarkets.dvp.actionUnconfirmed"), DVP_TOAST_POSITION);
-        void invalidateReads(dvpQueryKeys.isTradeRead);
+        void invalidateReads(dvpQueryKeys.isTradeOrWalletRead);
         return;
       }
       // The single biggest source of "did anything happen?": these used to
@@ -268,10 +268,12 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
         ...DVP_TOAST_POSITION,
         action: dvpToastAction(t, success.signature, cluster),
       });
-      void invalidateReads(dvpQueryKeys.isTradeRead);
+      void invalidateReads(dvpQueryKeys.isTradeOrWalletRead);
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Request failed.";
       toast.error(message, DVP_TOAST_POSITION);
+      // The request may have reached the API before the failure, so its outcome is unknown.
+      void invalidateReads(dvpQueryKeys.isTradeOrWalletRead);
     } finally {
       setPending((current) => {
         const next = new Set(current);

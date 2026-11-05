@@ -20,6 +20,7 @@ import { BASE58_ADDRESS_PATTERN } from "@/app/(session)/dashboard/[projectId]/ma
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
+import { fetchResultAnswer, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { compareUnsignedDecimals, isPositiveDecimal, parseUnsignedDecimal } from "./earn-decimal";
 import { formatDurationRange, formatUsd, isoDurationDays } from "./earn-format";
@@ -751,6 +752,10 @@ export function EarnWithdrawModal({
     submittingRef.current = false;
     setSubmitting(false);
     if (!result.ok) {
+      // An answer whose outcome is unknown may still have created the payout.
+      if (uncertainMoneyAnswerMessage(fetchResultAnswer(result)) !== null) {
+        void invalidateReads(earnQueryKeys.isMoneyMovementRead);
+      }
       // A create can still lose a race with a rebalance between preview and
       // confirm. When the refusal names the lane ceiling, answer with SDP copy
       // carrying that number and correct the available line — echoing the

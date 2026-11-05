@@ -309,7 +309,8 @@ function TradesToolbar({
 }: {
   /** A status or search is applied, so the rows below are a subset. */
   filtersApplied: boolean;
-  inboundCount: number;
+  /** Null when the inbound read failed: there is no count to show, and no option to offer. */
+  inboundCount: number | null;
   onQueryChange: (next: string) => void;
   onStatusChange: (next: StatusFilter) => void;
   query: string;
@@ -322,7 +323,8 @@ function TradesToolbar({
   // hiding the control hides the trade with it. The create button stays either
   // way; it is the strip's one permanent occupant. Once a filter is applied the
   // count is of the subset, and the bar is the only way to widen it again.
-  const showFilters = filtersApplied || tradeCount > 1 || inboundCount > 0;
+  const showFilters =
+    filtersApplied || tradeCount > 1 || (inboundCount !== null && inboundCount > 0);
   // The waiting option only exists when it has something in it; an empty one
   // would be a permanent dead control. The count rides on the label, because a
   // trade waiting on this project is the one thing here with a deadline against
@@ -331,7 +333,7 @@ function TradesToolbar({
   // decision per option, and splitting them into filter-then-map walks the list
   // twice to answer it.
   const items = STATUS_FILTER_ORDER.flatMap((option) => {
-    if (option === "waiting" && inboundCount === 0) {
+    if (option === "waiting" && (inboundCount === null || inboundCount === 0)) {
       return [];
     }
     return [
@@ -576,8 +578,9 @@ export function DvpTradesWorkspace({
   }
   return (
     <DvpTradesList
-      inbound={inboundRead.data ?? []}
-      inboundFailed={inboundRead.error !== undefined}
+      inbound={
+        inboundRead.error !== undefined || inboundRead.data === undefined ? null : inboundRead.data
+      }
       listFailed={tradesRead.error !== undefined}
       onRetryInbound={() => void inboundRead.mutate()}
       onRetryList={() => void tradesRead.mutate()}
@@ -591,7 +594,6 @@ export function DvpTradesWorkspace({
 function DvpTradesList({
   trades,
   inbound,
-  inboundFailed,
   listFailed,
   onRetryInbound,
   onRetryList,
@@ -600,10 +602,11 @@ function DvpTradesList({
 }: {
   /** Rows for the URL's filters; only read while `listFailed` is false. */
   trades: DvpTrade[];
-  /** Trades another organization created that name one of this project's wallets. */
-  inbound: DvpInboundTrade[];
-  /** The inbound read failed: the waiting segment says so rather than reading as none. */
-  inboundFailed: boolean;
+  /**
+   * Trades another organization created that name one of this project's wallets, or null when
+   * that read failed: the page says so rather than reading as none.
+   */
+  inbound: DvpInboundTrade[] | null;
   listFailed: boolean;
   onRetryInbound: () => void;
   onRetryList: () => void;
@@ -652,16 +655,17 @@ function DvpTradesList({
 
   // The inbound segment keeps its client-side sieve: that list is small and
   // complete, so the live input answers without a round trip.
-  const visibleInbound = showingInbound
-    ? inbound.filter((trade) => matchesTradeQuery(trade, queryInput.trim().toLowerCase()))
-    : [];
+  const visibleInbound =
+    showingInbound && inbound !== null
+      ? inbound.filter((trade) => matchesTradeQuery(trade, queryInput.trim().toLowerCase()))
+      : [];
 
   const { filtersApplied, filteredToNothing, listIsEmpty } = resolveTradesListState({
     returned: { status: statusFilter, query: searchQuery },
     chosen: urlFilters,
     queryInput,
     tradeCount: trades.length,
-    inboundCount: inbound.length,
+    inboundCount: inbound === null ? null : inbound.length,
     shownCount: showingInbound ? visibleInbound.length : trades.length,
     showingInbound,
   });
@@ -675,7 +679,7 @@ function DvpTradesList({
       {/* An error and a table of nothing say different things, and showing
           both says the list is empty when the truth is that it could not be
           read. The error stands alone. */}
-      {inboundFailed ? (
+      {inbound === null ? (
         <Callout live title={t("DashboardMarkets.dvp.inboundErrorTitle")} variant="warning">
           <Button onClick={onRetryInbound} size="sm" type="button" variant="secondary">
             {t("DashboardMarkets.dvp.retry")}
@@ -714,7 +718,7 @@ function DvpTradesList({
             toolbar={
               <TradesToolbar
                 filtersApplied={filtersApplied}
-                inboundCount={inbound.length}
+                inboundCount={inbound === null ? null : inbound.length}
                 onQueryChange={(next) => {
                   setQueryInput(next);
                   setPage(1);

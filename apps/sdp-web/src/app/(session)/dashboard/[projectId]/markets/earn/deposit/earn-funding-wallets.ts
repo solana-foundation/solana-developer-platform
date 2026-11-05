@@ -3,13 +3,17 @@
 import { useCallback, useMemo, useRef } from "react";
 import { z } from "zod";
 import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
-import { dashboardReadRequest } from "@/lib/dashboard-fetch";
 import {
   type DashboardKeyScope,
   type DashboardRequestKey,
-  dashboardRequestUrl,
+  dashboardRequestKey,
 } from "@/lib/dashboard-request-key";
-import { useDashboardKeyScope, useDashboardSWR } from "@/lib/dashboard-swr";
+import {
+  DashboardReadError,
+  readDashboardRequest,
+  useDashboardKeyScope,
+  useDashboardSWR,
+} from "@/lib/dashboard-swr";
 
 /**
  * Funding wallets for the deposit flow: the org's own SDP wallets, plus the
@@ -87,30 +91,15 @@ const fundingWalletBalanceResponseSchema = z.object({
 
 export type EarnFundingWallet = z.infer<typeof earnFundingWalletSchema>;
 
-function sendRead(scope: DashboardKeyScope, url: string): Promise<Response> {
-  return dashboardReadRequest(
-    url,
-    { projectId: scope.projectId, demo: scope.mode === "demo" },
-    undefined
-  );
-}
-
 /**
  * Balances come from live RPC reads, so they are opt-in per request and served
  * from short-TTL caches on both sides. They are shown as context only — never
  * as a gate on what the user may deposit.
  */
 export async function fetchFundingWallets(key: DashboardRequestKey): Promise<EarnFundingWallet[]> {
-  const response = await sendRead({ projectId: key[0], mode: key[1] }, dashboardRequestUrl(key));
-  if (!response.ok) {
-    throw new Error(`Request failed (${response.status})`);
-  }
-  const parsed = fundingWalletsResponseSchema.safeParse(await response.json());
-  if (!parsed.success) {
-    throw new Error("Invalid custody wallet response");
-  }
+  const body = await readDashboardRequest(key, fundingWalletsResponseSchema);
   // Only usable funding sources: an inactive wallet cannot originate a transfer.
-  return parsed.data.data.wallets.filter((wallet) => wallet.status === "active");
+  return body.data.wallets.filter((wallet) => wallet.status === "active");
 }
 
 /**
@@ -127,25 +116,22 @@ export async function fetchLiveFundingWalletBalance(
   walletId: string,
   minimumSlot?: number
 ): Promise<NonNullable<EarnFundingWallet["balances"]>> {
-  const query = minimumSlot === undefined ? "" : `?minimumSlot=${minimumSlot}`;
-  const response = await sendRead(
-    scope,
-    `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/balances${query}`
+  const body = await readDashboardRequest(
+    dashboardRequestKey(
+      scope,
+      `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/balances`,
+      minimumSlot === undefined ? undefined : { minimumSlot }
+    ),
+    fundingWalletBalanceResponseSchema
   );
-  if (!response.ok) {
-    throw new Error(`Request failed (${response.status})`);
-  }
-  const parsed = fundingWalletBalanceResponseSchema.safeParse(await response.json());
-  if (!parsed.success) {
-    throw new Error("Invalid custody wallet balance response");
-  }
   if (
     minimumSlot !== undefined &&
-    (parsed.data.data.balanceReadContext?.minimumSlot ?? -1) < minimumSlot
+    (body.data.balanceReadContext?.minimumSlot ?? -1) < minimumSlot
   ) {
-    throw new Error("Wallet balance read did not establish confirmation freshness");
+    // A success that does not prove the confirmed slot was read is an unreadable answer.
+    throw new DashboardReadError(200, null, null);
   }
-  return parsed.data.data.walletBalances.balances;
+  return body.data.walletBalances.balances;
 }
 
 /**

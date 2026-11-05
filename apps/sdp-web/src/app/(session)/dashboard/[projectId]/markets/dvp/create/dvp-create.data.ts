@@ -128,10 +128,7 @@ function mapCounterpartyAccounts(rows: readonly CounterpartyAccountRow[]) {
  * seven seconds, and no field shows one. Funding still refuses a short balance with the amount
  * named.
  */
-export function useDvpCreateContext(issuanceEnabled: boolean): {
-  context: DvpCreateContext | undefined;
-  retry: () => void;
-} {
+export function useDvpCreateContext(issuanceEnabled: boolean) {
   const scope = useDashboardKeyScope();
   const walletsRead = useWalletSummaries({ includeBalances: false });
   const tokensRead = useIssuedTokens(issuanceEnabled);

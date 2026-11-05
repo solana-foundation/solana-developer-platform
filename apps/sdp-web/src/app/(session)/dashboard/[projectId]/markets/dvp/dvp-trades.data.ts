@@ -171,7 +171,7 @@ export function useDvpTrade(tradeId: string) {
     dvpTradeResponseSchema,
     {
       refreshInterval: (latest) =>
-        latest === undefined || !isDvpTradeClosed(latest.data.trade) ? OPEN_TRADE_POLL_MS : 0,
+        latest !== undefined && !isDvpTradeClosed(latest.data.trade) ? OPEN_TRADE_POLL_MS : 0,
     }
   );
   return { ...response, data: response.data?.data.trade };

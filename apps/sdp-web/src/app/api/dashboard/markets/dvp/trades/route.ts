@@ -15,7 +15,7 @@ function tradesQuery(
   const url = new URL(request.url);
   const forwarded = new URLSearchParams();
   for (const [name, value] of url.searchParams) {
-    if (!(TRADE_LIST_PARAMS as readonly string[]).includes(name)) {
+    if (!TRADE_LIST_PARAMS.some((param) => param === name)) {
       return { ok: false, message: `Unsupported query parameter: ${name}` };
     }
     if (forwarded.has(name)) {

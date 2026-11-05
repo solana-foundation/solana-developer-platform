@@ -1,11 +1,16 @@
 import {
   type DashboardKeyScope,
+  type DashboardRequestKey,
   dashboardRequestKey,
   readsUnderPath,
 } from "@/lib/dashboard-request-key";
 import type { DvpTradesFilters } from "./dvp-trades.data";
 
 const DVP_TRADES_PATH = "/api/dashboard/markets/dvp/trades";
+
+const readsTrades = readsUnderPath(DVP_TRADES_PATH);
+const readsWallets = readsUnderPath("/api/dashboard/wallets");
+const readsWalletBalances = readsUnderPath("/api/dashboard/payments/wallets");
 
 export const DVP_TRADES_PAGE_SIZE = 50;
 
@@ -34,5 +39,8 @@ export const dvpQueryKeys = {
       pageSize: DVP_CREATE_OPTION_PAGE_SIZE,
     }),
   /** Every trade read: the list, the inbound list and each trade's record. */
-  isTradeRead: readsUnderPath(DVP_TRADES_PATH),
+  isTradeRead: readsTrades,
+  /** What a trade action can change: every trade read, and the wallet balances tokens move between. */
+  isTradeOrWalletRead: (key: DashboardRequestKey) =>
+    readsTrades(key) || readsWallets(key) || readsWalletBalances(key),
 };
