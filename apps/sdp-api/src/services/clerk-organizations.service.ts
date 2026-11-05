@@ -17,7 +17,6 @@ export interface ClerkOrganizationInvitation {
   url?: string;
   /** Clerk's own record of who sent it — a valid Clerk user by construction. */
   inviter_id?: string;
-  private_metadata?: { sdpInvitationId?: string } | null;
 }
 
 export interface ClerkOrganization {
@@ -26,6 +25,14 @@ export interface ClerkOrganization {
   slug?: string | null;
   private_metadata?: Record<string, unknown> | null;
 }
+
+/** The SDP invitation id `createOrganizationInvitation` stores on each Clerk invitation. */
+const sdpTaggedInvitationsSchema = z.array(
+  z.object({
+    id: z.string(),
+    private_metadata: z.object({ sdpInvitationId: z.string().optional() }).nullable().optional(),
+  })
+);
 
 const clerkOrganizationSchema = z.object({
   id: z.string(),
@@ -177,6 +184,28 @@ export class ClerkOrganizationsService {
 
       if (page.length < pageSize) {
         return all;
+      }
+    }
+  }
+
+  /**
+   * Revokes the pending invitation created for one SDP invitation, found by the
+   * id stored on it rather than by address, so another invitation to the same
+   * address is left alone.
+   */
+  async revokePendingInvitationForSdpInvitation(params: {
+    organizationId: string;
+    sdpInvitationId: string;
+  }): Promise<void> {
+    const pending = sdpTaggedInvitationsSchema.parse(
+      await this.listPendingOrganizationInvitations(params.organizationId)
+    );
+    for (const invitation of pending) {
+      if (invitation.private_metadata?.sdpInvitationId === params.sdpInvitationId) {
+        await this.revokeOrganizationInvitation({
+          organizationId: params.organizationId,
+          invitationId: invitation.id,
+        });
       }
     }
   }

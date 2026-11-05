@@ -497,9 +497,8 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
 /**
  * A pending row would still admit its address at sign-in, so a Clerk step that
  * threw fails it, which also frees the address for a retry. A Clerk 4xx created
- * nothing; a timeout or 5xx may have, so the Clerk invitation tagged with this
- * row's id is withdrawn. Matching the tag, not the address, leaves alone the
- * invitation a concurrent retry for the address may already have created.
+ * nothing; a timeout or 5xx may have, so the Clerk invitation made for this row
+ * is withdrawn.
  */
 async function failUnsentInvitation(
   c: AppContext,
@@ -539,16 +538,10 @@ async function failUnsentInvitation(
   if (clerkRefused) {
     return;
   }
-  const clerk = new ClerkOrganizationsService(c.env);
-  const pending = await clerk.listPendingOrganizationInvitations(clerkOrgId);
-  for (const entry of pending) {
-    if (entry.private_metadata?.sdpInvitationId === invitation.id) {
-      await clerk.revokeOrganizationInvitation({
-        organizationId: clerkOrgId,
-        invitationId: entry.id,
-      });
-    }
-  }
+  await new ClerkOrganizationsService(c.env).revokePendingInvitationForSdpInvitation({
+    organizationId: clerkOrgId,
+    sdpInvitationId: invitation.id,
+  });
 }
 
 export const updateMemberRole = async (c: ValidatedBodyContext<typeof updateMemberRoleSchema>) => {
