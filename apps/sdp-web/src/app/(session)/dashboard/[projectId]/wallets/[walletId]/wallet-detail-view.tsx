@@ -68,9 +68,10 @@ export function WalletDetailView({
   const t = useTranslations();
   const { dashboardAccess } = useDashboardWorkspace();
   const { data, error, isValidating, mutate } = useWalletRecord(walletId);
+  // A wallet deleted elsewhere 404s on the revisit's refetch, over its cached record.
+  if (error?.status === 404) return <ProjectNotFound />;
   if (data === undefined) {
     if (error === undefined) return <WalletDetailSkeleton />;
-    if (error.status === 404) return <ProjectNotFound />;
     return (
       <DashboardWorkspaceOverviewPanel>
         <div role="alert" className="flex flex-col items-start gap-2 text-body">

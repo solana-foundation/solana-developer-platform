@@ -1,6 +1,7 @@
 import { custodyWalletMetadataSchema } from "@sdp/types/custody";
 import { z } from "zod";
 import { resolveWalletConnectionRow } from "@/app/(session)/dashboard/[projectId]/wallets/[walletId]/wallet-connection-row";
+import { getTranslations } from "@/i18n/server";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { dashboardJson } from "@/lib/dashboard-response";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
@@ -17,17 +18,28 @@ const walletMetadataEnvelopeSchema = z.object({
  * Project's provider availability. A refused record read is passed through as sdp-api answered.
  */
 export async function GET(request: Request, context: { params: Promise<{ walletId: string }> }) {
+  const trace = createTimedTrace("route.dashboard.wallets.detail", request);
   const { walletId } = await context.params;
+  let resolvedWalletId: string;
+  try {
+    resolvedWalletId = decodeURIComponent(walletId);
+  } catch {
+    const t = await getTranslations();
+    logRouteResult(trace, 400, { walletId, error: "invalid wallet id" });
+    return dashboardJson(
+      { error: { message: t("DashboardCustody.invalidWalletId") } },
+      { status: 400, trace }
+    );
+  }
   const walletResponse = await proxyToSdpApi({
     request,
     traceSource: "route.dashboard.wallets.detail.record",
-    path: getWalletMetadataPath(walletId),
+    path: getWalletMetadataPath(resolvedWalletId),
   });
   if (!walletResponse.ok) {
     return walletResponse;
   }
 
-  const trace = createTimedTrace("route.dashboard.wallets.detail", request);
   try {
     const parsed = walletMetadataEnvelopeSchema.safeParse(await walletResponse.json());
     if (!parsed.success) {

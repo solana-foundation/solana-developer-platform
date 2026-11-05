@@ -47,13 +47,14 @@ type WalletActivityResponse = z.infer<typeof walletActivityResponseSchema>;
 export function useWalletActivity(
   walletId: string,
   limit: number = WALLET_ACTIVITY_LIMIT,
-  callbacks: {
+  callbacks?: {
     onSuccess?: (data: WalletActivityPayload) => void;
     onError?: (error: DashboardReadError) => void;
-  } = {}
+  }
 ) {
   const scope = useDashboardKeyScope();
-  const { onSuccess, onError } = callbacks;
+  const onSuccess = callbacks?.onSuccess;
+  const onError = callbacks?.onError;
   const config: SWRConfiguration<WalletActivityResponse, DashboardReadError> = {
     refreshInterval: 20_000,
     refreshWhenHidden: false,

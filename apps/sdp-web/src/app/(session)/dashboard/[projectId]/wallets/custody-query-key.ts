@@ -39,10 +39,13 @@ export const custodyQueryKeys = {
   /** Any wallet's record, balances or activity, the custody configs, and the wallet lists. */
   isWalletReadKey: (key: DashboardRequestKey) =>
     readsWalletsPath(key) || readsWalletBalancesPath(key),
-  /** The wallet inventories other features read (payments, Earn, issuance pickers). */
-  isWalletInventoryKey: (key: Arguments) =>
-    (isDashboardRequestKey(key) && custodyQueryKeys.isWalletReadKey(key)) ||
+  /** Wallet inventories other features still key by label (payments, Earn, issuance pickers). */
+  isWalletLabelKey: (key: Arguments) =>
     key === paymentsQueryKeys.actionWallets() ||
     key === earnQueryKeys.fundingWallets() ||
     issuanceQueryKeys.isWalletInventoryKey(key),
+  /** Every wallet read and inventory, whether keyed by request or by label. */
+  isWalletInventoryKey: (key: Arguments) =>
+    (isDashboardRequestKey(key) && custodyQueryKeys.isWalletReadKey(key)) ||
+    custodyQueryKeys.isWalletLabelKey(key),
 };

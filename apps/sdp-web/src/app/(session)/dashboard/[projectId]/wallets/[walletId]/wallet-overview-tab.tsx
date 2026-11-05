@@ -121,12 +121,18 @@ function BalanceFigure({ walletId }: { walletId: string }) {
       </div>
     );
   }
+  // A refresh that failed keeps the last balances, muted, as the wallet cards show them.
+  const stale = error !== undefined;
   return (
     <p
-      className="flex items-center gap-2 text-amount font-medium text-primary tabular-nums"
+      className={cn(
+        "flex items-center gap-2 text-amount font-medium tabular-nums",
+        stale ? "text-muted" : "text-primary"
+      )}
       data-wallet-balance
     >
       {formatTotalBalance(resolveTotalBalance(balances), locale)}
+      {stale ? <span className="sr-only"> {t("DashboardCustody.stale")}</span> : null}
       <UnpricedHoldingsHint balances={balances} />
     </p>
   );
@@ -238,6 +244,9 @@ function TokensTable({
     );
   }
   if (!issuedSettled) return <PartSkeleton />;
+  const figureTone = error === undefined ? "text-primary" : "text-muted";
+  const staleNote =
+    error === undefined ? null : <span className="sr-only"> {t("DashboardCustody.stale")}</span>;
   if (balances.length === 0) {
     return (
       <EmptyNote title={t("DashboardCustody.walletNoTokensTitle")}>
@@ -311,18 +320,20 @@ function TokensTable({
                   </span>
                 </TableCell>
                 <TableCell
-                  className={cn(PAYMENTS_TABLE_CELL, "text-right text-primary tabular-nums")}
+                  className={cn(PAYMENTS_TABLE_CELL, "text-right tabular-nums", figureTone)}
                 >
                   {formatDisplayAmount(balance.uiAmount, balance.token, locale)}
+                  {staleNote}
                 </TableCell>
                 <TableCell
-                  className={cn(PAYMENTS_TABLE_CELL, "text-right text-primary tabular-nums")}
+                  className={cn(PAYMENTS_TABLE_CELL, "text-right tabular-nums", figureTone)}
                 >
                   {usdValue === null ? (
                     <span className="text-tertiary">{t("DashboardCustody.walletNoPrice")}</span>
                   ) : (
                     formatCurrencyAmount(usdValue, locale)
                   )}
+                  {staleNote}
                 </TableCell>
               </TableRow>
             );
