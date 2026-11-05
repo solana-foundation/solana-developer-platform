@@ -59,7 +59,7 @@ The cache choice (`CACHE_MODE`) isn't written to the file either. For an externa
 
 ## Signing providers
 
-The configurator offers `local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, and `utila`. Its list of providers to enable (`SIGNING_PROVIDERS`) only decides which credential fields it shows, and isn't written to the file. Each provider other than `local` needs its own credentials, such as an API key, secret, and vault ID for Fireblocks. Each project picks its signer when you set up custody in the dashboard.
+The configurator offers `local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, and `utila`. Its list of providers to enable (`SIGNING_PROVIDERS`) only decides which credential fields it shows, and isn't written to the file. Each provider other than `local` needs its own credentials, such as an API key and secret for Fireblocks. Each project picks its signer when you set up custody in the dashboard.
 
 Privy, Coinbase CDP, Para, and Turnkey are open to every organization. The others, `local` included, also need a per-organization activation: [First devnet deployment](/docs/self-hosting/first-devnet-deployment) shows how for the local signer.
 
