@@ -208,4 +208,4 @@ const DEFAULT_COMPONENTS = {
   WeekNumber: CalendarWeekNumber,
 } satisfies Partial<CalendarComponents>;
 
-export { Calendar, CalendarDayButton };
+export { Calendar };

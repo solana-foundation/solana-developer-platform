@@ -8,14 +8,7 @@ import { Combobox } from "@sdp/ui/combobox";
 import { DetailList, DetailRow } from "@sdp/ui/detail-list";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
-import {
-  ArrowUpRightIcon,
-  LandmarkIcon,
-  PlusIcon,
-  StickyNoteIcon,
-  UserRoundIcon,
-  WalletIcon,
-} from "lucide-react";
+import { ArrowUpRightIcon, LandmarkIcon, PlusIcon } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
 import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
@@ -219,13 +212,7 @@ function DestinationFields({
 
   return (
     <>
-      {contact ? (
-        <ContactCombobox
-          {...contact}
-          value={counterpartyId}
-          hint={t("DashboardPayments.payForm.contactHint")}
-        />
-      ) : null}
+      {contact ? <ContactCombobox {...contact} value={counterpartyId} /> : null}
       <div className="space-y-3">
         <Combobox
           label={t("DashboardPayments.payForm.destination")}
@@ -385,31 +372,17 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
         </p>
       </div>
       <DetailList variant="summary">
-        <DetailRow
-          icon={<UserRoundIcon className="size-3.5" />}
-          label={t("DashboardPayments.onchainSend.to")}
-        >
+        <DetailRow label={t("DashboardPayments.onchainSend.to")}>
           {counterpartyName === "" ? "—" : counterpartyName}
         </DetailRow>
-        <DetailRow
-          icon={<WalletIcon className="size-3.5" />}
-          label={t("DashboardPayments.onchainSend.destination")}
-        >
+        <DetailRow label={t("DashboardPayments.onchainSend.destination")}>
           {destinationAddress === null ? "—" : shortenAddress(destinationAddress)}
         </DetailRow>
-        <DetailRow
-          icon={<WalletIcon className="size-3.5" />}
-          label={t("DashboardPayments.onchainSend.sourceWallet")}
-        >
+        <DetailRow label={t("DashboardPayments.onchainSend.sourceWallet")}>
           {sourceWalletName(selectedWallet)}
         </DetailRow>
         {memo === "" ? null : (
-          <DetailRow
-            icon={<StickyNoteIcon className="size-3.5" />}
-            label={t("DashboardPayments.onchainSend.memo")}
-          >
-            {memo}
-          </DetailRow>
+          <DetailRow label={t("DashboardPayments.onchainSend.memo")}>{memo}</DetailRow>
         )}
       </DetailList>
       {isFireblocksByokWallet(selectedWallet) ? (

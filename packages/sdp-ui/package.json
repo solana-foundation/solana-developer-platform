@@ -119,11 +119,6 @@
       "import": "./src/motion.ts",
       "default": "./src/motion.ts"
     },
-    "./provider-selection-card": {
-      "types": "./src/provider-selection-card.tsx",
-      "import": "./src/provider-selection-card.tsx",
-      "default": "./src/provider-selection-card.tsx"
-    },
     "./search-input": {
       "types": "./src/search-input.tsx",
       "import": "./src/search-input.tsx",

@@ -1,6 +1,6 @@
 # @sdp/ui
 
-The dashboard's UI primitives: buttons, inputs, selects, the combobox, modals and drawers,
+The dashboard's UI primitives: buttons, inputs, selects, the combobox, modals,
 tables, tooltips, badges, the date and time fields, list toolbars, skeletons and the rest. They
 wrap `@solana/design-system` where it has a component and are styled with Tailwind v4 utilities
 over `@sdp/design-tokens`. They live apart from `apps/sdp-web` so a Storybook can render them

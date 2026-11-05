@@ -89,7 +89,6 @@ export function PrincipalCreatePage({ wallets }: { wallets: CustodyWalletSummary
       currentStep={0}
       progressLabel={t("DashboardPrivateChannels.members.createStepProgress")}
       description={t("DashboardPrivateChannels.members.createDescription")}
-      maxWidthClassName="max-w-xl"
       footer={
         <div className="flex items-center justify-between gap-3">
           <Button

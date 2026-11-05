@@ -1434,8 +1434,7 @@
       "address": "Solana address",
       "provider": "Card or bank through a provider",
       "noProvider": "No card or bank provider is enabled for this project yet.",
-      "manageProviders": "Manage providers in Integrations",
-      "contactHint": "Who is paying the provider. Their details go to the provider you pick."
+      "manageProviders": "Manage providers in Integrations"
     },
     "activityKind": {
       "pay": "Pay",
@@ -1456,7 +1455,6 @@
     "back": "Back",
     "payForm": {
       "contact": "Contact",
-      "contactHint": "The person or business you are paying. Manage them in the Contact list.",
       "selectContact": "Select a contact",
       "searchContacts": "Search contacts",
       "destination": "Destination",

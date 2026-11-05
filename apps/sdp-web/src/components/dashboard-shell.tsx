@@ -771,7 +771,6 @@ export function DashboardShell({
                         action={headerAction}
                         above={backAction}
                         mark={activeTitleOverride ? activeTitleOverride.mark : pageConfig.titleMark}
-                        layout="refresh"
                         utilities={
                           demoAvailable ? <PaymentsDemoToggle {...paymentsDemo} /> : undefined
                         }

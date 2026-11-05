@@ -53,13 +53,7 @@ function DepositStep({ wizard, contact }: StepContentProps) {
 
   return (
     <div className="space-y-6">
-      {contact ? (
-        <ContactCombobox
-          {...contact}
-          value={fields.counterpartyId}
-          hint={t("DashboardPayments.depositMethod.contactHint")}
-        />
-      ) : null}
+      {contact ? <ContactCombobox {...contact} value={fields.counterpartyId} /> : null}
       <RampPairProviderSelector
         direction="onramp"
         enabledRampProviders={enabledRampProviders}

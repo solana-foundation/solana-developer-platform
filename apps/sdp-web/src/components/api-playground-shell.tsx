@@ -6,7 +6,7 @@ import { IDEMPOTENCY_REQUIRED_ROUTES } from "@sdp/types/idempotency-required-rou
 import type { Dispatch, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
-import { ApiPlaygroundRefreshLayout } from "@/components/api-playground-refresh-layout";
+import { ApiPlaygroundLayout } from "@/components/api-playground-layout";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
@@ -812,7 +812,7 @@ export function ApiPlaygroundShell({
   };
 
   return (
-    <ApiPlaygroundRefreshLayout
+    <ApiPlaygroundLayout
       endpoints={endpoints}
       activeEndpoint={activeEndpoint}
       onEndpointChange={updateEndpointInUrl}
