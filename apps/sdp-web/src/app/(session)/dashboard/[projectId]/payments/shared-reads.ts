@@ -52,6 +52,7 @@ const issuedTokensPageSchema = z.object({
     z.object({
       id: z.string(),
       name: z.string(),
+      decimals: z.number().int().nonnegative(),
       mintAddress: z.string().nullable(),
       symbol: z.string(),
       imageUrl: z.string().nullable().optional(),
@@ -65,6 +66,7 @@ export interface IssuedTokenSymbol {
   /** Null when the listing omits it. */
   id: string | null;
   name: string;
+  decimals: number;
   mintAddress: string;
   symbol: string;
   imageUrl: string | null;
@@ -115,6 +117,7 @@ async function readAllIssuedTokens(key: DashboardRequestKey): Promise<IssuedToke
         tokens.push({
           id: token.id === "" ? null : token.id,
           name: token.name,
+          decimals: token.decimals,
           mintAddress: token.mintAddress,
           symbol: token.symbol,
           imageUrl: token.imageUrl ?? null,

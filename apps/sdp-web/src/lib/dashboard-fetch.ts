@@ -414,17 +414,23 @@ export function dashboardRequest(path: string, init: RequestInit): Promise<Respo
 
 /**
  * A read sent under the Project and mode its SWR key names, never the tab's URL at send time, so
- * the answer always belongs to the key that stores it.
+ * the answer always belongs to the key that stores it. A `jsonBody` makes it a POST read (an
+ * estimate or quote that changes nothing); it never takes an Idempotency-Key.
  */
 export function dashboardReadRequest(
   url: string,
-  scope: { projectId: string; demo: boolean }
+  scope: { projectId: string; demo: boolean },
+  jsonBody: unknown
 ): Promise<Response> {
   const headers = new Headers({ [PROJECT_HEADER_NAME]: scope.projectId });
   if (scope.demo) {
     headers.set(TAB_DEMO_HEADER_NAME, "1");
   }
-  return fetch(url, { method: "GET", cache: "no-store", headers });
+  if (jsonBody === undefined) {
+    return fetch(url, { method: "GET", cache: "no-store", headers });
+  }
+  headers.set("Content-Type", "application/json");
+  return fetch(url, { method: "POST", cache: "no-store", headers, body: JSON.stringify(jsonBody) });
 }
 
 /** A key its caller keeps in its own store, and whether that store persisted it. */

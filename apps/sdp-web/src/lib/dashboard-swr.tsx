@@ -43,14 +43,10 @@ export function useDashboardKeyScope(): DashboardKeyScope {
   return { projectId, mode: demo ? "demo" : "live" };
 }
 
-export async function readDashboardRequest<Schema extends z.ZodType>(
-  key: DashboardRequestKey,
+async function parseDashboardRead<Schema extends z.ZodType>(
+  response: Response,
   schema: Schema
 ): Promise<z.infer<Schema>> {
-  const response = await dashboardReadRequest(dashboardRequestUrl(key), {
-    projectId: key[0],
-    demo: key[1] === "demo",
-  });
   const text = await response.text();
   let json: unknown;
   try {
@@ -70,6 +66,35 @@ export async function readDashboardRequest<Schema extends z.ZodType>(
     throw new DashboardReadError(response.status, null, null);
   }
   return parsed.data;
+}
+
+export async function readDashboardRequest<Schema extends z.ZodType>(
+  key: DashboardRequestKey,
+  schema: Schema
+): Promise<z.infer<Schema>> {
+  const response = await dashboardReadRequest(
+    dashboardRequestUrl(key),
+    { projectId: key[0], demo: key[1] === "demo" },
+    undefined
+  );
+  return parseDashboardRead(response, schema);
+}
+
+/**
+ * A POST read (an estimate or quote that changes nothing) keyed like any other read: the key's
+ * path is the URL and its params are the JSON body, so two keys share an entry only when they
+ * would send the same request.
+ */
+export async function readDashboardPostRequest<Schema extends z.ZodType>(
+  key: DashboardRequestKey,
+  schema: Schema
+): Promise<z.infer<Schema>> {
+  const response = await dashboardReadRequest(
+    key[2],
+    { projectId: key[0], demo: key[1] === "demo" },
+    key[3] ?? {}
+  );
+  return parseDashboardRead(response, schema);
 }
 
 const mountedReadCounts = new WeakMap<Cache, Map<string, number>>();
