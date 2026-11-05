@@ -38,8 +38,6 @@ export function EventsSection() {
             />
           ) : (
             <EventsList
-              // A newer event at the head reseeds the feed; older pages it loaded are then stale.
-              key={events.data.events[0]?.id ?? "empty"}
               projectId={projectId}
               initialEvents={events.data.events}
               initialHasMore={events.data.hasMore}

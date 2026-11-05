@@ -74,10 +74,11 @@ export function ChannelActionsMenu({
     startDeleting(async () => {
       const result = await deletePrivateChannelAction();
       if (result.ok) {
-        void invalidateReads(privateChannelsReads);
         setDeleteOpen(false);
         toast.success(t("DashboardPrivateChannels.instance.deleteSuccess"));
+        // Leave first: this page re-reading the deleted instance would render not found.
         router.push(href(PRIVATE_CHANNELS_OVERVIEW_PATH));
+        void invalidateReads(privateChannelsReads);
       } else {
         toast.error(result.message);
       }

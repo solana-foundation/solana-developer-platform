@@ -229,12 +229,16 @@ export function usePrivateChannelBalances(owners: readonly string[] | null) {
   );
 }
 
-/** The feed's newest page. Older pages and filtered pages load on demand inside the feed. */
+/**
+ * The feed's newest page. It only seeds the feed: older pages and filtered pages load on demand
+ * inside it, so no focus refetch replaces what the user has paged, filtered or opened.
+ */
 export function usePrivateChannelEvents() {
   const scope = useDashboardKeyScope();
   const response = useDashboardRead(
     privateChannelsQueryKeys.events(scope, { limit: PRIVATE_CHANNELS_EVENTS_PAGE_SIZE }),
-    eventsResponseSchema
+    eventsResponseSchema,
+    { revalidateOnFocus: false }
   );
   return { ...response, data: response.data?.data };
 }

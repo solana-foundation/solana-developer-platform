@@ -116,19 +116,6 @@ function toRecipientOptions(
 }
 
 export function TransferForm({ scopeKey, ...props }: TransferFormProps) {
-  const t = useTranslations();
-  if (props.channels.length === 0) {
-    return (
-      <p className="text-sm text-secondary">{t("DashboardPrivateChannels.transfer.noChannels")}</p>
-    );
-  }
-  if (props.sourceWallets.length === 0) {
-    return (
-      <p className="text-sm text-secondary">
-        {t("DashboardPrivateChannels.transfer.noSourceWallets")}
-      </p>
-    );
-  }
   return <TransferFormState key={scopeKey} {...props} />;
 }
 
@@ -324,6 +311,20 @@ function TransferFormState({
         transfer={submittedTransfer.transfer}
         onReset={reset}
       />
+    );
+  }
+
+  // After the progress view: a refetch that empties a list must not unmount a submitted transfer.
+  if (channels.length === 0) {
+    return (
+      <p className="text-sm text-secondary">{t("DashboardPrivateChannels.transfer.noChannels")}</p>
+    );
+  }
+  if (sourceWallets.length === 0) {
+    return (
+      <p className="text-sm text-secondary">
+        {t("DashboardPrivateChannels.transfer.noSourceWallets")}
+      </p>
     );
   }
 

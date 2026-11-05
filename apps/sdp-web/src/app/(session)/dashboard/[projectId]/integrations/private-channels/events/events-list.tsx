@@ -24,9 +24,9 @@ import type { TranslationValues } from "@/i18n/translate";
 import { type LoadEventsResult, loadProjectEventsAction } from "./actions";
 import { EventDetail } from "./event-detail";
 import {
-  EVENT_FAMILY_BADGE,
-  EVENT_STATUS_BADGE,
+  eventFamilyBadge,
   eventFamilyLabel,
+  eventStatusBadge,
   eventStatusLabel,
   eventTypeLabel,
 } from "./event-labels";
@@ -429,13 +429,13 @@ export function EventsList({
                   <span className="flex min-w-0 flex-1 flex-col gap-1">
                     <span className="flex items-center justify-between gap-2">
                       <span className="truncate text-primary text-sm">{row.label}</span>
-                      <Badge variant={EVENT_STATUS_BADGE[row.event.status] ?? "default"}>
+                      <Badge variant={eventStatusBadge(row.event.status)}>
                         {eventStatusLabel(t, row.event.status)}
                       </Badge>
                     </span>
                     <span className="block truncate text-tertiary text-xs">{row.detail}</span>
                     <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-tertiary text-xs">
-                      <Badge variant={EVENT_FAMILY_BADGE[row.event.family] ?? "default"}>
+                      <Badge variant={eventFamilyBadge(row.event.family)}>
                         {eventFamilyLabel(t, row.event.family)}
                       </Badge>
                       <span className="whitespace-nowrap">{row.when}</span>
@@ -488,12 +488,12 @@ export function EventsList({
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={EVENT_FAMILY_BADGE[row.event.family] ?? "default"}>
+                    <Badge variant={eventFamilyBadge(row.event.family)}>
                       {eventFamilyLabel(t, row.event.family)}
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={EVENT_STATUS_BADGE[row.event.status] ?? "default"}>
+                    <Badge variant={eventStatusBadge(row.event.status)}>
                       {eventStatusLabel(t, row.event.status)}
                     </Badge>
                   </TableCell>

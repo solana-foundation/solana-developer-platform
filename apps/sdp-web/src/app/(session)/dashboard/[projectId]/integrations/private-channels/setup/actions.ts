@@ -132,8 +132,8 @@ export async function connectPrivateChannelAction(
         body: JSON.stringify({ ...connectInput, confirmReactivate }),
       }
     );
-    // Connecting flips the active instance, which changes the provider detail,
-    // workspace tabs, and catalog status. Revalidate both the segment and catalog.
+    // Connecting flips the active instance, which the server-rendered catalog shows. Private
+    // Channels reads refresh through the dashboard SWR cache, invalidated by the caller.
     revalidatePath(await requestProjectHref("/dashboard/integrations"));
     return { ok: true, instance: response.instance };
   } catch (error) {

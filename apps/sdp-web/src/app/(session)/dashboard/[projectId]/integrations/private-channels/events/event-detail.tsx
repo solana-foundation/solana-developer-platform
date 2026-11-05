@@ -11,9 +11,9 @@ import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import {
-  EVENT_FAMILY_BADGE,
-  EVENT_STATUS_BADGE,
+  eventFamilyBadge,
   eventFamilyLabel,
+  eventStatusBadge,
   eventStatusLabel,
   eventTypeLabel,
 } from "./event-labels";
@@ -256,10 +256,10 @@ export function EventDetail({
         <div className="space-y-3 border-b border-border-default p-6">
           <h2 className="pr-10 text-lg font-medium tracking-tight text-primary">{eventLabel}</h2>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={EVENT_FAMILY_BADGE[event.family] ?? "default"}>
+            <Badge variant={eventFamilyBadge(event.family)}>
               {eventFamilyLabel(t, event.family)}
             </Badge>
-            <Badge variant={EVENT_STATUS_BADGE[event.status] ?? "default"}>
+            <Badge variant={eventStatusBadge(event.status)}>
               {eventStatusLabel(t, event.status)}
             </Badge>
           </div>
