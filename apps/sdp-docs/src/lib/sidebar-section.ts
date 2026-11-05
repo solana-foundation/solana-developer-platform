@@ -34,6 +34,30 @@ export function sectionByPath(
   return section;
 }
 
+/** A page and the top-level sidebar page its breadcrumb starts at, if any. */
+export type PageSection = { url: string; section: string | undefined };
+
+/**
+ * The sidebar entry each page sits under where its path alone does not say so: its breadcrumb
+ * starts at a top-level page other than the one its path extends (`sectionByPath`).
+ *
+ * @param pages - Each page with the section its breadcrumb starts at.
+ * @param topLevelUrls - The sidebar's top-level URLs (`topLevelUrlsOf`).
+ * @returns Section URLs by page URL, for those pages only.
+ */
+export function sectionOverridesOf(
+  pages: readonly PageSection[],
+  topLevelUrls: readonly string[]
+): Record<string, string> {
+  const overrides: Record<string, string> = {};
+  for (const { url, section } of pages) {
+    if (section !== undefined && section !== sectionByPath(topLevelUrls, url)) {
+      overrides[url] = section;
+    }
+  }
+  return overrides;
+}
+
 function sidebarItemOf(item: Item): Item {
   return { type: "page", name: item.name, url: item.url, icon: item.icon };
 }

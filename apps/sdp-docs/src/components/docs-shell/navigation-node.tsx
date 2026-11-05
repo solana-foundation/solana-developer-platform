@@ -94,9 +94,9 @@ function FolderNode({ node, pathname, sectionUrl, onNavigate }: FolderNodeProps)
   // row exists as soon as the page does (the sidebar scrolls it into view), and leaving it closes
   // it, so a long tree such as the API Reference stays out of the way in other sections. The
   // layout persists across pages, so nothing else would close it.
-  const [heldPath, setHeldPath] = useState(containsPath);
-  if (containsPath !== heldPath) {
-    setHeldPath(containsPath);
+  const [wasContainingPath, setWasContainingPath] = useState(containsPath);
+  if (containsPath !== wasContainingPath) {
+    setWasContainingPath(containsPath);
     setIsOpen(containsPath);
   }
 

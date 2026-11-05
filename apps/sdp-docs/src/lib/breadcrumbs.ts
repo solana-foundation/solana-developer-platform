@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { sectionByPath, topLevelUrlsOf } from "./sidebar-section";
+import { sectionOverridesOf, topLevelUrlsOf } from "./sidebar-section";
 import { source } from "./source";
 
 export type BreadcrumbItem = { name: string; url: string };
@@ -89,13 +89,9 @@ export function breadcrumbsFor(page: ResolvedPage["page"]): BreadcrumbItem[] {
  * @returns Section URLs by page URL.
  */
 export function sidebarSectionOverrides(): Record<string, string> {
-  const topLevelUrls = topLevelUrlsOf(source.pageTree);
-  const overrides: Record<string, string> = {};
-  for (const page of source.getPages()) {
+  const pages = source.getPages().map((page) => {
     const [section] = breadcrumbsFor(page);
-    if (section !== undefined && section.url !== sectionByPath(topLevelUrls, page.url)) {
-      overrides[page.url] = section.url;
-    }
-  }
-  return overrides;
+    return { url: page.url, section: section?.url };
+  });
+  return sectionOverridesOf(pages, topLevelUrlsOf(source.pageTree));
 }
