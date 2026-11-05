@@ -4,7 +4,7 @@ import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { cleanup, render, screen, within } from "@testing-library/react";
-import type { SWRResponse } from "swr";
+import { type State, SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
@@ -17,7 +17,7 @@ const USDC_MINT = wellKnownMint("USDC", "mainnet-beta") ?? "";
 const ADDRESS = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
 
 const mocks = vi.hoisted(() => {
-  const swr: Record<string, { data?: unknown; error?: unknown }> = {};
+  const swr: Record<string, State<unknown, unknown>> = {};
   return {
     workspace: {
       sdpEnvironment: "sandbox",
@@ -35,11 +35,9 @@ const mocks = vi.hoisted(() => {
       },
     },
     swr,
-    useSWR: vi.fn<(key: unknown) => SWRResponse<unknown, unknown>>(),
   };
 });
 
-vi.mock("swr", () => ({ default: mocks.useSWR }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => mocks.workspace,
@@ -98,18 +96,23 @@ function renderOverview(
     walletCount: number;
   }> = {}
 ) {
-  return render(
-    <I18nProvider locale="en" messages={getMessages("en")}>
-      <HomeWorkspace
-        totalBalance={props.totalBalance === undefined ? 250 : props.totalBalance}
-        totalBalanceError={props.totalBalanceError ?? null}
-        wallets={props.wallets ?? [WALLET]}
-        balances={props.balances ?? BALANCES}
-        walletCount={props.walletCount ?? 2}
-        issuedTokens={ISSUED}
-      />
-    </I18nProvider>
+  const cache = new Map(Object.entries(mocks.swr));
+  const cacheReads = vi.spyOn(cache, "get");
+  const view = render(
+    <SWRConfig value={{ provider: () => cache, isPaused: () => true }}>
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <HomeWorkspace
+          totalBalance={props.totalBalance === undefined ? 250 : props.totalBalance}
+          totalBalanceError={props.totalBalanceError ?? null}
+          wallets={props.wallets ?? [WALLET]}
+          balances={props.balances ?? BALANCES}
+          walletCount={props.walletCount ?? 2}
+          issuedTokens={ISSUED}
+        />
+      </I18nProvider>
+    </SWRConfig>
   );
+  return { ...view, swrReadKeys: () => cacheReads.mock.calls.map(([key]) => key) };
 }
 
 const section = (name: string) =>
@@ -129,21 +132,8 @@ function at<T>(items: readonly T[], index: number): T {
   return item;
 }
 
-/** What the SWR hook returns for the data a test seeded under a key. */
-function seededSwr(key: unknown): SWRResponse<unknown, unknown> {
-  const seeded = typeof key === "string" ? mocks.swr[key] : undefined;
-  return {
-    data: seeded?.data,
-    error: seeded?.error,
-    isLoading: false,
-    isValidating: false,
-    mutate: async () => undefined,
-  };
-}
-
 beforeEach(() => {
   resetDashboardNavigation();
-  mocks.useSWR.mockClear().mockImplementation(seededSwr);
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-09-25T12:00:00.000Z"));
   mocks.workspace.flags = { custody: true, issuance: true, payments: true };
@@ -178,11 +168,6 @@ const UNPRICED_SOL: CustodyWalletTokenBalance = {
   decimals: 9,
 };
 
-/** The keys every SWR read on the page was asked for under, across every render. */
-function swrReadKeys(): unknown[] {
-  return mocks.useSWR.mock.calls.map(([key]) => key);
-}
-
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -191,7 +176,7 @@ afterEach(() => {
 
 describe("Overview (HomeWorkspace)", () => {
   it("leads a populated organization with its balance, holdings, census and every action", () => {
-    renderOverview();
+    const { swrReadKeys } = renderOverview();
 
     const scoped = within(requireSection("balance"));
     expect(scoped.getByText("Total balance")).toBeTruthy();
@@ -294,7 +279,12 @@ describe("Overview (HomeWorkspace)", () => {
   });
 
   it("turns the first run into the wallet prompt with no activity list", () => {
-    renderOverview({ wallets: [], balances: [], walletCount: 0, totalBalance: null });
+    const { swrReadKeys } = renderOverview({
+      wallets: [],
+      balances: [],
+      walletCount: 0,
+      totalBalance: null,
+    });
     expect(screen.getByRole("heading", { name: "Start with a wallet" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Create a wallet" }).getAttribute("href")).toBe(
       "/dashboard/prj_test_sandbox/wallets/setup"
