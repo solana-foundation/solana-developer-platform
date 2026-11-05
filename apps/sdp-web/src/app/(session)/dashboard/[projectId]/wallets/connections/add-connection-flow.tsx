@@ -4,7 +4,7 @@ import type { ByokCustodyProvider } from "@sdp/types/custody";
 import { Button } from "@sdp/ui/button";
 import { PlugIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useSelectedProjectName } from "@/app/(session)/dashboard/[projectId]/wallets/connections/use-selected-project-name";
 import { formatCustodyProviderName } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import { ByokCredentialForm } from "@/app/(session)/dashboard/[projectId]/wallets/setup/privy-credential-form";
@@ -44,6 +44,14 @@ export function AddConnectionFlow({ provider }: { provider: ByokCustodyProvider 
   const providerHref = href(`/dashboard/integrations/${provider}`);
   const createsWallet = provider === "privy";
   const providerName = formatCustodyProviderName(provider);
+
+  // A reload or a closed tab would drop the frozen payload too; the browser asks first.
+  useEffect(() => {
+    if (!leaveDisabled) return;
+    const confirmLeave = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", confirmLeave);
+    return () => window.removeEventListener("beforeunload", confirmLeave);
+  }, [leaveDisabled]);
 
   const handleSuccess = (connectionId: string) => {
     setSubmitting(false);
@@ -100,11 +108,11 @@ export function AddConnectionFlow({ provider }: { provider: ByokCustodyProvider 
       progressLabel={t("DashboardCustody.addConnection")}
       footer={footer}
     >
-      {/* The header's Back follows the same lock as Cancel: leaving unmounts the form, and with
-          it the payload and key an unknown submission needs to replay safely. */}
+      {/* Back and the sidebar follow the same lock as Cancel: leaving unmounts the form, and
+          with it the payload and key an unknown submission needs to replay safely. */}
       <DashboardPageTitle
         title={t("DashboardCustody.newConnectionTitle", { provider: providerName })}
-        backLocked={leaveDisabled ? true : undefined}
+        navigationLocked={leaveDisabled ? true : undefined}
       />
       <div data-custody-add-connection>
         <ByokCredentialForm

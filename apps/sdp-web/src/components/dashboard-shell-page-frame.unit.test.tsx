@@ -198,6 +198,25 @@ describe("dashboard shell page frame", () => {
     expect(named?.querySelector(".animate-pulse")).toBeNull();
   });
 
+  it.each([
+    [
+      "locks",
+      <DashboardPageTitle key="locked" title="New Privy connection" navigationLocked />,
+      1,
+      "button",
+    ],
+    ["leaves open", <DashboardPageTitle key="open" title="New Privy connection" />, 0, "link"],
+  ] as const)(
+    "%s the sidebar and the way back as the page asks",
+    async (_label, title, inertAsides, backRole) => {
+      await renderAt(`${PROJECT}/integrations/privy/connections/new`, title);
+
+      expect(container.querySelectorAll("aside[inert]")).toHaveLength(inertAsides);
+      const back = screen.getByRole(backRole, { name: "Privy" });
+      expect(back.hasAttribute("disabled")).toBe(backRole === "button");
+    }
+  );
+
   // A phone browser's vh is its height with the toolbars hidden, so a vh shell kept a locked
   // page's footer under the toolbar.
   it("sizes a locked page to the visible viewport", async () => {

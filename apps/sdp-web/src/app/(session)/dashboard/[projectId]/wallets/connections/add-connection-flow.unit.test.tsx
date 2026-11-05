@@ -79,6 +79,12 @@ const completed = () =>
     data: { providerCredential: { provider: "privy" }, completion: { status: "success" } },
   });
 
+function leavePrevented(): boolean {
+  const unload = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(unload);
+  return unload.defaultPrevented;
+}
+
 async function fillAndSubmit(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText("App ID"), "app_test");
   await user.type(screen.getByLabelText("App secret"), "secret_test");
@@ -151,14 +157,16 @@ it("blocks leaving during a completion retry and releases it after a refusal", a
   await user.click(screen.getByRole("button", { name: "Check again" }));
   const close = screen.getByRole("button", { name: "Close" });
   expect(close).toHaveProperty("disabled", true);
-  expect(shownTitle).toMatchObject({ backLocked: true });
+  expect(shownTitle).toMatchObject({ navigationLocked: true });
+  expect(leavePrevented()).toBe(true);
   await user.click(close);
   expect(dashboardRouter.push).not.toHaveBeenCalled();
 
   retry.resolve(Response.json({ error: { message: "Try again later." } }, { status: 403 }));
   await screen.findByText("Try again later.");
   await waitFor(() => expect(close).toHaveProperty("disabled", false));
-  expect(shownTitle).toHaveProperty("backLocked", undefined);
+  expect(shownTitle).toHaveProperty("navigationLocked", undefined);
+  expect(leavePrevented()).toBe(false);
   await user.click(close);
   expect(dashboardRouter.push).toHaveBeenCalledWith(PROVIDER_HREF);
 });

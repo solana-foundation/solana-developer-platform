@@ -15,8 +15,8 @@ import { useDashboardPathname } from "@/lib/use-dashboard-project";
  *   stable element (memoized), since a new one each render sets the header again.
  * @param props.badge - Shown after the title on its line (a connection's status). Pass a stable
  *   element (memoized), as with `actions`.
- * @param props.backLocked - Disables the route's back link, as a flow does while a request it
- *   cannot replay elsewhere is in flight.
+ * @param props.navigationLocked - Makes the back link and the sidebar inert, as a flow does
+ *   while a request it cannot replay elsewhere is in flight.
  * @param props.alwaysVisible - Shows the title even where the route hides its own.
  * @returns Nothing; the shell renders the title.
  */
@@ -25,21 +25,21 @@ export function DashboardPageTitle({
   mark,
   actions,
   badge,
-  backLocked,
+  navigationLocked,
   alwaysVisible,
 }: {
   title: string;
   mark?: ReactNode;
   actions?: ReactNode;
   badge?: ReactNode;
-  backLocked?: true;
+  navigationLocked?: true;
   alwaysVisible?: true;
 }) {
   const setTitle = useContext(DashboardPageTitleContext);
   const pathname = useDashboardPathname();
   useLayoutEffect(() => {
-    setTitle?.({ pathname, title, mark, actions, badge, backLocked, alwaysVisible });
+    setTitle?.({ pathname, title, mark, actions, badge, navigationLocked, alwaysVisible });
     return () => setTitle?.(null);
-  }, [setTitle, pathname, title, mark, actions, badge, backLocked, alwaysVisible]);
+  }, [setTitle, pathname, title, mark, actions, badge, navigationLocked, alwaysVisible]);
   return null;
 }
