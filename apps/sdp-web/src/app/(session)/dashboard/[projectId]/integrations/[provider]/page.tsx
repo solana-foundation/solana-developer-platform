@@ -3,20 +3,6 @@ import type { CustodyConfigSummary } from "@sdp/types/custody";
 import type { ProjectProviderAvailability, RampProviderId } from "@sdp/types/provider-access";
 import { notFound, redirect } from "next/navigation";
 import {
-  buildConnectionsPageUrl,
-  type ConnectionsProjectSummary,
-  fetchConnectionsPage,
-  fetchProviderConnections,
-  fetchWalletsByConnection,
-  parseConnectionsFilters,
-  summarizeProviderConnections,
-} from "@/app/(session)/dashboard/[projectId]/custody/connections/connections.data";
-import {
-  isKnownCustodyProvider,
-  type KnownCustodyProvider,
-  providerSupportsStoredCredentialSetup,
-} from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
-import {
   isKnownIntegrationProvider,
   resolveIntegrationDetail,
 } from "@/app/(session)/dashboard/[projectId]/integrations/integration-detail";
@@ -27,6 +13,20 @@ import {
   resolveRampIntegrations,
 } from "@/app/(session)/dashboard/[projectId]/integrations/integrations-status";
 import type { OnboardingStatusResponse } from "@/app/(session)/dashboard/[projectId]/onboarding-status";
+import {
+  buildConnectionsPageUrl,
+  type ConnectionsProjectSummary,
+  fetchConnectionsPage,
+  fetchProviderConnections,
+  fetchWalletsByConnection,
+  parseConnectionsFilters,
+  summarizeProviderConnections,
+} from "@/app/(session)/dashboard/[projectId]/wallets/connections/connections.data";
+import {
+  isKnownCustodyProvider,
+  type KnownCustodyProvider,
+  providerSupportsStoredCredentialSetup,
+} from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import { getOfferedRampProviders } from "@/flags/ramps";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";

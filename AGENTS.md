@@ -8,7 +8,7 @@ This file is the canonical agent guide for this repository.
 - `apps/sdp-web`: dashboard application
 - `apps/sdp-docs`: public documentation site and generated API reference
 - `packages/sdp-types`: shared runtime types and shared product constants
-- `packages/sdp-design-tokens`: shared design tokens (CSS custom properties, Tailwind theme mapping) and the `refresh` theme scope; see its README
+- `packages/sdp-design-tokens`: shared design tokens (CSS custom properties, Tailwind theme mapping); see its README
 - `packages/sdp-ui`: the dashboard's UI primitives (`@sdp/ui`) over `@solana/design-system` and the design tokens; `apps/sdp-web/src/components/ui/*` re-exports them; see its README
 - `packages/sdp-api-catalog`: what the API, the dashboard and the docs share about the public API (`@sdp/api-catalog`): the API reference model and the request snippets; see its README
 
@@ -118,7 +118,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - `.agents/skills/sdp-make-pr/SKILL.md`: explicit-only PR creation workflow with technical before/after behavior, flows or pseudocode, verification, and risk notes.
 - `.agents/skills/sdp-review/SKILL.md`: explicit-only SDP change-set digest and focused review workflow.
 - `.agents/skills/sdp-bug-report/SKILL.md`: explicit-only SDP bug-bash reporting workflow for Linear issue `PRO-1482`.
-- `.agents/skills/sdp-module-alignment/SKILL.md`: internal engineering checklist and scanner (`scripts/scan-module.sh`) for bringing a module onto the current architecture and the refresh design before it is promoted or released, built from Earn's October 2026 alignment.
+- `.agents/skills/sdp-module-alignment/SKILL.md`: internal engineering checklist and scanner (`scripts/scan-module.sh`) for bringing a module onto the current architecture and the 2026 design before it is promoted or released, built from Earn's October 2026 alignment.
 
 When updating repo-local skills:
 - keep them grounded in the public docs and API reference instead of internal handlers

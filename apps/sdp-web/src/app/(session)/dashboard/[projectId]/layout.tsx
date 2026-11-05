@@ -87,7 +87,7 @@ export default async function ProjectLayout({
       sessionOrganizationId={orgId}
       fallbackHref={
         sandboxProject === null
-          ? `${WORKSPACE_LOADING_PATH}?return_to=${encodeURIComponent("/dashboard")}`
+          ? WORKSPACE_LOADING_PATH
           : projectHref(sandboxProject.id, dashboardPath)
       }
       flags={flags}

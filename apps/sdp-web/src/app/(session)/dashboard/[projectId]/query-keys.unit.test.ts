@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { custodyQueryKeys } from "./custody/custody-query-key";
 import { DEFAULT_ISSUANCE_LIST_QUERY } from "./issuance/issuance-list-query";
 import { issuanceQueryKeys } from "./issuance/issuance-query-key";
 import { earnQueryKeys } from "./markets/earn/earn-query-key";
 import { paymentsQueryKeys } from "./payments/payments-query-key";
 import { membersQueryKeys } from "./settings/members-query-key";
+import { custodyQueryKeys } from "./wallets/custody-query-key";
 
 const plainKeys = [
   paymentsQueryKeys.actionCounterparties(),

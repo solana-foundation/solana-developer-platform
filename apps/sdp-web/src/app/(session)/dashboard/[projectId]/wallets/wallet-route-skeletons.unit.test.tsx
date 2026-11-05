@@ -1,8 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import CustodyDetailLoading from "@/app/(session)/dashboard/[projectId]/custody/[walletId]/loading";
-import CustodyLoading from "@/app/(session)/dashboard/[projectId]/custody/loading";
-import CustodySetupLoading from "@/app/(session)/dashboard/[projectId]/custody/setup/loading";
 import WalletDetailLoading from "./[walletId]/loading";
 import WalletsLoading from "./loading";
 import WalletSetupLoading from "./setup/loading";
@@ -10,14 +7,11 @@ import { WalletDetailSkeleton, WalletsOnboardingSkeleton } from "./wallet-route-
 
 const routeLoaders = [
   ["wallets overview", WalletsLoading, "wallets-overview"],
-  ["custody overview alias", CustodyLoading, "wallets-overview"],
   ["wallet setup", WalletSetupLoading, "wallet-setup"],
-  ["custody setup alias", CustodySetupLoading, "wallet-setup"],
   ["wallet detail", WalletDetailLoading, "wallet-detail"],
-  ["custody detail alias", CustodyDetailLoading, "wallet-detail"],
 ] as const;
 
-describe("wallet and custody route loading states", () => {
+describe("wallet route loading states", () => {
   it.each(routeLoaders)("maps %s to its final-page geometry", (_name, Loader, layout) => {
     const html = renderToStaticMarkup(<Loader />);
 

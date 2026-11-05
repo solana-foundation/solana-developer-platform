@@ -8,16 +8,10 @@ import { Combobox } from "@sdp/ui/combobox";
 import { DetailList, DetailRow } from "@sdp/ui/detail-list";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
-import {
-  ArrowUpRightIcon,
-  LandmarkIcon,
-  PlusIcon,
-  StickyNoteIcon,
-  UserRoundIcon,
-  WalletIcon,
-} from "lucide-react";
+import { ArrowUpRightIcon, LandmarkIcon, PlusIcon } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
+import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { NewSolanaAddressForm } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/new-solana-address-form";
 import { isFireblocksByokWallet } from "@/app/(session)/dashboard/[projectId]/payments/fireblocks-wallet";
 import {
@@ -115,7 +109,7 @@ function PrivateSendOption({ status }: { status: PrivateSendStatus | null }) {
             : t("DashboardPayments.payForm.noPrivateChannel")}
         </p>
         <Link
-          href={href("/dashboard/integrations/private-channels")}
+          href={href(PRIVATE_CHANNELS_OVERVIEW_PATH)}
           className="inline-flex items-center gap-1 text-body font-medium text-primary hover:underline"
         >
           {t("DashboardPayments.payForm.openPrivateChannels")}
@@ -218,13 +212,7 @@ function DestinationFields({
 
   return (
     <>
-      {contact ? (
-        <ContactCombobox
-          {...contact}
-          value={counterpartyId}
-          hint={t("DashboardPayments.payForm.contactHint")}
-        />
-      ) : null}
+      {contact ? <ContactCombobox {...contact} value={counterpartyId} /> : null}
       <div className="space-y-3">
         <Combobox
           label={t("DashboardPayments.payForm.destination")}
@@ -369,12 +357,12 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
   const memo = fields.memo.trim();
   return (
     <>
-      <div className="flex flex-col items-center gap-0.5 border-b border-border-default pb-4 refresh:items-start refresh:pb-6">
-        <p className="text-3xl font-semibold tracking-tight text-primary refresh:text-amount refresh:font-medium">
+      <div className="flex flex-col gap-0.5 border-b border-border-default items-start pb-6">
+        <p className="tracking-tight text-primary text-amount font-medium">
           {fields.amount === "" ? "0" : fields.amount}{" "}
           {selectedAsset === null ? fields.asset : selectedAsset.label}
         </p>
-        <p className="text-sm text-tertiary refresh:text-body refresh:text-secondary">
+        <p className="text-body text-secondary">
           {t("DashboardPayments.onchainSend.toCounterparty", {
             counterparty:
               counterpartyName === ""
@@ -384,31 +372,17 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
         </p>
       </div>
       <DetailList variant="summary">
-        <DetailRow
-          icon={<UserRoundIcon className="size-3.5" />}
-          label={t("DashboardPayments.onchainSend.to")}
-        >
+        <DetailRow label={t("DashboardPayments.onchainSend.to")}>
           {counterpartyName === "" ? "—" : counterpartyName}
         </DetailRow>
-        <DetailRow
-          icon={<WalletIcon className="size-3.5" />}
-          label={t("DashboardPayments.onchainSend.destination")}
-        >
+        <DetailRow label={t("DashboardPayments.onchainSend.destination")}>
           {destinationAddress === null ? "—" : shortenAddress(destinationAddress)}
         </DetailRow>
-        <DetailRow
-          icon={<WalletIcon className="size-3.5" />}
-          label={t("DashboardPayments.onchainSend.sourceWallet")}
-        >
+        <DetailRow label={t("DashboardPayments.onchainSend.sourceWallet")}>
           {sourceWalletName(selectedWallet)}
         </DetailRow>
         {memo === "" ? null : (
-          <DetailRow
-            icon={<StickyNoteIcon className="size-3.5" />}
-            label={t("DashboardPayments.onchainSend.memo")}
-          >
-            {memo}
-          </DetailRow>
+          <DetailRow label={t("DashboardPayments.onchainSend.memo")}>{memo}</DetailRow>
         )}
       </DetailList>
       {isFireblocksByokWallet(selectedWallet) ? (
@@ -423,7 +397,7 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
 function ReviewStep({ wizard, counterpartyName }: StepProps) {
   const { transferResult } = wizard;
   const summary = (
-    <section className="w-full space-y-4 rounded-2xl bg-fill-subtle p-5 refresh:rounded-none refresh:bg-transparent refresh:p-0">
+    <section className="w-full space-y-4 rounded-none bg-transparent p-0">
       <ReviewSummary wizard={wizard} counterpartyName={counterpartyName} />
     </section>
   );

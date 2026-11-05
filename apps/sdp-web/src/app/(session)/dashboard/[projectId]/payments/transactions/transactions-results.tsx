@@ -7,7 +7,6 @@ import { ListEmptyState } from "@sdp/ui/list-empty-state";
 import { StatusText } from "@sdp/ui/status-text";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
-import { ReceiptTextIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { KeyboardEvent } from "react";
 import {
@@ -24,6 +23,7 @@ import {
   PAYMENTS_TABLE_HEAD,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-table";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { transactionHref } from "@/lib/payments-routes";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useTransactionFilters } from "./transaction-filters-context";
@@ -41,6 +41,7 @@ export function TransactionsResults({
   counterpartyNames: ReadonlyMap<string, string>;
 }) {
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const t = useTranslations();
   const href = useProjectHref();
   const statusOf = useTransactionStatus();
@@ -50,16 +51,11 @@ export function TransactionsResults({
   const open = (transaction: UnifiedTransaction) =>
     router.push(href(transactionHref(transaction.id)));
   if (result.transactions.length === 0) {
-    return (
-      <ListEmptyState
-        icon={<ReceiptTextIcon className="size-5" />}
-        message={t("DashboardPayments.transactions.noTransactionsFound")}
-      />
-    );
+    return <ListEmptyState message={t("DashboardPayments.transactions.noTransactionsFound")} />;
   }
   return (
     <section className="flex min-w-0 flex-1 flex-col" aria-busy={pending}>
-      <div className="overflow-x-auto refresh:-mx-3">
+      <div className="overflow-x-auto -mx-3">
         <Table className="rounded-none border-0 md:min-w-[47.5rem]">
           <TableHeader>
             <TableRow>
@@ -131,7 +127,7 @@ export function TransactionsResults({
                       <span className="block text-meta text-tertiary md:hidden">{contact}</span>
                     ) : null}
                     <span className="block text-meta text-tertiary md:hidden">
-                      {formatDateTime(transaction.createdAt, locale)}
+                      {formatDateTime(transaction.createdAt, locale, timeZone)}
                     </span>
                   </TableCell>
                   <TableCell
@@ -172,7 +168,7 @@ export function TransactionsResults({
                       "hidden whitespace-nowrap text-secondary md:table-cell"
                     )}
                   >
-                    {formatDateTime(transaction.createdAt, locale)}
+                    {formatDateTime(transaction.createdAt, locale, timeZone)}
                   </TableCell>
                 </TableRow>
               );

@@ -1,5 +1,5 @@
 import { COMPLIANCE_PROVIDERS } from "@sdp/types/provider-access";
-import { CUSTODY_PROVIDER_CATALOG } from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
+import { CUSTODY_PROVIDER_CATALOG } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import type { DashboardFlags } from "@/flags/dashboard";
 import {
   type IntegrationsSkeletonLayout,

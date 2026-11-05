@@ -31,7 +31,8 @@ import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspac
 import { EntityLink } from "@/components/entity-link";
 import { TokenMark } from "@/components/token-mark";
 import type { MessageKey } from "@/i18n/messages";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
 import { useCopy } from "@/lib/use-copy";
 import { useProjectHref } from "@/lib/use-dashboard-project";
@@ -338,6 +339,8 @@ function LegTransferRow({
   transfer: DvpLegTransfer;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
+  const timeZone = useTimeZone();
   const DirectionIcon = transfer.direction === "in" ? ArrowDownLeftIcon : ArrowUpRightIcon;
   return (
     <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 py-1 text-xs">
@@ -354,7 +357,7 @@ function LegTransferRow({
       </span>
       <span className="inline-flex items-center gap-1.5 text-tertiary tabular-nums">
         {transfer.blockTime === null ? null : (
-          <span suppressHydrationWarning>{formatTimestamp(transfer.blockTime, t)}</span>
+          <span>{formatTimestamp(transfer.blockTime, t, locale, timeZone)}</span>
         )}
         <a
           aria-label={t("DashboardMarkets.dvp.viewTransaction")}
@@ -796,12 +799,9 @@ function formatZoned(date: Date, timeZone: string | undefined): { when: string; 
 }
 
 /**
- * One dated fact about the trade: a label, the local time, and an info mark
+ * One dated fact about the trade: a label, the time in the reader's zone
+ * (`useTimeZone`, so the server render and hydration agree), and an info mark
  * whose tooltip spells the exact moment out in the reader's zone and in UTC.
- *
- * Local time depends on the browser, so the server renders it in its own zone
- * and the client corrects it on hydration; the mismatch warning is silenced
- * for exactly that span.
  */
 function TimestampFact({
   label,
@@ -814,13 +814,13 @@ function TimestampFact({
   children?: ReactNode;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
+  const timeZone = useTimeZone();
   const date = new Date(iso);
   return (
     <span className="flex items-center gap-1.5">
       <span>{label}</span>
-      <span className="text-secondary" suppressHydrationWarning>
-        {formatTimestamp(iso, t)}
-      </span>
+      <span className="text-secondary">{formatTimestamp(iso, t, locale, timeZone)}</span>
       {children}
       <Tooltip>
         <TooltipTrigger asChild>
