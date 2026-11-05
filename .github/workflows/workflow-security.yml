@@ -55,3 +55,5 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Run login retry fixture
         run: bash scripts/doppler/oidc-login.test.sh
+      - name: Run secret masking fixture
+        run: bash scripts/doppler/mask-secret-env.test.sh
