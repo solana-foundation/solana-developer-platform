@@ -3,7 +3,9 @@
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { EarnProviderAccess } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-surfacing";
 import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
+import { DashboardReadError } from "@/lib/dashboard-swr";
 import * as kaminoAllocations from "./kamino-allocations";
 import type { KaminoVaultAllocations } from "./kamino-allocations-schema";
 import { TREASURY_WALLETS_BODY } from "./treasury-layout";
@@ -183,6 +185,15 @@ const mocks = vi.hoisted(() => ({
   // Real SWR keeps the last read beside a later error.
   allocationsFailAfterRead: false,
   allocationsRequests: [] as Array<string | undefined>,
+  providerAccess: undefined as EarnProviderAccess | null | undefined,
+}));
+
+const KAMINO_ACCESS: EarnProviderAccess = {
+  kamino: { entitled: true, configured: true, enabled: true },
+};
+
+vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-provider-access", () => ({
+  useEarnProviderAccess: () => ({ providerAccess: mocks.providerAccess }),
 }));
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -745,11 +756,7 @@ vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-withdraw-modal"
 // the identical element instance, which would leave the mocked hooks unread.
 const workspaceElement = () => (
   <EnglishTestI18n>
-    <TreasurySolutionsWorkspace
-      providerAccess={{
-        kamino: { entitled: true, configured: true, enabled: true },
-      }}
-    />
+    <TreasurySolutionsWorkspace />
   </EnglishTestI18n>
 );
 
@@ -804,6 +811,7 @@ const devnetStrategyRow = (name: string) =>
     .find((row) => row?.textContent?.includes("Devnet"));
 
 beforeEach(() => {
+  mocks.providerAccess = KAMINO_ACCESS;
   mocks.canWrite = true;
   mocks.positionsAfterMovementIds = [];
   mocks.canManageCustody = true;
@@ -864,7 +872,7 @@ beforeEach(() => {
     }
     return {
       allocationsByVault,
-      error: mocks.allocationsFailAfterRead ? new Error("refresh failed") : undefined,
+      error: mocks.allocationsFailAfterRead ? new DashboardReadError(502, null, null) : undefined,
       isLoading: false,
     };
   });
@@ -1164,9 +1172,7 @@ describe("TreasurySolutionsWorkspace", () => {
     ];
     view.rerender(
       <EnglishTestI18n>
-        <TreasurySolutionsWorkspace
-          providerAccess={{ kamino: { entitled: true, configured: true, enabled: true } }}
-        />
+        <TreasurySolutionsWorkspace />
       </EnglishTestI18n>
     );
 
@@ -2708,9 +2714,7 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.vaultWithdrawals = [];
     view.rerender(
       <EnglishTestI18n>
-        <TreasurySolutionsWorkspace
-          providerAccess={{ kamino: { entitled: true, configured: true, enabled: true } }}
-        />
+        <TreasurySolutionsWorkspace />
       </EnglishTestI18n>
     );
 
@@ -2810,6 +2814,32 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
     expect(
       catalogue.getByText("Loading Devnet strategies. Mainnet strategies remain available.")
     ).toBeTruthy();
+  });
+
+  it("holds the Devnet strategies loading while the organization's access loads", () => {
+    mocks.providerAccess = undefined;
+    renderWorkspace();
+
+    const section = screen
+      .getByRole("heading", { name: "Available strategies" })
+      .closest("section");
+    if (!section) throw new Error("Expected the strategy catalogue");
+    expect(devnetStrategyRow("Steakhouse USDC")).toBeUndefined();
+    expect(
+      within(section).getByText("Loading Devnet strategies. Mainnet strategies remain available.")
+    ).toBeTruthy();
+  });
+
+  it("offers no deposit when the organization's access could not be read", () => {
+    mocks.providerAccess = null;
+    renderWorkspace();
+
+    const section = screen
+      .getByRole("heading", { name: "Available strategies" })
+      .closest("section");
+    if (!section) throw new Error("Expected the strategy catalogue");
+    expect(devnetStrategyRow("Steakhouse USDC")).toBeDefined();
+    expect(within(section).queryByRole("button", { name: "Deposit" })).toBeNull();
   });
 
   it("keeps mainnet strategies visible when the Devnet catalogue fails", () => {

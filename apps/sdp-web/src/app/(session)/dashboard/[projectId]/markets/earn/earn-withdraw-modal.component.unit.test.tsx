@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
 
 import type { EarnPortfolioWithdrawal } from "@sdp/types/earn";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
+import { readsOf, stubDashboardFetch } from "@/test/dashboard-fetch";
+import { renderBesideReads } from "@/test/dashboard-reads";
+import { SANDBOX_PROJECT } from "@/test/projects";
+import { earnQueryKeys } from "./earn-query-key";
 import { EarnWithdrawModal } from "./earn-withdraw-modal";
 
 const mocks = vi.hoisted(() => ({
@@ -74,7 +78,10 @@ beforeEach(() => {
   });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("EarnWithdrawModal submit lock", () => {
   /**
@@ -131,5 +138,42 @@ describe("EarnWithdrawModal submit lock", () => {
     await screen.findByText("Withdrawal submitted");
     expect(mocks.createEarnWithdrawal).toHaveBeenCalledTimes(2);
     expect(onWithdrawalCreated).toHaveBeenCalledWith("wref_1");
+  });
+
+  it.each([
+    [
+      "is created",
+      { ok: true, status: 200, data: { data: { withdrawal: withdrawal("processing") } } },
+    ],
+    [
+      "has an unknown outcome",
+      {
+        ok: false,
+        status: 409,
+        error: "outcome unknown",
+        code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN",
+        body: null,
+      },
+    ],
+  ])("reads Earn's programs again once the withdrawal %s", async (_answer, result) => {
+    const programsUrl = "/api/dashboard/markets/earn/programs?pageSize=100";
+    const fetchMock = stubDashboardFetch(() => Response.json({}));
+    mocks.createEarnWithdrawal.mockResolvedValue(result);
+    renderBesideReads(
+      <EarnWithdrawModal
+        programId="earn_program_1"
+        provider="upshift"
+        onClose={vi.fn()}
+        onWithdrawalCreated={vi.fn()}
+      />,
+      [earnQueryKeys.programs({ projectId: SANDBOX_PROJECT.id, mode: "live" })]
+    );
+    await waitFor(() => expect(readsOf(fetchMock, programsUrl)).toBe(1));
+
+    fillForm();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+
+    await waitFor(() => expect(mocks.createEarnWithdrawal).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(readsOf(fetchMock, programsUrl)).toBe(2));
   });
 });

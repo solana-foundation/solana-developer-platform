@@ -6,13 +6,14 @@ import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
 import { EarnIntegrationGuide } from "./earn-integration-guide";
 import {
   buildEarnIntegrationSections,
   buildEarnServerIntegration,
 } from "./earn-integration-snippets";
+import type { EarnProviderAccess } from "./earn-surfacing";
 
 const liveStrategy: EarnStrategy = {
   id: "earn_strategy_live",
@@ -79,11 +80,17 @@ const sandboxOnlyStrategy: EarnStrategy = {
   withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
 };
 
-const mocks = vi.hoisted(() => ({
-  environment: "sandbox" as SdpEnvironment,
-  strategyClusters: [] as Array<SolanaCluster | undefined>,
-  mainnetLoading: false,
-}));
+const mocks = vi.hoisted(() => {
+  const providerAccess: { current: EarnProviderAccess | null | undefined } = {
+    current: undefined,
+  };
+  return {
+    environment: "sandbox" as SdpEnvironment,
+    strategyClusters: [] as Array<SolanaCluster | undefined>,
+    mainnetLoading: false,
+    providerAccess,
+  };
+});
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
@@ -104,6 +111,10 @@ vi.mock("./earn-program-data", () => ({
       isLoading: mainnet && mocks.mainnetLoading,
     };
   },
+}));
+
+vi.mock("./earn-provider-access", () => ({
+  useEarnProviderAccess: () => ({ providerAccess: mocks.providerAccess.current }),
 }));
 
 vi.mock("@/components/ui/code-block", () => ({
@@ -132,14 +143,32 @@ describe("EarnIntegrationGuide", () => {
     kamino: { entitled: true, configured: true, enabled: true },
   } as const;
 
+  beforeEach(() => {
+    mocks.providerAccess.current = providerAccess;
+  });
+
+  it("holds the guide's skeleton while the organization's access loads", () => {
+    mocks.providerAccess.current = undefined;
+
+    const { container } = renderWithEnglish(<EarnIntegrationGuide />);
+
+    expect(container.querySelector('[data-embedded-yield-loading="integrate"]')).toBeTruthy();
+    expect(screen.queryByRole("combobox")).toBeNull();
+  });
+
+  it("offers no strategy for integration when the organization's access could not be read", () => {
+    mocks.providerAccess.current = null;
+
+    renderWithEnglish(<EarnIntegrationGuide strategyId="earn_strategy_live" />);
+
+    expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
+    expect(screen.queryByText(/STRATEGY_ID = "earn_strategy_live"/)).toBeNull();
+  });
+
   it("renders a compact reference guide with the real B2B2C contract", async () => {
     const user = userEvent.setup();
     renderWithEnglish(
-      <EarnIntegrationGuide
-        apiBaseUrl="http://127.0.0.1:8787"
-        providerAccess={providerAccess}
-        strategyId="earn_strategy_live"
-      />
+      <EarnIntegrationGuide apiBaseUrl="http://127.0.0.1:8787" strategyId="earn_strategy_live" />
     );
 
     expect(screen.getByText("2. Set up the server code")).toBeTruthy();
@@ -251,11 +280,7 @@ describe("EarnIntegrationGuide", () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     renderWithEnglish(
-      <EarnIntegrationGuide
-        apiBaseUrl="http://127.0.0.1:8787"
-        providerAccess={providerAccess}
-        strategyId="earn_strategy_live"
-      />
+      <EarnIntegrationGuide apiBaseUrl="http://127.0.0.1:8787" strategyId="earn_strategy_live" />
     );
 
     await user.click(screen.getByRole("button", { name: "Copy all code" }));
@@ -274,9 +299,7 @@ describe("EarnIntegrationGuide", () => {
 
   it("lists mainnet strategies disabled in sandbox, with no network toggle", async () => {
     const user = userEvent.setup();
-    renderWithEnglish(
-      <EarnIntegrationGuide providerAccess={providerAccess} strategyId={mainnetStrategy.id} />
-    );
+    renderWithEnglish(<EarnIntegrationGuide strategyId={mainnetStrategy.id} />);
 
     // Sandbox reads both shelves and shows them as one list.
     expect(mocks.strategyClusters).toContain("mainnet-beta");
@@ -301,7 +324,7 @@ describe("EarnIntegrationGuide", () => {
   it("keeps loading until the mainnet shelf answers, so a mainnet deep link never flashes as unknown", () => {
     mocks.mainnetLoading = true;
     const { container } = renderWithEnglish(
-      <EarnIntegrationGuide providerAccess={providerAccess} strategyId={mainnetStrategy.id} />
+      <EarnIntegrationGuide strategyId={mainnetStrategy.id} />
     );
 
     expect(container.querySelector('[data-embedded-yield-loading="integrate"]')).toBeTruthy();
@@ -310,12 +333,10 @@ describe("EarnIntegrationGuide", () => {
   });
 
   it("does not let a mainnet deep link bypass the cluster check even with provider access", () => {
-    renderWithEnglish(
-      <EarnIntegrationGuide
-        providerAccess={{ kamino: { entitled: false, configured: true, enabled: false } }}
-        strategyId={mainnetStrategy.id}
-      />
-    );
+    mocks.providerAccess.current = {
+      kamino: { entitled: false, configured: true, enabled: false },
+    };
+    renderWithEnglish(<EarnIntegrationGuide strategyId={mainnetStrategy.id} />);
 
     expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
     expect(screen.queryByText(/STRATEGY_ID = "earn_strategy_mainnet"/)).toBeNull();
@@ -341,7 +362,7 @@ describe("EarnIntegrationGuide", () => {
   });
 
   it("defaults to the first available strategy without a separate selection step", () => {
-    renderWithEnglish(<EarnIntegrationGuide providerAccess={providerAccess} />);
+    renderWithEnglish(<EarnIntegrationGuide />);
 
     expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
     expect(screen.getByText("earn_strategy_live")).toBeTruthy();
@@ -349,9 +370,7 @@ describe("EarnIntegrationGuide", () => {
   });
 
   it("keeps the strategy dropdown available when a deep-linked id no longer resolves", () => {
-    renderWithEnglish(
-      <EarnIntegrationGuide providerAccess={providerAccess} strategyId="earn_strategy_removed" />
-    );
+    renderWithEnglish(<EarnIntegrationGuide strategyId="earn_strategy_removed" />);
 
     expect(screen.getByText("Strategy no longer available")).toBeTruthy();
     expect(screen.getByText(/no longer in the live catalogue/)).toBeTruthy();
@@ -360,7 +379,7 @@ describe("EarnIntegrationGuide", () => {
 
   it("updates the strategy id and code in place when the dropdown changes", async () => {
     const user = userEvent.setup();
-    renderWithEnglish(<EarnIntegrationGuide providerAccess={providerAccess} />);
+    renderWithEnglish(<EarnIntegrationGuide />);
 
     await user.click(screen.getByRole("combobox", { name: "Select a strategy" }));
     await user.click(await screen.findByRole("option", { name: /Kamino Growth Vault.*8\.1%/ }));
@@ -372,15 +391,11 @@ describe("EarnIntegrationGuide", () => {
 
   it("names production-only providers as such instead of the sandbox-era label", async () => {
     const user = userEvent.setup();
-    renderWithEnglish(
-      <EarnIntegrationGuide
-        providerAccess={{
-          ...providerAccess,
-          jupiter_lend: { entitled: true, configured: true, enabled: true },
-        }}
-        strategyId={productionOnlyStrategy.id}
-      />
-    );
+    mocks.providerAccess.current = {
+      ...providerAccess,
+      jupiter_lend: { entitled: true, configured: true, enabled: true },
+    };
+    renderWithEnglish(<EarnIntegrationGuide strategyId={productionOnlyStrategy.id} />);
 
     // Deep link: the explanation says production-only, not sandbox-only.
     expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
@@ -397,15 +412,11 @@ describe("EarnIntegrationGuide", () => {
 
   it("refuses a deep link when the selected environment cannot fund the strategy", () => {
     mocks.environment = "production";
-    renderWithEnglish(
-      <EarnIntegrationGuide
-        providerAccess={{
-          ...providerAccess,
-          veda: { entitled: true, configured: true, enabled: true },
-        }}
-        strategyId={sandboxOnlyStrategy.id}
-      />
-    );
+    mocks.providerAccess.current = {
+      ...providerAccess,
+      veda: { entitled: true, configured: true, enabled: true },
+    };
+    renderWithEnglish(<EarnIntegrationGuide strategyId={sandboxOnlyStrategy.id} />);
 
     expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
     expect(screen.getByText(/Sandbox projects only/)).toBeTruthy();
@@ -413,12 +424,10 @@ describe("EarnIntegrationGuide", () => {
   });
 
   it("names provider setup as the reason an otherwise live strategy cannot be integrated", () => {
-    renderWithEnglish(
-      <EarnIntegrationGuide
-        providerAccess={{ kamino: { entitled: true, configured: false, enabled: false } }}
-        strategyId="earn_strategy_live"
-      />
-    );
+    mocks.providerAccess.current = {
+      kamino: { entitled: true, configured: false, enabled: false },
+    };
+    renderWithEnglish(<EarnIntegrationGuide strategyId="earn_strategy_live" />);
 
     expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
     expect(screen.getByText(/provider is not enabled/)).toBeTruthy();

@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 
 import type { EarnVaultWithdrawalRequestRecord } from "@sdp/types/earn";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
+import { readsOf, stubDashboardFetch } from "@/test/dashboard-fetch";
+import { renderBesideReads } from "@/test/dashboard-reads";
+import { SANDBOX_PROJECT } from "@/test/projects";
+import { earnQueryKeys } from "./earn-query-key";
 
 const mocks = vi.hoisted(() => ({
   cancelRequest: vi.fn(),
@@ -60,16 +63,19 @@ function request(
   };
 }
 
+const OPEN_REQUESTS_URL =
+  "/api/dashboard/markets/earn/vault-withdrawal-requests?limit=100&settled=false";
+
 function renderCard(onChanged = vi.fn()) {
-  const renderUi = () => (
-    <EnglishTestI18n>
-      <EarnVaultWithdrawalRequestsCard onChanged={onChanged} />
-    </EnglishTestI18n>
-  );
+  const fetchMock = stubDashboardFetch(() => Response.json({}));
+  const renderUi = () => <EarnVaultWithdrawalRequestsCard onChanged={onChanged} />;
   return {
-    ...render(renderUi()),
+    ...renderBesideReads(renderUi(), [
+      earnQueryKeys.vaultWithdrawalRequestsOpen({ projectId: SANDBOX_PROJECT.id, mode: "live" }),
+    ]),
     onChanged,
     renderUi,
+    fetchMock,
   };
 }
 
@@ -89,6 +95,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("EarnVaultWithdrawalRequestsCard", () => {
@@ -115,6 +122,7 @@ describe("EarnVaultWithdrawalRequestsCard", () => {
         data: { ...recoverable, status: "cancelled" },
       });
     const view = renderCard();
+    await waitFor(() => expect(readsOf(view.fetchMock, OPEN_REQUESTS_URL)).toBe(1));
 
     expect(screen.getByRole("heading", { name: "Withdrawal requests" })).toBeTruthy();
     expect(screen.getByText("Waiting for payment")).toBeTruthy();
@@ -130,7 +138,7 @@ describe("EarnVaultWithdrawalRequestsCard", () => {
       recoverable.withdrawalRequestId,
       IDEMPOTENCY_KEY
     );
-    expect(refresh).not.toHaveBeenCalled();
+    expect(readsOf(view.fetchMock, OPEN_REQUESTS_URL)).toBe(1);
 
     fireEvent.click(screen.getByRole("button", { name: "Get shares back" }));
     await waitFor(() => expect(mocks.cancelRequest).toHaveBeenCalledTimes(2));
@@ -140,7 +148,7 @@ describe("EarnVaultWithdrawalRequestsCard", () => {
       recoverable.withdrawalRequestId,
       IDEMPOTENCY_KEY,
     ]);
-    expect(refresh).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(readsOf(view.fetchMock, OPEN_REQUESTS_URL)).toBe(2));
     expect(view.onChanged).not.toHaveBeenCalled();
 
     // A successful cancel POST is only a submitted recovery action. Refresh
@@ -229,14 +237,15 @@ describe("EarnVaultWithdrawalRequestsCard", () => {
       data: { ...par, status: "cancelling" },
     });
 
-    renderCard();
+    const view = renderCard();
+    await waitFor(() => expect(readsOf(view.fetchMock, OPEN_REQUESTS_URL)).toBe(1));
 
     expect(screen.getByText("Awaiting operator")).toBeTruthy();
     expect(screen.getByText(/expected at par · awaiting operator settlement/)).toBeTruthy();
     expect(screen.queryByText(/payment can start after/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Cancel and keep wYLDS" }));
     await waitFor(() => expect(mocks.cancelRequest).toHaveBeenCalledTimes(1));
-    expect(refresh).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(readsOf(view.fetchMock, OPEN_REQUESTS_URL)).toBe(2));
     expect(screen.getByText("Cancelling")).toBeTruthy();
     expect(screen.getByText(/cancelling the operator request/)).toBeTruthy();
     expect(screen.queryByText(/awaiting operator settlement/)).toBeNull();

@@ -1,10 +1,15 @@
 // @vitest-environment jsdom
 
 import type { EarnStrategy, EarnVaultDeposit, EarnVaultMovementStatus } from "@sdp/types/earn";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readsOf, stubDashboardFetch } from "@/test/dashboard-fetch";
+import { renderBesideReads } from "@/test/dashboard-reads";
+import { SANDBOX_PROJECT } from "@/test/projects";
 import type { EarnFundingWallet } from "./deposit/earn-funding-wallets";
+import { earnQueryKeys } from "./earn-query-key";
 import {
   EarnVaultDepositModal,
   validateVaultDepositAmount,
@@ -138,6 +143,7 @@ vi.mock("@/i18n/provider", () => ({
     );
   },
   useLocale: () => "en",
+  I18nProvider: ({ children }: { children: ReactNode }) => children,
 }));
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
@@ -260,6 +266,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("exact vault amount helpers", () => {
@@ -438,6 +445,26 @@ describe("EarnVaultDepositModal", () => {
       },
       IDEMPOTENCY_KEY
     );
+  });
+
+  it("reads the funding wallets again after any deposit answer, a refusal included", async () => {
+    const inventoryUrl = "/api/dashboard/wallets?includeBalances=true";
+    const fetchMock = stubDashboardFetch(() => Response.json({}));
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: false,
+      error: "Deposit refused",
+      status: 422,
+      body: null,
+    });
+    renderBesideReads(
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />,
+      [earnQueryKeys.fundingWalletInventory({ projectId: SANDBOX_PROJECT.id, mode: "live" })]
+    );
+    await waitFor(() => expect(readsOf(fetchMock, inventoryUrl)).toBe(1));
+
+    await enterDepositAmount();
+
+    await waitFor(() => expect(readsOf(fetchMock, inventoryUrl)).toBe(2));
   });
 
   it("reuses one header idempotency key for an identical retry and never sends requestId", async () => {

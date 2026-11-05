@@ -126,6 +126,17 @@ describe("Embedded Yield route skeleton", () => {
   });
 });
 
+describe("Embedded Yield guide skeleton", () => {
+  it("draws the unified strategy and code guide at the code block's viewport", () => {
+    const html = renderToStaticMarkup(<EarnIntegrationGuideSkeleton />);
+
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toContain('data-embedded-yield-loading="integrate"');
+    expect(html).not.toContain("max-w-5xl");
+    expect(html).toContain("h-[calc(36rem+2.375rem)]");
+  });
+});
+
 // Each DvP skeleton mirrors the page it stands in for. These pin the parts
 // that went stale before: a five-step wizard with a side rail stood in for a
 // two-step create form, and two coarse blocks for the trade page.

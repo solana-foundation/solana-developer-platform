@@ -56,13 +56,19 @@ const context: DvpCreateContext = {
   ],
 };
 
+const retryContext = vi.fn();
+
 function renderForm(
   overrides: Partial<DvpCreateContext> = {},
   cluster: "devnet" | "mainnet-beta" = "devnet"
 ) {
   return render(
     <EnglishTestI18n>
-      <DvpCreateWorkspace cluster={cluster} context={{ ...context, ...overrides }} />
+      <DvpCreateWorkspace
+        cluster={cluster}
+        context={{ ...context, ...overrides }}
+        onRetryContext={retryContext}
+      />
     </EnglishTestI18n>
   );
 }
@@ -203,6 +209,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  retryContext.mockClear();
 });
 
 describe("DvpCreateWorkspace", () => {
@@ -354,6 +361,8 @@ describe("DvpCreateWorkspace", () => {
     renderForm({ error: "Token list failed (500).", tokens: [] });
 
     expect(screen.getByText("Token list failed (500).")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(retryContext).toHaveBeenCalledTimes(1);
   });
 
   // "ATD (6 decimals)" is a fact about how the chain stores the amount, not a

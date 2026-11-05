@@ -1,313 +1,178 @@
-/**
- * Loading the create form's options.
- *
- * This never throws: a form that renders with empty pickers beats a 500. The
- * cost of that choice is that "the request failed" and "you have none" become
- * the same empty list unless the error is carried out separately, which is
- * what most of these check.
- */
+// @vitest-environment jsdom
 
-import { describe, expect, it, vi } from "vitest";
-import { fetchDvpCreateContext } from "./dvp-create.data";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  dashboardErrorResponse,
+  readsOf,
+  sentDashboardReads,
+  stubDashboardFetch,
+} from "@/test/dashboard-fetch";
+import { resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { DashboardReadsProvider } from "@/test/dashboard-reads";
+import { TOKEN_2022_PROGRAM, useDvpCreateContext } from "./dvp-create.data";
 
-function ok(body: unknown) {
-  return { ok: true, status: 200, json: async () => body };
-}
-function fail(status: number, body: unknown = {}) {
-  return { ok: false, status, json: async () => body };
-}
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
-const WALLET = {
-  id: "cwlt_1",
+const WALLETS_URL = "/api/dashboard/wallets?view=summary";
+const TOKENS_URL = "/api/dashboard/issuance/tokens?page=1&pageSize=100";
+const ACCOUNTS_URL = "/api/dashboard/counterparty/accounts?pageSize=100";
+
+const CONFIG_WALLET = {
+  id: "cwlt_test_config",
+  walletId: "provider_test_config",
   publicKey: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
   label: "Treasury",
-  custodyConfigId: "cc_config",
+  custodyConfigId: "cc_test",
   isRuntimeExecutionAllowed: true,
 };
-const WALLET_WITH_BALANCES = {
-  ...WALLET,
-  balances: [
+const CONNECTION_WALLET = {
+  id: "cwlt_test_connection",
+  walletId: "provider_test_connection",
+  publicKey: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg",
+  label: null,
+  custodyConnectionId: "conn_test",
+  isRuntimeExecutionAllowed: false,
+};
+const TOKENS_PAGE = {
+  data: [
     {
-      mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
-      amount: "25000000000",
+      id: "tok_test_bond",
+      name: "Test Bond",
       decimals: 6,
-      token: "ATD",
+      mintAddress: "MintBond",
+      symbol: "TBOND",
     },
-    // The API falls back to the raw mint when it has no symbol. That is an
-    // address, not a label, and repeating it would read as "25,000 ns7Y4h...".
-    {
-      mint: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
-      amount: "50",
-      decimals: 6,
-      token: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
-    },
-    // Incomplete rows cannot drive an amount conversion, so they are dropped
-    // rather than defaulted to a scale nothing verified.
-    { mint: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y", amount: "1", token: "X" },
+    { id: "tok_test_named", name: "Named", decimals: 2, mintAddress: "MintNamed", symbol: "" },
+    { id: "tok_test_draft", name: "Draft", decimals: 6, mintAddress: null, symbol: "DRAFT" },
   ],
+  total: 3,
+  hasMore: false,
 };
-const TOKEN = {
-  id: "tok_1",
-  mintAddress: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
-  symbol: "TBOND",
-  name: "Test Bond",
-  decimals: 6,
-};
-
 const ACCOUNT = {
-  counterpartyAccountId: "cpa_1",
-  counterpartyId: "cp_1",
+  counterpartyAccountId: "cpa_test",
   name: "Acme OTC",
-  address: "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC",
   label: "Settlement wallet",
+  address: "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC",
 };
 
-/** Routes each call by path, so ordering assumptions cannot hide a bug. */
-function request(responses: { wallets: unknown; tokens: unknown; counterparties?: unknown }) {
-  return vi.fn(async (path: string) => {
-    if (path.startsWith("/v1/wallets")) return responses.wallets;
-    if (path.startsWith("/v1/counterparties/accounts")) {
-      return responses.counterparties ?? ok({ data: { accounts: [] } });
+function stubCreateReads(failing: string | null) {
+  return stubDashboardFetch(({ path }) => {
+    if (path === failing) return dashboardErrorResponse(503, `Unavailable: ${path}`);
+    if (path === WALLETS_URL) {
+      return Response.json({ data: { wallets: [CONFIG_WALLET, CONNECTION_WALLET] } });
     }
-    return responses.tokens;
-  }) as never;
+    if (path === TOKENS_URL) return Response.json(TOKENS_PAGE);
+    return Response.json({ data: { accounts: [ACCOUNT, { name: "No address" }] } });
+  });
 }
 
-describe("fetchDvpCreateContext", () => {
+function renderContext(issuanceEnabled: boolean) {
+  return renderHook(() => useDvpCreateContext(issuanceEnabled), {
+    wrapper: DashboardReadsProvider,
+  });
+}
+
+beforeEach(() => {
+  resetDashboardNavigation();
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+describe("useDvpCreateContext", () => {
+  it("offers the Project's wallets, minted tokens and counterparty accounts", async () => {
+    const fetchMock = stubCreateReads(null);
+
+    const { result } = renderContext(true);
+
+    await waitFor(() => expect(result.current.context).toBeDefined());
+    expect(result.current.context).toEqual({
+      wallets: [
+        {
+          id: CONFIG_WALLET.id,
+          address: CONFIG_WALLET.publicKey,
+          label: "Treasury",
+          custodyConfigId: "cc_test",
+          custodyConnectionId: undefined,
+          isRuntimeExecutionAllowed: true,
+          balances: null,
+        },
+        {
+          id: CONNECTION_WALLET.id,
+          address: CONNECTION_WALLET.publicKey,
+          label: null,
+          custodyConfigId: undefined,
+          custodyConnectionId: "conn_test",
+          isRuntimeExecutionAllowed: false,
+          balances: null,
+        },
+      ],
+      tokens: [
+        {
+          mint: "MintBond",
+          label: "TBOND",
+          name: "Test Bond",
+          decimals: 6,
+          tokenProgram: TOKEN_2022_PROGRAM,
+        },
+        {
+          mint: "MintNamed",
+          label: "Named",
+          name: "Named",
+          decimals: 2,
+          tokenProgram: TOKEN_2022_PROGRAM,
+        },
+      ],
+      counterpartyAccounts: [ACCOUNT],
+      error: null,
+    });
+    expect(
+      sentDashboardReads(fetchMock)
+        .map((read) => read.path)
+        .sort()
+    ).toEqual([ACCOUNTS_URL, TOKENS_URL, WALLETS_URL]);
+  });
+
+  it("offers no issued tokens and reads no listing while Issuance is off", async () => {
+    const fetchMock = stubCreateReads(null);
+
+    const { result } = renderContext(false);
+
+    await waitFor(() => expect(result.current.context).toBeDefined());
+    expect(result.current.context).toMatchObject({ tokens: [], error: null });
+    expect(readsOf(fetchMock, TOKENS_URL)).toBe(0);
+  });
+
   it.each([
-    { id: 42 },
-    { publicKey: "" },
-    { label: { name: "Treasury" } },
-    { isRuntimeExecutionAllowed: "true" },
-    { isRuntimeExecutionAllowed: undefined },
-    { custodyConfigId: "" },
-    { custodyConfigId: undefined },
-    { custodyConnectionId: "conn_conflict" },
-  ])("reports invalid wallet fields instead of offering a signing choice: %j", async (fields) => {
-    const load = vi.fn(async (path: string) => {
-      if (path === "/v1/wallets") {
-        return Response.json({
-          data: [
-            { ...WALLET, custodyConfigId: "cc_config", isRuntimeExecutionAllowed: true, ...fields },
-          ],
-        });
-      }
-      if (path === "/v1/issuance/tokens?pageSize=100") return Response.json({ data: [] });
-      if (path === "/v1/counterparties/accounts?pageSize=100")
-        return Response.json({ data: { accounts: [] } });
-      throw new Error(`Unexpected request: ${path}`);
-    });
-    const context = await fetchDvpCreateContext(load);
-    expect(context.wallets).toEqual([]);
-    expect(context.error).toBe("Invalid custody wallet response");
-  });
+    [WALLETS_URL, 0, 0],
+    [TOKENS_URL, 2, 0],
+    [ACCOUNTS_URL, 2, 2],
+  ])(
+    "names a failed %s read and keeps the options read before it",
+    async (failing, wallets, tokens) => {
+      stubCreateReads(failing);
 
-  it("includes nondefault Connection parties even when runtime execution is disabled", async () => {
-    const load = request({
-      wallets: ok({
-        data: [
-          {
-            ...WALLET,
-            custodyConfigId: undefined,
-            custodyConnectionId: "conn_external",
-            isRuntimeExecutionAllowed: false,
-          },
-        ],
-      }),
-      tokens: ok({ data: [] }),
-    });
+      const { result } = renderContext(true);
 
-    const context = await fetchDvpCreateContext(load);
+      await waitFor(() => expect(result.current.context?.error).toBe(`Unavailable: ${failing}`));
+      expect(result.current.context?.wallets).toHaveLength(wallets);
+      expect(result.current.context?.tokens).toHaveLength(tokens);
+      expect(result.current.context?.counterpartyAccounts).toEqual([]);
+    }
+  );
 
-    expect(load).toHaveBeenCalledWith("/v1/wallets");
-    expect(context.wallets).toEqual([
-      expect.objectContaining({
-        id: WALLET.id,
-        custodyConnectionId: "conn_external",
-        isRuntimeExecutionAllowed: false,
-      }),
-    ]);
-  });
+  it("reads again only what failed when the reader retries", async () => {
+    const fetchMock = stubCreateReads(TOKENS_URL);
+    const { result } = renderContext(true);
+    await waitFor(() => expect(result.current.context?.error).toBe(`Unavailable: ${TOKENS_URL}`));
 
-  it("maps wallets and deployed tokens", async () => {
-    const context = await fetchDvpCreateContext(
-      request({ wallets: ok({ data: [WALLET] }), tokens: ok({ data: [TOKEN] }) })
-    );
+    act(() => result.current.retry());
 
-    expect(context.error).toBeNull();
-    expect(context.wallets).toEqual([
-      {
-        id: "cwlt_1",
-        address: WALLET.publicKey,
-        label: "Treasury",
-        custodyConfigId: "cc_config",
-        isRuntimeExecutionAllowed: true,
-        // Not loaded, which the form reads as unknown rather than "holds nothing".
-        balances: null,
-      },
-    ]);
-    expect(context.tokens[0]).toMatchObject({
-      mint: TOKEN.mintAddress,
-      label: "TBOND",
-      decimals: 6,
-    });
-  });
-
-  it("accepts the wrapped wallets shape as well as the bare array", async () => {
-    const context = await fetchDvpCreateContext(
-      request({ wallets: ok({ data: { wallets: [WALLET] } }), tokens: ok({ data: [] }) })
-    );
-
-    expect(context.wallets).toHaveLength(1);
-  });
-
-  // A draft token has no mint, so nothing to put in escrow. Offering it would
-  // be an invitation to a 400.
-  it("drops a token that has no mint yet", async () => {
-    const context = await fetchDvpCreateContext(
-      request({
-        wallets: ok({ data: [] }),
-        tokens: ok({ data: [{ id: "tok_2", symbol: "DRAFT" }] }),
-      })
-    );
-
-    expect(context.tokens).toEqual([]);
-  });
-
-  it("maps counterparty crypto-wallet accounts for the party slots", async () => {
-    const context = await fetchDvpCreateContext(
-      request({
-        wallets: ok({ data: [] }),
-        tokens: ok({ data: [] }),
-        counterparties: ok({ data: { accounts: [ACCOUNT] } }),
-      })
-    );
-
-    expect(context.counterpartyAccounts).toEqual([
-      {
-        counterpartyAccountId: "cpa_1",
-        name: "Acme OTC",
-        label: "Settlement wallet",
-        address: ACCOUNT.address,
-      },
-    ]);
-  });
-
-  // Same rule as the tokens: a failed counterparty list must not read as "you
-  // have no counterparties", which would hide the second-reference option from
-  // somebody who uses it daily.
-  it("reports a failed counterparty load rather than showing none", async () => {
-    const context = await fetchDvpCreateContext(
-      request({
-        wallets: ok({ data: [WALLET] }),
-        tokens: ok({ data: [TOKEN] }),
-        counterparties: fail(503, { error: { message: "Counterparties unavailable." } }),
-      })
-    );
-
-    expect(context.error).toBe("Counterparties unavailable.");
-    expect(context.wallets).toHaveLength(1);
-    expect(context.tokens).toHaveLength(1);
-  });
-
-  it("falls back to the name, then the mint, when a token has no symbol", async () => {
-    const context = await fetchDvpCreateContext(
-      request({
-        wallets: ok({ data: [] }),
-        tokens: ok({
-          data: [{ mintAddress: "mint1", name: "Named" }, { mintAddress: "mint2" }],
-        }),
-      })
-    );
-
-    expect(context.tokens.map((token) => token.label)).toEqual(["Named", "mint2"]);
-  });
-
-  // THE case. Silently returning an empty list would send someone hunting for
-  // assets they can see in Issuance.
-  it("reports a failed token load rather than showing no tokens", async () => {
-    const context = await fetchDvpCreateContext(
-      request({
-        wallets: ok({ data: [WALLET] }),
-        tokens: fail(503, { error: { message: "Issuance unavailable." } }),
-      })
-    );
-
-    expect(context.error).toBe("Issuance unavailable.");
-    // The wallets that DID load are still offered.
-    expect(context.wallets).toHaveLength(1);
-  });
-
-  it("reports a failed wallet load", async () => {
-    const context = await fetchDvpCreateContext(
-      request({ wallets: fail(500), tokens: ok({ data: [TOKEN] }) })
-    );
-
-    expect(context.error).toContain("500");
-    expect(context.wallets).toEqual([]);
-  });
-
-  // Never throws: the page renders with empty pickers and an explanation.
-  it("survives a transport failure", async () => {
-    const context = await fetchDvpCreateContext(
-      vi.fn(async () => {
-        throw new Error("socket hang up");
-      }) as never
-    );
-
-    expect(context.error).toBe("socket hang up");
-    expect(context.wallets).toEqual([]);
-    expect(context.tokens).toEqual([]);
-  });
-
-  // A decimals field that is absent is unknown, not zero. Treating it as zero
-  // would make the amount field take a whole number for a 6-decimal mint.
-  it("keeps unknown decimals null rather than defaulting to zero", async () => {
-    const context = await fetchDvpCreateContext(
-      request({ wallets: ok({ data: [] }), tokens: ok({ data: [{ mintAddress: "mint1" }] }) })
-    );
-
-    expect(context.tokens[0].decimals).toBeNull();
-  });
-
-  // PRO-1851. Balances cost a chain read per wallet and held the form back by
-  // seconds; nothing on it renders one, so the page does not ask.
-  it("lists wallets without waiting on their balances", async () => {
-    const fetchContext = request({
-      wallets: ok({ data: [WALLET] }),
-      tokens: ok({ data: [TOKEN] }),
-    });
-
-    const context = await fetchDvpCreateContext(fetchContext);
-
-    const paths = vi
-      .mocked(fetchContext as (path: string) => unknown)
-      .mock.calls.map(([path]) => path);
-    expect(paths.filter((path) => path.startsWith("/v1/wallets"))).toEqual(["/v1/wallets"]);
-    expect(context.wallets[0].balances).toBeNull();
-  });
-
-  it("maps balances when a wallet row carries them", async () => {
-    const context = await fetchDvpCreateContext(
-      request({
-        wallets: ok({ data: [WALLET_WITH_BALANCES] }),
-        tokens: ok({ data: [TOKEN] }),
-      })
-    );
-
-    expect(context.wallets[0].balances).toEqual([
-      {
-        mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
-        amount: "25000000000",
-        decimals: 6,
-        symbol: "ATD",
-      },
-      {
-        mint: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
-        amount: "50",
-        decimals: 6,
-        symbol: null,
-      },
-    ]);
+    await waitFor(() => expect(readsOf(fetchMock, TOKENS_URL)).toBe(2));
+    expect(readsOf(fetchMock, WALLETS_URL)).toBe(1);
+    expect(readsOf(fetchMock, ACCOUNTS_URL)).toBe(1);
   });
 });

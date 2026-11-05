@@ -10,6 +10,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
+import { readsOf, stubDashboardFetch } from "@/test/dashboard-fetch";
+import { renderBesideReads } from "@/test/dashboard-reads";
+import { SANDBOX_PROJECT } from "@/test/projects";
+import { earnQueryKeys } from "./earn-query-key";
 
 const mocks = vi.hoisted(() => ({
   cancelRequest: vi.fn(),
@@ -168,6 +172,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("EarnVaultQueuedWithdrawModal", () => {
@@ -403,6 +408,35 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     await waitFor(() =>
       expect(mocks.cancelRequest).toHaveBeenCalledWith(submitted.withdrawalRequestId, SECOND_KEY)
     );
+  });
+
+  it("reads Earn's positions again once the request is created and once it is cancelled", async () => {
+    const positionsUrl = "/api/dashboard/markets/earn/vault-positions?limit=100";
+    const fetchMock = stubDashboardFetch(() => Response.json({}));
+    mocks.createRequest.mockResolvedValue({
+      ok: true,
+      status: 201,
+      data: { kind: "submitted", withdrawalRequest: request("pending") },
+    });
+    mocks.useRequestOutcome.mockReturnValue(request("expiredCancelable"));
+    renderBesideReads(
+      <EarnVaultQueuedWithdrawModal
+        environment="sandbox"
+        onClose={vi.fn()}
+        position={position}
+        projectId="project_1"
+        terms={terms}
+      />,
+      [earnQueryKeys.vaultPositions({ projectId: SANDBOX_PROJECT.id, mode: "live" })]
+    );
+    await waitFor(() => expect(readsOf(fetchMock, positionsUrl)).toBe(1));
+
+    await openReview();
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
+    await waitFor(() => expect(readsOf(fetchMock, positionsUrl)).toBe(2));
+    fireEvent.click(await screen.findByRole("button", { name: "Get shares back" }));
+
+    await waitFor(() => expect(readsOf(fetchMock, positionsUrl)).toBe(3));
   });
 
   it("keeps a confirmed cancel ahead of a stale poll whose timestamps sort differently", async () => {

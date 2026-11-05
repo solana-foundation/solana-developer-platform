@@ -8,7 +8,6 @@ import {
   matchesAddressQuery,
   overFundedLegs,
 } from "./dvp-trade";
-import { isNotFound } from "./dvp-trades.data";
 
 function trade(overrides: Parameters<typeof testTrade>[0] = {}): ReturnType<typeof testTrade> {
   return testTrade({ status: "funded", ...overrides });
@@ -161,26 +160,6 @@ describe("custodiedSidesOf", () => {
     });
 
     expect(custodiedSidesOf(value)).toEqual(["a"]);
-  });
-});
-
-// Rendering an outage as "not found" tells someone their trade is gone when it
-// is sitting there — and a DvP trade holds both parties' money in escrow, so
-// that is the worst available wrong answer.
-describe("isNotFound", () => {
-  it("is true only for a genuine 404", () => {
-    expect(isNotFound({ status: 404 })).toBe(true);
-  });
-
-  it("is false for every operational failure", () => {
-    for (const status of [429, 500, 502, 503, 401, 403]) {
-      expect(isNotFound({ status })).toBe(false);
-    }
-  });
-
-  // A transport failure never reached the API, so there is no status at all.
-  it("is false when the request never got a response", () => {
-    expect(isNotFound({ status: null })).toBe(false);
   });
 });
 

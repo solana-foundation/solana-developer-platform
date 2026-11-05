@@ -1,5 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { setWindowPathname } from "@/test/window-location";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
+import type { DashboardKeyScope } from "@/lib/dashboard-request-key";
+import { sentDashboardReads, stubDashboardFetch } from "@/test/dashboard-fetch";
+import { SANDBOX_PROJECT } from "@/test/projects";
 import {
   type EarnFundingWallet,
   fetchFundingWallets,
@@ -7,9 +10,10 @@ import {
   refreshFundingWalletBalances,
 } from "./earn-funding-wallets";
 
-const PROJECT_HEADERS = new Headers({ "x-project-id": "prj_test_sandbox" });
+const SCOPE: DashboardKeyScope = { projectId: SANDBOX_PROJECT.id, mode: "live" };
+const INVENTORY_KEY = earnQueryKeys.fundingWalletInventory(SCOPE);
+const UNREADABLE_ANSWER = { status: 200, code: null, message: "" };
 
-beforeEach(() => setWindowPathname("/dashboard/prj_test_sandbox/markets/treasury-solutions"));
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -27,10 +31,7 @@ function wallet(overrides: Partial<EarnFundingWallet> & { id: string }): EarnFun
 }
 
 function stubResponse(body: unknown) {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => Response.json(body))
-  );
+  return stubDashboardFetch(() => Response.json(body));
 }
 
 describe("fetchFundingWallets", () => {
@@ -40,7 +41,7 @@ describe("fetchFundingWallets", () => {
     ["has a row missing the address a deposit is signed from", { data: { wallets: [incomplete] } }],
   ])("fails closed when a successful response %s", async (_condition, body) => {
     stubResponse(body);
-    await expect(fetchFundingWallets()).rejects.toThrow("Invalid custody wallet response");
+    await expect(fetchFundingWallets(INVENTORY_KEY)).rejects.toMatchObject(UNREADABLE_ANSWER);
   });
 
   it("returns only active wallets from the live response", async () => {
@@ -49,7 +50,7 @@ describe("fetchFundingWallets", () => {
       data: { wallets: [active, wallet({ id: "inactive", status: "inactive" })] },
     });
 
-    await expect(fetchFundingWallets()).resolves.toEqual([active]);
+    await expect(fetchFundingWallets(INVENTORY_KEY)).resolves.toEqual([active]);
   });
 
   it("keeps same-address Connection owners and runtime-disabled wallets in inventory", async () => {
@@ -61,12 +62,16 @@ describe("fetchFundingWallets", () => {
       },
       { ...wallet({ id: "wallet-c" }), custodyConfigId: "config-c" },
     ];
-    stubResponse({ data: { wallets } });
+    const fetchMock = stubResponse({ data: { wallets } });
 
-    await expect(fetchFundingWallets()).resolves.toEqual(wallets);
-    expect(fetch).toHaveBeenCalledWith("/api/dashboard/wallets?view=summary&includeBalances=true", {
-      headers: PROJECT_HEADERS,
-    });
+    await expect(fetchFundingWallets(INVENTORY_KEY)).resolves.toEqual(wallets);
+    expect(sentDashboardReads(fetchMock)).toEqual([
+      {
+        path: "/api/dashboard/wallets?includeBalances=true",
+        projectId: SANDBOX_PROJECT.id,
+        demo: null,
+      },
+    ]);
   });
 });
 
@@ -81,7 +86,11 @@ describe("live funding wallet balances", () => {
       })
     );
     vi.stubGlobal("fetch", fetchMock);
-    await refreshFundingWalletBalances([affected, alias, unrelated], new Map([[affected.id, 101]]));
+    await refreshFundingWalletBalances(
+      SCOPE,
+      [affected, alias, unrelated],
+      new Map([[affected.id, 101]])
+    );
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       "/api/dashboard/payments/wallets/provider-affected/balances?minimumSlot=101",
       "/api/dashboard/payments/wallets/provider-alias/balances?minimumSlot=101",
@@ -90,7 +99,7 @@ describe("live funding wallet balances", () => {
   });
   it("requires the wallet API to acknowledge the position confirmation slot", async () => {
     const fetchMock = vi
-      .fn()
+      .fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ data: { walletBalances: { balances: [] } } }))
       .mockResolvedValueOnce(
         Response.json({
@@ -103,17 +112,18 @@ describe("live funding wallet balances", () => {
         })
       );
     vi.stubGlobal("fetch", fetchMock);
-    await expect(fetchLiveFundingWalletBalance("wallet", 101)).rejects.toThrow(
-      "confirmation freshness"
+    await expect(fetchLiveFundingWalletBalance(SCOPE, "wallet", 101)).rejects.toMatchObject(
+      UNREADABLE_ANSWER
     );
-    await expect(fetchLiveFundingWalletBalance("wallet", 101)).rejects.toThrow(
-      "confirmation freshness"
+    await expect(fetchLiveFundingWalletBalance(SCOPE, "wallet", 101)).rejects.toMatchObject(
+      UNREADABLE_ANSWER
     );
-    await expect(fetchLiveFundingWalletBalance("wallet", 101)).resolves.toEqual([]);
-    expect(fetchMock).toHaveBeenLastCalledWith(
-      "/api/dashboard/payments/wallets/wallet/balances?minimumSlot=101",
-      { cache: "no-store", headers: PROJECT_HEADERS }
-    );
+    await expect(fetchLiveFundingWalletBalance(SCOPE, "wallet", 101)).resolves.toEqual([]);
+    expect(sentDashboardReads(fetchMock).at(-1)).toEqual({
+      path: "/api/dashboard/payments/wallets/wallet/balances?minimumSlot=101",
+      projectId: SANDBOX_PROJECT.id,
+      demo: null,
+    });
   });
 
   it("bypasses the cached collection and reads the wallet balance endpoint", async () => {
@@ -126,14 +136,16 @@ describe("live funding wallet balances", () => {
         decimals: 6,
       },
     ];
-    const fetchMock = vi.fn(async () => Response.json({ data: { walletBalances: { balances } } }));
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubResponse({ data: { walletBalances: { balances } } });
 
-    await expect(fetchLiveFundingWalletBalance("wallet/live")).resolves.toEqual(balances);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/dashboard/payments/wallets/wallet%2Flive/balances",
-      { cache: "no-store", headers: PROJECT_HEADERS }
-    );
+    await expect(fetchLiveFundingWalletBalance(SCOPE, "wallet/live")).resolves.toEqual(balances);
+    expect(sentDashboardReads(fetchMock)).toEqual([
+      {
+        path: "/api/dashboard/payments/wallets/wallet%2Flive/balances",
+        projectId: SANDBOX_PROJECT.id,
+        demo: null,
+      },
+    ]);
   });
 
   it("rejects a partial refresh instead of returning a cached balance as fresh", async () => {
@@ -174,9 +186,10 @@ describe("live funding wallet balances", () => {
       })
     );
 
-    await expect(refreshFundingWalletBalances([first, unavailable])).rejects.toThrow(
-      "Request failed (503)"
-    );
+    await expect(refreshFundingWalletBalances(SCOPE, [first, unavailable])).rejects.toMatchObject({
+      status: 503,
+      message: "RPC unavailable",
+    });
     expect(first.balances?.[0]?.uiAmount).toBe("1");
     expect(unavailable.balances?.[0]?.uiAmount).toBe("1");
   });

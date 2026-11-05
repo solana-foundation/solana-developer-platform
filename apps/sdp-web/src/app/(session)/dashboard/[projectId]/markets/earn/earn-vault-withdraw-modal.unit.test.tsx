@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
 
 import type { EarnVaultPosition, EarnVaultWithdrawal } from "@sdp/types/earn";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
+import { readsOf, stubDashboardFetch } from "@/test/dashboard-fetch";
+import { renderBesideReads } from "@/test/dashboard-reads";
+import { SANDBOX_PROJECT } from "@/test/projects";
+import { earnQueryKeys } from "./earn-query-key";
 import { VAULT_QUOTE_DEBOUNCE_MS } from "./earn-vault-slippage";
 import { EarnVaultWithdrawModal } from "./earn-vault-withdraw-modal";
 
@@ -85,7 +89,10 @@ beforeEach(() => {
   mocks.fetchEarnVaultWithdrawalPreview.mockResolvedValue({ kind: "unavailable" });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 /** The flow's progress as the reader sees it: the current step's name and "Step x of y". */
 function flowProgress(): { step: string | null; label: string | undefined } {
@@ -274,6 +281,35 @@ describe("EarnVaultWithdrawModal", () => {
       amount: "6",
       submittedAt: expect.any(Number),
     });
+  });
+
+  it("reads Earn's positions again after any withdrawal answer, a refusal included", async () => {
+    const user = userEvent.setup();
+    const positionsUrl = "/api/dashboard/markets/earn/vault-positions?limit=100";
+    const fetchMock = stubDashboardFetch(() => Response.json({}));
+    mocks.createEarnVaultWithdrawal.mockResolvedValue({
+      ok: false,
+      status: 503,
+      error: "Vault temporarily unavailable",
+      body: null,
+    });
+    renderBesideReads(
+      <EarnVaultWithdrawModal
+        environment="sandbox"
+        onClose={vi.fn()}
+        onWithdrawn={vi.fn()}
+        position={position}
+        projectId="prj_1"
+      />,
+      [earnQueryKeys.vaultPositions({ projectId: SANDBOX_PROJECT.id, mode: "live" })]
+    );
+    await waitFor(() => expect(readsOf(fetchMock, positionsUrl)).toBe(1));
+
+    await user.type(screen.getByLabelText("Amount"), "6");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(await screen.findByRole("button", { name: "Confirm withdrawal" }));
+
+    await waitFor(() => expect(readsOf(fetchMock, positionsUrl)).toBe(2));
   });
 
   it("renders a confirmed withdrawal as complete while finalization continues", async () => {

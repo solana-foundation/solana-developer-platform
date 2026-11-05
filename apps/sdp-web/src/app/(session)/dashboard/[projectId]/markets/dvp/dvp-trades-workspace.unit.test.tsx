@@ -16,12 +16,12 @@
  * filter strip's presence rules, and the party/leg rendering.
  */
 
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ChangeEvent, ReactNode } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
+import { dashboardErrorResponse, readsOf, stubDashboardFetch } from "@/test/dashboard-fetch";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { EnglishDashboardReads } from "@/test/dashboard-reads";
 import {
   OTHER_ADDRESS,
   OWN_WALLET_ID,
@@ -33,6 +33,7 @@ import {
 import type { DvpTrade } from "./dvp-trade";
 import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
 import { resolveTradesListState } from "./dvp-trades-list-state";
+import { type DvpTradesUrlStatus, parseDvpTradesFilters } from "./dvp-trades-query";
 import { DvpTradesWorkspace } from "./dvp-trades-workspace";
 
 // A member who may write; the read-only cases live with each component's own viewer tests.
@@ -76,34 +77,47 @@ function trade(overrides: Partial<DvpTrade> = {}): DvpTrade {
   return testTrade(overrides);
 }
 
-function renderList(trades: DvpTrade[], error: string | null = null): string {
-  return renderWorkspace({ trades, error, inbound: [] });
+const TRADES_PATH = "/api/dashboard/markets/dvp/trades";
+
+function workspaceElement(searchQuery: string, statusFilter: DvpTradesUrlStatus) {
+  return (
+    <DvpTradesWorkspace
+      filters={parseDvpTradesFilters({ status: statusFilter, q: searchQuery }).filters}
+      searchQuery={searchQuery}
+      statusFilter={statusFilter}
+    />
+  );
 }
 
-function renderWorkspace({
-  trades,
-  inbound,
-  error = null,
-  searchQuery = "",
-  statusFilter = "all",
-}: {
+async function renderLoaded(searchQuery: string, statusFilter: DvpTradesUrlStatus) {
+  const view = render(workspaceElement(searchQuery, statusFilter), {
+    wrapper: EnglishDashboardReads,
+  });
+  await waitFor(() =>
+    expect(view.container.querySelector('[data-loading-layout="dvp-trades"]')).toBeNull()
+  );
+  return view;
+}
+
+function stubTradeLists(trades: DvpTrade[], inbound: DvpInboundTrade[]) {
+  stubDashboardFetch(({ path }) =>
+    Response.json({ data: { trades: path === `${TRADES_PATH}/inbound` ? inbound : trades } })
+  );
+}
+
+async function renderWorkspace(view: {
   trades: DvpTrade[];
   inbound: DvpInboundTrade[];
-  error?: string | null;
-  searchQuery?: string;
-  statusFilter?: "all" | "open" | "ready" | "closed";
-}): string {
-  return renderToStaticMarkup(
-    <EnglishTestI18n>
-      <DvpTradesWorkspace
-        error={error}
-        inbound={inbound}
-        searchQuery={searchQuery}
-        statusFilter={statusFilter}
-        trades={trades}
-      />
-    </EnglishTestI18n>
-  );
+  searchQuery: string;
+  statusFilter: DvpTradesUrlStatus;
+}): Promise<string> {
+  stubTradeLists(view.trades, view.inbound);
+  const { container } = await renderLoaded(view.searchQuery, view.statusFilter);
+  return container.innerHTML;
+}
+
+function renderList(trades: DvpTrade[]): Promise<string> {
+  return renderWorkspace({ trades, inbound: [], searchQuery: "", statusFilter: "all" });
 }
 
 /** A trade another organization set up that names one of this project's wallets. */
@@ -137,6 +151,7 @@ function inboundTrade(): DvpInboundTrade {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   resetDashboardNavigation();
   window.history.replaceState(null, "", "/");
 });
@@ -145,25 +160,27 @@ describe("DvpTradesWorkspace", () => {
   // The status dropdown is the only path to an inbound trade, so the filter
   // strip must render even when the project has no trades of its own —
   // hiding the control hides the trade with it.
-  it("offers the filter strip when trades are inbound, even with none of its own", () => {
-    const html = renderWorkspace({
+  it("offers the filter strip when trades are inbound, even with none of its own", async () => {
+    const html = await renderWorkspace({
       trades: [],
       inbound: [inboundTrade()],
+      searchQuery: "",
+      statusFilter: "all",
     });
 
     expect(html).toContain("Search trades");
     expect(html).toContain("Filter by status");
   });
 
-  it("offers no filters when nothing is inbound and the list is empty", () => {
-    expect(renderWorkspace({ trades: [], inbound: [] })).not.toContain("Filter by status");
+  it("offers no filters when nothing is inbound and the list is empty", async () => {
+    expect(await renderList([])).not.toContain("Filter by status");
   });
 
   it.each([
     ["No trades yet", []],
     ["<table", [trade()]],
-  ])("offers create inside the project alongside %s", (content, trades) => {
-    const html = renderList(trades);
+  ])("offers create inside the project alongside %s", async (content, trades) => {
+    const html = await renderList(trades);
 
     expect(html).toContain(content);
     expect(html).toContain("/dashboard/prj_test_sandbox/markets/dvp/create");
@@ -174,8 +191,13 @@ describe("DvpTradesWorkspace", () => {
   // the filters with it, so there was no way back to the other statuses.
   it.each(["open", "ready", "closed"] as const)(
     "keeps the filters on screen when the %s filter matches nothing",
-    (statusFilter) => {
-      const html = renderWorkspace({ trades: [], inbound: [], statusFilter });
+    async (statusFilter) => {
+      const html = await renderWorkspace({
+        trades: [],
+        inbound: [],
+        searchQuery: "",
+        statusFilter,
+      });
 
       expect(html).toContain("Filter by status");
       expect(html).toContain("No trades match these filters.");
@@ -183,8 +205,13 @@ describe("DvpTradesWorkspace", () => {
     }
   );
 
-  it("keeps the filters on screen when a search matches nothing", () => {
-    const html = renderWorkspace({ trades: [], inbound: [], searchQuery: "nothing-like-this" });
+  it("keeps the filters on screen when a search matches nothing", async () => {
+    const html = await renderWorkspace({
+      trades: [],
+      inbound: [],
+      searchQuery: "nothing-like-this",
+      statusFilter: "all",
+    });
 
     expect(html).toContain("Search trades");
     expect(html).toContain("No trades match these filters.");
@@ -192,8 +219,13 @@ describe("DvpTradesWorkspace", () => {
 
   // The one-row rule is about an unfiltered list. Narrowed to one trade, the
   // bar is the only way to widen the list again.
-  it("keeps the filters on screen when a status filter narrows the list to one trade", () => {
-    const html = renderWorkspace({ trades: [trade()], inbound: [], statusFilter: "ready" });
+  it("keeps the filters on screen when a status filter narrows the list to one trade", async () => {
+    const html = await renderWorkspace({
+      trades: [trade()],
+      inbound: [],
+      searchQuery: "",
+      statusFilter: "ready",
+    });
 
     expect(html).toContain("Search trades");
     expect(html).toContain("Filter by status");
@@ -201,45 +233,59 @@ describe("DvpTradesWorkspace", () => {
 
   // An error and a table of nothing say opposite things. Showing both claims
   // the list is empty when the truth is that it could not be read.
-  it("shows only the error when the list failed to load", () => {
-    const html = renderList([], "Upstream unavailable.");
+  it("shows only the error when the list failed to load, and reads it again on Try again", async () => {
+    const fetchMock = stubDashboardFetch(({ path }) =>
+      path === `${TRADES_PATH}/inbound`
+        ? Response.json({ data: { trades: [] } })
+        : dashboardErrorResponse(503, "Upstream unavailable.")
+    );
+    const { container } = await renderLoaded("", "all");
 
-    expect(html).toContain("Upstream unavailable.");
-    expect(html).not.toContain("No trades yet");
-    expect(html).not.toContain("<table");
+    expect(screen.getByText("Trades could not be loaded")).toBeTruthy();
+    expect(container.innerHTML).not.toContain("No trades yet");
+    expect(container.innerHTML).not.toContain("<table");
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(readsOf(fetchMock, `${TRADES_PATH}?limit=50`)).toBe(2));
+  });
+
+  it("warns that inbound trades could not be read, offering no Waiting segment, while the list renders", async () => {
+    const fetchMock = stubDashboardFetch(({ path }) =>
+      path === `${TRADES_PATH}/inbound`
+        ? dashboardErrorResponse(503, "Upstream unavailable.")
+        : Response.json({ data: { trades: [trade(), trade({ id: "dvp_2" })] } })
+    );
+    const { container } = await renderLoaded("", "all");
+
+    expect(screen.getByText("Trades waiting on you could not be loaded")).toBeTruthy();
+    expect(container.innerHTML).toContain("<table");
+    expect(screen.getByRole("combobox", { name: "Filter by status" })).toBeTruthy();
+    expect(container.querySelector('option[value="waiting"]')).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(readsOf(fetchMock, `${TRADES_PATH}/inbound`)).toBe(2));
   });
 
   // Two identical buttons on one screen read as two different actions.
-  it("does not repeat the create button beside the empty state", () => {
-    expect(renderList([]).match(/dvp\/create/g)?.length).toBe(1);
+  it("does not repeat the create button beside the empty state", async () => {
+    expect((await renderList([])).match(/dvp\/create/g)?.length).toBe(1);
   });
 
   // The filter bar earns its space only when there is something to sift; and
   // once it is there, "2 of 2" beside an untouched filter is a number that
   // answers nothing.
-  it("does not show a filter bar over a single trade", () => {
-    expect(renderList([trade()])).not.toContain("Search trades");
+  it("does not show a filter bar over a single trade", async () => {
+    expect(await renderList([trade()])).not.toContain("Search trades");
   });
 
-  it("offers filters once there is more than one trade", () => {
-    expect(renderList([trade(), trade({ id: "dvp_2" })])).toContain("Search trades");
+  it("offers filters once there is more than one trade", async () => {
+    expect(await renderList([trade(), trade({ id: "dvp_2" })])).toContain("Search trades");
   });
 
   // The echo of the workspace's own debounced replace must not clobber the
   // input: keystrokes typed while the URL catches up were previously lost.
-  it("keeps keystrokes typed while its own URL write is in flight", () => {
+  it("keeps keystrokes typed while its own URL write is in flight", async () => {
+    stubTradeLists([trade(), trade({ id: "dvp_2" })], []);
+    const view = await renderLoaded("", "all");
     vi.useFakeTimers();
-    const view = render(
-      <EnglishTestI18n>
-        <DvpTradesWorkspace
-          error={null}
-          inbound={[]}
-          searchQuery=""
-          statusFilter="all"
-          trades={[trade(), trade({ id: "dvp_2" })]}
-        />
-      </EnglishTestI18n>
-    );
 
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "ab" } });
     act(() => {
@@ -253,34 +299,15 @@ describe("DvpTradesWorkspace", () => {
     // More typing before the navigation's prop echo arrives…
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "abc" } });
     // …then the echo lands: the input must keep the newer text.
-    view.rerender(
-      <EnglishTestI18n>
-        <DvpTradesWorkspace
-          error={null}
-          inbound={[]}
-          searchQuery="ab"
-          statusFilter="all"
-          trades={[trade(), trade({ id: "dvp_2" })]}
-        />
-      </EnglishTestI18n>
-    );
+    view.rerender(workspaceElement("ab", "all"));
 
     expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("abc");
   });
 
-  it("writes a pending search and a new status as one filter state", () => {
+  it("writes a pending search and a new status as one filter state", async () => {
+    stubTradeLists([trade(), trade({ id: "dvp_2" })], []);
+    await renderLoaded("", "all");
     vi.useFakeTimers();
-    render(
-      <EnglishTestI18n>
-        <DvpTradesWorkspace
-          error={null}
-          inbound={[]}
-          searchQuery=""
-          statusFilter="all"
-          trades={[trade(), trade({ id: "dvp_2" })]}
-        />
-      </EnglishTestI18n>
-    );
 
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "ab" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Filter by status" }), {
@@ -301,19 +328,10 @@ describe("DvpTradesWorkspace", () => {
 
   // An EXTERNAL navigation (Back/Forward, a pasted URL) is exactly when the
   // input must adopt the URL's value — and any pending flush must not undo it.
-  it("adopts an externally navigated search and drops the superseded flush", () => {
+  it("adopts an externally navigated search and drops the superseded flush", async () => {
+    stubTradeLists([trade(), trade({ id: "dvp_2" })], []);
+    const view = await renderLoaded("", "all");
     vi.useFakeTimers();
-    const view = render(
-      <EnglishTestI18n>
-        <DvpTradesWorkspace
-          error={null}
-          inbound={[]}
-          searchQuery=""
-          statusFilter="all"
-          trades={[trade(), trade({ id: "dvp_2" })]}
-        />
-      </EnglishTestI18n>
-    );
 
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "abacus" } });
     // Back/Forward lands before the debounce flushes.
@@ -321,17 +339,7 @@ describe("DvpTradesWorkspace", () => {
       window.history.pushState(null, "", "/dashboard/prj_test_sandbox/markets/dvp?q=bamboo");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
-    view.rerender(
-      <EnglishTestI18n>
-        <DvpTradesWorkspace
-          error={null}
-          inbound={[]}
-          searchQuery="bamboo"
-          statusFilter="all"
-          trades={[trade(), trade({ id: "dvp_2" })]}
-        />
-      </EnglishTestI18n>
-    );
+    view.rerender(workspaceElement("bamboo", "all"));
     expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("bamboo");
 
     act(() => {
@@ -346,19 +354,12 @@ describe("DvpTradesWorkspace", () => {
     );
   });
 
-  it("starts from page one when browser navigation changes the search", () => {
-    const trades = Array.from({ length: 12 }, (_, index) => trade({ id: `dvp_${index + 1}` }));
-    const view = render(
-      <EnglishTestI18n>
-        <DvpTradesWorkspace
-          error={null}
-          inbound={[]}
-          searchQuery="first"
-          statusFilter="all"
-          trades={trades}
-        />
-      </EnglishTestI18n>
+  it("starts from page one when browser navigation changes the search", async () => {
+    stubTradeLists(
+      Array.from({ length: 12 }, (_, index) => trade({ id: `dvp_${index + 1}` })),
+      []
     );
+    const view = await renderLoaded("first", "all");
 
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     expect(screen.getByText("Page 2 of 2")).toBeTruthy();
@@ -367,25 +368,15 @@ describe("DvpTradesWorkspace", () => {
       window.history.pushState(null, "", "/dashboard/prj_test_sandbox/markets/dvp?q=second");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
-    view.rerender(
-      <EnglishTestI18n>
-        <DvpTradesWorkspace
-          error={null}
-          inbound={[]}
-          searchQuery="second"
-          statusFilter="all"
-          trades={trades}
-        />
-      </EnglishTestI18n>
-    );
+    view.rerender(workspaceElement("second", "all"));
 
     expect(screen.getByText("Page 1 of 2")).toBeTruthy();
   });
 
   // The trigger names what the control filters, not the opaque "All" — the
   // options themselves live in the dropdown portal and render only when open.
-  it("names the status filter on its closed trigger", () => {
-    expect(renderList([trade(), trade({ id: "dvp_2" })])).toContain("Filter by status");
+  it("names the status filter on its closed trigger", async () => {
+    expect(await renderList([trade(), trade({ id: "dvp_2" })])).toContain("Filter by status");
   });
 
   // A finished trade's escrows are closed and empty, so the stored reading is a
@@ -393,11 +384,11 @@ describe("DvpTradesWorkspace", () => {
   // claimed a balance that no longer exists — and a trade settled before any
   // reading was taken showed a bare number, so two finished trades rendered
   // two different ways.
-  it("shows what a finished trade delivered, not a funding fraction", () => {
+  it("shows what a finished trade delivered, not a funding fraction", async () => {
     const funded = testLeg({
       funding: { funded: true, observedAmount: "1000000000", frozen: false, surplus: null },
     });
-    const html = renderList([trade({ status: "settled", legs: { a: funded, b: funded } })]);
+    const html = await renderList([trade({ status: "settled", legs: { a: funded, b: funded } })]);
 
     expect(html).not.toContain("/ 1,000");
   });
@@ -408,8 +399,8 @@ describe("DvpTradesWorkspace", () => {
    * never say who gave what. Two rows meaning opposite things looked the same.
    */
   describe("which side you were on", () => {
-    it("says you delivered the asset leg when that side is custodied", () => {
-      const html = renderList([
+    it("says you delivered the asset leg when that side is custodied", async () => {
+      const html = await renderList([
         trade({
           status: "settled",
           legs: {
@@ -423,8 +414,8 @@ describe("DvpTradesWorkspace", () => {
       expect(html).toContain("You received");
     });
 
-    it("says the same for a trade where the caller holds the cash leg", () => {
-      const html = renderList([
+    it("says the same for a trade where the caller holds the cash leg", async () => {
+      const html = await renderList([
         trade({
           status: "settled",
           legs: {
@@ -439,8 +430,8 @@ describe("DvpTradesWorkspace", () => {
     });
 
     // Both legs custodied is a bilateral trade: two deliveries, no receipt.
-    it("says you delivered both legs on a bilateral trade", () => {
-      const html = renderList([
+    it("says you delivered both legs on a bilateral trade", async () => {
+      const html = await renderList([
         trade({
           kind: "bilateral",
           status: "settled",
@@ -468,24 +459,27 @@ describe("DvpTradesWorkspace", () => {
       "SDP Wallet",
       `/dashboard/prj_test_sandbox/wallets/${OWN_WALLET_ID}`,
     ],
-  ])("links party %# in the parties column to its page under its name", (party, name, href) => {
-    const html = renderList([
-      trade({
-        legs: {
-          a: testLeg({ party }),
-          b: testLeg({ party: { address: THIRD_ADDRESS, counterparty: null, wallet: null } }),
-        },
-      }),
-    ]);
+  ])(
+    "links party %# in the parties column to its page under its name",
+    async (party, name, href) => {
+      const html = await renderList([
+        trade({
+          legs: {
+            a: testLeg({ party }),
+            b: testLeg({ party: { address: THIRD_ADDRESS, counterparty: null, wallet: null } }),
+          },
+        }),
+      ]);
 
-    expect(html).toContain(name);
-    expect(html).toContain(href);
-  });
+      expect(html).toContain(name);
+      expect(html).toContain(href);
+    }
+  );
 
   // Before anything has read the escrow, its balance is unknown rather than
   // zero, so only the target is shown.
-  it("shows only the target for a leg nothing has read yet", () => {
-    const html = renderList([trade()]);
+  it("shows only the target for a leg nothing has read yet", async () => {
+    const html = await renderList([trade()]);
 
     // In the units somebody entered, with the token named. 1000000000 base
     // units at 6 decimals is 1,000 ATD, and showing the integer is how this
@@ -495,11 +489,11 @@ describe("DvpTradesWorkspace", () => {
     expect(html).not.toContain("1000000000");
   });
 
-  it("shows observed over target once the escrow has been read", () => {
+  it("shows observed over target once the escrow has been read", async () => {
     const funded = testLeg({
       funding: { observedAmount: "400000000", funded: false, surplus: null, frozen: false },
     });
-    const html = renderList([trade({ legs: { a: funded, b: testLeg() } })]);
+    const html = await renderList([trade({ legs: { a: funded, b: testLeg() } })]);
 
     expect(html).toContain("400 / 1,000");
   });
@@ -510,37 +504,37 @@ describe("DvpTradesWorkspace", () => {
   // The label is the only thing a screen reader gets from this icon, so it
   // has to name the condition that is actually true. Calling a frozen escrow
   // over-funded is a false statement, not a vague one.
-  it("labels a frozen row as frozen, not as over-funded", () => {
+  it("labels a frozen row as frozen, not as over-funded", async () => {
     const frozen = testLeg({
       funding: { observedAmount: "1000", funded: true, surplus: null, frozen: true },
     });
-    const html = renderList([trade({ legs: { a: frozen, b: testLeg() } })]);
+    const html = await renderList([trade({ legs: { a: frozen, b: testLeg() } })]);
 
     expect(html).toContain("Escrow is frozen");
     expect(html).not.toContain("Overfunded");
   });
 
-  it("labels an over-funded row as over-funded", () => {
+  it("labels an over-funded row as over-funded", async () => {
     const surplus = testLeg({
       funding: { observedAmount: "1500", funded: true, surplus: "500", frozen: false },
     });
-    const html = renderList([trade({ legs: { a: surplus, b: testLeg() } })]);
+    const html = await renderList([trade({ legs: { a: surplus, b: testLeg() } })]);
 
     expect(html).toContain("Overfunded");
   });
 
-  it("marks nothing on an ordinary row", () => {
+  it("marks nothing on an ordinary row", async () => {
     const funded = testLeg({
       funding: { observedAmount: "1000", funded: true, surplus: null, frozen: false },
     });
-    const html = renderList([trade({ legs: { a: funded, b: funded } })]);
+    const html = await renderList([trade({ legs: { a: funded, b: funded } })]);
 
     expect(html).not.toContain("Escrow is frozen");
     expect(html).not.toContain("Overfunded");
   });
 
-  it("does not inline an escrow address into the parties column", () => {
-    const html = renderList([trade()]);
+  it("does not inline an escrow address into the parties column", async () => {
+    const html = await renderList([trade()]);
 
     expect(html).not.toContain("FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU");
   });
@@ -576,6 +570,10 @@ describe("resolveTradesListState", () => {
       filtersApplied: true,
       filteredToNothing: true,
     });
+  });
+
+  it("never reads a project as empty when its inbound read failed", () => {
+    expect(resolveTradesListState({ ...base, inboundCount: null }).listIsEmpty).toBe(false);
   });
 
   it("holds the filter bar while a search is still being typed", () => {
