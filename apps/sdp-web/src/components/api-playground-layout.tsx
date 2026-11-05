@@ -44,7 +44,7 @@ const TAB_LIST_CLASS =
   "gap-6.5 [&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)]";
 
 // On a phone the design swaps each view's underline tabs for a 32px chip group with 14px labels.
-const PHONE_CHIP_CLASS = "refresh:px-2 refresh:py-1 refresh:text-body";
+const PHONE_CHIP_CLASS = "px-2 py-1 text-body";
 
 // The design's playground fields: 36px underline controls with 14px values, tracked -0.01em
 // like the deck's other controls.
@@ -61,11 +61,7 @@ function endpointGroups(endpoints: ApiPlaygroundEndpointConfig[]) {
 }
 
 /** Endpoint options, grouped when the endpoints name their families. */
-export function ApiPlaygroundEndpointOptions({
-  endpoints,
-}: {
-  endpoints: ApiPlaygroundEndpointConfig[];
-}) {
+function ApiPlaygroundEndpointOptions({ endpoints }: { endpoints: ApiPlaygroundEndpointConfig[] }) {
   const option = (endpoint: ApiPlaygroundEndpointConfig) => (
     <option key={endpoint.id} value={endpoint.id} className="bg-surface-raised text-primary">
       {endpoint.method} {endpoint.title}
@@ -439,7 +435,7 @@ function EndpointLine({
   runDisabled,
   onRun,
 }: Pick<
-  ApiPlaygroundRefreshLayoutProps,
+  ApiPlaygroundLayoutProps,
   "endpoints" | "activeEndpoint" | "onEndpointChange" | "execution" | "onRun"
 > & { runDisabled: boolean }) {
   const t = useTranslations();
@@ -522,7 +518,7 @@ function ResponseBody({
   );
 }
 
-export interface ApiPlaygroundRefreshLayoutProps {
+interface ApiPlaygroundLayoutProps {
   endpoints: ApiPlaygroundEndpointConfig[];
   activeEndpoint: ApiPlaygroundEndpointConfig;
   onEndpointChange: (endpointId: string) => void;
@@ -548,11 +544,11 @@ export interface ApiPlaygroundRefreshLayoutProps {
 }
 
 /**
- * The playground as a refresh surface lays out the endpoint and Run on one line, then the
+ * The playground lays out the endpoint and Run on one line, then the
  * request (form, raw HTTP or code) beside the response (body or
  * headers). ⌘↵ or Ctrl+↵ runs the request from anywhere on the page.
  */
-export function ApiPlaygroundRefreshLayout({
+export function ApiPlaygroundLayout({
   endpoints,
   activeEndpoint,
   onEndpointChange,
@@ -573,7 +569,7 @@ export function ApiPlaygroundRefreshLayout({
   onReset,
   onCopy,
   copiedAction,
-}: ApiPlaygroundRefreshLayoutProps) {
+}: ApiPlaygroundLayoutProps) {
   const t = useTranslations();
   const [view, setView] = useState<RequestView>("form");
   const [responseView, setResponseView] = useState<ResponseView>("body");

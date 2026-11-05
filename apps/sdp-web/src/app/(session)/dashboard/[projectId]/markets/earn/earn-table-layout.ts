@@ -2,7 +2,7 @@ import type { TreasuryTableColumns } from "@/app/(session)/dashboard/[projectId]
 import type { EMBEDDED_YIELD_STRATEGY_COLUMNS } from "./embedded-yield-layout";
 
 /**
- * What Earn's tables share on the refresh design, Treasury's and Embedded Yield's alike: the
+ * What Earn's tables share, Treasury's and Embedded Yield's alike: the
  * frame each page and its route skeleton set them in. No "use client" directive: the
  * server-rendered loading boundaries read these as values, and a client module would hand them
  * reference proxies instead.
@@ -19,7 +19,7 @@ export type EarnTableColumns = TreasuryTableColumns | typeof EMBEDDED_YIELD_STRA
 export const EARN_WIDE_ONLY_COLUMN = "hidden @2xl:table-cell";
 
 /** A table set on the page: the design's 12px bleed, so cell text lines up with the title. */
-export const EARN_TABLE_FRAME = "min-w-0 refresh:-mx-3";
+export const EARN_TABLE_FRAME = "min-w-0 -mx-3";
 
 /** The borderless design-system table, laid out by its columns' fixed widths. */
 export const EARN_TABLE = "rounded-none border-0 [&_table]:table-fixed";

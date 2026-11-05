@@ -61,7 +61,7 @@ describe("Markets dashboard headers", () => {
     expect(config.headerAction).toBeUndefined();
   });
 
-  it("centers the shared Markets title on DvP, which keeps the base design", () => {
+  it("centers the shared Markets title on DvP", () => {
     const config = getDashboardPageConfig("/dashboard/markets/dvp", t);
 
     expect(config).toMatchObject({

@@ -12,7 +12,7 @@ import { Combobox, type ComboboxOption } from "@sdp/ui/combobox";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { SegmentedControl } from "@sdp/ui/segmented-control";
-import { HashIcon, UsersIcon, WalletIcon } from "lucide-react";
+import { HashIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { BASE58_ADDRESS_PATTERN } from "@/app/(session)/dashboard/[projectId]/markets/base58-address";
 import { shortenAddress } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
@@ -293,7 +293,6 @@ export function PartySlotPicker({
       control = (
         <Combobox
           hideLabel
-          icon={<WalletIcon />}
           label={label}
           onChange={(walletId) => onChange({ mode: "wallet", walletId })}
           options={wallets.map((wallet) => ({
@@ -310,7 +309,6 @@ export function PartySlotPicker({
       control = (
         <Combobox
           hideLabel
-          icon={<UsersIcon />}
           label={label}
           onChange={(counterpartyAccountId) =>
             onChange({ mode: "counterparty", counterpartyAccountId })

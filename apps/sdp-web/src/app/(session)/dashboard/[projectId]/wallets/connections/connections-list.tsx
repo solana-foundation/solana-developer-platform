@@ -12,7 +12,7 @@ import {
 import { ListEmptyState } from "@sdp/ui/list-empty-state";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
-import { CableIcon, MoreHorizontalIcon } from "lucide-react";
+import { MoreHorizontalIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { formatCustodyProviderName } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
@@ -140,7 +140,6 @@ export function ConnectionsList({
   if (connections.length === 0) {
     return (
       <ListEmptyState
-        icon={<CableIcon className="size-5" />}
         message={t("DashboardCustody.connectionsEmptyInProject", { project: projectName })}
         description={t("DashboardCustody.connectionsEmptyDescription")}
         action={emptyStateAction}

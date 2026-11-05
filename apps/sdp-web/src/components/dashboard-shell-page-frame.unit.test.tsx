@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import * as clerk from "@clerk/nextjs";
+import { screen } from "@testing-library/react";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,9 +18,14 @@ import * as workspace from "@/contexts/dashboard-workspace-context";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navigation";
+import {
+  dashboardRouter,
+  resetDashboardNavigation,
+  setDashboardUrl,
+} from "@/test/dashboard-navigation";
 import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { dashboardFlagsAt } from "@/test/release-channel-flags";
+import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
@@ -43,6 +49,36 @@ const SIGNED_IN: ReturnType<typeof clerk.useAuth> = {
   orgRole: "org:admin",
   orgSlug: null,
   has: () => true,
+  signOut: async () => undefined,
+  getToken: async () => null,
+};
+
+const SIGNED_OUT: ReturnType<typeof clerk.useAuth> = {
+  isLoaded: true,
+  isSignedIn: false,
+  userId: null,
+  sessionId: null,
+  sessionClaims: null,
+  actor: null,
+  orgId: null,
+  orgRole: null,
+  orgSlug: null,
+  has: () => false,
+  signOut: async () => undefined,
+  getToken: async () => null,
+};
+
+const CLERK_LOADING: ReturnType<typeof clerk.useAuth> = {
+  isLoaded: false,
+  isSignedIn: undefined,
+  userId: undefined,
+  sessionId: undefined,
+  sessionClaims: undefined,
+  actor: undefined,
+  orgId: undefined,
+  orgRole: undefined,
+  orgSlug: undefined,
+  has: () => false,
   signOut: async () => undefined,
   getToken: async () => null,
 };
@@ -118,6 +154,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   resetDashboardNavigation();
+  restoreWindowLocation();
 });
 
 describe("dashboard shell page frame", () => {
@@ -186,5 +223,28 @@ describe("dashboard shell page frame", () => {
     const titles = [...container.querySelectorAll("h1")];
     expect(titles.map((title) => title.textContent)).toEqual(["Page not found"]);
     expect(titles[0]?.className).not.toContain("sr-only");
+  });
+
+  it("opens the phone's navigation from the header", async () => {
+    await renderAt(`${PROJECT}/api-keys`);
+    expect(screen.queryByRole("button", { name: "Close navigation overlay" })).toBeNull();
+
+    await act(async () => screen.getByRole("button", { name: "Open navigation" }).click());
+
+    expect(screen.getByRole("button", { name: "Close navigation overlay" })).toBeTruthy();
+  });
+
+  it.each([
+    ["signed out", SIGNED_OUT],
+    ["while Clerk loads", CLERK_LOADING],
+  ])("holds the loading screen %s without navigating", async (_label, auth) => {
+    vi.spyOn(clerk, "useAuth").mockReturnValue(auth);
+    setWindowPathname(`${PROJECT}/payments?tab=x`);
+
+    await renderAt(`${PROJECT}/payments?tab=x`);
+
+    expect(container.querySelector("main[data-shell-loading-skeleton]")).not.toBeNull();
+    expect(dashboardRouter.replace).not.toHaveBeenCalled();
+    expect(dashboardRouter.push).not.toHaveBeenCalled();
   });
 });

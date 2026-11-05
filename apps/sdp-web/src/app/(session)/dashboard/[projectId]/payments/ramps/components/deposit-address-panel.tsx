@@ -326,7 +326,7 @@ function RecentDeposits({
     );
   } else {
     body = (
-      <Table className="table-fixed rounded-none border-0 refresh:-mx-3">
+      <Table className="table-fixed rounded-none border-0 -mx-3">
         {/* The design's own table runs wider than the card and is clipped. */}
         <colgroup>
           {RECENT_DEPOSIT_COLUMN_WIDTHS.map((width) => (

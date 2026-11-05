@@ -3,14 +3,7 @@
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { SkeletonBlock } from "@sdp/ui/skeleton-block";
-import {
-  ArrowDownIcon,
-  ArrowLeftIcon,
-  ChevronLeftIcon,
-  DownloadIcon,
-  MenuIcon,
-  PlusIcon,
-} from "lucide-react";
+import { ArrowDownIcon, ChevronLeftIcon, DownloadIcon, MenuIcon, PlusIcon } from "lucide-react";
 import Link from "next/link";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
@@ -51,7 +44,7 @@ type DashboardPageConfig = {
   topBarLeadingContent?: ReactNode;
   contentWidthClass?: string;
   /**
-   * Refresh pages set the title and tabs in the page's column; this names that column when it
+   * Pages set the title and tabs in the page's column; this names that column when it
    * is narrower than the content box, as on a flow whose footer band spans the whole card.
    */
   headerWidthClass?: string;
@@ -59,7 +52,7 @@ type DashboardPageConfig = {
   headerAction?: DashboardHeaderActionConfig;
   hideTitle?: boolean;
   /**
-   * A refresh flow that hides its title and sets its own top spacing: the header keeps its
+   * A flow that hides its title and sets its own top spacing: the header keeps its
    * padding only on a phone, where it holds the menu button.
    */
   flushTopOnDesktop?: boolean;
@@ -91,10 +84,10 @@ export type DashboardHeaderActionConfig = {
   capability?: keyof DashboardCapabilities;
 };
 
-// The refresh header's action is 34px from md, 2px under the shared small button; on a phone,
+// The header's action is 34px from md, 2px under the shared small button; on a phone,
 // where it sits alone under the title, the design draws it 38px with 16px sides.
 const HEADER_ACTION_SIZE_CLASS =
-  "refresh:[--button-height-md:2.125rem] max-md:refresh:[--button-height-md:2.375rem] max-md:refresh:[--button-padding-x-md:1rem]";
+  "[--button-height-md:2.125rem] max-md:[--button-height-md:2.375rem] max-md:[--button-padding-x-md:1rem]";
 
 /** The saved file's name, off a Content-Disposition header. */
 function attachmentFilename(header: string | null): string | null {
@@ -217,17 +210,11 @@ type DashboardTopBarProps = {
   topBarLeadingContent?: ReactNode;
   hasHeaderTabs?: boolean;
   action?: ReactNode;
-  /** Set over a left title: a refresh action page's way back. */
+  /** Set over a left title: an action page's way back. */
   above?: ReactNode;
-  /**
-   * "refresh" is the design's phone header: a menu button that opens the navigation, the title
-   * under it, then the page's action; from md the sidebar is back and the action rejoins the
-   * title's row. "base" keeps the bottom bar's layout.
-   */
-  layout?: "base" | "refresh";
   /** Page-level controls at the title row's end (Payments puts its demo switch here). */
   utilities?: ReactNode;
-  /** Shown before a refresh page's title, as a wallet's provider mark is. */
+  /** Shown before the page's title, as a wallet's provider mark is. */
   mark?: ReactNode;
 };
 
@@ -244,14 +231,13 @@ export function HeaderBackAction({
   return (
     <Link
       href={projectHref(href)}
-      // Refresh: the chevron's stroke sits on the column's edge (the 16px icon has 6px of air before it), 6px to its label.
-      className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary refresh:-ml-1.5 refresh:h-5 refresh:gap-1.5"
+      // The chevron's stroke sits on the column's edge (the 16px icon has 6px of air before it), 6px to its label.
+      className="inline-flex items-center rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary -ml-1.5 h-5 gap-1.5"
     >
-      <ArrowLeftIcon className="h-4 w-4 refresh:hidden" />
-      <ChevronLeftIcon className="hidden size-4 refresh:block" />
+      <ChevronLeftIcon className="size-4 block" />
       <span
         className={[
-          "text-[13px] leading-[18px] font-medium refresh:text-body refresh:leading-5 refresh:font-normal",
+          "text-body leading-5 font-normal",
           compactOnMobile ? "hidden sm:inline" : "",
         ].join(" ")}
       >
@@ -262,7 +248,7 @@ export function HeaderBackAction({
 }
 
 /**
- * The refresh phone header's way into the navigation: the design's 20px menu glyph on a 36px
+ * The phone header's way into the navigation: the design's 20px menu glyph on a 36px
  * target, pulled 4px into the gutter so the glyph's lines start where the title does. Gone
  * from md, where the sidebar itself is on screen.
  */
@@ -281,7 +267,7 @@ function MobileNavButton({ onClick }: { onClick: () => void }) {
 }
 
 /**
- * The refresh title block. On a phone it is the design's three rows: the navigation button, the
+ * The title block. On a phone it is the design's three rows: the navigation button, the
  * title 8px under it, then the page's action 16px under that. From md the button goes and the
  * action sits on the title's row. Any utilities (Payments' demo mode switch) sit at the far right
  * of the phone's navigation row, and from md on the title's row, before the action.
@@ -300,7 +286,7 @@ export function StackedDashboardTopBar({
   action?: ReactNode;
   trailingContent: ReactNode;
   hideTitle?: boolean;
-  /** Set over the title in its column: a refresh action page's way back. */
+  /** Set over the title in its column: an action page's way back. */
   above?: ReactNode;
   /** Set before the title, 16px from it (a wallet's 48px provider mark). */
   mark?: ReactNode;
@@ -424,14 +410,14 @@ export function StandardDashboardTopBar({
   trailingContent: ReactNode;
   hideTitle?: boolean;
   alignTitleWithTabs?: boolean;
-  /** Set over the title in its column: a refresh action page's way back. */
+  /** Set over the title in its column: an action page's way back. */
   above?: ReactNode;
 }) {
   return (
-    // Refresh: the row is exactly the title's height, so the 24px to the tabs is measured from
+    // The row is exactly the title's height, so the 24px to the tabs is measured from
     // the title itself and a taller page action centres on it.
     <div
-      className="grid min-h-[40px] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] xl:grid-cols-[0_minmax(0,1fr)_auto] xl:gap-x-0 refresh:min-h-0 refresh:items-center"
+      className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] xl:grid-cols-[0_minmax(0,1fr)_auto] xl:gap-x-0 min-h-0 items-center"
       data-dashboard-standard-topbar
     >
       <div className="col-start-1 row-start-1 flex min-w-0 items-center">{leadingContent}</div>
@@ -469,7 +455,6 @@ export function DashboardTopBar({
   hasHeaderTabs = false,
   action,
   above,
-  layout = "base",
   utilities,
   mark,
 }: DashboardTopBarProps) {
@@ -485,10 +470,9 @@ export function DashboardTopBar({
   const centersPageTitle =
     titleVisibility !== "screen-reader-only" &&
     (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
-  const isRefresh = layout === "refresh";
   const openNavigation = () => setMobileSidebarOpen(true);
 
-  if (isRefresh && !centersPageTitle && !topBarLeadingContent) {
+  if (!centersPageTitle && !topBarLeadingContent) {
     return (
       <StackedDashboardTopBar
         navigation={<MobileNavButton onClick={openNavigation} />}
@@ -549,7 +533,7 @@ function playgroundHeaderTabs(t: ReturnType<typeof useTranslations>): DashboardH
 }
 
 /**
- * A refresh-design payments flow (Pay, Deposit): the title sits left above the flow's own tabs,
+ * A payments flow (Pay, Deposit): the title sits left above the flow's own tabs,
  * both in the flow's column, and the content box stays full width so the flow's footer band
  * can span the card. No back action: the footer's Cancel returns to Payments. A flow with one
  * way in has no tabs.
@@ -570,8 +554,8 @@ function refreshFlowPageConfig(config: {
   return pageConfig;
 }
 
-/** Width of the refresh Payments overview and list pages: the design's 900px column. */
-const REFRESH_PAGE_WIDTH = "max-w-page";
+/** Width of the overview and list pages: the design's 900px column. */
+const PAGE_WIDTH = "max-w-page";
 
 function actionPageConfig(config: {
   title: string;
@@ -616,7 +600,7 @@ function privateChannelsSubPageTitle(
   }
 }
 
-/** The Privacy connect form, on the refresh design: a left title over the form's column. */
+/** The Privacy connect form: a left title over the form's column. */
 function privacySetupPageConfig(t: ReturnType<typeof useTranslations>): DashboardPageConfig {
   return {
     title: t("Shared.dashboardShell.privacy"),
@@ -704,7 +688,7 @@ function getCounterpartyRoutePageConfig(
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
   if (pathname === "/dashboard/payments/counterparty/create") {
-    // A refresh flow: the way back over the title in the form's column; the footer band spans
+    // A flow: the way back over the title in the form's column; the footer band spans
     // the page.
     return {
       title: t("Shared.dashboardShell.newDesign.newCounterparty"),
@@ -722,7 +706,7 @@ function getCounterpartyRoutePageConfig(
     const counterpartyId = pathname.split("/")[4] ?? "";
     return {
       title: t("Shared.dashboardShell.contact"),
-      contentWidthClass: REFRESH_PAGE_WIDTH,
+      contentWidthClass: PAGE_WIDTH,
       backAction: {
         href: "/dashboard/payments/counterparty",
         label: t("Shared.dashboardShell.contactList"),
@@ -746,7 +730,7 @@ function getMarketsRoutePageConfig(
     return {
       title: t("Shared.dashboardShell.markets"),
       titlePosition: "left",
-      contentWidthClass: REFRESH_PAGE_WIDTH,
+      contentWidthClass: PAGE_WIDTH,
     };
   }
   // Create is a detail/action route, so it keeps a centred title and a way back
@@ -780,14 +764,14 @@ function getMarketsRoutePageConfig(
     return {
       title: t("Shared.dashboardShell.treasurySolutions"),
       titlePosition: "left",
-      contentWidthClass: REFRESH_PAGE_WIDTH,
+      contentWidthClass: PAGE_WIDTH,
     };
   }
   if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram) {
     return {
       title: t("Shared.dashboardShell.earnProgram"),
       titlePosition: "left",
-      contentWidthClass: REFRESH_PAGE_WIDTH,
+      contentWidthClass: PAGE_WIDTH,
       headerAction: {
         label: t("DashboardMarkets.earnProgram.configureShort"),
         href: `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure`,
@@ -799,7 +783,7 @@ function getMarketsRoutePageConfig(
   if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure`) {
     return {
       title: t("DashboardMarkets.earnProgram.configureShort"),
-      contentWidthClass: REFRESH_PAGE_WIDTH,
+      contentWidthClass: PAGE_WIDTH,
       backAction: {
         href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
         label: t("Shared.dashboardShell.earnProgram"),
@@ -830,7 +814,7 @@ function getWalletRoutePageConfig(
   return {
     title: t("Shared.dashboardShell.wallet"),
     titleMark: <SkeletonBlock className="size-12 rounded-full" />,
-    contentWidthClass: REFRESH_PAGE_WIDTH,
+    contentWidthClass: PAGE_WIDTH,
     backAction: {
       href: "/dashboard/wallets",
       label: t("Shared.dashboardShell.wallets"),
@@ -893,7 +877,7 @@ function getIssuanceRoutePageConfig(
       title: t("Shared.dashboardShell.issuance"),
       // The design keeps Overview and API Playground on a phone too.
       headerTabs: { ...playgroundHeaderTabs(t), hideOnMobile: false },
-      contentWidthClass: REFRESH_PAGE_WIDTH,
+      contentWidthClass: PAGE_WIDTH,
       headerAction: {
         label: t("DashboardIssuance.newDesign.createDraft"),
         href: "/dashboard/issuance/create",
@@ -919,7 +903,7 @@ function getIssuanceRoutePageConfig(
   // The token names itself through DashboardPageTitle; "Token" holds the place until it does.
   return {
     title: t("DashboardIssuance.newDesign.token.pageTitle"),
-    contentWidthClass: REFRESH_PAGE_WIDTH,
+    contentWidthClass: PAGE_WIDTH,
     backAction: {
       href: "/dashboard/issuance",
       label: t("Shared.dashboardShell.issuance"),
@@ -992,13 +976,13 @@ function getWalletSectionPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
-  // The list and the create flow are built on the refresh design: a left title over the
+  // The list and the create flow: a left title over the
   // design's 900px column with the page's one action beside it.
   if (pathname === "/dashboard/wallets") {
     return {
       title: t("Shared.dashboardShell.wallets"),
       headerTabs: playgroundHeaderTabs(t),
-      contentWidthClass: REFRESH_PAGE_WIDTH,
+      contentWidthClass: PAGE_WIDTH,
       headerAction: {
         label: t("Shared.dashboardShell.createAWallet"),
         href: "/dashboard/wallets/setup",
@@ -1022,10 +1006,10 @@ function getWalletSectionPageConfig(
 }
 
 /**
- * Header config for the Payments pages built on the refresh design: the overview, the three
+ * Header config for the Payments pages: the overview, the three
  * lists and the two flows. Returns null for every other route.
  */
-function getRefreshPaymentsPageConfig(
+function getPaymentsPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
   rampsEnabled: boolean
@@ -1034,7 +1018,7 @@ function getRefreshPaymentsPageConfig(
     return {
       title: t("Shared.dashboardShell.contactList"),
       titlePosition: "left",
-      contentWidthClass: REFRESH_PAGE_WIDTH,
+      contentWidthClass: PAGE_WIDTH,
       headerAction: {
         label: t("DashboardPayments.counterparty.add"),
         capability: "canWrite",
@@ -1048,14 +1032,14 @@ function getRefreshPaymentsPageConfig(
     return {
       title: t("Shared.dashboardShell.payments"),
       headerTabs: playgroundHeaderTabs(t),
-      contentWidthClass: REFRESH_PAGE_WIDTH,
+      contentWidthClass: PAGE_WIDTH,
     };
   }
   if (pathname === "/dashboard/payments/transactions") {
     return {
       title: t("Shared.dashboardShell.transactions"),
       titlePosition: "left",
-      contentWidthClass: REFRESH_PAGE_WIDTH,
+      contentWidthClass: PAGE_WIDTH,
       headerAction: {
         label: t("DashboardPayments.transactions.downloadCsv"),
         href: "/api/dashboard/payments/transactions/export",
@@ -1070,7 +1054,7 @@ function getRefreshPaymentsPageConfig(
     return {
       title: t("Shared.dashboardShell.requests"),
       titlePosition: "left",
-      contentWidthClass: REFRESH_PAGE_WIDTH,
+      contentWidthClass: PAGE_WIDTH,
       headerAction: {
         label: t("DashboardPayments.requests.new"),
         capability: "canWrite",
@@ -1092,7 +1076,7 @@ function getRefreshPaymentsPageConfig(
     // A request's page reads in the page column, the way back over its title.
     return {
       title: t("DashboardPayments.requests.paymentRequest"),
-      contentWidthClass: REFRESH_PAGE_WIDTH,
+      contentWidthClass: PAGE_WIDTH,
       backAction: { href: PAYMENT_REQUESTS_HREF, label: t("Shared.dashboardShell.requests") },
     };
   }
@@ -1101,7 +1085,7 @@ function getRefreshPaymentsPageConfig(
     // until it does.
     return {
       title: t("Shared.dashboardShell.transaction"),
-      contentWidthClass: REFRESH_PAGE_WIDTH,
+      contentWidthClass: PAGE_WIDTH,
       backAction: {
         href: PAYMENT_TRANSACTIONS_HREF,
         label: t("Shared.dashboardShell.transactions"),
@@ -1112,7 +1096,7 @@ function getRefreshPaymentsPageConfig(
     return {
       title: t("Shared.dashboardShell.newDesign.recurringPayments"),
       titlePosition: "left",
-      contentWidthClass: REFRESH_PAGE_WIDTH,
+      contentWidthClass: PAGE_WIDTH,
       headerAction: {
         label: t("DashboardPayments.recurring.new"),
         capability: "canWrite",
@@ -1159,7 +1143,7 @@ function getHomePageConfig(
     return {
       title: t("Shared.dashboardShell.newDesign.home"),
       titlePosition: "left",
-      contentWidthClass: REFRESH_PAGE_WIDTH,
+      contentWidthClass: PAGE_WIDTH,
     };
   }
   if (pathname === "/dashboard/tokens") {
@@ -1197,9 +1181,9 @@ export function getDashboardPageConfig(
   if (walletRoutePageConfig) return walletRoutePageConfig;
   const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
-  const refreshPaymentsConfig = getRefreshPaymentsPageConfig(pathname, t, rampsEnabled);
-  if (refreshPaymentsConfig) {
-    return refreshPaymentsConfig;
+  const paymentsConfig = getPaymentsPageConfig(pathname, t, rampsEnabled);
+  if (paymentsConfig) {
+    return paymentsConfig;
   }
   const counterpartyRouteConfig = getCounterpartyRoutePageConfig(pathname, t);
   if (counterpartyRouteConfig) {
@@ -1223,7 +1207,7 @@ export function getDashboardPageConfig(
   if (pathname.startsWith("/dashboard/payments/recurring/")) {
     return {
       title: t("Shared.dashboardShell.newDesign.recurringPayment"),
-      contentWidthClass: REFRESH_PAGE_WIDTH,
+      contentWidthClass: PAGE_WIDTH,
       backAction: {
         href: "/dashboard/payments/recurring",
         label: t("Shared.dashboardShell.newDesign.backToRecurringPayments"),
@@ -1262,7 +1246,7 @@ export function getDashboardPageConfig(
   if (pathname.startsWith("/dashboard/settings")) {
     return {
       title: t("Shared.organizationSettings.title"),
-      contentWidthClass: REFRESH_PAGE_WIDTH,
+      contentWidthClass: PAGE_WIDTH,
       headerTabs: {
         tabs: SETTINGS_TABS.map((tab) => ({
           id: tab.id,
@@ -1276,7 +1260,7 @@ export function getDashboardPageConfig(
   if (pathname === DASHBOARD_ACCOUNT_HREF) {
     return {
       title: t("Shared.account.title"),
-      contentWidthClass: REFRESH_PAGE_WIDTH,
+      contentWidthClass: PAGE_WIDTH,
       headerTabs: {
         tabs: ACCOUNT_TABS.map((tab) => ({ id: tab.id, label: t(tab.labelKey) })),
         hideOnMobile: false,

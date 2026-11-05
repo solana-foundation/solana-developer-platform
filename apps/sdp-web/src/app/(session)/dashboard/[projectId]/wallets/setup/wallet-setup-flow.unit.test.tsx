@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import { ThemeScopeProvider } from "@sdp/ui/theme-scope-provider";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -122,15 +121,13 @@ const PRODUCTION_BYOK_PAIR_AVAILABILITY = availableCustodyProviders(
 function renderFlow(props: Partial<FlowProps> = {}) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <ThemeScopeProvider scope="refresh">
-        <WalletSetupFlow
-          connectedProviders={props.connectedProviders ?? ["turnkey"]}
-          custodyAvailability={props.custodyAvailability ?? SANDBOX_AVAILABILITY}
-          environment={props.environment ?? "sandbox"}
-          initialProvider={props.initialProvider ?? null}
-          connections={props.connections ?? []}
-        />
-      </ThemeScopeProvider>
+      <WalletSetupFlow
+        connectedProviders={props.connectedProviders ?? ["turnkey"]}
+        custodyAvailability={props.custodyAvailability ?? SANDBOX_AVAILABILITY}
+        environment={props.environment ?? "sandbox"}
+        initialProvider={props.initialProvider ?? null}
+        connections={props.connections ?? []}
+      />
     </I18nProvider>
   );
 }

@@ -7,7 +7,6 @@ import { ListEmptyState } from "@sdp/ui/list-empty-state";
 import { StatusText } from "@sdp/ui/status-text";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
-import { ReceiptTextIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { KeyboardEvent } from "react";
 import {
@@ -50,16 +49,11 @@ export function TransactionsResults({
   const open = (transaction: UnifiedTransaction) =>
     router.push(href(transactionHref(transaction.id)));
   if (result.transactions.length === 0) {
-    return (
-      <ListEmptyState
-        icon={<ReceiptTextIcon className="size-5" />}
-        message={t("DashboardPayments.transactions.noTransactionsFound")}
-      />
-    );
+    return <ListEmptyState message={t("DashboardPayments.transactions.noTransactionsFound")} />;
   }
   return (
     <section className="flex min-w-0 flex-1 flex-col" aria-busy={pending}>
-      <div className="overflow-x-auto refresh:-mx-3">
+      <div className="overflow-x-auto -mx-3">
         <Table className="rounded-none border-0 md:min-w-[47.5rem]">
           <TableHeader>
             <TableRow>

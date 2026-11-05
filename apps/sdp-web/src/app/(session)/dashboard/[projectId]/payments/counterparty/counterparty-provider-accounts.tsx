@@ -267,7 +267,7 @@ export function CounterpartyProviderAccounts({
           </StatusText>
         </p>
       ) : null}
-      <div className="overflow-x-auto refresh:-mx-3">
+      <div className="overflow-x-auto -mx-3">
         <Table className="min-w-[720px] table-fixed rounded-none border-0">
           <TableHeader>
             <TableRow>

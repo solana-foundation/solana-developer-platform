@@ -67,7 +67,7 @@ const PROVIDER_LOGOS: Partial<
 interface WalletProviderMarkProps {
   provider?: KnownCustodyProvider | null;
   /**
-   * `nav`, `row` and `page` are the refresh design's round marks: a sidebar pin, a card or list
+   * `nav`, `row` and `page` are the design's round marks: a sidebar pin, a card or list
    * row, and the 48px mark beside a wallet page's title.
    */
   size?: "nav" | "xs" | "sm" | "row" | "md" | "page";

@@ -682,9 +682,8 @@ browser pass on `/dashboard/markets/embedded-yield` and
   (`EARN_PROVIDER_SURFACING`), while the sync keeps storing both so the DB stays
   a truthful provider inventory. Do not reimplement either here: a client-side
   copy would drift, and a hidden row never reaches the browser to begin with.
-- Design system: the 2026 refresh on the routes `lib/theme-scope-routes.ts`
-  lists. Type, colour and shapes come from `@sdp/design-tokens` in the
-  `refresh` scope; pages compose the shared refresh blocks (`RecordStack` and
+- Design system: type, colour and shapes come from `@sdp/design-tokens`; pages
+  compose the shared blocks (`RecordStack` and
   `RecordBlock`, `StatusText` for status as words, the borderless design-system
   `Table` in the Payments list type, `ActionTile`, `ListEmptyState`) rather than
   bordered cards. Treasury and Embedded Yield share their summary hero and a

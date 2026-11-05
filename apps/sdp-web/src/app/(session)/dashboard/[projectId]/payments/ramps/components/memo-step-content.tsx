@@ -9,7 +9,6 @@ import {
   isEmptyMemoRow,
   type MemoRow,
   type MemoRowErrorCode,
-  memoRowsToRecord,
   splitPastedMemoRows,
   validateMemoRows,
 } from "@/app/(session)/dashboard/[projectId]/payments/ramps/memo";
@@ -24,10 +23,9 @@ interface EditableMemoRow extends MemoRow {
   id: string;
 }
 
-// On a refresh surface the scope's input tokens drop the radius, fill and inset, and only the
-// bottom edge is drawn.
+// The input tokens drop the radius, fill and inset, so only the bottom edge is drawn.
 const INPUT_CLASS =
-  "h-[var(--input-height-xl)] min-w-0 flex-1 rounded-[var(--input-radius-xl)] border border-border-default bg-[var(--input-bg-idle)] px-[var(--input-padding-x-xl)] text-base text-primary placeholder:text-tertiary hover:bg-[var(--input-bg-hover)] focus:border-[var(--input-border-focus)] focus:outline-none refresh:border-x-0 refresh:border-t-0";
+  "h-[var(--input-height-xl)] min-w-0 flex-1 rounded-[var(--input-radius-xl)] border border-border-default bg-[var(--input-bg-idle)] px-[var(--input-padding-x-xl)] text-base text-primary placeholder:text-tertiary hover:bg-[var(--input-bg-hover)] focus:border-[var(--input-border-focus)] focus:outline-none border-x-0 border-t-0";
 
 /**
  * Creates a memo row with stable render identity.
@@ -84,7 +82,7 @@ function memoErrorText(t: ReturnType<typeof useTranslations>, code: MemoRowError
 }
 
 /**
- * Renders the inline optional ramp memo editor and JSON preview.
+ * Renders the inline optional ramp memo editor.
  *
  * @param props - Memo rows and the wizard-state change callback.
  * @returns The memo wizard step content.
@@ -96,7 +94,6 @@ export function MemoStepContent({ rows, onChange }: MemoStepContentProps) {
   );
   const memoRows = toMemoRows(editableRows);
   const errors = validateMemoRows(memoRows);
-  const populatedRows = memoRows.filter((row) => !isEmptyMemoRow(row));
 
   const commitRows = (nextRows: EditableMemoRow[]) => {
     setEditableRows(nextRows);
@@ -125,19 +122,10 @@ export function MemoStepContent({ rows, onChange }: MemoStepContentProps) {
   };
 
   return (
-    <div className="space-y-5 refresh:space-y-3">
-      <p className="text-sm text-tertiary refresh:hidden">
-        {t("DashboardPayments.ramps.memoDescription")}
-      </p>
-      <div className="hidden items-center gap-1.5 refresh:flex">
+    <div className="space-y-3">
+      <div className="items-center gap-1.5 flex">
         <span className="text-meta text-secondary">{t("DashboardPayments.ramps.memoStep")}</span>
         <InfoHint text={t("DashboardPayments.ramps.memoDescription")} />
-      </div>
-
-      <div className="flex items-center gap-2 px-1 text-xs font-medium text-tertiary refresh:hidden">
-        <span className="flex-1">{t("DashboardPayments.ramps.memoKey")}</span>
-        <span className="flex-1">{t("DashboardPayments.ramps.memoValue")}</span>
-        <span className="size-9" />
       </div>
 
       <div className="space-y-2">
@@ -202,22 +190,6 @@ export function MemoStepContent({ rows, onChange }: MemoStepContentProps) {
             .map((error) => (
               <p key={error.code}>{memoErrorText(t, error.code)}</p>
             ))}
-        </div>
-      ) : null}
-
-      {populatedRows.length > 0 ? (
-        <div className="space-y-3 refresh:hidden">
-          <div className="space-y-1">
-            <p className="text-base font-medium text-primary">
-              {t("DashboardPayments.ramps.memoJsonTitle")}
-            </p>
-            <p className="text-sm text-tertiary">
-              {t("DashboardPayments.ramps.memoJsonDescription")}
-            </p>
-          </div>
-          <pre className="overflow-auto rounded-xl border border-border-default bg-surface-sunken p-4 font-mono text-sm text-primary">
-            <code>{JSON.stringify(memoRowsToRecord(memoRows), null, 2)}</code>
-          </pre>
         </div>
       ) : null}
     </div>

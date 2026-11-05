@@ -87,14 +87,14 @@ describe("home and payments route loading states", () => {
   it("preserves the responsive table, wizard, and detail geometry", () => {
     const markup = renderAuthenticatedLoadingStates();
 
-    // The four refresh Payments lists; the Overview loads its balance and charts, not a table.
+    // The four Payments lists; the Overview loads its balance and charts, not a table.
     expect(markup.match(/data-loading-table="true"/g)).toHaveLength(4);
     expect(markup.match(/data-loading-wizard/g)).toHaveLength(4);
     expect(markup.match(/data-loading-detail-rows/g)).toHaveLength(2);
     expect(markup).toContain("lg:grid-cols-2");
   });
 
-  it("draws the refresh lists as a toolbar over a scrolling table in the title's column", () => {
+  it("draws the Payments lists as a toolbar over a scrolling table in the title's column", () => {
     const listCases = [
       {
         layout: "payments-transactions",
@@ -202,7 +202,7 @@ describe("home and payments route loading states", () => {
   it("keeps the recurring list loader contained at a 390px viewport", () => {
     const markup = renderToStaticMarkup(<RecurringPaymentsLoading />);
 
-    // The Schedules list scrolls sideways inside its column, like the other refresh lists.
+    // The Schedules list scrolls sideways inside its column, like the other Payments lists.
     expect(markup).toContain('data-loading-layout="recurring-payments"');
     expect(markup).toContain("overflow-x-auto");
     expect(markup).toContain("min-w-[47.5rem]");

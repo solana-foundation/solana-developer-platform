@@ -312,6 +312,17 @@ describe("demoSessionCookiesToDrop", () => {
 });
 
 describe("signed-out workspace hints", () => {
+  it("sends a signed-out page to sign-in with its path and query to come back to", async () => {
+    const request = new NextRequest(
+      `https://dashboard.example.com/dashboard/${SANDBOX_PROJECT.id}/payments?tab=x`
+    );
+    await proxy(request, new NextFetchEvent({ page: "/", request, context: undefined }));
+
+    expect(clerk.protect).toHaveBeenLastCalledWith({
+      unauthenticatedUrl: `https://dashboard.example.com/sign-in?redirect_url=%2Fdashboard%2F${SANDBOX_PROJECT.id}%2Fpayments%3Ftab%3Dx`,
+    });
+  });
+
   it("expires the last-selected project on the sign-in page", async () => {
     const request = new NextRequest("https://dashboard.example.com/sign-in", {
       headers: { cookie: `sdp_selected_project_id=${PRODUCTION_PROJECT.id}` },

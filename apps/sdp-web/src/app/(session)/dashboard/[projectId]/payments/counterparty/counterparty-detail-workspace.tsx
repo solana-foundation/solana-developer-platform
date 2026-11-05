@@ -241,7 +241,7 @@ function AddressesTable({ accounts }: { accounts: CounterpartyAccount[] }) {
   const t = useTranslations();
   const locale = useLocale();
   return (
-    <div className="overflow-x-auto refresh:-mx-3">
+    <div className="overflow-x-auto -mx-3">
       <Table className="min-w-[35rem] table-fixed rounded-none border-0">
         <colgroup>
           <col className="w-[38%]" />
@@ -385,7 +385,7 @@ function PaymentsTable({
   const t = useTranslations();
   const locale = useLocale();
   return (
-    <div className="overflow-x-auto refresh:-mx-3">
+    <div className="overflow-x-auto -mx-3">
       <Table className="min-w-[45rem] table-fixed rounded-none border-0">
         <colgroup>
           <col className="w-[18%]" />
@@ -612,7 +612,7 @@ export function CounterpartyDetailWorkspace({
               type="button"
               variant="outline"
               size="sm"
-              className="border-error-border text-error [--button-height-md:1.875rem] hover:bg-error-bg hover:text-error refresh:border-error-border refresh:hover:bg-error-bg"
+              className="border-error-border text-error [--button-height-md:1.875rem] hover:bg-error-bg hover:text-error"
               onClick={() => setDeleteOpen(true)}
             >
               {t("DashboardPayments.counterparty.detail.delete")}
