@@ -52,7 +52,7 @@ type DashboardPageConfig = {
   headerAction?: DashboardHeaderActionConfig;
   hideTitle?: boolean;
   /**
-   * A refresh flow that hides its title and sets its own top spacing: the header keeps its
+   * A flow that hides its title and sets its own top spacing: the header keeps its
    * padding only on a phone, where it holds the menu button.
    */
   flushTopOnDesktop?: boolean;
@@ -248,7 +248,7 @@ export function HeaderBackAction({
 }
 
 /**
- * The refresh phone header's way into the navigation: the design's 20px menu glyph on a 36px
+ * The phone header's way into the navigation: the design's 20px menu glyph on a 36px
  * target, pulled 4px into the gutter so the glyph's lines start where the title does. Gone
  * from md, where the sidebar itself is on screen.
  */
@@ -267,7 +267,7 @@ function MobileNavButton({ onClick }: { onClick: () => void }) {
 }
 
 /**
- * The refresh title block. On a phone it is the design's three rows: the navigation button, the
+ * The title block. On a phone it is the design's three rows: the navigation button, the
  * title 8px under it, then the page's action 16px under that. From md the button goes and the
  * action sits on the title's row. Any utilities (Payments' demo mode switch) sit at the far right
  * of the phone's navigation row, and from md on the title's row, before the action.
@@ -286,7 +286,7 @@ export function StackedDashboardTopBar({
   action?: ReactNode;
   trailingContent: ReactNode;
   hideTitle?: boolean;
-  /** Set over the title in its column: a refresh action page's way back. */
+  /** Set over the title in its column: an action page's way back. */
   above?: ReactNode;
   /** Set before the title, 16px from it (a wallet's 48px provider mark). */
   mark?: ReactNode;
@@ -410,7 +410,7 @@ export function StandardDashboardTopBar({
   trailingContent: ReactNode;
   hideTitle?: boolean;
   alignTitleWithTabs?: boolean;
-  /** Set over the title in its column: a refresh action page's way back. */
+  /** Set over the title in its column: an action page's way back. */
   above?: ReactNode;
 }) {
   return (
@@ -533,7 +533,7 @@ function playgroundHeaderTabs(t: ReturnType<typeof useTranslations>): DashboardH
 }
 
 /**
- * A refresh-design payments flow (Pay, Deposit): the title sits left above the flow's own tabs,
+ * A payments flow (Pay, Deposit): the title sits left above the flow's own tabs,
  * both in the flow's column, and the content box stays full width so the flow's footer band
  * can span the card. No back action: the footer's Cancel returns to Payments. A flow with one
  * way in has no tabs.
@@ -554,7 +554,7 @@ function refreshFlowPageConfig(config: {
   return pageConfig;
 }
 
-/** Width of the refresh Payments overview and list pages: the design's 900px column. */
+/** Width of the overview and list pages: the design's 900px column. */
 const PAGE_WIDTH = "max-w-page";
 
 function actionPageConfig(config: {
@@ -688,7 +688,7 @@ function getCounterpartyRoutePageConfig(
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
   if (pathname === "/dashboard/payments/counterparty/create") {
-    // A refresh flow: the way back over the title in the form's column; the footer band spans
+    // A flow: the way back over the title in the form's column; the footer band spans
     // the page.
     return {
       title: t("Shared.dashboardShell.newDesign.newCounterparty"),
@@ -1009,7 +1009,7 @@ function getWalletSectionPageConfig(
  * Header config for the Payments pages: the overview, the three
  * lists and the two flows. Returns null for every other route.
  */
-function getRefreshPaymentsPageConfig(
+function getPaymentsPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
   rampsEnabled: boolean
@@ -1181,9 +1181,9 @@ export function getDashboardPageConfig(
   if (walletRoutePageConfig) return walletRoutePageConfig;
   const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
-  const refreshPaymentsConfig = getRefreshPaymentsPageConfig(pathname, t, rampsEnabled);
-  if (refreshPaymentsConfig) {
-    return refreshPaymentsConfig;
+  const paymentsConfig = getPaymentsPageConfig(pathname, t, rampsEnabled);
+  if (paymentsConfig) {
+    return paymentsConfig;
   }
   const counterpartyRouteConfig = getCounterpartyRoutePageConfig(pathname, t);
   if (counterpartyRouteConfig) {

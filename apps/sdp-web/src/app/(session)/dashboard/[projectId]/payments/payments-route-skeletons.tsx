@@ -38,7 +38,7 @@ type ListSkeletonVariant =
   | "payment-requests"
   | "recurring-payments";
 
-/** The refresh lists' columns, in order, so a loading list lines up with the settled one. */
+/** The Payments lists' columns, in order, so a loading list lines up with the settled one. */
 const LIST_SKELETON_COLUMNS: Record<ListSkeletonVariant, readonly ListSkeletonColumn[]> = {
   "payments-transactions": [
     { id: "status", cellSkeletonClassName: "h-4 w-20" },
@@ -136,7 +136,7 @@ function ListTableSkeleton({ variant }: { variant: ListSkeletonVariant }) {
   );
 }
 
-/** A refresh list page: the filter and search row over the list, both in the title's column. */
+/** A Payments list page: the filter and search row over the list, both in the title's column. */
 function ListPageSkeleton({
   layout,
   children,
@@ -168,7 +168,7 @@ function UnderlineFieldSkeleton({ value = "w-48" }: { value?: string }) {
 }
 
 /**
- * A refresh flow's first step: the step name and bar, its fields, and the footer band pinned
+ * A flow's first step: the step name and bar, its fields, and the footer band pinned
  * to the bottom of the viewport, as WizardFrame lays them out.
  */
 function FlowPageSkeleton({

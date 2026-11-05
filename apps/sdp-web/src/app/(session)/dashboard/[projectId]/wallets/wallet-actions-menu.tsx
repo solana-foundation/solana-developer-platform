@@ -22,7 +22,7 @@ interface WalletActionsMenuProps {
   walletLabel: string | null;
   supportsSignerCheck?: boolean;
   triggerLabel?: string;
-  /** `kebab` is the refresh wallet card's quiet vertical-dots trigger. */
+  /** `kebab` is the wallet card's quiet vertical-dots trigger. */
   triggerMode?: "button" | "icon" | "kebab";
   triggerClassName?: string;
   /** Leads the menu with a link to the wallet, for surfaces that are not the wallet's own page. */

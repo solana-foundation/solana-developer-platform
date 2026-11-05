@@ -95,7 +95,7 @@ function QuoteCardEstimate({
 }
 
 /**
- * A provider as one tile in the refresh quote grid: a 28px logo and the name with a 16px radio
+ * A provider as one tile in the quote grid: a 28px logo and the name with a 16px radio
  * mark, then what the wallet receives and the fee pinned to the foot. The tile has no height
  * of its own: the grid gives every row the tallest tile's height, so a tile with a second
  * name line ("Sandbox only") sets the height for all of them and the quotes line up. The tile
