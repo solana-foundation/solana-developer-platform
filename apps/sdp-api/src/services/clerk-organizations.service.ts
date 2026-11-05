@@ -6,6 +6,13 @@ import { ClerkRequestError, describeClerkFailure } from "./clerk-error";
 
 /** Clerk's code for an invitation to an address already a member of the organization. */
 const CLERK_ALREADY_A_MEMBER = "already_a_member_in_organization";
+/** Clerk's code for an address its instance restrictions do not let sign up. */
+const CLERK_NOT_ALLOWED_ACCESS = "not_allowed_access";
+
+/** Clerk refused the invitation because its restrictions do not admit the address. */
+export function isClerkAccessRefusal(clerkError: ClerkRequestError): boolean {
+  return clerkError.clerkCode === CLERK_NOT_ALLOWED_ACCESS;
+}
 
 export interface ClerkOrganizationInvitation {
   id: string;

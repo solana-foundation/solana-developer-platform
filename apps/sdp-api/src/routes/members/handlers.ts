@@ -1,4 +1,4 @@
-import { INVITATION_STATUSES } from "@sdp/types/organizations";
+import { INVITATION_STATUSES, INVITEE_NOT_ALLOWED_REASON } from "@sdp/types/organizations";
 import { normalizeOrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
 import { z } from "zod";
@@ -26,6 +26,7 @@ import { findClerkOrganizationId } from "@/services/clerk-organization-provision
 import {
   type ClerkOrganizationInvitation,
   ClerkOrganizationsService,
+  isClerkAccessRefusal,
 } from "@/services/clerk-organizations.service";
 import {
   applyMembershipChange,
@@ -422,6 +423,11 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
     const invitation = { id: invitationId, email: normalizedEmail };
     if (isClerkRefusal(clerkError)) {
       await failUnsentInvitation(c, invitation, clerkError);
+      if (isClerkAccessRefusal(clerkError)) {
+        throw badRequest("This email address is not allowed to join", {
+          reason: INVITEE_NOT_ALLOWED_REASON,
+        });
+      }
       throw error;
     }
     // Clerk may have created the invitation before the call failed.
@@ -508,7 +514,7 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
 };
 
 /** Clerk answered 4xx: it refused the invitation, so it created and sent nothing. */
-function isClerkRefusal(clerkError: ClerkRequestError | null): boolean {
+function isClerkRefusal(clerkError: ClerkRequestError | null): clerkError is ClerkRequestError {
   return clerkError !== null && clerkError.clerkStatus >= 400 && clerkError.clerkStatus < 500;
 }
 
