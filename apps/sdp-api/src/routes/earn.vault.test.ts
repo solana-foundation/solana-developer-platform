@@ -130,8 +130,6 @@ const USDY_MINT = required(ONDO_DEPLOYMENTS["mainnet-beta"]).usdyMint;
 assert(!(USDY_MINT === ""));
 const WALLET_ADDRESS = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 
-let originalMarketsEnabled: string | undefined;
-let originalEarnEnabled: string | undefined;
 let originalEncryptionKey: string | undefined;
 let originalJupiterSwapApiKey: string | undefined;
 
@@ -384,12 +382,8 @@ function postVaultDeposit(
 }
 
 beforeEach(async () => {
-  originalMarketsEnabled = env.MARKETS_ENABLED;
-  originalEarnEnabled = env.EARN_ENABLED;
   originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
   originalJupiterSwapApiKey = env.JUPITER_SWAP_API_KEY;
-  env.MARKETS_ENABLED = "true";
-  env.EARN_ENABLED = "true";
   custodyReleaseChannel.outOfChannelMode = null;
   await seedTestDatabase(env);
   await clearKVStores(env);
@@ -407,8 +401,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  env.MARKETS_ENABLED = originalMarketsEnabled;
-  env.EARN_ENABLED = originalEarnEnabled;
   env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
   env.JUPITER_SWAP_API_KEY = originalJupiterSwapApiKey;
   surfacing.forceOn = false;
