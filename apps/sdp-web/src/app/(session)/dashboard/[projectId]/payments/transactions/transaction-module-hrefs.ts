@@ -3,10 +3,10 @@ import { transactionHref } from "@/lib/payments-routes";
 
 export const TRANSACTION_MODULE_HREFS = {
   payments: transactionHref,
-  earn: (id) => `/dashboard/markets/earn?transaction=${encodeURIComponent(id)}`,
+  earn: (id) => `/dashboard/markets/embedded-yield?transaction=${encodeURIComponent(id)}`,
   dvp: (id) => `/dashboard/markets/dvp/${encodeURIComponent(id)}`,
   private_channels: (id) =>
-    `/dashboard/integrations/private-channels?transaction=${encodeURIComponent(id)}`,
+    `/dashboard/integrations/private-channels/overview?transaction=${encodeURIComponent(id)}`,
   issuance: (id) => `/dashboard/issuance?transaction=${encodeURIComponent(id)}`,
   rings: (id) => `/dashboard/helius-rings?operation=${encodeURIComponent(id)}`,
 } as const satisfies Record<UnifiedTransactionModule, (id: string) => string>;

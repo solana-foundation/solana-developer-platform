@@ -25,7 +25,6 @@ import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import {
   ArrowDownLeftIcon,
-  ArrowLeftRightIcon,
   ArrowUpRightIcon,
   ChevronRightIcon,
   PlusIcon,
@@ -519,7 +518,6 @@ function TradesCardBody({
       <ListEmptyState
         action={canWrite ? <CreateTradeButton /> : <ReadOnlyEmptyNote />}
         description={t("DashboardMarkets.dvp.emptyDescription")}
-        icon={<ArrowLeftRightIcon className="size-5" />}
         message={t("DashboardMarkets.dvp.empty")}
       />
     );
@@ -537,7 +535,6 @@ function TradesCardBody({
               {t("DashboardMarkets.dvp.filterClear")}
             </Button>
           }
-          icon={<ArrowLeftRightIcon className="size-5" />}
           message={t("DashboardMarkets.dvp.filterNoMatches")}
         />
       ) : (

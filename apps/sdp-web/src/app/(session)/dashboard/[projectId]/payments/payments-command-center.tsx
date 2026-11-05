@@ -395,7 +395,7 @@ function ActivityList({
   if (rows !== null && rows.length === 0) {
     return (
       <ListEmptyState
-        className="refresh:py-12"
+        className="py-12"
         message={empty.title}
         description={empty.description}
         action={

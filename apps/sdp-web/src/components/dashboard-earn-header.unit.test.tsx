@@ -29,32 +29,25 @@ describe("Markets dashboard headers", () => {
     expect(config.routeTabs).toBeUndefined();
   });
 
-  it.each(["/dashboard/markets/embedded-yield", "/dashboard/markets/earn"])(
-    "titles Embedded Yield left over the page column, with the integration as its action at %s",
-    (pathname) => {
-      const config = getDashboardPageConfig(pathname, t);
+  it("titles Embedded Yield left over the page column, with the integration as its action", () => {
+    const config = getDashboardPageConfig("/dashboard/markets/embedded-yield", t);
 
-      expect(config).toMatchObject({
-        title: "Shared.dashboardShell.earnProgram",
-        titlePosition: "left",
-        contentWidthClass: "max-w-page",
-        headerAction: {
-          label: "DashboardMarkets.earnProgram.configureShort",
-          href: "/dashboard/markets/embedded-yield/configure",
-          variant: "primary",
-        },
-      });
-      expect(config.headerTabs).toBeUndefined();
-      expect(config.routeTabs).toBeUndefined();
-    }
-  );
+    expect(config).toMatchObject({
+      title: "Shared.dashboardShell.earnProgram",
+      titlePosition: "left",
+      contentWidthClass: "max-w-page",
+      headerAction: {
+        label: "DashboardMarkets.earnProgram.configureShort",
+        href: "/dashboard/markets/embedded-yield/configure",
+        variant: "primary",
+      },
+    });
+    expect(config.headerTabs).toBeUndefined();
+    expect(config.routeTabs).toBeUndefined();
+  });
 
-  it.each([
-    "/dashboard/markets/embedded-yield/configure",
-    "/dashboard/markets/embedded-yield/integrate",
-    "/dashboard/markets/earn/configure",
-  ])("sets the way back to Embedded Yield over the integration's title at %s", (pathname) => {
-    const config = getDashboardPageConfig(pathname, t);
+  it("sets the way back to Embedded Yield over the integration's title", () => {
+    const config = getDashboardPageConfig("/dashboard/markets/embedded-yield/configure", t);
 
     expect(config).toMatchObject({
       title: "DashboardMarkets.earnProgram.configureShort",
@@ -68,7 +61,7 @@ describe("Markets dashboard headers", () => {
     expect(config.headerAction).toBeUndefined();
   });
 
-  it("centers the shared Markets title on DvP, which keeps the base design", () => {
+  it("centers the shared Markets title on DvP", () => {
     const config = getDashboardPageConfig("/dashboard/markets/dvp", t);
 
     expect(config).toMatchObject({
@@ -136,13 +129,8 @@ describe("dashboard route headers", () => {
     ["/dashboard/api-keys/new", "Shared.dashboardShell.newApiKey"],
     ["/dashboard/api-keys/key_1/edit", "Shared.dashboardShell.editApiKey"],
     ["/dashboard/wallets", "Shared.dashboardShell.wallets"],
-    ["/dashboard/custody", "Shared.dashboardShell.wallets"],
     ["/dashboard/wallets/setup", "Shared.dashboardShell.createWallet"],
-    ["/dashboard/custody/setup", "Shared.dashboardShell.createWallet"],
-    ["/dashboard/wallets/connections", "Shared.dashboardShell.connections"],
-    ["/dashboard/custody/connections", "Shared.dashboardShell.connections"],
     ["/dashboard/wallets/wallet_1", "Shared.dashboardShell.wallet"],
-    ["/dashboard/custody/wallet_1", "Shared.dashboardShell.wallet"],
     ["/dashboard/issuance", "Shared.dashboardShell.issuance"],
     ["/dashboard/issuance/create", "DashboardIssuance.newDesign.draft.pageTitle"],
     ["/dashboard/issuance/token_1", "DashboardIssuance.newDesign.token.pageTitle"],
@@ -160,7 +148,6 @@ describe("dashboard route headers", () => {
     ["/dashboard/payments/receive", "Shared.dashboardShell.receive"],
     ["/dashboard/integrations", "Shared.dashboardShell.integrations"],
     ["/dashboard/integrations/helius", "Shared.dashboardShell.integrations"],
-    ["/dashboard/integrations/private-channels", "Shared.dashboardShell.integrations"],
     ["/dashboard/integrations/private-channels/setup", "Shared.dashboardShell.privacy"],
     [
       "/dashboard/integrations/private-channels/instance_1",

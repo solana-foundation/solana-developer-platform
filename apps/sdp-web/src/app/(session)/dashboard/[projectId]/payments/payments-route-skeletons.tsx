@@ -38,7 +38,7 @@ type ListSkeletonVariant =
   | "payment-requests"
   | "recurring-payments";
 
-/** The refresh lists' columns, in order, so a loading list lines up with the settled one. */
+/** The Payments lists' columns, in order, so a loading list lines up with the settled one. */
 const LIST_SKELETON_COLUMNS: Record<ListSkeletonVariant, readonly ListSkeletonColumn[]> = {
   "payments-transactions": [
     { id: "status", cellSkeletonClassName: "h-4 w-20" },
@@ -94,11 +94,7 @@ function ListToolbarSkeleton() {
 function ListTableSkeleton({ variant }: { variant: ListSkeletonVariant }) {
   const columns = LIST_SKELETON_COLUMNS[variant];
   return (
-    <div
-      className="overflow-x-auto refresh:-mx-3"
-      data-loading-table
-      data-loading-table-variant={variant}
-    >
+    <div className="overflow-x-auto -mx-3" data-loading-table data-loading-table-variant={variant}>
       <Table
         className={cn(
           "rounded-none border-0",
@@ -140,7 +136,7 @@ function ListTableSkeleton({ variant }: { variant: ListSkeletonVariant }) {
   );
 }
 
-/** A refresh list page: the filter and search row over the list, both in the title's column. */
+/** A Payments list page: the filter and search row over the list, both in the title's column. */
 function ListPageSkeleton({
   layout,
   children,
@@ -172,7 +168,7 @@ function UnderlineFieldSkeleton({ value = "w-48" }: { value?: string }) {
 }
 
 /**
- * A refresh flow's first step: the step name and bar, its fields, and the footer band pinned
+ * A flow's first step: the step name and bar, its fields, and the footer band pinned
  * to the bottom of the viewport, as WizardFrame lays them out.
  */
 function FlowPageSkeleton({
@@ -251,7 +247,7 @@ const RECENT_DEPOSIT_CELL_SKELETONS = [
 /** A wallet's recent deposits while they load: the settled table's columns, header and rows. */
 export function RecentDepositsTableSkeleton() {
   return (
-    <Table className="table-fixed rounded-none border-0 refresh:-mx-3" data-loading-recent-deposits>
+    <Table className="table-fixed rounded-none border-0 -mx-3" data-loading-recent-deposits>
       <colgroup>
         {RECENT_DEPOSIT_COLUMN_WIDTHS.map((width) => (
           <col key={width} className={width} />

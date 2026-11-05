@@ -1,6 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import MembersLoading from "@/app/(session)/dashboard/[projectId]/members/loading";
 import { HeliusRingsWorkspaceSkeleton } from "./helius-rings-skeleton";
 import HeliusRingsLoading from "./loading";
 
@@ -60,14 +59,5 @@ describe("Helius Rings loading state", () => {
     for (const [, className] of pulses) {
       expect(className).toContain("motion-reduce:animate-none");
     }
-  });
-});
-
-describe("Members loading state", () => {
-  it("loads as Settings, the page it redirects to", () => {
-    const markup = renderToStaticMarkup(<MembersLoading />);
-
-    expect(markup).toContain('data-loading-layout="settings"');
-    expect(markup).not.toContain('data-loading-layout="home"');
   });
 });

@@ -3,8 +3,8 @@ import {
   WALLET_ACTIVITY_LIMIT,
   WALLET_ACTIVITY_MAX_LIMIT,
   type WalletActivityIdentity,
-} from "@/app/(session)/dashboard/[projectId]/custody/wallet-activity.data";
-import { loadWalletActivity } from "@/app/(session)/dashboard/[projectId]/custody/wallet-activity.server";
+} from "@/app/(session)/dashboard/[projectId]/wallets/wallet-activity.data";
+import { loadWalletActivity } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-activity.server";
 import type { MessageKey } from "@/i18n/messages";
 import { getTranslations } from "@/i18n/server";
 import type { TranslationValues } from "@/i18n/translate";

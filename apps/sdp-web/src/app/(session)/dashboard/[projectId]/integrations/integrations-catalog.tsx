@@ -14,8 +14,9 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { type ReactNode, useMemo, useState } from "react";
-import type { CustodyProviderAvailability } from "@/app/(session)/dashboard/[projectId]/custody/provider-display-status";
-import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/custody/wallet-provider-mark";
+import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
+import type { CustodyProviderAvailability } from "@/app/(session)/dashboard/[projectId]/wallets/provider-display-status";
+import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
 import { useTranslations } from "@/i18n/provider";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
 import { DASHBOARD_INTEGRATIONS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
@@ -93,6 +94,8 @@ function StatusBadge({ status, t }: { status: IntegrationStatus; t: Translate })
 interface IntegrationRowModel extends FilterableIntegration {
   icon: ReactNode;
   description?: string;
+  /** Where the card opens: a family's own route when the provider id is not its path segment. */
+  dashboardPath: string;
 }
 
 function IntegrationCard({ row, t }: { row: IntegrationRowModel; t: Translate }) {
@@ -114,7 +117,7 @@ function IntegrationCard({ row, t }: { row: IntegrationRowModel; t: Translate })
           {/* Stretched link: the title anchors it and the overlay makes the
               whole card the click target. */}
           <Link
-            href={href(`/dashboard/integrations/${row.provider}`)}
+            href={href(row.dashboardPath)}
             className="truncate pt-2 text-base font-medium text-primary after:absolute after:inset-0 after:content-['']"
           >
             {row.label}
@@ -273,6 +276,7 @@ export function IntegrationsCatalog({
       status: provider.status,
       icon: <WalletProviderMark provider={provider.entry.id} size="sm" />,
       description: t(provider.entry.descriptionKey),
+      dashboardPath: `/dashboard/integrations/${provider.entry.id}`,
     }));
 
     const rampRows: IntegrationRowModel[] = ramps.map((provider) => ({
@@ -282,6 +286,7 @@ export function IntegrationsCatalog({
       status: provider.status,
       icon: <LogoMark src={RAMP_PROVIDER_LOGOS[provider.provider]} label={provider.label} />,
       description: provider.descriptionKey ? t(provider.descriptionKey) : undefined,
+      dashboardPath: `/dashboard/integrations/${provider.provider}`,
     }));
     const complianceRows: IntegrationRowModel[] = compliance.map((provider) => ({
       family: "compliance",
@@ -290,6 +295,7 @@ export function IntegrationsCatalog({
       status: provider.status,
       icon: <LogoMark src={COMPLIANCE_PROVIDER_LOGOS[provider.provider]} label={provider.label} />,
       description: provider.descriptionKey ? t(provider.descriptionKey) : undefined,
+      dashboardPath: `/dashboard/integrations/${provider.provider}`,
     }));
 
     const privacyRows: IntegrationRowModel[] = privacy.map((provider) => ({
@@ -299,6 +305,7 @@ export function IntegrationsCatalog({
       status: provider.status,
       icon: <VenetianMaskIcon aria-hidden className="size-5 text-secondary" strokeWidth={1.8} />,
       description: provider.descriptionKey ? t(provider.descriptionKey) : undefined,
+      dashboardPath: PRIVATE_CHANNELS_OVERVIEW_PATH,
     }));
 
     return [...custodyRows, ...rampRows, ...complianceRows, ...privacyRows];

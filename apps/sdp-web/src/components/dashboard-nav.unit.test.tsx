@@ -1,4 +1,3 @@
-import { LandmarkIcon, PercentIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetDashboardNavigation } from "@/test/dashboard-navigation";
@@ -66,12 +65,10 @@ describe("Markets dashboard navigation", () => {
       {
         label: "Shared.dashboardShell.treasurySolutions",
         href: "/dashboard/markets/treasury-solutions",
-        icon: LandmarkIcon,
       },
       {
         label: "Shared.dashboardShell.earnProgram",
         href: "/dashboard/markets/embedded-yield",
-        icon: PercentIcon,
       },
     ]);
   });
@@ -195,7 +192,6 @@ describe("Integrations dashboard navigation", () => {
       "/dashboard/integrations?tab=compliance",
       "/dashboard/integrations?tab=privacy",
     ]);
-    expect(item?.children?.every((child) => child.icon)).toBe(true);
   });
 
   it("lists no family when every owning module is disabled", () => {

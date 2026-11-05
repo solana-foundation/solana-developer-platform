@@ -1,42 +1,42 @@
 [
   {
-    "candidate": "src/app/(session)/dashboard/custody/provider-catalog.ts:49:5:Local Signer",
+    "candidate": "src/app/(session)/dashboard/[projectId]/wallets/provider-catalog.ts:49:5:Local Signer",
     "reason": "Provider brand name"
   },
   {
-    "candidate": "src/app/(session)/dashboard/custody/provider-catalog.ts:58:5:Privy",
+    "candidate": "src/app/(session)/dashboard/[projectId]/wallets/provider-catalog.ts:58:5:Privy",
     "reason": "Provider brand name"
   },
   {
-    "candidate": "src/app/(session)/dashboard/custody/provider-catalog.ts:67:5:Fireblocks",
+    "candidate": "src/app/(session)/dashboard/[projectId]/wallets/provider-catalog.ts:67:5:Fireblocks",
     "reason": "Provider brand name"
   },
   {
-    "candidate": "src/app/(session)/dashboard/custody/provider-catalog.ts:76:5:Coinbase CDP",
+    "candidate": "src/app/(session)/dashboard/[projectId]/wallets/provider-catalog.ts:76:5:Coinbase CDP",
     "reason": "Provider brand name"
   },
   {
-    "candidate": "src/app/(session)/dashboard/custody/provider-catalog.ts:85:5:Para",
+    "candidate": "src/app/(session)/dashboard/[projectId]/wallets/provider-catalog.ts:85:5:Para",
     "reason": "Provider brand name"
   },
   {
-    "candidate": "src/app/(session)/dashboard/custody/provider-catalog.ts:94:5:Turnkey",
+    "candidate": "src/app/(session)/dashboard/[projectId]/wallets/provider-catalog.ts:94:5:Turnkey",
     "reason": "Provider brand name"
   },
   {
-    "candidate": "src/app/(session)/dashboard/custody/provider-catalog.ts:103:5:DFNS",
+    "candidate": "src/app/(session)/dashboard/[projectId]/wallets/provider-catalog.ts:103:5:DFNS",
     "reason": "Provider brand name"
   },
   {
-    "candidate": "src/app/(session)/dashboard/custody/provider-catalog.ts:112:5:IBM Digital Asset Haven",
+    "candidate": "src/app/(session)/dashboard/[projectId]/wallets/provider-catalog.ts:112:5:IBM Digital Asset Haven",
     "reason": "Provider brand name"
   },
   {
-    "candidate": "src/app/(session)/dashboard/custody/provider-catalog.ts:121:5:Anchorage",
+    "candidate": "src/app/(session)/dashboard/[projectId]/wallets/provider-catalog.ts:121:5:Anchorage",
     "reason": "Provider brand name"
   },
   {
-    "candidate": "src/app/(session)/dashboard/custody/provider-catalog.ts:130:5:Utila",
+    "candidate": "src/app/(session)/dashboard/[projectId]/wallets/provider-catalog.ts:130:5:Utila",
     "reason": "Provider brand name"
   },
   {

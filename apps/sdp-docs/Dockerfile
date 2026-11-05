@@ -20,7 +20,7 @@ COPY apps/sdp-api/package.json ./apps/sdp-api/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
 # The API reference model and request snippets the reference renders from.
 COPY packages/sdp-api-catalog/package.json ./packages/sdp-api-catalog/
-# The refresh palette, type scale and font files the docs render with.
+# The palette, type scale and font files the docs render with.
 COPY packages/sdp-design-tokens/package.json ./packages/sdp-design-tokens/
 COPY packages/sdp-env-config/package.json ./packages/sdp-env-config/
 COPY packages/sdp-payments/package.json ./packages/sdp-payments/
