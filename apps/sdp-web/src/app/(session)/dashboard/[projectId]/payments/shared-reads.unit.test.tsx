@@ -9,7 +9,7 @@ import { sentDashboardReads, stubDashboardFetch } from "@/test/dashboard-fetch";
 import { resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { DashboardReadsProvider } from "@/test/dashboard-reads";
 import { SANDBOX_PROJECT } from "@/test/projects";
-import { useIssuedTokens } from "./shared-reads";
+import { useIssuedTokens, useWalletSummaries } from "./shared-reads";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
@@ -19,19 +19,37 @@ const FIRST_PAGE = {
   data: [
     {
       id: "tok_test_one",
+      name: "Token One",
       mintAddress: "MintOne1111111111111111111111111111111111111",
       symbol: "ONE",
       imageUrl: "https://assets.test/one.png",
     },
-    { id: "tok_test_draft", mintAddress: null, symbol: "DRAFT", imageUrl: null },
+    {
+      id: "tok_test_draft",
+      name: "Draft Token",
+      mintAddress: null,
+      symbol: "DRAFT",
+      imageUrl: null,
+    },
   ],
   total: ISSUANCE_MAX_PAGE_SIZE + 4,
   hasMore: true,
 };
 const SECOND_PAGE = {
   data: [
-    { id: "", mintAddress: "MintTwo2222222222222222222222222222222222222", symbol: "TWO" },
-    { id: "tok_test_unminted", mintAddress: "", symbol: "EMPTY", imageUrl: null },
+    {
+      id: "",
+      name: "Token Two",
+      mintAddress: "MintTwo2222222222222222222222222222222222222",
+      symbol: "TWO",
+    },
+    {
+      id: "tok_test_unminted",
+      name: "Unminted Token",
+      mintAddress: "",
+      symbol: "EMPTY",
+      imageUrl: null,
+    },
   ],
   total: ISSUANCE_MAX_PAGE_SIZE + 4,
   hasMore: false,
@@ -51,7 +69,28 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+describe("useWalletSummaries", () => {
+  it("reads again on the refresh interval its caller passes", async () => {
+    vi.useFakeTimers();
+    const fetchMock = stubDashboardFetch(() => Response.json({ data: { wallets: [] } }));
+    renderHook(() => useWalletSummaries({ includeBalances: false }, { refreshInterval: 5_000 }), {
+      wrapper: DashboardReadsProvider,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sentDashboardReads(fetchMock).map((read) => read.path)).toEqual([
+      "/api/dashboard/wallets?view=summary",
+    ]);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(sentDashboardReads(fetchMock).map((read) => read.path)).toEqual([
+      "/api/dashboard/wallets?view=summary",
+      "/api/dashboard/wallets?view=summary",
+    ]);
+  });
 });
 
 describe("useIssuedTokens", () => {
@@ -66,12 +105,14 @@ describe("useIssuedTokens", () => {
       expect(result.current.data).toEqual([
         {
           id: "tok_test_one",
+          name: "Token One",
           mintAddress: "MintOne1111111111111111111111111111111111111",
           symbol: "ONE",
           imageUrl: "https://assets.test/one.png",
         },
         {
           id: null,
+          name: "Token Two",
           mintAddress: "MintTwo2222222222222222222222222222222222222",
           symbol: "TWO",
           imageUrl: null,
