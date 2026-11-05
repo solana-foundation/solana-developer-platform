@@ -6,9 +6,9 @@ import userEvent from "@testing-library/user-event";
 import { type ReactNode, useState } from "react";
 import useSWR from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearOrganizationSwitch } from "@/contexts/requested-organization-switch";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import type { DashboardCacheScope } from "@/lib/dashboard-cache-scope";
-import { clearOrganizationSwitch } from "@/lib/requested-organization-switch";
 import {
   dashboardRouter,
   resetDashboardNavigation,
@@ -260,6 +260,31 @@ describe("DashboardWorkspaceProvider project selection", () => {
 
     await waitFor(() => expect(dashboardRouter.replace).toHaveBeenCalledTimes(2));
     expect(clerk.setActive.mock.calls).toEqual([[{ organization: "org_test_other" }]]);
+  });
+
+  it("forgets a switch the server never rendered once Clerk agrees with the page again", async () => {
+    const user = userEvent.setup();
+    const first = render(<WorkspaceFixture />);
+    await user.click(screen.getByRole("button", { name: "Switch organization" }));
+    clerk.auth = { ...clerk.auth, orgId: "org_test_other" };
+    first.rerender(<WorkspaceFixture />);
+    await waitFor(() => expect(dashboardRouter.replace).toHaveBeenCalledTimes(1));
+
+    // The landing rendered org_test, and Clerk went back to it (another tab's switch).
+    first.unmount();
+    clerk.auth = { ...clerk.auth, orgId: "org_test" };
+    const second = render(<WorkspaceFixture />);
+    await waitFor(() => expect(screen.getByLabelText("selected project")).toBeTruthy());
+    // A later mismatch to the organization once asked for is not this tab's switch.
+    clerk.auth = { ...clerk.auth, orgId: "org_test_other" };
+    second.rerender(<WorkspaceFixture />);
+
+    await waitFor(() => expect(clerk.setActive).toHaveBeenCalledTimes(2));
+    expect(clerk.setActive.mock.calls).toEqual([
+      [{ organization: "org_test_other" }],
+      [{ organization: "org_test" }],
+    ]);
+    expect(dashboardRouter.replace).toHaveBeenCalledTimes(1);
   });
 
   it("makes the page's organization active again when Clerk loads another one, staying on the URL", async () => {

@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import * as clerkSdk from "@clerk/nextjs";
 import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types/payments";
 import type { RenderHookResult } from "@testing-library/react";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
@@ -13,6 +12,7 @@ import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { PaymentsDemoProvider } from "@/lib/payments-demo/payments-demo-context";
+import { stubClerkSession } from "@/test/clerk";
 import { useOnrampWizard } from "./use-onramp-wizard";
 import type { UseRampWizardProps } from "./use-ramp-wizard";
 
@@ -36,14 +36,7 @@ vi.mock("sonner", () => ({
   },
 }));
 beforeEach(() => {
-  vi.mocked(vi.spyOn(clerkSdk, "useAuth"), { partial: true }).mockImplementation(() => ({
-    orgId: "org-test",
-    userId: "user-test",
-  }));
-  // The workspace provider reads setActive to keep Clerk on the page's organization.
-  vi.mocked(vi.spyOn(clerkSdk, "useClerk"), { partial: true }).mockImplementation(() => ({
-    setActive: async () => undefined,
-  }));
+  stubClerkSession({ orgId: "org-test", userId: "user-test" });
 });
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
