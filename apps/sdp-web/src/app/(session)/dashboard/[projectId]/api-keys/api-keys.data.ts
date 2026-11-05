@@ -8,7 +8,7 @@ import type { ApiKeyAuthoringExistingKey } from "./api-key-authoring";
 import { apiKeysQueryKeys } from "./api-keys-query-key";
 import type { ApiKeyRecord } from "./api-keys-table-client";
 
-const actionSchema = z.custom<Action>((value) => typeof value === "string" && isAction(value));
+const actionSchema = z.string().refine((value): value is Action => isAction(value));
 
 const apiKeyRecordSchema = z.object({
   id: z.string().min(1),
