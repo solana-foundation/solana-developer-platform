@@ -4,9 +4,9 @@ import type { PrivateChannelInstance } from "@sdp/types/private-channels";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect } from "react";
 import ProjectNotFound from "@/app/(session)/dashboard/[projectId]/not-found";
+import { usePrivateChannelInstance } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { PrivateChannelsLoadError } from "./private-channels-load-error";
-import { usePrivateChannelInstance } from "./private-channels-reads";
 import { PRIVATE_CHANNELS_SETUP_PATH } from "./private-channels-routes";
 
 /** Replaces the address once mounted; the caller renders its skeleton meanwhile. */
@@ -35,7 +35,7 @@ export function PrivateChannelsInstanceGate({
   skeleton: ReactNode;
   children: (instance: PrivateChannelInstance) => ReactNode;
 }) {
-  const { data: instance, error, mutate } = usePrivateChannelInstance();
+  const { data: instance, error, mutate } = usePrivateChannelInstance(true);
   if (instance === undefined) {
     return error ? (
       <PrivateChannelsLoadError message={error.message} onRetry={() => void mutate()} />

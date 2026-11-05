@@ -3,7 +3,6 @@
 import type { CustodyWalletSummary } from "@sdp/types/custody";
 import type {
   PrivateChannelDto,
-  PrivateChannelInstance,
   PrivateChannelPrincipalDto,
   PrivateChannelTokenEligibility,
   PrivateChannelVerifiedWalletDto,
@@ -28,22 +27,6 @@ export type PrivateChannelsCustodyWallet = Pick<
   CustodyWalletSummary,
   "walletId" | "publicKey" | "label" | "provider"
 >;
-
-const privateChannelInstanceSchema = z.object({
-  id: z.string(),
-  organizationId: z.string(),
-  projectId: z.string(),
-  isActive: z.boolean(),
-  createdBy: z.string().nullable(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-  gatewayUrl: z.string(),
-  chainRpcUrl: z.string(),
-  escrowProgramId: z.string(),
-  withdrawProgramId: z.string(),
-  escrowInstanceAddr: z.string(),
-  authUrl: z.string(),
-}) satisfies z.ZodType<PrivateChannelInstance>;
 
 const privateChannelSchema = z.object({
   id: z.string(),
@@ -107,9 +90,6 @@ const privateChannelEventSchema = z.object({
 
 export type PrivateChannelFeedEvent = z.infer<typeof privateChannelEventSchema>;
 
-const instanceResponseSchema = z.object({
-  data: z.object({ instance: privateChannelInstanceSchema.nullable() }),
-});
 const channelsResponseSchema = z.object({
   data: z.object({ channels: z.array(privateChannelSchema) }),
 });
@@ -140,16 +120,6 @@ const eventsResponseSchema = z.object({
 const eventReferencesResponseSchema = z.object({
   data: z.object({ references: z.record(z.string(), z.string()) }),
 });
-
-/** The Project's connected instance: `undefined` while it loads, `null` when there is none. */
-export function usePrivateChannelInstance() {
-  const scope = useDashboardKeyScope();
-  const response = useDashboardRead(
-    privateChannelsQueryKeys.instance(scope),
-    instanceResponseSchema
-  );
-  return { ...response, data: response.data?.data.instance };
-}
 
 /** Pass `enabled: false` until an active instance is known: the channel reads need one. */
 export function usePrivateChannels(enabled: boolean) {

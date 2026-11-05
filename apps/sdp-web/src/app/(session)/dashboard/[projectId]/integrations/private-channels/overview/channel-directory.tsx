@@ -13,7 +13,6 @@ import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/desi
 import Link from "next/link";
 import { PrivateChannelsLoadError } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-load-error";
 import {
-  usePrivateChannelInstance,
   usePrivateChannelPrincipals,
   usePrivateChannels,
   usePrivateChannelTokens,
@@ -25,6 +24,7 @@ import {
   shortenAddress,
 } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-view-data";
 import ProjectNotFound from "@/app/(session)/dashboard/[projectId]/not-found";
+import { usePrivateChannelInstance } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
 import { DashboardWorkspaceCard } from "@/components/dashboard-workspace-panel";
 import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
@@ -140,7 +140,7 @@ function DirectoryRows({ activeInstance }: { activeInstance: PrivateChannelInsta
  */
 export function ChannelDirectory({ instanceId }: { instanceId?: string }) {
   const t = useTranslations();
-  const instance = usePrivateChannelInstance();
+  const instance = usePrivateChannelInstance(true);
 
   if (instance.data === undefined) {
     return instance.error ? (

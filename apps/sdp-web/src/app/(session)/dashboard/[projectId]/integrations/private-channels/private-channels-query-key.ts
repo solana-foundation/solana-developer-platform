@@ -10,8 +10,6 @@ const PRIVATE_CHANNELS_READ_PATH = "/api/dashboard/private-channels";
 export const PRIVATE_CHANNELS_EVENTS_PAGE_SIZE = 50;
 
 export const privateChannelsQueryKeys = {
-  instance: (scope: DashboardKeyScope) =>
-    dashboardRequestKey(scope, `${PRIVATE_CHANNELS_READ_PATH}/instance`),
   channels: (scope: DashboardKeyScope) =>
     dashboardRequestKey(scope, `${PRIVATE_CHANNELS_READ_PATH}/channels`),
   tokens: (scope: DashboardKeyScope) =>
