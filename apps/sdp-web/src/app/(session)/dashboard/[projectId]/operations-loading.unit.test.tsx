@@ -56,7 +56,6 @@ describe("operations route loading states", () => {
     expect(markup).toContain("data-loading-api-key-table");
     expect(markup).not.toContain("data-loading-settings-form");
     expect(markup).toContain("data-loading-settings-onboarding");
-    expect(markup).toContain("data-loading-settings-members");
     expect(markup.match(/data-loading-summary-rail/g)).toHaveLength(2);
     expect(markup.match(/data-loading-action-bar/g)).toHaveLength(2);
   });

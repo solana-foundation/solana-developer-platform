@@ -2,13 +2,16 @@
 
 import { useClerk } from "@clerk/nextjs";
 import { Button } from "@sdp/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
 import { Modal } from "@sdp/ui/modal";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { leaveOrganization } from "@/app/(session)/members/actions";
+import {
+  RecordActionRow,
+  RecordSection,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
 import { useTranslations } from "@/i18n/provider";
+import { dashboardFetch } from "@/lib/dashboard-fetch";
 
 /**
  * Lets a member end their own membership. Admins cannot leave (the API refuses
@@ -16,7 +19,7 @@ import { useTranslations } from "@/i18n/provider";
  * API refuses the person, so the session drops the organization and returns
  * to the organization picker.
  */
-export function LeaveOrganizationCard() {
+export function LeaveOrganizationSection() {
   const t = useTranslations();
   const router = useRouter();
   const { setActive } = useClerk();
@@ -25,12 +28,12 @@ export function LeaveOrganizationCard() {
 
   const confirmLeave = () => {
     startTransition(async () => {
-      const result = await leaveOrganization();
-      if (result.status === "error") {
+      const result = await dashboardFetch("/api/dashboard/members/me", { method: "DELETE" });
+      if (!result.ok) {
         // The membership may have ended before the request failed (its Clerk
         // half runs after the commit): refreshing lets the layout's own check
         // show the no-access panel if it did.
-        toast.error(t("Shared.members.leaveFailed", { error: result.message }));
+        toast.error(t("Shared.members.leaveFailed", { error: result.error }));
         router.refresh();
         return;
       }
@@ -44,16 +47,22 @@ export function LeaveOrganizationCard() {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("Shared.members.leaveTitle")}</CardTitle>
-        <CardDescription>{t("Shared.members.leaveDescription")}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Button variant="destructive" onClick={() => setConfirmOpen(true)} disabled={isPending}>
-          {t("Shared.members.leaveOrganization")}
-        </Button>
-      </CardContent>
+    <RecordSection title={t("Shared.organizationSettings.dangerZoneTitle")}>
+      <RecordActionRow
+        label={t("Shared.members.leaveTitle")}
+        hint={t("Shared.members.leaveDescription")}
+        control={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setConfirmOpen(true)}
+            disabled={isPending}
+          >
+            {t("Shared.members.leaveOrganization")}
+          </Button>
+        }
+      />
       <Modal
         isOpen={isConfirmOpen}
         ariaLabel={t("Shared.members.leaveOrganization")}
@@ -76,6 +85,6 @@ export function LeaveOrganizationCard() {
           </div>
         </div>
       </Modal>
-    </Card>
+    </RecordSection>
   );
 }
