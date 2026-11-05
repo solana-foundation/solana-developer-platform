@@ -19,7 +19,7 @@ function renderIndicator() {
 afterEach(cleanup);
 
 describe("FullscreenLoadingIndicator", () => {
-  it("paints the ruled 280px sidebar and flat page, marked for the refresh palette", () => {
+  it("paints the ruled 280px sidebar and flat page, marked as the dashboard shell", () => {
     const { container } = renderIndicator();
     const main = container.querySelector("main");
     expect(main?.hasAttribute("data-sdp-dashboard-shell")).toBe(true);
