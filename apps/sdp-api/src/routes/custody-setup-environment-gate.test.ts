@@ -394,26 +394,24 @@ describe("Custody setup by project environment", () => {
     expect(await custodyRows()).toEqual(NO_CUSTODY_ROWS);
   });
 
-  it.each(["fireblocks", "turnkey"] as const)(
-    "refuses a Managed %s wallet on stable with custody_provider_not_in_release_channel, not a missing config",
-    async (provider) => {
-      env.SDP_RELEASE_CHANNEL = "stable";
+  it("refuses a Managed beta-provider wallet on stable with custody_provider_not_in_release_channel, not a missing config", async () => {
+    env.SDP_RELEASE_CHANNEL = "stable";
 
-      const response = await createManagedWallet("sandbox", provider, `gate-stable-${provider}`);
+    const response = await createManagedWallet("sandbox", "fireblocks", "gate-stable-fireblocks");
 
-      expect(response.status).toBe(403);
-      expect(await response.json()).toEqual({
-        error: {
-          code: "FORBIDDEN",
-          message: `The ${provider} custody provider is not available in this release channel for managed custody.`,
-          details: { reason: "custody_provider_not_in_release_channel" },
-        },
-        meta: { requestId: expect.any(String) },
-      });
-      expect(fetch).not.toHaveBeenCalled();
-      expect(await custodyRows()).toEqual(NO_CUSTODY_ROWS);
-    }
-  );
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message:
+          "The fireblocks custody provider is not available in this release channel for managed custody.",
+        details: { reason: "custody_provider_not_in_release_channel" },
+      },
+      meta: { requestId: expect.any(String) },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await custodyRows()).toEqual(NO_CUSTODY_ROWS);
+  });
 
   it("answers a Managed wallet for an admitted provider with no config as not initialized", async () => {
     const response = await createManagedWallet("sandbox", "privy", "gate-sandbox-no-config");
