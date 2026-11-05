@@ -1,25 +1,27 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
-import { dashboardRouter, setDashboardUrl } from "@/test/dashboard-navigation";
+import { setDashboardUrl } from "@/test/dashboard-navigation";
+import { EnglishI18n } from "@/test/i18n";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { SidebarUserMenu } from "./sidebar-user-menu";
+
+const clerk = vi.hoisted(() => ({ loaded: true }));
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@sentry/nextjs", () => ({ getFeedback: () => undefined }));
 vi.mock("@clerk/nextjs", () => ({
   useUser: () => ({
+    isLoaded: clerk.loaded,
     user: {
       fullName: "Jane Doe",
       imageUrl: "",
       primaryEmailAddress: { emailAddress: "jane@example.com" },
     },
   }),
-  useClerk: () => ({ openUserProfile: vi.fn(), signOut: vi.fn() }),
+  useClerk: () => ({ signOut: vi.fn() }),
 }));
 vi.mock("@/contexts/theme-context", () => ({
   THEME_PREFERENCES: ["system", "light", "dark"],
@@ -31,31 +33,35 @@ vi.mock("@/contexts/network-debug-context", () => ({
 
 afterEach(() => {
   cleanup();
-  document.documentElement.lang = "";
+  clerk.loaded = true;
 });
 
 describe("SidebarUserMenu", () => {
-  it("links Settings inside the URL's Project and switches the language", async () => {
+  it("reserves the account row while Clerk resolves the user", () => {
+    clerk.loaded = false;
+    render(<SidebarUserMenu collapsed={false} menuSide="right" />, { wrapper: EnglishI18n });
+
+    expect(screen.getByRole("status").getAttribute("aria-busy")).toBe("true");
+    expect(screen.queryByRole("button", { name: "Account menu" })).toBeNull();
+  });
+
+  it("opens on the identity and lists Account settings inside the URL's Project", async () => {
     setDashboardUrl(`/dashboard/${PRODUCTION_PROJECT.id}/payments`, {});
     const user = userEvent.setup();
-    render(
-      <I18nProvider locale="en" messages={getMessages("en")}>
-        <SidebarUserMenu collapsed={false} menuSide="right" />
-      </I18nProvider>
-    );
+    render(<SidebarUserMenu collapsed={false} menuSide="right" />, { wrapper: EnglishI18n });
 
     await user.click(screen.getByRole("button", { name: "Account menu" }));
-    expect(screen.getByRole("menuitem", { name: "Settings" }).getAttribute("href")).toBe(
-      `/dashboard/${PRODUCTION_PROJECT.id}/settings`
+
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getByText("Jane Doe")).toBeDefined();
+    expect(within(menu).getByText("jane@example.com")).toBeDefined();
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent)
+    ).toEqual(["Account settings", "Theme", "API Docs", "Feedback", "Sign out"]);
+    expect(screen.getByRole("menuitem", { name: "Account settings" }).getAttribute("href")).toBe(
+      `/dashboard/${PRODUCTION_PROJECT.id}/account`
     );
-    const row = screen.getByRole("menuitem", { name: /Language/ });
-    expect(row.textContent).toContain("English");
-
-    await user.click(row);
-    (await screen.findByRole("menuitemradio", { name: /Français/ })).focus();
-    await user.keyboard("{Enter}");
-
-    expect(document.documentElement.lang).toBe("fr");
-    expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1);
   });
 });

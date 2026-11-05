@@ -111,3 +111,4 @@ jobs:
             apps/sdp-web/playwright-report
             apps/sdp-web/test-results
           if-no-files-found: ignore
+          retention-days: 7

@@ -10,6 +10,7 @@ import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-conte
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { stubClerkSession } from "@/test/clerk";
 import { TokenActionAdminForms } from "./token-action-admin-forms";
 import {
   createInitialAuthorityForm,
@@ -30,7 +31,9 @@ const entry: TokenAllowlistEntry = {
 };
 
 // Only framework/session and HTTP boundaries are mocked; SWR and fetchers stay real.
-vi.mock("@clerk/nextjs", () => ({ useAuth: () => ({ orgId: "org_test", userId: "user_test" }) }));
+beforeEach(() => {
+  stubClerkSession();
+});
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const fetchMock = vi.fn<typeof fetch>();

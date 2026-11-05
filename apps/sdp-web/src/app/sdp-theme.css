@@ -78,7 +78,10 @@
      carry 450 into a nested scope. */
   --font-weight-regular-base: 400;
   --font-weight-regular: calc(var(--font-weight-regular-base) * var(--fw-mult));
-  --tab-weight-idle: var(--font-weight-regular);
+  /* Every tab is the Medium face, selected or not: the selected one changes ink only, so a
+     switch never changes a label's width. */
+  --tab-weight-idle: calc(var(--font-weight-medium-base) * var(--fw-mult));
+  --tab-weight-active: var(--tab-weight-idle);
 
   --text-extra-high: var(--emph-xh);
   --text-high: var(--emph-m);
@@ -128,7 +131,7 @@
   --tab-padding-x-sm: 0px;
   --tab-padding-x-md: 0px;
   --tab-padding-y-md: 11px;
-  --tab-text-idle: var(--emph-m);
+  --tab-text-idle: var(--emph-l);
   --tab-text-hover: var(--emph-xh);
   --tab-text-active: var(--emph-xh);
   --tab-indicator-color: var(--emph-xh);
@@ -188,11 +191,10 @@
 }
 
 /* Base UI 1.8 marks the active tab `data-active`; the design-system tab still styles
-   `data-selected`, so without this the active tab keeps the idle ink and weight and only the
-   underline tells it apart. The design sets it in full ink, medium. */
+   `data-selected`, so without this the active tab keeps the idle ink and only the underline
+   tells it apart. The design sets it in full ink. */
 [data-sdp-theme="refresh"] [role="tab"][data-active] {
   color: var(--tab-text-active);
-  font-weight: var(--tab-weight-active);
 }
 
 :root.dark {

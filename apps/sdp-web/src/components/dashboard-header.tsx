@@ -14,18 +14,23 @@ import {
 import Link from "next/link";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
+import { ACCOUNT_TABS } from "@/app/(session)/dashboard/[projectId]/account/account-tabs";
 import {
   formatCustodyProviderName,
   isKnownCustodyProvider,
 } from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
 import { privateChannelsInstancePath } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
+import { SETTINGS_TABS } from "@/app/(session)/dashboard/[projectId]/settings/settings-tabs";
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
 import { useTranslations } from "@/i18n/provider";
 import type { DashboardCapabilities } from "@/lib/dashboard-access";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
-import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import {
+  DASHBOARD_ACCOUNT_HREF,
+  DASHBOARD_MARKETS_SUBNAV_HREFS,
+} from "@/lib/dashboard-navigation-loading";
 import {
   PAYMENT_REQUEST_NEW_HREF,
   PAYMENT_REQUESTS_HREF,
@@ -1293,13 +1298,27 @@ export function getDashboardPageConfig(
   }
   // Members only redirects into Settings, so its loading frame carries the Settings title.
   if (pathname.startsWith("/dashboard/settings") || pathname === "/dashboard/members") {
-    // Settings was the only route left on the `max-w-5xl` default, which stranded a
-    // wide empty gutter beside its cards. Widened rather than set to `max-w-none`:
-    // the members table rows are label/value pairs, and letting them span
-    // an ultrawide display pushes each value far from its label.
     return {
-      title: t("Shared.dashboardShell.settings"),
-      contentWidthClass: "max-w-7xl",
+      title: t("Shared.organizationSettings.title"),
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      headerTabs: {
+        tabs: SETTINGS_TABS.map((tab) => ({
+          id: tab.id,
+          label: t(tab.labelKey),
+          capability: "capability" in tab ? tab.capability : undefined,
+        })),
+        hideOnMobile: false,
+      },
+    };
+  }
+  if (pathname === DASHBOARD_ACCOUNT_HREF) {
+    return {
+      title: t("Shared.account.title"),
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      headerTabs: {
+        tabs: ACCOUNT_TABS.map((tab) => ({ id: tab.id, label: t(tab.labelKey) })),
+        hideOnMobile: false,
+      },
     };
   }
   if (pathname.startsWith("/dashboard/allowlist")) {

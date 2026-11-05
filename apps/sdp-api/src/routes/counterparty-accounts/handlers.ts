@@ -5,12 +5,16 @@ import type {
 } from "@sdp/types/counterparties";
 import { z } from "zod";
 import { getDb } from "@/db/client";
-import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
+import {
+  type CounterpartyAccountRow,
+  isDuplicateCounterpartyAccountAddress,
+} from "@/db/repositories/counterparty-account.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {
   badRequest,
   badRequestParams,
   badRequestQuery,
+  conflict,
   internalError,
   notFound,
 } from "@/lib/errors";
@@ -45,6 +49,25 @@ function mapToCounterpartyAccount(row: CounterpartyAccountRow): CounterpartyAcco
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+/** The caller-facing message when an address is already on the counterparty (HOO-2618). */
+export const DUPLICATE_ACCOUNT_ADDRESS_MESSAGE = "This address is already on this counterparty";
+
+/**
+ * Runs an account write, answering 409 when it would give the counterparty a
+ * second active account for one network and address. The unique index decides,
+ * so two concurrent requests cannot both succeed.
+ */
+async function refuseDuplicateAddress<T>(write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (error) {
+    if (isDuplicateCounterpartyAccountAddress(error)) {
+      throw conflict(DUPLICATE_ACCOUNT_ADDRESS_MESSAGE);
+    }
+    throw error;
+  }
 }
 
 async function assertCounterpartyExists(
@@ -141,15 +164,17 @@ export const createCounterpartyAccount = async (
 
   await assertCounterpartyExists(c, params.data.counterpartyId, auth.organizationId, projectId);
 
-  const account = await getCounterpartyAccountsRepository(c).createCounterpartyAccount({
-    organizationId: auth.organizationId,
-    projectId,
-    counterpartyId: params.data.counterpartyId,
-    accountKind: body.accountKind,
-    label: body.label ?? null,
-    details: body.details ?? {},
-    providerAccountData: body.providerAccountData ?? {},
-  });
+  const account = await refuseDuplicateAddress(() =>
+    getCounterpartyAccountsRepository(c).createCounterpartyAccount({
+      organizationId: auth.organizationId,
+      projectId,
+      counterpartyId: params.data.counterpartyId,
+      accountKind: body.accountKind,
+      label: body.label ?? null,
+      details: body.details ?? {},
+      providerAccountData: body.providerAccountData ?? {},
+    })
+  );
 
   if (!account) {
     throw internalError("Failed to create counterparty account");
@@ -208,13 +233,15 @@ export const updateCounterpartyAccount = async (
     }
   }
 
-  const updated = await repo.updateCounterpartyAccount({
-    counterpartyAccountId: params.data.counterpartyAccountId,
-    counterpartyId: params.data.counterpartyId,
-    organizationId: auth.organizationId,
-    projectId,
-    ...body,
-  });
+  const updated = await refuseDuplicateAddress(() =>
+    repo.updateCounterpartyAccount({
+      counterpartyAccountId: params.data.counterpartyAccountId,
+      counterpartyId: params.data.counterpartyId,
+      organizationId: auth.organizationId,
+      projectId,
+      ...body,
+    })
+  );
 
   if (!updated) {
     await assertCounterpartyExists(c, params.data.counterpartyId, auth.organizationId, projectId);

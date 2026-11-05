@@ -59,10 +59,10 @@ vi.mock("@clerk/nextjs", () => ({
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
-function renderPanel(noAccess: boolean) {
+function renderPanel(noAccess: boolean, invitationExpired = false) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <SelectExistingOrganizationPanel noAccess={noAccess} />
+      <SelectExistingOrganizationPanel noAccess={noAccess} invitationExpired={invitationExpired} />
     </I18nProvider>
   );
 }
@@ -149,6 +149,15 @@ describe("SelectExistingOrganizationPanel", () => {
     expect(screen.getByRole("heading", { name: "No access to this organization" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Existing workspace" })).toBeNull();
     expect(screen.getByRole("textbox", { name: "Organization name" })).toBeTruthy();
+  });
+
+  it("tells an invitee whose invitation expired to ask an admin for a new one", () => {
+    mocks.session.activeOrganization = { id: "org_existing" };
+    renderPanel(true, true);
+
+    expect(screen.getByRole("heading", { name: "Your invitation has expired" })).toBeTruthy();
+    expect(screen.getByText(/Ask an admin of the organization to send you a new one/)).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "No access to this organization" })).toBeNull();
   });
 
   it("keeps an accepted invitation accepted when switching to its organization fails", async () => {
