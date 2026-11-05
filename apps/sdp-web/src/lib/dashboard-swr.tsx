@@ -114,9 +114,9 @@ function mountedReadsOf(cache: Cache): Map<string, number> {
  * `useSWR` for a request key, counted while mounted so an invalidation can tell a read on screen
  * (refetch, keep its data) from one that is not (clear it). Every dashboard read goes through here.
  */
-export function useDashboardSWR<Data>(
-  key: DashboardRequestKey | null,
-  fetcher: (requestKey: DashboardRequestKey) => Promise<Data>,
+export function useDashboardSWR<Data, Key extends DashboardRequestKey = DashboardRequestKey>(
+  key: Key | null,
+  fetcher: (requestKey: Key) => Promise<Data>,
   config?: SWRConfiguration<Data, DashboardReadError>
 ): SWRResponse<Data, DashboardReadError> {
   const { cache } = useSWRConfig();
