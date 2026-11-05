@@ -294,7 +294,7 @@
     "missingApiKeyIdForRotation": "Missing API key id for rotation.",
     "apiKeyRotated": "API key rotated. Previous key remains valid until {deadline}.",
     "apiKeyRotateFailed": "Rotate failed: {error}",
-    "providerLocalDescription": "Self-hosted Ed25519 keypair signer from CUSTODY_PRIVATE_KEY.",
+    "providerLocalDescription": "Self-hosted signer: each project gets its own Ed25519 keypair.",
     "providerPrivyDescription": "Hosted wallet infrastructure for API signing.",
     "providerFireblocksDescription": "MPC custody with vault-based wallet controls.",
     "providerCoinbaseCdpDescription": "Programmatic wallet provisioning through Coinbase CDP.",

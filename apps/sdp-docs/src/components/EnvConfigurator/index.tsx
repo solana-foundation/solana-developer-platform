@@ -494,8 +494,8 @@ export function EnvConfigurator() {
       if (key === "DATABASE_MODE" && value !== "bundled" && !next.POSTGRES_PASSWORD) {
         next.POSTGRES_PASSWORD = generateSecret("POSTGRES_PASSWORD");
       }
-      // Keep the default provider valid: if it drops out of the selected set,
-      // fall back to the first selected provider.
+      // Keep SIGNING_PROVIDER, which the API reads only at startup, one of the
+      // selected providers: if it drops out, use the first one selected.
       if (key === "SIGNING_PROVIDERS") {
         const selected = parseList(value);
         if (!selected.includes(next.SIGNING_PROVIDER)) {
