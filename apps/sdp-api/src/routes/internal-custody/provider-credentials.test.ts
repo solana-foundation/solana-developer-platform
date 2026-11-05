@@ -500,6 +500,37 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
   });
 
+  it("refuses a user's sixth Privy credential check in a window without contacting Privy", async () => {
+    const providerFetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () =>
+        Response.json({ code: "missing_or_invalid_privy_app_id" }, { status: 400 })
+      );
+    const { app, token } = buildApp();
+    for (const attempt of [1, 2, 3, 4, 5]) {
+      const refused = await submit(app, token, {
+        projectId: PROJECT_ID,
+        key: `privy-check-quota-${attempt}`,
+        body: VALID_BODY,
+      });
+      expect(refused.status).toBe(400);
+    }
+    providerFetch.mockClear();
+
+    const response = await submit(app, token, {
+      projectId: PROJECT_ID,
+      key: "privy-check-quota-6",
+      body: VALID_BODY,
+    });
+
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({
+      error: { code: "RATE_LIMITED", message: expect.stringMatching(/^Rate limit exceeded/) },
+      meta: { requestId: "req_provider_credential_submit" },
+    });
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
   it("answers an unknown replacement Connection with 404 before contacting Privy", async () => {
     const providerFetch = vi.spyOn(globalThis, "fetch");
     const { app, token } = buildApp();
