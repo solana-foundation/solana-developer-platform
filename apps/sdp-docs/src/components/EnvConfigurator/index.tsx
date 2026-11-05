@@ -741,7 +741,7 @@ curl http://localhost:8787/health`}</pre>
                   <p className="sdp-cfg-note">Fill required fields before downloading.</p>
                 ) : null}
                 <p className="sdp-cfg-hint">
-                  Some browsers drop the leading dot — rename the downloaded file to{" "}
+                  Some browsers drop the leading dot, so rename the downloaded file to{" "}
                   <code>.env</code> if needed.
                 </p>
                 <pre className="sdp-cfg-pre">{env}</pre>

@@ -8,18 +8,12 @@ steps:
   - Revoke an authority
 ---
 
-After a token is deployed, you can rotate its authorities and adjust operational settings. Authority management is separate from compliance actions — for freeze, pause, and seize flows see [Freeze and Compliance](/docs/tokens/freeze-and-compliance).
-
-For on-chain metadata edits, `PATCH /v1/issuance/tokens/{tokenId}` accepts optional `signingCustodyWalletId`. It selects the exact custody record controlling the current metadata authority for this request, not a new deployment wallet or authority. Omission requires exactly one matching in-scope record; multiple matches return `409`. Database-only edits need no signer. In the dashboard, one matching wallet is automatic; when there are several, choose one in the metadata confirmation or beside the Asset Profile Save button. Historical `data.token.signingCustodyWalletId` does not change.
-
-After an external authority rotation, request `GET /v1/issuance/tokens/{tokenId}?includeMetadataAuthority=true` and use `data.metadataAuthority` to select the signer. For a minted token, SDP reads it live from the chain rather than using the stored `data.token.metadataAuthority` snapshot. A token without a mint returns its stored metadata or mint authority without RPC.
-
-RPC failure returns `502`, never the stored value as a fallback. The dashboard keeps metadata and allowlist lookup errors separate, and the update rechecks authority before signing. This read changes neither the stored token nor its deployment wallet.
+After deployment, you can move a token's authorities to other wallets, give them up, and edit its metadata. Freeze, pause and seize are on [Freeze and Compliance](/docs/tokens/freeze-and-compliance).
 
 ## Prerequisites
 
-- A deployed token with status `active`
-- `tokens:admin` permission on the API key
+- A deployed token
+- The `issuance.authority` grant to move or revoke authorities, or `issuance.execute` to [edit metadata](#edit-metadata)
 
 ## How it works
 
@@ -27,33 +21,32 @@ RPC failure returns `502`, never the stored value as a fallback. The dashboard k
 
 <Step number={1} title="View current settings">
 
-Review the token's current authorities and configuration before making changes.
+Review the token's authorities and configuration before you change them.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Open the token detail page. The **Overview** tab shows the token address, mint authority, current supply, and core metadata.
+Open the token. **Overview** shows its supply, identity and authorities.
 
 ![Token detail Overview tab showing token address, mint authority, supply, template, and decimals](/images/tokens/token-settings-overview.png)
 
-The **Permissions** tab lists every authority and which wallet currently holds it.
+**Permissions** lists each authority with the wallet that holds it.
 
 ![Permissions tab showing Mint Authority, Freeze Authority, Metadata Authority, and Permanent Delegate Authority with Edit buttons](/images/tokens/token-settings-permissions.png)
 
-The **Extensions** tab shows the template and each operational flag — Token Access Control (allowlist) status, mintable, freezable, and default account state.
+Below them, **Extensions** shows the template and whether the token is freezable, pausable and mintable, has a permanent delegate, and uses an access list.
 
 ![Extensions tab showing template, allowlist, mintable, freezable, and default account state settings](/images/tokens/token-settings-extensions.png)
 
 </Tab>
 <Tab value="API">
 
-Fetch the current token state:
+Fetch the token:
 
 <ApiExample operation="get-token" />
 
-The response's `data.token` contains `authorities` (mint, freeze, and permanent
-delegate), active `extensions`, and `status` (`active` or `paused`).
+`data.token` holds `mintAuthority`, `freezeAuthority`, `metadataAuthority`, `extensions` (including `permanentDelegate`) and `status` (`pending`, `active`, `paused` or `revoked`). For a live onchain lookup of one authority, add `includeMetadataAuthority`, `includeFreezeAuthority`, `includePauseAuthority` or `includeAllowlistAuthority=true`.
 
 </Tab>
 </Tabs>
@@ -63,22 +56,22 @@ delegate), active `extensions`, and `status` (`active` or `paused`).
 
 <Step number={2} title="Rotate an authority">
 
-Transfer a token authority to a different wallet. Use this to move signing responsibilities or to hand off control to an external key holder.
+Move an authority to another wallet, to change who signs or to hand control to an outside key holder.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-On the token detail page, go to **Permissions**. Click **Edit** next to the authority you want to change. Select another controlled wallet or choose **Use custom address**, then click **Save authority**.
+On **Permissions**, click **Edit** beside the authority. Pick another wallet, or click **Use custom address** and enter a Solana address. Then click **Save authority**.
 
 ![Mint Authority modal showing current authority wallet, new authority dropdown with controlled wallets, and Save authority button](/images/tokens/token-authority-edit.png)
 
-> Once an authority is rotated to an external wallet, SDP can no longer sign operations that require it. Rotate the authority back to a controlled wallet to resume using SDP's deploy, mint, and compliance actions.
+> SDP can't sign with an authority held outside SDP custody, and can't take it back. Its holder must move it to a custody wallet before SDP can run the operations it controls.
 
 </Tab>
 <Tab value="API">
 
-SDP signs the authority rotation:
+SDP signs the rotation:
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
@@ -87,13 +80,13 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
   -H "Idempotency-Key: rotate-001" \
   -d '{
     "authority": {
-      "type": "mintAuthority",
+      "role": "mint",
       "newAuthority": "9aBCd...4eEf"
     }
   }'
 ```
 
-`type` can be `mintAuthority`, `freezeAuthority`, or `permanentDelegate`.
+`role` is `mint`, `freeze`, `permanentDelegate` or `metadata`. An optional `signingCustodyWalletId` must control the authority you're changing; `currentAuthority` is optional too.
 
 </Tab>
 </Tabs>
@@ -103,29 +96,33 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
 
 <Step number={3} title="Revoke an authority">
 
-Permanently remove an authority from the token. This action is irreversible — the token will no longer be mintable, freezable, or delegatable depending on which authority is revoked.
+Remove an authority for good. Without its mint authority the token can never be minted again; without the freeze authority, accounts can't be frozen or unfrozen; without the permanent delegate, force transfer and force burn stop; without the metadata authority, metadata can't change.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In **Settings → Authorities**, click **Revoke** next to the authority and confirm. A warning dialog explains the consequences before you proceed.
+On **Permissions**, click **Edit**, choose **None** and click **Save authority**. The form explains what you give up; confirm with **Yes, set to None**.
+
+On a token with an onchain access list, the dashboard lets you move the freeze authority but not remove it.
+
+To end minting at the cap, use **Lock supply** on **Operations**: it mints what's left of the cap, then gives up the mint authority.
 
 </Tab>
 <Tab value="API">
 
-Set `newAuthority` to `null` to revoke:
+Set `newAuthority` to `null`:
 
 ```typescript title="revoke-authority.ts"
 body: JSON.stringify({
   authority: {
-    type: "mintAuthority",
+    role: "mint",
     newAuthority: null,
   },
 }),
 ```
 
-After revoking the mint authority, no new tokens can ever be minted. Revocation is permanent and cannot be undone.
+Revocation is permanent: once the mint authority is gone, no one can mint the token again.
 
 </Tab>
 </Tabs>
@@ -134,3 +131,15 @@ After revoking the mint authority, no new tokens can ever be minted. Revocation 
 </Step>
 
 </HowItWorks>
+
+## Edit metadata
+
+`PATCH /v1/issuance/tokens/{tokenId}` updates the stored token. On a deployed token, changes to `name`, `description`, `uri` and `imageUrl` are also written onchain through the current metadata authority. `symbol`, `decimals` and `requiresAllowlist` can't change after deployment.
+
+`maxSupply` stays editable until the mint authority is revoked. It can't go below the minted supply, and `null` removes the cap.
+
+For an onchain edit, the optional `signingCustodyWalletId` picks the custody wallet that holds the current metadata authority, for this request only. It doesn't change the deployment wallet. Without it, exactly one custody wallet in scope must match, or the call returns `409`. Edits that stay in SDP need no signer. After deployment, a request with only `signingCustodyWalletId` returns `400`.
+
+In the dashboard, edit on the **Details** or **Public information** tab and click **Save changes**. When several wallets hold the metadata authority, choose one in the save bar.
+
+If the authority moved outside SDP, look it up with `GET /v1/issuance/tokens/{tokenId}?includeMetadataAuthority=true`. For a minted token, `data.metadataAuthority` comes live from the chain; otherwise it's the stored metadata or mint authority, read without RPC. An RPC failure returns `502`, never the stored value. The lookup changes nothing.

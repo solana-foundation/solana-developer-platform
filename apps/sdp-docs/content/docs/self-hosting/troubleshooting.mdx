@@ -3,8 +3,7 @@ title: Troubleshooting
 description: Diagnose common startup and configuration failures on a self-hosted stack.
 ---
 
-Most self-hosting problems surface at startup. Start by looking at the service
-state and logs:
+Most problems show up at startup. Start with the service state and the API logs:
 
 ```bash title="Terminal"
 cd ~/sdp
@@ -14,65 +13,49 @@ docker compose logs -f sdp-api
 
 ## Docker is not ready
 
-The install script checks for Docker up front. If you see that Docker is not
-installed, that Compose v2 is unavailable, or that the daemon is unreachable,
-install or start Docker and retry — see the
-[Docker Engine](https://docs.docker.com/engine/install/) and
-[Compose](https://docs.docker.com/compose/install/) docs.
+The install script checks Docker first. If it reports that Docker isn't installed, that Compose v2 is unavailable, or that the daemon isn't reachable, install or start Docker and retry. See the [Docker Engine](https://docs.docker.com/engine/install/) and [Compose](https://docs.docker.com/compose/install/) install guides.
 
 ## A required variable is missing
 
-`compose.yml` fails fast when a required variable is unset, with a message such
-as `set POSTGRES_PASSWORD in .env`. Make sure a `.env` exists next to
-`compose.yml` and fills in every required variable. The
-[configurator](/docs/self-hosting/configurator) produces a complete file; the
-[environment reference](/docs/self-hosting/env-reference) lists what is required.
+`compose.yml` stops with a message such as `set POSTGRES_PASSWORD in .env` when a required variable is unset. Make sure `.env` sits next to `compose.yml` and sets every required variable. The [configurator](/docs/self-hosting/configurator) writes a complete file, and the [environment reference](/docs/self-hosting/env-reference) lists what's required.
 
 ## Images won't pull
 
 If `docker compose pull` reports access denied or a missing manifest:
 
-- Confirm `SDP_IMAGE_REGISTRY` and `SDP_VERSION` point at a registry and tag you
-  can reach.
-- Pull a single image directly to see the underlying error, e.g.
-  `docker pull ghcr.io/solana-foundation/sdp/sdp-api:latest`.
+- Check that `SDP_IMAGE_REGISTRY` and `SDP_VERSION` name a registry and tag you can reach. Release tags look like `vX.Y.Z`.
+- Pull one image directly to see the underlying error, for example `docker pull ghcr.io/solana-foundation/sdp/sdp-api:latest`.
 - If the registry is private, run `docker login` for it first.
 
 ## Port already in use
 
-The API, web, and docs default to ports `8787`, `3000`, and `3001`. If another
-process holds one of them, the service won't bind. Override the host port in
-`.env` with `SDP_API_PORT`, `SDP_WEB_PORT`, or `SDP_DOCS_PORT` and run
-`docker compose up -d` again.
+The API, dashboard, and docs use ports `8787`, `3000`, and `3001` by default. If another process holds one, that service can't bind. Set `SDP_API_PORT`, `SDP_WEB_PORT`, or `SDP_DOCS_PORT` in `.env`, update the browser-facing URLs that name that port (the `NEXT_PUBLIC_*` URLs, and `FRONTEND_URL` for the dashboard), and run `docker compose up -d` again.
 
 ## Migrations failed
 
-`sdp-migrate` runs once before the API starts; if it fails, the API stays down.
-Inspect it with:
+`sdp-migrate` runs before the API starts. If it fails, the API stays down. Read its logs:
 
 ```bash title="Terminal"
 docker compose logs sdp-migrate
 ```
 
-A failure here is usually a database connection problem — check `POSTGRES_*` (or
-`DATABASE_URL`) and that the `postgres` service is healthy in `docker compose ps`.
+A failure here is usually a database connection problem. Check `POSTGRES_*` (or `DATABASE_URL`), and that `postgres` shows as healthy in `docker compose ps`.
 
 ## Database connection refused
 
-The API and migration services wait for Postgres to report healthy before
-starting. If they still can't connect, verify the credentials in `.env`, and for
-an external database (`DATABASE_URL` set) that it is reachable from inside the
-Docker network.
+The API and migrations wait for Postgres to report healthy before they start. If they still can't connect, check the credentials in `.env`. With an external database (`DATABASE_URL` set), check that it's reachable from inside the Docker network.
 
-## Authentication errors in the dashboard
+## Dashboard sign-in fails
 
-Sign-in problems point at the Clerk configuration. Re-check
-`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, and `CLERK_ISSUER`
-against your Clerk application, and confirm the keys match the environment
-(development vs production) you intend to run.
+Most sign-in failures are Clerk configuration. Check `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, and `CLERK_ISSUER` against your Clerk application, and that the keys belong to the instance (development or production) you mean to use. Then look for these in the API logs:
+
+- `Clerk token missing organization` or `Clerk token has no usable email claim`: the session token lacks the claims in the [Clerk setup guide](https://github.com/solana-foundation/solana-developer-platform/blob/main/apps/sdp-api/docs/self-hosting/clerk-setup.md).
+- `Clerk session refused: not issued to the dashboard`: `FRONTEND_URL` isn't the origin the dashboard loads from. With `ENVIRONMENT=production`, the API accepts only sessions issued to that origin.
+
+## The local signer isn't offered
+
+If the local provider is missing from the dashboard, `CUSTODY_PRIVATE_KEY` isn't set. If choosing it returns `Local requires manual activation for this organization.`, add the organization override from [First devnet deployment](/docs/self-hosting/first-devnet-deployment), and check that the Clerk webhook reaches the API.
 
 ## Still stuck?
 
-Capture the failing service's logs and your (secret-redacted) `.env` settings,
-then open an issue on the
-[project repository](https://github.com/solana-foundation/solana-developer-platform).
+Collect the failing service's logs and your `.env` settings with the secrets removed, then open an issue on the [project repository](https://github.com/solana-foundation/solana-developer-platform).

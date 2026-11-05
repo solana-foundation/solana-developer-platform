@@ -1,85 +1,57 @@
 ---
 title: Create a wallet
-description: Initialize a custody provider and create wallets for signing transactions.
+description: Set up a custody provider and create wallets for signing transactions.
 breadcrumbParent: /docs/wallet-operations
 ---
 
-A **custody wallet** is a Solana keypair whose key is held and signed for by a custody provider — SDP routes signing requests to whichever provider holds the wallet's key. Initialize a provider, then create wallets for transfers and other onchain operations.
+A **custody wallet** is a Solana keypair whose key a custody provider holds. SDP sends each signing request to the provider that holds the wallet's key. Set up a provider, then create wallets for transfers and other onchain operations.
 
-## Supported providers
-
-| Provider | Description |
-| --- | --- |
-| **Privy** | Embedded wallet infrastructure platform |
-| **Fireblocks** | Digital asset infrastructure company |
-| **Coinbase CDP** | Embedded wallets for developers |
-| **Para** | Wallet and authentication suite |
-| **Turnkey** | Non-custodial wallet infrastructure platform |
-| **DFNS** | Digital asset wallet infrastructure |
-| **Anchorage** | Regulated institutional crypto custody |
+The dashboard lists the custody providers your project can use. That list depends on this deployment and on your project's environment.
 
 <Tabs items={["Dashboard", "API"]}>
 <Tab value="Dashboard">
 
 ### 1. Open wallet setup
 
-Open **Wallets** in the sidebar and click **Create wallet**. Complete
-[organization setup](/docs/guides/setup-organization) first if needed.
+Open **Wallets** in the sidebar and click **Create wallet**. Once the project has wallets, the button reads **Create a wallet**. Only organization admins can create wallets. Complete [organization setup](/docs/guides/setup-organization) first if needed.
 
 ### 2. Choose a custody provider
 
-Under **Which provider holds the keys?**, select a provider. The list shows the
-providers your project can use. When it can use only one, that provider is
-already selected and the question is not shown.
+Under **Which provider holds the keys?**, select a provider. You can't change it after the wallet exists. When your project can use only one provider, it's already selected and the question isn't shown.
 
-### 3. Set up the provider
+### 3. Choose whose account holds the keys
 
-If you can connect your own account for the provider, the page asks whose
-account holds the keys. For Privy, choose **SDP's Privy account** to try SDP
-out, with no wallet policy and nothing to set up, or **Your own Privy account**
-to connect yours. Nothing is preselected. Production requires your own account;
-see [Go to mainnet](/docs/guides/go-to-mainnet).
+If you can connect your own account for the provider, the page asks whose account holds the keys, such as **Whose Privy account holds the keys?** When there's a choice, nothing is preselected.
 
-With your own account, enter a **Credential label**, your **Privy app ID** and
-your **Privy app secret**, then a **Wallet label** under **Wallet details**.
-Click **Connect and create wallet** to connect the account and create its first
-wallet.
+- **SDP's Privy account**: for trying SDP out in Sandbox. It has no wallet policy and nothing to set up.
+- **Your own Privy account**: connect it with its app ID and secret. Production accepts only your own account; see [Go to mainnet](/docs/guides/go-to-mainnet).
+
+### 4. Create the first wallet
+
+With SDP's account, enter a **Wallet label** and click **Create wallet**. The wallet's page opens with its address and balance.
+
+With your own account, keep or rename the **Credential label**, and enter your **Privy app ID** and **Privy app secret**. Under **Wallet details**, enter a **Wallet label**. Click **Connect and create wallet**: SDP checks the credentials with Privy, then creates the wallet, which appears on **Wallets**.
 
 ![Privy provider setup with example credentials and a masked secret](/images/go-to-mainnet/04-connect-privy.png)
 
-A connection signs only with its current credentials. If you rotate or remove
-them while a request is signing, that request returns `409` with
-`details.reason` set to `runtime_execution_unavailable`. Retry it as
-[Idempotency](/docs/developing-with-sdp/idempotency) describes for that
-operation: a transfer that recorded the failure replays it under the same
-`Idempotency-Key`, so send it again with a new key.
+The first wallet in a provider account is a transfer wallet.
 
-With SDP's account, enter a **Wallet label** and click **Create wallet**.
-The first wallet is a transfer wallet.
+### 5. Create more wallets
 
-### 4. Create additional wallets
+On **Wallets**, click **Create a wallet** and select the provider if asked. The account question lists SDP's account where it's offered, each of your connections, and **Connect another Privy account**. A connection that isn't ready shows what it needs, with a link to fix it.
 
-Click **Create wallet** again and select the provider if asked. Where the page
-asks whose account holds the keys, it lists SDP's account where it is offered,
-each of your connections and one to connect another; nothing is preselected. A connection
-that is not ready shows what it needs, with a link to fix it. Enter a **Wallet
-label**, choose a **Purpose** if more than one is offered, and click **Create
-wallet**.
+For SDP's account or an existing connection, enter a **Wallet label**, pick a **Purpose** (it starts on **Transfers**), and click **Create wallet**. **Connect another Privy account** works as in step 4.
 
-### 5. View your wallet
-
-Once the wallet is created, its page opens with its address and balance. A
-wallet created with **Connect and create wallet** appears on **Wallets**
-instead; open it to see its details.
+A connection signs only with its current credentials. If you rotate or remove them while a request is signing, that request returns `409 CONFLICT` with `details.reason` set to `runtime_execution_unavailable`. Retry it as [Idempotency](/docs/developing-with-sdp/idempotency) describes for that operation. A transfer that recorded the failure replays it under the same `Idempotency-Key`, so send the transfer again with a new key.
 
 </Tab>
 <Tab value="API">
 
-#### 1. Initialize the provider from the dashboard
+#### 1. Set up the provider in the dashboard
 
-Initializing a custody provider is provider setup (`wallets.configure`), and no API key can hold a `configure` action. An organization admin initializes it once per project, signed in to the dashboard (see the **Dashboard** tab); the dashboard calls `POST /v1/wallets/initialize` with that session. The same call made with an API key returns `403` with `details.action` set to `wallets.configure`.
+Setting up a custody provider takes `wallets.configure`, and no API key can hold a `configure` action. An organization admin sets it up once per project, signed in to the dashboard (see the **Dashboard** tab), which calls `POST /v1/wallets/initialize` with that session. The same call with an API key returns `403 INSUFFICIENT_PERMISSIONS` with `details.action` set to `wallets.configure`.
 
-Production projects use BYOK only. `POST /v1/wallets/initialize` sets up Managed custody, so in a Production project it returns `403` with `details.reason` set to `custody_mode_not_allowed`. Connect your own provider account to the project from the dashboard instead, then create wallets in that connection with `connectionId` using an API key that holds `wallets.manage`:
+Production projects take only your own provider account. `POST /v1/wallets/initialize` sets up SDP's account of the provider (Managed custody), so in a Production project it returns `403` with `details.reason` set to `custody_mode_not_allowed`. Connect your own account to the project in the dashboard instead. Then create wallets in that connection with `connectionId`, using an API key that holds `wallets.manage`:
 
 ```bash title="Terminal"
 export IDEMPOTENCY_KEY=$(uuidgen)
@@ -94,9 +66,9 @@ curl -X POST https://api.solana.com/v1/wallets \
   }'
 ```
 
-#### 2. Create additional wallets
+#### 2. Create more wallets
 
-Every wallet names the provider account it lives under: `provider` for the provider's Managed account, or `connectionId` for a connection your project added. Send exactly one of them. There is no default account to fall back to.
+Every wallet names the provider account it lives under: `provider` for SDP's account of that provider (Managed), or `connectionId` for a connection your project added. Send exactly one of them; a body with both or neither returns `400`. There is no default account to fall back to.
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -124,10 +96,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-The `purpose` field is optional metadata in the API. The dashboard exposes it
-when creating additional wallets; the provider's first wallet is a transfer
-wallet.
-Reuse the same `Idempotency-Key` when retrying a wallet creation.
+`purpose` is optional and defaults to `transfer`. Only a `transfer` wallet can be the source of a transfer, transfer batch, or recurring payment; any other purpose is refused with `403` and `details.reason` set to `wallet_purpose`. Reuse the same `Idempotency-Key` when you retry a wallet creation.
 
 #### 3. List wallets
 
@@ -158,7 +127,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-Every operation that signs names its wallet; there is no default wallet. Transfers take the wallet's `id` (`cwlt_…`) as `sourceCustodyWalletId`. Other modules name it the same way (their pages say which field). An API key limited to selected wallets lists the same `id` in `walletIds`.
+Every operation that signs names its wallet; there is no default wallet. Transfers take the wallet's `id` (`cwlt_…`) as `sourceCustodyWalletId`, and other modules' pages name their field. An API key limited to selected wallets lists the same `id` in `walletIds`.
 
 ```typescript title="transfer-request.ts"
 const body = {

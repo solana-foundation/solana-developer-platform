@@ -1,13 +1,13 @@
 ---
 title: Indexing and reconciliation
-description: List inbound transfers, paginate, dedupe, and reconcile against your product ledger.
+description: List transfers, read a wallet's observed payments, dedupe, and reconcile against your own ledger.
 ---
 
-`GET /v1/payments/transfers` is the workhorse for reconciliation. By default, it returns paginated persisted transfer records across your organization's custody wallets, with filters for direction, status, token, exact `custodyWalletId`, and date range. Use it to mirror SDP transfers locally, match inbound payments to orders, and drive a delta-polling worker. To include recent on-chain observations for one exact wallet, set `custodyWalletId` and `includeObserved=true`.
+`GET /v1/payments/transfers` lists the transfers SDP has recorded in your project, including what you sent (single, batch and recurring) and paid payment requests. Filter by direction, status, token, wallet, counterparty and date. To also see payments SDP never recorded, such as a customer's direct transfer to your address, pass one wallet's `custodyWalletId` with `includeObserved=true`.
 
 ## Listing inbound transfers
 
-The minimal inbound-only request:
+The minimal inbound request:
 
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
@@ -32,107 +32,91 @@ const { data, meta } = await res.json();
 </Tab>
 </Tabs>
 
+Without `includeObserved`, this returns recorded inbound transfers only, such as paid payment requests.
+
 ### Query parameters
 
 | Parameter | Type | Notes |
 | --- | --- | --- |
-| `direction` | `inbound` \| `outbound` | Common filter. Inbound = payments to wallets you control. |
-| `status` | `pending` \| `processing` \| `confirmed` \| `finalized` \| `failed` | Scope to a single state. |
-| `custodyWalletId` | string | Exact SDP Wallet ID (`id` from `GET /v1/wallets`). |
-| `includeObserved` | boolean | Default `false`. When `true`, adds recent on-chain activity for the exact `custodyWalletId`; it cannot be used without that filter. Synthetic observed rows have `custodyWalletId: null`. |
-| `token` | string | Filter by token symbol or on-chain mint (exact match against the stored transfer's `token` value). |
-| `from`, `to` | ISO 8601 datetime | Time-window filter on `createdAt`. Use with offset (`2026-05-14T00:00:00Z`). |
-| `page` | integer | Default `1`. |
-| `pageSize` | integer | Default `20`, max `100`. |
+| `direction` | `inbound` \| `outbound` | Inbound is a payment into one of your wallets. |
+| `status` | string | One or more of `processing`, `confirmed`, `finalized`, `failed`, comma-separated. |
+| `custodyWalletId` | string | One wallet's SDP `id` (`cwlt_…` from `GET /v1/wallets`). |
+| `includeObserved` | boolean | Default `false`. With `custodyWalletId`, adds the wallet's recent on-chain activity; see [Observed transfers](#observed-transfers). |
+| `token` | string | A well-known symbol (`SOL`, `USDC`) or a mint address. A well-known token matches either form. |
+| `counterpartyId` | string | Transfers tied to one counterparty (`cpty_…`). |
+| `search` | string | 3 or more characters, matched against ids, signatures, addresses, memo and counterparty names. |
+| `from`, `to` | ISO 8601 datetime | Window on `createdAt`. Include a time zone, such as `2026-05-14T00:00:00Z`. |
+| `sortBy`, `sortDirection` | string | Default `createdAt`, `desc`. |
+| `page`, `pageSize` | integer | Default `1` and `20`. `pageSize` is at most `100`. |
+
+[List transfers](/docs/reference/api/payments/list-payment-transfers) has every parameter.
+
+## Observed transfers
+
+With `custodyWalletId` and `includeObserved=true`, the list adds what the wallet's recent on-chain history shows and SDP has no record of:
+
+- SDP builds these rows from the wallet's latest signatures (at most 200) on each read, and does not store them. Use them for recent activity, not history.
+- Their `id` starts with `xfr_observed_`. It stays the same across reads, but `GET /v1/payments/transfers/{transferId}` does not find it.
+- `status` is `confirmed` or `failed`, never `finalized`. `custodyWalletId` is `null`, and there is no `memo`.
+- Reads with `includeObserved=true` have their own quota: 30 a minute per API key and 120 per organization. Past it they return `429 RATE_LIMITED`.
 
 ## Deduplication
 
-Two natural dedup keys:
-
-1. **`Transfer.id`** — SDP-internal, immutable, present on every transfer (including `pending` ones with no signature yet). Use this as your local primary key.
-2. **`Transfer.signature`** — the on-chain signature, populated once the transaction has been built and observed on-chain (typically at `confirmed`/`finalized`, but treat its presence rather than the status enum as the trigger — `processing` and even `pending` records can still have a null signature). **`UNIQUE` across SDP's transfers table** wherever it is set; two records cannot share a signature. Use this if you need to dedupe across multiple data sources (SDP + a parallel chain indexer, say) — only once `signature` is present.
-
-In practice: store transfers in your reconciliation table keyed by SDP `Transfer.id`, and assert `signature` uniqueness once it is populated.
+- **Recorded transfers**: key them by `id` (`xfr_…`), which exists before any `signature` does. Once set, `signature` is unique across SDP's recorded transfers, so it also dedupes against another chain indexer.
+- **Observed rows**: key them by `id`, not `signature`. One transaction can produce more than one row.
 
 ## Reconciling an order
 
-Customer-initiated inbound transfers do **not** populate `Transfer.memo` (memo-program instructions aren't extracted into the field), and the inbound record doesn't expose a reference. The reliable on-record correlation key is the inbound transfer's `destination` — match it against an order whose pre-issued receiving address is that same `destination`.
+For a customer's direct payment, the on-record keys are the receiving wallet and `destination`: observed rows carry no memo or reference. Give each order its own receiving wallet (see [Accept payments](/docs/payments/accept-overview#match-payments-to-orders)), then for each open order:
 
-The typical inbound match cycle:
+1. **Read** the wallet's inbound activity: `GET /v1/payments/transfers?custodyWalletId=<cwlt_…>&includeObserved=true&direction=inbound`.
+2. **Match** a transfer whose `token` and `amount` fit the order.
+3. **Check finality**: observed rows stop at `confirmed`, so check with Solana RPC (`getSignatureStatuses`) that the `signature` is `finalized` before any irreversible step.
+4. **Apply** the payment once: mark the order paid, store the `signature`, and start downstream work (email, shipment, ledger entry).
+5. **Leave unmatched transfers** for the next pass, or flag them for review after a grace period.
 
-1. **Read** recent persisted inbound transfers for the relevant token:
-   ```text title="Request"
-   GET /v1/payments/transfers
-     ?direction=inbound
-     &token=<mint or SOL>
-     &from=<since last reconciled>
-     &to=<now>
-     &pageSize=100
-   ```
-2. **For each transfer**, look up an open order keyed by the transfer's `destination` (`findOrderByDestination(tr.destination)`).
-3. **If matched**, assert the amount and token match the expected values on the order row, then mark the order paid, record the SDP `Transfer.id`, and dispatch downstream side effects (email, shipment, ledger entry).
-4. **If unmatched**, leave the transfer for the next pass (it may be an early-arrival for an order you haven't staged yet) or flag it for manual review after a grace window.
+A paid payment request needs none of this: SDP records it as an inbound `finalized` transfer.
 
-If you need memo- or Solana-Pay-`reference`-based correlation (e.g., a single-wallet flow where the destination address is shared across orders), read the on-chain transaction directly via Solana RPC using the transfer's `signature`. SDP does not surface either field on inbound transfer records today.
+## A polling worker
 
-## Solana Pay reference accounts (roadmap)
-
-SDP does not attach a Solana Pay reference pubkey on-chain, and inbound transfer records do not expose a reference field today. The realistic correlation options are: (a) **per-order destination addresses** — pre-issue a fresh receiving wallet per order and match by `Transfer.destination` (the recommended pattern; see [Reconciling an order](#reconciling-an-order) above); (b) **on-chain reads via Solana RPC** keyed off the transfer's `signature`, used to recover the memo-program instruction or Solana Pay `reference` that SDP itself doesn't surface for inbound transfers.
-
-## A delta-poll worker
-
-A reconciliation worker that wakes on a tick and asks "what is new since last time":
+A worker that checks each open order's wallet on every tick:
 
 <Tabs items={["TypeScript"]}>
 <Tab value="TypeScript">
 ```typescript title="reconcile-tick.ts"
-const OVERLAP_MS = 5_000; // re-query the last 5s on each tick to catch boundary arrivals
+// Observed reads have their own quota (30 a minute per API key),
+// so keep the open orders polled per minute under it.
+async function reconcileTick(openOrders: Order[]) {
+  for (const order of openOrders) {
+    const url = new URL("https://api.solana.com/v1/payments/transfers");
+    url.searchParams.set("custodyWalletId", order.custodyWalletId);
+    url.searchParams.set("includeObserved", "true");
+    url.searchParams.set("direction", "inbound");
 
-async function reconcileTick(state: WorkerState) {
-  // Nudge `from` backwards by the overlap window; `alreadySeen` dedupes the
-  // resulting duplicates. Always advance the high-water mark to `to` regardless,
-  // otherwise the window grows without bound.
-  const fromMs = state.lastSeenIso
-    ? Date.parse(state.lastSeenIso) - OVERLAP_MS
-    : Date.now() - 60_000;
-  const from = new Date(fromMs).toISOString();
-  const to = new Date().toISOString();
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${process.env.SDP_API_KEY}` },
+    });
+    if (res.status === 429) return; // over the quota: resume after Retry-After
+    const { data } = await res.json();
 
-  // This lists persisted records. To discover additional recent chain activity,
-  // run the same window per exact wallet with custodyWalletId + includeObserved.
-  for await (const tr of listInbound({ from, to })) {
-    if (await alreadySeen(tr.id)) continue;
-
-    // Match by destination — the on-record correlation key for inbound transfers.
-    // `tr.memo` is omitted (undefined) for customer-initiated inbound payments.
-    const order = await findOrderByDestination(tr.destination);
-    if (!order) {
-      await persistUnmatched(tr);
-      continue;
+    for (const tr of data) {
+      if (tr.status === "failed" || (await alreadyApplied(tr.id))) continue;
+      if (tr.token !== order.mint || !sameAmount(tr.amount, order.amount)) continue;
+      // Observed rows stop at "confirmed": check finality with your own RPC.
+      if (!(await isFinalized(tr.signature))) continue;
+      await markOrderPaid(order, tr); // stores tr.id and tr.signature
     }
-
-    if (tr.status === "finalized") {
-      await markOrderPaid(order, tr);
-    }
-    await persistSeen(tr.id, tr.status);
   }
-
-  state.lastSeenIso = to;
 }
 ```
 </Tab>
 </Tabs>
 
-Notes:
-
-- The overlap window (5s above) re-queries the trailing edge of the last tick to catch transfers that arrive at the boundary; `alreadySeen` collapses the resulting duplicates.
-- The high-water mark advances to `to` on every pass even though `from` is rolled back — otherwise the query window grows unbounded.
-- Always re-fetch a transfer to upgrade its status: a transfer seen as `confirmed` in one tick will appear as `finalized` in a later tick.
-- Use `pageSize=100` and the async iterator pattern (see [Payouts and disbursements](/docs/payments/send-payouts)) to handle large windows.
+Stop polling an order's wallet once the order is paid or expired, so the quota goes to open orders. `sameAmount` compares decimal strings by value: `"100"` and `"100.00"` are the same amount.
 
 ## Related
 
-- [Verifying a payment](/docs/payments/accept-verification) — single-transfer status reads.
-- [Accept overview](/docs/payments/accept-overview) — the broader inbound flow.
-- [Payouts and disbursements](/docs/payments/send-payouts) — the same list endpoint used outbound.
-- [Payments API reference](/docs/reference/api/payments) — full endpoint reference.
+- [Verifying a payment](/docs/payments/accept-verification): statuses and finality.
+- [Accept overview](/docs/payments/accept-overview): payment requests and shared addresses.
+- [Payouts and disbursements](/docs/payments/send-payouts): the same list endpoint, used for outbound runs.
+- [Payments API reference](/docs/reference/api/payments): every payments endpoint.

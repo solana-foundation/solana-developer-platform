@@ -138,20 +138,20 @@ const custodyWalletOwnerConstraint = {
 };
 
 const custodyWalletExample = {
-  id: "cw_example",
+  id: "cwlt_example",
   custodyConfigId: "cfg_example",
   provider: "privy",
   isRuntimeExecutionAllowed: true,
   walletId: "privy_wallet_123",
   publicKey: "So11111111111111111111111111111111111111112",
-  label: "Root Signing Wallet",
-  purpose: "root",
+  label: "Treasury wallet",
+  purpose: "transfer",
   status: "active",
   createdAt: "2025-01-01T00:00:00.000Z",
 };
 
 const custodyWalletBaseSchema = z.object({
-  id: z.string().openapi({ description: "Wallet record ID.", example: "cw_example" }),
+  id: z.string().openapi({ description: "Wallet record ID.", example: "cwlt_example" }),
   custodyConfigId: z.string().optional().openapi({
     description: "Owning custody configuration ID.",
     example: "cfg_example",
@@ -173,7 +173,7 @@ const custodyWalletBaseSchema = z.object({
   publicKey: solanaAddressSchema,
   label: z.string().nullable().openapi({
     description: "Optional wallet label.",
-    example: "Root Signing Wallet",
+    example: "Treasury wallet",
   }),
   // Response shape, so it lists every purpose a wallet may actually carry —
   // including one only SDP mints. The CREATE schemas stay closed on purpose: a
@@ -189,7 +189,7 @@ const custodyWalletBaseSchema = z.object({
       "dvp_settlement_authority",
     ])
     .nullable()
-    .openapi({ description: "Optional wallet purpose.", example: "root" }),
+    .openapi({ description: "Optional wallet purpose.", example: "transfer" }),
   status: z.enum(["active", "inactive"]).openapi({
     description: "Wallet status.",
     example: "active",
