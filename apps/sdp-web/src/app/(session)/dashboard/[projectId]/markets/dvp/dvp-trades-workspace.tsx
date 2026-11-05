@@ -25,7 +25,6 @@ import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import {
   ArrowDownLeftIcon,
-  ArrowLeftRightIcon,
   ArrowUpRightIcon,
   ChevronRightIcon,
   PlusIcon,
@@ -45,7 +44,8 @@ import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
 import { TokenMark } from "@/components/token-mark";
 import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { type UrlTableQueryAdapter, useUrlTableFilters } from "@/lib/use-url-table-filters";
@@ -210,6 +210,8 @@ function LegCell({
  */
 function OwnTradeRow({ trade }: { trade: DvpTrade }) {
   const t = useTranslations();
+  const locale = useLocale();
+  const timeZone = useTimeZone();
   const href = useProjectHref();
   // Both parties, captioned by role — leg a delivers the asset, leg b the
   // cash — and each styled for how the API classifies it: a counterparty
@@ -274,7 +276,7 @@ function OwnTradeRow({ trade }: { trade: DvpTrade }) {
         </span>
       </TableCell>
       <TableCell className="text-secondary text-sm">
-        {formatTimestamp(trade.createdAt, t)}
+        {formatTimestamp(trade.createdAt, t, locale, timeZone)}
       </TableCell>
       <TableCell>
         <ChevronRightIcon aria-hidden className="h-4 w-4 text-tertiary" />
@@ -519,7 +521,6 @@ function TradesCardBody({
       <ListEmptyState
         action={canWrite ? <CreateTradeButton /> : <ReadOnlyEmptyNote />}
         description={t("DashboardMarkets.dvp.emptyDescription")}
-        icon={<ArrowLeftRightIcon className="size-5" />}
         message={t("DashboardMarkets.dvp.empty")}
       />
     );
@@ -537,7 +538,6 @@ function TradesCardBody({
               {t("DashboardMarkets.dvp.filterClear")}
             </Button>
           }
-          icon={<ArrowLeftRightIcon className="size-5" />}
           message={t("DashboardMarkets.dvp.filterNoMatches")}
         />
       ) : (

@@ -16,14 +16,12 @@ or with an explicit `GAP`.
 | account        | profile, security, and preferences           | GAP                                                                                                |
 | allowlist      | manage the address allowlist                 | GAP                                                                                                |
 | api-keys       | create, reveal, and revoke API keys          | api-keys.e2e.spec.ts                                                                               |
-| custody        | custody overview and operations              | GAP                                                                                                |
 | helius-rings   | ring configuration                           | GAP                                                                                                |
 | integrations   | connect and manage integrations              | GAP                                                                                                |
 | issuance       | issue a token end to end                     | issuance.e2e.spec.ts                                                                               |
 | markets        | market listings and detail                   | GAP                                                                                                |
-| members        | invite members and manage roles              | GAP                                                                                                |
 | payments       | transfer, recurring payments, command center | payments-transfer.e2e.spec.ts, payments-recurring.e2e.spec.ts, payments-command-center.e2e.spec.ts |
-| settings       | workspace settings                           | GAP                                                                                                |
+| settings       | workspace settings, members and roles        | GAP                                                                                                |
 | tokens         | token management                             | GAP                                                                                                |
 | wallets        | create and manage wallets                    | wallets.e2e.spec.ts                                                                                |
 | [...unmatched] | a missing page keeps the Project's shell     | project-url-scope.e2e.spec.ts                                                                      |

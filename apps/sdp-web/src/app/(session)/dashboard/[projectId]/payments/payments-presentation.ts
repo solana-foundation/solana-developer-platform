@@ -14,7 +14,7 @@ export function isInboundTransfer(transfer: PaymentTransferSummary): boolean {
 }
 
 /**
- * How each transfer status reads in a refresh list. Finer than the shared success / pending /
+ * How each transfer status reads in a Payments list. Finer than the shared success / pending /
  * danger / neutral tone: a transfer the rails are moving ("processing", "settling") is
  * progress, while one waiting on a person or a payer ("pending", "awaiting payment") needs
  * attention.
@@ -153,12 +153,14 @@ const ELAPSED_UNITS = [
  *
  * @param iso - ISO timestamp.
  * @param locale - Formatting locale.
+ * @param timeZone - The viewer's zone (`useTimeZone` or `getRequestTimeZone`), for the date.
  * @param now - Reference time, for tests.
  * @returns The elapsed label, or null for a missing or invalid timestamp.
  */
 export function formatElapsedShort(
   iso: string | undefined,
-  locale?: string,
+  locale: string,
+  timeZone: string,
   now: number = Date.now()
 ): string | null {
   if (!iso) return null;
@@ -166,7 +168,9 @@ export function formatElapsedShort(
   if (Number.isNaN(time)) return null;
   const elapsed = now - time;
   if (elapsed < 0 || elapsed >= 7 * 86_400_000) {
-    return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }).format(time);
+    return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", timeZone }).format(
+      time
+    );
   }
   const { unit, ms } =
     [...ELAPSED_UNITS].reverse().find((candidate) => elapsed >= candidate.ms) ?? ELAPSED_UNITS[0];
@@ -259,13 +263,20 @@ export function summarizeBatch(
 }
 
 /**
- * A list's created-at cell: "Aug 22, 2026, 10:18 AM".
+ * A list's created-at cell: "Aug 22, 2026, 10:18 AM". The zone is always passed: left to the
+ * environment, the server formats in its own and the browser in the viewer's, and a page the
+ * server rendered fails to hydrate.
  *
  * @param iso - ISO timestamp.
  * @param locale - Formatting locale.
+ * @param timeZone - The viewer's zone, from `useTimeZone` or `getRequestTimeZone`.
  * @returns The formatted date and time, or null for a missing or invalid timestamp.
  */
-export function formatDateTime(iso: string | null | undefined, locale?: string): string | null {
+export function formatDateTime(
+  iso: string | null | undefined,
+  locale: string,
+  timeZone: string
+): string | null {
   if (!iso) return null;
   const time = new Date(iso).getTime();
   if (Number.isNaN(time)) return null;
@@ -275,17 +286,23 @@ export function formatDateTime(iso: string | null | undefined, locale?: string):
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZone,
   }).format(time);
 }
 
 /**
- * A list's date-only cell: "Aug 5, 2026".
+ * A list's date-only cell: "Aug 5, 2026", the day it was in the viewer's zone.
  *
  * @param iso - ISO timestamp.
  * @param locale - Formatting locale.
+ * @param timeZone - The viewer's zone, from `useTimeZone` or `getRequestTimeZone`.
  * @returns The formatted date, or null for a missing or invalid timestamp.
  */
-export function formatDate(iso: string | null | undefined, locale?: string): string | null {
+export function formatDate(
+  iso: string | null | undefined,
+  locale: string,
+  timeZone: string
+): string | null {
   if (!iso) return null;
   const time = new Date(iso).getTime();
   if (Number.isNaN(time)) return null;
@@ -293,5 +310,6 @@ export function formatDate(iso: string | null | undefined, locale?: string): str
     month: "short",
     day: "numeric",
     year: "numeric",
+    timeZone,
   }).format(time);
 }

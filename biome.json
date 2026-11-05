@@ -475,6 +475,15 @@
           }
         }
       }
+    },
+    {
+      "includes": [
+        "**/apps/sdp-web/**/*.ts",
+        "**/apps/sdp-web/**/*.tsx",
+        "**/packages/sdp-ui/**/*.ts",
+        "**/packages/sdp-ui/**/*.tsx"
+      ],
+      "plugins": ["./.biome-plugins/one-design.grit"]
     }
   ],
   "files": {

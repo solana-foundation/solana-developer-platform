@@ -7,7 +7,7 @@ const UNDERLINE_FIELD_CLASS =
 const SECONDARY_BUTTON_CLASS =
   "h-10 rounded-control border-0 bg-fill bg-none text-body font-medium text-primary shadow-none hover:bg-fill-strong focus-visible:shadow-none";
 
-// Clerk's prebuilt sign-in and sign-up drawn as a refresh-design form: no card, a left-aligned
+// Clerk's prebuilt sign-in and sign-up drawn as the design's form: no card, a left-aligned
 // header, underline fields and the design system's buttons. The auth shell draws the brand
 // and the account link, so Clerk's logo and footer are off.
 export const authAppearance = {

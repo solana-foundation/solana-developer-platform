@@ -6,13 +6,17 @@ import { ThemeSwitch } from "fumadocs-ui/layouts/shared/slots/theme-switch";
 import { ArrowUpRight, Menu, Search, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { usePathname } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentSetupOptions } from "@/lib/agent-setup";
+import { sectionByPath, topLevelUrlsOf } from "@/lib/sidebar-section";
 import { AgentSetup } from "./agent-setup";
 import { NavigationNode } from "./navigation-node";
 
 type DocsSidebarProps = {
   tree: Root;
+  /** Where a page's path does not name its sidebar entry (`sidebarSectionOverrides`). */
+  sectionOverrides: Record<string, string>;
   dashboardUrl: string | null;
   agentSetup: AgentSetupOptions;
 };
@@ -29,9 +33,32 @@ function getNodeKey(node: Root["children"][number]) {
   return String(node.name);
 }
 
-export function DocsSidebar({ tree, dashboardUrl, agentSetup }: DocsSidebarProps) {
+export function DocsSidebar({
+  tree,
+  sectionOverrides,
+  dashboardUrl,
+  agentSetup,
+}: DocsSidebarProps) {
   const [open, setOpen] = useState(false);
   const { setOpenSearch } = useSearchContext();
+  const pathname = usePathname();
+  const topLevelUrls = useMemo(() => topLevelUrlsOf(tree), [tree]);
+  // The entry the current page sits under, highlighted like the page itself.
+  const sectionUrl = sectionOverrides[pathname] ?? sectionByPath(topLevelUrls, pathname);
+  const navRef = useRef<HTMLElement>(null);
+
+  // A deep page's row (an API operation) can sit below the sidebar's fold: centre it when the
+  // page changes, and leave the sidebar alone while the row already shows.
+  useEffect(() => {
+    const nav = navRef.current;
+    const row = nav?.querySelector<HTMLElement>(`a[href="${CSS.escape(pathname)}"]`);
+    if (!nav || !row) return;
+    const navBox = nav.getBoundingClientRect();
+    const rowBox = row.getBoundingClientRect();
+    if (rowBox.top < navBox.top || rowBox.bottom > navBox.bottom) {
+      nav.scrollTop += rowBox.top - navBox.top - (navBox.height - rowBox.height) / 2;
+    }
+  }, [pathname]);
 
   return (
     <>
@@ -100,9 +127,14 @@ export function DocsSidebar({ tree, dashboardUrl, agentSetup }: DocsSidebarProps
           </div>
         </div>
 
-        <nav className="launch-docs-sidebar-nav" aria-label="Documentation navigation">
+        <nav ref={navRef} className="launch-docs-sidebar-nav" aria-label="Documentation navigation">
           {tree.children.map((node) => (
-            <NavigationNode key={getNodeKey(node)} node={node} onNavigate={() => setOpen(false)} />
+            <NavigationNode
+              key={getNodeKey(node)}
+              node={node}
+              sectionUrl={sectionUrl}
+              onNavigate={() => setOpen(false)}
+            />
           ))}
         </nav>
 
@@ -112,7 +144,13 @@ export function DocsSidebar({ tree, dashboardUrl, agentSetup }: DocsSidebarProps
               <span className="launch-docs-status-dot" aria-hidden="true" />
               Devnet live
             </span>
-            <span className="launch-docs-status-future">Mainnet soon</span>
+            <Link
+              href="/docs/guides/go-to-mainnet"
+              className="launch-docs-status-future"
+              onClick={() => setOpen(false)}
+            >
+              Mainnet by request
+            </Link>
           </div>
           <ThemeSwitch mode="light-dark-system" className="launch-docs-theme-switch" />
         </div>

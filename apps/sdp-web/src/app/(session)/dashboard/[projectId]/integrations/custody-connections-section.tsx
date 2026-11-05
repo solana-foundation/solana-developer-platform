@@ -5,14 +5,14 @@ import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
-import { AddConnectionModal } from "@/app/(session)/dashboard/[projectId]/custody/connections/add-connection-modal";
+import { AddConnectionModal } from "@/app/(session)/dashboard/[projectId]/wallets/connections/add-connection-modal";
 import type {
   ConnectionsFilters,
   ConnectionsPageResult,
   ConnectionsProjectSummary,
-} from "@/app/(session)/dashboard/[projectId]/custody/connections/connections.data";
-import { ConnectionsList } from "@/app/(session)/dashboard/[projectId]/custody/connections/connections-list";
-import { useSelectedProjectName } from "@/app/(session)/dashboard/[projectId]/custody/connections/use-selected-project-name";
+} from "@/app/(session)/dashboard/[projectId]/wallets/connections/connections.data";
+import { ConnectionsList } from "@/app/(session)/dashboard/[projectId]/wallets/connections/connections-list";
+import { useSelectedProjectName } from "@/app/(session)/dashboard/[projectId]/wallets/connections/use-selected-project-name";
 import { useTranslations } from "@/i18n/provider";
 
 /**

@@ -19,7 +19,8 @@ import { TableRow } from "@solana/design-system/table";
 import Link from "next/link";
 import { formatTimestamp } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
 import { useCanWrite } from "@/contexts/dashboard-workspace-context";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
@@ -119,6 +120,8 @@ function InboundFundAction({
 
 export function InboundRows({ trades }: { trades: DvpInboundTrade[] }) {
   const t = useTranslations();
+  const locale = useLocale();
+  const timeZone = useTimeZone();
   const href = useProjectHref();
 
   return trades.map((trade) => {
@@ -168,7 +171,7 @@ export function InboundRows({ trades }: { trades: DvpInboundTrade[] }) {
           </span>
         </TableCell>
         <TableCell className="text-secondary text-sm">
-          {formatTimestamp(dvpTimestampToIso(trade.expiryTimestamp), t)}
+          {formatTimestamp(dvpTimestampToIso(trade.expiryTimestamp), t, locale, timeZone)}
         </TableCell>
         <TableCell>
           {funded ? null : (

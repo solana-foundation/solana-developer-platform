@@ -1,7 +1,7 @@
 import type { CustodyProviderUseCase } from "@sdp/types/custody";
 import { COMPLIANCE_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import type { SdpModule } from "@sdp/types/release-channels";
-import { isKnownCustodyProvider } from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
+import { isKnownCustodyProvider } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import type { DashboardFlags } from "@/flags/dashboard";
 import {
   isModuleInDeploymentReleaseChannel,

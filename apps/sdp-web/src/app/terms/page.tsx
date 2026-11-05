@@ -1,4 +1,3 @@
-import { refreshThemeProps } from "@sdp/design-tokens";
 import { SDP_TERMS } from "@sdp/types/mainnet-access";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -16,7 +15,7 @@ export default async function TermsPage() {
   const t = await getTranslations();
 
   return (
-    <main {...refreshThemeProps} className="min-h-dvh bg-surface px-4 pb-24 sm:px-6">
+    <main className="min-h-dvh bg-surface px-4 pb-24 sm:px-6">
       <div className="mx-auto max-w-3xl">
         <header className="flex h-18 items-center">
           <Link
