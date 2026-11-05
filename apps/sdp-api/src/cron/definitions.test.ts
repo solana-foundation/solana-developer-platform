@@ -19,10 +19,10 @@ describe("CRON_DEFINITIONS", () => {
   });
 
   it("keeps every Money Exit but track-pending-withdrawals enabled on the stable release channel", () => {
-    const featuresOff = { ...env, SDP_RELEASE_CHANNEL: "stable" };
+    const stableEnv = { ...env, SDP_RELEASE_CHANNEL: "stable" };
 
     const disabledExits = CRON_DEFINITIONS.filter(
-      (definition) => definition.effect === "finishes" && !definition.enabled(featuresOff)
+      (definition) => definition.effect === "finishes" && !definition.enabled(stableEnv)
     ).map((definition) => definition.name);
 
     expect(disabledExits).toEqual(["track-pending-withdrawals"]);

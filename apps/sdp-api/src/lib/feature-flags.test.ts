@@ -22,13 +22,11 @@ import {
   assertSdpReleaseChannelConfigured,
   isAssetProfilesEnabled,
   isCustodyProviderAvailable,
-  isDvpEnabled,
   isEarnEnabled,
   isEarnHastraDexExitConfigured,
   isEarnHastraDexExitEnabled,
   isEarnVaultSponsorshipEnabled,
   isHeliusRingsEnabled,
-  isMarketsEnabled,
   isPrivateChannelsEnabled,
 } from "./feature-flags";
 
@@ -150,24 +148,17 @@ describe("isCustodyProviderAvailable", () => {
   });
 });
 
-describe("Markets, Earn and DvP gates", () => {
+describe("isEarnEnabled", () => {
   it.each([
-    { channel: "experimental", markets: true, earn: true, dvp: true },
-    { channel: "beta", markets: true, earn: true, dvp: false },
-    { channel: "stable", markets: false, earn: false, dvp: false },
-  ] as const satisfies readonly {
-    channel: SdpReleaseChannel;
-    markets: boolean;
-    earn: boolean;
-    dvp: boolean;
-  }[])("follow the $channel release channel alone", ({ channel, markets, earn, dvp }) => {
-    const env = { SDP_RELEASE_CHANNEL: channel };
-    expect({
-      markets: isMarketsEnabled(env),
-      earn: isEarnEnabled(env),
-      dvp: isDvpEnabled(env),
-    }).toEqual({ markets, earn, dvp });
-  });
+    { channel: "experimental", earn: true },
+    { channel: "beta", earn: true },
+    { channel: "stable", earn: false },
+  ] as const satisfies readonly { channel: SdpReleaseChannel; earn: boolean }[])(
+    "follows the $channel release channel alone",
+    ({ channel, earn }) => {
+      expect(isEarnEnabled({ SDP_RELEASE_CHANNEL: channel })).toBe(earn);
+    }
+  );
 });
 
 describe("isEarnHastraDexExitEnabled", () => {

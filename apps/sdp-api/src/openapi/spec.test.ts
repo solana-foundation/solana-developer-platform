@@ -917,10 +917,6 @@ describe("OpenAPI spec", () => {
     expect(JSON.stringify(stable)).not.toMatch(/\/v1\/earn/);
   });
 
-  // DvP is documented internally and deliberately withheld from the public
-  // document: the swap program is devnet-only and the family is flag-gated off,
-  // so every environment a customer can reach answers 403. Publishing it would
-  // document an endpoint nobody can call. Promoting it is a product decision.
   it("documents the DvP trade routes on the internal document only", () => {
     const internal = createOpenApiDocument();
     const publicDocument = createPublicOpenApiDocument(EXPERIMENTAL);
