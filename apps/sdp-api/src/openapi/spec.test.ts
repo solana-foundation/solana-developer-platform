@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
+import { CUSTODY_PROVIDER_CATALOG_BY_ID, CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import {
   IDEMPOTENCY_REQUIRED_ROUTES,
   INTERNAL_IDEMPOTENCY_REQUIRED_ROUTES,
@@ -823,7 +823,12 @@ describe("OpenAPI spec", () => {
     expect(CUSTODY_PROVIDERS.filter((provider) => serialized.includes(`"${provider}"`))).toEqual([
       "privy",
     ]);
-    expect(serialized).not.toMatch(/fireblocks/i);
+    // Prose too: no description names a provider stable does not offer.
+    const unpublishedLabels = CUSTODY_PROVIDERS.filter((provider) => provider !== "privy").map(
+      (provider) => CUSTODY_PROVIDER_CATALOG_BY_ID[provider].label
+    );
+    expect(unpublishedLabels.filter((label) => serialized.includes(label))).toEqual([]);
+    expect(serialized).not.toMatch(/fireblocks|coinbase/i);
     expect(createPublicSurfaceManifest("stable").custodyProviders).toEqual(["privy"]);
 
     const paths = stable.paths;
