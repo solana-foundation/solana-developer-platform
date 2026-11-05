@@ -58,9 +58,12 @@ const clerkErrorBodySchema = z.object({
  * anything a dashboard user can act on, so they see the generic internal error.
  */
 export class ClerkRequestError extends AppError {
+  readonly clerkStatus: number;
+
   constructor(status: number, body: string) {
     super("INTERNAL_ERROR", describeClerkFailure(status, body), { status, body });
     this.name = "ClerkRequestError";
+    this.clerkStatus = status;
   }
 
   /** Clerk's machine-readable code for its first error, when the body names one. */
