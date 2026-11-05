@@ -191,7 +191,7 @@ function CopyLinkContent({ copied }: { copied: boolean }) {
  * in this browser only, so it shows no code or link that would open a page that cannot find it,
  * and its actions say so instead of handing out a link nobody can open. It shows only while the
  * request can be paid. Opened by the new-request page, the link is marked and Copy link reads
- * Copied; when that copy failed, a line says so.
+ * Copied; when that copy failed, a line under the buttons says so until Copy link copies it.
  */
 function RequestPaymentLink({
   request,
@@ -214,6 +214,8 @@ function RequestPaymentLink({
   const payLink = origin ? `${origin}/pay/${publicToken}` : "";
   const amount = `${formatDecimalAmount(request.amount, locale)} ${symbol}`;
   const [copied, flashCopied] = useCopiedFlash(linkCopiedOnCreate === true);
+  // A copy that failed on the way here is said under the buttons until Copy link copies it.
+  const [arrivalCopyFailed, setArrivalCopyFailed] = useState(linkCopiedOnCreate === false);
   const linkRef = useRef<HTMLSpanElement>(null);
   // Before paint, so the mark never shows a frame of the bare link first.
   useLayoutEffect(() => {
@@ -230,6 +232,7 @@ function RequestPaymentLink({
       toast.error(t("DashboardPayments.record.copyFailed"));
       return;
     }
+    setArrivalCopyFailed(false);
     flashCopied();
   }
 
@@ -288,11 +291,6 @@ function RequestPaymentLink({
             {payLink || null}
           </span>
         )}
-        {linkCopiedOnCreate === false ? (
-          <p className="mt-2.5 text-body text-secondary">
-            {t("DashboardPayments.requests.paymentLinkCopyFailed")}
-          </p>
-        ) : null}
         {/* 16px to the design's 30px buttons, 8px apart; the copy is filled while the request
             can still be paid. */}
         <div className="mt-2.5 flex flex-wrap items-center gap-2 [&_button]:[--button-height-md:1.875rem]">
@@ -329,6 +327,12 @@ function RequestPaymentLink({
             {t("DashboardPayments.requestDetail.downloadQrCode")}
           </Button>
         </div>
+        {/* Under the buttons, so clearing it moves nothing a press is aimed at. */}
+        {arrivalCopyFailed ? (
+          <p className="text-body text-secondary">
+            {t("DashboardPayments.requests.paymentLinkCopyFailed")}
+          </p>
+        ) : null}
       </div>
     </div>
   );

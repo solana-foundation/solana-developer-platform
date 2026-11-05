@@ -250,12 +250,27 @@ describe("PaymentRequestDetailWorkspace opened by the new-request page", () => {
     await waitFor(() => expect(copyButton("Copy link")).toBeTruthy());
   });
 
-  it("says plainly when the link was not copied", () => {
+  it("says plainly when the link was not copied, under the buttons", () => {
     noteCreatedRequestLink("preq_1", false);
     renderDetail(false, "tok_1", paymentRequest);
 
+    const line = screen.getByText(notCopiedLine);
+    const copy = copyButton("Copy link");
+    if (!copy) throw new Error("no Copy link button");
+    // After the buttons, so clearing the line never moves the one just pressed.
+    expect(copy.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("clears the failed-copy line once Copy link copies the link", async () => {
+    noteCreatedRequestLink("preq_1", false);
+    const user = userEvent.setup();
+    renderDetail(false, "tok_1", paymentRequest);
     expect(screen.getByText(notCopiedLine)).toBeTruthy();
-    expect(copyButton("Copy link")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Copy link" }));
+
+    await waitFor(() => expect(screen.queryByText(notCopiedLine)).toBeNull());
+    expect(copyButton("Copied")).toBeTruthy();
   });
 
   it("says it on that request's first arrival only", () => {
