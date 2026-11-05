@@ -1,5 +1,7 @@
 import { type Mock, vi } from "vitest";
 import { IDEMPOTENCY_KEY_HEADER, type JsonValue } from "@/lib/idempotency";
+import { TAB_DEMO_HEADER_NAME } from "@/lib/payments-demo/demo-cookie";
+import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 
 /** One request the browser sent to the dashboard backend, as a test asserts on it. */
 export interface SentDashboardRequest {
@@ -36,6 +38,28 @@ export function stubDashboardFetch(
 /** Every request a {@link stubDashboardFetch} stub has received, in order. */
 export function sentDashboardRequests(fetchMock: Mock<typeof fetch>): SentDashboardRequest[] {
   return fetchMock.mock.calls.map(sentRequest);
+}
+
+/** One dashboard read the browser sent: its URL and the Project and demo headers it carried. */
+export interface SentDashboardRead {
+  path: string;
+  projectId: string | null;
+  demo: string | null;
+}
+
+/** Every read a {@link stubDashboardFetch} stub has received, in order. */
+export function sentDashboardReads(fetchMock: Mock<typeof fetch>): SentDashboardRead[] {
+  return fetchMock.mock.calls.map(([input, init]) => {
+    if (init === undefined) {
+      throw new Error("dashboardReadRequest always sends a RequestInit");
+    }
+    const headers = new Headers(init.headers);
+    return {
+      path: String(input),
+      projectId: headers.get(PROJECT_HEADER_NAME),
+      demo: headers.get(TAB_DEMO_HEADER_NAME),
+    };
+  });
 }
 
 /** sdp-api's success envelope, as `proxyToSdpApi` streams it back. */

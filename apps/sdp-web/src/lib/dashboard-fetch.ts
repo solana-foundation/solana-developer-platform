@@ -412,6 +412,28 @@ export function dashboardRequest(path: string, init: RequestInit): Promise<Respo
   return sendWithProject(path, init, headers);
 }
 
+/**
+ * A read sent under the Project and mode its SWR key names, never the tab's URL at send time, so
+ * the answer always belongs to the key that stores it. A `jsonBody` makes it a POST read (an
+ * estimate or quote that changes nothing) with an already serialized body; it never takes an
+ * Idempotency-Key.
+ */
+export function dashboardReadRequest(
+  url: string,
+  scope: { projectId: string; demo: boolean },
+  serializedJsonBody: string | undefined
+): Promise<Response> {
+  const headers = new Headers({ [PROJECT_HEADER_NAME]: scope.projectId });
+  if (scope.demo) {
+    headers.set(TAB_DEMO_HEADER_NAME, "1");
+  }
+  if (serializedJsonBody === undefined) {
+    return fetch(url, { method: "GET", cache: "no-store", headers });
+  }
+  headers.set("Content-Type", "application/json");
+  return fetch(url, { method: "POST", cache: "no-store", headers, body: serializedJsonBody });
+}
+
 /** A key its caller keeps in its own store, and whether that store persisted it. */
 export interface CallerIdempotencyKey {
   value: string;

@@ -4,11 +4,10 @@ import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { cleanup, render, screen, within } from "@testing-library/react";
-import type { SWRResponse } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import * as dashboardSwr from "@/lib/dashboard-swr";
+import { DashboardReadError } from "@/lib/dashboard-swr";
 import { resetDashboardNavigation } from "@/test/dashboard-navigation";
 import type { HomeActivityRow } from "./home-page.data";
 import type { PaymentsIssuedTokenSymbol } from "./payments/payments-page.data";
@@ -18,7 +17,7 @@ const USDC_MINT = wellKnownMint("USDC", "mainnet-beta") ?? "";
 const ADDRESS = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
 
 const mocks = vi.hoisted(() => {
-  const swr: Record<string, { data?: unknown; error?: unknown }> = {};
+  const read: { activity: { data?: unknown; error?: unknown } } = { activity: {} };
   return {
     workspace: {
       sdpEnvironment: "sandbox",
@@ -35,7 +34,8 @@ const mocks = vi.hoisted(() => {
         },
       },
     },
-    swr,
+    read,
+    useHomeActivitySnapshot: vi.fn((enabled: boolean) => (enabled ? read.activity : {})),
   };
 });
 
@@ -44,6 +44,12 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => mocks.workspace,
   useOptionalDashboardWorkspace: () => mocks.workspace,
   useCanWrite: () => mocks.workspace.dashboardAccess.capabilities.canWrite,
+}));
+vi.mock("./home-workspace.data", () => ({
+  useHomeActivitySnapshot: mocks.useHomeActivitySnapshot,
+}));
+vi.mock("./overview-network.data", () => ({
+  useOverviewNetwork: () => ({ status: "loading" }),
 }));
 
 const { HomeWorkspace } = await import("./home-workspace");
@@ -128,25 +134,9 @@ function at<T>(items: readonly T[], index: number): T {
   return item;
 }
 
-/** What the persisted SWR hook returns for the data a test seeded under a key. */
-function seededSwr(key: unknown): SWRResponse<unknown, unknown> {
-  const seeded = typeof key === "string" ? mocks.swr[key] : undefined;
-  return {
-    data: seeded?.data,
-    error: seeded?.error,
-    isLoading: false,
-    isValidating: false,
-    mutate: async () => undefined,
-  };
-}
-
 beforeEach(() => {
   resetDashboardNavigation();
-  // SAFETY: the stand-in serves whatever the test seeded under the key; each caller reads it as
-  // the data type it asked for.
-  vi.spyOn(dashboardSwr, "usePersistedDashboardSWR").mockImplementation(
-    seededSwr as typeof dashboardSwr.usePersistedDashboardSWR
-  );
+  mocks.useHomeActivitySnapshot.mockClear();
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-09-25T12:00:00.000Z"));
   mocks.workspace.flags = { custody: true, issuance: true, payments: true };
@@ -156,18 +146,16 @@ beforeEach(() => {
     canManageTokenWrite: true,
     canManageApiKeys: true,
   };
-  mocks.swr = {
-    "dashboard-home-activity": {
-      data: {
-        activityRows: [],
-        todaysVolume: {
-          transferCount: 3,
-          amountByMint: { [USDC_MINT]: "1234.5" },
-          complete: true,
-          coversDay: true,
-        },
-        todaysVolumeError: null,
+  mocks.read.activity = {
+    data: {
+      activityRows: [],
+      todaysVolume: {
+        transferCount: 3,
+        amountByMint: { [USDC_MINT]: "1234.5" },
+        complete: true,
+        coversDay: true,
       },
+      todaysVolumeError: null,
     },
   };
 });
@@ -181,14 +169,9 @@ const UNPRICED_SOL: CustodyWalletTokenBalance = {
   decimals: 9,
 };
 
-/** The keys Home's activity read was asked for under, across every render. */
-function activityReadKeys(): Set<unknown> {
-  return new Set(
-    vi
-      .mocked(dashboardSwr.usePersistedDashboardSWR)
-      .mock.calls.filter(([, , , persisted]) => persisted?.key === "home-activity")
-      .map(([key]) => key)
-  );
+/** Whether Home's activity read was enabled, across every render. */
+function activityReadsEnabled(): Set<boolean> {
+  return new Set(mocks.useHomeActivitySnapshot.mock.calls.map(([enabled]) => enabled));
 }
 
 afterEach(() => {
@@ -224,12 +207,12 @@ describe("Overview (HomeWorkspace)", () => {
     expect(section("quick-start")).toBeTruthy();
     expect(screen.getByRole("link", { name: "See all payments" })).toBeTruthy();
     expect(screen.getByText("No recent activity found yet.")).toBeTruthy();
-    expect(activityReadKeys()).toEqual(new Set(["dashboard-home-activity"]));
+    expect(activityReadsEnabled()).toEqual(new Set([true]));
   });
 
   it("reads one wallet and one token in the singular and a dash while volume is unknown", () => {
     // A wallet missed its read: the list can say so, but a total over the rest would understate.
-    mocks.swr["dashboard-home-activity"] = {
+    mocks.read.activity = {
       data: {
         activityRows: [],
         todaysVolume: null,
@@ -266,7 +249,7 @@ describe("Overview (HomeWorkspace)", () => {
   });
 
   it("counts today's payments when one moved a token with no price, never adding SOL to dollars", () => {
-    mocks.swr["dashboard-home-activity"] = {
+    mocks.read.activity = {
       data: {
         activityRows: [],
         todaysVolume: {
@@ -284,7 +267,7 @@ describe("Overview (HomeWorkspace)", () => {
   });
 
   it("marks today's volume as a floor when the read stopped short of midnight", () => {
-    mocks.swr["dashboard-home-activity"] = {
+    mocks.read.activity = {
       data: {
         activityRows: [],
         todaysVolume: {
@@ -309,7 +292,7 @@ describe("Overview (HomeWorkspace)", () => {
     );
     expect(section("activity")).toBeNull();
     // Neither the list nor the volume is on screen, so their read is never made.
-    expect(activityReadKeys()).toEqual(new Set([null]));
+    expect(activityReadsEnabled()).toEqual(new Set([false]));
     const actions = within(requireSection("actions"));
     expect(actions.queryByText("Create a wallet")).toBeNull();
     expect(actions.queryByText("Send a payment")).toBeNull();
@@ -358,7 +341,7 @@ describe("Overview (HomeWorkspace)", () => {
   });
 
   it("lists recent activity with its status, amount, token and explorer link", () => {
-    mocks.swr["dashboard-home-activity"] = {
+    mocks.read.activity = {
       data: {
         activityRows: [
           row("pay_1"),
@@ -403,7 +386,7 @@ describe("Overview (HomeWorkspace)", () => {
 
   it("drops issuance rows when Issuance is off", () => {
     mocks.workspace.flags.issuance = false;
-    mocks.swr["dashboard-home-activity"] = {
+    mocks.read.activity = {
       data: { activityRows: [row("pay_1"), row("mint_1", { sourceKind: "issuance" })] },
     };
     renderOverview();
@@ -411,25 +394,20 @@ describe("Overview (HomeWorkspace)", () => {
   });
 
   it("shows the activity error over its notice, and a loading line before the first read", () => {
-    mocks.swr["dashboard-home-activity"] = { error: { error: "Ledger is down." } };
-    const { unmount } = renderOverview();
-    expect(screen.getByText("Ledger is down.")).toBeTruthy();
-    unmount();
-
-    mocks.swr["dashboard-home-activity"] = { error: "fetch failed" };
-    const second = renderOverview();
+    mocks.read.activity = { error: new DashboardReadError(503, null, null) };
+    const failed = renderOverview();
     expect(screen.getByText("Activity is unavailable right now.")).toBeTruthy();
-    second.unmount();
+    failed.unmount();
 
-    mocks.swr["dashboard-home-activity"] = {
+    mocks.read.activity = {
       data: { activityRows: [], activityError: "Partial outage.", activityNotice: "Hidden." },
     };
-    const third = renderOverview();
+    const { unmount } = renderOverview();
     expect(screen.getByText("Partial outage.")).toBeTruthy();
     expect(screen.queryByText("Hidden.")).toBeNull();
-    third.unmount();
+    unmount();
 
-    mocks.swr["dashboard-home-activity"] = {};
+    mocks.read.activity = {};
     renderOverview();
     expect(screen.getByText("Loading recent activity...")).toBeTruthy();
   });

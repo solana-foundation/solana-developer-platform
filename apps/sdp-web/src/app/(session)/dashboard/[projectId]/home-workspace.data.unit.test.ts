@@ -1,21 +1,14 @@
 // @vitest-environment jsdom
 
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
-import { cleanup, renderHook } from "@testing-library/react";
-import { createElement, type ReactNode } from "react";
-import { SWRConfig } from "swr";
+import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SANDBOX_PROJECT } from "@/test/projects";
-import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
-import { fetchHomeActivity, useHomeActivitySnapshot } from "./home-workspace.data";
+import { DashboardReadError } from "@/lib/dashboard-swr";
+import { resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { DashboardReadsProvider } from "@/test/dashboard-reads";
+import { useHomeActivitySnapshot } from "./home-workspace.data";
 
-// The saved snapshot is scoped to the viewer's workspace.
-vi.mock("@/contexts/dashboard-workspace-context", () => ({
-  useDashboardWorkspace: () => ({
-    dashboardCacheScope: { userId: "user_home", orgId: "org_home" },
-    selectedProjectId: "prj_home",
-  }),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const ACTIVITY_PATH = "/api/dashboard/home/activity";
 const ADDRESS = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
@@ -55,57 +48,51 @@ function respond(status: number, body: unknown) {
 }
 
 beforeEach(() => {
-  window.localStorage.clear();
-  setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}`);
+  resetDashboardNavigation();
 });
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
-  restoreWindowLocation();
   vi.unstubAllGlobals();
 });
 
-describe("fetchHomeActivity", () => {
-  it("returns the list and today's volume from one answer", async () => {
-    respond(200, { data: SNAPSHOT });
-
-    await expect(fetchHomeActivity()).resolves.toEqual(SNAPSHOT);
-  });
-
-  it("rejects an answer without the volume instead of reading it as a $0.00 day", async () => {
-    respond(200, { data: { activityRows: [], activityError: null, activityNotice: null } });
-
-    await expect(fetchHomeActivity()).rejects.toThrow();
-  });
-
-  it("rejects a row the route could not have built", async () => {
-    respond(200, { data: { ...SNAPSHOT, activityRows: [{ id: "payment-xfr_1" }] } });
-
-    await expect(fetchHomeActivity()).rejects.toThrow();
-  });
-
-  it("rejects a failed read without the route's text, so each section words its own", async () => {
-    respond(500, { error: "client unavailable" });
-
-    await expect(fetchHomeActivity()).rejects.toMatchObject({ message: "" });
-  });
-});
-
 describe("useHomeActivitySnapshot", () => {
-  const wrapper = ({ children }: { children: ReactNode }) =>
-    createElement(
-      SWRConfig,
-      { value: { provider: () => new Map(), dedupingInterval: 0 } },
-      children
-    );
   const reads = (fetchMock: ReturnType<typeof respond>) =>
     fetchMock.mock.calls.filter(([path]) => path === ACTIVITY_PATH).length;
+
+  it("returns the list and today's volume from one answer", async () => {
+    respond(200, { data: SNAPSHOT });
+    const { result } = renderHook(() => useHomeActivitySnapshot(true), {
+      wrapper: DashboardReadsProvider,
+    });
+
+    await waitFor(() => expect(result.current.data).toEqual(SNAPSHOT));
+  });
+
+  it.each([
+    [
+      "an answer without the volume, never a $0.00 day",
+      { activityRows: [], activityError: null, activityNotice: null },
+    ],
+    [
+      "a row the route could not have built",
+      { ...SNAPSHOT, activityRows: [{ id: "payment-xfr_1" }] },
+    ],
+  ])("fails on %s", async (_case, data) => {
+    respond(200, { data });
+    const { result } = renderHook(() => useHomeActivitySnapshot(true), {
+      wrapper: DashboardReadsProvider,
+    });
+
+    await waitFor(() => expect(result.current.error).toBeInstanceOf(DashboardReadError));
+    expect(result.current.data).toBeUndefined();
+  });
 
   it("reads on mount, then once a minute", async () => {
     vi.useFakeTimers();
     const fetchMock = respond(200, { data: SNAPSHOT });
-    renderHook(() => useHomeActivitySnapshot(true), { wrapper });
+    renderHook(() => useHomeActivitySnapshot(true), { wrapper: DashboardReadsProvider });
 
     await vi.advanceTimersByTimeAsync(0);
     expect(reads(fetchMock)).toBe(1);
@@ -118,7 +105,7 @@ describe("useHomeActivitySnapshot", () => {
   it("reads nothing while disabled, however long the page stays open", async () => {
     vi.useFakeTimers();
     const fetchMock = respond(200, { data: SNAPSHOT });
-    renderHook(() => useHomeActivitySnapshot(false), { wrapper });
+    renderHook(() => useHomeActivitySnapshot(false), { wrapper: DashboardReadsProvider });
 
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(reads(fetchMock)).toBe(0);
