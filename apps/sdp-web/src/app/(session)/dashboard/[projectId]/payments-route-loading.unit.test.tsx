@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import DashboardLoading from "./(home)/loading";
+import { HomePageSkeleton } from "./home-page-skeleton";
 import CounterpartyDetailLoading from "./payments/counterparty/[counterpartyId]/loading";
 import CounterpartyCreateLoading from "./payments/counterparty/create/loading";
 import CounterpartyLoading from "./payments/counterparty/loading";
@@ -54,7 +54,7 @@ const EXPECTED_ROUTE_LAYOUTS = [
 function renderAuthenticatedLoadingStates(): string {
   return renderToStaticMarkup(
     <>
-      <DashboardLoading />
+      <HomePageSkeleton />
       <PaymentsLoading />
       <PayLoading />
       <DepositLoading />
@@ -188,7 +188,7 @@ describe("home and payments route loading states", () => {
   });
 
   it("mirrors the Overview: balance beside four tiles, then the network's four charts", () => {
-    const markup = renderToStaticMarkup(<DashboardLoading />);
+    const markup = renderToStaticMarkup(<HomePageSkeleton />);
 
     expect(markup.match(/data-loading-home-hero=/g)).toHaveLength(1);
     expect(markup).toContain("lg:grid-cols-2 lg:gap-12");
