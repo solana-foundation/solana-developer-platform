@@ -22,8 +22,9 @@ function isTruthyFlag(value: string | undefined): boolean {
 
 /**
  * Whether the deployment's release channel (`SDP_RELEASE_CHANNEL`, see `@sdp/types` release channels)
- * includes `module`. A release channel only caps: every flag below still has to be on,
- * and none of them can bring back a module the release channel leaves out.
+ * includes `module`. Where a module also has a flag below, the release channel only caps:
+ * the flag still has to be on, and it can never bring back a module the release channel
+ * leaves out.
  */
 export function isModuleAvailable(
   env: Pick<Env, "SDP_RELEASE_CHANNEL">,
@@ -120,31 +121,17 @@ export function isHeliusRingsEnabled(
   );
 }
 
-export function isMarketsEnabled(
-  env: Pick<Env, "MARKETS_ENABLED" | "SDP_RELEASE_CHANNEL">
-): boolean {
-  return (
-    isModuleAvailable(env, "markets", SDP_RAMP_PROVIDER_MATURITY) &&
-    isTruthyFlag(env.MARKETS_ENABLED)
-  );
+export function isMarketsEnabled(env: Pick<Env, "SDP_RELEASE_CHANNEL">): boolean {
+  return isModuleAvailable(env, "markets", SDP_RAMP_PROVIDER_MATURITY);
 }
 
-// Earn is a sub-module of Markets, so the parent flag gates it: clearing
-// MARKETS_ENABLED disables every Markets API surface in one move. Callers must
-// not add a second markets check — this hierarchy is the single source of truth.
-export function isEarnEnabled(
-  env: Pick<Env, "MARKETS_ENABLED" | "EARN_ENABLED" | "SDP_RELEASE_CHANNEL">
-): boolean {
-  return (
-    isMarketsEnabled(env) &&
-    isModuleAvailable(env, "earn", SDP_RAMP_PROVIDER_MATURITY) &&
-    isTruthyFlag(env.EARN_ENABLED)
-  );
+// Earn and DvP are Markets sub-modules: each requires Markets in the release channel
+// and its own maturity. Callers must not add a second markets check.
+export function isEarnEnabled(env: Pick<Env, "SDP_RELEASE_CHANNEL">): boolean {
+  return isMarketsEnabled(env) && isModuleAvailable(env, "earn", SDP_RAMP_PROVIDER_MATURITY);
 }
 
-// DvP is the other Markets sub-module. It has no flag of its own on the API, so
-// Markets plus the release channel decide it.
-export function isDvpEnabled(env: Pick<Env, "MARKETS_ENABLED" | "SDP_RELEASE_CHANNEL">): boolean {
+export function isDvpEnabled(env: Pick<Env, "SDP_RELEASE_CHANNEL">): boolean {
   return isMarketsEnabled(env) && isModuleAvailable(env, "dvp", SDP_RAMP_PROVIDER_MATURITY);
 }
 
