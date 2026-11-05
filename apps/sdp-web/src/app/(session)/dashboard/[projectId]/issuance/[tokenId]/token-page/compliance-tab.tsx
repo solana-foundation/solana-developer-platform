@@ -35,15 +35,15 @@ interface CountMessages {
   other: MessageKey;
 }
 
-const ENTRY_COUNT: CountMessages = {
+const ENTRY_COUNT = {
   one: "DashboardIssuance.newDesign.compliance.entriesOne",
   other: "DashboardIssuance.newDesign.compliance.entries",
-};
+} as const satisfies CountMessages;
 
-const ACCOUNT_COUNT: CountMessages = {
+const ACCOUNT_COUNT = {
   one: "DashboardIssuance.newDesign.compliance.accountsOne",
   other: "DashboardIssuance.newDesign.compliance.accounts",
-};
+} as const satisfies CountMessages;
 
 /**
  * "1 entry", "3 entries": the singular message for exactly one, as the dashboard's other counts
@@ -75,7 +75,11 @@ type ComplianceEntries = ReturnType<typeof useComplianceEntries>;
  * Who may hold the token: its access list (the addresses refused, or the only ones let in),
  * how many accounts are frozen, and a form that adds an address to the list.
  */
-export function TokenComplianceTab({ token, ops, canManageTokenAdmin }: TokenTabProps) {
+export function TokenComplianceTab({
+  token,
+  ops,
+  canManageTokenAdmin,
+}: Pick<TokenTabProps, "token" | "ops" | "canManageTokenAdmin">) {
   const t = useTranslations();
   const mode = ops.accessControlMode;
   const list = useComplianceEntries(token.id, mode);

@@ -4,85 +4,113 @@ import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import type { Token } from "@sdp/types/tokens";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { type ReactNode, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { TokenOperations } from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/asset-profile/use-token-operations";
+import * as operationData from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/asset-profile/use-token-operation-data";
+import { useTokenOperations } from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/asset-profile/use-token-operations";
+import * as actionRunner from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/use-token-action-runner";
+import * as workspace from "@/contexts/dashboard-workspace-context";
 import { getMessages } from "@/i18n/messages";
 import { EnglishI18n } from "@/test/i18n";
 import { LockSupplyForm, SupplyOperationForm } from "./supply-operation-form";
 
 const signerCopy = getMessages("en").DashboardIssuance.signer;
-const HOLDER = "3yQfmv9WiotYSDmamiow5Xt2abcvDxTzmFBSYEEGZtqe";
-const TOKEN = { id: "tok_test", symbol: "ACME", mintAddress: HOLDER } as Token;
+const AUTHORITY = "3yQfmv9WiotYSDmamiow5Xt2abcvDxTzmFBSYEEGZtqe";
+const OTHER_WALLET = "5wLf85zhVpJ7xBjDCE1KK8yTXyCrbbzoCUuv3Dwsd5PQ";
+
+/** A deployed token whose mint authority is `AUTHORITY`. */
+const TOKEN: Token = {
+  id: "tok_test",
+  projectId: "prj_test",
+  organizationId: "org_test",
+  signingCustodyWalletId: "cw_ops",
+  signingWalletId: "wal_ops",
+  mintAddress: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+  mintAuthority: AUTHORITY,
+  metadataAuthority: AUTHORITY,
+  freezeAuthority: AUTHORITY,
+  ablListAddress: null,
+  name: "Acme Dollar",
+  symbol: "ACME",
+  decimals: 6,
+  description: null,
+  uri: null,
+  imageUrl: null,
+  template: "stablecoin",
+  extensions: {},
+  totalSupply: "1000000",
+  maxSupply: null,
+  isMintable: true,
+  isFreezable: true,
+  requiresAllowlist: false,
+  status: "active",
+  deployedAt: "2026-11-05T00:00:00.000Z",
+  createdBy: "user_test",
+  createdAt: "2026-11-05T00:00:00.000Z",
+  updatedAt: "2026-11-05T00:00:00.000Z",
+};
 
 /** A custody wallet the project controls, able to sign. */
 function wallet(id: string, label: string, publicKey: string): PaymentsDashboardWallet {
   return { id, walletId: `wal_${id}`, label, publicKey, isRuntimeExecutionAllowed: true };
 }
 
-/** Two wallets that could sign: any of the project's wallets can burn what it holds. */
+/** Two wallets that could sign a burn: any of the project's wallets may burn what it holds. */
 const BURN_SIGNERS = [
-  wallet("cw_ops", "Operations", HOLDER),
-  wallet("cw_treasury", "Treasury", "5wLf85zhVpJ7xBjDCE1KK8yTXyCrbbzoCUuv3Dwsd5PQ"),
+  wallet("cw_ops", "Operations", AUTHORITY),
+  wallet("cw_treasury", "Treasury", OTHER_WALLET),
+];
+
+/** Two custody wallets holding the mint authority, either of which could sign the lock. */
+const MINT_AUTHORITY_SIGNERS = [
+  wallet("cw_ops", "Operations", AUTHORITY),
+  wallet("cw_reserve", "Reserve", AUTHORITY),
 ];
 
 /**
- * The burn form over live form state, as the operations hook keeps it: choosing a signer writes
- * it into the burn form, and submitting sends what that form holds.
+ * The token's operations over the project's custody wallets, with nothing fetched and an action
+ * running when `pending`: the returned spy receives each action instead of the API.
  */
-function BurnWithSigners({
-  onSubmit,
+function stubOperations({
+  authorityWallets,
+  pending,
 }: {
-  onSubmit: (action: string, signingWalletId: string) => void;
+  authorityWallets: PaymentsDashboardWallet[];
+  pending: boolean;
 }) {
-  const [burnForm, setBurnForm] = useState({
-    source: "",
-    amount: "",
-    memo: "",
-    signingWalletId: "",
+  const runAction = vi.fn();
+  vi.mocked(vi.spyOn(workspace, "useDashboardWorkspace"), { partial: true }).mockReturnValue({
+    sdpEnvironment: "sandbox",
   });
-  const ops = {
-    isPending: false,
-    mintForm: { destination: "", amount: "", memo: "", signingWalletId: "" },
-    burnForm,
-    setBurnForm,
-    mintValidationErrors: { destination: null, amount: null },
-    burnValidationErrors: { source: null, amount: null },
-    fundManagementDisabledReasons: {},
-    authorityWallets: BURN_SIGNERS,
-    getActionSignerProps: () => ({
-      signerWallets: BURN_SIGNERS,
-      signerUnavailableReason: null,
-      onSignerWalletIdChange: (signingWalletId: string) =>
-        setBurnForm((previous) => ({ ...previous, signingWalletId })),
-    }),
-    submitFundManagementAction: (action: string) => onSubmit(action, burnForm.signingWalletId),
-    closeFundManagementModal: vi.fn(),
-  } as unknown as TokenOperations;
-  return <SupplyOperationForm token={TOKEN} ops={ops} action="burn" />;
+  vi.mocked(vi.spyOn(actionRunner, "useTokenActionRunner"), { partial: true }).mockReturnValue({
+    isPending: pending,
+    runAction,
+  });
+  vi.mocked(vi.spyOn(operationData, "useTokenOperationData"), { partial: true }).mockReturnValue({
+    authorityWallets,
+    authorityWalletsError: null,
+    authorityWalletsLoading: false,
+    allowlistEntries: [],
+    frozenAccountsError: null,
+    frozenAccountsLoading: false,
+    frozenAccountsTotal: 0,
+  });
+  return runAction;
 }
 
-/** The lock form when two custody wallets hold the mint authority, over live form state. */
-function LockWithSigners() {
-  const [lockSupplyForm, setLockSupplyForm] = useState({ destination: "", signingWalletId: "" });
-  const signers = [wallet("cw_ops", "Operations", HOLDER), wallet("cw_reserve", "Reserve", HOLDER)];
-  const ops = {
-    isPending: false,
-    lockSupplyRemaining: "0",
-    lockSupplyMinted: false,
-    lockSupplyRevokeFailed: false,
-    lockSupplyForm,
-    setLockSupplyForm,
-    lockSupplySignerSelection: { wallets: signers, defaultWalletId: "", unavailableReason: null },
-    authorityWallets: signers,
-    handleLockSupply: vi.fn(),
-    closeLockSupplyModal: vi.fn(),
-  } as unknown as TokenOperations;
-  return <LockSupplyForm ops={ops} />;
+function useOperations() {
+  return useTokenOperations({
+    token: TOKEN,
+    shouldLoadAuthorityWallets: true,
+    canManageTokenAdmin: true,
+  });
 }
 
-function renderWith(node: ReactNode) {
-  render(<EnglishI18n>{node}</EnglishI18n>);
+function BurnForm() {
+  return <SupplyOperationForm token={TOKEN} ops={useOperations()} action="burn" />;
+}
+
+function LockForm() {
+  return <LockSupplyForm ops={useOperations()} />;
 }
 
 /**
@@ -102,37 +130,81 @@ async function chooseSigner(user: ReturnType<typeof userEvent.setup>, name: RegE
 }
 
 describe("SupplyOperationForm", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
-  it("keeps the burn's signing wallet on screen once chosen, so it can be read and changed", async () => {
+  it("keeps the burn's signing wallet on screen once chosen, so a wrong choice can be changed", async () => {
+    // Any of the project's wallets may burn what it holds, so with two the form asks.
+    const runAction = stubOperations({ authorityWallets: BURN_SIGNERS, pending: false });
     const user = userEvent.setup();
-    const onSubmit = vi.fn();
-    renderWith(<BurnWithSigners onSubmit={onSubmit} />);
-    fireEvent.change(screen.getByLabelText("Source"), { target: { value: HOLDER } });
+    render(
+      <EnglishI18n>
+        <BurnForm />
+      </EnglishI18n>
+    );
+    fireEvent.change(screen.getByLabelText("Source"), { target: { value: AUTHORITY } });
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "250000" } });
-    const submit = screen.getByRole("button", { name: /^Burn 250,000\.00/ }) as HTMLButtonElement;
-    expect(submit.disabled).toBe(true);
+    const submit = screen.getByRole("button", { name: /^Burn 250,000\.00/ });
+    expect(submit).toHaveProperty("disabled", true);
 
+    // Treasury does not hold the source, so it cannot sign this burn.
     await chooseSigner(user, /Treasury/);
     expect(signerPicker().textContent).toContain("Treasury");
-    expect(submit.disabled).toBe(false);
+    expect(submit).toHaveProperty("disabled", true);
 
     await chooseSigner(user, /Operations/);
     expect(signerPicker().textContent).toContain("Operations");
+    expect(submit).toHaveProperty("disabled", false);
 
     await user.click(submit);
-    expect(onSubmit).toHaveBeenCalledExactlyOnceWith("burn", "cw_ops");
+    expect(runAction).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        body: expect.objectContaining({ signingCustodyWalletId: "cw_ops" }),
+      }),
+      expect.objectContaining({ confirmationTitle: "Burn tokens?" })
+    );
+  });
+
+  it("locks the burn's signing wallet while an action runs", () => {
+    stubOperations({ authorityWallets: BURN_SIGNERS, pending: true });
+    render(
+      <EnglishI18n>
+        <BurnForm />
+      </EnglishI18n>
+    );
+    expect(signerPicker().hasAttribute("data-disabled")).toBe(true);
   });
 });
 
 describe("LockSupplyForm", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   it("keeps the lock's signing wallet on screen once chosen", async () => {
+    // Two custody wallets hold the mint authority, so the lock asks which signs.
+    stubOperations({ authorityWallets: MINT_AUTHORITY_SIGNERS, pending: false });
     const user = userEvent.setup();
-    renderWith(<LockWithSigners />);
+    render(
+      <EnglishI18n>
+        <LockForm />
+      </EnglishI18n>
+    );
 
     await chooseSigner(user, /Reserve/);
     expect(signerPicker().textContent).toContain("Reserve");
+  });
+
+  it("locks the lock's signing wallet while an action runs", () => {
+    stubOperations({ authorityWallets: MINT_AUTHORITY_SIGNERS, pending: true });
+    render(
+      <EnglishI18n>
+        <LockForm />
+      </EnglishI18n>
+    );
+    expect(signerPicker().hasAttribute("data-disabled")).toBe(true);
   });
 });

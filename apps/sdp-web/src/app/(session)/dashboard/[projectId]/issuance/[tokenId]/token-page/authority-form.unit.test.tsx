@@ -95,11 +95,15 @@ function renderStatefulForm(initial: string) {
   return { ops: base, submitted };
 }
 
-/** The form when two custody wallets hold the authority, keeping the chosen signer as the hook does. */
-function SignerHarness() {
+/**
+ * The form when two custody wallets hold the authority, keeping the chosen signer as the hook
+ * does, with an action running when `pending`.
+ */
+function SignerHarness({ pending }: { pending: boolean }) {
   const [signerWalletId, setSignerWalletId] = useState("");
-  const ops = {
+  const ops: TokenOperations = {
     ...buildOps("Addr2"),
+    isPending: pending,
     authorityModalSignerWalletId: signerWalletId,
     authorityModalSignerSelection: {
       wallets: [wallets[0], { ...wallets[0], id: "w3", walletId: "p3", label: "Treasury backup" }],
@@ -107,7 +111,7 @@ function SignerHarness() {
       unavailableReason: null,
     },
     setAuthorityModalSignerWalletId: setSignerWalletId,
-  } as TokenOperations;
+  };
   return <AuthorityForm ops={ops} />;
 }
 
@@ -184,14 +188,23 @@ describe("AuthorityForm", () => {
     const user = userEvent.setup();
     render(
       <I18nProvider locale="en" messages={messages}>
-        <SignerHarness />
+        <SignerHarness pending={false} />
       </I18nProvider>
     );
-    expect((save() as HTMLButtonElement).disabled).toBe(true);
+    expect(save()).toHaveProperty("disabled", true);
 
     await user.click(signerPicker());
     await user.click(await screen.findByRole("option", { name: /Treasury backup/ }));
     expect(signerPicker().textContent).toContain("Treasury backup");
-    expect((save() as HTMLButtonElement).disabled).toBe(false);
+    expect(save()).toHaveProperty("disabled", false);
+  });
+
+  it("locks the signing wallet while an action runs", () => {
+    render(
+      <I18nProvider locale="en" messages={messages}>
+        <SignerHarness pending />
+      </I18nProvider>
+    );
+    expect(signerPicker().hasAttribute("data-disabled")).toBe(true);
   });
 });

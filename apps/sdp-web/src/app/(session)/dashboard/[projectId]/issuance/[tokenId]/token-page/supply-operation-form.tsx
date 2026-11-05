@@ -29,7 +29,7 @@ function readSupplyOperation(ops: Ops, action: FundManagementModalAction, t: Tra
     ? ops.mintValidationErrors.destination
     : ops.burnValidationErrors.source;
   const signer = ops.getActionSignerProps(action);
-  const signerWallets = signer?.signerWallets ?? [];
+  const signerWallets = signer.signerWallets;
   // With several possible signers the form asks which one signs and keeps the picker once one
   // is chosen, so the choice stays readable and changeable; the action waits for a choice.
   const chooseSigner = signerWallets.length > 1;
@@ -37,7 +37,7 @@ function readSupplyOperation(ops: Ops, action: FundManagementModalAction, t: Tra
     !address.trim() ||
     !form.amount.trim() ||
     Boolean(ops.fundManagementDisabledReasons[action]) ||
-    Boolean(signer?.signerUnavailableReason) ||
+    Boolean(signer.signerUnavailableReason) ||
     Boolean(getSignerWalletUnavailableReason(signerWallets, form.signingWalletId, t)) ||
     (chooseSigner && !form.signingWalletId);
   return {
@@ -108,12 +108,13 @@ export function SupplyOperationForm({
         if (!blocked) ops.submitFundManagementAction(action);
       }}
     >
-      {chooseSigner && signer ? (
+      {chooseSigner ? (
         <TokenSignerSelect
           signerWallets={signerWallets}
           signerWalletId={form.signingWalletId}
           signerUnavailableReason={signer.signerUnavailableReason}
           onSignerWalletIdChange={signer.onSignerWalletIdChange}
+          disabled={ops.isPending}
         />
       ) : null}
       <FormField
@@ -259,6 +260,7 @@ export function LockSupplyForm({ ops }: Pick<TokenTabProps, "ops">) {
           onSignerWalletIdChange={(value) =>
             ops.setLockSupplyForm((previous) => ({ ...previous, signingWalletId: value }))
           }
+          disabled={ops.isPending}
         />
       ) : null}
       {needsMint ? (

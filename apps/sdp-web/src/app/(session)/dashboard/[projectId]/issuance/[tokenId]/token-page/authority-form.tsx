@@ -120,6 +120,7 @@ export function AuthorityForm({ ops }: Pick<TokenTabProps, "ops">) {
             signerWalletId={ops.authorityModalSignerWalletId}
             signerUnavailableReason={ops.authorityModalSignerSelection.unavailableReason}
             onSignerWalletIdChange={ops.setAuthorityModalSignerWalletId}
+            disabled={ops.isPending}
           />
         ) : null
       }
