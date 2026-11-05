@@ -1,5 +1,5 @@
 import { type Mock, vi } from "vitest";
-import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
+import { IDEMPOTENCY_KEY_HEADER, type JsonValue } from "@/lib/idempotency";
 
 /** One request the browser sent to the dashboard backend, as a test asserts on it. */
 export interface SentDashboardRequest {
@@ -39,7 +39,7 @@ export function sentDashboardRequests(fetchMock: Mock<typeof fetch>): SentDashbo
 }
 
 /** sdp-api's success envelope, as `proxyToSdpApi` streams it back. */
-export function dashboardDataResponse(status: number, data: unknown): Response {
+export function dashboardDataResponse(status: number, data: JsonValue): Response {
   return Response.json({ data, meta: { requestId: "req_test" } }, { status });
 }
 
