@@ -106,7 +106,7 @@ Popovers (`fumadocs-ui/components/ui/popover`) render in a portal outside `.sdp-
 
 A guide's `<Tab>` (`tab.tsx`) stays mounted while another tab shows, hidden, so the table of contents and search can link to its headings; following such a link opens the tab.
 
-A guide's `<Tabs>` panel is a card. A code sample's tabs (` ```lang tab="…" ` fences) are not: the tab card is the one frame, and the copy button sits at the end of the tab row instead of over the code (`globals.css`, "Tab panels").
+A guide's `<Tabs>` panel is a card. A panel holding only a code block (` ```lang tab="…" ` fences, or a `<Tab>` with one block) is not: the tab card is the one frame, and an untitled block's copy button sits at the end of the tab row instead of over the code (`globals.css`, "Tab panels"). A panel with prose or several blocks keeps each block's own button.
 
 ### CSS classes (for custom elements within pages)
 

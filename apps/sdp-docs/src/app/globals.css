@@ -2261,9 +2261,10 @@ a.rounded-lg.border.p-4 > p.truncate {
 }
 
 /* ── Tab panels: white card on beige background (matches dashboard cards). Scoped to the page,
-   so a tab panel in a portaled popover (the Agent setup menu) keeps its own surface. A code
-   sample's panel (```lang tab="…"```) is not a card: the tab card around it is the one frame. ── */
-.sdp-docs-shell [role="tabpanel"]:not(:has(> figure.shiki)) {
+   so a tab panel in a portaled popover (the Agent setup menu) keeps its own surface. A panel
+   holding only a code block (```lang tab="…"```) is not a card: the tab card around it is the
+   one frame. ── */
+.sdp-docs-shell [role="tabpanel"]:not(:has(> figure.shiki:only-child)) {
   background-color: var(--color-fd-card);
   color: var(--color-fd-card-foreground);
   border: 1px solid var(--color-fd-border);
@@ -2271,27 +2272,28 @@ a.rounded-lg.border.p-4 > p.truncate {
   padding: 1.5rem;
 }
 
-/* A code sample's copy button sits at the end of its tab row, never over the code. */
-.sdp-docs-shell :has(> [role="tabpanel"] > figure.shiki) {
+/* A lone code block's copy button sits at the end of its tab row, never over the code. Only a
+   panel's only child moves: a guide tab's several blocks would stack their buttons there. */
+.sdp-docs-shell :has(> [role="tabpanel"] > figure.shiki:only-child) {
   position: relative;
 }
 
-.sdp-docs-shell :has(> [role="tabpanel"] > figure.shiki) > [role="tablist"] {
+.sdp-docs-shell :has(> [role="tabpanel"] > figure.shiki:only-child) > [role="tablist"] {
   padding-right: 44px;
 }
 
-.sdp-docs-shell [role="tabpanel"] > figure.shiki {
+.sdp-docs-shell [role="tabpanel"] > figure.shiki:only-child {
   position: static;
 }
 
-.sdp-docs-shell [role="tabpanel"] > figure.shiki > div:not([role="region"]) {
+.sdp-docs-shell [role="tabpanel"] > figure.shiki:only-child > div:not([role="region"]) {
   top: 3px;
   right: 6px;
   backdrop-filter: none;
 }
 
 /* With the button out of the code, a line keeps the left padding on its right too. */
-.sdp-docs-shell [role="tabpanel"] > figure.shiki pre {
+.sdp-docs-shell [role="tabpanel"] > figure.shiki:only-child pre {
   --padding-right: var(--padding-left);
 }
 
