@@ -1,14 +1,12 @@
 "use client";
 
-import {
-  PRIVATE_CHANNEL_EVENT_TYPES,
-  type PrivateChannelEventDto,
-} from "@sdp/types/private-channels";
+import { PRIVATE_CHANNEL_EVENT_TYPES } from "@sdp/types/private-channels";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { Badge } from "@sdp/ui/badge";
 import { cn } from "@sdp/ui/cn";
 import { Modal } from "@sdp/ui/modal";
 import { ExternalLinkIcon } from "lucide-react";
+import type { PrivateChannelFeedEvent } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-reads";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
@@ -23,7 +21,7 @@ import { type EventNames, nameOf } from "./event-names";
 import type { PrivateChannelEventSummary } from "./event-summary";
 
 interface EventDetailProps {
-  event: PrivateChannelEventDto;
+  event: PrivateChannelFeedEvent;
   summary: PrivateChannelEventSummary;
   formattedOccurredAt: string;
   canViewRawPayload: boolean;
@@ -108,7 +106,7 @@ function stringifyPayload(payload: unknown): string {
 }
 
 function publicExplorerSignature(
-  event: PrivateChannelEventDto,
+  event: PrivateChannelFeedEvent,
   signature: string | undefined
 ): string | undefined {
   if (!signature) return undefined;

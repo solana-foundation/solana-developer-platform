@@ -2,7 +2,6 @@
 
 import {
   PRIVATE_CHANNEL_EVENT_FAMILIES,
-  type PrivateChannelEventDto,
   type PrivateChannelEventFamily,
 } from "@sdp/types/private-channels";
 import { Badge } from "@sdp/ui/badge";
@@ -13,6 +12,7 @@ import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/desi
 import { ChevronRightIcon, Loader2Icon } from "lucide-react";
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
+import type { PrivateChannelFeedEvent } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-reads";
 import {
   formatTokenAmount,
   resolveTransferTokenLabel,
@@ -40,7 +40,7 @@ interface Props {
    * rows are dropped, so a mounted feed can never mix projects.
    */
   projectId: string;
-  initialEvents: PrivateChannelEventDto[];
+  initialEvents: PrivateChannelFeedEvent[];
   initialHasMore: boolean;
   initialNextCursor: string | null;
   canViewRawPayload: boolean;
@@ -53,11 +53,11 @@ type EventFamilyFilter = "all" | PrivateChannelEventFamily;
 /** Keep all feed UI state in the same scope-guarded update. */
 interface FeedState {
   scope: { projectId: string };
-  events: PrivateChannelEventDto[];
+  events: PrivateChannelFeedEvent[];
   hasMore: boolean;
   nextCursor: string | null;
   selectedFamily: EventFamilyFilter;
-  selectedEvent: PrivateChannelEventDto | null;
+  selectedEvent: PrivateChannelFeedEvent | null;
 }
 
 const FAMILY_FILTERS = [
@@ -291,7 +291,7 @@ export function EventsList({
     });
   }
 
-  function setSelectedEvent(event: PrivateChannelEventDto | null) {
+  function setSelectedEvent(event: PrivateChannelFeedEvent | null) {
     setFeed((prev) => ({ ...prev, selectedEvent: event }));
   }
 

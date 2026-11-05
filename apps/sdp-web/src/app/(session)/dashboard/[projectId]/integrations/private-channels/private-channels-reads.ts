@@ -1,16 +1,12 @@
 "use client";
 
 import type { CustodyWalletSummary } from "@sdp/types/custody";
-import {
-  PRIVATE_CHANNEL_EVENT_FAMILY_VALUES,
-  PRIVATE_CHANNEL_EVENT_STATUS_VALUES,
-  PRIVATE_CHANNEL_EVENT_TYPE_VALUES,
-  type PrivateChannelDto,
-  type PrivateChannelEventDto,
-  type PrivateChannelInstance,
-  type PrivateChannelPrincipalDto,
-  type PrivateChannelTokenEligibility,
-  type PrivateChannelVerifiedWalletDto,
+import type {
+  PrivateChannelDto,
+  PrivateChannelInstance,
+  PrivateChannelPrincipalDto,
+  PrivateChannelTokenEligibility,
+  PrivateChannelVerifiedWalletDto,
 } from "@sdp/types/private-channels";
 import { z } from "zod";
 import { useWalletSummaries } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
@@ -90,6 +86,10 @@ const privateChannelVerifiedWalletSchema = z.object({
   verifiedAt: z.string(),
 }) satisfies z.ZodType<PrivateChannelVerifiedWalletDto>;
 
+/**
+ * A feed row. `family`, `type` and `status` stay open strings: a value the API adds before this
+ * dashboard knows it renders as its raw label instead of failing the feed.
+ */
 const privateChannelEventSchema = z.object({
   id: z.string(),
   organizationId: z.string(),
@@ -97,13 +97,15 @@ const privateChannelEventSchema = z.object({
   instanceId: z.string(),
   channelId: z.string().nullable(),
   sdpUserId: z.string().nullable(),
-  family: z.enum(PRIVATE_CHANNEL_EVENT_FAMILY_VALUES),
-  type: z.enum(PRIVATE_CHANNEL_EVENT_TYPE_VALUES),
-  status: z.enum(PRIVATE_CHANNEL_EVENT_STATUS_VALUES),
+  family: z.string(),
+  type: z.string(),
+  status: z.string(),
   payload: z.record(z.string(), z.unknown()),
   occurredAt: z.string(),
   createdAt: z.string(),
-}) satisfies z.ZodType<PrivateChannelEventDto>;
+});
+
+export type PrivateChannelFeedEvent = z.infer<typeof privateChannelEventSchema>;
 
 const instanceResponseSchema = z.object({
   data: z.object({ instance: privateChannelInstanceSchema.nullable() }),
