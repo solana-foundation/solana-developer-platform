@@ -136,10 +136,7 @@ const MAX_PAY_BODY_BYTES = 4 * 1024;
  * (`admittedSigner`) turns a policy refusal into `CUSTODY_POLICY_REFUSED` naming the provider;
  * that row here covers one that arrives any other way.
  */
-const SIGNING_ERROR_RESPONSES: Record<
-  SigningErrorCode,
-  { status: ContentfulStatusCode; code: ErrorCode }
-> = {
+const SIGNING_ERROR_RESPONSES = {
   PROVIDER_NOT_CONFIGURED: { status: 400, code: "PROVIDER_NOT_CONFIGURED" },
   WALLET_NOT_FOUND: { status: 404, code: "NOT_FOUND" },
   NOT_FOUND: { status: 404, code: "NOT_FOUND" },
@@ -149,7 +146,7 @@ const SIGNING_ERROR_RESPONSES: Record<
   CONFLICT: { status: 409, code: "CONFLICT" },
   POLICY_REFUSED: { status: 422, code: "CUSTODY_POLICY_REFUSED" },
   NETWORK_ERROR: { status: 502, code: "CUSTODY_ERROR" },
-};
+} as const satisfies Record<SigningErrorCode, { status: ContentfulStatusCode; code: ErrorCode }>;
 
 function getSafeSigningErrorMessage(err: SigningError): string {
   switch (err.code) {
