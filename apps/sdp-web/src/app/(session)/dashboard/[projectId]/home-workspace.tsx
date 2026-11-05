@@ -1,7 +1,7 @@
 "use client";
 
 import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
-import { assertNever, type PaymentsDashboardWallet } from "@sdp/types/payments";
+import { assertNever } from "@sdp/types/payments";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { Badge } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
@@ -28,6 +28,7 @@ import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { formatRelativeTime } from "./activity-format-utils";
+import { type HomeAccount, useHomeAccount } from "./home-account.data";
 import { countHeldTokens } from "./home-balance-breakdown";
 import { resolveHomeHeroState } from "./home-first-run";
 import {
@@ -38,6 +39,7 @@ import {
   type TodaysVolume,
   type TodaysVolumeFigure,
 } from "./home-page.data";
+import { HomeHeroSkeleton } from "./home-page-skeleton";
 import { buildTokenSymbolsByMint } from "./home-token-symbols";
 import { useHomeActivitySnapshot } from "./home-workspace.data";
 import { OverviewNetwork } from "./overview-network";
@@ -55,18 +57,14 @@ import {
   shortenAddress,
   statusMessageKey,
 } from "./payments/payments-overview.utils";
-import type { PaymentsIssuedTokenSymbol } from "./payments/payments-page.data";
 import { PAYMENT_STATUS_TONE } from "./payments/payments-presentation";
+import type { IssuedTokenSymbol } from "./payments/shared-reads";
 import { UnpricedHoldingsHint } from "./payments/unpriced-holdings-hint";
 import { tokenActivityHref } from "./tokens/holdings-links";
 
 interface HomeWorkspaceProps {
-  totalBalance: number | null;
-  totalBalanceError: string | null;
-  wallets: PaymentsDashboardWallet[];
-  balances: CustodyWalletTokenBalance[];
-  walletCount: number;
-  issuedTokens: PaymentsIssuedTokenSymbol[];
+  custodyEnabled: boolean;
+  issuanceEnabled: boolean;
 }
 
 const BALANCE_ROW_COUNT = 3;
@@ -212,7 +210,6 @@ function volumeCensusEntry(
  */
 function BalanceSummary({
   totalBalance,
-  totalBalanceError,
   hasPricedValue,
   balances,
   walletCount,
@@ -221,11 +218,10 @@ function BalanceSummary({
   todaysVolumeUnavailable,
 }: {
   totalBalance: number | null;
-  totalBalanceError: string | null;
   hasPricedValue: boolean;
   balances: CustodyWalletTokenBalance[];
   walletCount: number;
-  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
+  issuedTokensByMint: Record<string, IssuedTokenSymbol>;
   todaysVolume: TodaysVolume | null;
   todaysVolumeUnavailable: boolean;
 }) {
@@ -276,14 +272,7 @@ function BalanceSummary({
       <h2 className="text-body text-secondary">
         {t("Shared.homeWorkspace.newDesign.totalBalance")}
       </h2>
-      {totalBalanceError ? (
-        <>
-          <p className="mt-1 text-amount font-medium text-primary">
-            {t("Shared.homeWorkspace.unavailable")}
-          </p>
-          <p className="mt-2 text-body text-error">{totalBalanceError}</p>
-        </>
-      ) : hasPricedValue ? (
+      {hasPricedValue ? (
         <p className="mt-1 flex items-center gap-2 text-amount font-medium text-primary tabular-nums">
           {formatCurrencyAmount(totalBalance, locale)}
           <UnpricedHoldingsHint balances={balances} />
@@ -375,6 +364,26 @@ function BalanceSummary({
           />
         </p>
       </div>
+    </section>
+  );
+}
+
+function BalanceUnavailable({ onRetry }: { onRetry: () => void }) {
+  const t = useTranslations();
+  return (
+    <section className="min-w-0" data-overview-section="balance">
+      <h2 className="text-body text-secondary">
+        {t("Shared.homeWorkspace.newDesign.totalBalance")}
+      </h2>
+      <p className="mt-1 text-amount font-medium text-primary">
+        {t("Shared.homeWorkspace.unavailable")}
+      </p>
+      <p className="mt-2 text-body text-error">
+        {t("Shared.homeWorkspace.balanceDataUnavailable")}
+      </p>
+      <Button variant="outline" className="mt-6 h-control-md" onClick={onRetry}>
+        {t("Error.tryAgain")}
+      </Button>
     </section>
   );
 }
@@ -474,7 +483,7 @@ function RecentActivity({
   notice: string | null;
   emptyMessage: string;
   symbolsByMint: Record<string, string>;
-  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
+  issuedTokensByMint: Record<string, IssuedTokenSymbol>;
   showSeeAll: boolean;
 }) {
   const t = useTranslations();
@@ -612,30 +621,30 @@ function RecentActivity({
 }
 
 /**
- * Recent activity and today's volume, from the one read that builds both. Before the first wallet
- * neither section is on screen, so `enabled` is false and nothing is read.
+ * Recent activity and today's volume, from the one read that builds both. Pass the held balances
+ * while the sections are on screen, `null` while they are not (loading, unavailable, before the
+ * first wallet), and nothing is read.
  */
 function useHomeActivity(
-  enabled: boolean,
-  balances: CustodyWalletTokenBalance[],
-  issuanceEnabled: boolean,
-  isWalletEmptyState: boolean
+  visibleBalances: CustodyWalletTokenBalance[] | null,
+  issuanceEnabled: boolean
 ) {
   const t = useTranslations();
-  const { data: activitySnapshot, error: activityRequestError } = useHomeActivitySnapshot(enabled);
+  const { data: activitySnapshot, error: activityRequestError } = useHomeActivitySnapshot(
+    visibleBalances !== null
+  );
   const activityRows = filterHomeActivityRowsByFlags(activitySnapshot?.activityRows ?? [], {
     issuance: issuanceEnabled,
   });
-  const symbolsByMint = buildTokenSymbolsByMint(activityRows, balances);
+  const symbolsByMint =
+    visibleBalances === null ? {} : buildTokenSymbolsByMint(activityRows, visibleBalances);
   const activityError = activityRequestError
     ? readApiErrorMessage(activityRequestError) || t("Shared.homeWorkspace.activityUnavailable")
     : (activitySnapshot?.activityError ?? null);
   const activityNotice = activitySnapshot?.activityNotice ?? null;
-  const emptyActivityMessage = isWalletEmptyState
-    ? t("Shared.homeWorkspace.createFirstWalletActivity")
-    : activitySnapshot
-      ? t("Shared.homeWorkspace.noRecentActivity")
-      : t("Shared.homeWorkspace.loadingRecentActivity");
+  const emptyActivityMessage = activitySnapshot
+    ? t("Shared.homeWorkspace.noRecentActivity")
+    : t("Shared.homeWorkspace.loadingRecentActivity");
 
   return {
     activityRows,
@@ -653,32 +662,57 @@ function useHomeActivity(
   };
 }
 
+/** Without Custody there is no wallet to read: the first-run prompt, with no way to create one. */
+const NO_CUSTODY_ACCOUNT: HomeAccount = {
+  status: "ready",
+  walletCount: 0,
+  balances: [],
+  totalBalance: null,
+  issuedTokens: [],
+};
+
 /**
  * The Overview: setup while it is unfinished, the organization's balance beside the flows it can
  * start, approvals waiting on the viewer, Solana network context, and the latest activity.
  * Before the first wallet the balance column becomes the prompt to create one and the activity
  * list stays out, since there is nothing it could show.
  */
-export function HomeWorkspace({
-  totalBalance,
-  totalBalanceError,
-  wallets,
-  balances,
-  walletCount,
-  issuedTokens,
-}: HomeWorkspaceProps) {
+export function HomeWorkspace({ custodyEnabled, issuanceEnabled }: HomeWorkspaceProps) {
+  return custodyEnabled ? (
+    <CustodyHomeWorkspace issuanceEnabled={issuanceEnabled} />
+  ) : (
+    <HomeOverview
+      account={NO_CUSTODY_ACCOUNT}
+      custodyEnabled={false}
+      issuanceEnabled={issuanceEnabled}
+    />
+  );
+}
+
+function CustodyHomeWorkspace({ issuanceEnabled }: { issuanceEnabled: boolean }) {
+  const account = useHomeAccount(issuanceEnabled);
+  return <HomeOverview account={account} custodyEnabled issuanceEnabled={issuanceEnabled} />;
+}
+
+function HomeOverview({
+  account,
+  custodyEnabled,
+  issuanceEnabled,
+}: {
+  account: HomeAccount;
+  custodyEnabled: boolean;
+  issuanceEnabled: boolean;
+}) {
   const { dashboardAccess, flags } = useDashboardWorkspace();
   const { capabilities } = dashboardAccess;
-  const heroState = resolveHomeHeroState({
-    walletCount,
-    balances,
-    totalBalance,
-    balancesUnavailable: totalBalanceError !== null,
-  });
-  const firstRun = heroState.kind === "first_run";
-  const issuedTokensByMint = Object.fromEntries(
-    issuedTokens.map((token) => [token.mintAddress, token])
-  );
+  const ready = account.status === "ready" ? account : null;
+  const heroState = ready === null ? null : resolveHomeHeroState(ready);
+  const firstRun = heroState?.kind === "first_run";
+  const showsActivity = ready !== null && !firstRun;
+  const issuedTokensByMint: Record<string, IssuedTokenSymbol> =
+    ready === null
+      ? {}
+      : Object.fromEntries(ready.issuedTokens.map((token) => [token.mintAddress, token]));
   const network = useOverviewNetwork();
   const {
     activityRows,
@@ -688,9 +722,9 @@ export function HomeWorkspace({
     emptyActivityMessage,
     todaysVolume,
     todaysVolumeUnavailable,
-  } = useHomeActivity(!firstRun, balances, flags.issuance, wallets.length === 0);
+  } = useHomeActivity(showsActivity ? ready.balances : null, issuanceEnabled);
 
-  const canCreateWallet = flags.custody && capabilities.canManageCustody;
+  const canCreateWallet = custodyEnabled && capabilities.canManageCustody;
   const tiles: OverviewTile[] = [
     ...(canCreateWallet && !firstRun
       ? [
@@ -703,7 +737,7 @@ export function HomeWorkspace({
           } as const,
         ]
       : []),
-    ...(flags.issuance && capabilities.canManageTokenWrite
+    ...(issuanceEnabled && capabilities.canManageTokenWrite
       ? [
           {
             key: "token",
@@ -743,25 +777,33 @@ export function HomeWorkspace({
     // foot of a page, so Recent activity would otherwise end on the window's edge.
     <div className="flex w-full min-w-0 flex-col gap-16 pb-16" data-overview>
       <DashboardQuickStart variant="overview" />
-      <div className="grid min-w-0 gap-10 lg:grid-cols-2 lg:gap-12">
-        {firstRun ? (
-          <FirstWalletPrompt canCreateWallet={canCreateWallet} issuanceEnabled={flags.issuance} />
-        ) : (
-          <BalanceSummary
-            totalBalance={totalBalance}
-            totalBalanceError={totalBalanceError}
-            hasPricedValue={heroState.kind === "populated" ? heroState.hasPricedValue : true}
-            balances={balances}
-            walletCount={walletCount}
-            issuedTokensByMint={issuedTokensByMint}
-            todaysVolume={todaysVolume}
-            todaysVolumeUnavailable={todaysVolumeUnavailable}
-          />
-        )}
-        <OverviewActions tiles={tiles} />
-      </div>
+      {account.status === "loading" ? (
+        <HomeHeroSkeleton />
+      ) : (
+        <div className="grid min-w-0 gap-10 lg:grid-cols-2 lg:gap-12">
+          {account.status === "unavailable" ? (
+            <BalanceUnavailable onRetry={account.retry} />
+          ) : firstRun ? (
+            <FirstWalletPrompt
+              canCreateWallet={canCreateWallet}
+              issuanceEnabled={issuanceEnabled}
+            />
+          ) : (
+            <BalanceSummary
+              totalBalance={account.totalBalance}
+              hasPricedValue={heroState?.kind === "populated" ? heroState.hasPricedValue : true}
+              balances={account.balances}
+              walletCount={account.walletCount}
+              issuedTokensByMint={issuedTokensByMint}
+              todaysVolume={todaysVolume}
+              todaysVolumeUnavailable={todaysVolumeUnavailable}
+            />
+          )}
+          <OverviewActions tiles={tiles} />
+        </div>
+      )}
       <OverviewNetwork {...network} />
-      {firstRun ? null : (
+      {showsActivity ? (
         <RecentActivity
           rows={activityRows}
           error={activityError}
@@ -771,7 +813,7 @@ export function HomeWorkspace({
           issuedTokensByMint={issuedTokensByMint}
           showSeeAll={flags.payments}
         />
-      )}
+      ) : null}
     </div>
   );
 }

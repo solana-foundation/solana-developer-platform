@@ -1,16 +1,23 @@
 // @vitest-environment jsdom
 
 import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
-import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
 import { DashboardReadError } from "@/lib/dashboard-swr";
 import { resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { DashboardReadsProvider } from "@/test/dashboard-reads";
+import {
+  failedHomeRead,
+  type HomeReadAnswers,
+  type IssuedTokenListing,
+  issuedTokensResponse,
+  stubHomeReads,
+  walletAggregateResponse,
+  walletSummariesResponse,
+} from "@/test/home-reads";
+import { EnglishI18n } from "@/test/i18n";
 import type { HomeActivityRow } from "./home-page.data";
-import type { PaymentsIssuedTokenSymbol } from "./payments/payments-page.data";
 
 const ISSUED_MINT = "Iss1edMintAddress1111111111111111111111111";
 const USDC_MINT = wellKnownMint("USDC", "mainnet-beta") ?? "";
@@ -88,33 +95,33 @@ const BALANCES: CustodyWalletTokenBalance[] = [
     usdValue: 0,
   },
 ];
-const ISSUED: PaymentsIssuedTokenSymbol[] = [
-  { id: "tok_acme", mintAddress: ISSUED_MINT, symbol: "ACME", imageUrl: null },
+const ISSUED: IssuedTokenListing[] = [
+  { id: "tok_test_acme", name: "Acme", mintAddress: ISSUED_MINT, symbol: "ACME", decimals: 0 },
 ];
-// SAFETY: the Overview reads a wallet only to count it, so a bare id stands in for the summary.
-const WALLET = { id: "w_1" } as unknown as PaymentsDashboardWallet;
 
-function renderOverview(
-  props: Partial<{
-    totalBalance: number | null;
-    totalBalanceError: string | null;
-    wallets: PaymentsDashboardWallet[];
-    balances: CustodyWalletTokenBalance[];
-    walletCount: number;
-  }> = {}
-) {
+function renderWorkspace(custodyEnabled: boolean, issuanceEnabled: boolean) {
   return render(
-    <I18nProvider locale="en" messages={getMessages("en")}>
-      <HomeWorkspace
-        totalBalance={props.totalBalance === undefined ? 250 : props.totalBalance}
-        totalBalanceError={props.totalBalanceError ?? null}
-        wallets={props.wallets ?? [WALLET]}
-        balances={props.balances ?? BALANCES}
-        walletCount={props.walletCount ?? 2}
-        issuedTokens={ISSUED}
-      />
-    </I18nProvider>
+    <EnglishI18n>
+      <DashboardReadsProvider>
+        <HomeWorkspace custodyEnabled={custodyEnabled} issuanceEnabled={issuanceEnabled} />
+      </DashboardReadsProvider>
+    </EnglishI18n>
   );
+}
+
+async function renderOverview(
+  walletCount: number,
+  balances: CustodyWalletTokenBalance[],
+  issuanceEnabled: boolean
+) {
+  stubHomeReads({
+    aggregate: () => walletAggregateResponse(walletCount, balances),
+    wallets: () => walletSummariesResponse(["wal_test_1"]),
+    issuedTokens: () => issuedTokensResponse(ISSUED),
+  });
+  const view = renderWorkspace(true, issuanceEnabled);
+  await waitFor(() => expect(document.querySelector("[data-loading-home-hero]")).toBeNull());
+  return view;
 }
 
 const section = (name: string) =>
@@ -178,11 +185,12 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("Overview (HomeWorkspace)", () => {
-  it("leads a populated organization with its balance, holdings, census and every action", () => {
-    renderOverview();
+  it("leads a populated organization with its balance, holdings, census and every action", async () => {
+    await renderOverview(2, BALANCES, true);
 
     const scoped = within(requireSection("balance"));
     expect(scoped.getByText("Total balance")).toBeTruthy();
@@ -207,10 +215,10 @@ describe("Overview (HomeWorkspace)", () => {
     expect(section("quick-start")).toBeTruthy();
     expect(screen.getByRole("link", { name: "See all payments" })).toBeTruthy();
     expect(screen.getByText("No recent activity found yet.")).toBeTruthy();
-    expect(activityReadsEnabled()).toEqual(new Set([true]));
+    expect(mocks.useHomeActivitySnapshot).toHaveBeenLastCalledWith(true);
   });
 
-  it("reads one wallet and one token in the singular and a dash while volume is unknown", () => {
+  it("reads one wallet and one token in the singular and a dash while volume is unknown", async () => {
     // A wallet missed its read: the list can say so, but a total over the rest would understate.
     mocks.read.activity = {
       data: {
@@ -219,27 +227,40 @@ describe("Overview (HomeWorkspace)", () => {
         todaysVolumeError: "Payments activity is unavailable right now.",
       },
     };
-    renderOverview({ walletCount: 1, balances: [at(BALANCES, 0)] });
+    await renderOverview(1, [at(BALANCES, 0)], true);
     const balance = within(requireSection("balance"));
     expect(balance.getByText("wallet")).toBeTruthy();
     expect(balance.getByText("token held")).toBeTruthy();
     expect(balance.getByText("—")).toBeTruthy();
   });
 
-  it("reports an unavailable balance instead of a false zero", () => {
-    renderOverview({ totalBalance: null, totalBalanceError: "Balances are down." });
-    const balance = within(requireSection("balance"));
-    expect(balance.getByText("Unavailable")).toBeTruthy();
-    expect(balance.getByText("Balances are down.")).toBeTruthy();
+  it("reports an unavailable balance with no activity list, and retries into the balance", async () => {
+    const answers: HomeReadAnswers = {
+      aggregate: failedHomeRead,
+      wallets: () => walletSummariesResponse(["wal_test_1"]),
+      issuedTokens: () => issuedTokensResponse(ISSUED),
+    };
+    stubHomeReads(answers);
+    renderWorkspace(true, true);
+
+    await screen.findByText("Balance data is unavailable right now.");
+    expect(within(requireSection("balance")).getByText("Unavailable")).toBeTruthy();
+    expect(section("activity")).toBeNull();
+    expect(activityReadsEnabled()).toEqual(new Set([false]));
+
+    answers.aggregate = () => walletAggregateResponse(2, BALANCES);
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findAllByText("$250.00")).toHaveLength(2);
   });
 
-  it("names holdings with no price feed rather than totalling them", () => {
-    renderOverview({ totalBalance: null });
+  it("names holdings with no price feed rather than totalling them", async () => {
+    await renderOverview(1, [UNPRICED_SOL], true);
     expect(screen.getByText("Holdings with no price feed")).toBeTruthy();
   });
 
-  it("lists a holding with no price beside the count, and says the total leaves it out", () => {
-    renderOverview({ balances: [at(BALANCES, 0), UNPRICED_SOL] });
+  it("lists a holding with no price beside the count, and says the total leaves it out", async () => {
+    await renderOverview(2, [at(BALANCES, 0), UNPRICED_SOL], true);
     const balance = within(requireSection("balance"));
     expect(balance.getByRole("link", { name: "2 tokens held" })).toBeTruthy();
     expect(balance.getByText("SOL")).toBeTruthy();
@@ -248,7 +269,7 @@ describe("Overview (HomeWorkspace)", () => {
     ).toBeTruthy();
   });
 
-  it("counts today's payments when one moved a token with no price, never adding SOL to dollars", () => {
+  it("counts today's payments when one moved a token with no price, never adding SOL to dollars", async () => {
     mocks.read.activity = {
       data: {
         activityRows: [],
@@ -261,12 +282,12 @@ describe("Overview (HomeWorkspace)", () => {
         todaysVolumeError: null,
       },
     };
-    renderOverview({ balances: [at(BALANCES, 0), UNPRICED_SOL] });
+    await renderOverview(2, [at(BALANCES, 0), UNPRICED_SOL], true);
     const balance = within(requireSection("balance"));
     expect(balance.getByRole("link", { name: "2 payments today" })).toBeTruthy();
   });
 
-  it("marks today's volume as a floor when the read stopped short of midnight", () => {
+  it("marks today's volume as a floor when the read stopped short of midnight", async () => {
     mocks.read.activity = {
       data: {
         activityRows: [],
@@ -279,13 +300,13 @@ describe("Overview (HomeWorkspace)", () => {
         todaysVolumeError: null,
       },
     };
-    renderOverview();
+    await renderOverview(2, BALANCES, true);
     const balance = within(requireSection("balance"));
     expect(balance.getByRole("link", { name: "$20.00+ today’s volume" })).toBeTruthy();
   });
 
-  it("turns the first run into the wallet prompt with no activity list", () => {
-    renderOverview({ wallets: [], balances: [], walletCount: 0, totalBalance: null });
+  it("turns the first run into the wallet prompt with no activity list", async () => {
+    await renderOverview(0, [], true);
     expect(screen.getByRole("heading", { name: "Start with a wallet" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Create a wallet" }).getAttribute("href")).toBe(
       "/dashboard/prj_test_sandbox/wallets/setup"
@@ -299,9 +320,8 @@ describe("Overview (HomeWorkspace)", () => {
   });
 
   // Stable runs no Issuance, and its first run told a new organization about tokens it issues.
-  it("names the token in the first-run prompt only where Issuance runs", () => {
-    mocks.workspace.flags.issuance = false;
-    renderOverview({ wallets: [], balances: [], walletCount: 0, totalBalance: null });
+  it("names the token in the first-run prompt only where Issuance runs", async () => {
+    await renderOverview(0, [], false);
     expect(
       screen.getByText("Everything else here needs one: a payment has to leave from somewhere.")
     ).toBeTruthy();
@@ -316,7 +336,7 @@ describe("Overview (HomeWorkspace)", () => {
       canManageTokenWrite: false,
       canManageApiKeys: false,
     };
-    renderOverview({ wallets: [], balances: [], walletCount: 0, totalBalance: null });
+    renderWorkspace(false, false);
     expect(screen.queryByRole("link", { name: "Create a wallet" })).toBeNull();
     expect(
       screen.getByText(
@@ -326,7 +346,7 @@ describe("Overview (HomeWorkspace)", () => {
     expect(section("actions")).toBeNull();
   });
 
-  it("offers a read-only member no payment to send, with payments on", () => {
+  it("offers a read-only member no payment to send, with payments on", async () => {
     // A viewer's capabilities: every module flag on, but nothing beyond reads.
     mocks.workspace.dashboardAccess.capabilities = {
       canWrite: false,
@@ -334,13 +354,13 @@ describe("Overview (HomeWorkspace)", () => {
       canManageTokenWrite: false,
       canManageApiKeys: false,
     };
-    renderOverview();
+    await renderOverview(2, BALANCES, true);
     expect(screen.queryByText("Send a payment")).toBeNull();
     expect(section("actions")).toBeNull();
     expect(screen.getByRole("link", { name: "See all payments" })).toBeTruthy();
   });
 
-  it("lists recent activity with its status, amount, token and explorer link", () => {
+  it("lists recent activity with its status, amount, token and explorer link", async () => {
     mocks.read.activity = {
       data: {
         activityRows: [
@@ -366,7 +386,7 @@ describe("Overview (HomeWorkspace)", () => {
         activityNotice: "Showing the latest 4.",
       },
     };
-    renderOverview();
+    await renderOverview(2, BALANCES, true);
 
     const activity = within(requireSection("activity"));
     expect(activity.getByText("Showing the latest 4.")).toBeTruthy();
@@ -384,40 +404,36 @@ describe("Overview (HomeWorkspace)", () => {
     expect(rows[3]?.textContent).toContain("9xQeWv");
   });
 
-  it("drops issuance rows when Issuance is off", () => {
-    mocks.workspace.flags.issuance = false;
+  it("drops issuance rows when Issuance is off", async () => {
     mocks.read.activity = {
       data: { activityRows: [row("pay_1"), row("mint_1", { sourceKind: "issuance" })] },
     };
-    renderOverview();
+    await renderOverview(2, BALANCES, false);
     expect(within(requireSection("activity")).getAllByRole("row")).toHaveLength(2);
   });
 
-  it("shows the activity error over its notice, and a loading line before the first read", () => {
+  it("shows the activity error over its notice, and a loading line before the first read", async () => {
     mocks.read.activity = { error: new DashboardReadError(503, null, null) };
-    const failed = renderOverview();
+    const failed = await renderOverview(2, BALANCES, true);
     expect(screen.getByText("Activity is unavailable right now.")).toBeTruthy();
     failed.unmount();
 
     mocks.read.activity = {
       data: { activityRows: [], activityError: "Partial outage.", activityNotice: "Hidden." },
     };
-    const { unmount } = renderOverview();
+    const { unmount } = await renderOverview(2, BALANCES, true);
     expect(screen.getByText("Partial outage.")).toBeTruthy();
     expect(screen.queryByText("Hidden.")).toBeNull();
     unmount();
 
     mocks.read.activity = {};
-    renderOverview();
+    await renderOverview(2, BALANCES, true);
     expect(screen.getByText("Loading recent activity...")).toBeTruthy();
   });
 
-  it("asks for a first wallet in the activity list while the wallet read is empty", () => {
+  it("leaves out the link to every payment when Payments is off", async () => {
     mocks.workspace.flags.payments = false;
-    renderOverview({ wallets: [] });
-    expect(
-      screen.getByText("Create your first wallet to start tracking balances and activity.")
-    ).toBeTruthy();
+    await renderOverview(2, BALANCES, true);
     expect(screen.queryByRole("link", { name: "See all payments" })).toBeNull();
   });
 });

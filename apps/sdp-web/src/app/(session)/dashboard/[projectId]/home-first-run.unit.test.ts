@@ -20,7 +20,6 @@ describe("resolveHomeHeroState", () => {
         walletCount: 0,
         balances: [],
         totalBalance: null,
-        balancesUnavailable: false,
       })
     ).toEqual({
       kind: "first_run",
@@ -36,7 +35,6 @@ describe("resolveHomeHeroState", () => {
         walletCount: 1,
         balances: [],
         totalBalance: null,
-        balancesUnavailable: false,
       })
     ).toEqual({
       kind: "provisioned_empty",
@@ -48,7 +46,6 @@ describe("resolveHomeHeroState", () => {
       walletCount: 1,
       balances: [balance({ uiAmount: "0" })],
       totalBalance: null,
-      balancesUnavailable: false,
     });
 
     expect(result).toEqual({ kind: "provisioned_empty" });
@@ -61,7 +58,6 @@ describe("resolveHomeHeroState", () => {
       walletCount: 1,
       balances: [balance({ mint: "atd", token: "ATD", uiAmount: "25000" })],
       totalBalance: null,
-      balancesUnavailable: false,
     });
 
     expect(result).toEqual({ kind: "populated", hasPricedValue: false });
@@ -72,7 +68,6 @@ describe("resolveHomeHeroState", () => {
       walletCount: 2,
       balances: [balance({ usdValue: 149.11 })],
       totalBalance: 149.11,
-      balancesUnavailable: false,
     });
 
     expect(result).toEqual({ kind: "populated", hasPricedValue: true });
@@ -84,39 +79,8 @@ describe("resolveHomeHeroState", () => {
       walletCount: 1,
       balances: [balance({ usdValue: 0 })],
       totalBalance: 0,
-      balancesUnavailable: false,
     });
 
     expect(result).toEqual({ kind: "populated", hasPricedValue: true });
-  });
-
-  it("does not call an established organization empty when the balance feed failed", () => {
-    // The page defaults a failed aggregate to `[]`, which is indistinguishable
-    // from holding nothing. Classifying that as provisioned_empty swapped an
-    // established organization's hero for the get-started panel and swallowed the
-    // "balance data is unavailable" message, which only the hero renders.
-    const result = resolveHomeHeroState({
-      walletCount: 3,
-      balances: [],
-      totalBalance: null,
-      balancesUnavailable: true,
-    });
-
-    expect(result).toEqual({ kind: "populated", hasPricedValue: false });
-  });
-
-  it("does not call a zero wallet count first run when the feeds failed", () => {
-    // When both requests fail the page defaults the wallet count to zero, so a
-    // zero here is indistinguishable from an established organization behind a
-    // down API. The page suppresses `balancesUnavailable` when the wallet
-    // request genuinely answered with an empty list, so the failure hero wins.
-    const result = resolveHomeHeroState({
-      walletCount: 0,
-      balances: [],
-      totalBalance: null,
-      balancesUnavailable: true,
-    });
-
-    expect(result).toEqual({ kind: "populated", hasPricedValue: false });
   });
 });
