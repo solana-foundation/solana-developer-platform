@@ -14,7 +14,6 @@ import { MoreHorizontalIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import useSWR from "swr";
 import { z } from "zod";
 import { API_KEYS_PAGE_PATH } from "@/app/(session)/dashboard/[projectId]/api-keys/api-key-flash";
 import { RecordFacts } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
@@ -22,37 +21,36 @@ import { EntityLink } from "@/components/entity-link";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { projectHref } from "@/lib/dashboard-project-path";
+import {
+  useDashboardKeyScope,
+  useDashboardRead,
+  useInvalidateDashboardReads,
+} from "@/lib/dashboard-swr";
 import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
 import { fetchResultAnswer, IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
-import { membersQueryKeys } from "./members-query-key";
+import { memberReads, membersQueryKeys } from "./members-query-key";
 
-const memberApiKeysSchema = z.object({
-  apiKeys: z.array(
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      keyPrefix: z.string(),
-      projectId: z.string(),
-      projectName: z.string(),
-      environment: z.enum(SDP_ENVIRONMENTS),
-      createdAt: z.string(),
-    })
-  ),
+const memberApiKeysResponseSchema = z.object({
+  data: z.object({
+    apiKeys: z.array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        keyPrefix: z.string(),
+        projectId: z.string(),
+        projectName: z.string(),
+        environment: z.enum(SDP_ENVIRONMENTS),
+        createdAt: z.string(),
+      })
+    ),
+  }),
 });
 
-type MemberApiKey = z.infer<typeof memberApiKeysSchema>["apiKeys"][number];
+type MemberApiKey = z.infer<typeof memberApiKeysResponseSchema>["data"]["apiKeys"][number];
 
 function memberPath(memberId: string): string {
   return `/api/dashboard/members/${encodeURIComponent(memberId)}`;
-}
-
-async function fetchMemberApiKeys(memberId: string): Promise<MemberApiKey[]> {
-  const result = await dashboardFetch(`${memberPath(memberId)}/api-keys`);
-  if (!result.ok) {
-    throw new Error(result.error);
-  }
-  return z.object({ data: memberApiKeysSchema }).parse(result.data).data.apiKeys;
 }
 
 export function MemberActions({
@@ -70,6 +68,8 @@ export function MemberActions({
 }) {
   const t = useTranslations();
   const router = useRouter();
+  const scope = useDashboardKeyScope();
+  const invalidateReads = useInvalidateDashboardReads();
   const [isConfirmOpen, setConfirmOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   // One key per change, kept across its retries (a retry after a failed Clerk
@@ -110,6 +110,7 @@ export function MemberActions({
         return;
       }
       toast.success(t("Shared.members.roleChanged", { member: label }));
+      void invalidateReads(memberReads);
       refreshKeepingDashboardUrl(router);
     });
   };
@@ -126,10 +127,11 @@ export function MemberActions({
   // Removal waits for the member's key list, so no admin confirms before
   // seeing which keys survive; a failed read turns the button into an
   // explicit "remove anyway". SWR reads it again on focus, after a revoke.
-  const { data: apiKeys, error: apiKeysError } = useSWR(
-    isConfirmOpen ? membersQueryKeys.memberApiKeys({ memberId }) : null,
-    ([, id]) => fetchMemberApiKeys(id)
+  const { data: apiKeysResponse, error: apiKeysError } = useDashboardRead(
+    isConfirmOpen ? membersQueryKeys.memberApiKeys(scope, { memberId }) : null,
+    memberApiKeysResponseSchema
   );
+  const apiKeys = apiKeysResponse?.data.apiKeys;
   const isApiKeysLoading = isConfirmOpen && !apiKeys && !apiKeysError;
   const isApiKeysFailed = !apiKeys && Boolean(apiKeysError);
   const removeLabel = isApiKeysFailed
@@ -156,6 +158,7 @@ export function MemberActions({
 
       setConfirmOpen(false);
       toast.success(t("Shared.members.removed", { member: label }));
+      void invalidateReads(memberReads);
       refreshKeepingDashboardUrl(router);
     });
   };

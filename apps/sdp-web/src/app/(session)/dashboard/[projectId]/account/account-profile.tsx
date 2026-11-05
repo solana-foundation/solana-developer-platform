@@ -10,6 +10,7 @@ import { Label } from "@sdp/ui/label";
 import { type ChangeEvent, type FormEvent, useId, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
+import { AccountPageSkeleton } from "@/app/(session)/dashboard/[projectId]/operations-card-page-skeletons";
 import {
   RecordList,
   RecordRow,
@@ -39,7 +40,10 @@ const PROFILE_NAME_SCHEMA = z.object({
 });
 
 export function AccountProfile() {
-  const { user } = useUser();
+  const { isLoaded, user } = useUser();
+  if (!isLoaded) {
+    return <AccountPageSkeleton />;
+  }
   if (!user) {
     return null;
   }

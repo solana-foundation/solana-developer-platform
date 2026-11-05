@@ -11,10 +11,12 @@ import { toast } from "sonner";
 import { z } from "zod";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
 import { fetchResultAnswer, IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 import { useZodForm } from "@/lib/use-zod-form";
+import { memberReads } from "./members-query-key";
 
 const ROLE_LABEL_ID = "invite-role-label";
 
@@ -30,6 +32,7 @@ const inviteSchema = z.object({
 export function InviteMemberForm() {
   const t = useTranslations();
   const router = useRouter();
+  const invalidateReads = useInvalidateDashboardReads();
   // One key per address and role sent, kept across retries of them and
   // retired by the answer that settles it; editing either is a new key.
   const actionKey = useActionIdempotencyKey(null);
@@ -83,6 +86,7 @@ export function InviteMemberForm() {
       );
       // Clear the field only on success, so a rejected address stays editable.
       form.reset();
+      void invalidateReads(memberReads);
       refreshKeepingDashboardUrl(router);
     });
   };

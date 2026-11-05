@@ -607,6 +607,12 @@
       "other": "Excludes {count} tokens with no price feed."
     }
   },
+  "tokenHoldings": {
+    "retry": "Try again"
+  },
+  "apiKeyAuthoring": {
+    "retry": "Try again"
+  },
   "integrations": {
     "pageDescription": "Every provider SDP can run for this organization, with what is connected and what to do next. Custody installs from Wallets; other families are provisioned per deployment.",
     "statusActive": "Connected",
