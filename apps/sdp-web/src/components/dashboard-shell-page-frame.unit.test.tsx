@@ -235,22 +235,16 @@ describe("dashboard shell page frame", () => {
   });
 
   it.each([
-    [
-      "signed out",
-      SIGNED_OUT,
-      [[`/sign-in?redirect_url=%2Fdashboard%2F${SANDBOX_PROJECT.id}%2Fpayments%3Ftab%3Dx`]],
-    ],
-    ["while Clerk loads", CLERK_LOADING, []],
-  ])(
-    "paints the loading screen %s and sends only a signed-out session to sign-in",
-    async (_label, auth, replaces) => {
-      vi.spyOn(clerk, "useAuth").mockReturnValue(auth);
-      setWindowPathname(`${PROJECT}/payments?tab=x`);
+    ["signed out", SIGNED_OUT],
+    ["while Clerk loads", CLERK_LOADING],
+  ])("holds the loading screen %s without navigating", async (_label, auth) => {
+    vi.spyOn(clerk, "useAuth").mockReturnValue(auth);
+    setWindowPathname(`${PROJECT}/payments?tab=x`);
 
-      await renderAt(`${PROJECT}/payments?tab=x`);
+    await renderAt(`${PROJECT}/payments?tab=x`);
 
-      expect(container.querySelector("main[data-shell-loading-skeleton]")).not.toBeNull();
-      expect(dashboardRouter.replace.mock.calls).toEqual(replaces);
-    }
-  );
+    expect(container.querySelector("main[data-shell-loading-skeleton]")).not.toBeNull();
+    expect(dashboardRouter.replace).not.toHaveBeenCalled();
+    expect(dashboardRouter.push).not.toHaveBeenCalled();
+  });
 });
