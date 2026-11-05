@@ -4,7 +4,7 @@ import type { Node as PageTreeNode } from "fumadocs-core/page-tree";
 import { ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { type MouseEvent, useEffect, useMemo, useState } from "react";
+import { type MouseEvent, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 
 function getNodeKey(node: PageTreeNode) {
@@ -24,11 +24,13 @@ function nodeContainsPath(node: PageTreeNode, pathname: string): boolean {
 
 type NavigationNodeProps = {
   node: PageTreeNode;
+  /** The top-level entry the current page sits under, if any: highlighted like the page. */
+  sectionUrl: string | undefined;
   onNavigate: () => void;
 };
 
 /** A page tree node in the sidebar. Each level of children sits further in (globals.css). */
-export function NavigationNode({ node, onNavigate }: NavigationNodeProps) {
+export function NavigationNode({ node, sectionUrl, onNavigate }: NavigationNodeProps) {
   const pathname = usePathname();
 
   if (node.type === "separator") {
@@ -50,7 +52,7 @@ export function NavigationNode({ node, onNavigate }: NavigationNodeProps) {
         className={cn(
           "launch-docs-nav-item",
           node.url === "/docs" && "is-start",
-          isActive && "is-active"
+          (isActive || node.url === sectionUrl) && "is-active"
         )}
         aria-current={isActive ? "page" : undefined}
       >
@@ -61,7 +63,9 @@ export function NavigationNode({ node, onNavigate }: NavigationNodeProps) {
   }
 
   if (node.type === "folder") {
-    return <FolderNode node={node} pathname={pathname} onNavigate={onNavigate} />;
+    return (
+      <FolderNode node={node} pathname={pathname} sectionUrl={sectionUrl} onNavigate={onNavigate} />
+    );
   }
 
   return null;
@@ -70,6 +74,7 @@ export function NavigationNode({ node, onNavigate }: NavigationNodeProps) {
 type FolderNodeProps = {
   node: Extract<PageTreeNode, { type: "folder" }>;
   pathname: string;
+  sectionUrl: string | undefined;
   onNavigate: () => void;
 };
 
@@ -82,26 +87,35 @@ function isPlainClick(event: MouseEvent<HTMLAnchorElement>) {
  * A folder. Its row is one highlight, toggle included. A linked folder's link opens the folder
  * as it opens the page, and toggles it from the page itself, as the chevron does.
  */
-function FolderNode({ node, pathname, onNavigate }: FolderNodeProps) {
+function FolderNode({ node, pathname, sectionUrl, onNavigate }: FolderNodeProps) {
   const containsPath = useMemo(() => nodeContainsPath(node, pathname), [node, pathname]);
   const [isOpen, setIsOpen] = useState(containsPath);
-
-  useEffect(() => {
-    if (containsPath) setIsOpen(true);
-  }, [containsPath]);
+  // The folder follows the page in the same render: navigating into it opens it, so the page's
+  // row exists as soon as the page does (the sidebar scrolls it into view), and leaving it closes
+  // it, so a long tree such as the API Reference stays out of the way in other sections. The
+  // layout persists across pages, so nothing else would close it.
+  const [wasContainingPath, setWasContainingPath] = useState(containsPath);
+  if (containsPath !== wasContainingPath) {
+    setWasContainingPath(containsPath);
+    setIsOpen(containsPath);
+  }
 
   const folderName = typeof node.name === "string" ? node.name : String(node.name ?? "");
   const hasChildren = node.children.length > 0;
   const isActive = node.index?.url === pathname;
+  // A section folder lights up for a page it holds only when the page has no row inside it.
+  const isHighlighted =
+    isActive || (node.index !== undefined && node.index.url === sectionUrl && !containsPath);
 
   return (
     <div className="launch-docs-nav-folder">
-      <div className={cn("launch-docs-nav-folder-row", isActive && "is-active")}>
+      <div className={cn("launch-docs-nav-folder-row", isHighlighted && "is-active")}>
         {node.index ? (
           <>
             <Link
               href={node.index.url}
               className="launch-docs-nav-folder-link"
+              aria-current={isActive ? "page" : undefined}
               onClick={(event) => {
                 if (isPlainClick(event)) {
                   setIsOpen((open) => (isActive ? !open : true));
@@ -149,7 +163,12 @@ function FolderNode({ node, pathname, onNavigate }: FolderNodeProps) {
       {hasChildren && isOpen ? (
         <div className="launch-docs-nav-children">
           {node.children.map((child) => (
-            <NavigationNode key={getNodeKey(child)} node={child} onNavigate={onNavigate} />
+            <NavigationNode
+              key={getNodeKey(child)}
+              node={child}
+              sectionUrl={sectionUrl}
+              onNavigate={onNavigate}
+            />
           ))}
         </div>
       ) : null}
