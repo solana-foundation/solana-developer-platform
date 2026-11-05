@@ -79,7 +79,7 @@ if (response.ok) {
 
 ### Recovering from a partial failure
 
-A batch with `failed` recipients paid some recipients and not others. A `failed` recipient was not paid: its transaction never reached the network, or the network rejected it. To finish the run, retry the batch:
+A batch with `failed` recipients paid some recipients and not others. A `failed` recipient was not paid: its transaction never reached the network, or the network rejected it. Its `error` says why; when the source wallet could not cover the amount, it reads "The wallet used for this payment does not have enough funds", so fund the wallet before you retry. To finish the run, retry the batch:
 
 ```bash
 curl -X POST https://api.solana.com/v1/payments/transfer-batches/{batchId}/retry \

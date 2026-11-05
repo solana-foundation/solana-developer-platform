@@ -38,13 +38,15 @@ function OrganizationMark({ name, imageUrl }: { name: string; imageUrl?: string 
 const ENTRY_ROW_CLASS =
   "flex min-h-12 w-full items-center gap-3 rounded-control bg-fill px-3 py-2 text-body text-primary transition-colors hover:bg-fill-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50";
 
-type EntryState = "no-access" | "create" | "select";
+type EntryState = "invitation-expired" | "no-access" | "create" | "select";
 
 function resolveEntryState(params: {
   noAccess: boolean;
+  invitationExpired: boolean;
   isLoaded: boolean;
   hasChoices: boolean;
 }): EntryState {
+  if (params.noAccess && params.invitationExpired) return "invitation-expired";
   if (params.noAccess) return "no-access";
   if (params.isLoaded && !params.hasChoices) return "create";
   return "select";
@@ -55,6 +57,11 @@ function entryCopy(
   t: ReturnType<typeof useTranslations>
 ): { title: string; description: string } {
   switch (state) {
+    case "invitation-expired":
+      return {
+        title: t("Shared.SharedComponents.invitationExpiredTitle"),
+        description: t("Shared.SharedComponents.invitationExpiredDescription"),
+      };
     case "no-access":
       return {
         title: t("Shared.SharedComponents.noOrganizationAccessTitle"),
@@ -85,8 +92,15 @@ function entryCopy(
  * so the same choices are offered under that explanation.
  *
  * @param props.noAccess - Whether SDP refused the session's organization.
+ * @param props.invitationExpired - Whether it refused because the person's invitation expired.
  */
-export function SelectExistingOrganizationPanel({ noAccess }: { noAccess: boolean }) {
+export function SelectExistingOrganizationPanel({
+  noAccess,
+  invitationExpired,
+}: {
+  noAccess: boolean;
+  invitationExpired: boolean;
+}) {
   const t = useTranslations();
   const router = useRouter();
   const { userMemberships, userInvitations, setActive, isLoaded } = useOrganizationList({
@@ -103,6 +117,7 @@ export function SelectExistingOrganizationPanel({ noAccess }: { noAccess: boolea
   const copy = entryCopy(
     resolveEntryState({
       noAccess,
+      invitationExpired,
       isLoaded,
       hasChoices: memberships.length > 0 || invitations.length > 0,
     }),

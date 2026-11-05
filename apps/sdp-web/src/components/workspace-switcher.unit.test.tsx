@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
 import type { Project } from "@sdp/types/projects";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setDashboardUrl } from "@/test/dashboard-navigation";
 import { EnglishI18n } from "@/test/i18n";
@@ -25,7 +26,10 @@ const mocks = vi.hoisted(() => {
   };
   return {
     workspace,
+    organizationLoaded: true,
     selectProject: vi.fn(),
+    setActive: vi.fn<(params: { organization: string }) => Promise<void>>(),
+    switching: vi.fn<(isSwitching: boolean) => void>(),
     acme: { id: "org_test_acme", name: "Acme", imageUrl: null },
     globex: { id: "org_test_globex", name: "Globex", imageUrl: null },
   };
@@ -33,10 +37,10 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@clerk/nextjs", () => ({
-  useOrganization: () => ({ organization: mocks.acme }),
+  useOrganization: () => ({ isLoaded: mocks.organizationLoaded, organization: mocks.acme }),
   useOrganizationList: () => ({
     isLoaded: true,
-    setActive: vi.fn(),
+    setActive: mocks.setActive,
     userMemberships: { data: [{ organization: mocks.acme }, { organization: mocks.globex }] },
   }),
 }));
@@ -50,9 +54,15 @@ function showProject(project: Project) {
   mocks.workspace.sdpEnvironment = project.environment;
 }
 
+function renderSwitcher() {
+  render(<WorkspaceSwitcher onOrganizationSwitchingChange={mocks.switching} />, {
+    wrapper: EnglishI18n,
+  });
+}
+
 async function openSwitcher() {
   const user = userEvent.setup();
-  render(<WorkspaceSwitcher />, { wrapper: EnglishI18n });
+  renderSwitcher();
   const trigger = screen.getByRole("button", { name: "Acme" });
   await user.click(trigger);
   return { user, trigger };
@@ -61,11 +71,16 @@ async function openSwitcher() {
 beforeEach(() => {
   mocks.workspace.sandboxProject = SANDBOX_PROJECT;
   mocks.workspace.productionProject = PRODUCTION_PROJECT;
+  mocks.organizationLoaded = true;
   mocks.selectProject.mockReset();
+  mocks.switching.mockReset();
+  mocks.setActive.mockReset();
+  mocks.setActive.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
 });
 
 describe("WorkspaceSwitcher", () => {
@@ -112,5 +127,54 @@ describe("WorkspaceSwitcher", () => {
     expect(
       screen.getByRole("menuitem", { name: "Organization settings" }).getAttribute("href")
     ).toBe(`/dashboard/${SANDBOX_PROJECT.id}/settings`);
+  });
+
+  it("shows a loading placeholder while Clerk resolves the organization", () => {
+    mocks.organizationLoaded = false;
+    showProject(SANDBOX_PROJECT);
+    renderSwitcher();
+
+    expect(screen.getByRole("status").getAttribute("aria-busy")).toBe("true");
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("keeps the current organization without restarting the workspace", async () => {
+    showProject(SANDBOX_PROJECT);
+    const { user } = await openSwitcher();
+
+    await user.click(screen.getByRole("menuitem", { name: /Acme$/ }));
+
+    expect(mocks.setActive).not.toHaveBeenCalled();
+    expect(mocks.switching).not.toHaveBeenCalled();
+  });
+
+  it("shows a pending switch until Clerk has made the organization active", async () => {
+    const pending = Promise.withResolvers<void>();
+    mocks.setActive.mockReturnValue(pending.promise);
+    showProject(SANDBOX_PROJECT);
+    const { user, trigger } = await openSwitcher();
+
+    await user.click(screen.getByRole("menuitem", { name: /Globex$/ }));
+
+    expect(mocks.setActive).toHaveBeenCalledExactlyOnceWith({ organization: mocks.globex.id });
+    expect(trigger.getAttribute("aria-busy")).toBe("true");
+    expect(mocks.switching.mock.calls).toEqual([[true]]);
+    pending.resolve();
+    await waitFor(() => expect(mocks.switching.mock.calls).toEqual([[true], [false]]));
+  });
+
+  it("reports a refused switch and makes the current workspace usable again", async () => {
+    const toastError = vi.spyOn(toast, "error");
+    mocks.setActive.mockRejectedValue(new Error("Switch refused"));
+    showProject(SANDBOX_PROJECT);
+    const { user, trigger } = await openSwitcher();
+
+    await user.click(screen.getByRole("menuitem", { name: /Globex$/ }));
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("Could not switch organizations. Try again.")
+    );
+    expect(mocks.switching.mock.calls).toEqual([[true], [false]]);
+    expect(trigger.getAttribute("aria-busy")).toBe("false");
   });
 });

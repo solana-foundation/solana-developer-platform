@@ -108,18 +108,18 @@ separate from Sandbox and must be set up again.
 
 ## 3. Connect your custody provider account
 
-Production requires **Bring your own credentials**. In Production, open
-**Wallets**, click **Create wallet**, select **Privy**, then **Continue**.
+Production runs on your own provider account. In Production, open **Wallets**,
+click **Create wallet**, and select **Privy** if the page asks for a provider.
 
-Enter a **Credential label**, your **Privy app ID** and **Privy app secret** from
-the [Privy dashboard](https://dashboard.privy.io), and an **Initial wallet label**.
-Click **Connect and verify** to verify the connection and create your first
-Privy wallet.
+Enter a **Credential label**, your **Privy app ID** and **Privy app secret**
+from the [Privy dashboard](https://dashboard.privy.io), and a **Wallet label**.
+Click **Connect and create wallet** to verify the connection and create your
+first Privy wallet.
 
 [![Privy credential form with an example app ID and a masked app secret](/images/go-to-mainnet/04-connect-privy.png)](/docs/images/go-to-mainnet/04-connect-privy.png)
 
-For more wallets, select this connection. See
-[Create a wallet](/docs/guides/setup-wallets).
+For more wallets, pick this connection under **Whose Privy account holds the
+keys?** See [Create a wallet](/docs/guides/setup-wallets).
 
 ## 4. Create a production API key
 
@@ -523,18 +523,22 @@ Open **Wallets** in the sidebar and click **Create wallet**. Complete
 
 ### 2. Choose a custody provider
 
-Under **Which provider holds the keys?**, select a provider and click
-**Continue**. The list shows the providers your project can use.
+Under **Which provider holds the keys?**, select a provider. The list shows the
+providers your project can use. When it can use only one, that provider is
+already selected and the question is not shown.
 
 ### 3. Set up the provider
 
-If the provider offers both modes, choose **Managed** to use SDP's provider
-account or **Bring your own credentials** to connect your own. Production
-requires your own credentials; see [Go to mainnet](/docs/guides/go-to-mainnet).
+If you can connect your own account for the provider, the page asks whose
+account holds the keys. For Privy, choose **SDP's Privy account** to try SDP
+out, with no wallet policy and nothing to set up, or **Your own Privy account**
+to connect yours. Nothing is preselected. Production requires your own account;
+see [Go to mainnet](/docs/guides/go-to-mainnet).
 
-For Privy, enter a **Credential label**, **Privy app ID**, **Privy app secret**,
-and optional **Initial wallet label**. Click **Connect and verify** to connect
-the account and create its first wallet.
+With your own account, enter a **Credential label**, your **Privy app ID** and
+your **Privy app secret**, then a **Wallet label** under **Wallet details**.
+Click **Connect and create wallet** to connect the account and create its first
+wallet.
 
 ![Privy provider setup with example credentials and a masked secret](/images/go-to-mainnet/04-connect-privy.png)
 
@@ -545,19 +549,23 @@ them while a request is signing, that request returns `409` with
 operation: a transfer that recorded the failure replays it under the same
 `Idempotency-Key`, so send it again with a new key.
 
-For Managed custody, enter a **Wallet label** and click **Create wallet**.
+With SDP's account, enter a **Wallet label** and click **Create wallet**.
 The first wallet is a transfer wallet.
 
 ### 4. Create additional wallets
 
-Click **Create wallet** again, select the provider, and enter a **Wallet label**
-and **Purpose**. If the provider has active connections, choose the **Account**
-the wallet will belong to. Nothing is preselected. Click **Create wallet**.
+Click **Create wallet** again and select the provider if asked. Where the page
+asks whose account holds the keys, it lists SDP's account where it is offered,
+each of your connections and one to connect another; nothing is preselected. A connection
+that is not ready shows what it needs, with a link to fix it. Enter a **Wallet
+label**, choose a **Purpose** if more than one is offered, and click **Create
+wallet**.
 
 ### 5. View your wallet
 
-After provisioning, the wallet appears on **Wallets** with its address and
-balance. Open it to see its details.
+Once the wallet is created, its page opens with its address and balance. A
+wallet created with **Connect and create wallet** appears on **Wallets**
+instead; open it to see its details.
 
 </Tab>
 <Tab value="API">
@@ -2211,7 +2219,12 @@ curl 'https://api.solana.com/v1/payments/transfers/xfr_example' \
 
 When `destination` is a saved counterparty's Solana address, pass that account's ID as `counterpartyAccountId`. SDP ties the transfer to the counterparty, as it does for a [transfer batch](/docs/payments/send-payouts#native-transfer-batches) recipient: the transfer carries `counterpartyId`, and `GET /v1/payments/transfers?counterpartyId=` lists it.
 
-The account must be an active `crypto_wallet` account in the same project, and `destination` must be its address. An unknown or inactive account returns `404`, any other mismatch returns `400`, and no transfer is created. `counterpartyAccountId` cannot be combined with `transferId`.
+The account must be an active `crypto_wallet` account in the same project, and
+`destination` must be its address. An unknown or inactive account returns `404`,
+any other mismatch returns `400`, and no transfer is created.
+
+Only fields documented for your deployment are accepted. Unknown fields return
+`400` during validation, before looking up a wallet or transfer.
 
 ## SOL and the rent-exempt minimum
 
@@ -2219,11 +2232,17 @@ A Solana wallet holds either nothing or at least the rent-exempt minimum (about 
 
 `details.recipientIndexes` (`[0]`) or `details.sourceRemainder` identifies the problem; `details.minimumAmount` gives the minimum. Fund the address, send at least the minimum, or send the source wallet's whole balance. The `409` is not stored under the `Idempotency-Key`, so the same request can run after the balance changes. Token transfers are unaffected: SDP sponsors rent for a missing token account.
 
+## Insufficient funds
+
+When the source wallet holds less SOL, or less of the token in its token account, than the amount, the transfer fails with `400 TRANSACTION_FAILED` and nothing is sent. The transfer is recorded `failed`, and its `error` says the wallet does not have enough funds. Fund the wallet, then send the payment again with a new `Idempotency-Key`: the failed key replays the same error.
+
+A source wallet that has never held the token has no token account for it, so the request is refused earlier with `400 BAD_REQUEST` ("Source wallet has no token account for this mint").
+
 ## Deduplication
 
 `POST /v1/payments/transfers` requires an `Idempotency-Key`; without one it returns `400 IDEMPOTENCY_KEY_REQUIRED`. Use one stable key per payment and reuse it for retries. A same-key retry returns the original transfer. A changed request, wallet, or credential returns `422 IDEMPOTENCY_KEY_REUSED`; an in-flight request returns `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`.
 
-A recorded failure (such as `400 TRANSACTION_FAILED`) replays the same error; use a new key to try again. Replays are snapshots, so read the transfer with `GET` for its current status. See [Idempotency](/docs/developing-with-sdp/idempotency) for the full contract.
+A recorded failure (such as `400 TRANSACTION_FAILED`, or `422 CUSTODY_POLICY_REFUSED` when the wallet's policy at its custody provider refused to sign) replays the same error; use a new key to try again. Replays are snapshots, so read the transfer with `GET` for its current status. See [Idempotency](/docs/developing-with-sdp/idempotency) for the full contract.
 
 Persist the returned `Transfer.id` as your local primary key. Once populated, the on-chain `signature` is also unique across SDP transfers and can deduplicate records across SDP and another chain indexer.
 
@@ -2430,7 +2449,7 @@ if (response.ok) {
 
 ### Recovering from a partial failure
 
-A batch with `failed` recipients paid some recipients and not others. A `failed` recipient was not paid: its transaction never reached the network, or the network rejected it. To finish the run, retry the batch:
+A batch with `failed` recipients paid some recipients and not others. A `failed` recipient was not paid: its transaction never reached the network, or the network rejected it. Its `error` says why; when the source wallet could not cover the amount, it reads "The wallet used for this payment does not have enough funds", so fund the wallet before you retry. To finish the run, retry the batch:
 
 ```bash
 curl -X POST https://api.solana.com/v1/payments/transfer-batches/{batchId}/retry \
@@ -5451,7 +5470,7 @@ A failed request returns an error status and this body. The health checks are th
 | `403` | The key lacks the grant or wallet access the request needs, or the call comes from an IP address the key doesn't allow. | `FORBIDDEN`, `INSUFFICIENT_PERMISSIONS` |
 | `404` | Nothing with that ID exists in the project. | `NOT_FOUND` |
 | `409` | The request conflicts with the resource's state, or a request with the same idempotency key is still running. | `CONFLICT`, `IDEMPOTENCY_KEY_IN_FLIGHT` |
-| `422` | The request is well formed but can't go ahead: its idempotency key was used for a different request, or the signing provider refused the transaction. | `IDEMPOTENCY_KEY_REUSED`, `SIGNING_REJECTED` |
+| `422` | The request is well formed but can't go ahead: its idempotency key was used for a different request, the signing provider refused the transaction, or the wallet's policy at its custody provider refused to sign it. | `IDEMPOTENCY_KEY_REUSED`, `SIGNING_REJECTED`, `CUSTODY_POLICY_REFUSED` |
 | `429` | Too many requests. See [Rate limits](/docs/reference/conventions/rate-limits). | `RATE_LIMITED` |
 | `500` | Something failed inside SDP. | `INTERNAL_ERROR` |
 | `502` | Solana RPC answered, but with an error SDP could not use. | `SOLANA_RPC_ERROR` |
@@ -5462,6 +5481,7 @@ Each operation's page lists its statuses and shows a success example. The OpenAP
 ## Retrying
 
 - `400`, `401`, `403`, `404` and `422`: fix the request before you send it again.
+- `422 CUSTODY_POLICY_REFUSED`: the wallet's policy at its custody provider refused to sign. The message names the provider; review the policy there or change the request before you send it again.
 - `409 CONFLICT`: read the resource's current state, then decide.
 - `409 IDEMPOTENCY_KEY_IN_FLIGHT` and `429`: wait for `Retry-After`, then retry with the same `Idempotency-Key`.
 - `503 RPC_UNAVAILABLE`: `details.reason` says why Solana RPC was unavailable. `upstream_unavailable` is temporary: wait for `Retry-After`, then retry as the `5xx` rule below says. `not_configured` and `cluster_mismatch` are SDP configuration problems that a retry won't fix; quote `meta.requestId` when you report one.
@@ -19894,6 +19914,10 @@ Source: https://platform.solana.com/docs/reference/api/payments
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
+| `POST` | `/v1/payments/requests` | [Create payment request](/docs/reference/api/payments/create-payment-request.md) |
+| `GET` | `/v1/payments/requests` | [List payment requests](/docs/reference/api/payments/list-payment-requests.md) |
+| `GET` | `/v1/payments/requests/{paymentRequestId}` | [Get payment request](/docs/reference/api/payments/get-payment-request.md) |
+| `GET` | `/v1/payments/requests/{paymentRequestId}/link` | [Get payment request link](/docs/reference/api/payments/get-payment-request-link.md) |
 | `POST` | `/v1/payments/requests/{paymentRequestId}/cancel` | [Cancel payment request](/docs/reference/api/payments/cancel-payment-request.md) |
 
 ## Subscription plans
@@ -20496,7 +20520,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/create-payment-t
 
 `POST /v1/payments/transfers`
 
-Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment. A native SOL transfer is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when it pays less than the rent-exempt minimum to an address with no account or would leave the source wallet holding more than nothing but less than the minimum.
+Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment. A native SOL transfer is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when it pays less than the rent-exempt minimum to an address with no account or would leave the source wallet holding more than nothing but less than the minimum. When the source wallet's policy at its custody provider refuses to sign, the transfer fails with 422 `CUSTODY_POLICY_REFUSED` and nothing is signed or sent; the message names the provider whose policy to review. When the source wallet holds less SOL, or less of the token in its token account, than the amount, the transfer fails with 400 `TRANSACTION_FAILED` and is recorded `failed` with that reason in `error`; a retry with the same Idempotency-Key returns the same error, so fund the wallet and send again with a new key. A source wallet with no token account for the token is refused earlier with 400 `BAD_REQUEST`.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `transfers.execute` action.
 
@@ -20522,7 +20546,7 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 
 - **`transferId`** · `string` · min length 1
 
-  Existing off-ramp transfer to use for the on-chain crypto deposit. The transfer must still be awaiting payment and must not already contain on-chain submission data.
+  Existing off-ramp transfer to use for the on-chain crypto deposit. The transfer must still be awaiting payment and must not already contain on-chain submission data. Accepted only when the deployment includes Ramps; cannot be combined with `counterpartyAccountId`.
 
 - **`sourceCustodyWalletId`** · `string` · required · min length 1 · example `cwlt_example`
 
@@ -20534,7 +20558,7 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 
 - **`counterpartyAccountId`** · `string` · min length 1 · example `cpacct_example`
 
-  The counterparty's active Solana `crypto_wallet` account that `destination` belongs to, as a transfer batch recipient names it. The transfer record is tied to that counterparty. Its address must equal `destination`, and it cannot be combined with `transferId`.
+  The counterparty's active Solana `crypto_wallet` account that `destination` belongs to, as a transfer batch recipient names it. The transfer record is tied to that counterparty. Its address must equal `destination`.
 
 - **`token`** · `string` · required · example `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`
 
@@ -20624,11 +20648,11 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 
       - **`confirmedAt`** · `string` · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
-        When SDP confirmed the transfer. A ramp is confirmed once its delivery is verified onchain.
+        When SDP confirmed the transfer on chain.
 
-      - **`fee`** · `integer | null` · required · example `5000`
+      - **`fee`** · `integer | null` · required · example `0`
 
-        Transaction fee in lamports.
+        Network fee the source wallet paid, in lamports: 0 when SDP sponsored the transaction, null when not known.
 
       - **`error`** · `string | null` · required · example `Signature failed`
 
@@ -20963,7 +20987,7 @@ r = requests.post("https://api.solana.com/v1/payments/transfers",
       "slot": 123456,
       "blockTime": "2025-01-01T00:00:00.000Z",
       "confirmedAt": "2025-01-01T00:00:00.000Z",
-      "fee": 5000,
+      "fee": 0,
       "error": "Signature failed",
       "initiatedBy": {
         "type": "api_key"
@@ -21062,7 +21086,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
 - **`search`** · `string` · max length 200 · example `xfr_example`
 
-  Search transfer ID, signature, provider reference, source or destination address, memo, counterparty ID, or counterparty display name. Use at least 3 non-whitespace characters; a blank value is treated as no search filter.
+  Search transfer ID, signature, source or destination address, memo, counterparty ID, or counterparty display name. Use at least 3 non-whitespace characters; a blank value is treated as no search filter.
 
 - **`token`** · `string` · example `USDC`
 
@@ -21072,13 +21096,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
   Filter by transfer direction.
 
-- **`status`** · `string` · example `completed,confirmed,finalized`
+- **`status`** · `string` · example `confirmed,finalized`
 
   Filter by transfer status. Accepts a comma-separated list of statuses.
 
 - **`category`** · `string` · one of `wallet`, `ramp` · example `ramp`
 
-  Filter by wallet transfers or ramp transfers.
+  Filter by transfer category.
 
 - **`type`** · `string` · example `transfer,transfer_batch`
 
@@ -21200,11 +21224,11 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
     - **`confirmedAt`** · `string` · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
-      When SDP confirmed the transfer. A ramp is confirmed once its delivery is verified onchain.
+      When SDP confirmed the transfer on chain.
 
-    - **`fee`** · `integer | null` · required · example `5000`
+    - **`fee`** · `integer | null` · required · example `0`
 
-      Transaction fee in lamports.
+      Network fee the source wallet paid, in lamports: 0 when SDP sponsored the transaction, null when not known.
 
     - **`error`** · `string | null` · required · example `Signature failed`
 
@@ -21518,7 +21542,7 @@ r = requests.get("https://api.solana.com/v1/payments/transfers",
       "slot": 123456,
       "blockTime": "2025-01-01T00:00:00.000Z",
       "confirmedAt": "2025-01-01T00:00:00.000Z",
-      "fee": 5000,
+      "fee": 0,
       "error": "Signature failed",
       "initiatedBy": {
         "type": "api_key"
@@ -21698,11 +21722,11 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`confirmedAt`** · `string` · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
-        When SDP confirmed the transfer. A ramp is confirmed once its delivery is verified onchain.
+        When SDP confirmed the transfer on chain.
 
-      - **`fee`** · `integer | null` · required · example `5000`
+      - **`fee`** · `integer | null` · required · example `0`
 
-        Transaction fee in lamports.
+        Network fee the source wallet paid, in lamports: 0 when SDP sponsored the transaction, null when not known.
 
       - **`error`** · `string | null` · required · example `Signature failed`
 
@@ -21996,7 +22020,7 @@ r = requests.get("https://api.solana.com/v1/payments/transfers/xfr_example",
       "slot": 123456,
       "blockTime": "2025-01-01T00:00:00.000Z",
       "confirmedAt": "2025-01-01T00:00:00.000Z",
-      "fee": 5000,
+      "fee": 0,
       "error": "Signature failed",
       "initiatedBy": {
         "type": "api_key"
@@ -22414,7 +22438,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/create-payment-t
 
 `POST /v1/payments/transfer-batches`
 
-Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`). A token batch is refused with 409 `SPONSORED_RENT_OVER_CAP` when one recipient's new token account costs more rent than the sponsor funds in a transaction (`details.recipientIndex`). An `externalId` already used by a batch on the same project and source wallet never pays again: the same request from the same credential returns that batch, and any other returns `409 TRANSFER_BATCH_RUN_EXISTS` with its `batchId` in `error.details`. To finish a batch after a partial failure, call `POST /v1/payments/transfer-batches/{batchId}/retry`: it sends only the batch's `failed` recipients. Never resend the whole batch under a new Idempotency-Key, which pays the recipients that succeeded again.
+Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`). A token batch is refused with 409 `SPONSORED_RENT_OVER_CAP` when one recipient's new token account costs more rent than the sponsor funds in a transaction (`details.recipientIndex`). A chunk the source wallet cannot fund fails its recipients and transfer with the reason in `error` (the wallet does not have enough funds); the batch still returns 200. An `externalId` already used by a batch on the same project and source wallet never pays again: the same request from the same credential returns that batch, and any other returns `409 TRANSFER_BATCH_RUN_EXISTS` with its `batchId` in `error.details`. To finish a batch after a partial failure, call `POST /v1/payments/transfer-batches/{batchId}/retry`: it sends only the batch's `failed` recipients. Never resend the whole batch under a new Idempotency-Key, which pays the recipients that succeeded again.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `transfer_batches.execute` action.
 
@@ -22582,7 +22606,7 @@ Create a custody-executed outbound transfer batch.
 
       - **`error`** · `string | null` · required
 
-        Recipient-level failure reason, when available.
+        Recipient-level failure reason, when available. A recipient the source wallet could not fund reads "The wallet used for this payment does not have enough funds. Add funds and try again."
 
       - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
@@ -22660,11 +22684,11 @@ Create a custody-executed outbound transfer batch.
 
       - **`confirmedAt`** · `string` · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
-        When SDP confirmed the transfer. A ramp is confirmed once its delivery is verified onchain.
+        When SDP confirmed the transfer on chain.
 
-      - **`fee`** · `integer | null` · required · example `5000`
+      - **`fee`** · `integer | null` · required · example `0`
 
-        Transaction fee in lamports.
+        Network fee the source wallet paid, in lamports: 0 when SDP sponsored the transaction, null when not known.
 
       - **`error`** · `string | null` · required · example `Signature failed`
 
@@ -23064,7 +23088,7 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches",
         "slot": 123456,
         "blockTime": "2025-01-01T00:00:00.000Z",
         "confirmedAt": "2025-01-01T00:00:00.000Z",
-        "fee": 5000,
+        "fee": 0,
         "error": "Signature failed",
         "initiatedBy": {
           "type": "api_key"
@@ -23529,7 +23553,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`error`** · `string | null` · required
 
-        Recipient-level failure reason, when available.
+        Recipient-level failure reason, when available. A recipient the source wallet could not fund reads "The wallet used for this payment does not have enough funds. Add funds and try again."
 
       - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
@@ -23607,11 +23631,11 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`confirmedAt`** · `string` · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
-        When SDP confirmed the transfer. A ramp is confirmed once its delivery is verified onchain.
+        When SDP confirmed the transfer on chain.
 
-      - **`fee`** · `integer | null` · required · example `5000`
+      - **`fee`** · `integer | null` · required · example `0`
 
-        Transaction fee in lamports.
+        Network fee the source wallet paid, in lamports: 0 when SDP sponsored the transaction, null when not known.
 
       - **`error`** · `string | null` · required · example `Signature failed`
 
@@ -23952,7 +23976,7 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches/xbatch_ex
         "slot": 123456,
         "blockTime": "2025-01-01T00:00:00.000Z",
         "confirmedAt": "2025-01-01T00:00:00.000Z",
-        "fee": 5000,
+        "fee": 0,
         "error": "Signature failed",
         "initiatedBy": {
           "type": "api_key"
@@ -24164,7 +24188,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`error`** · `string | null` · required
 
-        Recipient-level failure reason, when available.
+        Recipient-level failure reason, when available. A recipient the source wallet could not fund reads "The wallet used for this payment does not have enough funds. Add funds and try again."
 
       - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
@@ -24242,11 +24266,11 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`confirmedAt`** · `string` · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
-        When SDP confirmed the transfer. A ramp is confirmed once its delivery is verified onchain.
+        When SDP confirmed the transfer on chain.
 
-      - **`fee`** · `integer | null` · required · example `5000`
+      - **`fee`** · `integer | null` · required · example `0`
 
-        Transaction fee in lamports.
+        Network fee the source wallet paid, in lamports: 0 when SDP sponsored the transaction, null when not known.
 
       - **`error`** · `string | null` · required · example `Signature failed`
 
@@ -24573,7 +24597,7 @@ r = requests.get("https://api.solana.com/v1/payments/transfer-batches/xbatch_exa
         "slot": 123456,
         "blockTime": "2025-01-01T00:00:00.000Z",
         "confirmedAt": "2025-01-01T00:00:00.000Z",
-        "fee": 5000,
+        "fee": 0,
         "error": "Signature failed",
         "initiatedBy": {
           "type": "api_key"
@@ -26769,7 +26793,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/collect-payment-
 
 `POST /v1/payments/recurring-payments/{id}/collect`
 
-Before a new collection, SDP requires an active counterparty and account in the schedule's project. If either is archived or unavailable, the schedule pauses with `pausedReason` `destination_unavailable` and the request returns 409 without signing. An earlier in-flight collection still recovers. If submission cannot be confirmed immediately, a 200 response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation.
+Before a new collection, SDP requires an active counterparty and account in the schedule's project. If either is archived or unavailable, the schedule pauses with `pausedReason` `destination_unavailable` and the request returns 409 without signing. An earlier in-flight collection still recovers. If submission cannot be confirmed immediately, a 200 response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation. When the source wallet cannot cover the amount, the request returns 400 `TRANSACTION_FAILED` and the failed collection attempt and its transfer record the same reason in `error`, so the collection history shows why.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurring.execute` action.
 
@@ -26963,9 +26987,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Solana transaction signature.
 
-      - **`error`** · `string | null` · required
+      - **`error`** · `string | null` · required · example `The wallet used for this payment does not have enough funds. Add funds and try again.`
 
-        Collection error, if any.
+        Why the collection failed, if it did. A source wallet that cannot cover the amount records the same text the collect request returned with `400 TRANSACTION_FAILED`.
 
       - **`metadata`** · `object` · required
 
@@ -27093,11 +27117,11 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
       - **`confirmedAt`** · `string` · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
-        When SDP confirmed the transfer. A ramp is confirmed once its delivery is verified onchain.
+        When SDP confirmed the transfer on chain.
 
-      - **`fee`** · `integer | null` · required · example `5000`
+      - **`fee`** · `integer | null` · required · example `0`
 
-        Transaction fee in lamports.
+        Network fee the source wallet paid, in lamports: 0 when SDP sponsored the transaction, null when not known.
 
       - **`error`** · `string | null` · required · example `Signature failed`
 
@@ -27428,7 +27452,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "attemptedAt": "2025-01-01T00:00:00.000Z",
       "status": "pending",
       "signature": "example",
-      "error": "example",
+      "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
       "metadata": {
         "recurringPaymentId": "recurringpayment_example",
         "initiatedByKeyId": "initiatedbykey_example",
@@ -27457,7 +27481,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "slot": 123456,
       "blockTime": "2025-01-01T00:00:00.000Z",
       "confirmedAt": "2025-01-01T00:00:00.000Z",
-      "fee": 5000,
+      "fee": 0,
       "error": "Signature failed",
       "initiatedBy": {
         "type": "api_key"
@@ -27961,9 +27985,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Solana transaction signature.
 
-      - **`error`** · `string | null` · required
+      - **`error`** · `string | null` · required · example `The wallet used for this payment does not have enough funds. Add funds and try again.`
 
-        Collection error, if any.
+        Why the collection failed, if it did. A source wallet that cannot cover the amount records the same text the collect request returned with `400 TRANSACTION_FAILED`.
 
       - **`metadata`** · `object` · required
 
@@ -28124,7 +28148,7 @@ r = requests.get("https://api.solana.com/v1/payments/recurring-payments/prp_exam
         "attemptedAt": "2025-01-01T00:00:00.000Z",
         "status": "pending",
         "signature": "example",
-        "error": "example",
+        "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
         "metadata": {
           "recurringPaymentId": "recurringpayment_example",
           "initiatedByKeyId": "initiatedbykey_example",
@@ -28165,6 +28189,989 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ---
 
 ## Payments: Payment requests
+
+### Create payment request
+Source: https://platform.solana.com/docs/reference/api/payments/create-payment-request
+
+> Creates a payment request: an amount of one token for a payer to send to a custody wallet in the caller's project, through the request's hosted payment link.
+
+`POST /v1/payments/requests`
+
+Requires `payment_requests.manage`. `walletId` is the provider wallet ID (`walletId` from `GET /v1/wallets`), not the SDP Wallet ID transfers take; an unknown wallet, or one outside the project, returns 404. `amount` is a decimal string with at most the mint's decimals, so `0.05` and `0.050` are the same request; more decimals return 400. A native SOL request is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM` when the wallet has no account and the amount is below the rent-exempt minimum. The response is the only one besides `GET /v1/payments/requests/{paymentRequestId}/link` that carries `publicToken`. Accepts an Idempotency-Key: a retry with the same key and request returns the original payment request instead of creating a second one.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `payment_requests.manage` action.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+- **`Idempotency-Key`** · `string`
+
+  Use a unique 1–255 printable ASCII key per operation. Reuse it with the same request on retries. An in-flight attempt returns `409`; a changed request returns `422`. [Retry and recovery rules](/docs/developing-with-sdp/idempotency).
+
+## Request body
+
+`application/json` · required
+
+Create payment request payload.
+
+- **`walletId`** · `string` · required · min length 1 · example `privy_wallet_123`
+
+  Receiving custody wallet in the caller's project. Provider wallet ID: the `walletId` field returned by GET /v1/wallets. The wallet record `id` and the public key are not accepted. An SDP Wallet ID (`cwlt_...`) returns 404.
+
+- **`token`** · `string` · required · example `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`
+
+  Mint address of the token to request. Symbols are not accepted; for native SOL, pass `So11111111111111111111111111111111111111112`.
+
+- **`amount`** · `string` · required · example `10.00`
+
+  Amount to request in UI units, as a decimal string greater than zero with no more decimal places than the mint has.
+
+- **`expiresAt`** · `string | null` · format `date-time` · default `null` · example `2026-12-01T00:00:00.000Z`
+
+  When the request stops accepting payment, as an ISO 8601 timestamp. Null or omitted: it never expires.
+
+## Responses
+
+- **`201`** Payment request created
+
+  - **`data`** · `object` · required
+
+    A new payment request, with its link token.
+
+    - **`id`** · `string` · required · example `preq_example`
+
+      SDP payment request ID.
+
+    - **`organizationId`** · `string` · required
+
+      Organization ID.
+
+    - **`projectId`** · `string | null` · required
+
+      Project ID.
+
+    - **`walletId`** · `string` · required
+
+      Receiving custody wallet's provider ID.
+
+    - **`destinationAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+      Address the payment is sent to.
+
+    - **`token`** · `string` · required
+
+      Token mint address.
+
+    - **`amount`** · `string` · required · example `100.00`
+
+      Token amount in UI units (decimal string).
+
+    - **`reference`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+      Solana Pay reference account that identifies the payment on chain.
+
+    - **`status`** · `string` · required · one of `awaiting_payment`, `paid`, `canceled`, `expired` · example `canceled`
+
+      Payment request status. `awaiting_payment` is open; `paid` was settled by an on-chain payment; `canceled` and `expired` closed without one.
+
+    - **`expiresAt`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      Expiry, if any.
+
+    - **`fulfilledByTransferId`** · `string | null` · required
+
+      The inbound transfer that paid the request.
+
+    - **`paidLate`** · `boolean` · required
+
+      Whether the payment landed after the request expired or was canceled. A payer who signed before then can still pay.
+
+    - **`lastCheckedAt`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      When SDP last read the chain for the payment.
+
+    - **`canceledByApiKeyId`** · `string | null` · required
+
+      The API key that canceled the request; null when a member did, or it is not canceled.
+
+    - **`canceledByUserId`** · `string | null` · required
+
+      User ID of the member who canceled the request; null when an API key did, or it is not canceled.
+
+    - **`canceledAt`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      When it was canceled.
+
+    - **`lifecycle`** · `object[]` · required
+
+      Every status the request entered, oldest first.
+
+      - **`status`** · `string` · required · one of `awaiting_payment`, `paid`, `canceled`, `expired` · example `canceled`
+
+        Payment request status. `awaiting_payment` is open; `paid` was settled by an on-chain payment; `canceled` and `expired` closed without one.
+
+      - **`at`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        ISO 8601 timestamp.
+
+    - **`createdBy`** · `string | null` · required
+
+      User ID of the member, or of the API key's creator, who created it.
+
+    - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+    - **`updatedAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+    - **`publicToken`** · `string` · required · example `example-public-token`
+
+      Token behind the request's hosted payment link, `/pay/{publicToken}`. Anyone holding it can build the request's fee-sponsored payment transaction, so share it only with the payer. Reads never return it; get it again with `GET /v1/payments/requests/{paymentRequestId}/link`.
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `payment_requests.manage` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`409`** Conflict
+
+  Same fields as `400`.
+
+- **`422`** Unprocessable Entity
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+## Example request
+
+```bash tab="cURL"
+curl -X POST 'https://api.solana.com/v1/payments/requests' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "walletId": "privy_wallet_123",
+    "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "amount": "10.00",
+    "expiresAt": null
+  }'
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/payments/requests", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Idempotency-Key": crypto.randomUUID(),
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    "walletId": "privy_wallet_123",
+    "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "amount": "10.00",
+    "expiresAt": null
+  })
+});
+```
+
+```python tab="Python"
+import os, requests, uuid
+
+r = requests.post("https://api.solana.com/v1/payments/requests",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  json={
+    "walletId": "privy_wallet_123",
+    "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "amount": "10.00",
+    "expiresAt": None
+  })
+```
+
+## Example responses
+
+```json tab="201"
+{
+  "data": {
+    "id": "preq_example",
+    "organizationId": "organization_example",
+    "projectId": "project_example",
+    "walletId": "wallet_example",
+    "destinationAddress": "So11111111111111111111111111111111111111112",
+    "token": "example",
+    "amount": "100.00",
+    "reference": "So11111111111111111111111111111111111111112",
+    "status": "canceled",
+    "expiresAt": "2025-01-01T00:00:00.000Z",
+    "fulfilledByTransferId": "fulfilledbytransfer_example",
+    "paidLate": false,
+    "lastCheckedAt": "2025-01-01T00:00:00.000Z",
+    "canceledByApiKeyId": "canceledbyapikey_example",
+    "canceledByUserId": "canceledbyuser_example",
+    "canceledAt": "2025-01-01T00:00:00.000Z",
+    "lifecycle": [
+      {
+        "status": "canceled",
+        "at": "2025-01-01T00:00:00.000Z"
+      }
+    ],
+    "createdBy": "example",
+    "createdAt": "2025-01-01T00:00:00.000Z",
+    "updatedAt": "2025-01-01T00:00:00.000Z",
+    "publicToken": "example-public-token"
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: payment_requests.manage",
+    "details": {
+      "action": "payment_requests.manage"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+---
+
+### List payment requests
+Source: https://platform.solana.com/docs/reference/api/payments/list-payment-requests
+
+> Lists the caller's project's payment requests, newest first.
+
+`GET /v1/payments/requests`
+
+Requires `payment_requests.read`. An open request past its `expiresAt` reads as `expired`. Records never carry `publicToken`.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `payment_requests.read` action.
+
+## Query parameters
+
+- **`page`** · `integer` · greater than 0 · default `1` · example `1`
+
+  Page number, starting at 1.
+
+- **`pageSize`** · `integer` · min 1 · max 100 · default `20` · example `20`
+
+  Results per page, 1 to 100.
+
+- **`status`** · `string` · one of `awaiting_payment`, `paid`, `canceled`, `expired` · example `canceled`
+
+  Payment request status. `awaiting_payment` is open; `paid` was settled by an on-chain payment; `canceled` and `expired` closed without one.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+## Responses
+
+- **`200`** Payment request list
+
+  - **`data`** · `object` · required
+
+    Payment request list response payload.
+
+    - **`paymentRequests`** · `object[]` · required
+
+      - **`id`** · `string` · required · example `preq_example`
+
+        SDP payment request ID.
+
+      - **`organizationId`** · `string` · required
+
+        Organization ID.
+
+      - **`projectId`** · `string | null` · required
+
+        Project ID.
+
+      - **`walletId`** · `string` · required
+
+        Receiving custody wallet's provider ID.
+
+      - **`destinationAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+        Address the payment is sent to.
+
+      - **`token`** · `string` · required
+
+        Token mint address.
+
+      - **`amount`** · `string` · required · example `100.00`
+
+        Token amount in UI units (decimal string).
+
+      - **`reference`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+        Solana Pay reference account that identifies the payment on chain.
+
+      - **`status`** · `string` · required · one of `awaiting_payment`, `paid`, `canceled`, `expired` · example `canceled`
+
+        Payment request status. `awaiting_payment` is open; `paid` was settled by an on-chain payment; `canceled` and `expired` closed without one.
+
+      - **`expiresAt`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        Expiry, if any.
+
+      - **`fulfilledByTransferId`** · `string | null` · required
+
+        The inbound transfer that paid the request.
+
+      - **`paidLate`** · `boolean` · required
+
+        Whether the payment landed after the request expired or was canceled. A payer who signed before then can still pay.
+
+      - **`lastCheckedAt`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        When SDP last read the chain for the payment.
+
+      - **`canceledByApiKeyId`** · `string | null` · required
+
+        The API key that canceled the request; null when a member did, or it is not canceled.
+
+      - **`canceledByUserId`** · `string | null` · required
+
+        User ID of the member who canceled the request; null when an API key did, or it is not canceled.
+
+      - **`canceledAt`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        When it was canceled.
+
+      - **`lifecycle`** · `object[]` · required
+
+        Every status the request entered, oldest first.
+
+        - **`status`** · `string` · required · one of `awaiting_payment`, `paid`, `canceled`, `expired` · example `canceled`
+
+          Payment request status. `awaiting_payment` is open; `paid` was settled by an on-chain payment; `canceled` and `expired` closed without one.
+
+        - **`at`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+          ISO 8601 timestamp.
+
+      - **`createdBy`** · `string | null` · required
+
+        User ID of the member, or of the API key's creator, who created it.
+
+      - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        ISO 8601 timestamp.
+
+      - **`updatedAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        ISO 8601 timestamp.
+
+    - **`total`** · `integer` · required
+
+    - **`page`** · `integer` · required
+
+    - **`pageSize`** · `integer` · required
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `payment_requests.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+## Example request
+
+```bash tab="cURL"
+curl 'https://api.solana.com/v1/payments/requests' \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/payments/requests", {
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.get("https://api.solana.com/v1/payments/requests",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "paymentRequests": [
+      {
+        "id": "preq_example",
+        "organizationId": "organization_example",
+        "projectId": "project_example",
+        "walletId": "wallet_example",
+        "destinationAddress": "So11111111111111111111111111111111111111112",
+        "token": "example",
+        "amount": "100.00",
+        "reference": "So11111111111111111111111111111111111111112",
+        "status": "canceled",
+        "expiresAt": "2025-01-01T00:00:00.000Z",
+        "fulfilledByTransferId": "fulfilledbytransfer_example",
+        "paidLate": false,
+        "lastCheckedAt": "2025-01-01T00:00:00.000Z",
+        "canceledByApiKeyId": "canceledbyapikey_example",
+        "canceledByUserId": "canceledbyuser_example",
+        "canceledAt": "2025-01-01T00:00:00.000Z",
+        "lifecycle": [
+          {
+            "status": "canceled",
+            "at": "2025-01-01T00:00:00.000Z"
+          }
+        ],
+        "createdBy": "example",
+        "createdAt": "2025-01-01T00:00:00.000Z",
+        "updatedAt": "2025-01-01T00:00:00.000Z"
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "pageSize": 1
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: payment_requests.read",
+    "details": {
+      "action": "payment_requests.read"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+---
+
+### Get payment request
+Source: https://platform.solana.com/docs/reference/api/payments/get-payment-request
+
+> Retrieves one payment request in the caller's project; another project's request returns 404.
+
+`GET /v1/payments/requests/{paymentRequestId}`
+
+Requires `payment_requests.read`. An open request past its `expiresAt` reads as `expired`. The record never carries `publicToken`; use `GET /v1/payments/requests/{paymentRequestId}/link`.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `payment_requests.read` action.
+
+## Path parameters
+
+- **`paymentRequestId`** · `string` · required · min length 1 · example `preq_example`
+
+  SDP payment request ID.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+## Responses
+
+- **`200`** Payment request
+
+  - **`data`** · `object` · required
+
+    A payment request. Reads never carry its link token.
+
+    - **`id`** · `string` · required · example `preq_example`
+
+      SDP payment request ID.
+
+    - **`organizationId`** · `string` · required
+
+      Organization ID.
+
+    - **`projectId`** · `string | null` · required
+
+      Project ID.
+
+    - **`walletId`** · `string` · required
+
+      Receiving custody wallet's provider ID.
+
+    - **`destinationAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+      Address the payment is sent to.
+
+    - **`token`** · `string` · required
+
+      Token mint address.
+
+    - **`amount`** · `string` · required · example `100.00`
+
+      Token amount in UI units (decimal string).
+
+    - **`reference`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+      Solana Pay reference account that identifies the payment on chain.
+
+    - **`status`** · `string` · required · one of `awaiting_payment`, `paid`, `canceled`, `expired` · example `canceled`
+
+      Payment request status. `awaiting_payment` is open; `paid` was settled by an on-chain payment; `canceled` and `expired` closed without one.
+
+    - **`expiresAt`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      Expiry, if any.
+
+    - **`fulfilledByTransferId`** · `string | null` · required
+
+      The inbound transfer that paid the request.
+
+    - **`paidLate`** · `boolean` · required
+
+      Whether the payment landed after the request expired or was canceled. A payer who signed before then can still pay.
+
+    - **`lastCheckedAt`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      When SDP last read the chain for the payment.
+
+    - **`canceledByApiKeyId`** · `string | null` · required
+
+      The API key that canceled the request; null when a member did, or it is not canceled.
+
+    - **`canceledByUserId`** · `string | null` · required
+
+      User ID of the member who canceled the request; null when an API key did, or it is not canceled.
+
+    - **`canceledAt`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      When it was canceled.
+
+    - **`lifecycle`** · `object[]` · required
+
+      Every status the request entered, oldest first.
+
+      - **`status`** · `string` · required · one of `awaiting_payment`, `paid`, `canceled`, `expired` · example `canceled`
+
+        Payment request status. `awaiting_payment` is open; `paid` was settled by an on-chain payment; `canceled` and `expired` closed without one.
+
+      - **`at`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        ISO 8601 timestamp.
+
+    - **`createdBy`** · `string | null` · required
+
+      User ID of the member, or of the API key's creator, who created it.
+
+    - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+    - **`updatedAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `payment_requests.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+## Example request
+
+```bash tab="cURL"
+curl 'https://api.solana.com/v1/payments/requests/preq_example' \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/payments/requests/preq_example", {
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.get("https://api.solana.com/v1/payments/requests/preq_example",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "id": "preq_example",
+    "organizationId": "organization_example",
+    "projectId": "project_example",
+    "walletId": "wallet_example",
+    "destinationAddress": "So11111111111111111111111111111111111111112",
+    "token": "example",
+    "amount": "100.00",
+    "reference": "So11111111111111111111111111111111111111112",
+    "status": "canceled",
+    "expiresAt": "2025-01-01T00:00:00.000Z",
+    "fulfilledByTransferId": "fulfilledbytransfer_example",
+    "paidLate": false,
+    "lastCheckedAt": "2025-01-01T00:00:00.000Z",
+    "canceledByApiKeyId": "canceledbyapikey_example",
+    "canceledByUserId": "canceledbyuser_example",
+    "canceledAt": "2025-01-01T00:00:00.000Z",
+    "lifecycle": [
+      {
+        "status": "canceled",
+        "at": "2025-01-01T00:00:00.000Z"
+      }
+    ],
+    "createdBy": "example",
+    "createdAt": "2025-01-01T00:00:00.000Z",
+    "updatedAt": "2025-01-01T00:00:00.000Z"
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: payment_requests.read",
+    "details": {
+      "action": "payment_requests.read"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+---
+
+### Get payment request link
+Source: https://platform.solana.com/docs/reference/api/payments/get-payment-request-link
+
+> Returns the token behind a payment request's hosted payment link, /pay/{publicToken}.
+
+`GET /v1/payments/requests/{paymentRequestId}/link`
+
+Anyone holding it can build the request's fee-sponsored payment transaction, so this route requires `payment_requests.manage`, not `payment_requests.read`. Another project's request returns 404. The token is returned whatever the request's status.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `payment_requests.manage` action.
+
+## Path parameters
+
+- **`paymentRequestId`** · `string` · required · min length 1 · example `preq_example`
+
+  SDP payment request ID.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+## Responses
+
+- **`200`** Payment request link token
+
+  - **`data`** · `object` · required
+
+    A payment request's link token.
+
+    - **`id`** · `string` · required · example `preq_example`
+
+      SDP payment request ID.
+
+    - **`publicToken`** · `string` · required · example `example-public-token`
+
+      Token behind the request's hosted payment link, `/pay/{publicToken}`. Anyone holding it can build the request's fee-sponsored payment transaction, so share it only with the payer. Reads never return it; get it again with `GET /v1/payments/requests/{paymentRequestId}/link`.
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `payment_requests.manage` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+## Example request
+
+```bash tab="cURL"
+curl 'https://api.solana.com/v1/payments/requests/preq_example/link' \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/payments/requests/preq_example/link", {
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.get("https://api.solana.com/v1/payments/requests/preq_example/link",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "id": "preq_example",
+    "publicToken": "example-public-token"
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: payment_requests.manage",
+    "details": {
+      "action": "payment_requests.manage"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+---
 
 ### Cancel payment request
 Source: https://platform.solana.com/docs/reference/api/payments/cancel-payment-request
@@ -31414,9 +32421,9 @@ Inputs for preparing the collector-signed Solana subscriptions transfer transact
 
         Solana transaction signature.
 
-      - **`error`** · `string | null` · required
+      - **`error`** · `string | null` · required · example `The wallet used for this payment does not have enough funds. Add funds and try again.`
 
-        Collection error, if any.
+        Why the collection failed, if it did. A source wallet that cannot cover the amount records the same text the collect request returned with `400 TRANSACTION_FAILED`.
 
       - **`metadata`** · `object` · required
 
@@ -31613,7 +32620,7 @@ r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example
       "attemptedAt": "2025-01-01T00:00:00.000Z",
       "status": "pending",
       "signature": "example",
-      "error": "example",
+      "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
       "metadata": {
         "recurringPaymentId": "recurringpayment_example",
         "initiatedByKeyId": "initiatedbykey_example",
@@ -31962,9 +32969,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Solana transaction signature.
 
-      - **`error`** · `string | null` · required
+      - **`error`** · `string | null` · required · example `The wallet used for this payment does not have enough funds. Add funds and try again.`
 
-        Collection error, if any.
+        Why the collection failed, if it did. A source wallet that cannot cover the amount records the same text the collect request returned with `400 TRANSACTION_FAILED`.
 
       - **`metadata`** · `object` · required
 
@@ -32125,7 +33132,7 @@ r = requests.get("https://api.solana.com/v1/payments/subscriptions/psub_example/
         "attemptedAt": "2025-01-01T00:00:00.000Z",
         "status": "pending",
         "signature": "example",
-        "error": "example",
+        "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
         "metadata": {
           "recurringPaymentId": "recurringpayment_example",
           "initiatedByKeyId": "initiatedbykey_example",
@@ -33378,7 +34385,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Counterparties
 Source: https://platform.solana.com/docs/reference/api/counterparties
 
-> A counterparty is a person or business you pay or get paid by. You save their details and payment accounts once, then reuse them in payouts and ramps.
+> A counterparty is a person or business you pay or get paid by. You save their details and payment accounts once, then reuse them in payments.
 
 ## Profiles
 
