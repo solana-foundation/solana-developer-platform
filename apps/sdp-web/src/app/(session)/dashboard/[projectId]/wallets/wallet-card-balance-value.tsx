@@ -1,70 +1,39 @@
 "use client";
 
-import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
-import useSWR from "swr";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import {
   formatTotalBalance,
   resolveTotalBalance,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
+import { useWalletSummaries } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
 import { useTranslations } from "@/i18n/provider";
-import { custodyQueryKeys } from "./custody-query-key";
-import {
-  BALANCE_REFRESH_INTERVAL_MS,
-  fetchWalletBalance,
-  fetchWalletBalances,
-} from "./wallet-balances.data";
-
-interface WalletCardBalanceValueProps {
-  walletId: string;
-  initialBalances: CustodyWalletTokenBalance[];
-}
+import { useWalletBalances } from "./custody-reads";
 
 /**
- * Every wallet's balances in one request, refreshed every 30 seconds. SWR shares the one read
- * between the cards and the Wallets page's refresh control, which calls `mutate` to re-read now;
- * an airdrop refreshes it through `custodyQueryKeys.isWalletLiveDataKey`.
+ * A wallet's total from the one read of every wallet's balances that all the cards share. A
+ * wallet the batch fails or leaves out is read on its own.
  */
-export function useWalletCardBalances(enabled = true) {
-  return useSWR<Record<string, CustodyWalletTokenBalance[]>>(
-    enabled ? custodyQueryKeys.walletCardBalances() : null,
-    fetchWalletBalances,
-    {
-      revalidateOnFocus: true,
-      refreshWhenHidden: false,
-      refreshInterval: BALANCE_REFRESH_INTERVAL_MS,
-      dedupingInterval: 5_000,
-      keepPreviousData: true,
-    }
-  );
-}
-
-export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCardBalanceValueProps) {
+export function WalletCardBalanceValue({ walletId }: { walletId: string }) {
   const t = useTranslations();
-  const { data: batchBalances, error: batchError } = useWalletCardBalances(Boolean(walletId));
+  const { data: batchWallets, error: batchError } = useWalletSummaries({ includeBalances: true });
+  const batchBalances = batchWallets?.find((wallet) => wallet.walletId === walletId)?.balances;
   const batchFailed =
-    Boolean(batchError) || (batchBalances !== undefined && batchBalances[walletId] === undefined);
-  const { data: fallbackBalances, error: fallbackError } = useSWR<CustodyWalletTokenBalance[]>(
-    batchFailed && walletId ? custodyQueryKeys.walletCardBalanceFallback({ walletId }) : null,
-    () => fetchWalletBalance(walletId),
-    {
-      revalidateOnFocus: true,
-      refreshWhenHidden: false,
-      refreshInterval: BALANCE_REFRESH_INTERVAL_MS,
-      dedupingInterval: 5_000,
-      keepPreviousData: true,
-    }
-  );
+    batchError !== undefined || (batchWallets !== undefined && batchBalances === undefined);
+  const { data: ownBalances, error: ownError } = useWalletBalances(batchFailed ? walletId : null);
 
-  const balances = batchFailed
-    ? (fallbackBalances ?? batchBalances?.[walletId] ?? initialBalances)
-    : (batchBalances?.[walletId] ?? initialBalances);
-  const hasError = batchFailed && (fallbackBalances === undefined || Boolean(fallbackError));
-  const totalBalance = resolveTotalBalance(balances);
+  const balances = batchFailed ? (ownBalances ?? batchBalances) : batchBalances;
+  if (balances === undefined) {
+    if (batchFailed && ownError !== undefined) {
+      return <span className="font-medium text-muted">—</span>;
+    }
+    return <SkeletonBlock className="inline-block h-[1em] w-20 align-middle" />;
+  }
+  const stale = batchFailed && (ownBalances === undefined || ownError !== undefined);
 
   return (
-    <span className={`font-medium ${hasError ? "text-muted" : "text-primary"}`}>
-      {formatTotalBalance(totalBalance)}
-      {hasError ? <span className="sr-only"> {t("DashboardCustody.stale")}</span> : null}
+    <span className={`font-medium ${stale ? "text-muted" : "text-primary"}`}>
+      {formatTotalBalance(resolveTotalBalance(balances))}
+      {stale ? <span className="sr-only"> {t("DashboardCustody.stale")}</span> : null}
     </span>
   );
 }

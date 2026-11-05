@@ -6,20 +6,15 @@ import { FilterMenu, FilterMenuOptions } from "@sdp/ui/filter-menu";
 import { ListToolbar, RowsPerPageSelect } from "@sdp/ui/list-toolbar";
 import { SearchInput } from "@sdp/ui/search-input";
 import Link from "next/link";
-import { use, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { toTitleCase } from "@/app/(session)/dashboard/[projectId]/activity-format-utils";
+import { useWalletSymbols } from "@/app/(session)/dashboard/[projectId]/wallets/custody-reads";
 import type { WalletActivityRow } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-activity.data";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useWalletActivityWindow } from "./use-wallet-activity-window";
 import { WalletActivityTable } from "./wallet-activity-table";
-import {
-  activityDisplayId,
-  type IssuedTokensByMint,
-  symbolsByMint,
-  type WalletBalancesResult,
-  walletTransactionsHref,
-} from "./wallet-detail.shared";
+import { activityDisplayId, walletTransactionsHref } from "./wallet-detail.shared";
 import { EmptyNote } from "./wallet-overview-tab";
 
 function distinct(values: readonly string[]): string[] {
@@ -151,28 +146,29 @@ function LoadOlderActivity({
 export function WalletActivityTab({
   walletId,
   custodyWalletId,
-  balancesPromise,
-  issuedTokensPromise,
+  issuanceEnabled,
 }: {
   walletId: string;
   custodyWalletId: string;
-  balancesPromise: Promise<WalletBalancesResult>;
-  issuedTokensPromise: Promise<IssuedTokensByMint>;
+  issuanceEnabled: boolean;
 }) {
   const t = useTranslations();
   const projectHref = useProjectHref();
-  const { balances } = use(balancesPromise);
-  const issued = use(issuedTokensPromise);
-  const symbols = useMemo(() => symbolsByMint(balances, issued), [balances, issued]);
+  const { symbols, settled } = useWalletSymbols(walletId, issuanceEnabled);
   const activity = useWalletActivityWindow(walletId);
   const { data } = activity;
   const feedRows = data?.activityRows;
   const rows = useMemo(() => feedRows ?? [], [feedRows]);
   const filters = useActivityFilters(rows);
 
-  if (!data) {
+  if (!data || !settled) {
     return activity.error ? (
-      <p className="text-body text-tertiary">{t("DashboardCustody.walletActivityUnavailable")}</p>
+      <div className="flex flex-col items-start gap-2">
+        <p className="text-body text-tertiary">{t("DashboardCustody.walletActivityUnavailable")}</p>
+        <Button type="button" variant="outline" size="sm" onClick={activity.retry}>
+          {t("DashboardCustody.retryRead")}
+        </Button>
+      </div>
     ) : (
       <div className="h-40 animate-pulse rounded-control bg-fill-subtle" aria-hidden="true" />
     );

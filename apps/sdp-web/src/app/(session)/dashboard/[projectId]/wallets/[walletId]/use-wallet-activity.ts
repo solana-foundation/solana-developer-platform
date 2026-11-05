@@ -1,12 +1,41 @@
 "use client";
 
-import useSWR, { type SWRConfiguration } from "swr";
+import type { SWRConfiguration } from "swr";
+import { z } from "zod";
 import { custodyQueryKeys } from "@/app/(session)/dashboard/[projectId]/wallets/custody-query-key";
 import {
-  fetchWalletActivity,
   WALLET_ACTIVITY_LIMIT,
   type WalletActivityPayload,
 } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-activity.data";
+import {
+  type DashboardReadError,
+  useDashboardKeyScope,
+  useDashboardRead,
+} from "@/lib/dashboard-swr";
+
+const walletActivityRowSchema = z.object({
+  id: z.string(),
+  sourceKind: z.enum(["payments", "issuance"]),
+  operationLabel: z.string(),
+  status: z.string(),
+  signature: z.string().nullable(),
+  token: z.string().optional(),
+  amount: z.string().optional(),
+  address: z.string().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+
+const walletActivityResponseSchema = z.object({
+  data: z.object({
+    activityRows: z.array(walletActivityRowSchema),
+    activityError: z.string().nullable(),
+    activityNotice: z.string().nullable(),
+    hasMore: z.boolean().optional(),
+  }),
+});
+
+type WalletActivityResponse = z.infer<typeof walletActivityResponseSchema>;
 
 /**
  * The wallet's latest `limit` activity rows (payments and issuance, newest first), read again
@@ -18,15 +47,23 @@ import {
 export function useWalletActivity(
   walletId: string,
   limit: number = WALLET_ACTIVITY_LIMIT,
-  callbacks: Pick<SWRConfiguration<WalletActivityPayload>, "onSuccess" | "onError"> = {}
+  callbacks: {
+    onSuccess?: (data: WalletActivityPayload) => void;
+    onError?: (error: DashboardReadError) => void;
+  } = {}
 ) {
-  const key =
-    limit === WALLET_ACTIVITY_LIMIT
-      ? custodyQueryKeys.walletActivity({ walletId })
-      : ([...custodyQueryKeys.walletActivity({ walletId }), limit] as const);
-  return useSWR(key, () => fetchWalletActivity(walletId, { limit }), {
+  const scope = useDashboardKeyScope();
+  const { onSuccess, onError } = callbacks;
+  const config: SWRConfiguration<WalletActivityResponse, DashboardReadError> = {
     refreshInterval: 20_000,
     refreshWhenHidden: false,
-    ...callbacks,
-  });
+    onSuccess: onSuccess === undefined ? undefined : (response) => onSuccess(response.data),
+    onError,
+  };
+  const response = useDashboardRead(
+    custodyQueryKeys.walletActivity(scope, { walletId, limit }),
+    walletActivityResponseSchema,
+    config
+  );
+  return { ...response, data: response.data?.data };
 }

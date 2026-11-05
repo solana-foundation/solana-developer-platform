@@ -13,27 +13,8 @@ import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createSdpApiClient, requestMemberRole, type SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 import { resolveWalletConnectionRow } from "./wallet-connection-row";
-import type {
-  IssuedTokensByMint,
-  WalletBalancesResult,
-  WalletPageView,
-} from "./wallet-detail.shared";
+import type { WalletPageView } from "./wallet-detail.shared";
 import { WalletDetailView } from "./wallet-detail-view";
-
-interface WalletBalancesResponse {
-  walletBalances?: {
-    walletId: string;
-    address: string;
-    balances: WalletBalancesResult["balances"];
-  };
-}
-
-interface OwnedTokenRoute {
-  id: string;
-  mintAddress: string | null;
-  name?: string | null;
-  symbol?: string | null;
-}
 
 async function getWalletDetail(
   request: SdpApiClient["request"],
@@ -55,48 +36,6 @@ async function getWalletDetail(
   }
 
   return wallet;
-}
-
-async function getWalletTrackedBalances(
-  request: SdpApiClient["request"],
-  walletId: string,
-  unavailableMessage: string
-): Promise<WalletBalancesResult> {
-  try {
-    const response = await request(`/v1/payments/wallets/${encodeURIComponent(walletId)}/balances`);
-    if (response.status === 404) {
-      return { balances: [], error: null };
-    }
-    if (!response.ok) {
-      return { balances: [], error: unavailableMessage };
-    }
-
-    const json = (await response.json()) as { data?: WalletBalancesResponse };
-    return { balances: json.data?.walletBalances?.balances ?? [], error: null };
-  } catch {
-    return { balances: [], error: unavailableMessage };
-  }
-}
-
-/** Tokens this organization issued, by mint; empty when the lookup fails. */
-async function getIssuedTokens(request: SdpApiClient["request"]): Promise<IssuedTokensByMint> {
-  try {
-    const response = await request("/v1/issuance/tokens?page=1&pageSize=100");
-    if (!response.ok) return {};
-    const json = (await response.json()) as { data?: OwnedTokenRoute[] };
-    const tokens: IssuedTokensByMint = {};
-    for (const token of json.data ?? []) {
-      if (typeof token.id !== "string" || !token.mintAddress?.trim()) continue;
-      tokens[token.mintAddress] = {
-        id: token.id,
-        name: token.name ?? null,
-        symbol: token.symbol?.trim() || null,
-      };
-    }
-    return tokens;
-  } catch {
-    return {};
-  }
 }
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
@@ -135,7 +74,7 @@ function toWalletPageView(
 
 /**
  * One wallet's page. The wallet itself is read before anything renders (its name heads the
- * page); balances and the issued-token names are handed to the view as promises, so each part streams in on its own instead of holding the page.
+ * page); its balances, activity and the issued-token names are read in the browser.
  */
 export async function WalletDetailPage({ params }: { params: Promise<{ walletId: string }> }) {
   const [t, { orgId }, { walletId }, issuanceEnabled] = await Promise.all([
@@ -150,17 +89,7 @@ export async function WalletDetailPage({ params }: { params: Promise<{ walletId:
 
   const resolvedWalletId = decodeURIComponent(walletId);
   const apiClient = await createSdpApiClient();
-  const walletPromise = getWalletDetail(apiClient.request, resolvedWalletId);
-  const balancesPromise = getWalletTrackedBalances(
-    apiClient.request,
-    resolvedWalletId,
-    t("DashboardCustody.trackedBalancesUnavailable")
-  );
-  // Issuance off means the API refuses `/v1/issuance/tokens`; nothing on the page needs them then.
-  const issuedTokensPromise = issuanceEnabled
-    ? getIssuedTokens(apiClient.request)
-    : Promise.resolve<IssuedTokensByMint>({});
-  const wallet = await walletPromise;
+  const wallet = await getWalletDetail(apiClient.request, resolvedWalletId);
 
   const canManageCustody = resolveDashboardAccess(await requestMemberRole()).capabilities
     .canManageCustody;
@@ -171,12 +100,5 @@ export async function WalletDetailPage({ params }: { params: Promise<{ walletId:
   });
   const view = toWalletPageView(wallet, connection, canManageCustody, t);
 
-  return (
-    <WalletDetailView
-      wallet={view}
-      balancesPromise={balancesPromise}
-      issuedTokensPromise={issuedTokensPromise}
-      issuanceEnabled={issuanceEnabled}
-    />
-  );
+  return <WalletDetailView wallet={view} issuanceEnabled={issuanceEnabled} />;
 }

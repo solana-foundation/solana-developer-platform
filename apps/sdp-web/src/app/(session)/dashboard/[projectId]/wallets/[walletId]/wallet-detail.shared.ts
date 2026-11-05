@@ -32,11 +32,6 @@ export interface WalletPageView {
   label: string | null;
 }
 
-export interface WalletBalancesResult {
-  balances: CustodyWalletTokenBalance[];
-  error: string | null;
-}
-
 /** Tokens this organization issued, by mint: their names in balances and activity. */
 export type IssuedTokensByMint = Record<
   string,

@@ -1,6 +1,5 @@
 "use client";
 
-import type { CustodyWalletSummary } from "@sdp/types/custody";
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { ListEmptyState } from "@sdp/ui/list-empty-state";
@@ -10,8 +9,8 @@ import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { LayoutGridIcon, RotateCwIcon, Rows3Icon, SearchIcon } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useWalletSummaries } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
 import {
   formatCustodyProviderName,
   getCustodyProviderEntry,
@@ -19,16 +18,16 @@ import {
   type KnownCustodyProvider,
 } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
-import {
-  useWalletCardBalances,
-  WalletCardBalanceValue,
-} from "@/app/(session)/dashboard/[projectId]/wallets/wallet-card-balance-value";
+import { WalletCardBalanceValue } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-card-balance-value";
 import {
   formatWalletMeta,
   formatWalletPurposeLabel,
   truncateMiddle,
 } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-format-utils";
-import { WalletsToolbarRowHold } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-route-skeletons";
+import {
+  WalletCardsSkeleton,
+  WalletsToolbarRowHold,
+} from "@/app/(session)/dashboard/[projectId]/wallets/wallet-route-skeletons";
 import { DashboardHeaderTabsTrailing } from "@/components/dashboard-header-tabs";
 import { useWalletFavorites } from "@/components/use-wallet-favorites";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -37,6 +36,7 @@ import { useDashboardTab, useDashboardUrlState } from "@/lib/dashboard-url-state
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useDebounce } from "@/lib/use-debounce";
 import { syncWalletFavorites, type WalletFavorite } from "@/lib/wallet-favorites";
+import type { CustodyWalletListItem, useCustodyWallets } from "./custody-reads";
 import { useWalletFavoriteToggle } from "./use-wallet-favorite-toggle";
 import { WalletActionsMenu } from "./wallet-actions-menu";
 import { WalletFavoriteButton } from "./wallet-favorite-button";
@@ -51,8 +51,7 @@ import {
 interface WalletsOverviewProps {
   canManageCustody: boolean;
   configsError: string | null;
-  wallets: CustodyWalletSummary[];
-  walletsError: string | null;
+  walletsRead: ReturnType<typeof useCustodyWallets>;
 }
 
 type WalletsView = "grid" | "list";
@@ -67,7 +66,7 @@ const REFRESHED_AT_FORMAT: Intl.DateTimeFormatOptions = { dateStyle: "medium", t
 const WALLET_SEARCH_THRESHOLD = 6;
 
 interface WalletItem {
-  wallet: CustodyWalletSummary;
+  wallet: CustodyWalletListItem;
   provider: KnownCustodyProvider | null;
   name: string;
   /** "Transfers · Fireblocks": the purpose, when it has one, then the provider. */
@@ -76,7 +75,7 @@ interface WalletItem {
 }
 
 function toWalletItem(
-  wallet: CustodyWalletSummary,
+  wallet: CustodyWalletListItem,
   t: ReturnType<typeof useTranslations>,
   projectHref: (dashboardPath: string) => string
 ): WalletItem {
@@ -233,10 +232,7 @@ function WalletCard({
         </div>
       </div>
       <p className="px-4 pt-5 pb-6 text-quote">
-        <WalletCardBalanceValue
-          walletId={wallet.walletId}
-          initialBalances={wallet.balances ?? []}
-        />
+        <WalletCardBalanceValue walletId={wallet.walletId} />
       </p>
       <dl className="grid grid-cols-2 gap-x-6 border-t border-border-subtle px-4 pt-3 pb-3">
         <WalletIdentifier
@@ -294,10 +290,7 @@ function WalletsList({
             </TableCell>
             <TableCell className="truncate text-secondary">{item.kind}</TableCell>
             <TableCell className="text-right">
-              <WalletCardBalanceValue
-                walletId={item.wallet.walletId}
-                initialBalances={item.wallet.balances ?? []}
-              />
+              <WalletCardBalanceValue walletId={item.wallet.walletId} />
             </TableCell>
             <TableCell className="pl-6">
               <span className="flex min-w-0 items-center gap-1.5">
@@ -337,14 +330,15 @@ function WalletsList({
 function WalletsToolbar({
   view,
   onViewChange,
+  onRefreshWallets,
 }: {
   view: WalletsView;
   onViewChange: (view: WalletsView) => void;
+  onRefreshWallets: () => void;
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const router = useRouter();
-  const { data, error, isValidating, mutate } = useWalletCardBalances();
+  const { data, error, isValidating, mutate } = useWalletSummaries({ includeBalances: true });
   const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
   const refreshedAtFormat = useMemo(
     () => new Intl.DateTimeFormat(locale, REFRESHED_AT_FORMAT),
@@ -363,8 +357,9 @@ function WalletsToolbar({
     wasValidatingRef.current = isValidating;
   }, [data, error, isValidating]);
 
+  // Bound re-reads keep what is on screen until the answers land.
   const refresh = () => {
-    router.refresh();
+    onRefreshWallets();
     void mutate();
   };
 
@@ -453,15 +448,90 @@ function EmptyWallets({
 export function WalletsOverview({
   canManageCustody,
   configsError,
-  wallets,
-  walletsError,
+  walletsRead,
 }: WalletsOverviewProps) {
   const t = useTranslations();
   const projectHref = useProjectHref();
   const isOverviewTab = useDashboardTab() !== "playground";
+  const { storageKey } = useWalletFavorites();
+  const wallets = walletsRead.data;
+  const items = useMemo(
+    () =>
+      wallets === undefined
+        ? undefined
+        : wallets.map((wallet) => toWalletItem(wallet, t, projectHref)),
+    [projectHref, t, wallets]
+  );
+
+  // A pin keeps the name the list shows now, and a wallet that has gone drops out of the sidebar.
+  useEffect(() => {
+    if (!storageKey || items === undefined) return;
+    syncWalletFavorites(storageKey, items.map(toFavorite));
+  }, [items, storageKey]);
+
+  // No toolbar without wallets, but its row stays: the loading view held it.
+  const toolbarRowHold = isOverviewTab ? <WalletsToolbarRowHold loading={false} /> : null;
+
+  if (items === undefined) {
+    if (walletsRead.error === undefined) {
+      return (
+        <>
+          {isOverviewTab ? <WalletsToolbarRowHold loading /> : null}
+          <WalletCardsSkeleton />
+        </>
+      );
+    }
+    return (
+      <>
+        {toolbarRowHold}
+        <div role="alert" className="flex flex-col items-start gap-2 text-body">
+          <p className="font-medium text-error">{t("DashboardCustody.unableToLoadWallets")}</p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            loading={walletsRead.isValidating}
+            onClick={() => void walletsRead.mutate()}
+          >
+            {t("DashboardCustody.retryRead")}
+          </Button>
+        </div>
+      </>
+    );
+  }
+
+  if (items.length === 0) {
+    return (
+      <>
+        {toolbarRowHold}
+        <EmptyWallets canManageCustody={canManageCustody} configsError={configsError} />
+      </>
+    );
+  }
+
+  return (
+    <WalletsOverviewList
+      items={items}
+      configsError={configsError}
+      onRefreshWallets={() => void walletsRead.mutate()}
+    />
+  );
+}
+
+function WalletsOverviewList({
+  items,
+  configsError,
+  onRefreshWallets,
+}: {
+  items: WalletItem[];
+  configsError: string | null;
+  onRefreshWallets: () => void;
+}) {
+  const t = useTranslations();
+  const isOverviewTab = useDashboardTab() !== "playground";
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const view: WalletsView = searchParams.get(VIEW_QUERY_PARAM) === "list" ? "list" : "grid";
-  const searchable = wallets.length > WALLET_SEARCH_THRESHOLD;
+  const searchable = items.length > WALLET_SEARCH_THRESHOLD;
   const initialSearch = normalizeWalletSearchQuery(
     searchParams.get(WALLET_SEARCH_QUERY_PARAM) ?? ""
   );
@@ -475,24 +545,18 @@ export function WalletsOverview({
   const syncingFromUrlRef = useRef<string | null>(null);
   // A search left in the URL cannot hide wallets on a page that shows no field to clear it.
   const normalizedSearch = searchable ? normalizeWalletSearchQuery(effectiveSearchValue) : "";
-  const items = useMemo(
-    () => wallets.map((wallet) => toWalletItem(wallet, t, projectHref)),
-    [projectHref, t, wallets]
-  );
   const visibleItems = useMemo(() => {
     if (!normalizedSearch) return items;
-    const visible = new Set(filterWallets(wallets, normalizedSearch));
+    const visible = new Set(
+      filterWallets(
+        items.map((item) => item.wallet),
+        normalizedSearch
+      )
+    );
     return items.filter((item) => visible.has(item.wallet));
-  }, [items, normalizedSearch, wallets]);
+  }, [items, normalizedSearch]);
   const searchIsPending = deferredSearchValue !== searchValue;
-  const { storageKey } = useWalletFavorites();
   const { canPin, favoriteIds, toggle } = useWalletFavoriteToggle();
-
-  // A pin keeps the name the list shows now, and a wallet that has gone drops out of the sidebar.
-  useEffect(() => {
-    if (!storageKey || walletsError) return;
-    syncWalletFavorites(storageKey, items.map(toFavorite));
-  }, [items, storageKey, walletsError]);
 
   useEffect(() => {
     const urlSearch = normalizeWalletSearchQuery(searchParams.get(WALLET_SEARCH_QUERY_PARAM) ?? "");
@@ -530,30 +594,6 @@ export function WalletsOverview({
     replaceSearchParams({ [WALLET_SEARCH_QUERY_PARAM]: null });
   };
 
-  // No toolbar without wallets, but its row stays: the loading view held it.
-  const toolbarRowHold = isOverviewTab ? <WalletsToolbarRowHold loading={false} /> : null;
-
-  if (walletsError) {
-    return (
-      <>
-        {toolbarRowHold}
-        <div role="alert" className="space-y-1 text-body">
-          <p className="font-medium text-error">{t("DashboardCustody.unableToLoadWallets")}</p>
-          <p className="text-secondary">{walletsError}</p>
-        </div>
-      </>
-    );
-  }
-
-  if (wallets.length === 0) {
-    return (
-      <>
-        {toolbarRowHold}
-        <EmptyWallets canManageCustody={canManageCustody} configsError={configsError} />
-      </>
-    );
-  }
-
   const cards = (
     <div className="grid gap-5 sm:grid-cols-2" data-wallet-grid>
       {visibleItems.map((item) => (
@@ -574,6 +614,7 @@ export function WalletsOverview({
         <DashboardHeaderTabsTrailing>
           <WalletsToolbar
             view={view}
+            onRefreshWallets={onRefreshWallets}
             onViewChange={(next) =>
               replaceSearchParams({ [VIEW_QUERY_PARAM]: next === "list" ? "list" : null })
             }
@@ -596,7 +637,7 @@ export function WalletsOverview({
             <p className="mt-2 text-meta text-secondary" aria-live="polite">
               {t("DashboardCustody.walletSearchResults", {
                 count: visibleItems.length,
-                total: wallets.length,
+                total: items.length,
               })}
             </p>
           ) : null}

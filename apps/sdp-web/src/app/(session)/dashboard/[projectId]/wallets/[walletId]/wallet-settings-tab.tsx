@@ -13,6 +13,7 @@ import {
 import { updateWalletLabelAction } from "@/app/(session)/dashboard/[projectId]/wallets/actions";
 import { custodyQueryKeys } from "@/app/(session)/dashboard/[projectId]/wallets/custody-query-key";
 import { useWalletActions } from "@/app/(session)/dashboard/[projectId]/wallets/use-wallet-actions";
+import { useWalletInventoryRefresh } from "@/app/(session)/dashboard/[projectId]/wallets/use-wallet-inventory-refresh";
 import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
 import { truncateMiddle } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-format-utils";
 import { RecordBlock, RecordLine, RecordStack } from "@/components/refresh-record";
@@ -29,6 +30,7 @@ function LabelBlock({ wallet }: { wallet: WalletPageView }) {
   const t = useTranslations();
   const { flags } = useDashboardWorkspace();
   const router = useRouter();
+  const refreshWalletInventory = useWalletInventoryRefresh();
   const saved = wallet.label ?? "";
   const [draft, setDraft] = useState(saved);
   const [pending, startTransition] = useTransition();
@@ -57,6 +59,8 @@ function LabelBlock({ wallet }: { wallet: WalletPageView }) {
           id: toastId,
           position: "bottom-right",
         });
+        refreshWalletInventory();
+        // The wallet's record heads the page from the server.
         router.refresh();
         return;
       }

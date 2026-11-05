@@ -57,6 +57,10 @@ export function useWalletActivityWindow(walletId: string) {
     data,
     /** The shown window never loaded. */
     error: data === undefined ? shown.error : undefined,
+    /** Reads the shown window again. */
+    retry: () => {
+      void shown.mutate();
+    },
     /** The shown window loaded once, but its latest refresh failed. */
     refreshFailed: data !== undefined && shown.error !== undefined,
     /** Rows older than the shown window exist and the feed can still widen to them. */

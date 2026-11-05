@@ -1,14 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyConfigSummary, CustodyWalletSummary } from "@sdp/types/custody";
+import type { CustodyConfigSummary } from "@sdp/types/custody";
 import { redirect } from "next/navigation";
-import { Suspense } from "react";
 import type { OnboardingStatusResponse } from "@/app/(session)/dashboard/[projectId]/onboarding-status";
 import { resolvePlaygroundApiBaseUrl } from "@/app/(session)/dashboard/[projectId]/playground-api-data";
 import {
   isKnownCustodyProvider,
   type KnownCustodyProvider,
 } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
-import { WalletsOverviewSkeleton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-route-skeletons";
 import { getTranslations } from "@/i18n/server";
 import { createTimedTrace } from "@/lib/request-tracing";
 import {
@@ -57,22 +55,6 @@ async function getCustodyConfigs(
   return json.data;
 }
 
-async function getCustodyWallets(
-  request: SdpApiClient["request"]
-): Promise<CustodyWalletSummary[]> {
-  // Wallet cards refresh balances client-side; avoid blocking the overview render on balance RPCs.
-  const res = await request("/v1/wallets");
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`SDP API request failed (${res.status}): ${body}`);
-  }
-
-  const json = (await res.json()) as {
-    data?: { wallets?: CustodyWalletSummary[] };
-  };
-  return json.data?.wallets ?? [];
-}
-
 export default async function WalletsPage() {
   const [t, { orgId }] = await Promise.all([getTranslations(), auth()]);
   if (!orgId) {
@@ -103,10 +85,9 @@ export default async function WalletsPage() {
       );
     }
 
-    const [configsResult, walletsResult] = await Promise.all([
-      trace.step("fetch_custody_configs", () => settle(getCustodyConfigs(projectClient.request))),
-      trace.step("fetch_custody_wallets", () => settle(getCustodyWallets(projectClient.request))),
-    ]);
+    const configsResult = await trace.step("fetch_custody_configs", () =>
+      settle(getCustodyConfigs(projectClient.request))
+    );
 
     const connectedProviders = configsResult.ok
       ? activeKnownProviders(configsResult.value.configs)
@@ -115,26 +96,19 @@ export default async function WalletsPage() {
       configsResult,
       t("DashboardCustody.unableToLoadWalletProviders")
     );
-    const walletsError = settledError(walletsResult, t("DashboardCustody.unableToLoadWallets"));
-    const wallets = walletsResult.ok ? walletsResult.value : [];
 
     trace.log({
       ok: true,
       linked: true,
       connectedProviderCount: connectedProviders.length,
-      walletCount: wallets.length,
     });
 
     return (
-      <Suspense fallback={<WalletsOverviewSkeleton />}>
-        <WalletsWorkspace
-          apiBaseUrl={resolvePlaygroundApiBaseUrl()}
-          connectedProviders={connectedProviders}
-          configsError={configsError}
-          wallets={wallets}
-          walletsError={walletsError}
-        />
-      </Suspense>
+      <WalletsWorkspace
+        apiBaseUrl={resolvePlaygroundApiBaseUrl()}
+        connectedProviders={connectedProviders}
+        configsError={configsError}
+      />
     );
   } catch (error) {
     trace.log({

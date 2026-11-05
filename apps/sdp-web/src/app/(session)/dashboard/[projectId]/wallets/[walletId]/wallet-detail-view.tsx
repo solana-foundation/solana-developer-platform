@@ -1,29 +1,15 @@
 "use client";
 
-import { Suspense, useMemo } from "react";
+import { useMemo } from "react";
 import { WalletFavoriteStar } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-favorite-button";
 import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { useDashboardTab, useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { WalletActivityTab } from "./wallet-activity-tab";
-import type {
-  IssuedTokensByMint,
-  WalletBalancesResult,
-  WalletPageView,
-  WalletTab,
-} from "./wallet-detail.shared";
+import type { WalletPageView, WalletTab } from "./wallet-detail.shared";
 import { WalletOverviewTab } from "./wallet-overview-tab";
 import { WalletSettingsTab } from "./wallet-settings-tab";
-
-function TabSkeleton() {
-  return (
-    <div className="flex flex-col gap-4" aria-hidden="true">
-      <div className="h-16 animate-pulse rounded-card bg-fill-subtle" />
-      <div className="h-40 animate-pulse rounded-card bg-fill-subtle" />
-    </div>
-  );
-}
 
 /**
  * One wallet's page, as the design lays it out: its name beside the provider's mark with the
@@ -31,13 +17,9 @@ function TabSkeleton() {
  */
 export function WalletDetailView({
   wallet,
-  balancesPromise,
-  issuedTokensPromise,
   issuanceEnabled,
 }: {
   wallet: WalletPageView;
-  balancesPromise: Promise<WalletBalancesResult>;
-  issuedTokensPromise: Promise<IssuedTokensByMint>;
   issuanceEnabled: boolean;
 }) {
   const requested = useDashboardTab();
@@ -66,27 +48,22 @@ export function WalletDetailView({
   return (
     <DashboardWorkspaceOverviewPanel data-wallet-detail={tab}>
       <DashboardPageTitle title={wallet.name} mark={mark} actions={actions} />
-      <Suspense fallback={<TabSkeleton />}>
-        {tab === "overview" ? (
-          <WalletOverviewTab
-            wallet={wallet}
-            balancesPromise={balancesPromise}
-            issuedTokensPromise={issuedTokensPromise}
-            issuanceEnabled={issuanceEnabled}
-            onViewAllActivity={() => replaceSearchParams({ tab: "activity" })}
-          />
-        ) : null}
-        {tab === "activity" ? (
-          <WalletActivityTab
-            key={wallet.walletId}
-            walletId={wallet.walletId}
-            custodyWalletId={wallet.custodyWalletId}
-            balancesPromise={balancesPromise}
-            issuedTokensPromise={issuedTokensPromise}
-          />
-        ) : null}
-        {tab === "settings" ? <WalletSettingsTab wallet={wallet} /> : null}
-      </Suspense>
+      {tab === "overview" ? (
+        <WalletOverviewTab
+          wallet={wallet}
+          issuanceEnabled={issuanceEnabled}
+          onViewAllActivity={() => replaceSearchParams({ tab: "activity" })}
+        />
+      ) : null}
+      {tab === "activity" ? (
+        <WalletActivityTab
+          key={wallet.walletId}
+          walletId={wallet.walletId}
+          custodyWalletId={wallet.custodyWalletId}
+          issuanceEnabled={issuanceEnabled}
+        />
+      ) : null}
+      {tab === "settings" ? <WalletSettingsTab wallet={wallet} /> : null}
     </DashboardWorkspaceOverviewPanel>
   );
 }
