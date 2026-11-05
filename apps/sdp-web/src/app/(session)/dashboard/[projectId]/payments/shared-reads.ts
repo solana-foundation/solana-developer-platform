@@ -1,12 +1,14 @@
 "use client";
 
 import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
+import type { SWRConfiguration } from "swr";
 import { z } from "zod";
 import { ISSUANCE_MAX_PAGE_SIZE } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-list-query";
 import { paymentsWalletsResponseSchema } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
 import { sharedReadQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads-query-key";
 import { type DashboardRequestKey, dashboardRequestKey } from "@/lib/dashboard-request-key";
 import {
+  type DashboardReadError,
   readDashboardRequest,
   useDashboardKeyScope,
   useDashboardRead,
@@ -49,6 +51,7 @@ const issuedTokensPageSchema = z.object({
   data: z.array(
     z.object({
       id: z.string(),
+      name: z.string(),
       mintAddress: z.string().nullable(),
       symbol: z.string(),
       imageUrl: z.string().nullable().optional(),
@@ -61,16 +64,21 @@ const issuedTokensPageSchema = z.object({
 export interface IssuedTokenSymbol {
   /** Null when the listing omits it. */
   id: string | null;
+  name: string;
   mintAddress: string;
   symbol: string;
   imageUrl: string | null;
 }
 
-export function useWalletSummaries(options: { includeBalances: boolean }) {
+export function useWalletSummaries(
+  options: { includeBalances: boolean },
+  config?: SWRConfiguration<z.infer<typeof paymentsWalletsResponseSchema>, DashboardReadError>
+) {
   const scope = useDashboardKeyScope();
   const response = useDashboardRead(
     sharedReadQueryKeys.walletSummaries(scope, options),
-    paymentsWalletsResponseSchema
+    paymentsWalletsResponseSchema,
+    config
   );
   return { ...response, data: response.data?.data.wallets };
 }
@@ -106,6 +114,7 @@ async function readAllIssuedTokens(key: DashboardRequestKey): Promise<IssuedToke
       if (token.mintAddress !== null && token.mintAddress !== "") {
         tokens.push({
           id: token.id === "" ? null : token.id,
+          name: token.name,
           mintAddress: token.mintAddress,
           symbol: token.symbol,
           imageUrl: token.imageUrl ?? null,
