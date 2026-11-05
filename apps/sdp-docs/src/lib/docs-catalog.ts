@@ -10,7 +10,7 @@
  */
 
 import type { ActionModule } from "@sdp/types/actions";
-import type { CustodyProvider } from "@sdp/types/custody";
+import type { ManagedCustodyProvider } from "@sdp/types/custody";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { SdpModule } from "@sdp/types/release-channels";
 
@@ -93,7 +93,8 @@ export const DOCS_TUTORIALS: readonly {
 /**
  * The custody providers `<CustodyProviderTable />` lists, in display order.
  * Local signing is left out: it runs only in a self-hosted deployment, which
- * the self-hosting pages cover.
+ * the self-hosting pages cover. Names repeat `CUSTODY_PROVIDER_CATALOG_BY_ID`
+ * labels because this file stays free of runtime workspace imports.
  */
 export const DOCS_CUSTODY_PROVIDERS = {
   privy: { name: "Privy", description: "Embedded wallet infrastructure platform" },
@@ -108,10 +109,7 @@ export const DOCS_CUSTODY_PROVIDERS = {
   },
   anchorage: { name: "Anchorage", description: "Regulated institutional crypto custody" },
   utila: { name: "Utila", description: "Vault-backed wallet signing through service accounts" },
-} as const satisfies Record<
-  Exclude<CustodyProvider, "local">,
-  { name: string; description: string }
->;
+} as const satisfies Record<ManagedCustodyProvider, { name: string; description: string }>;
 
 /** One ramp provider's capabilities; its page is /docs/payments/ramps-<provider>. */
 export type RampProviderEntry = {
