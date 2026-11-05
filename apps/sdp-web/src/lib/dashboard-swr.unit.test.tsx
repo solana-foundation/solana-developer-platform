@@ -141,9 +141,13 @@ describe("readDashboardPostRequest", () => {
       ESTIMATE_PARAMS
     );
 
-    await expect(readDashboardPostRequest(key, amountSchema, ESTIMATE_PARAMS)).resolves.toEqual({
+    await expect(readDashboardPostRequest(key, amountSchema)).resolves.toEqual({
       data: { amount: 7 },
     });
+    expect(fetchMock).toHaveBeenCalledWith(
+      ESTIMATE_PATH,
+      expect.objectContaining({ body: key[3].body })
+    );
     expect(sentDashboardRequests(fetchMock)).toEqual([
       { path: ESTIMATE_PATH, method: "POST", idempotencyKey: null, body: ESTIMATE_PARAMS },
     ]);
@@ -161,12 +165,14 @@ describe("readDashboardPostRequest", () => {
       ],
       memo: null,
     };
-    const key = dashboardPostReadKey(SCOPE, BATCH_ESTIMATE_PATH, {
-      serializedRequest: JSON.stringify(body),
-    });
+    const key = dashboardPostReadKey(SCOPE, BATCH_ESTIMATE_PATH, body);
 
-    await readDashboardPostRequest(key, amountSchema, body);
+    await readDashboardPostRequest(key, amountSchema);
 
+    expect(fetchMock).toHaveBeenCalledWith(
+      BATCH_ESTIMATE_PATH,
+      expect.objectContaining({ body: key[3].body })
+    );
     expect(sentDashboardRequests(fetchMock)).toEqual([
       { path: BATCH_ESTIMATE_PATH, method: "POST", idempotencyKey: null, body },
     ]);
@@ -178,7 +184,7 @@ describe("readDashboardPostRequest", () => {
     );
     const key = dashboardPostReadKey(SCOPE, ESTIMATE_PATH, ESTIMATE_PARAMS);
 
-    const read = readDashboardPostRequest(key, amountSchema, ESTIMATE_PARAMS);
+    const read = readDashboardPostRequest(key, amountSchema);
 
     await expect(read).rejects.toBeInstanceOf(DashboardReadError);
     await expect(read).rejects.toMatchObject({
@@ -280,26 +286,35 @@ describe("useInvalidateDashboardReads", () => {
     await waitFor(() => expect(result.current.wallets.data).toEqual({ data: { amount: 2 } }));
   });
 
-  it("never lets a read that was in flight before the write land after it", async () => {
+  it("remounts a read cleared mid-request into its own request, never the older answer", async () => {
     const stale = Promise.withResolvers<string>();
     const fetcher = vi
       .fn<() => Promise<string>>()
       .mockReturnValueOnce(stale.promise)
       .mockResolvedValueOnce("fresh");
-    const { result, rerender } = renderHook(useOffScreenRead, {
-      wrapper: DashboardReadsProvider,
-      initialProps: { mounted: true, fetcher },
-    });
+    const shown: unknown[] = [];
+    const { result, rerender } = renderHook(
+      (props: { mounted: boolean; fetcher: () => Promise<string> }) => {
+        const reads = useOffScreenRead(props);
+        shown.push(reads.read.data);
+        return reads;
+      },
+      { wrapper: DashboardReadsProvider, initialProps: { mounted: true, fetcher } }
+    );
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     rerender({ mounted: false, fetcher });
 
     await act(() => result.current.invalidate(readsUnderPath("/api/dashboard/wallets")));
-    stale.resolve("stale");
-    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
     rerender({ mounted: true, fetcher });
 
     expect(result.current.read.data).toBeUndefined();
+    expect(result.current.read.isLoading).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(2);
     await waitFor(() => expect(result.current.read.data).toBe("fresh"));
+    stale.resolve("stale");
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+    expect(result.current.read.data).toBe("fresh");
+    expect(shown).not.toContain("stale");
   });
 
   it("keeps a read on screen while another component reading the same key unmounts", async () => {
