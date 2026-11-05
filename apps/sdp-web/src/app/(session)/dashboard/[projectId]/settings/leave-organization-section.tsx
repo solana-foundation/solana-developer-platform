@@ -10,8 +10,8 @@ import {
   RecordActionRow,
   RecordSection,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
-import { leaveOrganization } from "@/app/(session)/members/actions";
 import { useTranslations } from "@/i18n/provider";
+import { dashboardFetch } from "@/lib/dashboard-fetch";
 
 /**
  * Lets a member end their own membership. Admins cannot leave (the API refuses
@@ -28,12 +28,12 @@ export function LeaveOrganizationSection() {
 
   const confirmLeave = () => {
     startTransition(async () => {
-      const result = await leaveOrganization();
-      if (result.status === "error") {
+      const result = await dashboardFetch("/api/dashboard/members/me", { method: "DELETE" });
+      if (!result.ok) {
         // The membership may have ended before the request failed (its Clerk
         // half runs after the commit): refreshing lets the layout's own check
         // show the no-access panel if it did.
-        toast.error(t("Shared.members.leaveFailed", { error: result.message }));
+        toast.error(t("Shared.members.leaveFailed", { error: result.error }));
         router.refresh();
         return;
       }

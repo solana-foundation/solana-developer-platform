@@ -11,9 +11,10 @@ import { MoreHorizontalIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { revokeInvitation } from "@/app/(session)/members/actions";
 import { useTranslations } from "@/i18n/provider";
+import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
+import { fetchResultAnswer, IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 
 export function InvitationActions({
@@ -35,12 +36,18 @@ export function InvitationActions({
     setIsRevoking(true);
     startTransition(async () => {
       const key = actionKey.keyFor(input);
-      const result = await revokeInvitation(invitationId, key);
-      actionKey.settled(input, key, result);
+      const result = await dashboardFetch(
+        `/api/dashboard/members/invitations/${encodeURIComponent(invitationId)}`,
+        { method: "DELETE", headers: { [IDEMPOTENCY_KEY_HEADER]: key } }
+      );
+      actionKey.settled(input, key, {
+        status: result.ok ? "success" : "error",
+        answer: fetchResultAnswer(result),
+      });
       setIsRevoking(false);
 
-      if (result.status === "error") {
-        toast.error(t("Shared.members.revokeFailed", { error: result.message }));
+      if (!result.ok) {
+        toast.error(t("Shared.members.revokeFailed", { error: result.error }));
         return;
       }
 

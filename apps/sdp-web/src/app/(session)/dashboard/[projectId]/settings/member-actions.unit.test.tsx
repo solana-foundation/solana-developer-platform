@@ -3,10 +3,16 @@ import type { OrganizationRole } from "@sdp/types/roles";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as membersActions from "@/app/(session)/members/actions";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
+import {
+  dashboardDataResponse,
+  dashboardErrorResponse,
+  type SentDashboardRequest,
+  sentDashboardRequests,
+  stubDashboardFetch,
+} from "@/test/dashboard-fetch";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { restoreWindowLocation } from "@/test/window-location";
@@ -14,11 +20,13 @@ import { MemberActions } from "./member-actions";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
-const REFUSED: membersActions.MemberActionResult = {
-  status: "error",
-  message: "upstream unavailable",
-  answer: { status: 503, replayed: false, code: null },
-};
+function refused(): Response {
+  return dashboardErrorResponse(503, "upstream unavailable");
+}
+
+function mutations(fetchMock: Parameters<typeof sentDashboardRequests>[0]): SentDashboardRequest[] {
+  return sentDashboardRequests(fetchMock).filter((request) => request.method !== "GET");
+}
 
 const MEMBERS_TAB_URL = `/dashboard/${SANDBOX_PROJECT.id}/settings?tab=members`;
 
@@ -44,20 +52,20 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   restoreWindowLocation();
 });
 
 describe("MemberActions role change", () => {
   it("keeps a failed change's key for its retry, and gives another role or member a new one", async () => {
-    const change = vi.spyOn(membersActions, "changeMemberRole").mockResolvedValue(REFUSED);
+    const fetchMock = stubDashboardFetch(refused);
     const user = userEvent.setup();
     const choose = async (item: string, calls: number) => {
       const trigger = screen.getByRole("button", { name: "Actions for Teammate" });
       await waitFor(() => expect(trigger.hasAttribute("disabled")).toBe(false));
       await user.click(trigger);
       await user.click(await screen.findByRole("menuitem", { name: item }));
-      await waitFor(() => expect(change).toHaveBeenCalledTimes(calls));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(calls));
     };
     const { rerender } = render(row("mem_test_1", "member"));
 
@@ -68,13 +76,15 @@ describe("MemberActions role change", () => {
     rerender(row("mem_test_2", "member"));
     await choose("Make admin", 4);
 
-    const keys = change.mock.calls.map(([, , key]) => key);
-    expect(change.mock.calls.map(([memberId, role]) => [memberId, role])).toEqual([
-      ["mem_test_1", "admin"],
-      ["mem_test_1", "admin"],
-      ["mem_test_1", "member"],
-      ["mem_test_2", "admin"],
+    const sent = mutations(fetchMock);
+    const keys = sent.map((request) => request.idempotencyKey);
+    expect(sent.map(({ method, path, body }) => [method, path, body])).toEqual([
+      ["PATCH", "/api/dashboard/members/mem_test_1", { role: "admin" }],
+      ["PATCH", "/api/dashboard/members/mem_test_1", { role: "admin" }],
+      ["PATCH", "/api/dashboard/members/mem_test_1", { role: "member" }],
+      ["PATCH", "/api/dashboard/members/mem_test_2", { role: "admin" }],
     ]);
+    expect(keys[0]).toEqual(expect.any(String));
     expect(keys[1]).toBe(keys[0]);
     expect(new Set(keys).size).toBe(3);
     expect(dashboardRouter.replace).not.toHaveBeenCalled();
@@ -82,7 +92,7 @@ describe("MemberActions role change", () => {
 
   it("re-reads the page at the live URL after a change, keeping the Members tab", async () => {
     window.history.replaceState(null, "", MEMBERS_TAB_URL);
-    vi.spyOn(membersActions, "changeMemberRole").mockResolvedValue({ status: "success" });
+    stubDashboardFetch(() => dashboardDataResponse(200, {}));
     const user = userEvent.setup();
     render(row("mem_test_1", "member"));
 
@@ -97,7 +107,7 @@ describe("MemberActions role change", () => {
 
 describe("MemberActions role choices", () => {
   it("offers every other role, read-only included", async () => {
-    const change = vi.spyOn(membersActions, "changeMemberRole").mockResolvedValue(REFUSED);
+    const fetchMock = stubDashboardFetch(refused);
     const user = userEvent.setup();
     render(row("mem_test_viewer", "member"));
 
@@ -106,8 +116,8 @@ describe("MemberActions role choices", () => {
     expect(items).toEqual(["Make admin", "Make read-only", "Remove member"]);
 
     await user.click(screen.getByRole("menuitem", { name: "Make read-only" }));
-    await waitFor(() => expect(change).toHaveBeenCalledTimes(1));
-    expect(change.mock.calls[0]?.slice(0, 2)).toEqual(["mem_test_viewer", "viewer"]);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(mutations(fetchMock).map((request) => request.body)).toEqual([{ role: "viewer" }]);
   });
 });
 
@@ -119,9 +129,7 @@ describe("MemberActions removal", () => {
   };
 
   it("holds the removal until the member's keys load", async () => {
-    vi.spyOn(membersActions, "listMemberApiKeys").mockReturnValue(
-      new Promise<membersActions.MemberApiKey[]>(() => {})
-    );
+    stubDashboardFetch(() => new Promise<Response>(() => {}));
     const user = userEvent.setup();
     render(row("mem_test_keys_pending", "member"));
 
@@ -133,8 +141,7 @@ describe("MemberActions removal", () => {
   });
 
   it("removes anyway after the keys fail to load", async () => {
-    vi.spyOn(membersActions, "listMemberApiKeys").mockRejectedValue(new Error("unavailable"));
-    const remove = vi.spyOn(membersActions, "removeMember").mockResolvedValue(REFUSED);
+    const fetchMock = stubDashboardFetch(refused);
     const user = userEvent.setup();
     render(row("mem_test_keys_failed", "member"));
 
@@ -146,24 +153,55 @@ describe("MemberActions removal", () => {
       )
     ).toBeTruthy();
     await waitFor(() =>
-      expect(remove).toHaveBeenCalledWith("mem_test_keys_failed", expect.any(String))
+      expect(mutations(fetchMock)).toEqual([
+        {
+          path: "/api/dashboard/members/mem_test_keys_failed",
+          method: "DELETE",
+          idempotencyKey: expect.any(String),
+          body: undefined,
+        },
+      ])
     );
   });
 
-  it("re-reads the page at the live URL after a removal, keeping the Members tab", async () => {
+  it("lists the member's keys once they load, then removes and re-reads the Members tab", async () => {
     window.history.replaceState(null, "", MEMBERS_TAB_URL);
-    vi.spyOn(membersActions, "listMemberApiKeys").mockResolvedValue([]);
-    vi.spyOn(membersActions, "removeMember").mockResolvedValue({ status: "success" });
+    const keysAnswer = Promise.withResolvers<Response>();
+    const fetchMock = stubDashboardFetch(({ method }) =>
+      method === "GET"
+        ? keysAnswer.promise.then((response) => response.clone())
+        : new Response(null, { status: 204 })
+    );
     const user = userEvent.setup();
     render(row("mem_test_removed", "member"));
 
     const dialog = await openRemoval(user);
-    const confirm = dialog.getByRole("button", { name: "Remove member" });
-    await waitFor(() => expect(confirm.hasAttribute("disabled")).toBe(false));
-    await user.click(confirm);
+    expect(dialog.getByText("Checking the API keys this member created…")).toBeTruthy();
+    keysAnswer.resolve(
+      dashboardDataResponse(200, {
+        apiKeys: [
+          {
+            id: "key_test_1",
+            name: "Deploy bot",
+            keyPrefix: "sdp_test",
+            projectId: "prj_test_sandbox",
+            projectName: "Sandbox",
+            environment: "sandbox",
+            createdAt: "2026-10-01T00:00:00.000Z",
+          },
+        ],
+      })
+    );
+    expect(await dialog.findByText("Deploy bot")).toBeTruthy();
+    expect(dialog.queryByText("Checking the API keys this member created…")).toBeNull();
+    await user.click(dialog.getByRole("button", { name: "Remove member" }));
 
     await waitFor(() =>
       expect(dashboardRouter.replace).toHaveBeenCalledWith(MEMBERS_TAB_URL, { scroll: false })
     );
+    expect(sentDashboardRequests(fetchMock).map(({ method, path }) => [method, path])).toEqual([
+      ["GET", "/api/dashboard/members/mem_test_removed/api-keys"],
+      ["DELETE", "/api/dashboard/members/mem_test_removed"],
+    ]);
   });
 });

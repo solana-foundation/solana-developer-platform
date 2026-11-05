@@ -15,8 +15,9 @@ import { z } from "zod";
 import { RecordSection } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
 import { SdpTermsContent } from "@/components/sdp-terms-content";
 import { useTranslations } from "@/i18n/provider";
+import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
 import { useZodForm } from "@/lib/use-zod-form";
-import { notifyMainnetAccessAction, requestMainnetAccessAction } from "./mainnet-access-actions";
+import { notifyMainnetAccess, requestMainnetAccess } from "./mainnet-access";
 
 const COUNTRY_OPTIONS: readonly ComboboxOption[] = COUNTRIES.map((country) => {
   const flag = regionFlagEmoji(country.code);
@@ -36,6 +37,7 @@ const JURISDICTION_SCHEMA = z.object({
 const TERMS_SCHEMA = z.object({ accepted: z.boolean().refine((accepted) => accepted) });
 
 interface RequestProps {
+  organizationId: string;
   organizationName: string;
 }
 
@@ -74,6 +76,7 @@ export function MainnetAccessRequestHost({
  * the end and accepted. Nothing is sent until the last step, so closing early leaves no trace.
  */
 function MainnetAccessRequestModal({
+  organizationId,
   organizationName,
   onClose,
 }: RequestProps & { onClose: () => void }) {
@@ -91,7 +94,7 @@ function MainnetAccessRequestModal({
   const attempted = useRef(false);
   const close = () => {
     onClose();
-    if (attempted.current) router.refresh();
+    if (attempted.current) refreshKeepingDashboardUrl(router);
   };
 
   const steps = [t("Shared.mainnetAccess.stepJurisdiction"), t("Shared.mainnetAccess.stepTerms")];
@@ -106,7 +109,7 @@ function MainnetAccessRequestModal({
     if (!country.ok || !terms.validate().ok) return;
     setError(null);
     startSubmit(async () => {
-      const result = await requestMainnetAccessAction({
+      const result = await requestMainnetAccess(organizationId, {
         countryCode: country.data.countryCode,
         termsVersion: SDP_TERMS.version,
       });
@@ -115,8 +118,8 @@ function MainnetAccessRequestModal({
         setStep("sent");
       } else {
         setError(result.error);
-        router.refresh();
       }
+      refreshKeepingDashboardUrl(router);
     });
   };
 
@@ -374,7 +377,7 @@ function TermsStep({
 }
 
 /** Sends a recorded request whose email did not go out. */
-export function MainnetAccessResendButton() {
+export function MainnetAccessResendButton({ organizationId }: { organizationId: string }) {
   const t = useTranslations();
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -389,8 +392,8 @@ export function MainnetAccessResendButton() {
         onClick={() =>
           startResend(async () => {
             setError(null);
-            const result = await notifyMainnetAccessAction();
-            if (result.ok) router.refresh();
+            const result = await notifyMainnetAccess(organizationId);
+            if (result.ok) refreshKeepingDashboardUrl(router);
             else setError(result.error);
           })
         }

@@ -1,10 +1,7 @@
 import { RecordSection } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
 import { getTranslations } from "@/i18n/server";
-import {
-  loadOrganizationAlertEmails,
-  saveOrganizationAlertEmailsAction,
-} from "./organization-access-actions";
 import { OrganizationAlertEmailsSwitch } from "./organization-alert-emails-switch";
+import { loadOrganizationAlertEmails } from "./organization-settings-load";
 
 /**
  * Alert emails to the organization's admins (HOO-2299): one switch for all of them.
@@ -18,7 +15,7 @@ export async function OrganizationAlertEmailsSection() {
       {alertEmails.ok ? (
         <OrganizationAlertEmailsSwitch
           initialEnabled={alertEmails.enabled}
-          save={saveOrganizationAlertEmailsAction}
+          organizationId={alertEmails.organizationId}
         />
       ) : (
         <p className="text-body text-error" role="alert">

@@ -1,11 +1,11 @@
 import { RecordSection } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
-import { listMembers, type Member, type PendingInvitation } from "@/app/(session)/members/actions";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { formatDate } from "@/lib/date-format";
 import { readableApiError } from "@/lib/sdp-api-error";
 import { InviteMemberForm } from "./invite-member-form";
 import { resolveMemberIdentity } from "./member-identity";
 import { MembersDirectory } from "./members-directory";
+import { listMembers, type Member, type PendingInvitation } from "./members-load";
 import { MembersPagination } from "./members-pagination";
 
 export async function MembersSection({ page }: { page: number }) {
