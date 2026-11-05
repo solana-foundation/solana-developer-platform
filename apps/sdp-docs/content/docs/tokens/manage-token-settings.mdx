@@ -29,15 +29,15 @@ Review the token's authorities and configuration before you change them.
 
 Open the token. **Overview** shows its supply, identity and authorities.
 
-![Token detail Overview tab showing token address, mint authority, supply, template, and decimals](/images/tokens/token-settings-overview.png)
+![Overview tab with the issued supply, token details and Identity: mint address, token ID, authorities and signing wallet](/images/tokens/token-settings-overview.png)
 
 **Permissions** lists each authority with the wallet that holds it.
 
-![Permissions tab showing Mint Authority, Freeze Authority, Metadata Authority, and Permanent Delegate Authority with Edit buttons](/images/tokens/token-settings-permissions.png)
+![Permissions tab listing the mint authority, freeze authority, metadata authority and permanent delegate, each held by Treasury with Edit](/images/tokens/token-settings-permissions.png)
 
 Below them, **Extensions** shows the template and whether the token is freezable, pausable and mintable, has a permanent delegate, and uses an access list.
 
-![Extensions tab showing template, allowlist, mintable, freezable, and default account state settings](/images/tokens/token-settings-extensions.png)
+![Extensions below the authorities: the Stablecoin template, with freezable, allowlist, pausable, permanent delegate and mintable enabled](/images/tokens/token-settings-extensions.png)
 
 </Tab>
 <Tab value="API">
@@ -64,7 +64,7 @@ Move an authority to another wallet, to change who signs or to hand control to a
 
 On **Permissions**, click **Edit** beside the authority. Pick another wallet, or click **Use custom address** and enter a Solana address. Then click **Save authority**.
 
-![Mint Authority modal showing current authority wallet, new authority dropdown with controlled wallets, and Save authority button](/images/tokens/token-authority-edit.png)
+<img src="/docs/images/tokens/token-authority-edit.png" alt="Mint authority in edit mode with Payouts chosen as Holder, Use custom address and Save authority" width="552" height="276" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
 > SDP can't sign with an authority held outside SDP custody, and can't take it back. Its holder must move it to a custody wallet before SDP can run the operations it controls.
 

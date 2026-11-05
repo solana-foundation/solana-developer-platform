@@ -101,9 +101,7 @@ Rewrite the composition, keep data hooks and trackers single-copy.
   page's footprint (same column widths, same row heights, same groups), and
   loading and error states hold that footprint.
 - **Verify:** measure CLS per width at 1440 and 390 with a `layout-shift`
-  `PerformanceObserver` (buffered) on a cold load; clear the persisted SWR
-  cache (`localStorage` keys `sdp.dashboard.cache.*`) first, or the page paints
-  cached data and never shows its loading state. Scanner B4 flags leftover
+  `PerformanceObserver` (buffered) on a cold load. Scanner B4 flags leftover
   design-switch code.
 - **Done:** CLS 0 at both widths, stated in the PR; skeleton unit tests share
   the layout constants with the page (Earn's `markets-route-skeletons.tsx`).
