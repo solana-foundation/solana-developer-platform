@@ -69,11 +69,16 @@ export async function revokeRecordedClerkSessions(
       continue;
     }
     try {
-      const response = await fetch(`https://api.clerk.com/v1/sessions/${sessionId}/revoke`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${secretKey}` },
-        signal: AbortSignal.timeout(Math.min(REVOKE_REQUEST_TIMEOUT_MS, remaining)),
-      });
+      // The id comes from a file name this run wrote, already matched against
+      // SESSION_ID above; it is encoded too, so it can only ever be one path segment.
+      const response = await fetch(
+        `https://api.clerk.com/v1/sessions/${encodeURIComponent(sessionId)}/revoke`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${secretKey}` },
+          signal: AbortSignal.timeout(Math.min(REVOKE_REQUEST_TIMEOUT_MS, remaining)),
+        }
+      );
       // 404: Clerk no longer has the session, so there is nothing left to revoke.
       if (response.ok || response.status === 404) {
         revoked += 1;
