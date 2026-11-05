@@ -6,7 +6,8 @@ import { act } from "@testing-library/react";
 import { hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { SWRConfig } from "swr";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as dashboardWorkspace from "@/contexts/dashboard-workspace-context";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
@@ -17,12 +18,6 @@ import { PaymentRequestDetailWorkspace } from "./payment-request-detail-workspac
 import * as requestsData from "./payment-requests-page.data";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
-vi.mock("@/contexts/dashboard-workspace-context", () => ({
-  useDashboardWorkspace: () => ({
-    sdpEnvironment: "sandbox",
-    dashboardAccess: resolveDashboardAccess("admin"),
-  }),
-}));
 
 // 10:14 PM in UTC, the server's zone, and 4:14 PM in Chicago, the viewer's.
 const request: PaymentRequest = {
@@ -60,6 +55,15 @@ function page() {
     </SWRConfig>
   );
 }
+
+beforeEach(() => {
+  vi.mocked(vi.spyOn(dashboardWorkspace, "useDashboardWorkspace"), {
+    partial: true,
+  }).mockImplementation(() => ({
+    sdpEnvironment: "sandbox",
+    dashboardAccess: resolveDashboardAccess("admin"),
+  }));
+});
 
 afterEach(() => {
   act(() => root?.unmount());
