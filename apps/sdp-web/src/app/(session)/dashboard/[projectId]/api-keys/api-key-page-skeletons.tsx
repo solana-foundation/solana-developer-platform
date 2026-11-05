@@ -156,3 +156,11 @@ export function ApiKeyAuthoringSkeleton({ route }: { route: "api-key-new" | "api
     </div>
   );
 }
+
+export function NewApiKeySkeleton() {
+  return <ApiKeyAuthoringSkeleton route="api-key-new" />;
+}
+
+export function EditApiKeySkeleton() {
+  return <ApiKeyAuthoringSkeleton route="api-key-edit" />;
+}

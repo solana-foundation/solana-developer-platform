@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import useSWR, { useSWRConfig } from "swr";
 import { z } from "zod";
 import { accountQueryKeys } from "@/app/(session)/dashboard/[projectId]/account/account-query-key";
+import { AccountPageSkeleton } from "@/app/(session)/dashboard/[projectId]/operations-card-page-skeletons";
 import {
   RecordActionRow,
   RecordFacts,
@@ -30,7 +31,10 @@ const PASSWORD_SCHEMA = z.object({
 });
 
 export function AccountSecurity() {
-  const { user } = useUser();
+  const { isLoaded, user } = useUser();
+  if (!isLoaded) {
+    return <AccountPageSkeleton />;
+  }
   if (!user) {
     return null;
   }

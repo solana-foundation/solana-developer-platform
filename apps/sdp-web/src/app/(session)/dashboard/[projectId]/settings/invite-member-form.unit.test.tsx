@@ -3,18 +3,22 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { dashboardRequestUrl } from "@/lib/dashboard-request-key";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import {
   dashboardDataResponse,
   dashboardErrorResponse,
+  readsOf,
   sentDashboardRequests,
   stubDashboardFetch,
 } from "@/test/dashboard-fetch";
-import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { renderBesideReads } from "@/test/dashboard-reads";
 import { EnglishI18n } from "@/test/i18n";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { restoreWindowLocation } from "@/test/window-location";
 import { InviteMemberForm } from "./invite-member-form";
+import { membersQueryKeys } from "./members-query-key";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
@@ -70,7 +74,6 @@ describe("InviteMemberForm", () => {
     expect(keys[0]).toEqual(expect.any(String));
     expect(keys[1]).toBe(keys[0]);
     expect(keys[2]).not.toBe(keys[0]);
-    expect(dashboardRouter.replace).not.toHaveBeenCalled();
   });
 
   it("sends nothing for an empty address", async () => {
@@ -81,20 +84,24 @@ describe("InviteMemberForm", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("invites the normalized address, says the email went out, and keeps the Members tab", async () => {
-    const membersTabUrl = `/dashboard/${SANDBOX_PROJECT.id}/settings?tab=members`;
-    window.history.replaceState(null, "", membersTabUrl);
+  it("invites the normalized address, says the email went out, and re-reads the members", async () => {
+    const directory = membersQueryKeys.directory(
+      { projectId: SANDBOX_PROJECT.id, mode: "live" },
+      { page: 1 }
+    );
     const success = vi.spyOn(toast, "success");
     const fetchMock = stubDashboardFetch(() => created("inv_clerk_1"));
+    const user = userEvent.setup();
+    renderBesideReads(<InviteMemberForm />, [directory]);
+    await user.type(screen.getByRole("textbox", { name: "Email address" }), " Invitee@Example.com");
+    await user.click(screen.getByRole("button", { name: "Send invite" }));
 
-    await invite(" Invitee@Example.com");
-
-    await waitFor(() =>
-      expect(dashboardRouter.replace).toHaveBeenCalledWith(membersTabUrl, { scroll: false })
-    );
-    expect(sentDashboardRequests(fetchMock).map((request) => request.body)).toEqual([
-      { email: "invitee@example.com", role: "member" },
-    ]);
+    await waitFor(() => expect(readsOf(fetchMock, dashboardRequestUrl(directory))).toBe(2));
+    expect(
+      sentDashboardRequests(fetchMock)
+        .filter(({ method }) => method === "POST")
+        .map((request) => request.body)
+    ).toEqual([{ email: "invitee@example.com", role: "member" }]);
     expect(success).toHaveBeenCalledWith("Invitation sent to invitee@example.com.");
   });
 

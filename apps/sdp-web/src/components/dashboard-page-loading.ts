@@ -2,10 +2,12 @@
 
 import type { ComponentType } from "react";
 import DashboardLoading from "@/app/(session)/dashboard/[projectId]/(home)/loading";
-import AllowlistLoading from "@/app/(session)/dashboard/[projectId]/allowlist/loading";
-import ApiKeyEditLoading from "@/app/(session)/dashboard/[projectId]/api-keys/[keyId]/edit/loading";
-import { ApiKeysListSkeleton } from "@/app/(session)/dashboard/[projectId]/api-keys/api-key-page-skeletons";
-import ApiKeyNewLoading from "@/app/(session)/dashboard/[projectId]/api-keys/new/loading";
+import { AllowlistSkeleton } from "@/app/(session)/dashboard/[projectId]/allowlist/allowlist-skeleton";
+import {
+  ApiKeysListSkeleton,
+  EditApiKeySkeleton,
+  NewApiKeySkeleton,
+} from "@/app/(session)/dashboard/[projectId]/api-keys/api-key-page-skeletons";
 import { HeliusRingsSkeleton } from "@/app/(session)/dashboard/[projectId]/helius-rings/helius-rings-skeleton";
 import {
   IntegrationDetailSkeleton,
@@ -46,7 +48,7 @@ import {
   RecurringPaymentsPageSkeleton,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-route-skeletons";
 import PaymentRequestsLoading from "@/app/(session)/dashboard/[projectId]/payments/requests/loading";
-import TokenHoldingsLoading from "@/app/(session)/dashboard/[projectId]/tokens/loading";
+import { TokenHoldingsSkeleton } from "@/app/(session)/dashboard/[projectId]/tokens/holdings-skeleton";
 import {
   WalletDetailSkeleton,
   WalletSetupSkeleton,
@@ -80,7 +82,7 @@ function resolveCurrentPageLoadingComponent(
     case "private-channels-setup":
       return PrivateChannelsSetupSkeleton;
     case "token-holdings":
-      return TokenHoldingsLoading;
+      return TokenHoldingsSkeleton;
     case "wallets-overview":
       return WalletsOverviewSkeleton;
     case "wallet-setup":
@@ -138,9 +140,9 @@ function resolveCurrentPageLoadingComponent(
     case "api-keys-list":
       return ApiKeysListSkeleton;
     case "api-key-new":
-      return ApiKeyNewLoading;
+      return NewApiKeySkeleton;
     case "api-key-edit":
-      return ApiKeyEditLoading;
+      return EditApiKeySkeleton;
     case "settings":
       return SettingsPageSkeleton;
     case "account":
@@ -148,6 +150,6 @@ function resolveCurrentPageLoadingComponent(
     case "helius-rings":
       return HeliusRingsSkeleton;
     case "allowlist":
-      return AllowlistLoading;
+      return AllowlistSkeleton;
   }
 }

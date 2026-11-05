@@ -3,17 +3,25 @@ import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { parseAllowedIps } from "@/lib/ip-allowlist-input";
 
-/** The organization read; an absent allowlist is an unrestricted one. */
-export const organizationAllowlistSchema = z
+/** An absent allowlist is an unrestricted one. */
+export function allowedIpsOf(settings: { allowedIpAddresses?: string[] } | null): string[] {
+  return settings?.allowedIpAddresses ?? [];
+}
+
+/** An unset `alertEmails` means alert emails are on. */
+export function alertEmailsEnabledOf(settings: { alertEmails?: boolean } | null): boolean {
+  return settings?.alertEmails !== false;
+}
+
+const organizationAllowlistSchema = z
   .object({
     settings: z.object({ allowedIpAddresses: z.array(z.string()).optional() }).nullable(),
   })
-  .transform((organization) => organization.settings?.allowedIpAddresses ?? []);
+  .transform((organization) => allowedIpsOf(organization.settings));
 
-/** The organization read; an unset `alertEmails` means alert emails are on. */
-export const organizationAlertEmailsSchema = z
+const organizationAlertEmailsSchema = z
   .object({ settings: z.object({ alertEmails: z.boolean().optional() }).nullable() })
-  .transform((organization) => organization.settings?.alertEmails !== false);
+  .transform((organization) => alertEmailsEnabledOf(organization.settings));
 
 function saveResultSchema<TValue extends z.ZodType>(valueSchema: TValue) {
   return z.discriminatedUnion("ok", [

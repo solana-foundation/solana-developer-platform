@@ -9,15 +9,12 @@ const onboardingOrganizationSchema = z.object({
     .optional(),
 });
 
-/** The signed-in organization's SDP id, from the onboarding status. */
+/** The signed-in organization's SDP id from the onboarding status; null while it is not linked. */
 export async function resolveOrganizationId(
   client: Awaited<ReturnType<typeof createOrgSdpApiClient>>
-): Promise<string> {
+): Promise<string | null> {
   const onboarding = onboardingOrganizationSchema.parse(
     await client.fetch<unknown>("/v1/onboarding/status")
   );
-  if (!onboarding.linked || !onboarding.organization) {
-    throw new Error("Organization is not linked yet");
-  }
-  return onboarding.organization.id;
+  return onboarding.linked && onboarding.organization ? onboarding.organization.id : null;
 }

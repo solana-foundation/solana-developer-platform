@@ -1,18 +1,36 @@
 // @vitest-environment jsdom
+import type { OrganizationRole } from "@sdp/types/roles";
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { restoreWindowLocation } from "@/test/window-location";
 import { SettingsWorkspace } from "./settings-workspace";
 
-const workspace = vi.hoisted(() => ({ canManageOrgSettings: false }));
+const workspace = vi.hoisted((): { role: OrganizationRole } => ({ role: "member" }));
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
-  useDashboardWorkspace: () => ({
-    dashboardAccess: { capabilities: { canManageOrgSettings: workspace.canManageOrgSettings } },
-  }),
+  useDashboardWorkspace: () => ({ dashboardAccess: resolveDashboardAccess(workspace.role) }),
 }));
+vi.mock("@/components/dashboard-quick-start", () => ({
+  DashboardQuickStart: () => "[quick start]",
+}));
+vi.mock("./organization-details-section", () => ({
+  OrganizationDetailsSection: () => "[details]",
+}));
+vi.mock("./mainnet-access-section", () => ({ MainnetAccessSection: () => "[mainnet]" }));
+vi.mock("./organization-alert-emails-section", () => ({
+  OrganizationAlertEmailsSection: () => "[alert emails]",
+}));
+vi.mock("./leave-organization-section", () => ({ LeaveOrganizationSection: () => "[leave]" }));
+vi.mock("./members-section", () => ({ MembersSection: () => "[members]" }));
+vi.mock("./organization-access-section", () => ({
+  OrganizationAccessSection: () => "[allowlist]",
+}));
+
+const ADMIN_GENERAL = "[details][quick start][mainnet][alert emails]";
+const MEMBER_GENERAL = "[details][leave]";
 
 afterEach(() => {
   cleanup();
@@ -20,26 +38,19 @@ afterEach(() => {
 });
 
 describe("SettingsWorkspace", () => {
-  it.each<[string, boolean, string]>([
-    ["", true, "General panel"],
-    ["?tab=members", true, "Members panel"],
-    ["?tab=security", true, "Security panel"],
-    ["?tab=unknown", true, "General panel"],
-    ["", false, "General panel"],
-    ["?tab=members", false, "General panel"],
-    ["?tab=security", false, "General panel"],
-    ["?tab=unknown", false, "General panel"],
-  ])("shows '%s' to a person whose canManageOrgSettings is %s: %s", (query, canManage, shown) => {
+  it.each<[OrganizationRole, string, string]>([
+    ["admin", "", ADMIN_GENERAL],
+    ["admin", "?tab=members", "[members]"],
+    ["admin", "?tab=security", "[allowlist]"],
+    ["admin", "?tab=unknown", ADMIN_GENERAL],
+    ["member", "", MEMBER_GENERAL],
+    ["member", "?tab=members", MEMBER_GENERAL],
+    ["member", "?tab=security", MEMBER_GENERAL],
+  ])("shows SDP's %s role at '%s' the sections it holds: %s", (role, query, shown) => {
     window.history.replaceState(null, "", `/dashboard/${SANDBOX_PROJECT.id}/settings${query}`);
-    workspace.canManageOrgSettings = canManage;
+    workspace.role = role;
 
-    const { container } = render(
-      <SettingsWorkspace
-        general={<p>General panel</p>}
-        members={<p>Members panel</p>}
-        security={<p>Security panel</p>}
-      />
-    );
+    const { container } = render(<SettingsWorkspace />);
 
     expect(container.textContent).toBe(shown);
   });

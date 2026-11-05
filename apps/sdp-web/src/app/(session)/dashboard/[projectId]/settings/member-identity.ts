@@ -1,4 +1,4 @@
-import type { Member } from "./members-load";
+import type { Member } from "./members.data";
 
 /**
  * A misconfigured Clerk token customization can store an unsubstituted placeholder —

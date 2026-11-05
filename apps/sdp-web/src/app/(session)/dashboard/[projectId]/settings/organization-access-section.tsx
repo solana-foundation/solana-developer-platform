@@ -1,25 +1,41 @@
+"use client";
+
 import { RecordSection } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
-import { getTranslations } from "@/i18n/server";
+import { useTranslations } from "@/i18n/provider";
+import { useCurrentOrganization } from "./organization.data";
 import { OrganizationIpAllowlist } from "./organization-ip-allowlist";
-import { loadOrganizationIpAllowlist } from "./organization-settings-load";
+import {
+  SettingsLoadError,
+  SettingsRowsSkeleton,
+  useReadFailureText,
+} from "./settings-section-state";
 
 /** The organization-wide IP allowlist for its API keys. */
-export async function OrganizationAccessSection() {
-  const [t, allowlist] = await Promise.all([getTranslations(), loadOrganizationIpAllowlist()]);
+export function OrganizationAccessSection() {
+  const t = useTranslations();
+  const failureText = useReadFailureText();
+  const organization = useCurrentOrganization();
 
-  if (allowlist.ok) {
+  if (organization.data) {
     return (
       <OrganizationIpAllowlist
-        organizationId={allowlist.organizationId}
-        initialAllowedIps={allowlist.allowedIps}
+        organizationId={organization.data.id}
+        initialAllowedIps={organization.data.allowedIps}
       />
     );
   }
   return (
     <RecordSection id="api-access" title={t("Shared.organizationAccess.title")}>
-      <p className="text-body text-error" role="alert">
-        {t("Shared.organizationAccess.loadFailed", { error: allowlist.error })}
-      </p>
+      {organization.error ? (
+        <SettingsLoadError
+          message={t("Shared.organizationAccess.loadFailed", {
+            error: failureText(organization.error),
+          })}
+          onRetry={() => void organization.mutate()}
+        />
+      ) : (
+        <SettingsRowsSkeleton rows={2} />
+      )}
     </RecordSection>
   );
 }

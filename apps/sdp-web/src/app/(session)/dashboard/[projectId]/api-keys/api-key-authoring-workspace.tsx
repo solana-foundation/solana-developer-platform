@@ -12,9 +12,11 @@ import { CircleCheck, FileText, Globe, KeyRound, Layers, Search, Wallet } from "
 import { useRouter } from "next/navigation";
 import { type ReactNode, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { memberReads } from "@/app/(session)/dashboard/[projectId]/settings/members-query-key";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { invalidateQuickStartStatus } from "@/lib/dashboard-quick-start";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { parseAllowedIps } from "@/lib/ip-allowlist-input";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useStepFade } from "@/lib/use-step-fade";
@@ -31,6 +33,7 @@ import {
 } from "./api-key-authoring";
 import { grantSummaryLines, grantsSummaryLabel } from "./api-key-grant-labels";
 import { ApiKeyGrantPicker } from "./api-key-grant-picker";
+import { apiKeyReads } from "./api-keys-query-key";
 
 const API_KEYS_PATH = "/dashboard/api-keys";
 
@@ -583,6 +586,7 @@ export function ApiKeyAuthoringWorkspace({
   const t = useTranslations();
   const router = useRouter();
   const href = useProjectHref();
+  const invalidateReads = useInvalidateDashboardReads();
   const { sdpEnvironment, selectedProjectId } = useDashboardWorkspace();
   const [currentStep, setCurrentStep] = useState<ApiKeyAuthoringStep>("details");
   const [draft, setDraft] = useState(() => draftFromInitialKey(initialKey));
@@ -631,8 +635,9 @@ export function ApiKeyAuthoringWorkspace({
       if (mode === "create" && selectedProjectId) {
         invalidateQuickStartStatus();
       }
+      void invalidateReads(apiKeyReads);
+      void invalidateReads(memberReads);
       router.push(href(API_KEYS_PATH));
-      router.refresh();
     });
   };
 

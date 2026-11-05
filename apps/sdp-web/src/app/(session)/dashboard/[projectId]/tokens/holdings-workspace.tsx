@@ -1,6 +1,7 @@
 "use client";
 
 import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
+import { Button } from "@sdp/ui/button";
 import { Card, CardContent } from "@sdp/ui/card";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
@@ -10,11 +11,13 @@ import {
   formatDisplayAmount,
   resolveTransferTokenLabel,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
+import { useWalletAggregate } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
 import { TokenMark } from "@/components/token-mark";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { tokenActivityHref } from "./holdings-links";
 import { buildHoldingsRows } from "./holdings-rows";
+import { TokenHoldingsSkeleton } from "./holdings-skeleton";
 
 /**
  * Every token an organization holds.
@@ -23,7 +26,30 @@ import { buildHoldingsRows } from "./holdings-rows";
  * stays a summary, which left an organization holding a dozen tokens looking at a
  * count with nothing behind it. This is what that count opens, so it caps nothing.
  */
-export function HoldingsWorkspace({ balances }: { balances: CustodyWalletTokenBalance[] }) {
+export function HoldingsWorkspace() {
+  const t = useTranslations();
+  // Same aggregate the home page reads, so this page cannot disagree with the card it was opened
+  // from.
+  const aggregate = useWalletAggregate();
+  if (aggregate.data) {
+    return <HoldingsTable balances={aggregate.data.balances} />;
+  }
+  if (aggregate.error) {
+    return (
+      <div role="alert" className="flex flex-col items-start gap-3 py-10">
+        <p className="text-sm text-destructive-strong">
+          {t("Shared.homeWorkspace.holdingsUnavailable")}
+        </p>
+        <Button type="button" size="sm" onClick={() => void aggregate.mutate()}>
+          {t("Shared.tokenHoldings.retry")}
+        </Button>
+      </div>
+    );
+  }
+  return <TokenHoldingsSkeleton />;
+}
+
+function HoldingsTable({ balances }: { balances: CustodyWalletTokenBalance[] }) {
   const t = useTranslations();
   const locale = useLocale();
   const href = useProjectHref();

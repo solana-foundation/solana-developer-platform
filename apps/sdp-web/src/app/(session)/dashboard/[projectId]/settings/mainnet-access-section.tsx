@@ -1,3 +1,5 @@
+"use client";
+
 import { type CountryCode, countryByCode } from "@sdp/types/countries";
 import type { MainnetAccess } from "@sdp/types/mainnet-access";
 import { regionFlagEmoji } from "@sdp/types/payment-rails";
@@ -8,10 +10,16 @@ import {
   RecordStateBand,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
 import type { MessageKey } from "@/i18n/messages";
-import { getRequestLocale, getRequestTimeZone, getTranslations } from "@/i18n/server";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { formatDate } from "@/lib/date-format";
-import { loadMainnetAccess } from "./mainnet-access-load";
 import { MainnetAccessRequestHost, MainnetAccessResendButton } from "./mainnet-access-request";
+import { useCurrentOrganization, useMainnetAccess } from "./organization.data";
+import {
+  SettingsLoadError,
+  SettingsRowsSkeleton,
+  useReadFailureText,
+} from "./settings-section-state";
 
 function countryLabel(code: CountryCode): string {
   const { name } = countryByCode(code);
@@ -23,42 +31,48 @@ function countryLabel(code: CountryCode): string {
  * The organization's mainnet access (HOO-2427): a one-time request while it has none, and what
  * it declared and accepted once it asked. Changes go through the SDP alias, never this section.
  */
-export async function MainnetAccessSection() {
-  const [t, locale, timeZone, loaded] = await Promise.all([
-    getTranslations(),
-    getRequestLocale(),
-    getRequestTimeZone(),
-    loadMainnetAccess(),
-  ]);
+export function MainnetAccessSection() {
+  const t = useTranslations();
+  const locale = useLocale();
+  const timeZone = useTimeZone();
+  const failureText = useReadFailureText();
+  const organization = useCurrentOrganization();
+  const access = useMainnetAccess(organization.data ? organization.data.id : null);
 
-  if (!loaded.ok) {
+  if (organization.data && access.data) {
     return (
-      <RecordSection id="mainnet-access" title={t("Shared.mainnetAccess.title")}>
-        <p className="text-body text-error" role="alert">
-          {t("Shared.mainnetAccess.loadFailed", { error: loaded.error })}
-        </p>
-      </RecordSection>
+      <MainnetAccessRequestHost
+        canRequest={access.data.state === "not_requested" && access.data.available}
+        organizationId={organization.data.id}
+        organizationName={organization.data.name}
+        record={
+          <MainnetAccessRecord
+            organizationId={organization.data.id}
+            access={access.data}
+            locale={locale}
+            timeZone={timeZone}
+            t={t}
+          />
+        }
+      />
     );
   }
+  const failedRead = organization.error ? organization : access.error ? access : null;
   return (
-    <MainnetAccessRequestHost
-      canRequest={loaded.access.state === "not_requested" && loaded.access.available}
-      organizationId={loaded.organizationId}
-      organizationName={loaded.organizationName}
-      record={
-        <MainnetAccessRecord
-          organizationId={loaded.organizationId}
-          access={loaded.access}
-          locale={locale}
-          timeZone={timeZone}
-          t={t}
+    <RecordSection id="mainnet-access" title={t("Shared.mainnetAccess.title")}>
+      {failedRead?.error ? (
+        <SettingsLoadError
+          message={t("Shared.mainnetAccess.loadFailed", { error: failureText(failedRead.error) })}
+          onRetry={() => void failedRead.mutate()}
         />
-      }
-    />
+      ) : (
+        <SettingsRowsSkeleton rows={2} />
+      )}
+    </RecordSection>
   );
 }
 
-type Translate = Awaited<ReturnType<typeof getTranslations>>;
+type Translate = ReturnType<typeof useTranslations>;
 
 function MainnetAccessRecord({
   organizationId,

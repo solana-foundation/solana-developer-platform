@@ -5,9 +5,14 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { dashboardRequestUrl } from "@/lib/dashboard-request-key";
+import { dashboardDataResponse, readsOf, stubDashboardFetch } from "@/test/dashboard-fetch";
+import { resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { renderBesideReads } from "@/test/dashboard-reads";
+import { SANDBOX_PROJECT } from "@/test/projects";
 import * as mainnetAccess from "./mainnet-access";
 import { MainnetAccessRequestHost } from "./mainnet-access-request";
+import { organizationQueryKeys } from "./organization-query-key";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
@@ -18,17 +23,22 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
+
+const HOST = (
+  <MainnetAccessRequestHost
+    canRequest
+    organizationId="org_sdp"
+    organizationName="Acme"
+    record={null}
+  />
+);
 
 function renderHost() {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <MainnetAccessRequestHost
-        canRequest
-        organizationId="org_sdp"
-        organizationName="Acme"
-        record={null}
-      />
+      {HOST}
     </I18nProvider>
   );
 }
@@ -98,8 +108,13 @@ describe("MainnetAccessRequestHost", () => {
     async (result, shown) => {
       giveReaderOverflow();
       const request = vi.spyOn(mainnetAccess, "requestMainnetAccess").mockResolvedValue(result);
+      const currentOrganization = organizationQueryKeys.current({
+        projectId: SANDBOX_PROJECT.id,
+        mode: "live",
+      });
+      const fetchMock = stubDashboardFetch(() => dashboardDataResponse(200, {}));
       const user = userEvent.setup();
-      renderHost();
+      renderBesideReads(HOST, [currentOrganization]);
 
       await user.click(screen.getByRole("button", { name: "Request mainnet access" }));
       await user.click(screen.getByRole("button", { name: /Country or region/ }));
@@ -115,7 +130,9 @@ describe("MainnetAccessRequestHost", () => {
         countryCode: "SG",
         termsVersion: SDP_TERMS.version,
       });
-      expect(dashboardRouter.replace).toHaveBeenCalledOnce();
+      await waitFor(() =>
+        expect(readsOf(fetchMock, dashboardRequestUrl(currentOrganization))).toBe(2)
+      );
     }
   );
 });

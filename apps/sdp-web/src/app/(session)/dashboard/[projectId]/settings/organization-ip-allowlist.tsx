@@ -5,13 +5,13 @@ import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { Label } from "@sdp/ui/label";
 import { XIcon } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { type KeyboardEvent, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { RecordSection } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
 import { useTranslations } from "@/i18n/provider";
-import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { parseAllowedIps } from "@/lib/ip-allowlist-input";
+import { organizationReads } from "./organization-query-key";
 import { saveOrganizationIpAllowlist } from "./organization-settings";
 
 const FIELD_ID = "organization-allowed-ips";
@@ -31,7 +31,7 @@ export function OrganizationIpAllowlist({
   initialAllowedIps: string[];
 }) {
   const t = useTranslations();
-  const router = useRouter();
+  const invalidateReads = useInvalidateDashboardReads();
   const [entries, setEntries] = useState(initialAllowedIps);
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -86,8 +86,7 @@ export function OrganizationIpAllowlist({
       setDraft("");
       idempotencyKey.current = null;
       toast.success(t("Shared.organizationAccess.saved"));
-      // The tabs remount their panels from the page's server props, so those must hold the save.
-      refreshKeepingDashboardUrl(router);
+      void invalidateReads(organizationReads);
     });
   };
 

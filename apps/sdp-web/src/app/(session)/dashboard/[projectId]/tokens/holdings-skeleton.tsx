@@ -4,9 +4,6 @@ import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 
 // Mirrors the holdings table: a count line, then four right-aligned columns.
-// Without this the route fell through to the dashboard skeleton, which draws the
-// home page — a balance hero, an allocation bar and an activity table — none of
-// which this page renders.
 const HOLDING_ROW_IDS = [
   "holdings-skeleton-1",
   "holdings-skeleton-2",
@@ -16,7 +13,7 @@ const HOLDING_ROW_IDS = [
   "holdings-skeleton-6",
 ];
 
-export default function TokenHoldingsLoading() {
+export function TokenHoldingsSkeleton() {
   return (
     <div className="w-full space-y-4 py-2" data-loading-layout="token-holdings" aria-busy="true">
       <SkeletonBlock className="h-4 w-24 rounded-[4px]" />

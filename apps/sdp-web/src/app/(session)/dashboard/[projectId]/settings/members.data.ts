@@ -1,7 +1,10 @@
+"use client";
+
 import { MEMBER_STATUSES } from "@sdp/types/organizations";
 import { ORGANIZATION_ROLES } from "@sdp/types/roles";
 import { z } from "zod";
-import { createOrgSdpApiClient } from "@/lib/sdp-api";
+import { useDashboardKeyScope, useDashboardRead } from "@/lib/dashboard-swr";
+import { membersQueryKeys } from "./members-query-key";
 
 const memberSchema = z.object({
   id: z.string(),
@@ -35,19 +38,16 @@ const memberDirectorySchema = z.object({
 });
 
 export type Member = z.infer<typeof memberSchema>;
-export type PendingInvitation = z.infer<typeof pendingInvitationSchema>;
-type MemberDirectory = z.infer<typeof memberDirectorySchema>;
 
-const MEMBERS_PAGE_SIZE = 25;
+const memberDirectoryResponseSchema = z.object({ data: memberDirectorySchema });
 
-// Membership is organization-wide, so the list reads without a project.
-export async function listMembers(page: number): Promise<MemberDirectory> {
-  const client = await createOrgSdpApiClient();
-  const query = new URLSearchParams({
-    page: String(Math.max(1, page)),
-    pageSize: String(MEMBERS_PAGE_SIZE),
-  });
-  return memberDirectorySchema.parse(
-    await client.fetch<unknown>(`/v1/members?${query.toString()}`)
+/** The last page stays up while the next one loads. */
+export function useMembersDirectory(page: number) {
+  const scope = useDashboardKeyScope();
+  const response = useDashboardRead(
+    membersQueryKeys.directory(scope, { page }),
+    memberDirectoryResponseSchema,
+    { keepPreviousData: true }
   );
+  return { ...response, data: response.data?.data };
 }

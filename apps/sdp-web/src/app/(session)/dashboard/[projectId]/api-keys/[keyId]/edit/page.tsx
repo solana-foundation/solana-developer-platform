@@ -1,16 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import { grantableActionsInChannel } from "@/app/(session)/dashboard/[projectId]/api-keys/api-key-authoring";
-import {
-  fetchApiKeyAuthoringWallets,
-  fetchApiKeyForAuthoring,
-} from "@/app/(session)/dashboard/[projectId]/api-keys/api-key-authoring.data";
-import { ApiKeyAuthoringWorkspace } from "@/app/(session)/dashboard/[projectId]/api-keys/api-key-authoring-workspace";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { createSdpApiClient, requestMemberRole, requestProjectHref } from "@/lib/sdp-api";
-
-export const dynamic = "force-dynamic";
+import { requestMemberRole, requestProjectHref } from "@/lib/sdp-api";
+import { EditApiKeyWorkspace } from "./edit-api-key-workspace";
 
 export default async function EditApiKeyPage({ params }: { params: Promise<{ keyId: string }> }) {
   const [{ orgId }, { keyId }] = await Promise.all([auth(), params]);
@@ -20,22 +14,10 @@ export default async function EditApiKeyPage({ params }: { params: Promise<{ key
   if (!resolveDashboardAccess(await requestMemberRole()).capabilities.canManageApiKeys) {
     redirect(await requestProjectHref("/dashboard/api-keys"));
   }
-
-  const client = await createSdpApiClient();
-  const [apiKey, wallets] = await Promise.all([
-    fetchApiKeyForAuthoring(client, decodeURIComponent(keyId)),
-    fetchApiKeyAuthoringWallets(client),
-  ]);
-  if (!apiKey) {
-    notFound();
-  }
-
   return (
-    <ApiKeyAuthoringWorkspace
-      mode="edit"
-      wallets={wallets}
+    <EditApiKeyWorkspace
+      keyId={decodeURIComponent(keyId)}
       offeredActions={grantableActionsInChannel(isModuleInDeploymentReleaseChannel)}
-      initialKey={apiKey}
     />
   );
 }
