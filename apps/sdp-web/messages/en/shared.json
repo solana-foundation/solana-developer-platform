@@ -477,7 +477,6 @@
     "createFirstWalletBalances": "Create your first wallet to start tracking balances.",
     "noTrackedBalances": "No tracked balances found yet.",
     "activityUnavailable": "Activity is unavailable right now.",
-    "createFirstWalletActivity": "Create your first wallet to start tracking balances and activity.",
     "noRecentActivity": "No recent activity found yet.",
     "loadingRecentActivity": "Loading recent activity...",
     "createWallet": "Create a wallet",
