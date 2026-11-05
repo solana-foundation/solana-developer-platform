@@ -20,7 +20,7 @@ import {
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
-import { seedOrganization } from "@/test/helpers/organizations";
+import { organizationStatements } from "@/test/helpers/organizations";
 import { lastPrivyAdapter } from "@/test/helpers/privy-adapter";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
@@ -255,15 +255,13 @@ async function seedRouteState(): Promise<void> {
           (?, 'outsider@example.com', 1, 'active')`
       )
       .bind(ACTOR_USER_ID, RECIPIENT_USER_ID, OUTSIDER_USER_ID),
-  ]);
-  await seedOrganization(db, {
-    id: ORGANIZATION_ID,
-    name: "PC Transfer Org",
-    slug: "pc-transfer-org",
-    status: "active",
-    creator: { id: ACTOR_USER_ID, email: "actor@example.com" },
-  });
-  await db.batch([
+    ...organizationStatements(db, {
+      id: ORGANIZATION_ID,
+      name: "PC Transfer Org",
+      slug: "pc-transfer-org",
+      status: "active",
+      creator: { id: ACTOR_USER_ID, email: "actor@example.com" },
+    }),
     db
       .prepare(
         `INSERT INTO organization_members (id, organization_id, user_id, role, status)

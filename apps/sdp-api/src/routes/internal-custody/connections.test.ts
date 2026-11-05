@@ -13,7 +13,7 @@ import {
   type TestStoredProviderCredential,
 } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
-import { seedOrganization } from "@/test/helpers/organizations";
+import { organizationStatements } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -70,14 +70,14 @@ function buildApp(options: { injectJwt: boolean }) {
 
 async function seedScope(): Promise<void> {
   const db = getDb(env);
-  await seedOrganization(db, {
-    id: ORG.id,
-    name: "Connections Read",
-    slug: ORG.slug,
-    status: "active",
-    creator: USER,
-  });
   await db.batch([
+    ...organizationStatements(db, {
+      id: ORG.id,
+      name: "Connections Read",
+      slug: ORG.slug,
+      status: "active",
+      creator: USER,
+    }),
     db
       .prepare(
         `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
