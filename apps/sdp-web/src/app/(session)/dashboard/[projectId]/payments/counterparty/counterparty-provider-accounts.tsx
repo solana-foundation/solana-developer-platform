@@ -10,8 +10,8 @@ import { StatusText, type StatusTone } from "@sdp/ui/status-text";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { toTitleCase } from "@/app/(session)/dashboard/[projectId]/activity-format-utils";
-import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/custody/wallet-address-copy-button";
 import { formatDisplayAmount } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
+import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
 import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel } from "@/lib/ramps";
 
@@ -267,7 +267,7 @@ export function CounterpartyProviderAccounts({
           </StatusText>
         </p>
       ) : null}
-      <div className="overflow-x-auto refresh:-mx-3">
+      <div className="overflow-x-auto -mx-3">
         <Table className="min-w-[720px] table-fixed rounded-none border-0">
           <TableHeader>
             <TableRow>

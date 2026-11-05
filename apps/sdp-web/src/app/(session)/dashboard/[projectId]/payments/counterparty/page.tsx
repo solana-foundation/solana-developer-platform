@@ -1,8 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { paymentsPlaygroundHref } from "@/lib/payments-routes";
-import { requestProjectHref } from "@/lib/sdp-api";
 import {
   fetchCounterpartyDirectory,
   fetchProjectCounterpartyAccounts,
@@ -11,18 +9,10 @@ import { CounterpartyWorkspace } from "./counterparty-workspace";
 
 export const dynamic = "force-dynamic";
 
-export default async function CounterpartyPage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
+export default async function CounterpartyPage() {
   const { orgId } = await auth();
   if (!orgId) {
     redirect("/dashboard");
-  }
-  if ((await searchParams).tab === "playground") {
-    // The contact list no longer has a playground tab; its endpoints moved into the Payments one.
-    redirect(await requestProjectHref(paymentsPlaygroundHref("list-counterparties")));
   }
 
   return withDashboardPageTrace("dashboard.counterparty.page", async ({ trace, apiClient }) => {

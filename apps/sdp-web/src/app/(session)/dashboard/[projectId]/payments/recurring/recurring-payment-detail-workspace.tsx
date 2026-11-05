@@ -16,7 +16,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/custody/wallet-address-copy-button";
 import {
   formatDisplayAmount,
   isHttpUrl,
@@ -29,6 +28,7 @@ import {
   formatDecimalAmount,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
 import { usePaymentsActionWallets } from "@/app/(session)/dashboard/[projectId]/payments/ramps/hooks/use-payments-action-wallets";
+import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import {

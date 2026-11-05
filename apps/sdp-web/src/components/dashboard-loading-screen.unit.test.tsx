@@ -64,14 +64,14 @@ describe("DashboardLoadingScreen", () => {
     expect(transactions).not.toBe(policies);
   });
 
-  it("paints Helius Rings and the Members redirect with their own skeletons, not Home's", () => {
+  it("paints Helius Rings and Settings with their own skeletons, not Home's", () => {
     const helius = renderLoadingScreen("/dashboard/helius-rings");
-    const members = renderLoadingScreen("/dashboard/members");
+    const settings = renderLoadingScreen("/dashboard/settings");
 
     expect(helius).toContain('data-loading-layout="helius-rings"');
     expect(helius).not.toContain('data-loading-layout="home"');
-    expect(members).toContain('data-loading-layout="settings"');
-    expect(members).not.toContain('data-loading-layout="home"');
+    expect(settings).toContain('data-loading-layout="settings"');
+    expect(settings).not.toContain('data-loading-layout="home"');
   });
 
   it("holds the skeleton to the same content width the settled route uses", () => {
@@ -94,13 +94,13 @@ describe("DashboardLoadingScreen", () => {
     expect(markup).not.toContain("px-6 py-8");
   });
 
-  it("titles Helius Rings and the Members redirect instead of falling through to Home", () => {
+  it("titles Helius Rings and Settings instead of falling through to Home", () => {
     const t = identityTranslate;
 
     expect(getDashboardPageConfig("/dashboard/helius-rings", t).title).toBe(
       "Shared.dashboardShell.heliusRings"
     );
-    expect(getDashboardPageConfig("/dashboard/members", t).title).toBe(
+    expect(getDashboardPageConfig("/dashboard/settings", t).title).toBe(
       "Shared.organizationSettings.title"
     );
   });

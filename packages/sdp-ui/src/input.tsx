@@ -10,12 +10,10 @@ type InputProps = TextInputProps & {
 
 const DEFAULT_ICON_CLASS = "size-5 shrink-0 text-tertiary";
 
-// Filled by default; a refresh surface draws the same field as an underline (the scope zeroes
-// the radius, padding and focus ring through the design-system input tokens).
-const FILLED_FIELD_CLASS = cn(
-  "[&>span:first-child]:border-0 [&>span:first-child]:bg-fill-subtle",
-  "refresh:[&>span:first-child]:border-b-[length:var(--input-border-width)] refresh:[&>span:first-child]:bg-transparent"
-);
+// An underline field: the design-system input tokens zero the radius, padding and focus ring, and
+// the field draws only its bottom edge.
+const UNDERLINE_FIELD_CLASS =
+  "[&>span:first-child]:border-0 [&>span:first-child]:border-b-[length:var(--input-border-width)] [&>span:first-child]:bg-transparent";
 
 function withIconClass(node: ReactNode): ReactNode {
   if (!isValidElement<{ className?: string }>(node)) {
@@ -27,10 +25,10 @@ function withIconClass(node: ReactNode): ReactNode {
 }
 
 /**
- * Design-system TextInput with the borderless filled field style applied by default (an
- * underline inside a refresh surface); callers can override it through `className`.
+ * Design-system TextInput with the underline field style applied by default; callers can
+ * override it through `className`.
  *
- * @param props - TextInput props; `className` merges after the filled style so conflicting utilities win.
+ * @param props - TextInput props; `className` merges after the underline style so conflicting utilities win.
  * @returns The styled text input element.
  */
 function Input({
@@ -53,7 +51,7 @@ function Input({
 
   return (
     <TextInput
-      className={cn(FILLED_FIELD_CLASS, stripWrapperPadding(className))}
+      className={cn(UNDERLINE_FIELD_CLASS, stripWrapperPadding(className))}
       data-slot="input"
       size={size}
       iconLeft={withIconClass(iconLeft)}

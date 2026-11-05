@@ -33,7 +33,6 @@ export async function MembersSection({ page }: { page: number }) {
         <InviteMemberForm />
       </RecordSection>
 
-      {/* Anchored so the retired /dashboard/members route can deep-link here. */}
       <RecordSection id="members" title={t("Shared.members.title")}>
         {loadError ? (
           <p role="alert" className="text-body text-error">

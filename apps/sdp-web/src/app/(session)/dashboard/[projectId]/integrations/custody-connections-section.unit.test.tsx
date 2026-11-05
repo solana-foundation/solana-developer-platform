@@ -12,17 +12,17 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-vi.mock("@/app/(session)/dashboard/[projectId]/custody/wallet-address-copy-button", () => ({
+vi.mock("@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button", () => ({
   WalletAddressCopyButton: () => null,
   WalletMetadataCopyButton: () => null,
 }));
 
-vi.mock("@/app/(session)/dashboard/[projectId]/custody/wallet-provider-mark", () => ({
+vi.mock("@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark", () => ({
   WalletProviderMark: () => <span>Provider mark</span>,
 }));
 
 vi.mock(
-  "@/app/(session)/dashboard/[projectId]/custody/connections/use-selected-project-name",
+  "@/app/(session)/dashboard/[projectId]/wallets/connections/use-selected-project-name",
   () => ({
     useSelectedProjectName: () => "Acme Payments",
   })
@@ -32,7 +32,7 @@ import {
   type ConnectionsPageResult,
   type CustodyConnectionListItem,
   summarizeProviderConnections,
-} from "@/app/(session)/dashboard/[projectId]/custody/connections/connections.data";
+} from "@/app/(session)/dashboard/[projectId]/wallets/connections/connections.data";
 import { CustodyConnectionsSection } from "./custody-connections-section";
 
 function makeConnection(
