@@ -1,4 +1,4 @@
-import { INVITATION_STATUSES } from "@sdp/types/organizations";
+import { INVITATION_STATUSES, INVITEE_NOT_ALLOWED_REASON } from "@sdp/types/organizations";
 import { ORGANIZATION_ROLES } from "@sdp/types/roles";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -7,7 +7,11 @@ import { app } from "@/index";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import { readAuditActions } from "@/test/helpers/audit-logs";
 import { clerkHeaders } from "@/test/helpers/clerk";
-import { type ClerkBackend, stubClerkBackend } from "@/test/helpers/clerk-backend";
+import {
+  type ClerkBackend,
+  type ClerkBackendAnswer,
+  stubClerkBackend,
+} from "@/test/helpers/clerk-backend";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { readInvitationStatus, seedInvitation } from "@/test/helpers/invitations";
@@ -35,6 +39,13 @@ const CLERK_INVITATION_BODY = {
 const SEAT_HOLDERS = Array.from({ length: 18 }, (_, index) =>
   organizationMember(`invite_seat_${index}`, "member")
 );
+const CLERK_LIST_REQUEST = {
+  method: "GET",
+  path: `/organizations/${CLERK_ORG_ID}/invitations?status=pending&limit=100&offset=0`,
+  body: null,
+};
+const CLERK_SERVER_ERROR = { status: 500, body: { errors: [] } };
+const OTHER_TAGGED_INVITATION = { id: "orginv_invite_retry", sdpInvitationId: "inv_invite_retry" };
 
 const invitationRowSchema = z.object({
   id: z.string(),
@@ -72,6 +83,51 @@ async function invitationRows() {
       await getDb(env).queryMany(
         "SELECT id, email, role, status, expires_at, clerk_invitation_id FROM invitations WHERE organization_id = ? ORDER BY created_at, id",
         [ORGANIZATION.id]
+      )
+    );
+}
+
+function clerkCreateRequest(sdpInvitationId: string) {
+  return {
+    method: "POST",
+    path: `/organizations/${CLERK_ORG_ID}/invitations`,
+    body: { ...CLERK_INVITATION_BODY, private_metadata: { sdpInvitationId } },
+  };
+}
+
+function clerkPendingList(
+  tagged: Array<{ id: string; sdpInvitationId: string }>
+): ClerkBackendAnswer {
+  return {
+    status: 200,
+    body: {
+      data: tagged.map(({ id, sdpInvitationId }) => ({
+        id,
+        email_address: INVITEE_EMAIL,
+        status: "pending",
+        private_metadata: { sdpInvitationId },
+      })),
+    },
+  };
+}
+
+function answerOnCreate(answers: (sdpInvitationId: string) => ClerkBackendAnswer[]) {
+  const createInvitation = ClerkOrganizationsService.prototype.createOrganizationInvitation;
+  vi.spyOn(ClerkOrganizationsService.prototype, "createOrganizationInvitation").mockImplementation(
+    async function (this: ClerkOrganizationsService, params) {
+      clerk.answer(...answers(params.sdpInvitationId));
+      return createInvitation.call(this, params);
+    }
+  );
+}
+
+async function invitationAuditEntries(invitationId: string) {
+  return z
+    .array(z.object({ action: z.string(), status: z.string(), clerk_code: z.string().nullable() }))
+    .parse(
+      await getDb(env).queryMany(
+        "SELECT action, status, metadata::jsonb ->> 'clerkCode' AS clerk_code FROM audit_logs WHERE resource_type = 'invitation' AND resource_id = ? ORDER BY ledger_sequence",
+        [invitationId]
       )
     );
 }
@@ -120,16 +176,10 @@ describe("POST /v1/members/invite", () => {
     const after = Date.now();
 
     expect(response.status).toBe(201);
-    expect(clerk.requests).toEqual([
-      {
-        method: "POST",
-        path: `/organizations/${CLERK_ORG_ID}/invitations`,
-        body: CLERK_INVITATION_BODY,
-      },
-    ]);
     const rows = await invitationRows();
     expect(rows).toHaveLength(1);
     const [row] = rows;
+    expect(clerk.requests).toEqual([clerkCreateRequest(row.id)]);
     expect(row).toMatchObject({
       email: INVITEE_EMAIL,
       role: "admin",
@@ -273,7 +323,7 @@ describe("POST /v1/members/invite", () => {
     });
   });
 
-  it("answers a Clerk failure with the generic internal error, never Clerk's own text", async () => {
+  it("fails the claimed invitation and audits Clerk's code when Clerk refuses it, answering the generic internal error", async () => {
     clerk.answer({
       status: 422,
       body: { errors: [{ code: "form_param_format_invalid", long_message: "Clerk says no" }] },
@@ -286,20 +336,94 @@ describe("POST /v1/members/invite", () => {
       error: { code: "INTERNAL_ERROR", message: "An internal error occurred" },
       meta: { requestId: expect.any(String) },
     });
+    const rows = await invitationRows();
+    expect(rows.map((row) => row.status)).toEqual(["failed"]);
+    expect(clerk.requests).toEqual([clerkCreateRequest(rows[0].id)]);
+    expect(await invitationAuditEntries(rows[0].id)).toEqual([
+      { action: "invite", status: "success", clerk_code: null },
+      { action: "invite", status: "failure", clerk_code: "form_param_format_invalid" },
+    ]);
   });
 
-  it("keeps the claimed invitation pending with no Clerk id when Clerk refuses it", async () => {
-    clerk.answer({ status: 500, body: { errors: [] } });
+  it("fails the claimed invitation and answers 400 when Clerk's restrictions do not admit the address", async () => {
+    clerk.answer({
+      status: 403,
+      body: { errors: [{ code: "not_allowed_access", long_message: "Clerk says no" }] },
+    });
+
+    const response = await invite(INVITEE_EMAIL);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "BAD_REQUEST",
+        message: "This email's domain isn't approved yet. Contact us to get it added.",
+        details: { reason: INVITEE_NOT_ALLOWED_REASON },
+      },
+      meta: { requestId: expect.any(String) },
+    });
+    const rows = await invitationRows();
+    expect(rows.map((row) => row.status)).toEqual(["failed"]);
+    expect(clerk.requests).toEqual([clerkCreateRequest(rows[0].id)]);
+  });
+
+  it("adopts the Clerk invitation tagged with its id when Clerk answers 5xx to the create", async () => {
+    answerOnCreate((sdpInvitationId) => [
+      CLERK_SERVER_ERROR,
+      clerkPendingList([OTHER_TAGGED_INVITATION, { id: CLERK_INVITATION_ID, sdpInvitationId }]),
+    ]);
+
+    const response = await invite(INVITEE_EMAIL);
+
+    expect(response.status).toBe(201);
+    const [row] = await invitationRows();
+    expect(row).toMatchObject({ status: "pending", clerk_invitation_id: CLERK_INVITATION_ID });
+    expect(clerk.requests).toEqual([clerkCreateRequest(row.id), CLERK_LIST_REQUEST]);
+    expect(await response.json()).toEqual({
+      data: {
+        invitation: {
+          id: row.id,
+          email: INVITEE_EMAIL,
+          role: "admin",
+          expiresAt: row.expires_at,
+          clerkInvitationId: CLERK_INVITATION_ID,
+        },
+      },
+      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+    });
+  });
+
+  it("fails the claimed invitation when Clerk answers 5xx and lists no invitation tagged with its id", async () => {
+    answerOnCreate(() => [CLERK_SERVER_ERROR, clerkPendingList([OTHER_TAGGED_INVITATION])]);
 
     expect((await invite(INVITEE_EMAIL)).status).toBe(500);
-    expect(clerk.requests).toHaveLength(1);
-    expect(await invitationRows()).toEqual([
-      expect.objectContaining({
-        email: INVITEE_EMAIL,
-        status: "pending",
-        clerk_invitation_id: null,
-      }),
+    const rows = await invitationRows();
+    expect(rows).toEqual([
+      expect.objectContaining({ status: "failed", clerk_invitation_id: null }),
     ]);
+    expect(clerk.requests).toEqual([clerkCreateRequest(rows[0].id), CLERK_LIST_REQUEST]);
+  });
+
+  it("fails the claimed invitation when the Clerk call times out and Clerk cannot list its invitations", async () => {
+    vi.spyOn(ClerkOrganizationsService.prototype, "createOrganizationInvitation").mockRejectedValue(
+      new DOMException("The operation timed out", "TimeoutError")
+    );
+    clerk.answer(CLERK_SERVER_ERROR);
+
+    expect((await invite(INVITEE_EMAIL)).status).toBe(500);
+    expect(clerk.requests).toEqual([CLERK_LIST_REQUEST]);
+    expect((await invitationRows()).map((row) => row.status)).toEqual(["failed"]);
+  });
+
+  it("invites again an address whose last invitation failed", async () => {
+    clerk.answer(
+      { status: 422, body: { errors: [{ code: "form_param_format_invalid" }] } },
+      { status: 200, body: { id: CLERK_INVITATION_ID, status: "pending" } }
+    );
+
+    expect((await invite(INVITEE_EMAIL)).status).toBe(500);
+    expect((await invite(INVITEE_EMAIL)).status).toBe(201);
+    expect((await invitationRows()).map((row) => row.status).sort()).toEqual(["failed", "pending"]);
   });
 
   it("withdraws the Clerk invitation it created when the invitation was revoked while Clerk was inviting", async () => {
@@ -326,12 +450,9 @@ describe("POST /v1/members/invite", () => {
       error: { code: "CONFLICT", message: "The invitation was revoked while it was being sent" },
       meta: { requestId: expect.any(String) },
     });
+    const [revoked] = await invitationRows();
     expect(clerk.requests).toEqual([
-      {
-        method: "POST",
-        path: `/organizations/${CLERK_ORG_ID}/invitations`,
-        body: CLERK_INVITATION_BODY,
-      },
+      clerkCreateRequest(revoked.id),
       {
         method: "POST",
         path: `/organizations/${CLERK_ORG_ID}/invitations/${CLERK_INVITATION_ID}/revoke`,
@@ -364,14 +485,8 @@ describe("POST /v1/members/invite", () => {
     const response = await invite(INVITEE_EMAIL);
 
     expect(response.status).toBe(201);
-    expect(clerk.requests).toEqual([
-      {
-        method: "POST",
-        path: `/organizations/${CLERK_ORG_ID}/invitations`,
-        body: CLERK_INVITATION_BODY,
-      },
-    ]);
     const [row] = await invitationRows();
+    expect(clerk.requests).toEqual([clerkCreateRequest(row.id)]);
     expect(row.status).toBe("accepted");
     expect(await response.json()).toEqual({
       data: {

@@ -30,6 +30,7 @@ import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
@@ -101,9 +102,9 @@ const DAY_MS = 86_400_000;
  * When the latest payment went out, in days as the design reads it ("2 days ago", "yesterday");
  * past a month the date says it better.
  */
-function lastPaidLabel(iso: string, locale: string): string {
+function lastPaidLabel(iso: string, locale: string, timeZone: string): string {
   const days = Math.round((new Date(iso).getTime() - Date.now()) / DAY_MS);
-  if (Math.abs(days) > 30) return formatDate(iso, locale) ?? iso;
+  if (Math.abs(days) > 30) return formatDate(iso, locale, timeZone) ?? iso;
   return new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(days, "day");
 }
 
@@ -175,6 +176,7 @@ function ContactRecord({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const summary = summarizePayouts(payouts);
   // Only the latest payouts were read (the cap, or a later page failed): older ones are not in
   // the total.
@@ -203,7 +205,7 @@ function ContactRecord({
           )}
         </DetailRow>
         <DetailRow label={t("DashboardPayments.counterparty.createdLabel")}>
-          {formatDate(counterparty.createdAt, locale)}
+          {formatDate(counterparty.createdAt, locale, timeZone)}
         </DetailRow>
       </DetailList>
       <DetailList>
@@ -222,8 +224,8 @@ function ContactRecord({
           {summary.lastPaidAt === undefined ? (
             notPaid(t("DashboardPayments.counterparty.detail.neverPaid"))
           ) : (
-            <span title={formatDateTime(summary.lastPaidAt, locale) ?? undefined}>
-              {lastPaidLabel(summary.lastPaidAt, locale)}
+            <span title={formatDateTime(summary.lastPaidAt, locale, timeZone) ?? undefined}>
+              {lastPaidLabel(summary.lastPaidAt, locale, timeZone)}
             </span>
           )}
         </DetailRow>
@@ -240,6 +242,7 @@ function ContactRecord({
 function AddressesTable({ accounts }: { accounts: CounterpartyAccount[] }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   return (
     <div className="overflow-x-auto -mx-3">
       <Table className="min-w-[35rem] table-fixed rounded-none border-0">
@@ -275,7 +278,7 @@ function AddressesTable({ accounts }: { accounts: CounterpartyAccount[] }) {
                 </span>
               </TableCell>
               <TableCell className="text-body whitespace-nowrap text-secondary tabular-nums">
-                {formatDate(account.createdAt, locale)}
+                {formatDate(account.createdAt, locale, timeZone)}
               </TableCell>
             </TableRow>
           ))}
@@ -384,6 +387,7 @@ function PaymentsTable({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   return (
     <div className="overflow-x-auto -mx-3">
       <Table className="min-w-[45rem] table-fixed rounded-none border-0">
@@ -439,7 +443,7 @@ function PaymentsTable({
                   {wallet ? <span title={wallet}>{shortenAddress(wallet)}</span> : "—"}
                 </TableCell>
                 <TableCell className="text-body whitespace-nowrap text-secondary">
-                  {formatDateTime(transfer.createdAt, locale)}
+                  {formatDateTime(transfer.createdAt, locale, timeZone)}
                 </TableCell>
               </TableRow>
             );

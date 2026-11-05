@@ -8,7 +8,7 @@ import {
   RecordStateBand,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
 import type { MessageKey } from "@/i18n/messages";
-import { getRequestLocale, getTranslations } from "@/i18n/server";
+import { getRequestLocale, getRequestTimeZone, getTranslations } from "@/i18n/server";
 import { formatDate } from "@/lib/date-format";
 import { loadMainnetAccess } from "./mainnet-access-load";
 import { MainnetAccessRequestHost, MainnetAccessResendButton } from "./mainnet-access-request";
@@ -24,9 +24,10 @@ function countryLabel(code: CountryCode): string {
  * it declared and accepted once it asked. Changes go through the SDP alias, never this section.
  */
 export async function MainnetAccessSection() {
-  const [t, locale, loaded] = await Promise.all([
+  const [t, locale, timeZone, loaded] = await Promise.all([
     getTranslations(),
     getRequestLocale(),
+    getRequestTimeZone(),
     loadMainnetAccess(),
   ]);
 
@@ -49,6 +50,7 @@ export async function MainnetAccessSection() {
           organizationId={loaded.organizationId}
           access={loaded.access}
           locale={locale}
+          timeZone={timeZone}
           t={t}
         />
       }
@@ -62,15 +64,19 @@ function MainnetAccessRecord({
   organizationId,
   access,
   locale,
+  timeZone,
   t,
 }: {
   organizationId: string;
   access: MainnetAccess;
   locale: string;
+  timeZone: string;
   t: Translate;
 }) {
   const unsent = access.state === "pending" && access.request?.notified === false;
-  const requestedOn = access.request ? formatDate(locale, access.request.requestedAt) : null;
+  const requestedOn = access.request
+    ? formatDate(locale, timeZone, access.request.requestedAt)
+    : null;
   return (
     <>
       {unsent ? (

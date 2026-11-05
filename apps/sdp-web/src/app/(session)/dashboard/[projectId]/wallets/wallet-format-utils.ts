@@ -36,14 +36,15 @@ export function formatWalletMeta(value: string, start = 8, end = 6): string {
 }
 
 /**
- * A creation date, rendered identically on the server and in the browser.
+ * A creation date, the day it was in the viewer's zone. Returns the raw value for an
+ * unparseable date rather than "Invalid Date".
  *
- * `timeZone` is pinned rather than left to the environment: otherwise the
- * server formats in its zone and the viewer's browser in theirs, and the two
- * disagree often enough — anywhere near midnight UTC — to trip hydration.
- * Returns the raw value for an unparseable date rather than "Invalid Date".
+ * @param value - ISO timestamp.
+ * @param locale - Formatting locale.
+ * @param timeZone - The viewer's zone, from `useTimeZone`, so the server and the browser agree.
+ * @returns The formatted date, or the value itself when it does not parse.
  */
-export function formatCreatedDate(value: string, locale: string): string {
+export function formatCreatedDate(value: string, locale: string, timeZone: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return value;
@@ -53,7 +54,7 @@ export function formatCreatedDate(value: string, locale: string): string {
     month: "short",
     day: "2-digit",
     year: "numeric",
-    timeZone: "UTC",
+    timeZone,
   });
 }
 

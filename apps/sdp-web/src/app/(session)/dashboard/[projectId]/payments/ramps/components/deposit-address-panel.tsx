@@ -42,6 +42,7 @@ import { fetchTransfers } from "@/app/(session)/dashboard/[projectId]/payments/p
 import { usePaymentsActionWallets } from "@/app/(session)/dashboard/[projectId]/payments/ramps/hooks/use-payments-action-wallets";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { RECENT_DEPOSIT_COLUMN_WIDTHS } from "./recent-deposit-columns";
@@ -308,6 +309,7 @@ function RecentDeposits({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const href = useProjectHref();
   let body: ReactNode;
   if (depositsError) {
@@ -367,7 +369,7 @@ function RecentDeposits({
                 </TableCell>
                 <TableCell className="truncate text-body text-primary">{contact ?? "—"}</TableCell>
                 <TableCell className="truncate text-body text-secondary">
-                  {formatDate(deposit.createdAt, locale)}
+                  {formatDate(deposit.createdAt, locale, timeZone)}
                 </TableCell>
               </TableRow>
             );
@@ -416,6 +418,7 @@ export function DepositAddressPanel({
   // Wallet setup is for custody managers; anyone else gets the empty state alone.
   const canManageCustody = useDashboardWorkspace().dashboardAccess.capabilities.canManageCustody;
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const href = useProjectHref();
   const cluster = useSolanaCluster();
   const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
@@ -507,7 +510,7 @@ export function DepositAddressPanel({
               <span className="text-tertiary">
                 {lastDeposit
                   ? t("DashboardPayments.depositAddress.lastDeposit", {
-                      date: formatDate(lastDeposit, locale) ?? "",
+                      date: formatDate(lastDeposit, locale, timeZone) ?? "",
                     })
                   : t("DashboardPayments.depositAddress.nothingYet")}
               </span>

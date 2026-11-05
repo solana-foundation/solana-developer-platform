@@ -16949,7 +16949,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/estimate-payment
 
 `POST /v1/payments/transfer-batches/estimate`
 
-`warnings` lists what would make the batch fail: a native SOL amount below the rent-exempt minimum sent to an address with no account, or a source wallet left below the minimum; create refuses those with 409 `AMOUNT_BELOW_RENT_MINIMUM`.
+`warnings` lists what would make the batch fail: a native SOL amount below the rent-exempt minimum sent to an address with no account, or a source wallet left below the minimum; create refuses those with 409 `AMOUNT_BELOW_RENT_MINIMUM`. Returns 503 `ESTIMATE_NOT_AVAILABLE` when Solana RPC cannot price a chunk's fee; the estimate stores nothing, so retry it.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `transfer_batches.read` action.
 
@@ -17136,6 +17136,10 @@ Estimate transaction chunking and fees for a transfer batch.
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -37078,10 +37082,14 @@ A worker that checks each open order's wallet on every tick:
 <Tab value="TypeScript">
 ```typescript title="reconcile-tick.ts"
 // Observed reads have their own quota (30 a minute per API key), and each
-// page is one read, so keep the pages polled per minute under it.
+// page is one read. Past it, the worker waits out Retry-After and reads the
+// same page again, so no order is skipped.
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function reconcileTick(openOrders: Order[]) {
   orders: for (const order of openOrders) {
-    for (let page = 1; ; page++) {
+    let page = 1;
+    while (true) {
       const url = new URL("https://api.solana.com/v1/payments/transfers");
       url.searchParams.set("custodyWalletId", order.custodyWalletId);
       url.searchParams.set("includeObserved", "true");
@@ -37092,7 +37100,10 @@ async function reconcileTick(openOrders: Order[]) {
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${process.env.SDP_API_KEY}` },
       });
-      if (res.status === 429) return; // over the quota: resume after Retry-After
+      if (res.status === 429) {
+        await sleep(Number(res.headers.get("Retry-After")) * 1000);
+        continue; // the same page again
+      }
       const { data, meta } = await res.json();
 
       for (const tr of data) {
@@ -37104,6 +37115,7 @@ async function reconcileTick(openOrders: Order[]) {
         continue orders; // paid: apply it once, then move to the next order
       }
       if (!meta.hasMore) break;
+      page++;
     }
   }
 }

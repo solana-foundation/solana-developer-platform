@@ -24,7 +24,6 @@ export type ErrorCode =
   | "EXPIRED_API_KEY"
   | "REVOKED_API_KEY"
   | "INSUFFICIENT_PERMISSIONS"
-  | "OPERATION_NOT_ALLOWED"
   | "INVALID_TOKEN"
   // Token issuance errors
   | "TOKEN_NOT_FOUND"
@@ -96,7 +95,6 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   EXPIRED_API_KEY: 401,
   REVOKED_API_KEY: 401,
   INSUFFICIENT_PERMISSIONS: 403,
-  OPERATION_NOT_ALLOWED: 403,
   INVALID_TOKEN: 401,
   // Token issuance errors
   TOKEN_NOT_FOUND: 404,
@@ -169,7 +167,6 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   EXPIRED_API_KEY: "API key has expired",
   REVOKED_API_KEY: "API key has been revoked",
   INSUFFICIENT_PERMISSIONS: "Insufficient permissions for this action",
-  OPERATION_NOT_ALLOWED: "Operation not allowed for this API key",
   INVALID_TOKEN: "Invalid or expired token",
   // Token issuance errors
   TOKEN_NOT_FOUND: "Token not found",
@@ -231,6 +228,13 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
 export function isErrorCode(value: unknown): value is ErrorCode {
   return typeof value === "string" && Object.hasOwn(ERROR_STATUS_CODES, value);
 }
+
+/**
+ * Every `ErrorCode`, in `ERROR_STATUS_CODES` order. The OpenAPI error envelope
+ * lists exactly these, so a code added here is documented with no second list.
+ */
+export const ERROR_CODES: readonly ErrorCode[] =
+  Object.keys(ERROR_STATUS_CODES).filter(isErrorCode);
 
 export class AppError extends Error {
   public readonly code: ErrorCode;
