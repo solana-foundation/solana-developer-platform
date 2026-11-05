@@ -9,7 +9,7 @@ import type {
 import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { paymentTransferReads } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import { moneyMovementReads } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import { simulateSandboxTransfer } from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
 import { rampTransferPollInterval } from "@/app/(session)/dashboard/[projectId]/payments/ramps/ramp-phase";
 import { getRampTransferState } from "@/app/(session)/dashboard/[projectId]/payments/ramps/ramp-transfer-state";
@@ -195,7 +195,8 @@ export function useOnrampWizard(props: UseRampWizardProps) {
 
     try {
       await simulateSandboxTransfer({ transferId }, t);
-      void invalidateReads(paymentTransferReads);
+      // The simulated funding credits the wallet, so balances change with the transfer.
+      void invalidateReads(moneyMovementReads);
       setQuoteSimulationSucceeded(true);
       toast.success(t("DashboardPayments.ramps.quoteFundingSimulated"), {
         id: toastId,

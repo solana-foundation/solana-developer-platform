@@ -1032,6 +1032,8 @@
       "nextPayment": "Next payment",
       "counterpartyUnavailable": "Counterparty unavailable",
       "counterpartyArchived": "Archived counterparty",
+      "counterpartyLoading": "Loading…",
+      "invalidId": "Invalid schedule ID.",
       "loadFailedDescription": "The schedule did not load. Nothing was changed.",
       "historyUnavailable": "The run history did not load.",
       "walletsUnavailable": "Wallet names could not be loaded.",

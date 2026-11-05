@@ -57,6 +57,10 @@ export const counterpartyReads = readsUnderPath("/api/dashboard/counterparty");
 export const isCounterpartyReadKey = (key: Arguments) =>
   isDashboardRequestKey(key) && counterpartyReads(key);
 
+/** {@link paymentRequestReads} for an SWR filter, which hands it every key in the cache. */
+export const isPaymentRequestReadKey = (key: Arguments) =>
+  isDashboardRequestKey(key) && paymentRequestReads(key);
+
 const COUNTERPARTY_ACCOUNTS_PAGE_SIZE = 100;
 
 /** One requirements corridor: the contact, the provider and direction, and what moves. */

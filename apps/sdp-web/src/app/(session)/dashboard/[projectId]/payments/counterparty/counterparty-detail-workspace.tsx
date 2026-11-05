@@ -44,7 +44,11 @@ import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
-import { type DashboardRequestKey, dashboardRequestKey } from "@/lib/dashboard-request-key";
+import {
+  type DashboardRequestKey,
+  dashboardRequestKey,
+  readsUnderPath,
+} from "@/lib/dashboard-request-key";
 import {
   readDashboardRequest,
   useDashboardKeyScope,
@@ -575,8 +579,13 @@ export function CounterpartyDetailWorkspace({
     toast.success(t("DashboardPayments.counterparty.deleted", { name: counterparty.displayName }), {
       position: "bottom-right",
     });
-    void invalidateReads(counterpartyReads);
     router.push(href("/dashboard/payments/counterparty"));
+    // This page's own reads are left alone: refetched while it is still on screen, the deleted
+    // contact would answer 404 and flash not-found before the list replaces it.
+    const ownReads = readsUnderPath(
+      `/api/dashboard/counterparty/${encodeURIComponent(counterparty.id)}`
+    );
+    void invalidateReads((key) => counterpartyReads(key) && !ownReads(key));
   }
 
   const addAddressButton = canWrite ? (

@@ -33,6 +33,7 @@ import {
   formatDecimalAmount,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
 import {
+  moneyMovementReads,
   paymentsQueryKeys,
   recurringPaymentReads,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
@@ -107,6 +108,16 @@ interface RecurringPaymentDetailWorkspaceProps {
   collectionAttempts: PaymentSubscriptionCollectionAttempt[];
   collectionAttemptsTotal: number;
   collectionAttemptsError?: string;
+}
+
+/**
+ * What a schedule action changes: the schedule always, and the money reads too when the action can
+ * start a collection (activating, collecting, resuming), since a collection moves funds.
+ */
+function actionReads(action: RecurringPaymentAction): (key: DashboardRequestKey) => boolean {
+  return action === "cancel"
+    ? recurringPaymentReads
+    : (key) => recurringPaymentReads(key) || moneyMovementReads(key);
 }
 
 interface DetailActionError {
@@ -899,9 +910,9 @@ export function RecurringPaymentDetailWorkspace({
     try {
       await runRecurringPaymentAction(recurringPayment.id, action, undefined, t);
       toast.success(actionSuccessLabel(action, t), { id: toastId, position: "bottom-right" });
-      void invalidateReads(recurringPaymentReads);
+      void invalidateReads(actionReads(action));
     } catch (error) {
-      refreshIfOutcomeUnknown(error, () => void invalidateReads(recurringPaymentReads));
+      refreshIfOutcomeUnknown(error, () => void invalidateReads(actionReads(action)));
       const message =
         error instanceof Error
           ? error.message

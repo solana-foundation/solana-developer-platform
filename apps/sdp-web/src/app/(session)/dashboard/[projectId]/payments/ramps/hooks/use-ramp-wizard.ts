@@ -13,6 +13,7 @@ import type { z } from "zod";
 import type { CounterpartyOptions } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/use-all-counterparties";
 import {
   counterpartyRequirementsReads,
+  moneyMovementReads,
   paymentTransferReads,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import { cancelRampTransfer } from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
@@ -357,6 +358,7 @@ export function useRampWizard<TId extends string>(
         id: toastId,
         position: "bottom-right",
       });
+      await invalidateReads(moneyMovementReads);
       finish();
     } catch (error) {
       setIsCanceling(false);

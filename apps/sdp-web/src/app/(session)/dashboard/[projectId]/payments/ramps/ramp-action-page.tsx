@@ -21,7 +21,7 @@ import {
   useOrganizationProviderAccess,
   usePrivateChannelInstance,
 } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
-import { useCanWrite } from "@/contexts/dashboard-workspace-context";
+import { useCanWrite, useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import type { DashboardRequestKey } from "@/lib/dashboard-request-key";
 import { readDashboardRequest, useDashboardKeyScope } from "@/lib/dashboard-swr";
@@ -73,13 +73,57 @@ export interface RailProps {
   onExit: () => void;
 }
 
+/** The organization's ramp provider access, as the flows read it. */
+interface ProviderAccessState {
+  /** Null when the read failed or was skipped: no access, so the provider flows stay off. */
+  rampProviderAccess: RampProviderAccess | null;
+  /** The read has answered (or was never needed). */
+  settled: boolean;
+}
+
 /**
- * Pay and Deposit. The header's tabs pick the variant (Pay: Single / Batch; Deposit: Solana
- * address / Card or bank through a provider). Each flow opens on one details step with the
- * contact inside it; a single payment can hand off to a bank payout, and a deposit to an
- * address needs no contact at all.
+ * Pay and Deposit. Provider access serves only Ramps (the fiat rails) and Compliance (address
+ * screening), so where neither runs here it is not read at all.
  */
 export function PaymentsActionPage(props: PaymentsActionPageProps) {
+  const rampsOffered = useRampsOffered();
+  const complianceRuns = useDashboardWorkspace().flags.compliance;
+  return rampsOffered || complianceRuns ? (
+    <PaymentsActionPageWithProviderAccess {...props} />
+  ) : (
+    <PaymentsActionFlows {...props} providerAccess={{ rampProviderAccess: null, settled: true }} />
+  );
+}
+
+function PaymentsActionPageWithProviderAccess(props: PaymentsActionPageProps) {
+  const providerAccess = useOrganizationProviderAccess();
+  return (
+    <PaymentsActionFlows
+      {...props}
+      providerAccess={{
+        // A failed read is no access: the provider flows stay off rather than open on a guess.
+        rampProviderAccess:
+          providerAccess.data === undefined
+            ? null
+            : filterEnabledRampProviderAccess(
+                providerAccess.data.ramps,
+                props.enabledRampProviders
+              ),
+        settled: providerAccess.data !== undefined || providerAccess.error !== undefined,
+      }}
+    />
+  );
+}
+
+/**
+ * The header's tabs pick the variant (Pay: Single / Batch; Deposit: Solana address / Card or
+ * bank through a provider). Each flow opens on one details step with the contact inside it; a
+ * single payment can hand off to a bank payout, and a deposit to an address needs no contact.
+ */
+function PaymentsActionFlows({
+  providerAccess,
+  ...props
+}: PaymentsActionPageProps & { providerAccess: ProviderAccessState }) {
   const t = useTranslations();
   const { mode } = props;
   const router = useRouter();
@@ -108,12 +152,7 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
       ),
     [issuedTokens.data]
   );
-  const providerAccess = useOrganizationProviderAccess();
-  // A failed read is no access: the provider flows stay off rather than open on a guess.
-  const rampProviderAccess =
-    providerAccess.data === undefined
-      ? null
-      : filterEnabledRampProviderAccess(providerAccess.data.ramps, props.enabledRampProviders);
+  const { rampProviderAccess } = providerAccess;
   const instance = usePrivateChannelInstance(props.privateChannelsEnabled === true);
   const privateSend: PrivateSendStatus | null = !props.privateChannelsEnabled
     ? null
@@ -174,7 +213,7 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
 
   // Which flows open (an address, or a provider's) waits on provider access where Ramps runs, so
   // the page never opens one flow and swaps to the other.
-  if (rampsOffered && providerAccess.data === undefined && providerAccess.error === undefined) {
+  if (rampsOffered && !providerAccess.settled) {
     return mode === "send" ? <PaymentsPayPageSkeleton /> : <PaymentsDepositPageSkeleton />;
   }
 

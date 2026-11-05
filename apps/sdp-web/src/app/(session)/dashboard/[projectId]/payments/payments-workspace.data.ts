@@ -33,7 +33,6 @@ import {
   type CallerIdempotencyKey,
   dashboardRequest,
   dashboardRequestUnderOwnKey,
-  MOVEMENT_READ_PATHS,
 } from "@/lib/dashboard-fetch";
 import type { DashboardPostReadKey } from "@/lib/dashboard-request-key";
 import { readDashboardPostRequest } from "@/lib/dashboard-swr";
@@ -480,18 +479,6 @@ export async function retryTransferBatch(
   return readTransferBatchAnswer(response, t);
 }
 
-/** Reads a batch as it stands now: its recipients settle after the send answers. */
-export async function fetchTransferBatch(
-  batchId: string,
-  t: Translate
-): Promise<CreateTransferBatchResult> {
-  const response = await dashboardRequest(MOVEMENT_READ_PATHS.batch(batchId), {
-    method: "GET",
-    cache: "no-store",
-  });
-  return readTransferBatchAnswer(response, t);
-}
-
 async function readTransferBatchAnswer(
   response: Response,
   t: Translate
@@ -573,9 +560,4 @@ export interface CounterpartiesResult {
   /** The directory's full size, when the read knows it (a server's first page does). */
   total?: number;
   error?: string;
-}
-
-/** Whether a contacts read holds the whole directory, so a reader can reuse it. */
-export function counterpartyListComplete(result: CounterpartiesResult): boolean {
-  return result.ok && (result.total === undefined || result.data.length >= result.total);
 }

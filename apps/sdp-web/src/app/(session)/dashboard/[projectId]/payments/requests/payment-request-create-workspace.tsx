@@ -18,7 +18,10 @@ import {
   formatDateTime,
   formatDecimalAmount,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
-import { paymentRequestReads } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import {
+  isPaymentRequestReadKey,
+  paymentRequestReads,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import { RecordLoadError } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
 import { PaymentRequestCreateSkeleton } from "@/app/(session)/dashboard/[projectId]/payments/payments-route-skeletons";
 import { useWalletSummaries } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
@@ -291,7 +294,7 @@ export function PaymentRequestCreateWorkspace() {
 function PaymentRequestCreateForm({ wallets }: { wallets: readonly PaymentsDashboardWallet[] }) {
   const t = useTranslations();
   const invalidateReads = useInvalidateDashboardReads();
-  const notice = useOutcomeUnknownNotice(null);
+  const notice = useOutcomeUnknownNotice(isPaymentRequestReadKey);
   const locale = useLocale();
   const router = useRouter();
   const projectHref = useProjectHref();

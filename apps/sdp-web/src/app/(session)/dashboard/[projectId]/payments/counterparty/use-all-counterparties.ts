@@ -2,10 +2,7 @@
 
 import type { Counterparty } from "@sdp/types/counterparties";
 import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
-import {
-  type CounterpartiesResult,
-  counterpartyListComplete,
-} from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
+import type { CounterpartiesResult } from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
 import { type DashboardRequestKey, dashboardRequestKey } from "@/lib/dashboard-request-key";
 import { readDashboardRequest, useDashboardKeyScope, useDashboardSWR } from "@/lib/dashboard-swr";
@@ -38,19 +35,13 @@ export interface CounterpartyOptions {
   addCreated: (created: Counterparty) => void;
 }
 
-/**
- * Every contact in the Project. A page the server still renders hands in its first page as
- * `seed`, shown until the read lands and reused when it already holds every contact.
- */
-export function useAllCounterparties(seed?: CounterpartiesResult): CounterpartyOptions {
+/** Every contact in the Project. */
+export function useAllCounterparties(): CounterpartyOptions {
   const t = useTranslations();
   const scope = useDashboardKeyScope();
   const { data, error, mutate } = useDashboardSWR(
     paymentsQueryKeys.allCounterparties(scope),
-    readAllCounterparties,
-    seed?.ok
-      ? { fallbackData: seed.data, revalidateIfStale: !counterpartyListComplete(seed) }
-      : undefined
+    readAllCounterparties
   );
   const result: CounterpartiesResult =
     error !== undefined

@@ -1,3 +1,4 @@
+import { getTranslations } from "@/i18n/server";
 import { dashboardJson } from "@/lib/dashboard-response";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
@@ -7,7 +8,11 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
   try {
     walletId = decodeURIComponent((await context.params).walletId);
   } catch {
-    return dashboardJson({ error: { message: "Invalid wallet id" } }, { status: 400 });
+    const t = await getTranslations();
+    return dashboardJson(
+      { error: { message: t("DashboardCustody.invalidWalletId") } },
+      { status: 400 }
+    );
   }
   const incoming = new URL(request.url).searchParams;
   const minimumSlot = incoming.get("minimumSlot");

@@ -53,6 +53,8 @@ export function useCounterpartyLookups(counterpartyIds: readonly string[] | unde
     counterpartyIds === undefined || counterpartyIds.length === 0
       ? null
       : paymentsQueryKeys.counterpartyLookups(scope, counterpartyIds),
-    readCounterpartyLookups
+    readCounterpartyLookups,
+    // A new page of rows keeps the names already read while its own load.
+    { keepPreviousData: true }
   );
 }

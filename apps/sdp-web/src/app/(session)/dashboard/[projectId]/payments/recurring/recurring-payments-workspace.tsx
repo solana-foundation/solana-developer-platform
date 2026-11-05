@@ -176,10 +176,13 @@ function useRecurringPaymentLabels({
   issuedTokensByMint,
   wallets,
   counterparties,
+  counterpartiesLoading,
 }: {
   issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
   wallets: RecurringPaymentWalletView[];
   counterparties: RecurringPaymentCounterpartyView[];
+  /** The names for this page are still being read: a missing one is loading, not unavailable. */
+  counterpartiesLoading: boolean;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -204,9 +207,10 @@ function useRecurringPaymentLabels({
   };
   const getCounterpartyLabel = (recurringPayment: PaymentRecurringPayment) => {
     const counterparty = counterpartyById.get(recurringPayment.counterpartyId);
-    return counterparty === undefined
-      ? t("DashboardPayments.recurring.counterpartyUnavailable")
-      : counterparty.displayName;
+    if (counterparty !== undefined) return counterparty.displayName;
+    return counterpartiesLoading
+      ? t("DashboardPayments.recurring.counterpartyLoading")
+      : t("DashboardPayments.recurring.counterpartyUnavailable");
   };
   const getAmountLabel = (recurringPayment: PaymentRecurringPayment) =>
     formatDisplayAmount(
@@ -494,6 +498,7 @@ export function RecurringPaymentsWorkspace({
     issuedTokensByMint,
     wallets: wallets.data ?? [],
     counterparties: counterpartyViews.counterparties,
+    counterpartiesLoading: lookups.isLoading,
   });
   const lookupError =
     wallets.error === undefined && counterpartyViews.failed === 0 && lookups.error === undefined

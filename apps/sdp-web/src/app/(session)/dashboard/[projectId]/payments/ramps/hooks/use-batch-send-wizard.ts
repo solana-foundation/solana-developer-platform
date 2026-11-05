@@ -721,8 +721,9 @@ export function useBatchSendWizard({
       const { title, description } = retryFailureCopy(error instanceof Error ? error : null, t);
       toast.error(title, { id: toastId, description, position: "bottom-right" });
       // The API may have taken the retry even though its answer was lost: read
-      // the batch again, so a resend in flight resumes the poll.
+      // the batch again, so a resend in flight resumes the poll, and the money it moved.
       void setLiveBatch();
+      void invalidateReads(moneyMovementReads);
     } finally {
       setRetrying(false);
     }

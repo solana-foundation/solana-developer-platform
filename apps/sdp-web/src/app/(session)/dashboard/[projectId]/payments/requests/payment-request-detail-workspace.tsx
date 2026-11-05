@@ -47,6 +47,7 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
 import {
+  DashboardReadError,
   useDashboardKeyScope,
   useDashboardRead,
   useDashboardSWR,
@@ -503,7 +504,12 @@ export function PaymentRequestDetailWorkspace({ requestId }: { requestId: string
   const link = useDashboardRead(
     paymentsQueryKeys.paymentRequestLink(scope, requestId),
     paymentRequestLinkResponseSchema,
-    { revalidateOnFocus: false }
+    {
+      revalidateOnFocus: false,
+      // A role that may not manage requests is refused (403); asking again changes nothing.
+      shouldRetryOnError: (error) =>
+        !(error instanceof DashboardReadError && error.status >= 400 && error.status < 500),
+    }
   );
   const wallets = useWalletSummaries({ includeBalances: false });
   const request = detail.data?.data;

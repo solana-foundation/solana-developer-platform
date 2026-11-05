@@ -1,6 +1,5 @@
 import {
   type CreatePaymentRecurringPaymentRequest,
-  type ListPaymentRecurringPaymentsResponse,
   PAYMENT_RECURRING_PAYMENT_STATUSES,
   PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES,
   type PaymentRecurringPayment,
@@ -8,11 +7,9 @@ import {
   type PaymentRecurringPaymentCollectionResponse,
   type PaymentRecurringPaymentResponse,
   type PaymentRecurringPaymentStatus,
-  type PaymentSubscriptionCollectionAttempt,
   paymentSubscriptionCollectionAttemptMetadataSchema,
   RECURRING_PAYMENT_PAUSE_REASONS,
   RECURRING_PAYMENT_TOKEN_APPROVAL_STATUSES,
-  type RecurringPaymentTokenApproval,
   type UpdatePaymentRecurringPaymentRequest,
 } from "@sdp/types/payments";
 import { z } from "zod";
@@ -34,13 +31,6 @@ const RECURRING_PAYMENTS_PAGE_SIZE = 100;
 export const RECURRING_LIST_DEFAULT_PAGE_SIZE = 25;
 
 export type RecurringPaymentAction = PaymentRecurringPaymentAction;
-
-export interface RecurringPaymentsListOptions {
-  page?: number;
-  pageSize?: number;
-  status?: PaymentRecurringPaymentStatus | null;
-  counterpartyId?: string;
-}
 
 export interface RecurringPaymentsListState {
   page: number;
@@ -75,14 +65,6 @@ export function parseRecurringPaymentsListParams(
     status: status.success ? status.data : null,
   };
 }
-
-interface ClientRecurringPaymentsListOptions extends RecurringPaymentsListOptions {
-  signal?: AbortSignal;
-}
-
-export type RecurringFetchResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; status: number | null; error: string };
 
 const recurringPaymentSchema = z.object({
   id: z.string(),
@@ -174,33 +156,6 @@ function dashboardEnvelopeSchema<T extends z.ZodType>(dataSchema: T) {
 const dashboardRecurringPaymentEnvelopeSchema = dashboardEnvelopeSchema(
   recurringPaymentResponseSchema
 );
-const dashboardRecurringPaymentsListEnvelopeSchema = dashboardEnvelopeSchema(
-  recurringPaymentsListResponseSchema
-);
-
-export interface RecurringPaymentCollectionAttemptsResult {
-  collectionAttempts: PaymentSubscriptionCollectionAttempt[];
-  total: number;
-}
-
-function setPositiveInteger(query: URLSearchParams, key: string, value: number | undefined) {
-  if (value !== undefined && Number.isInteger(value) && value > 0) {
-    query.set(key, String(value));
-  }
-}
-
-function buildRecurringPaymentsQuery(options: RecurringPaymentsListOptions): URLSearchParams {
-  const query = new URLSearchParams();
-  setPositiveInteger(query, "page", options.page);
-  setPositiveInteger(query, "pageSize", options.pageSize);
-  if (options.status !== undefined && options.status !== null) {
-    query.set("status", options.status);
-  }
-  if (options.counterpartyId !== undefined) {
-    query.set("counterpartyId", options.counterpartyId);
-  }
-  return query;
-}
 
 async function readDashboardEnvelope<T>(
   response: Response,
@@ -227,55 +182,6 @@ async function readDashboardEnvelope<T>(
     throw new Error(t("DashboardPayments.recurring.emptyResponse", { request: fallback }));
   }
   return body.data;
-}
-
-export async function listRecurringPayments(
-  options: ClientRecurringPaymentsListOptions,
-  t: Translate
-): Promise<ListPaymentRecurringPaymentsResponse> {
-  const { signal, ...filters } = options;
-  const query = buildRecurringPaymentsQuery({
-    page: filters.page ?? 1,
-    pageSize: filters.pageSize ?? RECURRING_PAYMENTS_PAGE_SIZE,
-    status: filters.status,
-    counterpartyId: filters.counterpartyId,
-  });
-  const response = await dashboardRequest(
-    `/api/dashboard/payments/recurring-payments?${query.toString()}`,
-    {
-      method: "GET",
-      cache: "no-store",
-      signal,
-    }
-  );
-  return readDashboardEnvelope<ListPaymentRecurringPaymentsResponse>(
-    response,
-    dashboardRecurringPaymentsListEnvelopeSchema,
-    t("DashboardPayments.newDesign.recurring.unableToLoad"),
-    t
-  );
-}
-
-export async function getRecurringPayment(
-  recurringPaymentId: string,
-  signal: AbortSignal | undefined,
-  t: Translate
-): Promise<PaymentRecurringPayment> {
-  const response = await dashboardRequest(
-    `/api/dashboard/payments/recurring-payments/${encodeURIComponent(recurringPaymentId)}`,
-    {
-      method: "GET",
-      cache: "no-store",
-      signal,
-    }
-  );
-  const data = await readDashboardEnvelope<PaymentRecurringPaymentResponse>(
-    response,
-    dashboardRecurringPaymentEnvelopeSchema,
-    t("DashboardPayments.newDesign.recurring.unableToLoad"),
-    t
-  );
-  return data.recurringPayment;
 }
 
 export async function createRecurringPayment(
@@ -356,12 +262,6 @@ export async function runRecurringPaymentAction(
     t
   );
   return data.recurringPayment;
-}
-
-/** A recurring payment as its detail page reads it: a canceled one with its token approval. */
-export interface RecurringPaymentDetail {
-  recurringPayment: PaymentRecurringPayment;
-  tokenApproval: RecurringPaymentTokenApproval | null;
 }
 
 /**
