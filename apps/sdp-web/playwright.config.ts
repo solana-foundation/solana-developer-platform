@@ -108,9 +108,15 @@ export default defineConfig({
       name: "auth-setup",
       testMatch: /auth\.global\.setup\.ts/,
       retries: useExternalApi ? 2 : 0,
+      // Revokes the Clerk sessions the run signed in once every dependent project finishes.
+      teardown: "auth-teardown",
       use: {
         ...devices["Desktop Chrome"],
       },
+    },
+    {
+      name: "auth-teardown",
+      testMatch: /auth\.global\.teardown\.ts/,
     },
     {
       name: "dashboard",
