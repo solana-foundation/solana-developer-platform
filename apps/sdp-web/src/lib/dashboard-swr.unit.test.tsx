@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
 
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { hydrateRoot } from "react-dom/client";
+import { renderToString } from "react-dom/server";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
+import { DASHBOARD_CACHE_STORAGE_PREFIX } from "@/lib/dashboard-snapshot-storage";
 import { usePersistedDashboardSWR } from "./dashboard-swr";
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
@@ -72,5 +76,36 @@ describe("optional dashboard cache storage", () => {
       { wrapper }
     );
     await waitFor(() => expect(result.current.data).toBe(21));
+  });
+});
+
+function StoredSnapshot() {
+  const { data } = usePersistedDashboardSWR(
+    "stored",
+    () => new Promise<string>(() => {}),
+    {},
+    { key: "stored", ttlMs: 30000 }
+  );
+  return <output>{data}</output>;
+}
+
+describe("persisted dashboard snapshot hydration", () => {
+  it("hydrates to the server markup, then shows the stored snapshot", async () => {
+    const ui = wrapper({ children: <StoredSnapshot /> });
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(ui);
+    const scopeKey = getDashboardCacheScopeKey(
+      { userId: "user", orgId: "org" },
+      { projectId: "project" }
+    );
+    localStorage.setItem(
+      `${DASHBOARD_CACHE_STORAGE_PREFIX}.${scopeKey}.stored`,
+      JSON.stringify({ expiresAt: Date.now() + 30000, value: "cached", version: 1 })
+    );
+    const onRecoverableError = vi.fn();
+    const root = await act(async () => hydrateRoot(container, ui, { onRecoverableError }));
+    expect(onRecoverableError).not.toHaveBeenCalled();
+    expect(container.textContent).toBe("cached");
+    act(() => root.unmount());
   });
 });
