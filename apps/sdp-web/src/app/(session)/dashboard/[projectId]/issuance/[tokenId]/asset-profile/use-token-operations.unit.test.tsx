@@ -135,21 +135,22 @@ describe("token operation confirmations", () => {
     );
   });
 
-  it("shows the mint amount as the form's button does, and sends it as typed", () => {
+  it.each([
+    { typed: "1000000", shown: "1,000,000.00 QAD" },
+    { typed: ".000001", shown: "0.000001 QAD" },
+  ])("confirms a mint typed $typed as $shown, as the form's button does", ({ typed, shown }) => {
     const { result } = renderOperations({ maxSupply: null });
-    act(() => result.current.setMintForm((form) => ({ ...form, destination, amount: "1000000" })));
+    act(() => result.current.setMintForm((form) => ({ ...form, destination, amount: typed })));
     act(() => result.current.handleMint());
     expect(mocks.runAction).toHaveBeenCalledWith(
       expect.objectContaining({
         body: expect.objectContaining({
-          mint: expect.objectContaining({ destination, amount: "1000000" }),
+          mint: expect.objectContaining({ destination, amount: typed }),
         }),
       }),
       expect.objectContaining({
         confirmationTitle: "Mint tokens?",
-        confirmationDetails: expect.arrayContaining([
-          { label: "Amount", value: "1,000,000.00 QAD" },
-        ]),
+        confirmationDetails: expect.arrayContaining([{ label: "Amount", value: shown }]),
       })
     );
   });
