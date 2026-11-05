@@ -1,7 +1,13 @@
 "use client";
 
-import type { AssetAuditEvent } from "@sdp/types/audit";
-import { dashboardRequest } from "@/lib/dashboard-fetch";
+import {
+  ASSET_AUDIT_ACTOR_TYPES,
+  ASSET_AUDIT_STATUSES,
+  type AssetAuditEvent,
+} from "@sdp/types/audit";
+import { z } from "zod";
+import type { DashboardRequestKey } from "@/lib/dashboard-request-key";
+import { readDashboardRequest } from "@/lib/dashboard-swr";
 
 export interface AssetAuditHistory {
   events: AssetAuditEvent[];
@@ -9,55 +15,26 @@ export interface AssetAuditHistory {
   hasMore: boolean;
 }
 
-interface AssetAuditEnvelope {
-  data?: AssetAuditEvent[];
-  error?: string | null;
-  total?: number;
-  hasMore?: boolean;
-}
+const assetAuditEventSchema = z.object({
+  id: z.string(),
+  action: z.string(),
+  resourceType: z.string(),
+  resourceId: z.string().nullable(),
+  actorType: z.enum(ASSET_AUDIT_ACTOR_TYPES),
+  actorLabel: z.string(),
+  status: z.enum(ASSET_AUDIT_STATUSES),
+  createdAt: z.string(),
+  metadata: z.record(z.string(), z.unknown()).nullable(),
+}) satisfies z.ZodType<AssetAuditEvent>;
 
-export async function fetchAssetAuditHistory(
-  tokenId: string,
-  options: {
-    action?: string | null;
-    status?: string | null;
-    actorType?: string | null;
-    page?: number;
-    pageSize?: number;
-    signal?: AbortSignal;
-  } = {}
-): Promise<AssetAuditHistory> {
-  const query = new URLSearchParams();
-  if (options.page) {
-    query.set("page", String(options.page));
-  }
-  if (options.action) {
-    query.set("action", options.action);
-  }
-  if (options.status) {
-    query.set("status", options.status);
-  }
-  if (options.actorType) {
-    query.set("type", options.actorType);
-  }
-  if (options.pageSize) {
-    query.set("pageSize", String(options.pageSize));
-  }
+const assetAuditHistoryResponseSchema = z.object({
+  data: z.array(assetAuditEventSchema),
+  total: z.number().int().nonnegative(),
+  hasMore: z.boolean(),
+});
 
-  const suffix = query.toString();
-  const response = await dashboardRequest(
-    `/api/dashboard/issuance/tokens/${encodeURIComponent(tokenId)}/audit${suffix ? `?${suffix}` : ""}`,
-    { method: "GET", cache: "no-store", signal: options.signal }
-  );
-  const body = (await response.json().catch(() => ({}))) as AssetAuditEnvelope;
-
-  if (!response.ok || body.error) {
-    throw new Error(body.error || `Audit request failed (${response.status})`);
-  }
-
-  return {
-    events: Array.isArray(body.data) ? body.data : [],
-    total: typeof body.total === "number" ? body.total : 0,
-    hasMore: body.hasMore === true,
-  };
+/** One window of a token's audit history, read from the BFF route the key names. */
+export async function readAssetAuditHistory(key: DashboardRequestKey): Promise<AssetAuditHistory> {
+  const body = await readDashboardRequest(key, assetAuditHistoryResponseSchema);
+  return { events: body.data, total: body.total, hasMore: body.hasMore };
 }

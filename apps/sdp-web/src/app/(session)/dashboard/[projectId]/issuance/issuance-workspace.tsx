@@ -275,7 +275,7 @@ function IssuanceListResults({
   projectTotal: number;
 }) {
   const t = useTranslations();
-  if (list.errorMessage) {
+  if (list.errorMessage !== null) {
     return (
       <ListEmptyState
         message={t("DashboardIssuance.newDesign.list.loadFailed")}

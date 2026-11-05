@@ -8,9 +8,8 @@ import { TableCell } from "@sdp/ui/table";
 import { TableRow } from "@solana/design-system/table";
 import { PlusIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
-import useSWR from "swr";
 import {
-  fetchTokenAllowlistPage,
+  readTokenAllowlistPage,
   type TokenAllowlistPage,
 } from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/asset-profile/allowlist.data";
 import { issuanceQueryKeys } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-query-key";
@@ -19,6 +18,7 @@ import { PAYMENTS_TABLE_CELL } from "@/app/(session)/dashboard/[projectId]/payme
 import { RecordBlock, RecordStack } from "@/components/refresh-record";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
+import { useDashboardKeyScope, useDashboardSWR } from "@/lib/dashboard-swr";
 import type { TokenTabProps } from "./token-page.shared";
 import { TokenTable } from "./token-table";
 
@@ -29,12 +29,19 @@ type AllowlistEntry = TokenAllowlistPage["entries"][number];
 
 /** The token's access list, a page at a time; nothing is read while the token has none. */
 function useComplianceEntries(tokenId: string, mode: AccessControlMode) {
+  const scope = useDashboardKeyScope();
   const [page, setPage] = useState(1);
-  const { data, error } = useSWR<TokenAllowlistPage, Error>(
+  const { data, error } = useDashboardSWR(
     mode === "disabled"
       ? null
-      : issuanceQueryKeys.tokenAllowlist({ tokenId, page, pageSize: PAGE_SIZE }),
-    () => fetchTokenAllowlistPage(tokenId, { page, pageSize: PAGE_SIZE }),
+      : issuanceQueryKeys.tokenAllowlist(scope, {
+          tokenId,
+          page,
+          pageSize: PAGE_SIZE,
+          search: null,
+          label: null,
+        }),
+    readTokenAllowlistPage,
     { keepPreviousData: true }
   );
   const entries = (data?.entries ?? []).filter((entry) => entry.status !== "revoked");

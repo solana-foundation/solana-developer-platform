@@ -11,7 +11,6 @@ import { TableCell } from "@sdp/ui/table";
 import { TableRow } from "@solana/design-system/table";
 import { ArrowUpRightIcon, ChevronDownIcon, MinusIcon, PlusIcon } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
-import useSWR from "swr";
 import {
   getOperationGroups,
   getOperationLabels,
@@ -19,10 +18,7 @@ import {
   type OperationRow,
 } from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/asset-profile/tabs/operation-rows.model";
 import { OpsActionForms } from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/asset-profile/tabs/ops-action-forms";
-import {
-  fetchTokenTransactionsPage,
-  type TokenTransactionsPage,
-} from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/asset-profile/transactions.data";
+import { readTokenTransactionsPage } from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/asset-profile/transactions.data";
 import { TokenDisabledActionTooltip } from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/token-disabled-action-tooltip";
 import { getRemainingMintableSupply } from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.utils";
 import { issuanceQueryKeys } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-query-key";
@@ -36,6 +32,7 @@ import { RecordBlock, RecordStack } from "@/components/refresh-record";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useDashboardKeyScope, useDashboardSWR } from "@/lib/dashboard-swr";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { LockSupplyForm, SupplyOperationForm } from "./supply-operation-form";
@@ -577,10 +574,11 @@ function TokenTransactions({ tokenId }: { tokenId: string }) {
   const t = useTranslations();
   const cluster = useSolanaCluster();
   const locale = useLocale();
+  const scope = useDashboardKeyScope();
   const [page, setPage] = useState(1);
-  const { data, error } = useSWR<TokenTransactionsPage, Error>(
-    issuanceQueryKeys.tokenTransactions({ tokenId, page, pageSize: TRANSACTIONS_PAGE_SIZE }),
-    () => fetchTokenTransactionsPage(tokenId, { page, pageSize: TRANSACTIONS_PAGE_SIZE }),
+  const { data, error } = useDashboardSWR(
+    issuanceQueryKeys.tokenTransactions(scope, { tokenId, page, pageSize: TRANSACTIONS_PAGE_SIZE }),
+    readTokenTransactionsPage,
     { keepPreviousData: true }
   );
   const dateTime = useMemo(() => new Intl.DateTimeFormat(locale, DATE_TIME_FORMAT), [locale]);

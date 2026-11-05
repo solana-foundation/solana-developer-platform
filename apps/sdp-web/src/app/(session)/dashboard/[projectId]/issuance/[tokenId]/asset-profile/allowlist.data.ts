@@ -1,7 +1,9 @@
 "use client";
 
 import type { TokenAllowlistEntry } from "@sdp/types/tokens";
-import { dashboardRequest } from "@/lib/dashboard-fetch";
+import { z } from "zod";
+import type { DashboardRequestKey } from "@/lib/dashboard-request-key";
+import { readDashboardRequest } from "@/lib/dashboard-swr";
 
 export interface TokenAllowlistPage {
   entries: TokenAllowlistEntry[];
@@ -11,88 +13,42 @@ export interface TokenAllowlistPage {
   pageSize: number;
 }
 
-interface TokenAllowlistPageEnvelope {
-  data?: TokenAllowlistEntry[];
-  error?: string | null;
-  total?: number;
-  hasMore?: boolean;
-  page?: number;
-  pageSize?: number;
-}
+const tokenAllowlistEntrySchema = z.object({
+  id: z.string(),
+  tokenId: z.string(),
+  address: z.string(),
+  label: z.string().nullable(),
+  status: z.enum(["pending", "active", "revoked"]),
+  addedBy: z.string(),
+  createdAt: z.string(),
+  revokedAt: z.string().nullable(),
+}) satisfies z.ZodType<TokenAllowlistEntry>;
 
-export async function fetchTokenAllowlistPage(
-  tokenId: string,
-  options: {
-    page?: number;
-    pageSize?: number;
-    search?: string | null;
-    label?: string | null;
-    signal?: AbortSignal;
-  } = {}
+const tokenAllowlistPageResponseSchema = z.object({
+  data: z.array(tokenAllowlistEntrySchema),
+  total: z.number().int().nonnegative(),
+  hasMore: z.boolean(),
+  page: z.number().int().positive(),
+  pageSize: z.number().int().positive(),
+});
+
+/** One page of a token's access list, read from the BFF route the key names. */
+export async function readTokenAllowlistPage(
+  key: DashboardRequestKey
 ): Promise<TokenAllowlistPage> {
-  const query = new URLSearchParams();
-  if (options.page) {
-    query.set("page", String(options.page));
-  }
-  if (options.pageSize) {
-    query.set("pageSize", String(options.pageSize));
-  }
-  if (options.search) {
-    query.set("search", options.search);
-  }
-  if (options.label) {
-    query.set("label", options.label);
-  }
-
-  const suffix = query.toString();
-  const response = await dashboardRequest(
-    `/api/dashboard/issuance/tokens/${encodeURIComponent(tokenId)}/allowlist${suffix ? `?${suffix}` : ""}`,
-    { method: "GET", cache: "no-store", signal: options.signal }
-  );
-  const body = (await response.json().catch(() => ({}))) as TokenAllowlistPageEnvelope;
-
-  if (!response.ok || body.error) {
-    throw new Error(body.error || `Allowlist request failed (${response.status})`);
-  }
-
+  const body = await readDashboardRequest(key, tokenAllowlistPageResponseSchema);
   return {
-    entries: Array.isArray(body.data) ? body.data : [],
-    total: typeof body.total === "number" ? body.total : 0,
-    hasMore: body.hasMore === true,
-    page: typeof body.page === "number" ? body.page : 1,
-    pageSize: typeof body.pageSize === "number" ? body.pageSize : 25,
+    entries: body.data,
+    total: body.total,
+    hasMore: body.hasMore,
+    page: body.page,
+    pageSize: body.pageSize,
   };
 }
 
-export interface TokenAllowlistLabels {
-  labels: string[];
+export const tokenAllowlistLabelsResponseSchema = z.object({
+  labels: z.array(z.string()),
   // Total active control-list entries (unfiltered) — drives the summary count,
   // since the paged list's total reflects the active search/label filter.
-  total: number;
-}
-
-interface TokenAllowlistLabelsEnvelope {
-  labels?: string[];
-  total?: number;
-  error?: string | null;
-}
-
-export async function fetchTokenAllowlistLabels(
-  tokenId: string,
-  options: { signal?: AbortSignal } = {}
-): Promise<TokenAllowlistLabels> {
-  const response = await dashboardRequest(
-    `/api/dashboard/issuance/tokens/${encodeURIComponent(tokenId)}/allowlist/labels`,
-    { method: "GET", cache: "no-store", signal: options.signal }
-  );
-  const body = (await response.json().catch(() => ({}))) as TokenAllowlistLabelsEnvelope;
-
-  if (!response.ok || body.error) {
-    throw new Error(body.error || `Allowlist labels request failed (${response.status})`);
-  }
-
-  return {
-    labels: Array.isArray(body.labels) ? body.labels : [],
-    total: typeof body.total === "number" ? body.total : 0,
-  };
-}
+  total: z.number().int().nonnegative(),
+});

@@ -2,15 +2,19 @@
 
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import type { Token } from "@sdp/types/tokens";
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { issuanceQueryKeys } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-query-key";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import type { DashboardKeyScope, DashboardRequestKey } from "@/lib/dashboard-request-key";
+import { useDashboardSWR } from "@/lib/dashboard-swr";
 import { stubClerkSession } from "@/test/clerk";
+import { SANDBOX_PROJECT } from "@/test/projects";
 import { useTokenOperationData } from "./use-token-operation-data";
 
 beforeEach(() => {
@@ -174,8 +178,7 @@ it("reports a failed wallet request through authorityWalletsError", async () => 
     })
   );
   const { result } = renderData(token);
-  await waitFor(() => expect(result.current.authorityWalletsError).toBe("Request failed (503)"));
-  expect(result.current.authorityWalletsError).toBe("Request failed (503)");
+  await waitFor(() => expect(result.current.authorityWalletsError).toBe("Wallet lookup denied"));
   expect(result.current.authorityWallets).toEqual([]);
 });
 
@@ -203,4 +206,51 @@ it("keeps wallet failure blocking even when previous inventories were cached", a
     expect(second.result.current.authorityWalletsError).toBe("Wallet inventory unavailable")
   );
   expect(second.result.current.authorityWallets).toEqual([]);
+});
+
+const OTHER_TOKEN_ID = "tok_test_other";
+const READ_SCOPE: DashboardKeyScope = { projectId: SANDBOX_PROJECT.id, mode: "live" };
+
+function readsOf(tokenId: string) {
+  return {
+    allowlistPage: issuanceQueryKeys.tokenAllowlist(READ_SCOPE, {
+      tokenId,
+      page: 2,
+      pageSize: 25,
+      search: "treasury",
+      label: null,
+    }),
+    allowlistLabels: issuanceQueryKeys.tokenAllowlistLabels(READ_SCOPE, { tokenId }),
+    transactionsPage: issuanceQueryKeys.tokenTransactions(READ_SCOPE, {
+      tokenId,
+      page: 1,
+      pageSize: 10,
+    }),
+    frozenAccounts: issuanceQueryKeys.frozenAccounts(READ_SCOPE, { tokenId }),
+  };
+}
+
+function useTokenReads(tokenId: string, fetcher: (key: DashboardRequestKey) => Promise<string>) {
+  const reads = readsOf(tokenId);
+  useDashboardSWR(reads.allowlistPage, fetcher);
+  useDashboardSWR(reads.allowlistLabels, fetcher);
+  useDashboardSWR(reads.transactionsPage, fetcher);
+  useDashboardSWR(reads.frozenAccounts, fetcher);
+}
+
+it("refreshes the token's access-list, transactions and frozen reads after an operation, and no other token's", async () => {
+  const fetcher = vi.fn(async (key: DashboardRequestKey) => key[2]);
+  const { result } = renderHook(
+    () => {
+      useTokenReads(token.id, fetcher);
+      useTokenReads(OTHER_TOKEN_ID, fetcher);
+      return useTokenOperationData({ token, shouldLoadAuthorityWallets: false });
+    },
+    { wrapper }
+  );
+  await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(8));
+
+  await act(() => result.current.revalidateAfterSuccess());
+
+  expect(fetcher.mock.calls.slice(8).map(([key]) => key)).toEqual(Object.values(readsOf(token.id)));
 });

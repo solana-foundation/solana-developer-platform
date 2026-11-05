@@ -15,6 +15,7 @@ import {
 import * as csrActions from "@/app/(session)/dashboard/[projectId]/wallets/setup/fireblocks-csr-actions";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import type { DashboardRequestKey } from "@/lib/dashboard-request-key";
 import { dashboardRouter, setDashboardUrl } from "@/test/dashboard-navigation";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { generateFireblocksCsrAction, loadFireblocksCsrAction } from "./fireblocks-csr-actions";
@@ -56,7 +57,7 @@ function Inventory({
   name,
   fetcher,
 }: {
-  cacheKey: string | readonly string[];
+  cacheKey: string | DashboardRequestKey;
   name: string;
   fetcher: () => Promise<string>;
 }) {
@@ -319,7 +320,10 @@ describe("ByokCredentialForm", () => {
           />
           <Inventory cacheKey={earnQueryKeys.fundingWallets()} name="earn" fetcher={walletRead} />
           <Inventory
-            cacheKey={issuanceQueryKeys.authorityWallets({ tokenId: "token" })}
+            cacheKey={issuanceQueryKeys.authorityWallets(
+              { projectId: PRODUCTION_PROJECT.id, mode: "live" },
+              { tokenId: "tok_test" }
+            )}
             name="issuance"
             fetcher={walletRead}
           />
