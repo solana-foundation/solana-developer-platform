@@ -69,6 +69,7 @@ function request(
     discount_bps: 25,
     nonce: null,
     creation_timestamp: null,
+    provider_state_observed: false,
     maturity_timestamp: "1700000060",
     deadline_timestamp: "1700000120",
     client_request_id: "request-key",
@@ -167,7 +168,15 @@ describe("queued withdrawal reconciliation", () => {
   });
 
   describe.each([true, false])("late par submissions with own lease held: %s", (leaseHeld) => {
-    it.each([null, "1699999800", "1700000001", "busy", "failed", "not_landed"])(
+    it.each([
+      null,
+      "1699999800",
+      "1700000001",
+      "busy",
+      "failed",
+      "not_landed",
+      "expired_unknown",
+    ] as const)(
       "checks finalized closing history %s before claiming a reusable PDA",
       async (closedAt) => {
         const current = parRequest();
@@ -219,19 +228,38 @@ describe("queued withdrawal reconciliation", () => {
         });
         clusterRpc.respond("getTransaction", ({ params }) => ({
           result:
-            closedAt === "not_landed"
+            closedAt === "not_landed" || closedAt === "expired_unknown"
               ? null
               : historical(params[0] === "closing" ? Number(closedAt) : 1_700_000_000),
         }));
-        const history =
-          closedAt === "busy"
-            ? Array.from({ length: 16 }, (_, index) => ({
-                signature: `mention-${index}`,
-                err: null,
-              }))
-            : closedAt === null
-              ? []
-              : [{ signature: "closing", err: null }];
+        clusterRpc.answer("getBlockHeight", closedAt === "expired_unknown" ? 2 : 1);
+        let history: Array<{ signature: string; err: null }>;
+        let transactionReads: number;
+        switch (closedAt) {
+          case "busy":
+            history = Array.from({ length: 16 }, (_, index) => ({
+              signature: `mention-${index}`,
+              err: null,
+            }));
+            transactionReads = 17;
+            break;
+          case null:
+          case "failed":
+          case "not_landed":
+          case "expired_unknown":
+            history = [];
+            transactionReads = 1;
+            break;
+          case "1699999800":
+          case "1700000001":
+            history = [{ signature: "closing", err: null }];
+            transactionReads = 2;
+            break;
+          default: {
+            const exhaustive: never = closedAt;
+            throw new Error(`Unexpected recovery case ${exhaustive}`);
+          }
+        }
         clusterRpc.answer("getSignaturesForAddress", history);
         parProvider.client = {
           decodeParRedemptionLifecycleEvents: vi.fn().mockResolvedValue(
@@ -252,8 +280,10 @@ describe("queued withdrawal reconciliation", () => {
         const pending = inSandboxScope(() =>
           recordSignedExternalQueuedRequest(env, { createSignedRequest: write }, input)
         );
-        if (closedAt === "failed") {
-          await expect(pending).rejects.toMatchObject({ code: "TRANSACTION_FAILED" });
+        if (closedAt === "failed" || closedAt === "expired_unknown") {
+          await expect(pending).rejects.toMatchObject({
+            code: closedAt === "failed" ? "TRANSACTION_FAILED" : "SERVICE_UNAVAILABLE",
+          });
           expect(write).not.toHaveBeenCalled();
           expect(clusterRpc.calls.filter((call) => call.method === "getTransaction")).toHaveLength(
             1
@@ -289,7 +319,7 @@ describe("queued withdrawal reconciliation", () => {
           expect.objectContaining({ until: "request-signature", limit: 16 }),
         ]);
         expect(clusterRpc.calls.filter((call) => call.method === "getTransaction")).toHaveLength(
-          closedAt === "busy" ? 17 : closedAt === null ? 1 : 2
+          transactionReads
         );
       }
     );
@@ -554,6 +584,24 @@ describe("queued withdrawal reconciliation", () => {
         expect(ledger.observeExpiredUnknownSignature).not.toHaveBeenCalled();
         expect(ledger.failActionAndRecoverRequest).not.toHaveBeenCalled();
       });
+
+      it.each([true, null] as const)(
+        "retains a closed request with provider-observation state %s",
+        async (providerStateObserved) => {
+          const ledger = fakeLedger(
+            absentRequest({
+              status: "closed_or_unknown",
+              provider_state_observed: providerStateObserved,
+            })
+          );
+          const rpc = absentHistory();
+          await expect(
+            reconcileAction(env, ledger, action(), null, { rpc, currentHeight: 2n })
+          ).resolves.toBe("unchanged");
+          expect(ledger.observeExpiredUnknownSignature).not.toHaveBeenCalled();
+          expect(ledger.failActionAndRecoverRequest).not.toHaveBeenCalled();
+        }
+      );
 
       it("does not count incomplete closing history as negative evidence", async () => {
         const ledger = fakeLedger(absentRequest());

@@ -424,6 +424,8 @@ it cannot claim a newer cycle at the reused address.
 Finalized failed par transactions return `400 TRANSACTION_FAILED`; build a new
 transaction. An unresolved 16-signature history window returns `503` and needs
 support reconciliation rather than an unbounded search during submission.
+An expired par build whose creation history is unavailable also returns
+`503`; keep and retry the original signed intent.
 An expired create becomes `failed` only after
 repeated checks find no finalized transaction, provider request or close event;
 unknown or incomplete history stays recoverable.

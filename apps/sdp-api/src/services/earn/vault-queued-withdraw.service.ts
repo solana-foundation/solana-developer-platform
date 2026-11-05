@@ -8,7 +8,8 @@ import type {
 } from "@sdp/earn/types";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import { getTransaction, type ParsedTransaction, type SolanaRpc } from "@sdp/rpc/solana";
+import { getTransaction, type ParsedTransaction } from "@sdp/rpc/solana";
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from "@sdp/rpc/transaction-version";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { address, type Signature } from "@solana/kit";
@@ -1196,7 +1197,12 @@ export async function recordSignedExternalQueuedRequest(
           "This signed redemption failed on chain. Build a new transaction."
         );
       }
-      await assertParCreationNotClosed(env, rpc, input, parTransaction);
+      await assertParCreationNotClosed(env, input, parTransaction);
+    } else if ((await readConfirmedBlockHeight()) > BigInt(input.lastValidBlockHeight)) {
+      throw new AppError(
+        "SERVICE_UNAVAILABLE",
+        "Creation history is unavailable for this expired redemption. Retry the original signed intent; do not build a replacement."
+      );
     }
   }
   try {
@@ -1225,10 +1231,10 @@ export async function recordSignedExternalQueuedRequest(
 
 async function assertParCreationNotClosed(
   env: Env,
-  rpc: SolanaRpc,
   input: CreateSignedQueuedWithdrawalRequestInput,
   transaction: ParsedTransaction
 ): Promise<void> {
+  const rpc = createClusterRpc();
   const client = resolveVaultParRedemptionClient(env, input.provider, createVaultDeadline());
   if (!client) throw notImplemented(input.provider, "par redemptions");
   if (transaction.blockTime === null || transaction.blockTime === undefined) {
@@ -1248,7 +1254,11 @@ async function assertParCreationNotClosed(
   const closing = await findClosingParEventInHistoryPage(
     env,
     {
-      getTransaction: (signature, config) => rpc.getTransaction(signature, config),
+      getTransaction: (signature, config) =>
+        rpc.getTransaction(signature, {
+          ...config,
+          maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
+        }),
       getSignaturesForAddress: (requestAddress, config) =>
         rpc.getSignaturesForAddress(requestAddress, config),
     },

@@ -319,6 +319,121 @@ describe("Earn queued withdrawal repository", () => {
     ).resolves.toMatchObject({ id: retry.request.id });
   });
 
+  it("retains proof of an open par request after its PDA and history disappear", async () => {
+    const created = await createRequest({
+      mechanism: "operator_redemption",
+      intermediateMint: INTERMEDIATE_MINT,
+      intermediateAmount: "10.25",
+      quotedAssets: "10.25",
+      discountBps: null,
+      maturityTimestamp: null,
+      deadlineTimestamp: null,
+    });
+    // The previous image does not know the new column. Its status write alone
+    // must retain the same proof during a rolling deployment.
+    const pending = await getDb(env)
+      .prepare(
+        "UPDATE earn_vault_withdrawal_requests SET status = 'pending' WHERE id = ? RETURNING *"
+      )
+      .bind(created.request.id)
+      .first();
+    expect(pending).toMatchObject({
+      provider_state_observed: true,
+      nonce: null,
+      creation_timestamp: null,
+    });
+    await repository.advanceRequest({
+      withdrawalRequestId: created.request.id,
+      organizationId: ORG,
+      toStatus: "closed_or_unknown",
+    });
+    await expect(
+      repository.failActionAndRecoverRequest({
+        actionId: created.action.id,
+        organizationId: ORG,
+        failureReason: "missing history",
+      })
+    ).rejects.toThrow(/changed before action failure recovery/);
+    await expect(
+      repository.advanceRequest({
+        withdrawalRequestId: created.request.id,
+        organizationId: ORG,
+        toStatus: "failed",
+        failureReason: "missing history",
+      })
+    ).resolves.toBeNull();
+    expect(
+      await getDb(env)
+        .prepare(
+          "SELECT occupied FROM earn_vault_withdrawal_request_pda_leases WHERE lease_token = ?"
+        )
+        .bind(created.request.id)
+        .first()
+    ).toEqual({ occupied: true });
+    await expect(
+      repository.getActionByClientRequestId({
+        organizationId: ORG,
+        clientRequestId: created.action.client_request_id,
+      })
+    ).resolves.toMatchObject({ status: "requested" });
+  });
+
+  it("preserves ambiguous legacy par history without manufacturing provider proof", async () => {
+    const created = await createRequest({
+      mechanism: "operator_redemption",
+      intermediateMint: INTERMEDIATE_MINT,
+      intermediateAmount: "10.25",
+      quotedAssets: "10.25",
+      discountBps: null,
+      maturityTimestamp: null,
+      deadlineTimestamp: null,
+    });
+    await getDb(env)
+      .prepare(
+        "UPDATE earn_vault_withdrawal_requests SET status = 'closed_or_unknown', provider_state_observed = NULL WHERE id = ?"
+      )
+      .bind(created.request.id)
+      .run();
+    await expect(
+      repository.failActionAndRecoverRequest({
+        actionId: created.action.id,
+        organizationId: ORG,
+        failureReason: "missing history",
+      })
+    ).rejects.toThrow(/changed before action failure recovery/);
+    await expect(
+      repository.getById({
+        organizationId: ORG,
+        environment: "sandbox",
+        withdrawalRequestId: created.request.id,
+      })
+    ).resolves.toMatchObject({ status: "closed_or_unknown", provider_state_observed: null });
+  });
+
+  it("can recover a legacy creating intent whose provider was never observed", async () => {
+    const created = await createRequest();
+    await getDb(env)
+      .prepare(
+        "UPDATE earn_vault_withdrawal_requests SET provider_state_observed = NULL WHERE id = ?"
+      )
+      .bind(created.request.id)
+      .run();
+    await expect(
+      repository.advanceRequest({
+        withdrawalRequestId: created.request.id,
+        organizationId: ORG,
+        toStatus: "closed_or_unknown",
+      })
+    ).resolves.toMatchObject({ provider_state_observed: false });
+    await expect(
+      repository.failActionAndRecoverRequest({
+        actionId: created.action.id,
+        organizationId: ORG,
+        failureReason: "corroborated absence",
+      })
+    ).resolves.toMatchObject({ request: { status: "failed" } });
+  });
+
   it.each(["requested", "submitted"] as const)(
     "requires new, spaced absence evidence for an upgraded %s create",
     async (status) => {

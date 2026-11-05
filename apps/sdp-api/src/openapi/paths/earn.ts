@@ -588,7 +588,9 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
       "A par redemption whose original cycle already closed is refused for operator history " +
       "reconciliation, so a late receipt cannot claim a newer request at the reused address. " +
       "Finalized failed par transactions return 400 TRANSACTION_FAILED. An unresolved " +
-      "16-signature online history window returns 503 and requires support reconciliation.",
+      "16-signature online history window returns 503 and requires support reconciliation. " +
+      "Expired par builds with unavailable creation history return 503; retain and retry " +
+      "the original signed intent rather than signing a replacement.",
     security,
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,

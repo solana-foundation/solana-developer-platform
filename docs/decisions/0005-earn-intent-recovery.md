@@ -51,7 +51,10 @@ at these boundaries can duplicate transfers, strand tracking, or misstate balanc
   two complete, spaced observations find no signature, finalized transaction,
   provider obligation or authenticated close event. Incomplete history defers
   recovery. Migration 0212 starts this stronger evidence separately from older
-  status-cache misses; provider-proven requests never become failed by absence.
+  status-cache misses and durably preserves open-provider observations after
+  the account closes. Null legacy history remains protected unless the row is
+  still creating; ambiguous older requests need operator recovery.
+  Provider-proven requests never become failed by absence.
 - Earn and Markets feature flags stop new commitments and catalogue discovery.
   Authenticated exit/history routes stay available. Cancellation releases an
   obligation and is an exit requiring `earn.manage`, including after production
@@ -95,9 +98,11 @@ older writers are handled by the trigger, and initiated commands still use the
 same constraints. There is no production backfill or infrastructure change.
 
 Apply additive migration 0212 before the queue recovery writer. Older images
-ignore its nullable observation column. Build metadata already deleted by an
-older cleanup needs separate operator recovery; this migration cannot recreate
-an unknown owner-signed message or its tenant attribution.
+ignore its nullable observation columns; a trigger retains provider proof from
+their status updates during the rolling deployment. Legacy rows with unknown
+provider history and build metadata already deleted by an older cleanup need
+operator recovery. This migration cannot recreate an unknown owner-signed
+message or its tenant attribution.
 
 These tests do not certify provider solvency, liquidity, issuer fulfillment,
 RPC truthfulness or custody availability. Browser storage can be cleared and

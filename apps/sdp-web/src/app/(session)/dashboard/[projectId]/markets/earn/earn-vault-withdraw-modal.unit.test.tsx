@@ -116,10 +116,11 @@ describe("EarnVaultWithdrawModal", () => {
     const user = userEvent.setup();
     renderModal();
 
-    await user.type(screen.getByLabelText("Amount"), "2");
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "2" } });
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Continue" }).getAttribute("disabled")).toBeNull()
     );
+    await user.click(screen.getByLabelText("Amount"));
     await user.keyboard("{Enter}");
     expect(flowProgress()).toEqual({ step: "Review", label: "Review, Step 2 of 4" });
 

@@ -64,6 +64,8 @@ export interface EarnVaultWithdrawalRequestRow {
   discount_bps: number | null;
   nonce: string | null;
   creation_timestamp: string | null;
+  /** NULL for legacy rows whose earlier provider observations are unknown. */
+  provider_state_observed: boolean | null;
   maturity_timestamp: string | null;
   deadline_timestamp: string | null;
   client_request_id: string;
@@ -494,6 +496,12 @@ const REQUEST_SOURCES: Record<
   ],
   failed: ["creating", "closed_or_unknown"],
 };
+
+const UNPROVEN_CREATE_SQL = `(
+  nonce IS NULL AND creation_timestamp IS NULL
+  AND (provider_state_observed = FALSE
+    OR (provider_state_observed IS NULL AND status = 'creating'))
+)`;
 
 async function findRequestByClientRequestId(
   db: DatabaseExecutor,
@@ -1018,13 +1026,13 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             `INSERT INTO earn_vault_withdrawal_requests (
                id, organization_id, project_id, environment, provider, position_id,
                custody_wallet_id, owner_address, vault_address, token_mint, share_mint,
-               request_address, status, mechanism, shares, quoted_assets,
+               request_address, status, provider_state_observed, mechanism, shares, quoted_assets,
                share_decimals, asset_decimals, intermediate_mint, intermediate_amount,
                discount_bps, maturity_timestamp, deadline_timestamp,
                client_request_id, idempotency_fingerprint, creation_signature,
                created_by, initiated_by_key_id
              ) VALUES (
-               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', FALSE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
              )
              RETURNING *`
           )
@@ -1318,7 +1326,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                     updated_at = sdp_iso_now()
               WHERE id = ? AND organization_id = ?
                 AND status = ANY (?::text[])
-                AND (? <> 'failed' OR (nonce IS NULL AND creation_timestamp IS NULL))
+                AND (? <> 'failed' OR ${UNPROVEN_CREATE_SQL})
               RETURNING *`
           )
           .bind(
@@ -1436,7 +1444,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                   END,
                   updated_at = sdp_iso_now()
             WHERE id = ? AND organization_id = ? AND status = ANY (?::text[])
-              AND (? <> 'failed' OR (nonce IS NULL AND creation_timestamp IS NULL))
+              AND (? <> 'failed' OR ${UNPROVEN_CREATE_SQL})
               AND (? NOT IN ('pending', 'fulfillable', 'expired_cancelable') OR NOT EXISTS (
                 SELECT 1 FROM earn_vault_withdrawal_request_actions action
                  WHERE action.withdrawal_request_id = earn_vault_withdrawal_requests.id

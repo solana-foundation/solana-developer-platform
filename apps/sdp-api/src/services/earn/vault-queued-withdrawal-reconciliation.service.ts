@@ -728,7 +728,13 @@ async function recoverAbsentCreation(
     });
     return "advanced";
   }
-  if (request.nonce !== null || request.creation_timestamp !== null) return "unchanged";
+  if (
+    request.nonce !== null ||
+    request.creation_timestamp !== null ||
+    request.provider_state_observed === true ||
+    (request.provider_state_observed === null && request.status !== "creating")
+  )
+    return "unchanged";
   const observation = await ledger.observeExpiredUnknownSignature({
     actionId: actionRow.id,
     organizationId: actionRow.organization_id,
