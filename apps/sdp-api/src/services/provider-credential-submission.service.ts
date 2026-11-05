@@ -7,6 +7,7 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict, internalError, notFound, providerUnavailable } from "@/lib/errors";
 import { normalizeForFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { requireEnv } from "@/lib/runtime-env";
+import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import { getLogger } from "@/runtime/logger";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
@@ -44,6 +45,7 @@ import {
 } from "@/services/stores/provider-credential.store";
 import type { Env } from "@/types/env";
 
+const PRIVY_PREFLIGHT_QUOTA = { name: "privy-credential-preflight", actorMax: 5, orgMax: 20 };
 const UNFINISHED_INSTALLATION_MESSAGE =
   "A custody installation is already in progress for this project";
 const REPLACEMENT_CONFLICT_MESSAGE = "Custody Connection cannot accept replacement credentials";
@@ -186,6 +188,7 @@ async function submitProviderCredentialIntent(
     return setup.result;
   }
   if ("appId" in fields) {
+    await enforceMeteredQuota(c, PRIVY_PREFLIGHT_QUOTA);
     try {
       await assertPrivyCredentialAccepted(c.env, fields);
     } catch (error) {
