@@ -122,15 +122,18 @@ describe("InterfacesSection", () => {
     expect(markup).not.toContain("aria-live");
   });
 
-  it("marks the Prepare tab coming soon on the stable channel, which holds subscriptions back", async () => {
+  it("shows both ways with no coming-soon badge on the stable channel", async () => {
     vi.stubEnv("SDP_RELEASE_CHANNEL", "stable");
     const view = document.createElement("div");
     view.innerHTML = renderToStaticMarkup(await InterfacesSection({ links }));
     const section = within(view);
 
-    expect(section.getByRole("tab", { name: /Coming soon/ })).toBe(
-      section.getByRole("tab", { name: /^Prepare mode/ })
-    );
+    expect(section.getAllByRole("tab").map((tab) => tab.querySelector("b")?.textContent)).toEqual([
+      "REST API",
+      "Dashboard",
+    ]);
+    expect(section.queryByRole("tab", { name: /Coming soon/ })).toBeNull();
+    expect(view.textContent).not.toContain("Coming soon");
   });
 });
 
