@@ -18,6 +18,7 @@ import { getAuthorized } from "@/middleware/authorize";
 import { requireHumanActor } from "@/middleware/human-session";
 import { callerMayPerform } from "@/middleware/require-action";
 import type { ValidatedBodyContext, ValidatedContext } from "@/middleware/validate";
+import { getLogger } from "@/runtime/logger";
 import { listActiveApiKeysCreatedBy } from "@/services/api-key.service";
 import { AuditService } from "@/services/audit.service";
 import { ClerkRequestError } from "@/services/clerk-error";
@@ -407,7 +408,7 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
   }
 
   const clerk = new ClerkOrganizationsService(c.env);
-  let clerkInvitation: ClerkOrganizationInvitation | null;
+  let clerkInvitation: Pick<ClerkOrganizationInvitation, "id"> | null;
   try {
     clerkInvitation = await clerk.createOrganizationInvitationUnlessMember({
       organizationId: clerkOrgId,
@@ -417,13 +418,19 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
       sdpInvitationId: invitationId,
     });
   } catch (error) {
-    await failUnsentInvitation(
-      c,
-      clerkOrgId,
-      { id: invitationId, email: normalizedEmail },
-      error instanceof ClerkRequestError ? error : null
-    );
-    throw error;
+    const clerkError = error instanceof ClerkRequestError ? error : null;
+    const invitation = { id: invitationId, email: normalizedEmail };
+    if (isClerkRefusal(clerkError)) {
+      await failUnsentInvitation(c, invitation, clerkError);
+      throw error;
+    }
+    // Clerk may have created the invitation before the call failed.
+    const delivered = await findDeliveredInvitation(clerk, clerkOrgId, invitationId);
+    if (delivered === null) {
+      await failUnsentInvitation(c, invitation, clerkError);
+      throw error;
+    }
+    clerkInvitation = delivered;
   }
 
   // The address already holds the Clerk membership, typically from accepting
@@ -494,15 +501,45 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
   });
 };
 
+/** Clerk answered 4xx: it refused the invitation, so it created and sent nothing. */
+function isClerkRefusal(clerkError: ClerkRequestError | null): boolean {
+  return clerkError !== null && clerkError.clerkStatus >= 400 && clerkError.clerkStatus < 500;
+}
+
 /**
- * A pending row would still admit its address at sign-in, so a Clerk step that
- * threw fails it, which also frees the address for a retry. A Clerk 4xx created
- * nothing; a timeout or 5xx may have, so the Clerk invitation made for this row
- * is withdrawn.
+ * The invitation a create that threw may still have made: Clerk can commit it
+ * and send its email when its answer never arrives. A lookup Clerk cannot
+ * answer either finds none.
+ */
+async function findDeliveredInvitation(
+  clerk: ClerkOrganizationsService,
+  clerkOrgId: string,
+  sdpInvitationId: string
+): Promise<{ id: string } | null> {
+  let tagged: Array<{ clerkInvitationId: string; sdpInvitationId: string }>;
+  try {
+    tagged = await clerk.listSdpTaggedPendingInvitations(clerkOrgId);
+  } catch (error) {
+    // Clerk answered with an error, our timeout fired, or the connection broke.
+    const clerkUnreachable =
+      error instanceof ClerkRequestError ||
+      (error instanceof DOMException && error.name === "TimeoutError") ||
+      (error instanceof TypeError && error.cause instanceof Error);
+    if (clerkUnreachable) {
+      return null;
+    }
+    throw error;
+  }
+  const match = tagged.find((entry) => entry.sdpInvitationId === sdpInvitationId);
+  return match === undefined ? null : { id: match.clerkInvitationId };
+}
+
+/**
+ * A pending row would still admit its address at sign-in, so an invitation
+ * Clerk did not deliver is failed, which also frees the address for a retry.
  */
 async function failUnsentInvitation(
   c: AppContext,
-  clerkOrgId: string,
   invitation: { id: string; email: string },
   clerkError: ClerkRequestError | null
 ): Promise<void> {
@@ -532,16 +569,15 @@ async function failUnsentInvitation(
       result: undefined,
     };
   });
-
-  const clerkRefused =
-    clerkError !== null && clerkError.clerkStatus >= 400 && clerkError.clerkStatus < 500;
-  if (clerkRefused) {
-    return;
-  }
-  await new ClerkOrganizationsService(c.env).revokePendingInvitationForSdpInvitation({
-    organizationId: clerkOrgId,
-    sdpInvitationId: invitation.id,
-  });
+  getLogger().warn(
+    {
+      organizationId,
+      invitationId: invitation.id,
+      clerkStatus: clerkError === null ? null : clerkError.clerkStatus,
+      clerkCode,
+    },
+    "sdp_api_invitation_failed"
+  );
 }
 
 export const updateMemberRole = async (c: ValidatedBodyContext<typeof updateMemberRoleSchema>) => {

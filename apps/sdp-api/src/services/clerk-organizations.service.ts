@@ -189,25 +189,22 @@ export class ClerkOrganizationsService {
   }
 
   /**
-   * Revokes the pending invitation created for one SDP invitation, found by the
-   * id stored on it rather than by address, so another invitation to the same
-   * address is left alone.
+   * Every pending invitation that carries the SDP invitation id
+   * `createOrganizationInvitation` stores on it, so a create whose answer never
+   * arrived can still be traced to its SDP invitation.
    */
-  async revokePendingInvitationForSdpInvitation(params: {
-    organizationId: string;
-    sdpInvitationId: string;
-  }): Promise<void> {
+  async listSdpTaggedPendingInvitations(
+    organizationId: string
+  ): Promise<Array<{ clerkInvitationId: string; sdpInvitationId: string }>> {
     const pending = sdpTaggedInvitationsSchema.parse(
-      await this.listPendingOrganizationInvitations(params.organizationId)
+      await this.listPendingOrganizationInvitations(organizationId)
     );
-    for (const invitation of pending) {
-      if (invitation.private_metadata?.sdpInvitationId === params.sdpInvitationId) {
-        await this.revokeOrganizationInvitation({
-          organizationId: params.organizationId,
-          invitationId: invitation.id,
-        });
-      }
-    }
+    return pending.flatMap((invitation) => {
+      const sdpInvitationId = invitation.private_metadata?.sdpInvitationId;
+      return sdpInvitationId === undefined
+        ? []
+        : [{ clerkInvitationId: invitation.id, sdpInvitationId }];
+    });
   }
 
   /**
