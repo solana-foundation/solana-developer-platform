@@ -14,7 +14,11 @@ import { PERSISTED_RAMP_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-ac
 import { UNIFIED_TRANSACTION_MODULE_CONTRACTS } from "@sdp/types/unified-transactions";
 import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
-import { MODULE_GATE, TRANSFER_STATUS_GATE } from "@/openapi/release-channel-values";
+import {
+  CUSTODY_PROVIDER_GATE,
+  MODULE_GATE,
+  TRANSFER_STATUS_GATE,
+} from "@/openapi/release-channel-values";
 import {
   createPaymentRequestSchema as createPaymentRequestSchemaBase,
   listPaymentRequestsQuerySchema as listPaymentRequestsQuerySchemaBase,
@@ -329,6 +333,7 @@ export const transferSchema = z
       })
       .optional()
       .openapi({
+        [CUSTODY_PROVIDER_GATE]: "fireblocks",
         description:
           "Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.",
       }),
