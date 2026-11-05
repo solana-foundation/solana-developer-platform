@@ -47,7 +47,9 @@ export type SdpReleaseChannel = (typeof SDP_RELEASE_CHANNEL_NAMES)[number];
 /**
  * Each module's maturity. A release channel runs every module at or above its
  * own level, so each channel contains the more mature ones by construction.
- * Promoting a module is a one-line change here.
+ * Promoting a module starts in sdp-infra: move its paths to the new channel in
+ * `terraform/modules/sdp-api-served-paths` and apply, so the public edge admits them,
+ * then change its level here.
  *
  * Three modules have no maturity of their own:
  * - Custody is in a release channel when at least one (provider, custody mode)
