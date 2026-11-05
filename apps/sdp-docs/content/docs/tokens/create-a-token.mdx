@@ -11,7 +11,7 @@ steps:
 
 Creating a token saves its metadata, extensions and rules in SDP as a draft (`status: "pending"`). Nothing reaches Solana until you [deploy it](/docs/tokens/deploy-a-token).
 
-![Empty Issuance page with a create card](/images/tokens/token-list-empty.png)
+![Empty Issuance page with a Create a draft button](/images/tokens/token-list-empty.png)
 
 ## Before you begin
 
@@ -49,7 +49,7 @@ On **What is this token?**, enter a **Name**, then choose a classification:
 
 Click **Continue**.
 
-![Template selection modal showing Stablecoin, Tokenized Security, and Custom cards](/images/tokens/token-create-templates.png)
+<img src="/docs/images/tokens/token-create-templates.png" alt="What is this token? step with the name Acme Dollar and Stablecoin selected" width="693" height="484" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
 </Tab>
 <Tab value="API">
@@ -86,7 +86,7 @@ On **Token details**, fill in:
 
 Click **Continue**.
 
-![Identity configuration form with Metadata URI, Token Name, Symbol, and Decimals fields](/images/tokens/token-create-identity.png)
+<img src="/docs/images/tokens/token-create-identity.png" alt="Token details step with symbol ACME, 6 decimals, a description, issuer name and currency" width="693" height="679" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
 </Tab>
 <Tab value="API">
@@ -124,9 +124,11 @@ Decide what the token can do and which wallet holds each of its keys.
 
 On **What this token can do**, choose the controls: **Freezable**, **Pausable**, **Permanent delegate**, **Access list** and **Mintable**. A stablecoin keeps all of them on, and its **Access list** is a blocklist or an allowlist. Any other token can turn them off, except **Mintable**, which is always on.
 
+<img src="/docs/images/tokens/token-create-settings.png" alt="What this token can do step with every control on and Access list set to Allowlist" width="693" height="594" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
+
 On **Who holds the keys**, choose a wallet for **Mint authority** (it also signs the deploy), **Metadata authority** and, when the token has them, **Freeze authority** and **Permanent delegate**.
 
-![Operational settings form showing Main Signer and Transfer Controls with Allowlist and Denylist toggles](/images/tokens/token-create-settings.png)
+<img src="/docs/images/tokens/token-create-keys.png" alt="Who holds the keys step with the Treasury wallet holding every authority" width="693" height="360" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
 </Tab>
 <Tab value="API">
@@ -194,11 +196,11 @@ On **Review**, check the draft and click **Create draft**. The **Draft created**
 
 **Save and exit** stores a complete draft in SDP. An unfinished one stays in this browser, under **Unfinished drafts** on Issuance.
 
-![Issuance list showing the newly created token with a Draft badge](/images/tokens/token-list-draft.png)
+![Issuance list with Acme Dollar marked Draft](/images/tokens/token-list-draft.png)
 
 The draft's **Overview** tab holds **Deploy token**, the next step.
 
-![Token detail page showing Not deployed status and Deploy button](/images/tokens/token-detail-pending.png)
+![Acme Dollar's Overview tab in the Draft state, with Deploy this token and its Deploy token button](/images/tokens/token-detail-pending.png)
 
 </Tab>
 <Tab value="API">
