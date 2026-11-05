@@ -1413,9 +1413,6 @@
       "anAmount": "an amount",
       "aWallet": "a wallet",
       "createAndCopyLink": "Create and copy link",
-      "requestCreated": "Request created",
-      "linkOnClipboard": "The link is on your clipboard.",
-      "copyLinkFromRequest": "Copy the link from the request.",
       "noWalletTitle": "There is no wallet to be paid into",
       "noWalletDescription": "A request names the wallet the payment lands in, and this project holds none. Create one and the link has somewhere to go.",
       "openWallets": "Open Wallets",
@@ -1562,8 +1559,6 @@
     },
     "requestDetail": {
       "paymentLink": "Payment link",
-      "linkCopied": "Link copied",
-      "linkCopiedDescription": "The link for {amount} is on your clipboard.",
       "share": "Share…",
       "shareTitle": "Payment request for {amount}",
       "downloadQrCode": "Download QR code",
