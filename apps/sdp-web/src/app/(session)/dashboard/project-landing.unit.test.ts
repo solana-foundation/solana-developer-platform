@@ -64,8 +64,6 @@ import ProjectLayout from "./[projectId]/layout";
 import { ProjectOrganizationSwitch } from "./[projectId]/project-organization-switch";
 import DashboardLandingPage from "./page";
 
-const WORKSPACE_LOADING_REDIRECT = "/workspace-loading?return_to=%2Fdashboard";
-
 async function expectRedirect(render: Promise<unknown>, url: string): Promise<void> {
   await expect(render).rejects.toThrow("NEXT_REDIRECT");
   expect(nextNavigationMock.redirect.mock.calls).toEqual([[url]]);
@@ -108,12 +106,12 @@ describe("bare dashboard landing", () => {
     await expectRedirect(renderLanding({}), `/dashboard/${SANDBOX_PROJECT.id}`);
   });
 
-  it("returns to the requested page and query inside the last-used project", async () => {
+  it("returns a docs playground link to its endpoint inside the last-used project", async () => {
     setLastUsedProjectCookie(PRODUCTION_PROJECT.id);
 
     await expectRedirect(
-      renderLanding({ return_to: "/dashboard/payments/transactions?tab=x" }),
-      `/dashboard/${PRODUCTION_PROJECT.id}/payments/transactions?tab=x`
+      renderLanding({ return_to: "/dashboard/payments?tab=playground&endpoint=ep_test" }),
+      `/dashboard/${PRODUCTION_PROJECT.id}/payments?tab=playground&endpoint=ep_test`
     );
   });
 
@@ -197,6 +195,6 @@ describe("project-scoped dashboard layout", () => {
       `/dashboard/${OTHER_ORGANIZATION_PROJECT.id}/payments`
     );
 
-    expect(layout).toMatchObject({ props: { fallbackHref: WORKSPACE_LOADING_REDIRECT } });
+    expect(layout).toMatchObject({ props: { fallbackHref: "/workspace-loading" } });
   });
 });

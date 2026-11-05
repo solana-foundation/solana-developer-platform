@@ -6,7 +6,6 @@ import { InfoHint } from "@sdp/ui/info-hint";
 import { StatusText } from "@sdp/ui/status-text";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/custody/wallet-address-copy-button";
 import { TokenDisabledActionTooltip } from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/token-disabled-action-tooltip";
 import type { PermissionRowId } from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.types";
 import { deployNetworkName } from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.utils";
@@ -20,6 +19,7 @@ import {
 } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-token-state";
 import { formatDecimalAmount } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
 import { RecordAmount } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
+import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
 import {
   RecordBlock,
   RecordColumns,

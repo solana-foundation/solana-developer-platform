@@ -94,21 +94,19 @@ export function SidebarUserMenu({
           type="button"
           aria-label={t("Shared.dashboardShell.accountMenu")}
           className={cn(
-            "flex h-12 items-center rounded-[var(--button-radius-lg)] text-left transition-colors hover:bg-fill-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary refresh:hover:bg-fill",
-            collapsed ? "w-full justify-center" : "w-full min-w-0 gap-2.5 px-2 refresh:gap-3"
+            "flex h-12 items-center rounded-[var(--button-radius-lg)] text-left transition-colors hover:bg-fill focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+            collapsed ? "w-full justify-center" : "w-full min-w-0 px-2 gap-3"
           )}
         >
           <UserAvatar name={name} imageUrl={user.imageUrl} />
           {collapsed ? null : (
             <>
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-sm font-semibold leading-tight text-primary refresh:text-field refresh:leading-tight refresh:font-medium">
+                <span className="truncate leading-tight text-primary text-field font-medium">
                   {name}
                 </span>
                 {email ? (
-                  <span className="truncate text-xs leading-tight text-tertiary refresh:text-meta refresh:leading-tight refresh:text-secondary">
-                    {email}
-                  </span>
+                  <span className="truncate leading-tight text-meta text-secondary">{email}</span>
                 ) : null}
               </span>
               <ChevronsUpDownIcon className="size-4 shrink-0 text-tertiary" />

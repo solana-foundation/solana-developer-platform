@@ -4,8 +4,8 @@ import { COMPLIANCE_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access
 import {
   CUSTODY_PROVIDER_CATALOG,
   type CustodyProviderCatalogEntry,
-} from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
-import type { CustodyProviderAvailability } from "@/app/(session)/dashboard/[projectId]/custody/provider-display-status";
+} from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
+import type { CustodyProviderAvailability } from "@/app/(session)/dashboard/[projectId]/wallets/provider-display-status";
 import type { MessageKey } from "@/i18n/messages";
 import type { IntegrationFamily } from "./integrations-filter";
 import type { IntegrationEntry, IntegrationStatus } from "./integrations-status";

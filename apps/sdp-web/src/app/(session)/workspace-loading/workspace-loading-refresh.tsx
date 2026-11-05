@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { DashboardLoadingScreen } from "@/components/dashboard-loading-screen";
 import { useTranslations } from "@/i18n/provider";
+import { signInHref } from "@/lib/clerk-config";
 import { parseDashboardPathname } from "@/lib/dashboard-project-path";
 import { WORKSPACE_LOADING_RETRY_MS } from "@/lib/workspace-loading";
 
@@ -38,7 +39,7 @@ export function WorkspaceLoadingRefresh({ returnTo }: { returnTo: string }) {
         });
         if (response.status === 401) {
           clearTimeout(deadline);
-          window.location.replace(`/sign-in?redirect_url=${encodeURIComponent(returnTo)}`);
+          window.location.replace(signInHref(returnTo));
           return;
         }
         if (!response.ok) throw new Error("Workspace unavailable");
