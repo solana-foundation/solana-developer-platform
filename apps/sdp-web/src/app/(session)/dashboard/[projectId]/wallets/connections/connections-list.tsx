@@ -21,6 +21,7 @@ import { formatWalletMeta } from "@/app/(session)/dashboard/[projectId]/wallets/
 import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
 import { PaginatedFooter } from "@/components/ui/paginated-footer";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { ConnectionStatusCell } from "./connection-status";
 import {
@@ -36,7 +37,7 @@ const CREATED_COLUMN_CLASS = "hidden @4xl/connections-table:table-cell";
 
 type Translate = ReturnType<typeof useTranslations>;
 
-function formatDate(value: string | null, locale: string, t: Translate): string {
+function formatDate(value: string | null, locale: string, timeZone: string, t: Translate): string {
   if (!value) return t("DashboardCustody.never");
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -44,6 +45,7 @@ function formatDate(value: string | null, locale: string, t: Translate): string 
     month: "short",
     day: "2-digit",
     year: "numeric",
+    timeZone,
   });
 }
 
@@ -119,6 +121,7 @@ export function ConnectionsList({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const router = useRouter();
   const pathname = usePathname();
   const href = useProjectHref();
@@ -212,7 +215,7 @@ export function ConnectionsList({
                 />
               </TableCell>
               <TableCell className={cn(CREATED_COLUMN_CLASS, "text-xs text-secondary")}>
-                {formatDate(connection.createdAt, locale, t)}
+                {formatDate(connection.createdAt, locale, timeZone, t)}
               </TableCell>
               <TableCell className="text-right">
                 <DropdownMenu>

@@ -7,6 +7,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { RecordBlock } from "@/components/refresh-record";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   type LocalDraft,
@@ -66,6 +67,7 @@ function LocalDraftRow({ entry, onDiscard }: { entry: LocalDraft; onDiscard: () 
   const t = useTranslations();
   const projectHref = useProjectHref();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const name =
     (entry.draft.name ?? "").trim() || t("DashboardIssuance.newDesign.localDrafts.untitled");
   const symbol = (entry.draft.symbol ?? "").trim();
@@ -97,7 +99,7 @@ function LocalDraftRow({ entry, onDiscard }: { entry: LocalDraft; onDiscard: () 
             {t("DashboardIssuance.newDesign.localDrafts.saved")}
           </span>
           <span className="text-body text-primary tabular-nums">
-            {formatTokenDay(entry.savedAt, locale) ?? "—"}
+            {formatTokenDay(entry.savedAt, locale, timeZone) ?? "—"}
           </span>
         </span>
       </Link>

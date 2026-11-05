@@ -16,6 +16,7 @@ import { providerTransferDetailRows } from "@/app/(session)/dashboard/[projectId
 import { EntityLink } from "@/components/entity-link";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import type { TranslationValues } from "@/i18n/translate";
 import { explorerTxUrl } from "@/lib/explorer";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS, RAMP_PROVIDER_WEBSITES } from "@/lib/ramps";
@@ -69,6 +70,8 @@ function completionDetailRows(
   cluster: SolanaCluster,
   onramp: boolean,
   tokenLabel: string | null | undefined,
+  locale: string,
+  timeZone: string,
   t: Translate
 ): CompletionDetailRow[] {
   const rows: CompletionDetailRow[] = [
@@ -132,14 +135,14 @@ function completionDetailRows(
   if (transfer.createdAt) {
     rows.push({
       label: t("DashboardPayments.createdLabel"),
-      value: formatTimestamp(transfer.createdAt, t),
+      value: formatTimestamp(transfer.createdAt, t, locale, timeZone),
     });
   }
   const completedAt = transfer.confirmedAt ?? transfer.updatedAt;
   if (completedAt) {
     rows.push({
       label: t("DashboardPayments.ramps.completed"),
-      value: formatTimestamp(completedAt, t),
+      value: formatTimestamp(completedAt, t, locale, timeZone),
     });
   }
   if (receiptRow) {
@@ -223,6 +226,7 @@ export function RampCompleteScreen({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const cluster = useSolanaCluster();
   const onramp = direction === "onramp";
   const tokenLabel = resolveTransferTokenLabel(transfer.token);
@@ -232,7 +236,16 @@ export function RampCompleteScreen({
 
   const primaryAmount = onramp ? cryptoAmount : fiatAmount;
   const secondaryAmount = onramp ? fiatAmount : cryptoAmount;
-  const detailRows = completionDetailRows(quote, transfer, cluster, onramp, tokenLabel, t);
+  const detailRows = completionDetailRows(
+    quote,
+    transfer,
+    cluster,
+    onramp,
+    tokenLabel,
+    locale,
+    timeZone,
+    t
+  );
 
   return (
     <section className="w-full overflow-hidden rounded-2xl bg-fill-subtle">

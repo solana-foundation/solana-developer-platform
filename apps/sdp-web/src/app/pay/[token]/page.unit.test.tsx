@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ZodError } from "zod";
 import { nextNavigationMock, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import PayPage from "./page";
 import { payTokenSchema } from "./pay-token";
@@ -49,6 +50,12 @@ describe("PayPage unknown links", () => {
 
     await expect(renderPage("AbCdEfGh12345-xy")).rejects.toThrow("Pay link read failed (429)");
     expect(nextNavigationMock.notFound).not.toHaveBeenCalled();
+  });
+
+  it("refuses a read whose body is not a payment link instead of drawing it", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ status: "paid" }), { status: 200 }));
+
+    await expect(renderPage("AbCdEfGh12345-xy")).rejects.toThrow(ZodError);
   });
 });
 

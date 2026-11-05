@@ -18,6 +18,7 @@ import {
   RecordSection,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { formatDateTime } from "@/lib/date-format";
 import { useZodForm } from "@/lib/use-zod-form";
 import { useReportAccountError } from "./account-errors";
@@ -197,13 +198,14 @@ function SessionRow({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const reportError = useReportAccountError();
   const [isPending, startTransition] = useTransition();
   const revoke = useReverification(() => session.revoke());
   const { browserName, browserVersion, deviceType, city, country, ipAddress } =
     session.latestActivity;
   const browser = [browserName, browserVersion].filter(Boolean).join(" ");
-  const lastActive = formatDateTime(locale, session.lastActiveAt.toISOString());
+  const lastActive = formatDateTime(locale, timeZone, session.lastActiveAt.toISOString());
 
   const signOut = () => {
     startTransition(async () => {
