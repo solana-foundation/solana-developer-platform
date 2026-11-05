@@ -2,25 +2,50 @@ import type { Arguments } from "swr";
 import { issuanceQueryKeys } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-query-key";
 import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
 import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import {
+  type DashboardKeyScope,
+  type DashboardRequestKey,
+  dashboardRequestKey,
+  isDashboardRequestKey,
+  readsUnderPath,
+} from "@/lib/dashboard-request-key";
+import { WALLET_ACTIVITY_LIMIT } from "./wallet-activity.data";
 
-const WALLET_CARD_BALANCE_FALLBACK_PREFIX = "wallet-card-balance-fallback:";
+const readsWalletsPath = readsUnderPath("/api/dashboard/wallets");
+const readsWalletBalancesPath = readsUnderPath("/api/dashboard/payments/wallets");
+
+function walletPath(walletId: string) {
+  return `/api/dashboard/wallets/${encodeURIComponent(walletId)}` as const;
+}
 
 export const custodyQueryKeys = {
-  walletActivity: ({ walletId }: { walletId: string }) => ["wallet-activity", walletId] as const,
-  /** Keyed to the server read so a later visit never starts from an earlier visit's cache. */
-  walletBalances: ({ walletId, readAt }: { walletId: string; readAt: number }) =>
-    ["wallet-balances", walletId, readAt] as const,
-  walletCardBalances: () => "wallet-card-balances",
-  walletCardBalanceFallback: ({ walletId }: { walletId: string }) =>
-    `${WALLET_CARD_BALANCE_FALLBACK_PREFIX}${walletId}`,
-  /** Balances and activity of any wallet, as shown on the wallet pages. */
-  isWalletLiveDataKey: (key: Arguments) =>
-    (Array.isArray(key) && (key[0] === "wallet-balances" || key[0] === "wallet-activity")) ||
-    key === custodyQueryKeys.walletCardBalances() ||
-    (typeof key === "string" && key.startsWith(WALLET_CARD_BALANCE_FALLBACK_PREFIX)),
-  /** The wallet inventories other features read (payments, Earn, issuance pickers). */
-  isWalletInventoryKey: (key: Arguments) =>
+  wallets: (scope: DashboardKeyScope) => dashboardRequestKey(scope, "/api/dashboard/wallets"),
+  configs: (scope: DashboardKeyScope) =>
+    dashboardRequestKey(scope, "/api/dashboard/wallets/configs"),
+  wallet: (scope: DashboardKeyScope, { walletId }: { walletId: string }) =>
+    dashboardRequestKey(scope, walletPath(walletId)),
+  walletBalances: (scope: DashboardKeyScope, { walletId }: { walletId: string }) =>
+    dashboardRequestKey(
+      scope,
+      `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/balances`
+    ),
+  walletActivity: (
+    scope: DashboardKeyScope,
+    { walletId, limit }: { walletId: string; limit: number }
+  ) =>
+    dashboardRequestKey(scope, `${walletPath(walletId)}/activity`, {
+      limit: limit === WALLET_ACTIVITY_LIMIT ? undefined : limit,
+    }),
+  /** Any wallet's record, balances or activity, the custody configs, and the wallet lists. */
+  isWalletReadKey: (key: DashboardRequestKey) =>
+    readsWalletsPath(key) || readsWalletBalancesPath(key),
+  /** Wallet inventories other features still key by label (payments, Earn, issuance pickers). */
+  isWalletLabelKey: (key: Arguments) =>
     key === paymentsQueryKeys.actionWallets() ||
     key === earnQueryKeys.fundingWallets() ||
     issuanceQueryKeys.isWalletInventoryKey(key),
+  /** Every wallet read and inventory, whether keyed by request or by label. */
+  isWalletInventoryKey: (key: Arguments) =>
+    (isDashboardRequestKey(key) && custodyQueryKeys.isWalletReadKey(key)) ||
+    custodyQueryKeys.isWalletLabelKey(key),
 };

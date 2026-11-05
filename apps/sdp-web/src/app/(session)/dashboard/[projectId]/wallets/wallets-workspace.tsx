@@ -1,6 +1,5 @@
 "use client";
 
-import type { CustodyWalletSummary } from "@sdp/types/custody";
 import { cn } from "@sdp/ui/cn";
 import dynamic from "next/dynamic";
 import { useEffect } from "react";
@@ -11,8 +10,9 @@ import {
 } from "@/components/dashboard-workspace-panel";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useTranslations } from "@/i18n/provider";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
-import type { KnownCustodyProvider } from "./provider-catalog";
+import { useConnectedCustodyProviders, useCustodyWallets } from "./custody-reads";
 import { WalletsOverview } from "./wallets-overview";
 
 const WalletsPlayground = dynamic(
@@ -26,22 +26,15 @@ const WalletsPlayground = dynamic(
   }
 );
 
-interface WalletsWorkspaceProps {
-  apiBaseUrl: string | null;
-  connectedProviders: KnownCustodyProvider[];
-  configsError: string | null;
-  wallets: CustodyWalletSummary[];
-  walletsError: string | null;
-}
-
-export function WalletsWorkspace({
-  apiBaseUrl,
-  connectedProviders,
-  configsError,
-  wallets,
-  walletsError,
-}: WalletsWorkspaceProps) {
+export function WalletsWorkspace({ apiBaseUrl }: { apiBaseUrl: string | null }) {
+  const t = useTranslations();
   const { dashboardAccess } = useDashboardWorkspace();
+  const walletsRead = useCustodyWallets();
+  const walletsError =
+    walletsRead.error === undefined ? null : t("DashboardCustody.unableToLoadWallets");
+  const providersRead = useConnectedCustodyProviders();
+  const configsError =
+    providersRead.error === undefined ? null : t("DashboardCustody.unableToLoadWalletProviders");
   const isPlaygroundTab = useDashboardTab() === "playground";
 
   useEffect(() => {
@@ -74,8 +67,7 @@ export function WalletsWorkspace({
               <div className="contents" data-wallet-panel="overview">
                 <WalletsOverview
                   configsError={configsError}
-                  wallets={wallets}
-                  walletsError={walletsError}
+                  walletsRead={walletsRead}
                   canManageCustody={dashboardAccess.capabilities.canManageCustody}
                 />
               </div>
@@ -84,20 +76,26 @@ export function WalletsWorkspace({
           {
             id: "playground",
             className: dashboardWorkspacePlaygroundPanelClassName,
-            content: (
-              <WalletsPlayground
-                apiBaseUrl={apiBaseUrl}
-                connectedProviders={connectedProviders}
-                configsError={configsError}
-                wallets={wallets.map((wallet) => ({
-                  walletId: wallet.walletId,
-                  label: wallet.label,
-                  provider: wallet.provider ?? null,
-                  publicKey: wallet.publicKey,
-                }))}
-                walletsError={walletsError}
-              />
-            ),
+            content:
+              (walletsRead.data === undefined && walletsError === null) ||
+              (providersRead.data === undefined && configsError === null) ? (
+                <ApiPlaygroundShellSkeleton />
+              ) : (
+                <WalletsPlayground
+                  apiBaseUrl={apiBaseUrl}
+                  // A failed read leaves the examples without providers; the playground names it.
+                  connectedProviders={providersRead.data ?? []}
+                  configsError={configsError}
+                  // A failed read leaves the examples without wallets; the playground names the failure.
+                  wallets={(walletsRead.data ?? []).map((wallet) => ({
+                    walletId: wallet.walletId,
+                    label: wallet.label,
+                    provider: wallet.provider ?? null,
+                    publicKey: wallet.publicKey,
+                  }))}
+                  walletsError={walletsError}
+                />
+              ),
           },
         ]}
       />

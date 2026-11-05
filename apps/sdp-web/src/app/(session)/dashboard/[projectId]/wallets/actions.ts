@@ -8,14 +8,13 @@ import type {
 } from "@sdp/types/custody";
 import { isIdempotencyErrorCode } from "@sdp/types/idempotency";
 import { decimalFixedPointToNumber, lamports, lamportsToSol } from "@solana/kit";
-import { revalidatePath } from "next/cache";
 import { getTranslations } from "@/i18n/server";
 import {
   type ApiAnswer,
   actionIdempotencyHeaders,
   isOutcomeUnknownAnswer,
 } from "@/lib/idempotency";
-import { createSdpApiClient, requestProjectHref, sdpApiAnswer } from "@/lib/sdp-api";
+import { createSdpApiClient, sdpApiAnswer } from "@/lib/sdp-api";
 import { isKnownCustodyProvider, type KnownCustodyProvider } from "./provider-catalog";
 
 function getString(formData: FormData, key: string): string {
@@ -129,10 +128,6 @@ async function initializeCustodyWallet(formData: FormData): Promise<string> {
   return walletId;
 }
 
-async function revalidateWalletPaths() {
-  revalidatePath(await requestProjectHref("/dashboard/wallets"));
-}
-
 /** The purposes the create endpoint accepts; anything else is left for the API to default. */
 const CREATABLE_WALLET_PURPOSES = new Set<string>([
   "transfer",
@@ -207,7 +202,6 @@ export async function initializeCustodySetupAction(
   const t = await getTranslations();
   try {
     const walletId = await initializeCustodyWallet(formData);
-    await revalidateWalletPaths();
     return { status: "success", walletId };
   } catch (error) {
     const answer = sdpApiAnswer(error);
@@ -230,7 +224,6 @@ export async function createCustodySetupWalletAction(
   const t = await getTranslations();
   try {
     const walletId = await createCustodyWalletForProvider(formData);
-    await revalidateWalletPaths();
     return { status: "success", walletId };
   } catch (error) {
     return {
@@ -279,11 +272,6 @@ export async function updateWalletLabelAction(
         label: nextLabel || null,
       }),
     });
-
-    revalidatePath(await requestProjectHref("/dashboard/wallets"));
-    revalidatePath(
-      await requestProjectHref(`/dashboard/wallets/${encodeURIComponent(resolvedWalletId)}`)
-    );
 
     return {
       status: "success",
@@ -378,7 +366,7 @@ export async function requestDevnetSolanaFaucetAction(
     }
 
     const client = await createSdpApiClient();
-    // The API waits (bounded) for the airdrop to confirm, so revalidating next reads the funded balance.
+    // The API waits (bounded) for the airdrop to confirm, so the next balance read sees the funds.
     const airdrop = await client.fetch<WalletFaucetResponse>(
       `/internal/dashboard/wallets/${encodeURIComponent(resolvedWalletId)}/faucet`,
       { method: "POST" }
@@ -386,11 +374,6 @@ export async function requestDevnetSolanaFaucetAction(
     if (airdrop.status === "failed") {
       return { status: "error", message: t("DashboardCustody.devnetFaucetTransactionFailed") };
     }
-
-    revalidatePath(await requestProjectHref("/dashboard/wallets"));
-    revalidatePath(
-      await requestProjectHref(`/dashboard/wallets/${encodeURIComponent(resolvedWalletId)}`)
-    );
 
     return {
       status: "success",

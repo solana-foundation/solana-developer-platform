@@ -1,14 +1,17 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import WalletDetailLoading from "./[walletId]/loading";
-import WalletsLoading from "./loading";
-import WalletSetupLoading from "./setup/loading";
-import { WalletDetailSkeleton, WalletsOnboardingSkeleton } from "./wallet-route-skeletons";
+import {
+  WalletCardsSkeleton,
+  WalletDetailSkeleton,
+  WalletSetupSkeleton,
+  WalletsOnboardingSkeleton,
+  WalletsOverviewSkeleton,
+} from "./wallet-route-skeletons";
 
 const routeLoaders = [
-  ["wallets overview", WalletsLoading, "wallets-overview"],
-  ["wallet setup", WalletSetupLoading, "wallet-setup"],
-  ["wallet detail", WalletDetailLoading, "wallet-detail"],
+  ["wallets overview", WalletsOverviewSkeleton, "wallets-overview"],
+  ["wallet setup", WalletSetupSkeleton, "wallet-setup"],
+  ["wallet detail", WalletDetailSkeleton, "wallet-detail"],
 ] as const;
 
 describe("wallet route loading states", () => {
@@ -30,8 +33,8 @@ describe("wallet route loading states", () => {
     expect(html).toContain('data-skeleton-section="wallet-activity"');
   });
 
-  it("reserves the two-column wallet card grid while the overview loads", () => {
-    const html = renderToStaticMarkup(<WalletsLoading />);
+  it("reserves the two-column wallet card grid while the list loads", () => {
+    const html = renderToStaticMarkup(<WalletCardsSkeleton />);
 
     expect(html).toContain('data-wallet-grid-skeleton="true"');
     expect(html).toContain("sm:grid-cols-2");

@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import type { ComponentProps } from "react";
+import type { CustodyWalletMetadata, CustodyWalletTokenBalance } from "@sdp/types/custody";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WalletActivityRow } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-activity.data";
+import { DashboardPageTitleContext } from "@/components/dashboard-page-title-context";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { dashboardErrorResponse, stubDashboardFetch } from "@/test/dashboard-fetch";
+import { resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { DashboardReadsProvider } from "@/test/dashboard-reads";
 
 // jsdom implements no matchMedia, while the activity table's motion components read it.
 if (!window.matchMedia) {
@@ -57,7 +62,7 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
     sandboxProject: { id: "project" },
     selectedProjectId: "project",
     dashboardCacheScope: { userId: "user", orgId: "org" },
-    dashboardAccess: { capabilities: { canUseWalletSignerCheck: true } },
+    dashboardAccess: { capabilities: { canUseWalletSignerCheck: true, canManageCustody: true } },
     flags: { dvp: false, issuance: false, markets: false, ramps: false },
   }),
 }));
@@ -153,49 +158,76 @@ const INCOMING_ROW: WalletActivityRow = {
   createdAt: "2026-09-10T00:00:00.000Z",
 };
 
-const wallet: ComponentProps<typeof WalletDetailView>["wallet"] = {
-  walletId: "wallet_one",
-  custodyWalletId: "cwlt_one",
-  name: "Settlement Fireblocks",
-  label: "Settlement Fireblocks",
-  publicKey: "gZeTc7Hq9mXw2JDUBSDgZeTc7Hq9mXw2JDUBSD",
-  provider: "fireblocks",
-  providerName: "Fireblocks",
-  purposeLabel: "Transfers",
-  createdAt: "2026-06-30T00:00:00.000Z",
+const WALLET_FIELDS = {
+  id: "cwlt_one",
   isRuntimeExecutionAllowed: true,
-  supportsSignerCheck: true,
-  connection: null,
-  canManageCustody: true,
+  walletId: "wallet_one",
+  publicKey: "gZeTc7Hq9mXw2JDUBSDgZeTc7Hq9mXw2JDUBSD",
+  label: "Settlement Fireblocks",
+  purpose: "transfer",
+  status: "active",
+  createdAt: "2026-06-30T00:00:00.000Z",
+} as const;
+
+const wallet: CustodyWalletMetadata = {
+  ...WALLET_FIELDS,
+  provider: "fireblocks",
+  custodyConfigId: "cfg_test_1",
 };
 
-function renderView(overrides: Partial<ComponentProps<typeof WalletDetailView>> = {}) {
-  return render(
-    <I18nProvider locale="en" messages={getMessages("en")}>
-      <WalletDetailView
-        wallet={wallet}
-        balancesPromise={Promise.resolve({
-          balances: [
-            {
-              token: "USDC",
-              mint: USDC,
-              amount: "4000000000",
-              uiAmount: "4000",
-              decimals: 6,
-              usdValue: 4000,
-            },
-          ],
-          error: null,
-        })}
-        issuedTokensPromise={Promise.resolve({})}
-        issuanceEnabled
-        {...overrides}
-      />
-    </I18nProvider>
+const USDC_BALANCE: CustodyWalletTokenBalance = {
+  token: "USDC",
+  mint: USDC,
+  amount: "4000000000",
+  uiAmount: "4000",
+  decimals: 6,
+  usdValue: 4000,
+};
+
+interface WalletRecordBody {
+  wallet: CustodyWalletMetadata;
+  connection: { label: string; href: string | null } | null;
+}
+
+const BALANCES_PATH = "/api/dashboard/payments/wallets/wallet_one/balances";
+
+function walletAnswer(record: WalletRecordBody | number, path: string): Response {
+  if (path === "/api/dashboard/wallets/wallet_one") {
+    return typeof record === "number"
+      ? dashboardErrorResponse(record, "Wallet unavailable")
+      : Response.json({ data: record });
+  }
+  if (path === BALANCES_PATH) {
+    return Response.json({ data: { walletBalances: { balances: [USDC_BALANCE] } } });
+  }
+  return Response.json({ data: [], total: 0, hasMore: false });
+}
+
+function answerWallet(record: WalletRecordBody | number) {
+  return stubDashboardFetch(({ path }) => walletAnswer(record, path));
+}
+
+function readsTree(children: ReactNode) {
+  return (
+    <DashboardReadsProvider>
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        {children}
+      </I18nProvider>
+    </DashboardReadsProvider>
   );
 }
 
+function viewTree() {
+  return readsTree(<WalletDetailView walletId="wallet_one" issuanceEnabled />);
+}
+
+function renderView(record: WalletRecordBody | number) {
+  answerWallet(record);
+  return render(viewTree());
+}
+
 beforeEach(() => {
+  resetDashboardNavigation();
   mocks.tab = null;
   mocks.activity = {
     activityRows: [OUTGOING_ROW, INCOMING_ROW],
@@ -210,12 +242,97 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
+});
+
+describe("the wallet's record", () => {
+  it("shows the Project's not-found view for a wallet the API cannot find", async () => {
+    await act(async () => {
+      renderView(404);
+    });
+    expect(
+      (await screen.findByRole("link", { name: "Back to overview" })).getAttribute("href")
+    ).toBe("/dashboard/prj_test_sandbox");
+  });
+
+  it("shows the not-found view when a revisit finds the cached wallet gone", async () => {
+    const { rerender } = renderView({ wallet, connection: null });
+    expect(await screen.findByText("Payments can sign with this wallet.")).toBeTruthy();
+    rerender(readsTree(null));
+    answerWallet(404);
+
+    rerender(viewTree());
+
+    expect(
+      (await screen.findByRole("link", { name: "Back to overview" })).getAttribute("href")
+    ).toBe("/dashboard/prj_test_sandbox");
+  });
+
+  it("mutes the balance and token figures, noted stale, when a balance refresh fails", async () => {
+    const { rerender } = renderView({ wallet, connection: null });
+    expect(
+      await screen.findByText("$4,000.00", { selector: "[data-wallet-balance]" })
+    ).toBeTruthy();
+    rerender(readsTree(null));
+    stubDashboardFetch(({ path }) =>
+      path === BALANCES_PATH
+        ? dashboardErrorResponse(503, "Balances unavailable")
+        : walletAnswer({ wallet, connection: null }, path)
+    );
+
+    rerender(viewTree());
+
+    const figure = await waitFor(() => {
+      const shown = present(
+        document.querySelector<HTMLElement>("[data-wallet-balance]"),
+        "the balance figure"
+      );
+      expect(shown.textContent).toContain("$4,000.00 (stale)");
+      return shown;
+    });
+    expect(figure.className).toContain("text-muted");
+    const tokens = present(
+      document.querySelector<HTMLElement>("[data-wallet-tokens]"),
+      "the tokens table"
+    );
+    expect(
+      within(tokens)
+        .getAllByText("(stale)")
+        .map((note) => present(note.closest("td"), "the note's cell").className)
+    ).toEqual([expect.stringContaining("text-muted"), expect.stringContaining("text-muted")]);
+  });
+
+  it("says the wallet could not be loaded, and loads it on retry", async () => {
+    renderView(503);
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("This wallet could not be loaded.");
+
+    answerWallet({ wallet, connection: null });
+    fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByText("Payments can sign with this wallet.")).toBeTruthy();
+  });
+
+  it("calls an unlabelled wallet untitled rather than by its address", async () => {
+    const setTitle = vi.fn();
+    answerWallet({ wallet: { ...wallet, label: null }, connection: null });
+    render(
+      <DashboardPageTitleContext.Provider value={setTitle}>
+        {viewTree()}
+      </DashboardPageTitleContext.Provider>
+    );
+
+    expect(await screen.findByText("Payments can sign with this wallet.")).toBeTruthy();
+    expect(setTitle).toHaveBeenLastCalledWith(
+      expect.objectContaining({ title: "Untitled wallet" })
+    );
+  });
 });
 
 describe("Overview", () => {
   it("heads the wallet with its state, balance and identity, then what it holds and did", async () => {
     await act(async () => {
-      renderView();
+      renderView({ wallet, connection: null });
     });
     expect(
       await screen.findByText("$4,000.00", { selector: "[data-wallet-balance]" })
@@ -229,9 +346,8 @@ describe("Overview", () => {
       [...document.querySelectorAll("[data-record-fact] dt")].map((label) => label.textContent)
     ).toEqual(["Provider", "Purpose", "Created", "Address", "Wallet ID"]);
 
-    const tokens = present(
-      document.querySelector<HTMLElement>("[data-wallet-tokens]"),
-      "the tokens table"
+    const tokens = await waitFor(() =>
+      present(document.querySelector<HTMLElement>("[data-wallet-tokens]"), "the tokens table")
     );
     expect(within(tokens).getByText("USDC")).toBeTruthy();
     // The mint under its token, with a copy of the whole.
@@ -252,12 +368,8 @@ describe("Overview", () => {
   it("puts the connection beside the provider and names it in the band", async () => {
     await act(async () => {
       renderView({
-        wallet: {
-          ...wallet,
-          provider: "privy",
-          providerName: "Privy",
-          connection: { label: "Treasury app", href: "/dashboard/prj/integrations/privy/c" },
-        },
+        wallet: { ...WALLET_FIELDS, provider: "privy", custodyConnectionId: "conn_test_treasury" },
+        connection: { label: "Treasury app", href: "/dashboard/prj/integrations/privy/c" },
       });
     });
     expect(
@@ -285,7 +397,7 @@ describe("Overview", () => {
       ],
     };
     await act(async () => {
-      renderView();
+      renderView({ wallet, connection: null });
     });
     const activity = await waitForActivityTable();
     const toggles = within(activity).getAllByRole("button", { name: "Details" });
@@ -314,7 +426,7 @@ describe("Overview", () => {
   it("keeps the recent rows when a refresh fails, and says the activity is unavailable", async () => {
     mocks.activityRefreshFails = true;
     await act(async () => {
-      renderView();
+      renderView({ wallet, connection: null });
     });
     expect(await screen.findByText("Wallet activity is unavailable right now.")).toBeTruthy();
     const activity = await waitForActivityTable();
@@ -324,7 +436,7 @@ describe("Overview", () => {
 
   it("says a restricted wallet cannot sign, and offers no faucet", async () => {
     await act(async () => {
-      renderView({ wallet: { ...wallet, isRuntimeExecutionAllowed: false } });
+      renderView({ wallet: { ...wallet, isRuntimeExecutionAllowed: false }, connection: null });
     });
     expect(await screen.findByText("Restricted")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Request devnet SOL" })).toBeNull();
@@ -335,7 +447,7 @@ describe("Activity", () => {
   it("searches the wallet's activity", async () => {
     mocks.tab = "activity";
     await act(async () => {
-      renderView();
+      renderView({ wallet, connection: null });
     });
     expect(await screen.findAllByText(/xfr_/)).toHaveLength(2);
     fireEvent.change(screen.getByPlaceholderText("Search this wallet's activity"), {
@@ -357,7 +469,7 @@ describe("Activity", () => {
     mocks.tab = "activity";
     mocks.activityRefreshFails = true;
     await act(async () => {
-      renderView();
+      renderView({ wallet, connection: null });
     });
     expect(await screen.findByText("Wallet activity is unavailable right now.")).toBeTruthy();
     expect(screen.getAllByText(/xfr_/)).toHaveLength(2);
@@ -374,7 +486,7 @@ describe("Activity", () => {
       hasMore: true,
     };
     await act(async () => {
-      renderView();
+      renderView({ wallet, connection: null });
     });
     expect(
       await screen.findByText(
@@ -402,7 +514,7 @@ describe("Activity", () => {
       hasMore: true,
     };
     await act(async () => {
-      renderView();
+      renderView({ wallet, connection: null });
     });
     await act(async () => {
       fireEvent.click(await screen.findByRole("button", { name: "Load older activity" }));
@@ -430,7 +542,7 @@ describe("Activity", () => {
       hasMore: true,
     };
     await act(async () => {
-      renderView();
+      renderView({ wallet, connection: null });
     });
     expect(await screen.findByText("Page 1 of 2")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Load older activity" })).toBeNull();
@@ -444,7 +556,7 @@ describe("Settings", () => {
   it("saves a changed label only, and proves ownership where the wallet can sign", async () => {
     mocks.tab = "settings";
     await act(async () => {
-      renderView();
+      renderView({ wallet, connection: null });
     });
     const field = await screen.findByLabelText("Wallet label");
     const save = screen.getByRole("button", { name: "Save changes" });
@@ -461,7 +573,7 @@ describe("Settings", () => {
   it("keeps a label, holds purpose and creation as fixed, and reads Never before a proof", async () => {
     mocks.tab = "settings";
     await act(async () => {
-      renderView();
+      renderView({ wallet, connection: null });
     });
     const field = await screen.findByLabelText("Wallet label");
     fireEvent.change(field, { target: { value: "   " } });
@@ -488,7 +600,7 @@ describe("Settings", () => {
   it("explains why a restricted wallet cannot prove ownership", async () => {
     mocks.tab = "settings";
     await act(async () => {
-      renderView({ wallet: { ...wallet, isRuntimeExecutionAllowed: false } });
+      renderView({ wallet: { ...wallet, isRuntimeExecutionAllowed: false }, connection: null });
     });
     expect(await screen.findByRole("button", { name: "Prove ownership" })).toHaveProperty(
       "disabled",

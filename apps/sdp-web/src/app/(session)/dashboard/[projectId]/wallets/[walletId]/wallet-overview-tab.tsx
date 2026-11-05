@@ -6,7 +6,6 @@ import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { ArrowUpRightIcon } from "lucide-react";
 import Link from "next/link";
-import { Suspense, use } from "react";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
@@ -20,6 +19,11 @@ import {
   PAYMENTS_TABLE_HEAD,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-table";
 import { UnpricedHoldingsHint } from "@/app/(session)/dashboard/[projectId]/payments/unpriced-holdings-hint";
+import {
+  useIssuedTokensByMint,
+  useWalletBalances,
+  useWalletSymbols,
+} from "@/app/(session)/dashboard/[projectId]/wallets/custody-reads";
 import { useWalletActions } from "@/app/(session)/dashboard/[projectId]/wallets/use-wallet-actions";
 import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
 import {
@@ -40,12 +44,7 @@ import { useTimeZone } from "@/i18n/time-zone";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useWalletActivity } from "./use-wallet-activity";
 import { WalletActivityTable } from "./wallet-activity-table";
-import {
-  type IssuedTokensByMint,
-  symbolsByMint,
-  type WalletBalancesResult,
-  type WalletPageView,
-} from "./wallet-detail.shared";
+import type { WalletPageView } from "./wallet-detail.shared";
 
 const RECENT_ACTIVITY = 5;
 
@@ -91,46 +90,62 @@ function WalletStateBand({ wallet }: { wallet: WalletPageView }) {
   );
 }
 
-function BalanceFigure({ balancesPromise }: { balancesPromise: Promise<WalletBalancesResult> }) {
+/** A read that never answered: what failed, and a retry. */
+function ReadFailed({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const t = useTranslations();
+  return (
+    <div className="flex flex-col items-start gap-2">
+      <p className="text-body text-tertiary">{message}</p>
+      <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+        {t("DashboardCustody.retryRead")}
+      </Button>
+    </div>
+  );
+}
+
+function BalanceFigure({ walletId }: { walletId: string }) {
+  const t = useTranslations();
   const locale = useLocale();
-  const { balances, error } = use(balancesPromise);
-  if (error) {
+  const { data: balances, error, mutate } = useWalletBalances(walletId);
+  if (balances === undefined) {
+    if (error === undefined) {
+      return <div className="h-11 w-48 animate-pulse rounded-control bg-fill-subtle" />;
+    }
     return (
       <div className="flex flex-col gap-1">
         <p className="text-amount font-medium text-tertiary">—</p>
-        <p className="text-body text-tertiary">{error}</p>
+        <ReadFailed
+          message={t("DashboardCustody.walletBalancesUnavailable")}
+          onRetry={() => void mutate()}
+        />
       </div>
     );
   }
+  // A refresh that failed keeps the last balances, muted, as the wallet cards show them.
+  const stale = error !== undefined;
   return (
     <p
-      className="flex items-center gap-2 text-amount font-medium text-primary tabular-nums"
+      className={cn(
+        "flex items-center gap-2 text-amount font-medium tabular-nums",
+        stale ? "text-muted" : "text-primary"
+      )}
       data-wallet-balance
     >
       {formatTotalBalance(resolveTotalBalance(balances), locale)}
+      {stale ? <span className="sr-only"> {t("DashboardCustody.stale")}</span> : null}
       <UnpricedHoldingsHint balances={balances} />
     </p>
   );
 }
 
-function BalanceBlock({
-  wallet,
-  balancesPromise,
-}: {
-  wallet: WalletPageView;
-  balancesPromise: Promise<WalletBalancesResult>;
-}) {
+function BalanceBlock({ wallet }: { wallet: WalletPageView }) {
   const t = useTranslations();
   const locale = useLocale();
   const timeZone = useTimeZone();
   const { flags } = useDashboardWorkspace();
   return (
     <RecordBlock title={t("DashboardCustody.balance")} quiet>
-      <Suspense
-        fallback={<div className="h-11 w-48 animate-pulse rounded-control bg-fill-subtle" />}
-      >
-        <BalanceFigure balancesPromise={balancesPromise} />
-      </Suspense>
+      <BalanceFigure walletId={wallet.walletId} />
       {/* The design's facts under the figure: three to a row, four when a connection joins
           them, two on a phone, where Created moves to the end. */}
       <div className="mt-4">
@@ -206,20 +221,32 @@ function isMintAddress(mint: string | undefined): mint is string {
 }
 
 function TokensTable({
-  balancesPromise,
-  issuedTokensPromise,
+  walletId,
   issuanceEnabled,
 }: {
-  balancesPromise: Promise<WalletBalancesResult>;
-  issuedTokensPromise: Promise<IssuedTokensByMint>;
+  walletId: string;
   issuanceEnabled: boolean;
 }) {
   const t = useTranslations();
   const locale = useLocale();
   const projectHref = useProjectHref();
-  const { balances, error } = use(balancesPromise);
-  const issued = use(issuedTokensPromise);
-  if (error) return <p className="text-body text-tertiary">{error}</p>;
+  const { data: balances, error, mutate } = useWalletBalances(walletId);
+  const issuedTokens = useIssuedTokensByMint(issuanceEnabled);
+  const issuedSettled =
+    !issuanceEnabled || issuedTokens.data !== undefined || issuedTokens.error !== undefined;
+  if (balances === undefined) {
+    if (error === undefined) return <PartSkeleton />;
+    return (
+      <ReadFailed
+        message={t("DashboardCustody.walletBalancesUnavailable")}
+        onRetry={() => void mutate()}
+      />
+    );
+  }
+  if (!issuedSettled) return <PartSkeleton />;
+  const figureTone = error === undefined ? "text-primary" : "text-muted";
+  const staleNote =
+    error === undefined ? null : <span className="sr-only"> {t("DashboardCustody.stale")}</span>;
   if (balances.length === 0) {
     return (
       <EmptyNote title={t("DashboardCustody.walletNoTokensTitle")}>
@@ -248,7 +275,9 @@ function TokensTable({
         </TableHeader>
         <TableBody>
           {balances.map((balance) => {
-            const issuedToken = balance.token === "SOL" ? undefined : issued[balance.mint];
+            // A failed issued-token read leaves the row under the name its balance carries.
+            const issuedToken =
+              balance.token === "SOL" ? undefined : issuedTokens.data?.[balance.mint];
             const name = issuedToken?.name ?? balance.token;
             // The same valuation as the total above, so a row and the total never disagree.
             const usdValue = resolveUsdBalanceValue(balance);
@@ -291,18 +320,20 @@ function TokensTable({
                   </span>
                 </TableCell>
                 <TableCell
-                  className={cn(PAYMENTS_TABLE_CELL, "text-right text-primary tabular-nums")}
+                  className={cn(PAYMENTS_TABLE_CELL, "text-right tabular-nums", figureTone)}
                 >
                   {formatDisplayAmount(balance.uiAmount, balance.token, locale)}
+                  {staleNote}
                 </TableCell>
                 <TableCell
-                  className={cn(PAYMENTS_TABLE_CELL, "text-right text-primary tabular-nums")}
+                  className={cn(PAYMENTS_TABLE_CELL, "text-right tabular-nums", figureTone)}
                 >
                   {usdValue === null ? (
                     <span className="text-tertiary">{t("DashboardCustody.walletNoPrice")}</span>
                   ) : (
                     formatCurrencyAmount(usdValue, locale)
                   )}
+                  {staleNote}
                 </TableCell>
               </TableRow>
             );
@@ -315,13 +346,9 @@ function TokensTable({
 
 function TokensBlock({
   wallet,
-  balancesPromise,
-  issuedTokensPromise,
   issuanceEnabled,
 }: {
   wallet: WalletPageView;
-  balancesPromise: Promise<WalletBalancesResult>;
-  issuedTokensPromise: Promise<IssuedTokensByMint>;
   issuanceEnabled: boolean;
 }) {
   const t = useTranslations();
@@ -350,37 +377,32 @@ function TokensBlock({
         ) : undefined
       }
     >
-      <Suspense fallback={<PartSkeleton />}>
-        <TokensTable
-          balancesPromise={balancesPromise}
-          issuedTokensPromise={issuedTokensPromise}
-          issuanceEnabled={issuanceEnabled}
-        />
-      </Suspense>
+      <TokensTable walletId={wallet.walletId} issuanceEnabled={issuanceEnabled} />
     </RecordBlock>
   );
 }
 
 function RecentActivityRows({
   walletId,
-  balancesPromise,
-  issuedTokensPromise,
+  issuanceEnabled,
 }: {
   walletId: string;
-  balancesPromise: Promise<WalletBalancesResult>;
-  issuedTokensPromise: Promise<IssuedTokensByMint>;
+  issuanceEnabled: boolean;
 }) {
   const t = useTranslations();
-  const { balances } = use(balancesPromise);
-  const issued = use(issuedTokensPromise);
-  const { data, error } = useWalletActivity(walletId);
-  if (!data && !error) return <PartSkeleton />;
-  if (!data || data.activityError) {
+  const { symbols, settled } = useWalletSymbols(walletId, issuanceEnabled);
+  const { data, error, mutate } = useWalletActivity(walletId);
+  if ((!data && !error) || (data && !settled)) return <PartSkeleton />;
+  if (!data) {
     return (
-      <p className="text-body text-tertiary">
-        {data?.activityError ?? t("DashboardCustody.walletActivityUnavailable")}
-      </p>
+      <ReadFailed
+        message={t("DashboardCustody.walletActivityUnavailable")}
+        onRetry={() => void mutate()}
+      />
     );
+  }
+  if (data.activityError) {
+    return <p className="text-body text-tertiary">{data.activityError}</p>;
   }
   // A refresh that fails after the rows loaded keeps them, with a note, as the Activity tab does
   // (the block lays its children out in a column).
@@ -401,10 +423,7 @@ function RecentActivityRows({
   return (
     <>
       {refreshFailed}
-      <WalletActivityTable
-        rows={rows.slice(0, RECENT_ACTIVITY)}
-        symbols={symbolsByMint(balances, issued)}
-      />
+      <WalletActivityTable rows={rows.slice(0, RECENT_ACTIVITY)} symbols={symbols} />
     </>
   );
 }
@@ -415,14 +434,10 @@ function RecentActivityRows({
  */
 export function WalletOverviewTab({
   wallet,
-  balancesPromise,
-  issuedTokensPromise,
   issuanceEnabled,
   onViewAllActivity,
 }: {
   wallet: WalletPageView;
-  balancesPromise: Promise<WalletBalancesResult>;
-  issuedTokensPromise: Promise<IssuedTokensByMint>;
   issuanceEnabled: boolean;
   onViewAllActivity: () => void;
 }) {
@@ -430,13 +445,8 @@ export function WalletOverviewTab({
   return (
     <RecordStack>
       <WalletStateBand wallet={wallet} />
-      <BalanceBlock wallet={wallet} balancesPromise={balancesPromise} />
-      <TokensBlock
-        wallet={wallet}
-        balancesPromise={balancesPromise}
-        issuedTokensPromise={issuedTokensPromise}
-        issuanceEnabled={issuanceEnabled}
-      />
+      <BalanceBlock wallet={wallet} />
+      <TokensBlock wallet={wallet} issuanceEnabled={issuanceEnabled} />
       <RecordBlock
         title={t("DashboardCustody.recentActivity")}
         aside={
@@ -445,13 +455,7 @@ export function WalletOverviewTab({
           </Button>
         }
       >
-        <Suspense fallback={<PartSkeleton />}>
-          <RecentActivityRows
-            walletId={wallet.walletId}
-            balancesPromise={balancesPromise}
-            issuedTokensPromise={issuedTokensPromise}
-          />
-        </Suspense>
+        <RecentActivityRows walletId={wallet.walletId} issuanceEnabled={issuanceEnabled} />
       </RecordBlock>
     </RecordStack>
   );

@@ -3,12 +3,11 @@
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { useSWRConfig } from "swr";
 import {
   checkWalletSignerMemoAction,
   requestDevnetSolanaFaucetAction,
 } from "@/app/(session)/dashboard/[projectId]/wallets/actions";
-import { custodyQueryKeys } from "@/app/(session)/dashboard/[projectId]/wallets/custody-query-key";
+import { useWalletInventoryRefresh } from "@/app/(session)/dashboard/[projectId]/wallets/use-wallet-inventory-refresh";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
@@ -40,7 +39,7 @@ export function useWalletActions({
   supportsSignerCheck?: boolean;
 }) {
   const t = useTranslations();
-  const { mutate } = useSWRConfig();
+  const refreshWalletInventory = useWalletInventoryRefresh();
   const { dashboardAccess, sandboxProject } = useDashboardWorkspace();
   const [isBusy, startTransition] = useTransition();
   const [lastProof, setLastProof] = useState<WalletOwnershipProof | null>(null);
@@ -103,8 +102,8 @@ export function useWalletActions({
 
         if (result.status === "success") {
           const explorerUrl = explorerTxUrl(result.signature, ACTION_EXPLORER_CLUSTER);
-          // The funded wallet's cards read cached balances; refresh them now.
-          void mutate(custodyQueryKeys.isWalletLiveDataKey);
+          // Every read of the funded wallet's balances re-reads, on screen or on the next visit.
+          refreshWalletInventory();
 
           toast.success(t("DashboardCustody.devnetSolRequested", { amount: result.amountSol }), {
             id: toastId,

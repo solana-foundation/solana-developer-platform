@@ -3,27 +3,22 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type {
   WalletActivityPayload,
   WalletActivityRow,
 } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-activity.data";
+import {
+  dashboardErrorResponse,
+  sentDashboardReads,
+  stubDashboardFetch,
+} from "@/test/dashboard-fetch";
+import { resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { useWalletActivityWindow } from "./use-wallet-activity-window";
 
-const fetchWalletActivity = vi.hoisted(() =>
-  vi.fn<(walletId: string, options?: { limit?: number }) => Promise<WalletActivityPayload>>()
-);
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
-vi.mock(
-  "@/app/(session)/dashboard/[projectId]/wallets/wallet-activity.data",
-  async (importOriginal) => ({
-    ...(await importOriginal<
-      typeof import("@/app/(session)/dashboard/[projectId]/wallets/wallet-activity.data")
-    >()),
-    fetchWalletActivity,
-  })
-);
-
-const { useWalletActivityWindow } = await import("./use-wallet-activity-window");
+const ACTIVITY_PATH = "/api/dashboard/wallets/wallet_one/activity";
 
 function rowsOf(count: number): WalletActivityRow[] {
   return Array.from({ length: count }, (_, index) => ({
@@ -69,18 +64,35 @@ function wrapper({ children }: { children: ReactNode }) {
   );
 }
 
-function limitsRequested(): (number | undefined)[] {
-  return fetchWalletActivity.mock.calls.map(([, options]) => options?.limit);
+let fetchMock: Mock<typeof fetch>;
+
+function limitOf(path: string): number {
+  return path === ACTIVITY_PATH ? 20 : Number(path.slice(`${ACTIVITY_PATH}?limit=`.length));
 }
+
+function answerActivity(answer: (limit: number) => WalletActivityPayload | Response) {
+  fetchMock = stubDashboardFetch(({ path }) => {
+    const answered = answer(limitOf(path));
+    return answered instanceof Response ? answered : Response.json({ data: answered });
+  });
+}
+
+function limitsRequested(): number[] {
+  return sentDashboardReads(fetchMock).map(({ path }) => limitOf(path));
+}
+
+beforeEach(() => {
+  resetDashboardNavigation();
+});
 
 afterEach(() => {
   cleanup();
-  fetchWalletActivity.mockReset();
+  vi.unstubAllGlobals();
 });
 
 describe("useWalletActivityWindow", () => {
   it("shows the wider window once it loads, and widens from there", async () => {
-    fetchWalletActivity.mockImplementation(async (_id, options) => payload(options?.limit ?? 20));
+    answerActivity((limit) => payload(limit));
     const { result } = renderHook(() => useWalletActivityWindow("wallet_one"), { wrapper });
     await waitFor(() => expect(result.current.data?.activityRows).toHaveLength(20));
 
@@ -94,11 +106,11 @@ describe("useWalletActivityWindow", () => {
 
   it("keeps the loaded window when a wider read fails, and retries that same size", async () => {
     let widerFails = true;
-    fetchWalletActivity.mockImplementation(async (_id, options) => {
-      const limit = options?.limit ?? 20;
-      if (limit > 20 && widerFails) throw new Error("upstream unavailable");
-      return payload(limit);
-    });
+    answerActivity((limit) =>
+      limit > 20 && widerFails
+        ? dashboardErrorResponse(502, "upstream unavailable")
+        : payload(limit)
+    );
     const { result } = renderHook(() => useWalletActivityWindow("wallet_one"), { wrapper });
     await waitFor(() => expect(result.current.data?.activityRows).toHaveLength(20));
 
@@ -119,12 +131,12 @@ describe("useWalletActivityWindow", () => {
     act(() => result.current.loadOlder());
     await waitFor(() => expect(result.current.data?.activityRows).toHaveLength(120));
     expect(result.current.olderFailed).toBe(false);
-    expect(Math.max(...limitsRequested().map((limit) => limit ?? 20))).toBe(120);
+    expect(Math.max(...limitsRequested())).toBe(120);
   });
 
   it("does not count a wider window cached by an earlier visit until a fresh read loads it", async () => {
     const cache = new Map<string, unknown>();
-    fetchWalletActivity.mockImplementation(async (_id, options) => payload(options?.limit ?? 20));
+    answerActivity((limit) => payload(limit));
     const firstVisit = renderHook(() => useWalletActivityWindow("wallet_one"), {
       wrapper: ({ children }) => <CachedWrapper cache={cache}>{children}</CachedWrapper>,
     });
@@ -134,11 +146,9 @@ describe("useWalletActivityWindow", () => {
     firstVisit.unmount();
 
     // Back on the wallet: the 120-row window is still cached, but reading it again fails.
-    fetchWalletActivity.mockImplementation(async (_id, options) => {
-      const limit = options?.limit ?? 20;
-      if (limit > 20) throw new Error("upstream unavailable");
-      return payload(limit);
-    });
+    answerActivity((limit) =>
+      limit > 20 ? dashboardErrorResponse(502, "upstream unavailable") : payload(limit)
+    );
     const { result } = renderHook(() => useWalletActivityWindow("wallet_one"), {
       wrapper: ({ children }) => <CachedWrapper cache={cache}>{children}</CachedWrapper>,
     });
@@ -156,8 +166,8 @@ describe("useWalletActivityWindow", () => {
   });
 
   it("treats a wider read that loses a source as failed", async () => {
-    fetchWalletActivity.mockImplementation(async (_id, options) =>
-      (options?.limit ?? 20) > 20
+    answerActivity((limit) =>
+      limit > 20
         ? payload(100, { activityNotice: "Payments activity is unavailable right now." })
         : payload(20)
     );

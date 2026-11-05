@@ -5,13 +5,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   faucet: vi.fn(),
-  mutate: vi.fn(),
+  refreshWalletInventory: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { loading: vi.fn(), success: vi.fn(), error: vi.fn() }),
 }));
-vi.mock("swr", () => ({ useSWRConfig: () => ({ mutate: mocks.mutate }) }));
+vi.mock("./use-wallet-inventory-refresh", () => ({
+  useWalletInventoryRefresh: () => mocks.refreshWalletInventory,
+}));
 vi.mock("@/i18n/provider", () => ({ useTranslations: () => (key: string) => key }));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({
@@ -25,14 +27,13 @@ vi.mock("@/app/(session)/dashboard/[projectId]/wallets/actions", () => ({
 }));
 
 const { useWalletActions } = await import("./use-wallet-actions");
-const { custodyQueryKeys } = await import("./custody-query-key");
 
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
 describe("useWalletActions", () => {
-  it("refreshes the cached wallet balances once the faucet has funded the wallet", async () => {
+  it("refreshes the wallet reads once the faucet has funded the wallet", async () => {
     mocks.faucet.mockResolvedValue({ status: "success", signature: "sig", amountSol: "1" });
     const { result } = renderHook(() => useWalletActions({ walletId: "wallet_one" }));
 
@@ -40,10 +41,10 @@ describe("useWalletActions", () => {
       result.current.requestDevnetSol();
     });
 
-    expect(mocks.mutate).toHaveBeenCalledWith(custodyQueryKeys.isWalletLiveDataKey);
+    expect(mocks.refreshWalletInventory).toHaveBeenCalledTimes(1);
   });
 
-  it("leaves the cached balances alone when the faucet refuses", async () => {
+  it("leaves the wallet reads alone when the faucet refuses", async () => {
     mocks.faucet.mockResolvedValue({ status: "error", message: "Rate limited" });
     const { result } = renderHook(() => useWalletActions({ walletId: "wallet_one" }));
 
@@ -51,6 +52,6 @@ describe("useWalletActions", () => {
       result.current.requestDevnetSol();
     });
 
-    expect(mocks.mutate).not.toHaveBeenCalled();
+    expect(mocks.refreshWalletInventory).not.toHaveBeenCalled();
   });
 });

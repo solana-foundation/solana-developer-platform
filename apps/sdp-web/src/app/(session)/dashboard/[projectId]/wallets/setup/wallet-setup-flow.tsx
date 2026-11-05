@@ -1164,7 +1164,7 @@ function useCreateWallet({
           invalidateQuickStartStatus();
         }
         refreshWalletInventory();
-        // The action revalidated the wallet pages, so the flow leaves without refreshing
+        // The wallet reads were invalidated above, so the flow leaves without refreshing
         // itself: a refresh would only re-run this page's reads on the way out.
         onCreated(result.walletId);
       } finally {

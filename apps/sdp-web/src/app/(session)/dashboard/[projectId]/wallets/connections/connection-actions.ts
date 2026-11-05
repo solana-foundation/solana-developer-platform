@@ -45,9 +45,6 @@ async function revalidateCustody(provider: CustodyProvider, connectionId?: strin
       await requestProjectHref(`/dashboard/integrations/${provider}/connections/${connectionId}`)
     );
   }
-  // Wallet surfaces read the same connections, so a new wallet or a credential
-  // change shows there too.
-  revalidatePath(await requestProjectHref("/dashboard/wallets"));
 }
 
 /**

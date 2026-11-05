@@ -92,17 +92,24 @@ export function WalletsToolbarRowHold({ loading }: { loading: boolean }) {
   );
 }
 
+/** The Wallets list's cards while the list loads. */
+export function WalletCardsSkeleton() {
+  return (
+    <LoadingRegion layout="wallets-overview">
+      <div className="grid gap-5 sm:grid-cols-2" data-wallet-grid-skeleton>
+        {FOUR_ITEMS.map((item) => (
+          <WalletCardSkeleton key={item} />
+        ))}
+      </div>
+    </LoadingRegion>
+  );
+}
+
 export function WalletsOverviewSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel className="space-y-6">
       <WalletsToolbarRowHold loading />
-      <LoadingRegion layout="wallets-overview">
-        <div className="grid gap-5 sm:grid-cols-2" data-wallet-grid-skeleton>
-          {FOUR_ITEMS.map((item) => (
-            <WalletCardSkeleton key={item} />
-          ))}
-        </div>
-      </LoadingRegion>
+      <WalletCardsSkeleton />
     </DashboardWorkspaceOverviewPanel>
   );
 }

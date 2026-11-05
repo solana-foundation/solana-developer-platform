@@ -65,7 +65,7 @@ describe("recheckPrivyCredentialAction", () => {
     mocks.createSdpApiClient.mockResolvedValue(client);
   });
 
-  it("returns success and revalidates when the completion passes", async () => {
+  it("returns success and revalidates the provider page when the completion passes", async () => {
     client.fetch.mockResolvedValue(completionResult("success"));
 
     await expect(recheckPrivyCredentialAction("conn_test")).resolves.toEqual({
@@ -77,7 +77,6 @@ describe("recheckPrivyCredentialAction", () => {
       expect.objectContaining({ method: "POST" })
     );
     expect(mocks.revalidatePath.mock.calls).toEqual([
-      [`/dashboard/${PRODUCTION_PROJECT.id}/wallets`],
       [`/dashboard/${PRODUCTION_PROJECT.id}/integrations/privy`],
     ]);
   });

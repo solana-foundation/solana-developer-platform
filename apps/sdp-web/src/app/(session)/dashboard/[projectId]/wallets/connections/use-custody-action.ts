@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
+import { useWalletInventoryRefresh } from "@/app/(session)/dashboard/[projectId]/wallets/use-wallet-inventory-refresh";
 import { useTranslations } from "@/i18n/provider";
 import type { CustodyActionResult } from "./connection-actions";
 
@@ -36,6 +37,7 @@ interface ActionMessages {
 export function useCustodyAction() {
   const t = useTranslations();
   const router = useRouter();
+  const refreshWalletInventory = useWalletInventoryRefresh();
   const [pending, setPending] = useState(false);
 
   const run = useCallback(
@@ -68,12 +70,14 @@ export function useCustodyAction() {
 
       // Re-read in every case. A failure may still have moved state (a rotation
       // candidate survives a rejected cut-over), and an unknown outcome is the
-      // case where re-reading matters most.
+      // case where re-reading matters most. The wallet pages read in the browser, so their
+      // reads are invalidated alongside the server-rendered page.
+      refreshWalletInventory();
       router.refresh();
       onSettled?.(result);
       return result;
     },
-    [router, t]
+    [refreshWalletInventory, router, t]
   );
 
   return { pending, run };

@@ -3,7 +3,6 @@
 import { Button } from "@sdp/ui/button";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
-import { useRouter } from "next/navigation";
 import { type FormEvent, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
@@ -13,6 +12,7 @@ import {
 import { updateWalletLabelAction } from "@/app/(session)/dashboard/[projectId]/wallets/actions";
 import { custodyQueryKeys } from "@/app/(session)/dashboard/[projectId]/wallets/custody-query-key";
 import { useWalletActions } from "@/app/(session)/dashboard/[projectId]/wallets/use-wallet-actions";
+import { useWalletInventoryRefresh } from "@/app/(session)/dashboard/[projectId]/wallets/use-wallet-inventory-refresh";
 import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
 import { truncateMiddle } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-format-utils";
 import { RecordBlock, RecordLine, RecordStack } from "@/components/refresh-record";
@@ -28,7 +28,7 @@ const LABEL_MAX_LENGTH = 100;
 function LabelBlock({ wallet }: { wallet: WalletPageView }) {
   const t = useTranslations();
   const { flags } = useDashboardWorkspace();
-  const router = useRouter();
+  const refreshWalletInventory = useWalletInventoryRefresh();
   const saved = wallet.label ?? "";
   const [draft, setDraft] = useState(saved);
   const [pending, startTransition] = useTransition();
@@ -57,7 +57,7 @@ function LabelBlock({ wallet }: { wallet: WalletPageView }) {
           id: toastId,
           position: "bottom-right",
         });
-        router.refresh();
+        refreshWalletInventory();
         return;
       }
       toast.error(t("DashboardCustody.unableToUpdateWalletLabel"), {

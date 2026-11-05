@@ -11,7 +11,7 @@ export function activityDisplayId(id: string): string {
   return bare.length > 14 ? `${bare.slice(0, 8)}…${bare.slice(-4)}` : bare;
 }
 
-/** What the wallet's page shows about the wallet itself, resolved on the server. */
+/** What the wallet's page shows about the wallet itself, from its record. */
 export interface WalletPageView {
   walletId: string;
   /** The custody record's own id, which the Transactions ledger filters by. */
@@ -30,11 +30,6 @@ export interface WalletPageView {
   connection: { label: string; href: string | null } | null;
   canManageCustody: boolean;
   label: string | null;
-}
-
-export interface WalletBalancesResult {
-  balances: CustodyWalletTokenBalance[];
-  error: string | null;
 }
 
 /** Tokens this organization issued, by mint: their names in balances and activity. */

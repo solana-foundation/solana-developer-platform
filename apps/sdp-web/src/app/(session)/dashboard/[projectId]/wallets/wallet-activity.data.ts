@@ -11,7 +11,6 @@ import {
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
 import { parseErrorMessage } from "@/lib/api-error";
-import { dashboardRequest } from "@/lib/dashboard-fetch";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 type WalletActivitySourceKind = "payments" | "issuance";
@@ -43,13 +42,6 @@ export interface WalletActivityPayload {
 export interface WalletActivityIdentity {
   custodyWalletId: string;
   providerWalletId: string;
-}
-
-interface DashboardWalletActivityEnvelope {
-  data?: Partial<WalletActivityPayload>;
-  error?: {
-    message?: string;
-  };
 }
 
 /** Rows the feed reads by default: the Overview's recent rows and the Activity tab's first window. */
@@ -209,32 +201,4 @@ export async function fetchWalletPaymentActivity(
     return failed;
   }
   return { ok: true, data: pages.flatMap((page) => page.data ?? []).slice(0, limit) };
-}
-
-export async function fetchWalletActivity(
-  walletId: string,
-  options: { signal?: AbortSignal; limit?: number } = {}
-): Promise<WalletActivityPayload> {
-  const path = `/api/dashboard/wallets/${encodeURIComponent(walletId)}/activity`;
-  const query =
-    options.limit === undefined || options.limit === WALLET_ACTIVITY_LIMIT
-      ? ""
-      : `?${new URLSearchParams({ limit: String(options.limit) })}`;
-  const response = await dashboardRequest(`${path}${query}`, {
-    method: "GET",
-    cache: "no-store",
-    signal: options.signal,
-  });
-  if (!response.ok) {
-    const failure = (await response.json().catch(() => ({}))) as DashboardWalletActivityEnvelope;
-    throw new Error(failure.error?.message ?? "");
-  }
-  const body = (await response.json().catch(() => ({}))) as DashboardWalletActivityEnvelope;
-
-  return {
-    activityRows: body.data?.activityRows ?? [],
-    activityError: body.data?.activityError ?? null,
-    activityNotice: body.data?.activityNotice ?? null,
-    hasMore: body.data?.hasMore ?? false,
-  };
 }

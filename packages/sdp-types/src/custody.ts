@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { SdpEnvironment } from "./api-keys";
 
 export const CUSTODY_PROVIDERS = [
@@ -859,3 +860,51 @@ export interface CustodyProviderSetupStatus {
 export interface CustodySetupStatusResponse {
   providers: CustodyProviderSetupStatus[];
 }
+
+export const custodyWalletTokenBalanceSchema = z.object({
+  token: z.string(),
+  mint: z.string(),
+  amount: z.string(),
+  uiAmount: z.string(),
+  decimals: z.number(),
+  usdPrice: z.number().optional(),
+  usdValue: z.number().optional(),
+}) satisfies z.ZodType<CustodyWalletTokenBalance>;
+
+export const custodyConfigSummarySchema = z.object({
+  id: z.string(),
+  organizationId: z.string(),
+  projectId: z.string().nullable(),
+  provider: z.enum(CUSTODY_PROVIDERS),
+  status: z.enum(CUSTODY_CONFIG_STATUSES),
+  createdAt: z.string(),
+}) satisfies z.ZodType<CustodyConfigSummary>;
+
+const custodyWalletFieldsSchema = z.object({
+  id: z.string(),
+  provider: z.enum(CUSTODY_PROVIDERS).optional(),
+  isRuntimeExecutionAllowed: z.boolean(),
+  walletId: z.string(),
+  publicKey: z.string(),
+  label: z.string().nullable(),
+  purpose: z.string().nullable(),
+  status: z.enum(["active", "inactive"]),
+  createdAt: z.string(),
+  balances: z.array(custodyWalletTokenBalanceSchema).optional(),
+});
+
+/** A wallet belongs to exactly one custody owner: a config or a connection. */
+function withCustodyWalletOwner<Fields extends z.ZodRawShape>(fields: z.ZodObject<Fields>) {
+  return z.union([
+    fields.extend({ custodyConfigId: z.string(), custodyConnectionId: z.undefined().optional() }),
+    fields.extend({ custodyConfigId: z.undefined().optional(), custodyConnectionId: z.string() }),
+  ]);
+}
+
+export const custodyWalletSummarySchema = withCustodyWalletOwner(
+  custodyWalletFieldsSchema
+) satisfies z.ZodType<CustodyWalletSummary>;
+
+export const custodyWalletMetadataSchema = withCustodyWalletOwner(
+  custodyWalletFieldsSchema.extend({ provider: z.enum(CUSTODY_PROVIDERS) })
+) satisfies z.ZodType<CustodyWalletMetadata>;
