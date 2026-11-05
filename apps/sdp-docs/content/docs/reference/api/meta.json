@@ -1,7 +1,6 @@
 {
-  "title": "API",
+  "title": "API Reference",
   "pages": [
-    "index",
     "health",
     "wallets",
     "projects",

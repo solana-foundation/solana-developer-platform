@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import { ThemeScopeProvider } from "@sdp/ui/theme-scope-provider";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -174,14 +173,7 @@ describe("OnchainSendRail heading", () => {
 
 describe("OnchainSendRail while sending", () => {
   it("keeps the send label on a spinning button and says what it is waiting on", () => {
-    // The footer's waiting line is the refresh design's, where Pay runs.
-    mocks.wizard = { ...reviewWizard, submitting: true };
-    render(
-      <ThemeScopeProvider scope="refresh">
-        <OnchainSendRail {...railProps} />
-      </ThemeScopeProvider>,
-      { wrapper }
-    );
+    renderRail({ ...reviewWizard, submitting: true });
 
     // The spinner joins the button's name, so match the label inside it.
     const send = screen.getByRole("button", { name: /Send transfer/ });

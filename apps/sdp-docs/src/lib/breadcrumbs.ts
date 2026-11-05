@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { sectionOverridesOf, topLevelUrlsOf } from "./sidebar-section";
 import { source } from "./source";
 
 export type BreadcrumbItem = { name: string; url: string };
@@ -44,9 +45,7 @@ export function resolvePage(slug?: string[]): ResolvedPage | null {
  * @returns Its trail, empty for a page the sidebar lists at its top level.
  */
 export function breadcrumbsFor(page: ResolvedPage["page"]): BreadcrumbItem[] {
-  const topLevelUrls = new Set(
-    source.pageTree.children.flatMap((node) => (node.type === "page" ? [node.url] : []))
-  );
+  const topLevelUrls = new Set(topLevelUrlsOf(source.pageTree));
   if (topLevelUrls.has(page.url)) return [];
 
   const items: BreadcrumbItem[] = [];
@@ -80,4 +79,19 @@ export function breadcrumbsFor(page: ResolvedPage["page"]): BreadcrumbItem[] {
   }
 
   return items;
+}
+
+/**
+ * The sidebar entry each page sits under where its path alone does not say so: its breadcrumb
+ * starts at a different top-level page (Create a wallet, under `/docs/guides`, belongs to
+ * Wallets). The sidebar finds every other page's entry by its path (`sectionByPath`).
+ *
+ * @returns Section URLs by page URL.
+ */
+export function sidebarSectionOverrides(): Record<string, string> {
+  const pages = source.getPages().map((page) => {
+    const [section] = breadcrumbsFor(page);
+    return { url: page.url, section: section?.url };
+  });
+  return sectionOverridesOf(pages, topLevelUrlsOf(source.pageTree));
 }

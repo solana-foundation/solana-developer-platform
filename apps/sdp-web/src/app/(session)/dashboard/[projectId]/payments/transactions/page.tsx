@@ -5,9 +5,8 @@ import { fetchIssuedTokensByMintWhenIssuanceEnabled } from "@/app/(session)/dash
 import { fetchPaymentsWallets } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
 import { parseTransactionFilters } from "@/app/(session)/dashboard/[projectId]/payments/transactions/transactions-query";
 import { getDashboardFlags } from "@/flags/dashboard";
-import { PAYMENT_TRANSACTION_OPEN_PARAM, transactionHref } from "@/lib/payments-routes";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 import { enabledPaymentTransactionKinds, enabledTransactionModules } from "./transaction-modules";
 import { fetchTransactionsPage } from "./transactions-page.data";
 import { TransactionsWorkspace } from "./transactions-workspace";
@@ -24,13 +23,7 @@ export default async function TransactionsPage({ searchParams }: TransactionsPag
   const { orgId } = await auth();
   if (!orgId) redirect("/dashboard");
 
-  const params = await searchParams;
-  const openId = params[PAYMENT_TRANSACTION_OPEN_PARAM];
-  if (typeof openId === "string" && openId !== "") {
-    // The ledger's old deep link to one transaction; it has its own page now.
-    redirect(await requestProjectHref(transactionHref(openId)));
-  }
-  const flags = await getDashboardFlags();
+  const [params, flags] = await Promise.all([searchParams, getDashboardFlags()]);
   const modules = enabledTransactionModules(flags);
   const filters = parseTransactionFilters(params, modules);
   const trace = createTimedTrace("dashboard.payments.transactions.page");

@@ -156,7 +156,7 @@ describe("DashboardWorkspaceProvider project selection", () => {
   });
 
   it("switches project to the module root under the other project, dropping entity ids", async () => {
-    setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/custody/cwlt_test_1`, {
+    setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/wallets/cwlt_test_1`, {
       walletId: "cwlt_test_1",
     });
     const user = userEvent.setup();

@@ -1,0 +1,22 @@
+language js
+
+or {
+  or {
+    JsStringLiteralExpression(),
+    JsxString(),
+    JsTemplateChunkElement()
+  } as $text where {
+    $text <: r"(?s).*(?:^|[\s\"'`:])refresh:[^\s\"'`].*",
+    register_diagnostic(span=$text, message="SDP has one design, so there is no `refresh:` variant. Write the class without it.", severity="error")
+  },
+  or {
+    JsxAttribute(),
+    JsLiteralMemberName(),
+    JsStringLiteralExpression(),
+    JsxString(),
+    JsTemplateChunkElement()
+  } as $theme where {
+    $theme <: r"(?s).*data-sdp-theme.*",
+    register_diagnostic(span=$theme, message="SDP has one design, so there is no theme attribute. The tokens on :root style every element.", severity="error")
+  }
+}

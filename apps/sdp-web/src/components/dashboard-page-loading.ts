@@ -48,7 +48,6 @@ import {
 import PaymentRequestsLoading from "@/app/(session)/dashboard/[projectId]/payments/requests/loading";
 import TokenHoldingsLoading from "@/app/(session)/dashboard/[projectId]/tokens/loading";
 import {
-  WalletConnectionsListSkeleton,
   WalletDetailSkeleton,
   WalletSetupSkeleton,
   WalletsOverviewSkeleton,
@@ -86,8 +85,6 @@ function resolveCurrentPageLoadingComponent(
       return WalletsOverviewSkeleton;
     case "wallet-setup":
       return WalletSetupSkeleton;
-    case "wallet-connections":
-      return WalletConnectionsListSkeleton;
     case "wallet-detail":
       return WalletDetailSkeleton;
     case "issuance-overview":
@@ -105,8 +102,6 @@ function resolveCurrentPageLoadingComponent(
     case "embedded-yield-portfolio":
       return EmbeddedYieldPortfolioSkeleton;
     case "embedded-yield-configure":
-      return EarnIntegrationGuideSkeleton;
-    case "embedded-yield-integrate":
       return EarnIntegrationGuideSkeleton;
     case "dvp-trades":
       return DvpTradesSkeleton;

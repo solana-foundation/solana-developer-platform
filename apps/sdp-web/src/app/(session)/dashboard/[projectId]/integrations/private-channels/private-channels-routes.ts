@@ -9,7 +9,7 @@
  */
 
 /** Provider detail and connection-management destinations under Integrations. */
-export const PRIVATE_CHANNELS_INTEGRATION_PATH = "/dashboard/integrations/private-channels";
+const PRIVATE_CHANNELS_INTEGRATION_PATH = "/dashboard/integrations/private-channels";
 export const PRIVATE_CHANNELS_SETUP_PATH = `${PRIVATE_CHANNELS_INTEGRATION_PATH}/setup`;
 export const PRIVATE_CHANNELS_OVERVIEW_PATH = "/dashboard/integrations/private-channels/overview";
 

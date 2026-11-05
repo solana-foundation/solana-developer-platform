@@ -161,7 +161,7 @@ export function CryptoAccountForm({
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-2">
-        <Label className="text-tertiary" htmlFor="account-label">
+        <Label htmlFor="account-label">
           {t("DashboardPayments.counterparty.label")}{" "}
           <span className="font-normal text-muted">
             {t("DashboardPayments.counterparty.optional")}
@@ -192,9 +192,7 @@ export function CryptoAccountForm({
       />
 
       <div className="flex flex-col gap-2">
-        <Label className="text-tertiary" htmlFor="account-address">
-          {t("DashboardPayments.counterparty.walletAddress")}
-        </Label>
+        <Label htmlFor="account-address">{t("DashboardPayments.counterparty.walletAddress")}</Label>
         <Input
           id="account-address"
           size="xl"
