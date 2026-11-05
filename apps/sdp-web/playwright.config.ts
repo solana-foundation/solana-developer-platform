@@ -37,7 +37,9 @@ export default defineConfig({
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : [["list"]],
   use: {
     baseURL: env.baseURL,
-    trace: "retain-on-failure",
+    // A trace records every request's cookies and headers, and CI artifacts on
+    // this public repository are downloadable by anyone, so CI keeps none.
+    trace: process.env.CI ? "off" : "retain-on-failure",
   },
   webServer: [
     ...(!useExternalApi

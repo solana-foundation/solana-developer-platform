@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { MEMBER_STATUSES, type MemberStatus } from "@sdp/types/organizations";
+import {
+  INVITATION_EXPIRED_REASON,
+  MEMBER_STATUSES,
+  type MemberStatus,
+} from "@sdp/types/organizations";
 import { ORGANIZATION_ROLES, type OrganizationRole } from "@sdp/types/roles";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -174,6 +178,77 @@ describe("sign-in admission", () => {
       "Invitation to this organization has expired"
     );
     expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("expired");
+    expect(await inviteeMembership()).toBeNull();
+  });
+
+  it("reports an expired invitation as expired on every sign-in, not only the one that marked it", async () => {
+    await setInviteeMembership(null);
+    await invite("member", -1);
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await signIn("member", CLERK_ORG_ID);
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Invitation to this organization has expired",
+          details: { reason: INVITATION_EXPIRED_REASON },
+        },
+      });
+    }
+    expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("expired");
+    expect(await inviteeMembership()).toBeNull();
+  });
+
+  it("reports expiry when a revoked invitation was replaced within the same second", async () => {
+    await setInviteeMembership(null);
+    const db = getDb(env);
+    for (const [id, status, expiresInDays] of [
+      ["inv_admission_revoked", "revoked", -2],
+      [INVITATION_ID, "pending", -1],
+    ] as const) {
+      await seedInvitation(db, {
+        id,
+        organizationId: ORGANIZATION.id,
+        email: INVITEE.email,
+        role: "member",
+        invitedBy: ADMIN.userId,
+        status,
+        expiresInDays,
+      });
+    }
+    // Both rows carry one whole-second creation time, as two invites in one second do.
+    await db.execute("UPDATE invitations SET created_at = ? WHERE organization_id = ?", [
+      "2026-11-01 12:00:00",
+      ORGANIZATION.id,
+    ]);
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expectUnauthorized(
+        await signIn("member", CLERK_ORG_ID),
+        "Invitation to this organization has expired"
+      );
+    }
+  });
+
+  it("refuses without the expired reason once the newest invitation was revoked", async () => {
+    await setInviteeMembership(null);
+    await seedInvitation(getDb(env), {
+      id: INVITATION_ID,
+      organizationId: ORGANIZATION.id,
+      email: INVITEE.email,
+      role: "member",
+      invitedBy: ADMIN.userId,
+      status: "revoked",
+      expiresInDays: -1,
+    });
+
+    const response = await signIn("member", CLERK_ORG_ID);
+    expect(response.status).toBe(401);
+    const body = z
+      .object({ error: z.object({ message: z.string(), details: z.unknown().optional() }) })
+      .parse(await response.json());
+    expect(body.error).toEqual({ message: "No pending invitation to this organization" });
     expect(await inviteeMembership()).toBeNull();
   });
 

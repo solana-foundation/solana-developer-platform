@@ -70,6 +70,11 @@
 }
 
 .bottom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
   margin-top: 48px;
   padding-top: 22px;
   border-top: 1px solid #232329;
@@ -77,6 +82,21 @@
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--night-ink3);
+}
+
+/* the bottom line's own type, a finger tall like the column links */
+.legalLink {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  margin-block: -16px;
+  color: var(--night-ink2);
+  text-decoration: none;
+  transition: color 160ms var(--micro);
+}
+
+.legalLink:hover {
+  color: var(--night-ink);
 }
 
 @media (max-width: 1000px) {

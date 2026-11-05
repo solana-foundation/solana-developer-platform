@@ -13,6 +13,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { ComingSoon } from "@/components/homepage/coming-soon";
+import shared from "@/components/homepage/homepage.module.css";
 import { Rise } from "@/components/homepage/rise";
 import styles from "./interfaces.module.css";
 import { RequestCard } from "./request-card";
@@ -24,6 +26,10 @@ type InterfacesConsoleProps = {
   copy: Record<InterfaceMode, InterfaceModeCopy>;
   modesLabel: string;
   responseLabel: string;
+  /** The modes whose call the deployment's release channel holds back; their tabs carry the pill. */
+  comingSoonModes: readonly InterfaceMode[];
+  /** The translated "Coming soon". */
+  comingSoonLabel: string;
   /** The reference links set under the modes. */
   links: ReactNode;
 };
@@ -71,6 +77,8 @@ export function InterfacesConsole({
   copy,
   modesLabel,
   responseLabel,
+  comingSoonModes,
+  comingSoonLabel,
   links,
 }: InterfacesConsoleProps) {
   const reducedMotion = useReducedMotion();
@@ -202,7 +210,12 @@ export function InterfacesConsole({
                 onPointerEnter={(event) => handlePointerEnter(event, index)}
                 onPointerLeave={handlePointerLeave}
               >
-                <b className={styles.wayTitle}>{copy[each.mode].title}</b>
+                <b className={styles.wayTitle}>
+                  {copy[each.mode].title}
+                  {comingSoonModes.includes(each.mode) ? (
+                    <ComingSoon label={comingSoonLabel} className={shared.soonInline} />
+                  ) : null}
+                </b>
                 <span className={styles.wayBody}>{copy[each.mode].body}</span>
                 <span className={styles.wayBar} aria-hidden="true">
                   <i

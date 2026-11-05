@@ -1507,7 +1507,6 @@
         "saveAndExit": "Save and exit",
         "continue": "Continue",
         "createDraft": "Create draft",
-        "creating": "Creating",
         "saveFailed": "The draft could not be saved",
         "saved": "Draft saved",
         "savedBody": "You can finish it from Issuance whenever you like.",
@@ -1642,8 +1641,7 @@
         "nothingSaved": "Nothing is saved until you press Save changes.",
         "fixErrors": "{count} fields need a look before saving.",
         "discard": "Discard",
-        "saveChanges": "Save changes",
-        "saving": "Saving"
+        "saveChanges": "Save changes"
       },
       "publicInfo": {
         "included": "Included in public view",

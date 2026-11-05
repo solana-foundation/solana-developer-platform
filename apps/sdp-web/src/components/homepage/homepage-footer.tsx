@@ -1,4 +1,4 @@
-import { SDP_GITHUB_REPO_URL } from "@sdp/types/site";
+import { SDP_GITHUB_REPO_URL, SDP_TERMS_PATH } from "@sdp/types/site";
 import { cn } from "@sdp/ui/cn";
 import Image from "next/image";
 import Link from "next/link";
@@ -79,9 +79,12 @@ export async function HomepageFooter({ links }: { links: HomepageLinks }) {
             </div>
           ))}
         </div>
-        <p className={styles.bottom}>
-          {t("Homepage.footer.providedBy", { organization: FOOTER_ORGANIZATION })}
-        </p>
+        <div className={styles.bottom}>
+          <p>{t("Homepage.footer.providedBy", { organization: FOOTER_ORGANIZATION })}</p>
+          <Link className={styles.legalLink} href={SDP_TERMS_PATH}>
+            {t("Homepage.footer.terms")}
+          </Link>
+        </div>
       </div>
     </footer>
   );

@@ -56,5 +56,5 @@ Shared rules live in `integrate-ramp-provider`. Hot here:
 - No fallbacks — missing customer/account/instructions throws; never default them.
 - HTTP in the provider; DB (counterparty, wallet, customer, transfer row) in the handler.
 - `deliveryMode` arms are a real discriminated union — return exactly one arm's fields; no `any`.
-- Update `apps/sdp-web/src/app/dashboard/payments/ramps/` when the provider's quote arm or instruction shape is not already rendered by the chosen delivery mode.
+- Update `apps/sdp-web/src/app/(session)/dashboard/payments/ramps/` when the provider's quote arm or instruction shape is not already rendered by the chosen delivery mode.
 - Verify `@sdp/payments`, focused API quote/persistence tests, OpenAPI generation when changed, and `sdp-web` typecheck/tests for the renderer.

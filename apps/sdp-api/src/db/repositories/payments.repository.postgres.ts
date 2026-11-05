@@ -240,6 +240,10 @@ function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransferRow {
     confirmed_at: (row.confirmed_at as string | null | undefined) ?? null,
     finalization_last_polled_at:
       (row.finalization_last_polled_at as string | null | undefined) ?? null,
+    audit_intent_id: z
+      .string()
+      .nullable()
+      .parse(row.audit_intent_id ?? null),
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -465,13 +469,14 @@ export function createPostgresPaymentsRepository(
              serialized_tx,
              signature,
              slot,
+             fee,
              initiated_by_key_id,
              idempotency_key,
              idempotency_fingerprint,
              confirmed_at,
              created_at,
              updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, CASE WHEN ?::boolean THEN sdp_iso_now() END, sdp_iso_now(), sdp_iso_now())
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ?::boolean THEN sdp_iso_now() END, sdp_iso_now(), sdp_iso_now())
            RETURNING *
            )
            SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
@@ -501,6 +506,7 @@ export function createPostgresPaymentsRepository(
           input.serializedTx,
           input.signature,
           input.slot,
+          input.fee ?? null,
           input.initiatedByKeyId,
           input.idempotencyKey ?? null,
           input.idempotencyFingerprint ?? null,
@@ -643,6 +649,47 @@ export function createPostgresPaymentsRepository(
         .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;
+    },
+
+    async recordTransferAuditIntent(input) {
+      assertScope(input);
+      const scope = buildTransferScopeWhere({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+        extraClauses: [
+          "id = ?",
+          SIGNED_SUBMISSION_STATUS_CLAUSE,
+          "signed_transaction IS NULL",
+          "submission_started_at IS NULL",
+        ],
+        extraValues: [input.transferId, ...SIGNED_SUBMISSION_STATUS_VALUES],
+      });
+      const row = await db
+        .prepare(
+          `UPDATE payment_transfers SET audit_intent_id = ? WHERE ${scope.where} RETURNING id`
+        )
+        .bind(input.auditIntentId, ...scope.values)
+        .first<{ id: string }>();
+      return row !== null;
+    },
+
+    async closeTransferAuditIntent(input) {
+      assertScope(input);
+      const scope = buildTransferScopeWhere({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+        extraClauses: ["id = ?", "audit_intent_id = ?"],
+        extraValues: [input.transferId, input.auditIntentId],
+      });
+      const row = await db
+        .prepare(
+          `UPDATE payment_transfers SET audit_intent_id = NULL WHERE ${scope.where} RETURNING id`
+        )
+        .bind(...scope.values)
+        .first<{ id: string }>();
+      return row !== null;
     },
 
     async updateOnchainTransferForRamp(input) {

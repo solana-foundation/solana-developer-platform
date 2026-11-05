@@ -1,9 +1,10 @@
+import { ONCHAIN_TRANSFER_STATUSES } from "@sdp/types/payments";
 import { describe, expect, it } from "vitest";
 
-import { buildWalletsPlaygroundEndpointConfigs } from "@/app/dashboard/[projectId]/custody/wallets-playground-config";
-import { buildIssuancePlaygroundEndpointConfigs } from "@/app/dashboard/[projectId]/issuance/issuance-playground-config";
-import { buildCounterpartyPlaygroundEndpointConfigs } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-playground-config";
-import { buildPaymentsPlaygroundEndpointConfigs } from "@/app/dashboard/[projectId]/payments/payments-playground-config";
+import { buildWalletsPlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/custody/wallets-playground-config";
+import { buildIssuancePlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-playground-config";
+import { buildCounterpartyPlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-playground-config";
+import { buildPaymentsPlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/payments/payments-playground-config";
 import type { ApiPlaygroundEndpointConfig } from "@/components/api-playground-shell";
 import { getMessages } from "@/i18n/messages";
 import { translate } from "@/i18n/translate";
@@ -129,6 +130,41 @@ describe("API playground release channel", () => {
     expect(JSON.parse(body)).toMatchObject({ provider: expect.any(String) });
   });
 
+  it("uses the channel's generated transfer fields and response examples", () => {
+    const endpoints = filterPlaygroundEndpointsToReleaseChannel(
+      getOpenApiPlaygroundEndpoints("payments"),
+      "stable"
+    );
+    const transfer = endpoints.find((endpoint) => endpoint.id === "create-payment-transfer");
+    expect(transfer).toBeDefined();
+    expect(transfer?.bodyFields.find((field) => field.key === "$body")?.defaultValue).not.toContain(
+      "transferId"
+    );
+    const serialized = JSON.stringify(endpoints);
+    expect(serialized).not.toMatch(/deliveryMode|fiatCurrency|providerReference|rampsMemo/);
+  });
+
+  it("keeps ramp statuses out of the curated transfer filter when no provider is offered", () => {
+    const endpoints = filterPlaygroundEndpointsToReleaseChannel(
+      buildPaymentsPlaygroundEndpointConfigs({ wallets: [], transfers: [], rampProviders: [] }, t),
+      "stable"
+    );
+    const statuses = endpoints
+      .find((endpoint) => endpoint.id === "list-transfers")
+      ?.pathFields.find((field) => field.key === "status")
+      ?.options?.map((option) => option.value);
+    expect(statuses).toEqual(ONCHAIN_TRANSFER_STATUSES);
+    const experimental = buildPaymentsPlaygroundEndpointConfigs(
+      { wallets: [], transfers: [], rampProviders: ["moonpay"] },
+      t
+    );
+    expect(
+      experimental
+        .find((endpoint) => endpoint.id === "list-transfers")
+        ?.pathFields.find((field) => field.key === "status")?.options
+    ).toContainEqual({ label: "settling", value: "settling" });
+  });
+
   it("filters every playground's forms on every channel without rejecting their examples", () => {
     const builders = [
       buildWalletsPlaygroundEndpointConfigs({ connectedProviders: [], wallets: [], t }),
@@ -191,7 +227,7 @@ describe("API playground allowlist", () => {
   it("refuses what the catalog does not publish on the channel", () => {
     expect(findPublishedPlaygroundOperation("GET", "/v1/api-keys", "experimental")).toBeUndefined();
     expect(
-      findPublishedPlaygroundOperation("POST", "/v1/payments/requests", "experimental")
+      findPublishedPlaygroundOperation("POST", "/v1/places/autocomplete", "experimental")
     ).toBeUndefined();
     expect(
       findPublishedPlaygroundOperation("GET", "/v1/payments/transfers/", "experimental")

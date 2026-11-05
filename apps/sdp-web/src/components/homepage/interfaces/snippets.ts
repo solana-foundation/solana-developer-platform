@@ -1,5 +1,6 @@
 import { DEFAULT_SDP_API_URL } from "@sdp/types/site";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
+import type { GatedSurface } from "@/components/homepage/release-gate";
 
 /**
  * The two calls the Interfaces section shows, one per way of working. They are real requests
@@ -18,6 +19,8 @@ export type InterfaceSnippet = {
   method: "GET" | "POST";
   /** The path as the API reference writes it, shown in the card's head. */
   path: string;
+  /** The surface whose module serves `path`, when a release channel can hold it back. */
+  gate?: GatedSurface;
   /** The request as typed in a wide terminal. */
   request: readonly CodeLine[];
   /** The same request set for a phone: one flag a line, the body broken out. */
@@ -28,7 +31,8 @@ export type InterfaceSnippet = {
 
 const API = DEFAULT_SDP_API_URL;
 const PROMPT: CodeToken = { kind: "prompt", text: "$" };
-const AUTH = '-H "Authorization: Bearer sk_test_…"';
+/** Keys are `sf_<key id>_<secret>` (apps/sdp-api/src/lib/api-key-format.ts). */
+const AUTH = '-H "Authorization: Bearer sf_…"';
 const JSON_TYPE = '-H "Content-Type: application/json"';
 /** A transfer moves money, so the API refuses one without a key (IDEMPOTENCY_REQUIRED_ROUTES). */
 const IDEMPOTENCY = '-H "Idempotency-Key: payment-invoice-1234"';

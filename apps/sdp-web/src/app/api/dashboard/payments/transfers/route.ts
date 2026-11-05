@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { fetchDashboardPaymentTransfers } from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { fetchDashboardPaymentTransfers } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
+import { dashboardJson } from "@/lib/dashboard-response";
 import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient, proxyFailure, proxyToSdpApi } from "@/lib/sdp-api";
@@ -46,16 +46,13 @@ export async function GET(request: Request) {
       Number.isFinite(pageSize) && pageSize > 0 ? pageSize : 20
     );
     const status = result.ok ? 200 : (result.status ?? 500);
-    const nextResponse = NextResponse.json(
+    const nextResponse = dashboardJson(
       result.ok
         ? { data: result.data ?? [] }
         : { error: { message: result.error ?? "Transfer list request failed" } },
       {
         status,
-        headers: {
-          "X-SDP-Trace-ID": trace.traceId,
-          "Server-Timing": trace.serverTiming(),
-        },
+        trace,
       }
     );
 
@@ -66,16 +63,13 @@ export async function GET(request: Request) {
 
     return nextResponse;
   } catch (error) {
-    const response = NextResponse.json(
+    const response = dashboardJson(
       {
         error: error instanceof Error ? error.message : "Transfer list request failed",
       },
       {
         status: 500,
-        headers: {
-          "X-SDP-Trace-ID": trace.traceId,
-          "Server-Timing": trace.serverTiming(),
-        },
+        trace,
       }
     );
     logRouteResult(trace, 500, {

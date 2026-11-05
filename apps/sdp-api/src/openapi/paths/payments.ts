@@ -5,6 +5,7 @@ import { errorResponseSchema } from "@/openapi/schemas/base";
 
 import {
   createOnrampQuoteRequestSchema,
+  createPaymentRequestRequestSchema,
   createRecurringPaymentRequestSchema,
   createSubscriptionPlanRequestSchema,
   createSubscriptionRequestSchema,
@@ -12,6 +13,7 @@ import {
   createTransferRequestSchema,
   estimateTransferBatchRequestSchema,
   paymentListRecurringPaymentsQuerySchema,
+  paymentListRequestsQuerySchema,
   paymentListSubscriptionCollectionAttemptsQuerySchema,
   paymentListSubscriptionPlansQuerySchema,
   paymentListSubscriptionsQuerySchema,
@@ -43,12 +45,15 @@ import {
   projectScopeWithDeclaredIdempotencyHeaders,
 } from "./helpers";
 import {
+  createdPaymentRequestResponse,
   offrampCurrenciesResponse,
   onrampCurrenciesResponse,
   onrampQuoteResponse,
   paymentRecurringPaymentCollectionResponse,
   paymentRecurringPaymentListResponse,
   paymentRecurringPaymentResponse,
+  paymentRequestLinkResponse,
+  paymentRequestListResponse,
   paymentRequestResponse,
   paymentSubscriptionCollectionAttemptListResponse,
   paymentSubscriptionListResponse,
@@ -152,7 +157,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Execute transfer (custody)",
     operationId: "createPaymentTransfer",
     description:
-      "Executes an on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment. A native SOL transfer is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when it pays less than the rent-exempt minimum to an address with no account or would leave the source wallet holding more than nothing but less than the minimum.",
+      "Executes an on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment. A native SOL transfer is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when it pays less than the rent-exempt minimum to an address with no account or would leave the source wallet holding more than nothing but less than the minimum. When the source wallet's policy at its custody provider refuses to sign, the transfer fails with 422 `CUSTODY_POLICY_REFUSED` and nothing is signed or sent; the message names the provider whose policy to review. When the source wallet holds less SOL, or less of the token in its token account, than the amount, the transfer fails with 400 `TRANSACTION_FAILED` and is recorded `failed` with that reason in `error`; a retry with the same Idempotency-Key returns the same error, so fund the wallet and send again with a new key. A source wallet with no token account for the token is refused earlier with 400 `BAD_REQUEST`.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: movementKeyHeaders,
@@ -250,6 +255,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     operationId: "createPaymentTransferBatch",
     description:
       "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`). A token batch is refused with 409 `SPONSORED_RENT_OVER_CAP` when one recipient's new token account costs more rent than the sponsor funds in a transaction (`details.recipientIndex`). " +
+      "A chunk the source wallet cannot fund fails its recipients and transfer with the reason in `error` (the wallet does not have enough funds); the batch still returns 200. " +
       "An `externalId` already used by a batch on the same project and source wallet never pays again: the same request from the same credential returns that batch, and any other returns `409 TRANSFER_BATCH_RUN_EXISTS` with its `batchId` in `error.details`. " +
       "To finish a batch after a partial failure, call `POST /v1/payments/transfer-batches/{batchId}/retry`: it sends only the batch's `failed` recipients. Never resend the whole batch under a new Idempotency-Key, which pays the recipients that succeeded again.",
     security: [{ apiKeyAuth: [] }],
@@ -421,7 +427,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Activate recurring payment",
     operationId: "activatePaymentRecurringPayment",
     description:
-      "Activates a pending SDP-custody recurring payment by creating the Solana subscriptions plan, authorizing the subscription, and storing the resulting on-chain identifiers and signatures. The source wallet gives the Subscriptions program's authority for that token an approval of 0, and each collection approves exactly its own amount in the same transaction as the pull, so the token program's `Approve` instruction appears in activation and collection transactions. If your custody provider's wallet policy allowlists programs or instructions, allow `Approve` to that authority, or the provider refuses the collection and SDP pauses the recurring payment with `pausedReason` `custody_policy_refused`.",
+      "Activates a pending SDP-custody recurring payment by creating the Solana subscriptions plan, authorizing the subscription, and storing the resulting on-chain identifiers and signatures. Both the counterparty and its account must be active before a fresh activation; an unavailable recipient returns `404` before claiming the schedule or signing. Recovery can confirm saved transactions, but cannot sign a new step for an unavailable recipient. The source wallet gives the Subscriptions program's authority for that token an approval of 0, and each collection approves exactly its own amount in the same transaction as the pull, so the token program's `Approve` instruction appears in activation and collection transactions. If your custody provider's wallet policy allowlists programs or instructions, allow `Approve` to that authority, or the provider refuses the collection and SDP pauses the recurring payment with `pausedReason` `custody_policy_refused`.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyRequiredRerunHeaders,
@@ -461,6 +467,101 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
+    path: "/v1/payments/requests",
+    tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.paymentRequests,
+    summary: "Create payment request",
+    operationId: "createPaymentRequest",
+    description:
+      "Creates a payment request: an amount of one token for a payer to send to a custody wallet in the caller's project, through the request's hosted payment link. Requires `payment_requests.manage`. `walletId` is the provider wallet ID (`walletId` from `GET /v1/wallets`), not the SDP Wallet ID transfers take; an unknown wallet, or one outside the project, returns 404. `amount` is a decimal string with at most the mint's decimals, so `0.05` and `0.050` are the same request; more decimals return 400. A native SOL request is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM` when the wallet has no account and the amount is below the rent-exempt minimum. The response is the only one besides `GET /v1/payments/requests/{paymentRequestId}/link` that carries `publicToken`. Accepts an Idempotency-Key: a retry with the same key and request returns the original payment request instead of creating a second one.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: keyAcceptedHeaders,
+      body: {
+        required: true,
+        content: jsonContent(createPaymentRequestRequestSchema),
+      },
+    },
+    responses: {
+      201: {
+        description: "Payment request created",
+        content: jsonContent(createdPaymentRequestResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/requests",
+    tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.paymentRequests,
+    summary: "List payment requests",
+    operationId: "listPaymentRequests",
+    description:
+      "Lists the caller's project's payment requests, newest first. Requires `payment_requests.read`. An open request past its `expiresAt` reads as `expired`. Records never carry `publicToken`.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      query: paymentListRequestsQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Payment request list",
+        content: jsonContent(paymentRequestListResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/requests/{paymentRequestId}",
+    tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.paymentRequests,
+    summary: "Get payment request",
+    operationId: "getPaymentRequest",
+    description:
+      "Retrieves one payment request in the caller's project; another project's request returns 404. Requires `payment_requests.read`. An open request past its `expiresAt` reads as `expired`. The record never carries `publicToken`; use `GET /v1/payments/requests/{paymentRequestId}/link`.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRequestIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Payment request",
+        content: jsonContent(paymentRequestResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/requests/{paymentRequestId}/link",
+    tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.paymentRequests,
+    summary: "Get payment request link",
+    operationId: "getPaymentRequestLink",
+    description:
+      "Returns the token behind a payment request's hosted payment link, `/pay/{publicToken}`. Anyone holding it can build the request's fee-sponsored payment transaction, so this route requires `payment_requests.manage`, not `payment_requests.read`. Another project's request returns 404. The token is returned whatever the request's status.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRequestIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Payment request link token",
+        content: jsonContent(paymentRequestLinkResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
     path: "/v1/payments/requests/{paymentRequestId}/cancel",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.paymentRequests,
@@ -490,7 +591,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Collect recurring payment",
     operationId: "collectPaymentRecurringPayment",
     description:
-      "Manually starts a due active SDP-custody recurring payment collection, creating a linked payment transfer and collection attempt. If submission cannot be confirmed immediately, a 200 response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation.",
+      "Manually starts a due active SDP-custody recurring payment collection, creating a linked payment transfer and collection attempt. Before a new collection, SDP requires an active counterparty and account in the schedule's project. If either is archived or unavailable, the schedule pauses with `pausedReason` `destination_unavailable` and the request returns 409 without signing. An earlier in-flight collection still recovers. If submission cannot be confirmed immediately, a 200 response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation. When the source wallet cannot cover the amount, the request returns 400 `TRANSACTION_FAILED` and the failed collection attempt and its transfer record the same reason in `error`, so the collection history shows why.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyRequiredRerunHeaders,
@@ -512,7 +613,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
     summary: "Resume recurring payment",
     operationId: "resumePaymentRecurringPayment",
-    description: `Resumes a paused SDP-custody recurring payment. SDP pauses a recurring payment when a due period fails ${RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause} times, or at once when the custody provider's policy refuses to sign a collection. Its on-chain subscription is still in place, so nothing is signed: the recurring payment returns to active, the failure count starts again, and a due period that has already ended moves to the next one. A canceled recurring payment cannot be resumed.`,
+    description: `Resumes a paused SDP-custody recurring payment. SDP pauses a recurring payment when a due period fails ${RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause} times, at once when the custody provider's policy refuses to sign a collection, or before a new collection when its counterparty or account is archived or unavailable. Resume requires both recipient records to be active. Its on-chain subscription is still in place, so nothing is signed: the recurring payment returns to active, the failure count starts again, and a due period that has already ended moves to the next one. A canceled recurring payment cannot be resumed.`,
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyRequiredRerunHeaders,
@@ -546,6 +647,30 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(paymentRecurringPaymentResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/recurring-payments/{id}/collection-attempts",
+    tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
+    summary: "List recurring payment collection attempts",
+    operationId: "listPaymentRecurringPaymentCollectionAttempts",
+    description:
+      "Lists every collection attempt a recurring payment has made over its whole history, newest first: its current subscription and every subscription an edit replaced. A recurring payment that has not been activated has none.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRecurringPaymentIdParamsSchema,
+      query: paymentListSubscriptionCollectionAttemptsQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Collection attempt list",
+        content: jsonContent(paymentSubscriptionCollectionAttemptListResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 

@@ -404,6 +404,11 @@ export const ONCHAIN_TRANSFER_STATUSES = [
 
 export type OnchainTransferStatus = (typeof ONCHAIN_TRANSFER_STATUSES)[number];
 
+/** Transfer-only statuses hidden when the channel has no ramp provider. */
+export const RAMP_ONLY_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filter(
+  (status) => !ONCHAIN_TRANSFER_STATUSES.some((onchainStatus) => onchainStatus === status)
+);
+
 /** Onchain transfer statuses that still await a chain verdict. */
 export const ONCHAIN_TRANSFER_IN_FLIGHT_STATUSES = [
   "pending",
@@ -852,14 +857,14 @@ export type PaymentRecurringPaymentStatus = (typeof PAYMENT_RECURRING_PAYMENT_ST
 export type UnpausedRecurringPaymentStatus = Exclude<PaymentRecurringPaymentStatus, "paused">;
 
 /**
- * Why SDP paused a recurring payment (HOO-2340): the custody provider's policy refused to sign a
- * collection, or one due period failed
- * {@link RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause} times. Migration 0184
- * checks the column against these and keeps it set exactly while the row is `paused`.
+ * Why SDP paused a recurring payment: a signing policy refusal, repeated
+ * collection failures, or an unavailable counterparty or account. The database
+ * checks these values and requires a reason exactly while the row is paused.
  */
 export const RECURRING_PAYMENT_PAUSE_REASONS = [
   "custody_policy_refused",
   "failed_attempts",
+  "destination_unavailable",
 ] as const;
 export type RecurringPaymentPauseReason = (typeof RECURRING_PAYMENT_PAUSE_REASONS)[number];
 

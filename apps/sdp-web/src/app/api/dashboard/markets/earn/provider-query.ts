@@ -1,5 +1,6 @@
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
-import { NextResponse } from "next/server";
+import type { NextResponse } from "next/server";
+import { dashboardJson } from "@/lib/dashboard-response";
 
 const PROVIDERS = new Set<string>(EARN_PROVIDERS);
 
@@ -15,7 +16,7 @@ export type ProxyQueryValidation = { ok: true; query: string } | { ok: false; me
 export function proxyQueryErrorResponse(
   validated: Extract<ProxyQueryValidation, { ok: false }>
 ): NextResponse {
-  return NextResponse.json({ error: { message: validated.message } }, { status: 400 });
+  return dashboardJson({ error: { message: validated.message } }, { status: 400 });
 }
 
 /**

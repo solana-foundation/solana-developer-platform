@@ -28,34 +28,49 @@ Open **Wallets** in the sidebar and click **Create wallet**. Complete
 
 ### 2. Choose a custody provider
 
-Under **Which provider holds the keys?**, select a provider and click
-**Continue**. The list shows the providers your project can use.
+Under **Which provider holds the keys?**, select a provider. The list shows the
+providers your project can use. When it can use only one, that provider is
+already selected and the question is not shown.
 
 ### 3. Set up the provider
 
-If the provider offers both modes, choose **Managed** to use SDP's provider
-account or **Bring your own credentials** to connect your own. Production
-requires your own credentials; see [Go to mainnet](/docs/guides/go-to-mainnet).
+If you can connect your own account for the provider, the page asks whose
+account holds the keys. For Privy, choose **SDP's Privy account** to try SDP
+out, with no wallet policy and nothing to set up, or **Your own Privy account**
+to connect yours. Nothing is preselected. Production requires your own account;
+see [Go to mainnet](/docs/guides/go-to-mainnet).
 
-For Privy, enter a **Credential label**, **Privy app ID**, **Privy app secret**,
-and optional **Initial wallet label**. Click **Connect and verify** to connect
-the account and create its first wallet.
+With your own account, enter a **Credential label**, your **Privy app ID** and
+your **Privy app secret**, then a **Wallet label** under **Wallet details**.
+Click **Connect and create wallet** to connect the account and create its first
+wallet.
 
 ![Privy provider setup with example credentials and a masked secret](/images/go-to-mainnet/04-connect-privy.png)
 
-For Managed custody, enter a **Wallet label** and click **Create wallet**.
+A connection signs only with its current credentials. If you rotate or remove
+them while a request is signing, that request returns `409` with
+`details.reason` set to `runtime_execution_unavailable`. Retry it as
+[Idempotency](/docs/developing-with-sdp/idempotency) describes for that
+operation: a transfer that recorded the failure replays it under the same
+`Idempotency-Key`, so send it again with a new key.
+
+With SDP's account, enter a **Wallet label** and click **Create wallet**.
 The first wallet is a transfer wallet.
 
 ### 4. Create additional wallets
 
-Click **Create wallet** again, select the provider, and enter a **Wallet label**
-and **Purpose**. If the provider has active connections, choose the **Account**
-the wallet will belong to. Nothing is preselected. Click **Create wallet**.
+Click **Create wallet** again and select the provider if asked. Where the page
+asks whose account holds the keys, it lists SDP's account where it is offered,
+each of your connections and one to connect another; nothing is preselected. A connection
+that is not ready shows what it needs, with a link to fix it. Enter a **Wallet
+label**, choose a **Purpose** if more than one is offered, and click **Create
+wallet**.
 
 ### 5. View your wallet
 
-After provisioning, the wallet appears on **Wallets** with its address and
-balance. Open it to see its details.
+Once the wallet is created, its page opens with its address and balance. A
+wallet created with **Connect and create wallet** appears on **Wallets**
+instead; open it to see its details.
 
 </Tab>
 <Tab value="API">

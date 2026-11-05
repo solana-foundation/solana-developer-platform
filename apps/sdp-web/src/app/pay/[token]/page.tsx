@@ -8,10 +8,13 @@ import {
   formatDisplayAmount,
   formatTimestamp,
   shortenAddress,
-} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
-import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/[projectId]/playground-api-data";
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
+import { resolvePlaygroundApiBaseUrl } from "@/app/(session)/dashboard/[projectId]/playground-api-data";
 import { SolanaQrCode } from "@/components/solana-qr-code";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
+import { findPublicSdpApiBaseUrl } from "@/lib/sdp-api-base-url";
+import { PayStatusWatch } from "./pay-status-watch";
+import { payTokenSchema } from "./pay-token";
 
 export const dynamic = "force-dynamic";
 
@@ -77,10 +80,16 @@ function isRenderablePayUrl(value: string): boolean {
   }
 }
 
+/**
+ * The public pay page. It has no `loading.tsx`: a loading boundary streams a 200 before the read
+ * below can call `notFound()`, and an unknown link must answer 404 (HOO-2619).
+ */
 export default async function PayPage({ params }: { params: Promise<{ token: string }> }) {
-  const t = await getTranslations();
-  const locale = await getRequestLocale();
-  const { token } = await params;
+  const parsedToken = payTokenSchema.safeParse((await params).token);
+  if (!parsedToken.success) {
+    notFound();
+  }
+  const token = parsedToken.data;
   const apiBaseUrl = resolvePlaygroundApiBaseUrl();
   if (!apiBaseUrl) {
     throw new Error("SDP API base URL is not configured");
@@ -89,21 +98,38 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
   const response = await fetch(`${apiBaseUrl}/pay/${encodeURIComponent(token)}`, {
     cache: "no-store",
   });
-  if (!response.ok) {
+  if (response.status === 404) {
     notFound();
   }
+  if (!response.ok) {
+    // A refused or failed read is not a missing link: the error page lets the payer retry.
+    throw new Error(`Pay link read failed (${response.status})`);
+  }
   const request = (await response.json()) as PayRequest;
+  const t = await getTranslations();
+  const locale = await getRequestLocale();
 
   const payUrl =
     request.solanaPayUrl && isRenderablePayUrl(request.solanaPayUrl) ? request.solanaPayUrl : null;
   const statusPanel =
     request.status === "awaiting_payment" ? null : getStatusPanels(t)[request.status];
+  // The watch reads from the payer's browser, so it takes the address a browser can reach.
+  const publicApiBaseUrl = findPublicSdpApiBaseUrl({
+    NEXT_PUBLIC_SDP_API_BASE_URL: process.env.NEXT_PUBLIC_SDP_API_BASE_URL,
+    NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL,
+  });
 
   return (
     <main
       {...refreshThemeProps}
       className="flex min-h-screen items-center justify-center bg-surface px-4 py-12"
     >
+      {publicApiBaseUrl ? (
+        <PayStatusWatch
+          statusUrl={`${publicApiBaseUrl}/pay/${encodeURIComponent(token)}`}
+          status={request.status}
+        />
+      ) : null}
       <div className="w-full max-w-md overflow-hidden rounded-card border border-border-default bg-surface-raised">
         <div className="p-8">
           <div className="flex items-center justify-center">

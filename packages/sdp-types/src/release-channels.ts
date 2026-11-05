@@ -26,6 +26,7 @@ export const SDP_MODULES = [
   "custody",
   "payments",
   "recurring_payments",
+  "subscriptions",
   "ramps",
   "compliance",
   "issuance",
@@ -60,6 +61,7 @@ export type SdpReleaseChannel = (typeof SDP_RELEASE_CHANNEL_NAMES)[number];
 export const SDP_MODULE_MATURITY = {
   payments: "stable",
   recurring_payments: "stable",
+  subscriptions: "beta",
   compliance: "experimental",
   issuance: "experimental",
   earn: "beta",

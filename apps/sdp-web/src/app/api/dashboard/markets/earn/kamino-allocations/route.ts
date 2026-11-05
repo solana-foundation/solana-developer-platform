@@ -1,8 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
-import { NextResponse } from "next/server";
+import type { NextResponse } from "next/server";
 import { z } from "zod";
-import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/[projectId]/markets/base58-address";
-import { KAMINO_ALLOCATIONS_MAX_VAULTS } from "@/app/dashboard/[projectId]/markets/treasury-solutions/kamino-allocations-schema";
+import { BASE58_ADDRESS_PATTERN } from "@/app/(session)/dashboard/[projectId]/markets/base58-address";
+import { KAMINO_ALLOCATIONS_MAX_VAULTS } from "@/app/(session)/dashboard/[projectId]/markets/treasury-solutions/kamino-allocations-schema";
+import { dashboardJson } from "@/lib/dashboard-response";
 import { readVaultsAllocations } from "./kamino-allocations-store";
 
 /**
@@ -47,10 +48,10 @@ const allocationsQuerySchema = z.object({
 });
 
 function jsonError(status: number, message: string): NextResponse {
-  return NextResponse.json(
+  return dashboardJson(
     { error: { message } },
     // Public market data, but per-request: freshness is the cache's job.
-    { headers: { "Cache-Control": "private, no-store" }, status }
+    { status }
   );
 }
 
@@ -85,7 +86,7 @@ export async function GET(request: Request) {
     // the same schema module the store parsed upstream with. Upstream and
     // catalogue failures are already folded into the batch as absent vaults.
     const payload = await readVaultsAllocations(query.data.vaults);
-    return NextResponse.json(payload, { headers: { "Cache-Control": "private, no-store" } });
+    return dashboardJson(payload);
   } catch {
     // The reason is deliberately not surfaced: the dashboard renders the same
     // placeholder for every failure, and raw internals never belong in a
