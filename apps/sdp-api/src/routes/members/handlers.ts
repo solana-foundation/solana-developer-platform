@@ -424,7 +424,7 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
     if (isClerkRefusal(clerkError)) {
       await failUnsentInvitation(c, invitation, clerkError);
       if (isClerkAccessRefusal(clerkError)) {
-        throw badRequest("This email address is not allowed to join", {
+        throw badRequest("This email's domain isn't approved yet. Contact us to get it added.", {
           reason: INVITEE_NOT_ALLOWED_REASON,
         });
       }

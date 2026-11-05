@@ -357,7 +357,7 @@ describe("POST /v1/members/invite", () => {
     expect(await response.json()).toEqual({
       error: {
         code: "BAD_REQUEST",
-        message: "This email address is not allowed to join",
+        message: "This email's domain isn't approved yet. Contact us to get it added.",
         details: { reason: INVITEE_NOT_ALLOWED_REASON },
       },
       meta: { requestId: expect.any(String) },
