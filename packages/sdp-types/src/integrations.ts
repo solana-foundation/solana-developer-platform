@@ -13,6 +13,20 @@ const integrationStateSchema = z.discriminatedUnion("status", [
 ]);
 export type IntegrationState = z.infer<typeof integrationStateSchema>;
 
+export const INTEGRATION_STATUSES = ["not_configured", "provided", "connected"] as const;
+export type IntegrationStatus = (typeof INTEGRATION_STATUSES)[number];
+
+/** Whether the project sets an integration in each status up itself; SDP supplies a provided one. */
+export const INTEGRATION_STATUS_CONFIGURABLE = {
+  not_configured: true,
+  provided: false,
+  connected: true,
+} as const satisfies Record<IntegrationStatus, boolean>;
+
+export function isConfigurableIntegrationStatus(status: IntegrationStatus): boolean {
+  return INTEGRATION_STATUS_CONFIGURABLE[status];
+}
+
 const custodyIntegrationSchema = z.object({
   provider: z.enum(CUSTODY_PROVIDERS),
   category: z.enum(CUSTODY_PROVIDER_CATEGORIES),

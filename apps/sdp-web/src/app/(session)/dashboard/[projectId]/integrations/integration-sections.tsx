@@ -1,22 +1,23 @@
 import { CUSTODY_PROVIDER_CATEGORY_DETAILS } from "@sdp/types/custody";
-import type {
-  IntegrationFamily,
-  IntegrationState,
-  ProjectIntegrationFamily,
-  ProjectIntegrations,
-  RpcIntegration,
+import {
+  type IntegrationFamily,
+  type IntegrationState,
+  isConfigurableIntegrationStatus,
+  type ProjectIntegrationFamily,
+  type ProjectIntegrations,
+  type RpcIntegration,
 } from "@sdp/types/integrations";
 import { VenetianMaskIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { getCustodyProviderEntry } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
+import { ProviderBrandMark } from "@/components/provider-brand-mark";
 import type { DashboardFlags } from "@/flags/dashboard";
 import type { MessageKey } from "@/i18n/messages";
 import type { useTranslations } from "@/i18n/provider";
 import {
   COMPLIANCE_BRAND_MARKS,
   CUSTODY_BRAND_MARKS,
-  ProviderBrandMark,
   RAMP_BRAND_MARKS,
   RPC_BRAND_MARKS,
 } from "@/lib/provider-brand-marks";
@@ -80,13 +81,8 @@ const RPC_PROVIDER_LABELS = {
   validationcloud: "Validation Cloud",
 } as const satisfies Record<RpcIntegration["provider"], string>;
 
-/** Whether the project has anything to set up for an integration in this state. */
-export function isConfigurable(state: IntegrationState): boolean {
-  return state.status !== "provided";
-}
-
 function hrefWhenConfigurable(state: IntegrationState, href: string): string | null {
-  return isConfigurable(state) ? href : null;
+  return isConfigurableIntegrationStatus(state.status) ? href : null;
 }
 
 function familyRows(family: IntegrationFamily, t: Translate): IntegrationRow[] {

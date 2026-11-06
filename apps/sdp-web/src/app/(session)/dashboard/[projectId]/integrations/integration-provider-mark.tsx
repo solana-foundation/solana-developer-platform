@@ -1,8 +1,8 @@
 import type { IntegrationProviderIdentity } from "@/app/(session)/dashboard/[projectId]/integrations/integration-detail";
+import { ProviderBrandMark } from "@/components/provider-brand-mark";
 import {
   COMPLIANCE_BRAND_MARKS,
   CUSTODY_BRAND_MARKS,
-  ProviderBrandMark,
   RAMP_BRAND_MARKS,
 } from "@/lib/provider-brand-marks";
 

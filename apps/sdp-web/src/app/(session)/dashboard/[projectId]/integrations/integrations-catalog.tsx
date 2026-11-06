@@ -1,9 +1,10 @@
 "use client";
 
-import type {
-  IntegrationState,
-  ProjectIntegrationFamily,
-  ProjectIntegrations,
+import {
+  type IntegrationState,
+  isConfigurableIntegrationStatus,
+  type ProjectIntegrationFamily,
+  type ProjectIntegrations,
 } from "@sdp/types/integrations";
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
@@ -24,14 +25,13 @@ import {
   type IntegrationRow,
   type IntegrationSection,
   integrationSections,
-  isConfigurable,
 } from "./integration-sections";
 
 type Translate = ReturnType<typeof useTranslations>;
 
 // Mark, name, category, state, chevron: one grid so every row's columns line up.
 const ROW_COLUMNS =
-  "grid grid-cols-[44px_minmax(0,1fr)_auto_16px] items-center gap-x-3 md:grid-cols-[44px_minmax(0,1fr)_176px_160px_16px]";
+  "grid grid-cols-[2.75rem_minmax(0,1fr)_auto_1rem] items-center gap-x-3 md:grid-cols-[2.75rem_minmax(0,1fr)_11rem_10rem_1rem]";
 
 function isProjectIntegrationFamily(value: string): value is ProjectIntegrationFamily {
   return Object.hasOwn(INTEGRATION_FAMILY_COPY_KEYS, value);
@@ -101,7 +101,9 @@ function IntegrationRowItem({ row, t }: { row: IntegrationRow; t: Translate }) {
 }
 
 function SectionSummary({ section, t }: { section: IntegrationSection; t: Translate }) {
-  const configurable = section.rows.filter((row) => isConfigurable(row.state));
+  const configurable = section.rows.filter((row) =>
+    isConfigurableIntegrationStatus(row.state.status)
+  );
   if (configurable.length === 0) {
     return null;
   }
@@ -143,14 +145,12 @@ export function IntegrationsCatalog({ integrations }: { integrations: ProjectInt
   const sections = useMemo(() => integrationSections(integrations, t), [integrations, t]);
 
   // A family with no provider for this project loses its tab, and a link to it lands on All.
-  const presentFamilies = sections.map((section) => section.family);
+  const presentFamilies = new Set<string>(sections.map((section) => section.family));
   useHiddenHeaderTabs(
-    Object.keys(INTEGRATION_FAMILY_COPY_KEYS).filter(
-      (family) => isProjectIntegrationFamily(family) && !presentFamilies.includes(family)
-    )
+    Object.keys(INTEGRATION_FAMILY_COPY_KEYS).filter((family) => !presentFamilies.has(family))
   );
   const tabFamily =
-    urlTab !== null && isProjectIntegrationFamily(urlTab) && presentFamilies.includes(urlTab)
+    urlTab !== null && isProjectIntegrationFamily(urlTab) && presentFamilies.has(urlTab)
       ? urlTab
       : null;
   const normalizedQuery = query.trim().toLowerCase();

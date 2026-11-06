@@ -1,9 +1,6 @@
 import type { CustodyProvider } from "@sdp/types/custody";
 import type { ComplianceProviderId, RampProviderId } from "@sdp/types/provider-access";
 import type { ManagedRpcProvider } from "@sdp/types/rpc";
-import { cn } from "@sdp/ui/cn";
-import { KeyRoundIcon } from "lucide-react";
-import Image from "next/image";
 
 export interface BrandMark {
   logo: string;
@@ -57,39 +54,3 @@ export const COMPLIANCE_BRAND_MARKS = {
   range: { logo: "/provider-logos/brand/range.svg", background: "#22533e", ringed: false },
   trm: { logo: "/provider-logos/brand/trm.svg", background: "#0f0f13", ringed: false },
 } as const satisfies Record<ComplianceProviderId, BrandMark>;
-
-const BRAND_MARK_SIZES = {
-  list: { box: "size-10", logo: 24 },
-  page: { box: "size-12", logo: 28 },
-} as const;
-
-/** A provider's round brand mark: its logo centred on its brand colour. */
-export function ProviderBrandMark({
-  mark,
-  size,
-}: {
-  mark: BrandMark | null;
-  size: keyof typeof BRAND_MARK_SIZES;
-}) {
-  const { box, logo } = BRAND_MARK_SIZES[size];
-  const markClass = cn(
-    "relative inline-flex shrink-0 items-center justify-center rounded-full",
-    box
-  );
-  if (mark === null) {
-    return (
-      <span aria-hidden className={cn(markClass, "bg-fill-strong")}>
-        <KeyRoundIcon className="size-5 text-secondary" />
-      </span>
-    );
-  }
-  return (
-    <span
-      aria-hidden
-      className={cn(markClass, mark.ringed && "shadow-[inset_0_0_0_1px_rgba(15,15,19,0.1)]")}
-      style={{ backgroundColor: mark.background }}
-    >
-      <Image src={mark.logo} alt="" width={logo} height={logo} className="object-contain" />
-    </span>
-  );
-}

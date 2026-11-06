@@ -33,7 +33,7 @@ export function WalletProviderMark({ provider, size = "md" }: WalletProviderMark
       className={[
         "inline-flex shrink-0 items-center justify-center overflow-hidden",
         mark === null ? "border border-border-subtle bg-fill-subtle" : "",
-        mark?.ringed ? "shadow-[inset_0_0_0_1px_rgba(15,15,19,0.1)]" : "",
+        mark?.ringed ? "ring-1 ring-border-subtle ring-inset" : "",
         dimensionClass,
       ].join(" ")}
       style={mark === null ? undefined : { backgroundColor: mark.background }}

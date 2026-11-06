@@ -1,5 +1,9 @@
 import { configuredManagedRpcProviders } from "@sdp/rpc/factory";
-import { CUSTODY_PROVIDER_CATALOG, type ProviderMode } from "@sdp/types/custody";
+import {
+  CUSTODY_PROVIDER_CATALOG,
+  type CustodyProvider,
+  type ProviderMode,
+} from "@sdp/types/custody";
 import type {
   ComplianceIntegration,
   CustodyIntegration,
@@ -25,13 +29,13 @@ import {
 import type { Env } from "@/types/env";
 
 interface ActiveCustodyRecordRow {
-  provider: string;
+  provider: CustodyProvider;
   mode: ProviderMode;
 }
 
 interface ProjectIntegrationFacts {
   availability: ProjectProviderAvailability;
-  activeCustodyModes: ReadonlyMap<string, ReadonlySet<ProviderMode>>;
+  activeCustodyModes: ReadonlyMap<CustodyProvider, ReadonlySet<ProviderMode>>;
   privateChannelsActive: boolean | null;
 }
 
@@ -81,7 +85,7 @@ export async function getProjectIntegrations(
 async function loadActiveCustodyModes(
   db: DatabaseExecutor,
   scope: ProjectProviderScope
-): Promise<Map<string, Set<ProviderMode>>> {
+): Promise<Map<CustodyProvider, Set<ProviderMode>>> {
   const rows = await db.queryMany<ActiveCustodyRecordRow>(
     `SELECT provider, 'managed' AS mode
        FROM custody_configs
@@ -96,7 +100,7 @@ async function loadActiveCustodyModes(
         AND status = 'active'`,
     [scope.organizationId, scope.projectId, scope.organizationId, scope.projectId]
   );
-  const modesByProvider = new Map<string, Set<ProviderMode>>();
+  const modesByProvider = new Map<CustodyProvider, Set<ProviderMode>>();
   for (const row of rows) {
     const modes = modesByProvider.get(row.provider) ?? new Set<ProviderMode>();
     modes.add(row.mode);

@@ -488,12 +488,13 @@ export function DashboardShell({
   // A page can insist on its title where the route hides it: a missing page has to say so.
   const titleAlwaysVisible = activeTitleOverride?.alwaysVisible === true;
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
+  const hiddenHeaderTabIdSet = new Set(hiddenHeaderTabIds);
   const headerTabs = pageConfig.headerTabs && {
     ...pageConfig.headerTabs,
     tabs: pageConfig.headerTabs.tabs.filter(
       (tab) =>
         (!tab.capability || dashboardAccess.capabilities[tab.capability]) &&
-        !hiddenHeaderTabIds?.includes(tab.id)
+        !hiddenHeaderTabIdSet.has(tab.id)
     ),
   };
   const routeTabs = pageConfig.routeTabs;
