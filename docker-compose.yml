@@ -63,6 +63,7 @@ services:
       # (a local gateway, e.g. http://host.docker.internal:8899, is honoured as
       # written).
       PRIVATE_CHANNEL_EGRESS_ALLOWLIST: ${PRIVATE_CHANNEL_EGRESS_ALLOWLIST:-}
+      HELIUS_RINGS_ENABLED: ${HELIUS_RINGS_ENABLED:-false}
       SDP_FLAG_ASSET_PROFILES: ${SDP_FLAG_ASSET_PROFILES:-true}
       API_VERSION: ${API_VERSION:-local-compose}
       SDP_DEPLOYMENT_MODE: ${SDP_DEPLOYMENT_MODE:-self_hosted}
@@ -78,7 +79,9 @@ services:
       API_KEY_PEPPER: ${API_KEY_PEPPER:-}
       CREDENTIAL_FINGERPRINT_PEPPER: ${CREDENTIAL_FINGERPRINT_PEPPER:-}
       CUSTODY_ENCRYPTION_KEY: ${CUSTODY_ENCRYPTION_KEY:-}
+      CUSTODY_KMS_KEY_NAME: ${CUSTODY_KMS_KEY_NAME:-}
       SPC_CREDENTIAL_ENCRYPTION_KEY: ${SPC_CREDENTIAL_ENCRYPTION_KEY:-}
+      SPC_CREDENTIAL_KMS_KEY_NAME: ${SPC_CREDENTIAL_KMS_KEY_NAME:-}
 
       # Solana
       # createClusterRpc() reads only the per-cluster pool; mainnet stays unset until named.
@@ -87,12 +90,25 @@ services:
 
       # Signing
       SIGNING_PROVIDER: ${SIGNING_PROVIDER:-local}
+      CUSTODY_PRIVATE_KEY: ${CUSTODY_PRIVATE_KEY:-}
       PRIVY_APP_ID: ${PRIVY_APP_ID:-}
       PRIVY_APP_SECRET: ${PRIVY_APP_SECRET:-}
-      FEE_PAYER_PRIVATE_KEY: ${FEE_PAYER_PRIVATE_KEY:-}
-      FEE_PAYMENT_PROVIDER: ${FEE_PAYMENT_PROVIDER:-native}
 
-      # Observability (optional)
+      # Fee sponsorship: one Kora per cluster. The API refuses to start with only
+      # one of a cluster's URL and RPC URL set; an empty value counts as unset.
+      KORA_DEVNET_URL: ${KORA_DEVNET_URL:-}
+      KORA_DEVNET_RPC_URL: ${KORA_DEVNET_RPC_URL:-}
+      KORA_DEVNET_API_KEY: ${KORA_DEVNET_API_KEY:-}
+      KORA_DEVNET_CLOUD_RUN_AUDIENCE: ${KORA_DEVNET_CLOUD_RUN_AUDIENCE:-}
+      KORA_MAINNET_URL: ${KORA_MAINNET_URL:-}
+      KORA_MAINNET_RPC_URL: ${KORA_MAINNET_RPC_URL:-}
+      KORA_MAINNET_API_KEY: ${KORA_MAINNET_API_KEY:-}
+      KORA_MAINNET_CLOUD_RUN_AUDIENCE: ${KORA_MAINNET_CLOUD_RUN_AUDIENCE:-}
+      KORA_TIMEOUT_MS: ${KORA_TIMEOUT_MS:-}
+
+      # Jupiter Swap (swap-funded Earn deposits)
+      JUPITER_SWAP_API_KEY: ${JUPITER_SWAP_API_KEY:-}
+      JUPITER_SWAP_API_URL: ${JUPITER_SWAP_API_URL:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -109,12 +125,14 @@ services:
         NEXT_PUBLIC_SDP_API_BASE_URL: ${NEXT_PUBLIC_SDP_API_BASE_URL:-http://localhost:8787}
         NEXT_PUBLIC_SDP_DOCS_URL: ${NEXT_PUBLIC_SDP_DOCS_URL:-http://localhost:3001}
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+        NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
     restart: unless-stopped
     ports:
       - "${SDP_WEB_PORT:-3000}:3000"
     environment:
       SDP_RELEASE_CHANNEL: ${SDP_RELEASE_CHANNEL:-experimental}
       PRIVATE_CHANNELS_ENABLED: ${PRIVATE_CHANNELS_ENABLED:-false}
+      HELIUS_RINGS_ENABLED: ${HELIUS_RINGS_ENABLED:-false}
       ISSUANCE_ENABLED: ${ISSUANCE_ENABLED:-false}
       SDP_API_BASE_URL: http://sdp-api:8787
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
