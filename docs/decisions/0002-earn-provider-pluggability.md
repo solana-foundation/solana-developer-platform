@@ -1300,3 +1300,5 @@ automatic share-account close. Other providers' behavior is unchanged.
 This supersedes the Kamino requested-amount and rent-refund assumptions above.
 See [the audit](../earn/kamino-audit-2026-09-29.md) for validation, threat analysis
 and rollout requirements for previously issued transactions.
+
+2026-11-05: MARKETS_ENABLED and EARN_ENABLED were removed; the release channel alone gates Markets and Earn.

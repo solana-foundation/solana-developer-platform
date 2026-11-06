@@ -4,7 +4,6 @@ import { Button } from "@sdp/ui/button";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Textarea } from "@sdp/ui/textarea";
-import { EyeIcon, EyeOffIcon } from "lucide-react";
 import { useId, useState } from "react";
 import { useTranslations } from "@/i18n/provider";
 
@@ -45,7 +44,7 @@ export function SecretField({
   const [shown, setShown] = useState(false);
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       <Label htmlFor={fieldId}>{label}</Label>
       <div className="flex items-center gap-2">
         {multiline ? (
@@ -68,9 +67,10 @@ export function SecretField({
           />
         ) : (
           <Input
+            size="xl"
             id={fieldId}
             name={name}
-            className="flex-1"
+            className="flex-1 font-mono"
             type={shown ? "text" : "password"}
             autoComplete="off"
             required={required}
@@ -82,23 +82,18 @@ export function SecretField({
         )}
         <Button
           type="button"
-          variant="secondary"
+          variant="ghost"
           size="sm"
           disabled={disabled}
           aria-pressed={shown}
-          // The icon carries no text, so the control needs its own name.
           aria-label={shown ? t("DashboardCustody.hideSecret") : t("DashboardCustody.showSecret")}
           onClick={() => setShown((current) => !current)}
         >
-          {shown ? (
-            <EyeOffIcon aria-hidden className="size-4" />
-          ) : (
-            <EyeIcon aria-hidden className="size-4" />
-          )}
+          {shown ? t("DashboardCustody.secretHide") : t("DashboardCustody.secretShow")}
         </Button>
       </div>
       {hint ? (
-        <p id={hintId} className="text-sm leading-5 text-tertiary">
+        <p id={hintId} className="text-meta text-tertiary">
           {hint}
         </p>
       ) : null}

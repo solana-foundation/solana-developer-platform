@@ -1,6 +1,4 @@
-import { type Context, Hono, type Next } from "hono";
-import { forbidden } from "@/lib/errors";
-import { isDvpEnabled } from "@/lib/feature-flags";
+import { Hono } from "hono";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
@@ -22,19 +20,6 @@ import { createDvpTradeSchema, fundDvpTradeSchema } from "./schemas";
 
 export const dvp = new Hono<{ Bindings: Env }>();
 
-/**
- * Gates every DvP route behind the Markets module flag.
- *
- * The DvP swap program exists on devnet only (PRO-1798).
- */
-async function requireDvpFeature(c: Context<{ Bindings: Env }>, next: Next) {
-  if (!isDvpEnabled(c.env)) {
-    throw forbidden("Markets is not enabled for this environment.");
-  }
-  await next();
-}
-
-dvp.use("*", requireDvpFeature);
 dvp.use("*", unifiedAuthMiddleware());
 dvp.use("*", projectContextMiddleware());
 

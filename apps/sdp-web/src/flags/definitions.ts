@@ -159,7 +159,7 @@ export function defineDashboardFlags({
     key: "markets",
     adapter: moduleAdapter("markets"),
     identify,
-    defaultValue: flagDefault("MARKETS_ENABLED", false),
+    defaultValue: true,
     description:
       "Show the Markets module — Earn today, further market workspaces later. Off hides every Markets surface at once, whatever the sub-module flags say.",
     options: [
@@ -172,7 +172,7 @@ export function defineDashboardFlags({
     key: "dvp",
     adapter: moduleAdapter("dvp"),
     identify,
-    defaultValue: flagDefault("DVP_ENABLED", false),
+    defaultValue: true,
     description:
       "Show the DvP workspace (atomic delivery-versus-payment trades). A sub-module of Markets, so it also requires the markets flag. The swap program is deployed on devnet only, so the API answers 403 everywhere else regardless of this flag.",
     options: [
@@ -185,7 +185,7 @@ export function defineDashboardFlags({
     key: "earn",
     adapter: moduleAdapter("earn"),
     identify,
-    defaultValue: flagDefault("EARN_ENABLED", false),
+    defaultValue: true,
     description:
       "Show the Earn workspace (strategy catalogue, deposits, withdrawals). A sub-module of Markets, so it also requires the markets flag.",
     options: [

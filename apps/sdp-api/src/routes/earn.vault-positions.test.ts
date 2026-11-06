@@ -210,8 +210,6 @@ function encodeCursorPayload(createdAt: string, id: string): string {
 installClusterRpcStub();
 
 beforeEach(async () => {
-  env.MARKETS_ENABLED = "true";
-  env.EARN_ENABLED = "true";
   await seedTestDatabase(env);
   await clearKVStores(env);
   await seedScope();

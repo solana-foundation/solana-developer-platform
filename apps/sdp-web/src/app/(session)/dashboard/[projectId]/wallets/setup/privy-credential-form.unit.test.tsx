@@ -40,8 +40,8 @@ function renderForm(
 }
 
 async function fillAndSubmit(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(screen.getByLabelText("Privy app ID"), "app_123");
-  await user.type(screen.getByLabelText("Privy app secret"), "shh-secret");
+  await user.type(screen.getByLabelText("App ID"), "app_123");
+  await user.type(screen.getByLabelText("App secret"), "shh-secret");
   await user.click(screen.getByRole("button", { name: "Connect and verify" }));
 }
 
@@ -254,7 +254,7 @@ describe("ByokCredentialForm", () => {
     });
     const user = userEvent.setup();
     renderForm("fireblocks");
-    expect(screen.queryByLabelText("Privy app ID")).toBeNull();
+    expect(screen.queryByLabelText("App ID")).toBeNull();
     await screen.findByRole("button", { name: "Download CSR" });
     await user.type(screen.getByLabelText("API user ID"), "fireblocks-key");
     expect(screen.queryByLabelText("Vault account ID")).toBeNull();
@@ -276,11 +276,11 @@ describe("ByokCredentialForm", () => {
   it("renders the shared field definitions with a write-only secret", () => {
     renderForm();
 
-    expect(screen.getByLabelText("Credential label")).toHaveProperty(
+    expect(screen.getByLabelText("Connection name")).toHaveProperty(
       "defaultValue",
       "Privy credential"
     );
-    const secret = screen.getByLabelText("Privy app secret") as HTMLInputElement;
+    const secret = screen.getByLabelText("App secret") as HTMLInputElement;
     expect(secret.type).toBe("password");
     expect(secret.value).toBe("");
   });
@@ -363,7 +363,7 @@ describe("ByokCredentialForm", () => {
     await fillAndSubmit(user);
     await screen.findByRole("alert");
     // The rejected secret must not linger for corrections to be typed onto.
-    const secret = screen.getByLabelText("Privy app secret") as HTMLInputElement;
+    const secret = screen.getByLabelText("App secret") as HTMLInputElement;
     expect(secret.value).toBe("");
     await user.type(secret, "corrected-secret");
     await user.click(screen.getByRole("button", { name: "Connect and verify" }));
@@ -389,7 +389,7 @@ describe("ByokCredentialForm", () => {
     // Nothing was sent, so nothing needs recovering: the form stays editable
     // with the typed secret intact and no frozen replay on offer.
     expect(screen.queryByRole("button", { name: "Retry submission" })).toBeNull();
-    const secret = screen.getByLabelText("Privy app secret") as HTMLInputElement;
+    const secret = screen.getByLabelText("App secret") as HTMLInputElement;
     expect(secret.value).toBe("shh-secret");
 
     // Found rather than queried: the alert renders from the state update, but
@@ -413,7 +413,7 @@ describe("ByokCredentialForm", () => {
     await fillAndSubmit(user);
     // The editable form is gone: nothing can drift under the retained key.
     const retry = await screen.findByRole("button", { name: "Retry submission" });
-    expect(screen.queryByLabelText("Privy app secret")).toBeNull();
+    expect(screen.queryByLabelText("App secret")).toBeNull();
 
     await user.click(retry);
     await waitFor(() => expect(submitPrivyCredentialAction).toHaveBeenCalledTimes(2));
@@ -486,7 +486,7 @@ describe("ByokCredentialForm", () => {
     // still back out of a refusal that needs an external fix first.
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("Install checks are not enabled");
-    expect(screen.queryByLabelText("Privy app secret")).toBeNull();
+    expect(screen.queryByLabelText("App secret")).toBeNull();
     expect(onLock).toHaveBeenLastCalledWith(false);
 
     await user.click(await screen.findByRole("button", { name: "Check again" }));
@@ -514,7 +514,7 @@ describe("ByokCredentialForm", () => {
     // form is gone, and the lock releases so the user can leave.
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("cannot be reconciled");
-    expect(screen.queryByLabelText("Privy app secret")).toBeNull();
+    expect(screen.queryByLabelText("App secret")).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
     expect(onLock).toHaveBeenLastCalledWith(false);
   });
@@ -534,7 +534,7 @@ describe("ByokCredentialForm", () => {
     await screen.findByRole("alert");
     // The failed connection blocks fresh submissions server-side, so the
     // corrected attempt must target it as a replacement under a new key.
-    const secret = screen.getByLabelText("Privy app secret") as HTMLInputElement;
+    const secret = screen.getByLabelText("App secret") as HTMLInputElement;
     expect(secret.value).toBe("");
     await user.type(secret, "corrected-secret");
     await user.click(screen.getByRole("button", { name: "Connect and verify" }));
@@ -606,7 +606,7 @@ describe("ByokCredentialForm", () => {
     await fillAndSubmit(user);
     const checkAgain = await screen.findByRole("button", { name: "Check again" });
     // The credential is stored; the form (and its secret field) is gone.
-    expect(screen.queryByLabelText("Privy app secret")).toBeNull();
+    expect(screen.queryByLabelText("App secret")).toBeNull();
 
     await user.click(checkAgain);
     await waitFor(() => expect(recheckPrivyCredentialAction).toHaveBeenCalledWith("conn_1"));

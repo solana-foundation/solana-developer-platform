@@ -63,6 +63,8 @@ export interface ProviderConnections {
  */
 export interface ConnectionsProjectSummary {
   signingPaused: boolean;
+  /** Active connections the API would sign through now. */
+  signingCount: number;
   /**
    * False when the project holds more connections than the loader reads. The
    * table is still correct as far as it goes; the project-level claims are not,
@@ -252,9 +254,11 @@ export function summarizeProviderConnections(
 ): ConnectionsProjectSummary {
   const active = project.connections.filter((connection) => connection.status === "active");
 
+  const signingCount = active.filter((connection) => connection.isRuntimeExecutionAllowed).length;
+
   return {
-    signingPaused:
-      active.length > 0 && active.every((connection) => !connection.isRuntimeExecutionAllowed),
+    signingPaused: active.length > 0 && signingCount === 0,
+    signingCount,
     complete: project.complete,
   };
 }
