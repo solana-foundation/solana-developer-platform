@@ -47,6 +47,7 @@ function withdrawal(status: EarnVaultWithdrawal["status"]): EarnVaultWithdrawal 
     signature: "sig_recorded_not_broadcast",
     shares: "6",
     shareMint: position.shareMint,
+    ownerAddress: null,
     failureReason: null,
     createdAt: "2026-08-21T00:00:00.000Z",
     confirmedAt: null,

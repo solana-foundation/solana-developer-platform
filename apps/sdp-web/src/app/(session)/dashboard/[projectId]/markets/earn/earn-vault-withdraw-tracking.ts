@@ -21,6 +21,7 @@ export const vaultWithdrawalIdempotencyKeyStore = createIdempotencyKeyStore(
  * reason the deposit fingerprint documents.
  */
 export function vaultWithdrawalRequestFingerprint(input: {
+  redemptionMode?: "standard" | "instant";
   /** `null` only before a project resolves; it still discriminates. */
   projectId: string | null;
   positionId: string;
@@ -37,7 +38,9 @@ export function vaultWithdrawalRequestFingerprint(input: {
    */
   toleranceBps: number | null;
 }): string {
-  return JSON.stringify([input.projectId, input.positionId, input.shares, input.toleranceBps]);
+  const identity = [input.projectId, input.positionId, input.shares, input.toleranceBps];
+  if (input.redemptionMode !== undefined) identity.push(input.redemptionMode);
+  return JSON.stringify(identity);
 }
 
 /** The exit twin of the deposit's floor memo — see `createFloorMemo`. */

@@ -31,6 +31,7 @@ import {
   MANAGED_RPC_HOSTS,
   PUBLIC_CLUSTER_HOSTS,
 } from "./managed-rpc-env-keys";
+import { withRpcReadContext } from "./read-context";
 import { currentClusterScope } from "./scope";
 import { withReadSocketRetry } from "./socket-retry";
 import {
@@ -745,7 +746,7 @@ export function createClusterRpc(options?: ClusterRpcOptions): SolanaRpc {
   const memoizedRpc = boundedRpcs.get(clientKey);
   if (memoizedRpc) return memoizedRpc;
   const rpc = createSolanaRpcFromTransport(
-    withTransportDeadline(poolTransport, options.timeoutMs, "caller")
+    withTransportDeadline(withRpcReadContext(poolTransport), options.timeoutMs, "caller")
   );
   boundedRpcs.set(clientKey, rpc);
   return rpc;
@@ -1027,7 +1028,10 @@ function pooledClusterRpc(
   const { poolKey, poolTransport } = pooledClusterTransport(cluster, endpointUrls, memo.transports);
   const memoizedRpc = memo.rpcs.get(poolKey);
   if (memoizedRpc) return memoizedRpc;
-  const rpc = createSolanaRpcFromTransport(poolTransport);
+  // The shared confirmation context (`withMinimumRpcSlot`) is a no-op without a
+  // scope, so unscoped callers are unchanged; a scoped read injects its
+  // `minContextSlot` and observes the returned bank here, at the pool boundary.
+  const rpc = createSolanaRpcFromTransport(withRpcReadContext(poolTransport));
   memo.rpcs.set(poolKey, rpc);
   return rpc;
 }

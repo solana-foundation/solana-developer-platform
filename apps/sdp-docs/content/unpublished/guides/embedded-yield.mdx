@@ -492,3 +492,59 @@ Refresh position and wallet balances after confirmation and display the observed
 values. Do not add a requested amount to a stale balance, or replace a null
 `tokenAmount` with a requested withdrawal amount. Request amounts and queue
 `quotedAssets` may be shown separately with requested or expected labels.
+
+## Plume provider orders (internal integration)
+
+Plume uses the same strategy catalogue, caller-signed deposit and withdrawal
+transactions, positions and movement endpoints as other vault providers. The
+provider is staged with money-in disabled pending deployment validation. No Plume
+API key is required. Your wallet must pass Plume's Predicate v2 mint eligibility
+check; a 403 from its builder means the wallet is not approved.
+
+For a first mint with a separate fee payer, finalize the share token account setup:
+
+1. `POST /v1/earn/provider-actions/external/preparation-transactions` with
+   `strategyId`, `ownerAddress`, and optional `feePayer`.
+2. Sign the returned action's `transaction` with the owner and optional fee payer.
+3. `POST /v1/earn/provider-actions/external/preparations` with `actionId` and
+   `signedTransaction`.
+4. Poll `GET /v1/earn/provider-actions/{actionId}` until `finalized` or `not_required`, then use the
+   normal deposit build and submit flow.
+
+Every POST requires an `Idempotency-Key`. Preserve the key and identical payload
+when retrying an uncertain request. The preparation action is durable and can outlive the browser session.
+`not_required` means the live account already exists; no setup transaction or
+signature is needed. An abandoned unsigned build can be rebuilt under a new key;
+reuse its original key to recover an uncertain submit.
+
+Plume mint transactions already contain protocol signatures. Sign the exact
+message and preserve every existing signature. Do not replace its blockhash,
+change its fee payer, append instructions, or compose a swap into it. Fund USDC
+before building the mint. SDP accepts human-readable decimal amounts and converts
+them to exact base-unit integers; no fractional base units are rounded.
+
+The withdrawal build accepts optional `redemptionMode: "standard" | "instant"`.
+Both modes settle across chains. `instant` uses the provider's available instant
+liquidity; it does not mean same-transaction delivery. Neither mode requires a
+later user-signed claim. A `confirmed` source movement still awaits delivery.
+Poll until `finalized` and inspect `settlementOutcome: "delivered"`; SDP verifies
+the destination Solana token credit before reporting fulfillment. A status-indexing
+404 remains pending. Output-floor parameters are unsupported for these
+cross-chain flows and are refused rather than silently ignored.
+
+A pending standard redemption can be cancelled with
+`POST /v1/earn/provider-actions/external/cancellation-transactions`, naming its
+`movementId` and optional `feePayer`. Sign the returned transaction, submit it to
+`POST /v1/earn/provider-actions/external/cancellations`, and poll the action id.
+The cancellation uses the original order's composer. It sets Plume's aggregate
+pending amount to zero for that wallet and vault, which can affect other pending
+requests. Only a verified full share return closes the selected SDP movement;
+partial or aggregated returns remain pending for recovery. A cancelled movement
+reports `settlementOutcome: "cancelled"` and zero USDC payout. Already-delivered
+USDC cannot be recalled.
+
+These provider-action routes are registered in the internal OpenAPI document.
+They remain outside the publishable Earn contract until a named security sign-off
+promotes them; Earn itself remains unpublished until PRO-2038. Treasury uses the
+custody equivalents, `POST /v1/earn/provider-actions/preparations` and
+`POST /v1/earn/provider-actions/cancellations`, under the same project scope.

@@ -400,6 +400,10 @@ describe("OpenAPI spec", () => {
       expect.arrayContaining(["positionId", "shares"])
     );
     expect(withdrawalBuildRequest.properties).not.toHaveProperty("strategyId");
+    expect(withdrawalBuildRequest.properties?.redemptionMode?.enum).toEqual([
+      "standard",
+      "instant",
+    ]);
 
     expect(
       JSON.stringify(
@@ -427,7 +431,7 @@ describe("OpenAPI spec", () => {
     );
   });
 
-  it("keeps every literal Embedded Yield guide route in the publishable Earn document", () => {
+  it("keeps Embedded Yield routes aligned with their reviewed OpenAPI surface", () => {
     const publicDocument = createPublicOpenApiDocument(PUBLISHABLE_EARN);
     // The guide is unpublished until PRO-2038 (apps/sdp-docs/CLAUDE.md,
     // "Unpublishing a Page") but its route contract is still pinned here.
@@ -455,7 +459,16 @@ describe("OpenAPI spec", () => {
         "/v1/earn/external-wallet/withdrawal-request-cancellations",
       ])
     );
+    const internal = createOpenApiDocument();
     for (const path of referencedPaths) {
+      if (path.startsWith("/v1/earn/provider-actions")) {
+        expect(internal.paths?.[path], `Missing internal OpenAPI path: ${path}`).toBeDefined();
+        expect(
+          publicDocument.paths?.[path],
+          `Unreviewed public promotion: ${path}`
+        ).toBeUndefined();
+        continue;
+      }
       expect(publicDocument.paths?.[path], `Missing public OpenAPI path: ${path}`).toBeDefined();
     }
   });

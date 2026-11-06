@@ -189,6 +189,7 @@ export const buildEarnVaultDepositFingerprint = (input: EarnVaultDepositFingerpr
   );
 
 export interface EarnVaultWithdrawalFingerprintInput {
+  redemptionMode?: "standard" | "instant";
   environment: string;
   provider: string;
   /** The `earn_positions` row being exited. */
@@ -223,6 +224,7 @@ export const buildEarnVaultWithdrawalFingerprint = (
       provider: input.provider,
       positionId: input.positionId,
       direction: "withdrawal",
+      redemptionMode: input.redemptionMode,
       shares: normalizeDecimalString(input.shares),
       minAmountOut: input.minAmountOut === null ? null : normalizeDecimalString(input.minAmountOut),
     })

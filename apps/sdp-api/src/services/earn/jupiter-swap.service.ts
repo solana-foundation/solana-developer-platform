@@ -164,6 +164,10 @@ export function withComputeUnitLimit(
   plan: EarnVaultTransactionPlan,
   units: number
 ): EarnVaultTransactionPlan {
+  if (plan.providerTransaction !== undefined)
+    throw badRequest(
+      "Provider-signed transactions cannot be recomposed; fund the wallet with USDC first"
+    );
   const instructions = plan.instructions.filter((instruction) => {
     if (instruction.programAddress !== COMPUTE_BUDGET_PROGRAM_ID) return true;
     const data = Buffer.from(instruction.data, "base64");
@@ -969,6 +973,10 @@ export function prependSwapLegToVaultPlan(
   plan: EarnVaultTransactionPlan,
   leg: JupiterSwapLeg
 ): EarnVaultTransactionPlan {
+  if (plan.providerTransaction !== undefined)
+    throw badRequest(
+      "Provider-signed transactions cannot be composed with a swap; fund the wallet with USDC first"
+    );
   return {
     ...plan,
     instructions: [...leg.instructions, ...plan.instructions],
