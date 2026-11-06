@@ -438,10 +438,14 @@ export function parseProviderOverridesFromClerkMetadata(
   return hasOwnEntries(next as Record<string, unknown>) ? next : undefined;
 }
 
+/**
+ * The tier and provider overrides an operator keeps in a Clerk organization's private metadata.
+ * The production entitlement is not among them: SDP's database owns it (see
+ * `setProductionEntitlement`), so a `sdp.enableProductionProject` key in Clerk is ignored.
+ */
 export function parseClerkOrganizationTierMetadata(organization: ClerkOrganizationWithMetadata): {
   tier: OrganizationTier;
   providerOverrides?: OrganizationProviderOverrides;
-  enableProductionProject: boolean;
 } {
   const privateMetadata = asRecord(organization.private_metadata);
   const sdp = asRecord(privateMetadata?.sdp);
@@ -449,7 +453,6 @@ export function parseClerkOrganizationTierMetadata(organization: ClerkOrganizati
   return {
     tier: normalizeOrganizationTier(typeof sdp?.tier === "string" ? sdp.tier : undefined),
     providerOverrides: parseProviderOverridesFromClerkMetadata(sdp?.providerOverrides),
-    enableProductionProject: sdp?.enableProductionProject === true,
   };
 }
 
@@ -1589,24 +1592,24 @@ export function assertEarnProviderConfigured(
   }
 }
 
+/**
+ * Copies the tier and provider overrides from a Clerk organization's private metadata onto the
+ * SDP organization. It keeps the production entitlement exactly as SDP holds it: only
+ * `setProductionEntitlement` changes that.
+ */
 export async function syncProviderAccessFromClerk(
   db: DatabaseClient,
   params: {
     organizationId: string;
     clerkOrganization: ClerkOrganizationWithMetadata;
   }
-): Promise<{
-  tier: OrganizationTier;
-  settings: OrganizationSettings | null;
-  /** Whether this sync turned mainnet on or off; the caller audits the change. */
-  productionEntitlementChanged: boolean;
-}> {
+): Promise<{ tier: OrganizationTier; settings: OrganizationSettings | null }> {
   const clerkMetadata = parseClerkOrganizationTierMetadata(params.clerkOrganization);
 
   // Settings are one JSON column patched by read-merge-write; the row lock keeps
   // this sync from clobbering a concurrent dashboard settings update (and vice
   // versa), matching the updateOrganization handler.
-  const { existingSettings, persistedSettings } = await db.transaction(async (tx) => {
+  const persistedSettings = await db.transaction(async (tx) => {
     const row = await tx
       .prepare("SELECT settings FROM organizations WHERE id = ? FOR UPDATE")
       .bind(params.organizationId)
@@ -1616,18 +1619,13 @@ export async function syncProviderAccessFromClerk(
       throw new AppError("NOT_FOUND", "Organization not found");
     }
 
-    const existing = parseOrganizationSettings(row.settings);
-    const {
-      providerOverrides: _staleOverrides,
-      enableProductionProject: _staleEnableProduction,
-      ...retainedSettings
-    } = existing ?? {};
+    const { providerOverrides: _staleOverrides, ...retainedSettings } =
+      parseOrganizationSettings(row.settings) ?? {};
     const nextSettings: OrganizationSettings = {
       ...retainedSettings,
       ...(clerkMetadata.providerOverrides
         ? { providerOverrides: clerkMetadata.providerOverrides }
         : {}),
-      ...(clerkMetadata.enableProductionProject ? { enableProductionProject: true } : {}),
     };
 
     const persisted = hasOwnEntries(nextSettings as Record<string, unknown>) ? nextSettings : null;
@@ -1641,23 +1639,64 @@ export async function syncProviderAccessFromClerk(
       .bind(clerkMetadata.tier, toStoredOrganizationSettings(persisted), params.organizationId)
       .run();
 
-    return { existingSettings: existing, persistedSettings: persisted };
+    return persisted;
   });
 
-  const wasProductionEnabled = existingSettings?.enableProductionProject === true;
-  const productionEntitlementChanged =
-    wasProductionEnabled !== clerkMetadata.enableProductionProject;
-  if (productionEntitlementChanged) {
-    logEvent("info", {
-      event: "sdp_api_organization_production_enablement_changed",
-      organization_id: params.organizationId,
-      enable_production_project: clerkMetadata.enableProductionProject,
-    });
+  return { tier: clerkMetadata.tier, settings: persistedSettings };
+}
+
+/**
+ * Whether the organization holds the production entitlement in SDP's database.
+ *
+ * @throws NOT_FOUND when the organization does not exist.
+ */
+export async function readProductionEntitlement(
+  db: DatabaseExecutor,
+  organizationId: string
+): Promise<boolean> {
+  const { settings } = await getOrganizationTierState(db, organizationId);
+  return settings?.enableProductionProject === true;
+}
+
+/**
+ * Turns the organization's production entitlement on or off in SDP's database, the only place it
+ * is held. Callers audit the change in the same transaction.
+ *
+ * @returns Whether the entitlement changed; false when it already had the requested value.
+ * @throws NOT_FOUND when the organization does not exist.
+ */
+export async function setProductionEntitlement(
+  tx: DatabaseExecutor,
+  organizationId: string,
+  enabled: boolean
+): Promise<{ changed: boolean }> {
+  const row = await tx
+    .prepare("SELECT settings FROM organizations WHERE id = ? FOR UPDATE")
+    .bind(organizationId)
+    .first<{ settings: string | null }>();
+  if (!row) {
+    throw new AppError("NOT_FOUND", "Organization not found");
   }
 
-  return {
-    tier: clerkMetadata.tier,
-    settings: persistedSettings,
-    productionEntitlementChanged,
+  const { enableProductionProject: current, ...retained } =
+    parseOrganizationSettings(row.settings) ?? {};
+  if ((current === true) === enabled) return { changed: false };
+
+  const next: OrganizationSettings = {
+    ...retained,
+    ...(enabled ? { enableProductionProject: true } : {}),
   };
+  await tx
+    .prepare("UPDATE organizations SET settings = ?, updated_at = sdp_datetime_now() WHERE id = ?")
+    .bind(
+      toStoredOrganizationSettings(hasOwnEntries(next as Record<string, unknown>) ? next : null),
+      organizationId
+    )
+    .run();
+  logEvent("info", {
+    event: "sdp_api_organization_production_enablement_changed",
+    organization_id: organizationId,
+    enable_production_project: enabled,
+  });
+  return { changed: true };
 }

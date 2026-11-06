@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } fr
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
-import { correctMainnetAccess } from "@/services/mainnet-access.service";
+import {
+  changeProductionEntitlement,
+  correctMainnetAccess,
+  readMainnetAccessStatus,
+} from "@/services/mainnet-access.service";
 import { syncProviderAccessFromClerk } from "@/services/provider-availability.service";
 import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -389,7 +393,49 @@ describe("Organization mainnet access (HOO-2427)", () => {
     }
   );
 
-  it("reads approved once an operator sets enableProductionProject in Clerk", async () => {
+  const OPERATOR = { operator: "ops-oncall", reason: "approved", ticket: "HOO-2628" };
+
+  function grant() {
+    return changeProductionEntitlement(env, {
+      organizationId: ORGANIZATION_ID,
+      operation: "grant",
+      ...OPERATOR,
+    });
+  }
+
+  async function entitlementAuditEntries(): Promise<unknown[]> {
+    const entries = await getDb(env)
+      .prepare(
+        `SELECT metadata FROM audit_logs
+          WHERE resource_type = 'organization' AND resource_id = ? ORDER BY ledger_sequence`
+      )
+      .bind(ORGANIZATION_ID)
+      .all<{ metadata: string }>();
+    return entries.results
+      .map((entry) => JSON.parse(entry.metadata))
+      .filter((metadata) => metadata.event === "production_entitlement_changed");
+  }
+
+  it("reads approved once an operator grants production access", async () => {
+    expect((await post(SUBMISSION)).status).toBe(201);
+    expect(await grant()).toEqual({
+      organizationId: ORGANIZATION_ID,
+      productionEntitled: true,
+      changed: true,
+    });
+    const data = (await (await get()).json()).data;
+    expect(data).toMatchObject({ state: "approved", countryCode: "SG" });
+    expect((await post(SUBMISSION)).status).toBe(409);
+  });
+
+  it("reads approved for an organization granted without ever asking", async () => {
+    await grant();
+    expect((await (await get()).json()).data).toMatchObject({ state: "approved", request: null });
+    expect((await post(SUBMISSION)).status).toBe(409);
+    expect(sentEmails()).toHaveLength(0);
+  });
+
+  it("does not grant production access from Clerk metadata", async () => {
     expect((await post(SUBMISSION)).status).toBe(201);
     await syncProviderAccessFromClerk(getDb(env), {
       organizationId: ORGANIZATION_ID,
@@ -398,22 +444,49 @@ describe("Organization mainnet access (HOO-2427)", () => {
         private_metadata: { sdp: { enableProductionProject: true } },
       },
     });
-    const data = (await (await get()).json()).data;
-    expect(data).toMatchObject({ state: "approved", countryCode: "SG" });
-    expect((await post(SUBMISSION)).status).toBe(409);
+    expect((await (await get()).json()).data).toMatchObject({ state: "pending" });
+    expect(await readMainnetAccessStatus(getDb(env), ORGANIZATION_ID)).toMatchObject({
+      productionEntitled: false,
+    });
+    expect(await entitlementAuditEntries()).toEqual([]);
   });
 
-  it("reads approved for an organization enabled without ever asking", async () => {
-    await syncProviderAccessFromClerk(getDb(env), {
-      organizationId: ORGANIZATION_ID,
-      clerkOrganization: {
-        id: "org_clerk",
-        private_metadata: { sdp: { enableProductionProject: true } },
-      },
-    });
-    expect((await (await get()).json()).data).toMatchObject({ state: "approved", request: null });
-    expect((await post(SUBMISSION)).status).toBe(409);
-    expect(sentEmails()).toHaveLength(0);
+  it("keeps a granted organization entitled when Clerk metadata drops or denies it", async () => {
+    await grant();
+    for (const privateMetadata of [{}, { sdp: { enableProductionProject: false } }]) {
+      await syncProviderAccessFromClerk(getDb(env), {
+        organizationId: ORGANIZATION_ID,
+        clerkOrganization: { id: "org_clerk", private_metadata: privateMetadata },
+      });
+      expect((await (await get()).json()).data).toMatchObject({ state: "approved" });
+    }
+  });
+
+  it("audits a grant and a revoke with the operator, and writes nothing for a repeat", async () => {
+    await grant();
+    expect(await grant()).toMatchObject({ changed: false });
+    expect(
+      await changeProductionEntitlement(env, {
+        organizationId: ORGANIZATION_ID,
+        operation: "revoke",
+        ...OPERATOR,
+      })
+    ).toMatchObject({ productionEntitled: false, changed: true });
+    expect((await (await get()).json()).data).toMatchObject({ state: "not_requested" });
+    expect(await entitlementAuditEntries()).toEqual([
+      expect.objectContaining({ enabled: true, source: "operator", ...OPERATOR }),
+      expect.objectContaining({ enabled: false, source: "operator", ...OPERATOR }),
+    ]);
+  });
+
+  it("refuses to grant an organization that does not exist", async () => {
+    await expect(
+      changeProductionEntitlement(env, {
+        organizationId: "org_missing",
+        operation: "grant",
+        ...OPERATOR,
+      })
+    ).rejects.toThrow("Organization not found");
   });
 
   it("refuses an admin naming another organization, recording nothing on either", async () => {

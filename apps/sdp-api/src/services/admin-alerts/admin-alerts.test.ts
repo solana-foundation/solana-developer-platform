@@ -230,7 +230,7 @@ const CONFIG_EVENTS: [string, Omit<SystemAuditLogEntry, "organizationId">, strin
       action: "update",
       resourceType: "organization",
       resourceId: ORGANIZATION_ID,
-      metadata: { event: "production_entitlement_changed", enabled: false, source: "clerk" },
+      metadata: { event: "production_entitlement_changed", enabled: false, source: "operator" },
     },
     "Mainnet disabled in Acme Pay",
   ],

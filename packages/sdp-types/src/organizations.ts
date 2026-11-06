@@ -123,8 +123,9 @@ export interface OrganizationSettings {
   legacyAllowedIpAddresses?: unknown;
   providerOverrides?: OrganizationProviderOverrides;
   /**
-   * Set from Clerk org `private_metadata.sdp.enableProductionProject` by the
-   * Clerk webhook sync. Without `true` the API refuses every production
+   * Held only in SDP's database and set only by the operator script
+   * (`pnpm -C apps/sdp-api mainnet-access grant|revoke`); Clerk metadata never
+   * changes it. Without `true` the API refuses every production
    * project (API keys, dashboard selection, approval replays) and the project
    * list hides them.
    */

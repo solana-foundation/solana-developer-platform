@@ -46,8 +46,8 @@ calls admin can always write memberships.
   ever ends access, and only when a fresh read shows Clerk no longer holds the
   membership. SDP's own removals coming back find it already removed and change
   nothing. Organization deletion is still mirrored, and
-  organization updates sync only entitlements (Clerk private metadata) from a
-  fresh Backend API read, never from the event payload. SDP owns the name and
+  organization updates sync only the tier and provider overrides (Clerk
+  private metadata) from a fresh Backend API read, never from the event payload. SDP owns the name and
   slug and pushes a rename to Clerk.
 - **Admission happens only in SDP**: creating an organization (the creator
   becomes its first admin) or the first sign-in matching a pending SDP
@@ -72,9 +72,13 @@ calls admin can always write memberships.
 ## Consequences
 
 - Clerk's role labels carry no meaning; SDP code never maps them to a role.
-- Operator entitlements (`enableProductionProject`, `providerOverrides`) still
-  arrive from Clerk organization `private_metadata`, writable only through the
-  Backend API or the Clerk Dashboard. That is the one remaining Clerk path that
-  grants anything, and it is operator-only.
+- The production entitlement (`enableProductionProject`) is SDP's own, like
+  membership: an operator sets it in SDP's database with
+  `pnpm -C apps/sdp-api mainnet-access grant|revoke`, and a Clerk metadata
+  change never grants or removes it.
+- The tier and provider overrides (`providerOverrides`) still arrive from Clerk
+  organization `private_metadata`, writable only through the Backend API or the
+  Clerk Dashboard. That is the one remaining Clerk path that grants anything,
+  and it is operator-only.
 - Deleting a Clerk user is an operator action; SDP accepts it even if it
   leaves an organization without an admin, and an operator restores one.

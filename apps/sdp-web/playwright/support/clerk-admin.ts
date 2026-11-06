@@ -233,7 +233,8 @@ export async function setClerkOrganizationTier(
     sdp: {
       ...sdpMetadata,
       tier,
-      enableProductionProject: true,
+      // SDP's database holds the production entitlement; the bootstrap seeds it there.
+      enableProductionProject: undefined,
       providerOverrides: undefined,
     },
   };

@@ -15,9 +15,9 @@ export interface ProjectContextOptions {
    * already deployed (Earn withdrawals and reads, ADR 0002); never for anything
    * that starts new exposure.
    *
-   * The entitlement is `enableProductionProject` in the organization's Clerk
-   * `private_metadata.sdp`, synced into `organizations.settings` by
-   * `provider-availability.service.ts`. Turning it off is a management
+   * The entitlement is `enableProductionProject` in `organizations.settings`,
+   * which only the operator script sets (`pnpm -C apps/sdp-api mainnet-access
+   * grant|revoke`); Clerk metadata never changes it. Turning it off is a management
    * decision, not something the product does; this keeps funds already in a
    * production project withdrawable if that ever happens.
    */
