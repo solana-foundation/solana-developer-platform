@@ -16,7 +16,10 @@ import type { MovementId } from "@sdp/types/movements";
 import { address, signature } from "@solana/kit";
 import { type DatabaseClient, getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
+import {
+  createPostgresEarnMovementsRepository,
+  type EarnMovementRow,
+} from "@/db/repositories/earn-movements.repository";
 import {
   createEarnProviderActionsRepository,
   type EarnProviderActionClaim,
@@ -58,6 +61,31 @@ const scopeOf = (row: EarnProviderActionRow) => ({
   actionId: row.id,
   preparationLeaseUntil: row.lease_until,
 });
+
+/** A movement that still names a pending provider order a cancellation may clear. */
+type CancellableParent = EarnMovementRow & { signed_transaction: string };
+
+/**
+ * Whether `parent` is the pending provider order a cancellation build selected.
+ * Shared by the build and submit gates so a build is only ever accepted while
+ * its selected redemption is the one still pending: Plume's cancellation clears
+ * every pending standard redemption for the wallet and vault, so bytes built
+ * against a redemption that settled since preparation would cancel a newer
+ * order instead.
+ */
+function isCancellableProviderOrder(
+  parent: EarnMovementRow | null,
+  row: EarnProviderActionRow
+): parent is CancellableParent {
+  return Boolean(
+    parent &&
+      parent.project_id === row.project_id &&
+      parent.signed_transaction &&
+      parent.status !== "finalized" &&
+      parent.status !== "failed" &&
+      parent.chain_finalized_at !== null
+  );
+}
 
 /** Claim before builds or signatures. A retry of recorded bytes never creates another transaction. */
 export async function claimProviderAction(
@@ -188,6 +216,18 @@ export async function submitExternalProviderAction(
   );
   const repo = createEarnProviderActionsRepository(getDb(env)),
     scope = scopeOf(row);
+  // The build may be older than the ledger: a redemption that settled since
+  // preparation leaves a stale cancellation whose bytes would clear whatever
+  // redemption is pending now. Recheck the selected parent as the last gate
+  // before the claim accepts the bytes.
+  if (row.action === "cancellation" && row.parent_movement_id !== null) {
+    const parent = await createPostgresEarnMovementsRepository(getDb(env)).getMovementById({
+      organizationId: row.organization_id,
+      movementId: row.parent_movement_id,
+    });
+    if (!isCancellableProviderOrder(parent, row))
+      throw conflict("The provider order is no longer pending");
+  }
   let claimed: EarnProviderActionRow | null;
   try {
     claimed = await repo.advance(scope, "prepared", "requested", {
@@ -292,14 +332,7 @@ async function buildProviderActionPlan(
         organizationId: row.organization_id,
         movementId: row.parent_movement_id,
       });
-      if (
-        !parent ||
-        parent.project_id !== row.project_id ||
-        !parent.signed_transaction ||
-        parent.status === "finalized" ||
-        parent.status === "failed" ||
-        parent.chain_finalized_at === null
-      )
+      if (!isCancellableProviderOrder(parent, row))
         throw conflict("The provider order cannot be cancelled");
       const sourceTransaction = parent.signed_transaction;
       plan = await deadline.run("Building provider-order cancellation", () =>
