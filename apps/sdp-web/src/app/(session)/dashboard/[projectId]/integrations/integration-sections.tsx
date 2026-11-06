@@ -116,7 +116,7 @@ const RPC_BRAND_MARKS = {
 } as const satisfies Record<RpcIntegration["provider"], BrandMark>;
 
 const RAMP_BRAND_MARKS = {
-  moonpay: { logo: "/provider-logos/brand/moonpay.png", background: "#000000", ringed: false },
+  moonpay: { logo: "/provider-logos/brand/moonpay.png", background: "#ffffff", ringed: true },
   stripe: { logo: "/provider-logos/brand/stripe.svg", background: "#533afd", ringed: false },
 } as const satisfies Record<RampIntegration["provider"], BrandMark>;
 
