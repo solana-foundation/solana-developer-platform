@@ -244,7 +244,11 @@ export function WorkspaceSwitcher({
                   </span>
                   {/* Beta shares sign-in with production, so its switcher says which one this is. */}
                   {flags.releaseChannel === "beta" ? (
-                    <Badge variant="info" className="shrink-0">
+                    <Badge
+                      variant="info"
+                      className="shrink-0"
+                      title={t("Shared.SharedComponents.betaBadgeHint")}
+                    >
                       {t("Shared.SharedComponents.betaBadge")}
                     </Badge>
                   ) : null}

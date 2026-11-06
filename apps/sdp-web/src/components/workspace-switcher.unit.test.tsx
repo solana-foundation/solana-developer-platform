@@ -228,7 +228,10 @@ describe("WorkspaceSwitcher", () => {
     showProject(SANDBOX_PROJECT);
     renderSwitcher();
 
-    expect(within(screen.getByRole("button", { name: "Acme" })).getByText("Beta")).toBeDefined();
+    const mark = within(screen.getByRole("button", { name: "Acme" })).getByText("Beta");
+    expect(mark.closest("[title]")?.getAttribute("title")).toBe(
+      "Devnet only. Beta modules may change before they reach mainnet."
+    );
   });
 
   it("shows no beta mark elsewhere", () => {

@@ -24,7 +24,7 @@ describe("AuthPageShell", () => {
     const html = await renderShell();
 
     expect(html).toContain(">Beta<");
-    expect(html).toContain("Beta is a devnet sandbox with its own organizations");
+    expect(html).toContain("Beta runs on devnet only, with its own organizations.");
   });
 
   it.each(["stable", "experimental"])("shows no beta mark on %s", async (channel) => {

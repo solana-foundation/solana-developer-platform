@@ -46,8 +46,8 @@ async function readUnlinkedOrganizations(
 }
 
 /**
- * The person's Clerk organizations this deployment does not link. Prod, stage and
- * beta share one Clerk instance, so a person's Clerk organizations include ones
+ * The person's Clerk organizations this deployment does not link. Deployments
+ * share one Clerk instance, so a person's Clerk organizations include ones
  * another deployment created, which SDP here answers `linked: false` for (ADR 0012).
  * Only that answer hides an organization. A failed read resolves with none hidden:
  * hiding is a convenience, and SDP still refuses an organization it does not know.
