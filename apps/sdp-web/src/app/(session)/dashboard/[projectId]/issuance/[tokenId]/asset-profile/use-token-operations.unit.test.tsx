@@ -135,6 +135,52 @@ describe("token operation confirmations", () => {
     );
   });
 
+  it.each([
+    { typed: "1000000", shown: "1,000,000.00 QAD" },
+    { typed: ".000001", shown: "0.000001 QAD" },
+  ])("confirms a mint typed $typed as $shown, as the form's button does", ({ typed, shown }) => {
+    const { result } = renderOperations({ maxSupply: null });
+    act(() => result.current.setMintForm((form) => ({ ...form, destination, amount: typed })));
+    act(() => result.current.handleMint());
+    expect(mocks.runAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          mint: expect.objectContaining({ destination, amount: typed }),
+        }),
+      }),
+      expect.objectContaining({
+        confirmationTitle: "Mint tokens?",
+        confirmationDetails: expect.arrayContaining([{ label: "Amount", value: shown }]),
+      })
+    );
+  });
+
+  it("shows the burn amount as the form's button does, and sends it as typed", () => {
+    const { result } = renderOperations({ totalSupply: "2000000" });
+    act(() =>
+      result.current.setBurnForm((form) => ({
+        ...form,
+        source,
+        amount: "1000000",
+        signingWalletId: "cwlt_test",
+      }))
+    );
+    act(() => result.current.handleBurn());
+    expect(mocks.runAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          burn: expect.objectContaining({ source, amount: "1000000" }),
+        }),
+      }),
+      expect.objectContaining({
+        confirmationTitle: "Burn tokens?",
+        confirmationDetails: expect.arrayContaining([
+          { label: "Amount", value: "1,000,000.00 QAD" },
+        ]),
+      })
+    );
+  });
+
   it("shows both addresses and amount before force transfer", () => {
     const { result } = renderOperations();
     act(() =>
@@ -151,7 +197,7 @@ describe("token operation confirmations", () => {
         requiresConfirmation: true,
         confirmationWarning: expect.stringContaining("without the holder's approval"),
         confirmationDetails: expect.arrayContaining([
-          { label: "Amount", value: "1 QAD" },
+          { label: "Amount", value: "1.00 QAD" },
           { label: "Source", value: source },
           { label: "Destination", value: destination },
           { label: "Network", value: "Devnet" },
@@ -175,7 +221,7 @@ describe("token operation confirmations", () => {
         requiresConfirmation: true,
         confirmationWarning: expect.stringContaining("cannot be undone"),
         confirmationDetails: expect.arrayContaining([
-          { label: "Amount", value: "1 QAD" },
+          { label: "Amount", value: "1.00 QAD" },
           { label: "Source", value: source },
           { label: "Network", value: "Mainnet" },
         ]),

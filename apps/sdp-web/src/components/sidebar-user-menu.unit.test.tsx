@@ -39,7 +39,7 @@ afterEach(() => {
 describe("SidebarUserMenu", () => {
   it("reserves the account row while Clerk resolves the user", () => {
     clerk.loaded = false;
-    render(<SidebarUserMenu collapsed={false} menuSide="right" />, { wrapper: EnglishI18n });
+    render(<SidebarUserMenu collapsed={false} />, { wrapper: EnglishI18n });
 
     expect(screen.getByRole("status").getAttribute("aria-busy")).toBe("true");
     expect(screen.queryByRole("button", { name: "Account menu" })).toBeNull();
@@ -48,7 +48,7 @@ describe("SidebarUserMenu", () => {
   it("opens on the identity and lists Account settings inside the URL's Project", async () => {
     setDashboardUrl(`/dashboard/${PRODUCTION_PROJECT.id}/payments`, {});
     const user = userEvent.setup();
-    render(<SidebarUserMenu collapsed={false} menuSide="right" />, { wrapper: EnglishI18n });
+    render(<SidebarUserMenu collapsed={false} />, { wrapper: EnglishI18n });
 
     await user.click(screen.getByRole("button", { name: "Account menu" }));
 
@@ -59,7 +59,7 @@ describe("SidebarUserMenu", () => {
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent)
-    ).toEqual(["Account settings", "Theme", "API Docs", "Feedback", "Sign out"]);
+    ).toEqual(["Account settings", "Theme", "Send feedback", "API docs", "Sign out"]);
     expect(screen.getByRole("menuitem", { name: "Account settings" }).getAttribute("href")).toBe(
       `/dashboard/${PRODUCTION_PROJECT.id}/account`
     );

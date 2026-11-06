@@ -1,381 +1,187 @@
 "use client";
 
-import type { ComplianceProviderId, RampProviderId } from "@sdp/types/provider-access";
+import {
+  type IntegrationState,
+  isConfigurableIntegrationStatus,
+  type ProjectIntegrationFamily,
+  type ProjectIntegrations,
+} from "@sdp/types/integrations";
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
+import { InfoHint } from "@sdp/ui/info-hint";
 import { SearchInput } from "@sdp/ui/search-input";
-import {
-  ArrowLeftRightIcon,
-  ChevronRight,
-  ShieldCheckIcon,
-  VenetianMaskIcon,
-  WalletIcon,
-} from "lucide-react";
-import Image from "next/image";
+import { ChevronRightIcon, CircleCheckIcon } from "lucide-react";
 import Link from "next/link";
-import { type ReactNode, useMemo, useState } from "react";
-import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
-import type { CustodyProviderAvailability } from "@/app/(session)/dashboard/[projectId]/wallets/provider-display-status";
-import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
+import { useMemo, useState } from "react";
+import {
+  DashboardHeaderTabsTrailing,
+  useHiddenHeaderTabs,
+} from "@/components/dashboard-header-tabs";
 import { useTranslations } from "@/i18n/provider";
-import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
-import { DASHBOARD_INTEGRATIONS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
-import { RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
-  type ConnectionState,
-  connectionState,
-  type FilterableIntegration,
-  INTEGRATION_FAMILIES,
-  type IntegrationFamily,
-} from "./integrations-filter";
-import type { IntegrationEntry, IntegrationStatus, PrivacyProviderId } from "./integrations-status";
+  INTEGRATION_FAMILY_COPY_KEYS,
+  INTEGRATION_ROW_COLUMNS,
+  type IntegrationRow,
+  type IntegrationSection,
+  integrationSections,
+} from "./integration-sections";
 
 type Translate = ReturnType<typeof useTranslations>;
-const EMPTY_PRIVACY: IntegrationEntry<PrivacyProviderId>[] = [];
 
-/**
- * The pill says precisely what this provider is; the chips group. A chip is a
- * question ("show me what is on"), a pill is an answer, and the answer for a
- * deployment-provisioned rail is not the same as for a key this organization
- * connected itself -- the detail page says so in as many words a click later,
- * so a card claiming "Connected" would be contradicted by the page it opens.
- *
- * Same labels the detail page uses, so a provider never changes its word
- * between the two surfaces.
- */
-function statusLabel(status: IntegrationStatus, t: Translate): string {
-  switch (status) {
-    case "active":
-      return t("Shared.integrations.statusActive");
-    case "available":
-      return t("Shared.integrations.statusAvailable");
-    case "enabled":
-      return t("Shared.integrations.statusEnabled");
-    case "unknown":
-      return t("Shared.integrations.statusUnknown");
+function isProjectIntegrationFamily(value: string): value is ProjectIntegrationFamily {
+  return Object.hasOwn(INTEGRATION_FAMILY_COPY_KEYS, value);
+}
+
+function StateLabel({ state, t }: { state: IntegrationState; t: Translate }) {
+  switch (state.status) {
+    case "connected":
+      return (
+        <span className="inline-flex items-center gap-1.5 text-success">
+          <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
+          {t("Shared.integrations.stateConnected")}
+        </span>
+      );
+    case "provided":
+      return <span className="text-secondary">{t("Shared.integrations.stateProvided")}</span>;
+    case "not_configured":
+      return <span className="text-secondary">{t("Shared.integrations.stateNotConfigured")}</span>;
     default: {
-      const exhaustive: never = status;
-      throw new Error(`Unknown integration status: ${String(exhaustive)}`);
+      const exhaustive: never = state;
+      throw new Error(`Unknown integration state: ${String(exhaustive)}`);
     }
   }
 }
 
-/**
- * Colour, unlike the wording, does track the chips: everything the "Connected"
- * chip selects is green, so scanning the grid and filtering it answer the same
- * question. That was the defect worth fixing -- three green cards vanished
- * behind a chip whose colour they already carried.
- *
- * The connected token pair is the shared `Badge` component's `success`, so a
- * provider looks the same here as its connection does on the detail page.
- */
-const STATE_CLASS_NAMES: Record<ConnectionState, string> = {
-  connected: "bg-success-bg text-success",
-  not_connected: "bg-fill-subtle text-tertiary",
-  unknown: "bg-status-warning-bg text-status-warning-text",
-};
-
-function StatusBadge({ status, t }: { status: IntegrationStatus; t: Translate }) {
-  const state = connectionState(status);
-  return (
-    <span
-      className={cn(
-        "shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium",
-        STATE_CLASS_NAMES[state]
-      )}
-    >
-      {statusLabel(status, t)}
-    </span>
-  );
-}
-
-interface IntegrationRowModel extends FilterableIntegration {
-  icon: ReactNode;
-  description?: string;
-  /** Where the card opens: a family's own route when the provider id is not its path segment. */
-  dashboardPath: string;
-}
-
-function IntegrationCard({ row, t }: { row: IntegrationRowModel; t: Translate }) {
+function IntegrationRowItem({ row, t }: { row: IntegrationRow; t: Translate }) {
   const href = useProjectHref();
-  // Cards browse; the detail page acts. Its header carries the state-correct
-  // action, so repeating a button here was redundant, and the chevron is the
-  // standing invitation that the whole card opens it.
   return (
     <li
-      className="group relative flex items-start gap-3 rounded-2xl border border-border-default bg-surface-raised p-5 transition-colors hover:border-border-strong motion-reduce:transition-none"
-      data-integration-row="true"
-      data-integration-status={row.status}
+      className={cn(
+        INTEGRATION_ROW_COLUMNS,
+        "group relative isolate py-3",
+        row.href !== null &&
+          "before:absolute before:inset-y-0 before:-inset-x-3 before:-z-10 before:rounded-lg before:bg-fill-subtle before:opacity-0 before:transition-opacity before:content-[''] hover:before:opacity-100 has-[:focus-visible]:before:opacity-100 has-[:focus-visible]:before:ring-2 has-[:focus-visible]:before:ring-primary motion-reduce:before:transition-none"
+      )}
+      data-integration-row={row.key}
+      data-integration-status={row.state.status}
     >
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-fill-strong">
-        {row.icon}
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <div className="flex items-start justify-between gap-3">
-          {/* Stretched link: the title anchors it and the overlay makes the
-              whole card the click target. */}
+      {row.icon}
+      <div className="flex min-w-0 flex-col">
+        {row.href === null ? (
+          <span className="truncate text-sm leading-5 font-medium text-primary">{row.label}</span>
+        ) : (
           <Link
-            href={href(row.dashboardPath)}
-            className="truncate pt-2 text-base font-medium text-primary after:absolute after:inset-0 after:content-['']"
+            href={href(row.href)}
+            className="truncate text-sm leading-5 font-medium text-primary after:absolute after:inset-y-0 after:-inset-x-3 after:content-[''] focus-visible:outline-none"
           >
             {row.label}
           </Link>
-          <StatusBadge status={row.status} t={t} />
-        </div>
-        {row.description ? (
-          <p className="pr-6 text-sm leading-5 text-tertiary">{row.description}</p>
-        ) : null}
+        )}
+        <p className="truncate text-xs leading-4 text-secondary">{row.description}</p>
       </div>
-      <ChevronRight
-        aria-hidden
-        className="absolute right-4 bottom-4 size-4 text-tertiary transition-transform group-hover:translate-x-0.5 group-hover:text-secondary motion-reduce:transition-none"
-      />
+      <span className="hidden truncate text-xs text-secondary md:block">{row.category}</span>
+      <span className="flex justify-end text-xs">
+        <StateLabel state={row.state} t={t} />
+      </span>
+      <span className="flex justify-end">
+        {row.href === null ? null : (
+          <ChevronRightIcon
+            aria-hidden
+            className="size-4 text-tertiary transition-transform group-hover:translate-x-0.5 group-hover:text-secondary motion-reduce:transition-none"
+          />
+        )}
+      </span>
     </li>
   );
 }
 
-function LogoMark({ src, label }: { src: string; label: string }) {
-  // Mirrors the wallet marks: logos sit on a white chip so dark-mode
-  // artwork with transparent backgrounds stays legible.
+function SectionSummary({ section, t }: { section: IntegrationSection; t: Translate }) {
+  const configurable = section.rows.filter((row) =>
+    isConfigurableIntegrationStatus(row.state.status)
+  );
+  if (configurable.length === 0) {
+    return null;
+  }
+  const connected = configurable.filter((row) => row.state.status === "connected").length;
   return (
-    <span
-      aria-hidden
-      title={label}
-      className="inline-flex h-7 w-7 items-center justify-center overflow-hidden rounded-md border border-border-subtle bg-[white]"
-    >
-      <span className="relative h-full w-full p-1">
-        <Image src={src} alt="" fill sizes="28px" className="object-contain" />
-      </span>
+    <span className="text-sm text-secondary">
+      {t("Shared.integrations.connectedCount", { connected, total: configurable.length })}
     </span>
   );
 }
 
-/**
- * The family title key for hub tiles and section headings.
- *
- * @param family - The integration family.
- * @returns The message key for the family title.
- */
-function familyLabelKey(family: IntegrationFamily) {
+function IntegrationSectionBlock({ section, t }: { section: IntegrationSection; t: Translate }) {
   return (
-    {
-      custody: "Shared.integrations.custodyTitle",
-      ramps: "Shared.integrations.rampsTitle",
-      compliance: "Shared.integrations.complianceTitle",
-      privacy: "Shared.integrations.privacyTitle",
-    } as const
-  )[family];
-}
-
-/**
- * The family description key for hub tiles and section headings.
- *
- * @param family - The integration family.
- * @returns The message key for the family description.
- */
-function familyDescriptionKey(family: IntegrationFamily) {
-  return (
-    {
-      custody: "Shared.integrations.custodyDescription",
-      ramps: "Shared.integrations.rampsDescription",
-      compliance: "Shared.integrations.complianceDescription",
-      privacy: "Shared.integrations.privacyDescription",
-    } as const
-  )[family];
-}
-
-const FAMILY_ICONS = {
-  custody: WalletIcon,
-  ramps: ArrowLeftRightIcon,
-  compliance: ShieldCheckIcon,
-  privacy: VenetianMaskIcon,
-} satisfies Record<IntegrationFamily, typeof WalletIcon>;
-
-function IntegrationsHub({
-  families,
-  t,
-}: {
-  families: readonly IntegrationFamily[];
-  t: Translate;
-}) {
-  const href = useProjectHref();
-  return (
-    <div data-integrations-hub="true" className="grid grid-cols-2 gap-2 xl:grid-cols-3">
-      {families.map((integrationFamily) => {
-        const Icon = FAMILY_ICONS[integrationFamily];
-        return (
-          <Link
-            key={integrationFamily}
-            href={href(DASHBOARD_INTEGRATIONS_SUBNAV_HREFS[integrationFamily])}
-            data-integration-hub-action={integrationFamily}
-            className="group flex min-h-36 min-w-0 flex-col items-center justify-center rounded-md border border-border-default px-3 py-4 text-center transition-colors hover:border-border-strong hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none xl:min-h-44"
-          >
-            <span className="inline-flex size-12 shrink-0 items-center justify-center rounded-full bg-fill-subtle text-primary transition-colors group-hover:bg-fill-strong">
-              <Icon className="size-5" aria-hidden="true" />
-            </span>
-            <span className="mt-3 text-base font-semibold text-primary">
-              {t(familyLabelKey(integrationFamily))}
-            </span>
-            <span className="mt-1 text-sm leading-5 text-secondary">
-              {t(familyDescriptionKey(integrationFamily))}
-            </span>
-          </Link>
-        );
-      })}
-    </div>
-  );
-}
-
-/**
- * The integrations hub, or one family's provider cards when `?tab=` names an
- * enabled family.
- *
- * @param props - The component props.
- * @param props.custody - Custody providers with their status, or `null` when the lookup failed.
- * @param props.ramps - Ramp providers with their status.
- * @param props.compliance - Compliance providers with their status.
- * @param props.privacy - Privacy integrations with their status.
- * @param props.enabledFamilies - The families this organization can see.
- * @returns The rendered catalog.
- */
-export function IntegrationsCatalog({
-  custody,
-  ramps,
-  compliance,
-  privacy = EMPTY_PRIVACY,
-  enabledFamilies = INTEGRATION_FAMILIES,
-}: {
-  /** `null` when the connected-provider lookup failed: state unknown, not empty. */
-  custody: CustodyProviderAvailability[] | null;
-  ramps: IntegrationEntry<RampProviderId>[];
-  compliance: IntegrationEntry<ComplianceProviderId>[];
-  privacy?: IntegrationEntry<PrivacyProviderId>[];
-  /** Mirrors the sidebar: a disabled module does not get a hub entry or tab. */
-  enabledFamilies?: readonly IntegrationFamily[];
-}) {
-  const t = useTranslations();
-  // The family axis lives in the Integrations sidebar submenu (`?tab=`).
-  // Unknown and disabled values fall back to the hub rather than exposing an
-  // integration category the organization cannot use.
-  const urlTab = useDashboardTab();
-  const family: IntegrationFamily | "all" =
-    urlTab !== null &&
-    (INTEGRATION_FAMILIES as string[]).includes(urlTab) &&
-    enabledFamilies.includes(urlTab as IntegrationFamily)
-      ? (urlTab as IntegrationFamily)
-      : "all";
-  const [query, setQuery] = useState("");
-
-  const rows = useMemo<IntegrationRowModel[]>(() => {
-    const custodyRows: IntegrationRowModel[] = (custody ?? []).map((provider) => ({
-      family: "custody",
-      provider: provider.entry.id,
-      label: provider.entry.label,
-      status: provider.status,
-      icon: <WalletProviderMark provider={provider.entry.id} size="sm" />,
-      description: t(provider.entry.descriptionKey),
-      dashboardPath: `/dashboard/integrations/${provider.entry.id}`,
-    }));
-
-    const rampRows: IntegrationRowModel[] = ramps.map((provider) => ({
-      family: "ramps",
-      provider: provider.provider,
-      label: provider.label,
-      status: provider.status,
-      icon: <LogoMark src={RAMP_PROVIDER_LOGOS[provider.provider]} label={provider.label} />,
-      description: provider.descriptionKey ? t(provider.descriptionKey) : undefined,
-      dashboardPath: `/dashboard/integrations/${provider.provider}`,
-    }));
-    const complianceRows: IntegrationRowModel[] = compliance.map((provider) => ({
-      family: "compliance",
-      provider: provider.provider,
-      label: provider.label,
-      status: provider.status,
-      icon: <LogoMark src={COMPLIANCE_PROVIDER_LOGOS[provider.provider]} label={provider.label} />,
-      description: provider.descriptionKey ? t(provider.descriptionKey) : undefined,
-      dashboardPath: `/dashboard/integrations/${provider.provider}`,
-    }));
-
-    const privacyRows: IntegrationRowModel[] = privacy.map((provider) => ({
-      family: "privacy",
-      provider: provider.provider,
-      label: provider.label,
-      status: provider.status,
-      icon: <VenetianMaskIcon aria-hidden className="size-5 text-secondary" strokeWidth={1.8} />,
-      description: provider.descriptionKey ? t(provider.descriptionKey) : undefined,
-      dashboardPath: PRIVATE_CHANNELS_OVERVIEW_PATH,
-    }));
-
-    return [...custodyRows, ...rampRows, ...complianceRows, ...privacyRows];
-  }, [custody, ramps, compliance, privacy, t]);
-
-  const visible = rows.filter(
-    (row) =>
-      row.family === family &&
-      (query.trim().length === 0 ||
-        row.label.toLowerCase().includes(query.trim().toLowerCase()) ||
-        row.provider.toLowerCase().includes(query.trim().toLowerCase()))
-  );
-
-  return (
-    <div className="w-full space-y-6 px-4 py-5 md:px-6">
-      {family === "all" ? <IntegrationsHub families={enabledFamilies} t={t} /> : null}
-
-      {family !== "all" ? (
-        <div className="flex justify-end">
-          <div className="w-full max-w-xs">
-            <SearchInput
-              value={query}
-              onChange={(event) => setQuery(event.currentTarget.value)}
-              placeholder={t("Shared.integrations.searchPlaceholder")}
-            />
-          </div>
+    <section className="space-y-2" data-integration-section={section.family}>
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-2">
+          <h2 className="text-subheading font-medium text-primary">{section.title}</h2>
+          <InfoHint text={section.description} />
         </div>
-      ) : null}
+        <SectionSummary section={section} t={t} />
+      </div>
+      <ul className="divide-y divide-border-subtle">
+        {section.rows.map((row) => (
+          <IntegrationRowItem key={row.key} row={row} t={t} />
+        ))}
+      </ul>
+    </section>
+  );
+}
 
-      {family !== "all" && visible.length === 0 && custody !== null ? (
-        <div
-          className="rounded-2xl border border-border-default bg-surface-raised px-6 py-10 text-center"
-          data-integrations-empty="true"
-        >
+function matchesQuery(row: IntegrationRow, query: string): boolean {
+  return row.label.toLowerCase().includes(query) || row.provider.toLowerCase().includes(query);
+}
+
+export function IntegrationsCatalog({ integrations }: { integrations: ProjectIntegrations }) {
+  const t = useTranslations();
+  const urlTab = useDashboardTab();
+  const [query, setQuery] = useState("");
+  const sections = useMemo(() => integrationSections(integrations, t), [integrations, t]);
+
+  // A family with no provider for this project loses its tab, and a link to it lands on All.
+  const presentFamilies = new Set<string>(sections.map((section) => section.family));
+  useHiddenHeaderTabs(
+    Object.keys(INTEGRATION_FAMILY_COPY_KEYS).filter((family) => !presentFamilies.has(family))
+  );
+  const tabFamily =
+    urlTab !== null && isProjectIntegrationFamily(urlTab) && presentFamilies.has(urlTab)
+      ? urlTab
+      : null;
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleSections = sections
+    .filter((section) => tabFamily === null || section.family === tabFamily)
+    .map((section) => ({
+      ...section,
+      rows: section.rows.filter((row) => matchesQuery(row, normalizedQuery)),
+    }))
+    .filter((section) => section.rows.length > 0);
+
+  return (
+    <div className="w-full space-y-10" data-integrations-catalog="true">
+      <DashboardHeaderTabsTrailing>
+        <div className="w-56 max-w-full">
+          <SearchInput
+            value={query}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+            placeholder={t("Shared.integrations.searchPlaceholder")}
+          />
+        </div>
+      </DashboardHeaderTabsTrailing>
+      {visibleSections.map((section) => (
+        <IntegrationSectionBlock key={section.family} section={section} t={t} />
+      ))}
+      {visibleSections.length === 0 ? (
+        <div className="py-10 text-center" data-integrations-empty="search">
           <p className="text-base font-medium text-primary">
             {t("Shared.integrations.emptyTitle")}
           </p>
-          <p className="mt-1 text-sm leading-6 text-tertiary">
-            {t("Shared.integrations.emptyBody")}
-          </p>
-          <Button variant="secondary" className="mt-5" onClick={() => setQuery("")}>
-            {t("Shared.integrations.clearFilters")}
+          <Button variant="secondary" className="mt-4" onClick={() => setQuery("")}>
+            {t("Shared.integrations.clearSearch")}
           </Button>
         </div>
-      ) : null}
-
-      {family !== "all" ? (
-        <section className="space-y-4">
-          <div className="space-y-1">
-            <h2 className="text-lg font-medium tracking-tight text-primary">
-              {t(familyLabelKey(family))}
-            </h2>
-            <p className="text-sm leading-5 text-tertiary">{t(familyDescriptionKey(family))}</p>
-          </div>
-
-          {family === "custody" && custody === null ? (
-            <div
-              role="alert"
-              className="rounded-2xl border border-border-default bg-fill-subtle px-5 py-4 text-sm leading-6 text-secondary"
-            >
-              {t("Shared.integrations.custodyUnavailable")}
-            </div>
-          ) : null}
-
-          <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {visible.map((row) => (
-              <IntegrationCard key={`${row.family}:${row.provider}`} row={row} t={t} />
-            ))}
-          </ul>
-        </section>
       ) : null}
     </div>
   );

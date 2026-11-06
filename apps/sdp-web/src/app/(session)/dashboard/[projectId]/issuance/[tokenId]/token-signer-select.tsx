@@ -21,6 +21,8 @@ interface TokenSignerSelectProps {
   /** Overrides the default signing helper line when the selection is available. */
   helperText?: string;
   showSelectionSummary?: boolean;
+  /** Locks the choice while the operation it signs is in flight. */
+  disabled?: boolean;
 }
 
 export function TokenSignerSelect({
@@ -31,6 +33,7 @@ export function TokenSignerSelect({
   label,
   helperText,
   showSelectionSummary = false,
+  disabled,
 }: TokenSignerSelectProps) {
   const t = useTranslations();
   const hasReason = Boolean(signerUnavailableReason);
@@ -94,7 +97,7 @@ export function TokenSignerSelect({
       ) : (
         <Select
           value={selectedWallet?.id ?? ""}
-          disabled={isUnavailable}
+          disabled={isUnavailable || disabled}
           placeholder={t("DashboardIssuance.signer.select")}
           onValueChange={(value) => onSignerWalletIdChange(value === null ? "" : value)}
         >

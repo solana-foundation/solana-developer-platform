@@ -12,6 +12,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { ApiKeyActionsMenu } from "./api-key-actions-menu";
 import { grantSummaryLines, grantsSummaryLabel } from "./api-key-grant-labels";
@@ -86,6 +87,7 @@ function formatRotationDeadline(value: string, locale: string): string {
 function formatDate(
   value: string | null,
   locale: string,
+  timeZone: string,
   t: ReturnType<typeof useTranslations>
 ): string {
   if (!value) return t("DashboardCustody.never");
@@ -95,6 +97,7 @@ function formatDate(
     month: "short",
     day: "2-digit",
     year: "numeric",
+    timeZone,
   });
 }
 
@@ -164,6 +167,7 @@ export function ApiKeysTableClient({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const router = useRouter();
   const href = useProjectHref();
   const [apiKeys, setApiKeys] = useState(initialApiKeys);
@@ -265,13 +269,13 @@ export function ApiKeysTableClient({
                 </span>
               </TableCell>
               <TableCell className={`${LAST_USED_COLUMN_CLASS} text-xs text-secondary`}>
-                {formatDate(key.lastUsedAt, locale, t)}
+                {formatDate(key.lastUsedAt, locale, timeZone, t)}
               </TableCell>
               <TableCell className={`${EXPIRES_COLUMN_CLASS} text-xs text-secondary`}>
-                {formatDate(effectiveExpiry(key), locale, t)}
+                {formatDate(effectiveExpiry(key), locale, timeZone, t)}
               </TableCell>
               <TableCell className={`${CREATED_COLUMN_CLASS} text-xs text-secondary`}>
-                {formatDate(key.createdAt, locale, t)}
+                {formatDate(key.createdAt, locale, timeZone, t)}
               </TableCell>
               <TableCell>
                 {canManageApiKeys ? (

@@ -258,7 +258,21 @@ export function formatTotalBalance(total: number | null, locale?: string): strin
   return total === null ? "—" : formatCurrencyAmount(total, locale);
 }
 
-export function formatTimestamp(value: string | undefined, t: Translate, locale?: string): string {
+/**
+ * A moment as "Aug 22, 10:18 AM" in the viewer's zone, or "Pending" before there is one.
+ *
+ * @param value - ISO timestamp.
+ * @param t - Translator, for the pending label.
+ * @param locale - Formatting locale.
+ * @param timeZone - The viewer's zone, from `useTimeZone` or `getRequestTimeZone`.
+ * @returns The formatted moment, or the pending label for a missing or invalid one.
+ */
+export function formatTimestamp(
+  value: string | undefined,
+  t: Translate,
+  locale: string,
+  timeZone: string
+): string {
   if (!value) {
     return t("DashboardPayments.pending");
   }
@@ -273,6 +287,7 @@ export function formatTimestamp(value: string | undefined, t: Translate, locale?
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZone,
   }).format(date);
 }
 

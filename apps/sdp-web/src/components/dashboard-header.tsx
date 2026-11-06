@@ -1,5 +1,7 @@
 "use client";
 
+import type { ProjectIntegrationFamily } from "@sdp/types/integrations";
+
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { SkeletonBlock } from "@sdp/ui/skeleton-block";
@@ -8,15 +10,18 @@ import Link from "next/link";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { ACCOUNT_TABS } from "@/app/(session)/dashboard/[projectId]/account/account-tabs";
+import { INTEGRATION_FAMILY_COPY_KEYS } from "@/app/(session)/dashboard/[projectId]/integrations/integration-sections";
 import { privateChannelsInstancePath } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { SETTINGS_TABS } from "@/app/(session)/dashboard/[projectId]/settings/settings-tabs";
 import {
   formatCustodyProviderName,
+  getCustodyProviderEntry,
   isKnownCustodyProvider,
 } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
+import { ProviderBrandMark } from "@/components/provider-brand-mark";
 import { useTranslations } from "@/i18n/provider";
 import type { DashboardCapabilities } from "@/lib/dashboard-access";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
@@ -29,6 +34,7 @@ import {
   PAYMENT_REQUESTS_HREF,
   PAYMENT_TRANSACTIONS_HREF,
 } from "@/lib/payments-routes";
+import { CUSTODY_BRAND_MARKS } from "@/lib/provider-brand-marks";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
 type DashboardPageConfig = {
@@ -65,6 +71,8 @@ type DashboardPageConfig = {
    * page names itself, so the header is its final height from the first frame.
    */
   titleMark?: ReactNode;
+  /** One line under a marked title saying what the page's subject is (a provider's purpose). */
+  description?: string;
 };
 
 export type DashboardHeaderActionConfig = {
@@ -212,28 +220,29 @@ type DashboardTopBarProps = {
   action?: ReactNode;
   /** Set over a left title: an action page's way back. */
   above?: ReactNode;
-  /** Page-level controls at the title row's end (Payments puts its demo switch here). */
-  utilities?: ReactNode;
   /** Shown before the page's title, as a wallet's provider mark is. */
   mark?: ReactNode;
+  /** Set under a marked title. */
+  description?: string;
+  /** Set after the title on its line (a record's status). */
+  badge?: ReactNode;
 };
 
 export function HeaderBackAction({
   href,
   label,
   compactOnMobile = false,
+  locked = false,
 }: {
   href: string;
   label: string;
   compactOnMobile?: boolean;
+  /** Shown but not followable, while the page holds work that leaving would drop. */
+  locked?: boolean;
 }) {
   const projectHref = useProjectHref();
-  return (
-    <Link
-      href={projectHref(href)}
-      // The chevron's stroke sits on the column's edge (the 16px icon has 6px of air before it), 6px to its label.
-      className="inline-flex items-center rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary -ml-1.5 h-5 gap-1.5"
-    >
+  const content = (
+    <>
       <ChevronLeftIcon className="size-4 block" />
       <span
         className={[
@@ -243,6 +252,24 @@ export function HeaderBackAction({
       >
         {label}
       </span>
+    </>
+  );
+  // The chevron's stroke sits on the column's edge (the 16px icon has 6px of air before it), 6px to its label.
+  const className =
+    "inline-flex items-center rounded-[var(--button-radius-md)] -ml-1.5 h-5 gap-1.5";
+  if (locked) {
+    return (
+      <button type="button" disabled className={cn(className, "cursor-not-allowed text-tertiary")}>
+        {content}
+      </button>
+    );
+  }
+  return (
+    <Link
+      href={projectHref(href)}
+      className={cn(className, "text-secondary transition-colors hover:text-primary")}
+    >
+      {content}
     </Link>
   );
 }
@@ -267,29 +294,75 @@ function MobileNavButton({ onClick }: { onClick: () => void }) {
 }
 
 /**
+ * The page's h1 with what sits around it: a mark before it (and a description under it), or a
+ * status badge after it on its line.
+ */
+function PageTitleLine({
+  title,
+  mark,
+  description,
+  badge,
+}: {
+  title: string;
+  mark?: ReactNode;
+  description?: string;
+  badge?: ReactNode;
+}) {
+  const heading = (
+    <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
+      {title}
+    </h1>
+  );
+  if (mark) {
+    return (
+      <div className="flex min-w-0 items-center gap-4">
+        {/* A flex box, so an inline mark sits on no line box and the row is the mark's height. */}
+        <span className="flex shrink-0">{mark}</span>
+        <div className="min-w-0">
+          {heading}
+          {description ? <p className="mt-1 text-body text-secondary">{description}</p> : null}
+        </div>
+      </div>
+    );
+  }
+  if (badge) {
+    return (
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        {heading}
+        {badge}
+      </div>
+    );
+  }
+  return heading;
+}
+
+/**
  * The title block. On a phone it is the design's three rows: the navigation button, the
  * title 8px under it, then the page's action 16px under that. From md the button goes and the
- * action sits on the title's row. Any utilities (Payments' demo mode switch) sit at the far right
- * of the phone's navigation row, and from md on the title's row, before the action.
+ * action sits on the title's row.
  */
 export function StackedDashboardTopBar({
   navigation,
   title,
   action,
-  trailingContent,
   hideTitle = false,
   above,
   mark,
+  description,
+  badge,
 }: {
   navigation: ReactNode;
   title: string;
   action?: ReactNode;
-  trailingContent: ReactNode;
   hideTitle?: boolean;
   /** Set over the title in its column: an action page's way back. */
   above?: ReactNode;
   /** Set before the title, 16px from it (a wallet's 48px provider mark). */
   mark?: ReactNode;
+  /** Set under the title beside the mark. */
+  description?: string;
+  /** Set after the title on its line. */
+  badge?: ReactNode;
 }) {
   return (
     <div
@@ -315,19 +388,7 @@ export function StackedDashboardTopBar({
               {above}
             </div>
           ) : null}
-          {mark ? (
-            <div className="flex min-w-0 items-center gap-4">
-              {/* A flex box, so an inline mark sits on no line box and the row is the mark's height. */}
-              <span className="flex shrink-0">{mark}</span>
-              <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
-                {title}
-              </h1>
-            </div>
-          ) : (
-            <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
-              {title}
-            </h1>
-          )}
+          <PageTitleLine title={title} mark={mark} description={description} badge={badge} />
         </div>
       )}
       {/* An empty state whose action repeats this one (New, Add) hides it: the shell's
@@ -343,20 +404,6 @@ export function StackedDashboardTopBar({
           )}
         >
           {action}
-        </div>
-      ) : null}
-      {trailingContent ? (
-        // On a phone it shares the navigation button's row; from md it sits on the title's row
-        // before the action. The md columns have no gap, only margins, so a missing or hidden
-        // action leaves no empty gap at the right edge. Under a back link it keeps to the title's
-        // row as the action does, in a 36px box like the action's, so the two share a centre.
-        <div
-          className={cn(
-            "col-start-3 row-start-1 flex items-center justify-end empty:hidden md:col-start-2 md:ml-3",
-            above && "md:h-9 md:self-end"
-          )}
-        >
-          {trailingContent}
         </div>
       ) : null}
     </div>
@@ -455,18 +502,10 @@ export function DashboardTopBar({
   hasHeaderTabs = false,
   action,
   above,
-  utilities,
   mark,
+  description,
+  badge,
 }: DashboardTopBarProps) {
-  const utilityContent = utilities ?? null;
-  const trailingContent = action ? (
-    <>
-      {action}
-      {utilityContent}
-    </>
-  ) : (
-    utilityContent
-  );
   const centersPageTitle =
     titleVisibility !== "screen-reader-only" &&
     (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
@@ -480,8 +519,9 @@ export function DashboardTopBar({
         hideTitle={titleVisibility === "screen-reader-only"}
         above={above}
         mark={mark}
+        description={description}
+        badge={badge}
         action={action}
-        trailingContent={utilityContent}
       />
     );
   }
@@ -500,7 +540,7 @@ export function DashboardTopBar({
             {topBarLeadingContent}
           </>
         }
-        trailingContent={trailingContent}
+        trailingContent={action}
       />
     );
   }
@@ -517,7 +557,7 @@ export function DashboardTopBar({
           {topBarLeadingContent}
         </>
       }
-      trailingContent={trailingContent}
+      trailingContent={action}
     />
   );
 }
@@ -845,7 +885,7 @@ function getAccessControlPageConfig(
   if (pathname === "/dashboard/api-keys") {
     return {
       title: t("Shared.dashboardShell.apiKeys"),
-      contentWidthClass: "max-w-none",
+      contentWidthClass: PAGE_WIDTH,
     };
   }
   if (pathname === "/dashboard/api-keys/new") {
@@ -925,46 +965,87 @@ function getIssuanceRoutePageConfig(
 
 function getIntegrationsPageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
+  integrationFamilies: readonly ProjectIntegrationFamily[]
 ): DashboardPageConfig | null {
-  if (/^\/dashboard\/integrations\/[^/]+$/.test(pathname)) {
+  const providerPageId = /^\/dashboard\/integrations\/([^/]+)$/.exec(pathname)?.[1];
+  if (providerPageId) {
+    if (!isKnownCustodyProvider(providerPageId)) {
+      return {
+        title: t("Shared.dashboardShell.integrations"),
+        contentWidthClass: PAGE_WIDTH,
+        backAction: {
+          href: "/dashboard/integrations",
+          label: t("Shared.integrations.backToIntegrations"),
+        },
+      };
+    }
+    // The provider names itself in the header from the static catalog, so the mark and the
+    // line under the title are there from the first frame.
+    const entry = getCustodyProviderEntry(providerPageId);
     return {
-      title: t("Shared.dashboardShell.integrations"),
-      contentWidthClass: "max-w-5xl",
+      title: entry.label,
+      titleMark: <ProviderBrandMark size="page" mark={CUSTODY_BRAND_MARKS[providerPageId]} />,
+      description: t(entry.descriptionKey),
+      contentWidthClass: PAGE_WIDTH,
       backAction: {
         href: "/dashboard/integrations",
-        label: t("Shared.integrations.backToIntegrations"),
+        label: t("Shared.integrations.custodyTitle"),
+      },
+    };
+  }
+  // A new connection: a flow, so the way back over the title in the form's column and the
+  // footer band across the page. Checked before the connection route, which `new` also matches.
+  const newConnectionProvider = /^\/dashboard\/integrations\/([^/]+)\/connections\/new$/.exec(
+    pathname
+  )?.[1];
+  if (newConnectionProvider) {
+    const providerName = isKnownCustodyProvider(newConnectionProvider)
+      ? formatCustodyProviderName(newConnectionProvider)
+      : newConnectionProvider;
+    return {
+      title: t("DashboardCustody.newConnectionTitle", { provider: providerName }),
+      contentWidthClass: "max-w-none",
+      headerWidthClass: "max-w-flow",
+      backAction: {
+        href: `/dashboard/integrations/${newConnectionProvider}`,
+        label: providerName,
       },
     };
   }
   // One custody connection. Checked before the catch-all below, which would
   // otherwise title this "Integrations" and send Back to the catalogue rather
   // than to the provider that owns the connection.
-  const custodyConnection = /^\/dashboard\/integrations\/([^/]+)\/connections\/[^/]+$/.exec(
-    pathname
-  );
-  if (custodyConnection) {
-    const provider = custodyConnection[1] ?? "";
+  const provider = /^\/dashboard\/integrations\/([^/]+)\/connections\/[^/]+$/.exec(pathname)?.[1];
+  if (provider) {
     return {
       title: t("DashboardCustody.connectionPageTitle"),
-      contentWidthClass: "max-w-5xl",
+      contentWidthClass: PAGE_WIDTH,
       backAction: {
         href: `/dashboard/integrations/${provider}`,
-        label: t("DashboardCustody.backToProvider", {
-          provider: isKnownCustodyProvider(provider)
-            ? formatCustodyProviderName(provider)
-            : provider,
-        }),
+        label: isKnownCustodyProvider(provider) ? formatCustodyProviderName(provider) : provider,
+      },
+    };
+  }
+  if (pathname === "/dashboard/integrations") {
+    return {
+      title: t("Shared.dashboardShell.integrations"),
+      contentWidthClass: PAGE_WIDTH,
+      headerTabs: {
+        tabs: [
+          { id: "all", label: t("Shared.integrations.tabAll") },
+          ...integrationFamilies.map((family) => ({
+            id: family,
+            label: t(INTEGRATION_FAMILY_COPY_KEYS[family].title),
+          })),
+        ],
+        hideOnMobile: false,
+        filteredByPage: true,
       },
     };
   }
   if (pathname.startsWith("/dashboard/integrations")) {
-    // Card-grid page: fill the shell's wide container instead of stacking a
-    // second max-width inside the centered default and stranding gutters.
-    return {
-      title: t("Shared.dashboardShell.integrations"),
-      contentWidthClass: "max-w-7xl",
-    };
+    return { title: t("Shared.dashboardShell.integrations"), contentWidthClass: PAGE_WIDTH };
   }
   return null;
 }
@@ -1168,6 +1249,7 @@ function getHomePageConfig(
 export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
+  integrationFamilies: readonly ProjectIntegrationFamily[],
   paymentsEnabled = true,
   rampsEnabled = false
 ): DashboardPageConfig {
@@ -1236,7 +1318,7 @@ export function getDashboardPageConfig(
       },
     };
   }
-  const integrationsConfig = getIntegrationsPageConfig(pathname, t);
+  const integrationsConfig = getIntegrationsPageConfig(pathname, t, integrationFamilies);
   if (integrationsConfig) {
     return integrationsConfig;
   }

@@ -5,7 +5,7 @@
 import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { Env } from "@/types/env";
-import type { AppError } from "./errors";
+import type { AppError, ErrorResponse } from "./errors";
 
 interface SuccessResponse<T> {
   data: T;
@@ -91,17 +91,30 @@ export function mapErrorStatusCode(statusCode: number): ContentfulStatusCode {
 }
 
 /**
- * The app's envelope for an `AppError`: the error, the request id and the
- * trace header. `app.onError` sends every thrown `AppError` through it, and a
- * handler that returns an error instead of throwing it (a replayed failed row)
- * uses it too, so both look the same.
+ * The app's error envelope: the error, the request id and the trace header.
+ * `error.code` is an `ErrorCode`, the list the OpenAPI error envelope
+ * documents, so every error `app.onError` answers names a documented code.
+ *
+ * @param c - The request context.
+ * @param status - The HTTP status to answer with.
+ * @param error - The code, the caller-safe message and any details.
+ */
+export function errorResponse(
+  c: Context<{ Bindings: Env }>,
+  status: ContentfulStatusCode,
+  error: ErrorResponse["error"]
+): Response {
+  c.header("X-SDP-Trace-ID", c.get("traceId"));
+  return c.json({ error, meta: { requestId: c.get("requestId") } }, status);
+}
+
+/**
+ * The envelope for an `AppError`. `app.onError` sends every thrown `AppError`
+ * through it, and a handler that returns an error instead of throwing it (a
+ * replayed failed row) uses it too, so both look the same.
  */
 export function appErrorResponse(c: Context<{ Bindings: Env }>, err: AppError): Response {
-  c.header("X-SDP-Trace-ID", c.get("traceId"));
-  return c.json(
-    { error: err.toResponse().error, meta: { requestId: c.get("requestId") } },
-    mapErrorStatusCode(err.statusCode)
-  );
+  return errorResponse(c, mapErrorStatusCode(err.statusCode), err.toResponse().error);
 }
 
 /**

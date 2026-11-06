@@ -68,14 +68,14 @@
         "expectedResponse": {
           "data": {
             "wallet": {
-              "id": "cw_example",
+              "id": "cwlt_example",
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
-              "label": "Root Signing Wallet",
-              "purpose": "root",
+              "label": "Treasury wallet",
+              "purpose": "transfer",
               "status": "active",
               "createdAt": "2025-01-01T00:00:00.000Z"
             }
@@ -207,14 +207,14 @@
           "data": {
             "wallets": [
               {
-                "id": "cw_example",
+                "id": "cwlt_example",
                 "custodyConfigId": "cfg_example",
                 "provider": "privy",
                 "isRuntimeExecutionAllowed": true,
                 "walletId": "privy_wallet_123",
                 "publicKey": "So11111111111111111111111111111111111111112",
-                "label": "Root Signing Wallet",
-                "purpose": "root",
+                "label": "Treasury wallet",
+                "purpose": "transfer",
                 "status": "active",
                 "createdAt": "2025-01-01T00:00:00.000Z"
               }
@@ -432,14 +432,14 @@
         "expectedResponse": {
           "data": {
             "wallet": {
-              "id": "cw_example",
+              "id": "cwlt_example",
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
-              "label": "Root Signing Wallet",
-              "purpose": "root",
+              "label": "Treasury wallet",
+              "purpose": "transfer",
               "status": "active",
               "createdAt": "2025-01-01T00:00:00.000Z"
             }
@@ -481,14 +481,14 @@
         "expectedResponse": {
           "data": {
             "wallet": {
-              "id": "cw_example",
+              "id": "cwlt_example",
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
-              "label": "Root Signing Wallet",
-              "purpose": "root",
+              "label": "Treasury wallet",
+              "purpose": "transfer",
               "status": "active",
               "createdAt": "2025-01-01T00:00:00.000Z"
             }
@@ -9809,14 +9809,14 @@
           "data": {
             "wallets": [
               {
-                "id": "cw_example",
+                "id": "cwlt_example",
                 "custodyConfigId": "cfg_example",
                 "provider": "privy",
                 "isRuntimeExecutionAllowed": true,
                 "walletId": "privy_wallet_123",
                 "publicKey": "So11111111111111111111111111111111111111112",
-                "label": "Root Signing Wallet",
-                "purpose": "root",
+                "label": "Treasury wallet",
+                "purpose": "transfer",
                 "status": "active",
                 "createdAt": "2025-01-01T00:00:00.000Z"
               }

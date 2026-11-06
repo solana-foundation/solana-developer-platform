@@ -43,6 +43,22 @@ mainnet the API prices no mint, so SOL arrives unpriced on devnet. Value a
 token by its market price or, for a well-known USD stablecoin, by its mint;
 never by its symbol, since anyone can mint a "USDC".
 
+A date a viewer reads is formatted in their zone, passed as `timeZone`:
+`useTimeZone()` in a client component, `await getRequestTimeZone()` on the
+server (`src/i18n`). Left to the environment, the server formats in UTC and
+the browser in the viewer's zone, and the page fails to hydrate. The browser
+stores its zone in the `sdp-time-zone` cookie so the server renders the next
+page in it; without the cookie the server renders UTC and `useTimeZone`
+switches to the browser's zone after hydration. A server component cannot
+correct itself, so a date a first-time visitor reads (the public pay page's
+expiry) renders in a client component. `suppressHydrationWarning` is no fix:
+React keeps the server's text and never corrects it.
+
+A catalog value is a plain `{name}` template: `translate` renders no ICU, and
+`src/i18n/messages.unit.test.ts` rejects `plural` or `select` in any catalog. A
+count takes a singular key beside its plural one (`entriesOne` beside
+`entries`), picked with `count === 1`, in `messages/en` only.
+
 Dashboard pages live under `app/(session)/dashboard/[projectId]/`, and the Project comes from the URL alone:
 
 - Server code (pages, server actions, route handlers) calls `createSdpApiClient()`, `requestProjectId()` and `requestProjectHref(path)` from `@/lib/sdp-api`; they read the request's `x-project-id`, which `proxy.ts` sets from the URL. Keep signatures Project-free: no `projectId` parameters, no reads of the selection cookie.
@@ -51,7 +67,7 @@ Dashboard pages live under `app/(session)/dashboard/[projectId]/`, and the Proje
 - A missing page or an unmatched address inside a Project renders `[projectId]/not-found.tsx` in the shell; the `[...unmatched]` catch-all exists so unmatched URLs reach it instead of the root 404.
 - The shell keys its page frame (header and content) by pathname, so a route change replaces the frame rather than moving it. Whatever a page adds to the header after it mounts must not change the header's height: a title mark is held by the route's `titleMark`, and controls a page portals into the tab row (`DashboardHeaderTabsTrailing`) get a placeholder in the route's skeleton.
 - The shell sizes itself in `dvh` (`h-dvh`, `min-h-dvh`), never `h-screen`: a phone browser's `vh` is its height with the toolbars hidden, so a locked page (a flow's footer) sat under the toolbar.
-- Tests mock with `vi.mock("next/navigation", () => import("@/test/next-navigation"))` and `vi.mock("next/headers", () => import("@/test/next-headers"))`; fixtures live in `src/test/`.
+- Tests mock with `vi.mock("next/navigation", () => import("@/test/next-navigation"))` and `vi.mock("next/headers", () => import("@/test/next-headers"))`, plus `vi.mock("next/cache", () => import("@/test/next-cache"))` where a server action revalidates; fixtures live in `src/test/`.
 
 A button whose action is running takes `loading` and keeps its words: the
 design-system button spins in place at its own width, so there is no "…ing"

@@ -65,6 +65,7 @@
   "GET /v1/helius-rings/wallets/:_": "helius_rings.read",
   "GET /v1/helius-rings/wallets/:_/identity": "helius_rings.read",
   "GET /v1/helius-rings/wallets/:_/zones": "helius_rings.read",
+  "GET /v1/integrations": "projects.read",
   "GET /v1/issuance/asset-profiles": "issuance.read",
   "GET /v1/issuance/asset-profiles/:_": "issuance.read",
   "GET /v1/issuance/asset-profiles/by-token/:_": "issuance.read",

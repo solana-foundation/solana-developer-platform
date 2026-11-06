@@ -1,13 +1,21 @@
-import { SigningError } from "@sdp/custody/signing";
-import { FeePaymentError } from "@sdp/fee-payment/port";
-import { SdpPaymentsError } from "@sdp/payments/errors";
-import { RpcTimeoutError, RpcUnavailableError, SdpRpcError } from "@sdp/rpc/errors";
+import assert from "node:assert/strict";
+import { SigningError, type SigningErrorCode } from "@sdp/custody/signing";
+import { SdpEarnError, type SdpEarnErrorCode } from "@sdp/earn/errors";
+import { FeePaymentError, type FeePaymentErrorCode } from "@sdp/fee-payment/port";
+import { SdpPaymentsError, type SdpPaymentsErrorCode } from "@sdp/payments/errors";
+import {
+  RpcTimeoutError,
+  RpcUnavailableError,
+  SdpRpcError,
+  type SdpRpcErrorCode,
+} from "@sdp/rpc/errors";
 import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
+import { HTTPException } from "hono/http-exception";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp, type SdpPlugin } from "@/app";
 import { DatabaseUnavailableError } from "@/db/client";
-import { AppError } from "@/lib/errors";
+import { AppError, isErrorCode } from "@/lib/errors";
 import { type ValidatedBodyContext, validateBody } from "@/middleware/validate";
 import { rootLogger } from "@/runtime/logger";
 import { env as baseEnv } from "@/test/helpers/env";
@@ -510,8 +518,11 @@ describe("createApp onError", () => {
 
     const res = await app.request(SECRET_SIGNING_ERROR_PATH, {}, baseEnv);
 
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { message: string } };
+    expect(res.status).toBe(503);
+    const body = z
+      .object({ error: z.object({ code: z.string(), message: z.string() }) })
+      .parse(await res.json());
+    expect(body.error.code).toBe("PROVIDER_NOT_CONFIGURED");
     expect(body.error.message).toBe(
       "The signing provider is not configured. Check provider configuration and try again."
     );
@@ -550,5 +561,158 @@ describe("createApp onError", () => {
     expect(res.status).toBe(500);
     expect(JSON.stringify(await res.json())).not.toContain("jane.doe@example.com");
     loggerError.mockRestore();
+  });
+});
+
+const HANDLED_ERROR_PATH = "/__handled_error_test_throw";
+
+/** A family's codes, from a record that a new code in the family leaves incomplete. */
+function codesOf<Code extends string>(codes: Record<Code, true>): Code[] {
+  return Object.keys(codes).filter((code): code is Code => Object.hasOwn(codes, code));
+}
+
+/** The status an answer must carry: its code's own (`AppError`'s), or none checked. */
+type ExpectedStatus = "own" | "unchecked";
+
+type HandledError = [label: string, thrown: () => Error, status: ExpectedStatus];
+
+// One case per code each error family the handler recognizes can carry. Each record lists its
+// family's whole code union, so a new code fails to compile here until it runs through the handler.
+const HANDLED_ERRORS: HandledError[] = [
+  ...codesOf<SigningErrorCode>({
+    PROVIDER_NOT_CONFIGURED: true,
+    WALLET_NOT_FOUND: true,
+    INVALID_REQUEST: true,
+    NETWORK_ERROR: true,
+    ALREADY_INITIALIZED: true,
+    NOT_FOUND: true,
+    CONFLICT: true,
+    PROVIDER_CREDENTIAL_INVALID: true,
+    POLICY_REFUSED: true,
+  }).map(
+    (code): HandledError => [
+      `SigningError ${code}`,
+      () => new SigningError("test failure", code),
+      "own",
+    ]
+  ),
+  ...codesOf<FeePaymentErrorCode>({
+    PROVIDER_NOT_AVAILABLE: true,
+    INSUFFICIENT_BALANCE: true,
+    TRANSACTION_TOO_LARGE: true,
+    PROVIDER_REJECTED: true,
+    SIGNING_FAILED: true,
+    SUBMISSION_FAILED: true,
+    NETWORK_ERROR: true,
+    RATE_LIMITED: true,
+  }).map(
+    (code): HandledError => [
+      `FeePaymentError ${code}`,
+      () => new FeePaymentError("test failure", code),
+      // An ambiguous sponsor failure is TRANSACTION_FAILED at 502 on purpose (mapFeePaymentError).
+      "unchecked",
+    ]
+  ),
+  ...codesOf<SdpRpcErrorCode>({
+    BAD_REQUEST: true,
+    SOLANA_RPC_ERROR: true,
+    RPC_UNAVAILABLE: true,
+    CLUSTER_SCOPE_MISSING: true,
+    CLUSTER_SCOPE_CONFLICT: true,
+  }).map(
+    (code): HandledError => [
+      `SdpRpcError ${code}`,
+      () => new SdpRpcError(code, "test failure"),
+      "own",
+    ]
+  ),
+  ...codesOf<SdpPaymentsErrorCode>({
+    BAD_REQUEST: true,
+    CONFLICT: true,
+    RATE_LIMITED: true,
+    INTERNAL_ERROR: true,
+    PROVIDER_NOT_CONFIGURED: true,
+    PROVIDER_UNAVAILABLE: true,
+    PROVIDER_RESPONSE_INVALID: true,
+    ESTIMATE_NOT_AVAILABLE: true,
+  }).map(
+    (code): HandledError => [
+      `SdpPaymentsError ${code}`,
+      () => new SdpPaymentsError(code, "test failure"),
+      "own",
+    ]
+  ),
+  ...codesOf<SdpEarnErrorCode>({
+    BAD_REQUEST: true,
+    CONFLICT: true,
+    RATE_LIMITED: true,
+    INTERNAL_ERROR: true,
+    NOT_IMPLEMENTED: true,
+    PROVIDER_NOT_CONFIGURED: true,
+    PROVIDER_UNAVAILABLE: true,
+  }).map(
+    (code): HandledError => [
+      `SdpEarnError ${code}`,
+      () => new SdpEarnError(code, "test failure"),
+      "own",
+    ]
+  ),
+  // Keychain's own error for a Fireblocks block that is not a policy refusal.
+  ["Fireblocks BLOCKED", () => new Error("Transaction failed with status: BLOCKED"), "own"],
+  [
+    "RpcUnavailableError",
+    () => new RpcUnavailableError("not_configured", "test failure", { cluster: "devnet" }),
+    "own",
+  ],
+  [
+    "DatabaseUnavailableError",
+    () =>
+      new DatabaseUnavailableError(new Error("test failure"), {
+        totalCount: 1,
+        idleCount: 0,
+        waitingCount: 1,
+      }),
+    "own",
+  ],
+  ["HTTPException 400", () => new HTTPException(400, { message: "test failure" }), "own"],
+  ["unknown Error", () => new Error("test failure"), "own"],
+];
+
+const errorCodeBody = z.object({ error: z.object({ code: z.string() }) });
+
+describe("createApp onError error codes", () => {
+  beforeEach(async () => {
+    // These requests are anonymous, so they share the per-IP anonymous window
+    // with every suite this worker ran in the same minute; start it empty.
+    await clearKVStores(baseEnv);
+  });
+
+  it.each(HANDLED_ERRORS)(
+    "answers a thrown %s with an ErrorCode",
+    async (label, thrown, status) => {
+      const app = createApp({ rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY });
+      app.all(HANDLED_ERROR_PATH, () => {
+        throw thrown();
+      });
+
+      const res = await app.request(HANDLED_ERROR_PATH, {}, baseEnv);
+
+      const { code } = errorCodeBody.parse(await res.json()).error;
+      // ERROR_CODES is exactly what the OpenAPI error envelope lists (spec.test.ts).
+      assert(isErrorCode(code), `${label} answered ${code}, which ERROR_CODES does not list`);
+      if (status === "own") {
+        expect(res.status).toBe(new AppError(code).statusCode);
+      }
+    }
+  );
+
+  it("answers an unmatched route with an ErrorCode", async () => {
+    const app = createApp({ rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY });
+
+    const res = await app.request("/__no_such_route", {}, baseEnv);
+
+    const { code } = errorCodeBody.parse(await res.json()).error;
+    assert(isErrorCode(code), `an unmatched route answered ${code}`);
+    expect(res.status).toBe(new AppError(code).statusCode);
   });
 });

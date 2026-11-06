@@ -21,6 +21,7 @@ import { PaymentsTableHeader } from "@/app/(session)/dashboard/[projectId]/payme
 import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 
@@ -61,6 +62,7 @@ export function RecurringPaymentRunHistory({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const cluster = useSolanaCluster();
   const none = <span className="text-tertiary">{t("DashboardPayments.recurring.none")}</span>;
 
@@ -114,11 +116,11 @@ export function RecurringPaymentRunHistory({
             // Rows grow with a reason, every cell on the first line's baseline.
             <TableRow key={attempt.id} className="[--table-cell-padding-y:10px] [&>td]:align-top">
               <TableCell className={cn(PAYMENTS_TABLE_CELL, "text-primary tabular-nums")}>
-                {formatDate(attempt.dueAt, locale)}
+                {formatDate(attempt.dueAt, locale, timeZone)}
               </TableCell>
               <TableCell className={cn(PAYMENTS_TABLE_CELL, "text-secondary tabular-nums")}>
                 {attempt.attemptedAt ? (
-                  formatDateTime(attempt.attemptedAt, locale)
+                  formatDateTime(attempt.attemptedAt, locale, timeZone)
                 ) : (
                   <span className="text-tertiary">
                     {t("DashboardPayments.recurring.notAttempted")}

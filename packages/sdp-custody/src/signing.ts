@@ -39,9 +39,6 @@ export class SigningError extends Error {
 export type SigningErrorCode =
   | "PROVIDER_NOT_CONFIGURED"
   | "WALLET_NOT_FOUND"
-  | "SIGNING_FAILED"
-  | "APPROVAL_TIMEOUT"
-  | "APPROVAL_REJECTED"
   | "INVALID_REQUEST"
   | "NETWORK_ERROR"
   | "ALREADY_INITIALIZED"

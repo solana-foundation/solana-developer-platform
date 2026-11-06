@@ -1,33 +1,23 @@
-import { SOLANA_CLUSTER_LABELS, type SolanaCluster } from "@sdp/types/well-known-tokens";
+import type { PaymentRequestStatus } from "@sdp/types/payments";
+import { SOLANA_CLUSTER_LABELS } from "@sdp/types/well-known-tokens";
 import { Badge } from "@sdp/ui/badge";
 import { ArrowUpRightIcon, BanIcon, CheckCircle2Icon, ClockIcon, XIcon } from "lucide-react";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import {
   formatDisplayAmount,
-  formatTimestamp,
   shortenAddress,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
 import { resolvePlaygroundApiBaseUrl } from "@/app/(session)/dashboard/[projectId]/playground-api-data";
 import { SolanaQrCode } from "@/components/solana-qr-code";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { findPublicSdpApiBaseUrl } from "@/lib/sdp-api-base-url";
+import { PayExpiry } from "./pay-expiry";
+import { payLinkSchema } from "./pay-link";
 import { PayStatusWatch } from "./pay-status-watch";
 import { payTokenSchema } from "./pay-token";
 
 export const dynamic = "force-dynamic";
-
-type PayStatus = "awaiting_payment" | "paid" | "canceled" | "expired";
-
-interface PayRequest {
-  amount: string;
-  tokenSymbol: string;
-  recipient: string;
-  status: PayStatus;
-  expiresAt: string | null;
-  network: SolanaCluster;
-  solanaPayUrl: string | null;
-}
 
 interface StatusPanel {
   icon: ReactNode;
@@ -52,7 +42,7 @@ function getStatusPanels(t: Awaited<ReturnType<typeof getTranslations>>) {
       title: t("Shared.pay.requestCanceled"),
       body: t("Shared.pay.requestCanceledDescription"),
     },
-  } as const satisfies Record<Exclude<PayStatus, "awaiting_payment">, StatusPanel>;
+  } as const satisfies Record<Exclude<PaymentRequestStatus, "awaiting_payment">, StatusPanel>;
 }
 
 /**
@@ -67,11 +57,14 @@ function getUnavailablePanel(t: Awaited<ReturnType<typeof getTranslations>>): St
   };
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+const DETAIL_VALUE = "min-w-0 truncate font-medium text-primary";
+
+/** A label, and on the right its value: the caller's element, so a client value can own it. */
+function DetailRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-4">
       <span className="text-secondary">{label}</span>
-      <span className="min-w-0 truncate font-medium text-primary">{value}</span>
+      {children}
     </div>
   );
 }
@@ -116,9 +109,12 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
     // A refused or failed read is not a missing link: the error page lets the payer retry.
     throw new Error(`Pay link read failed (${response.status})`);
   }
-  const request = (await response.json()) as PayRequest;
-  const t = await getTranslations();
-  const locale = await getRequestLocale();
+  const [body, t, locale] = await Promise.all([
+    response.json(),
+    getTranslations(),
+    getRequestLocale(),
+  ]);
+  const request = payLinkSchema.parse(body);
 
   const payUrl =
     request.solanaPayUrl && isRenderablePayUrl(request.solanaPayUrl) ? request.solanaPayUrl : null;
@@ -182,16 +178,19 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
           ) : null}
 
           <div className="mt-8 space-y-3 border-t border-border-default pt-6 text-body">
-            <DetailRow label={t("Shared.pay.to")} value={shortenAddress(request.recipient)} />
-            <DetailRow label={t("Shared.pay.token")} value={request.tokenSymbol} />
-            <DetailRow
-              label={t("Shared.pay.expires")}
-              value={
-                request.expiresAt
-                  ? formatTimestamp(request.expiresAt, t, locale)
-                  : t("Shared.pay.noExpiry")
-              }
-            />
+            <DetailRow label={t("Shared.pay.to")}>
+              <span className={DETAIL_VALUE}>{shortenAddress(request.recipient)}</span>
+            </DetailRow>
+            <DetailRow label={t("Shared.pay.token")}>
+              <span className={DETAIL_VALUE}>{request.tokenSymbol}</span>
+            </DetailRow>
+            <DetailRow label={t("Shared.pay.expires")}>
+              {request.expiresAt ? (
+                <PayExpiry expiresAt={request.expiresAt} className={DETAIL_VALUE} />
+              ) : (
+                <span className={DETAIL_VALUE}>{t("Shared.pay.noExpiry")}</span>
+              )}
+            </DetailRow>
           </div>
         </div>
 

@@ -9,12 +9,12 @@ steps:
   - Seize tokens
 ---
 
-SDP provides two categories of compliance tooling:
+SDP gives you two kinds of compliance tooling:
 
-- **Token controls** — freeze individual accounts, pause all transfers, or seize tokens. Available for tokens with `isFreezable` enabled or the `pausable` extension.
-- **Address screening** — check a wallet against configured compliance providers before approving a destination or adding it to a token's Token Access Control allowlist.
+- **Token controls**: freeze one holder's account, pause every transfer, or seize tokens. Freeze needs a freezable token (`isFreezable`), pause needs the `pausable` extension, and seize needs the permanent delegate.
+- **Address screening**: check a wallet against your compliance providers before you approve it as a destination or add it to the token's access list.
 
-Token-control actions require `tokens:admin` permission on the API key.
+Token controls need the `issuance.enforce` grant on the API key; screening needs `compliance.execute`.
 
 ## How it works
 
@@ -22,22 +22,22 @@ Token-control actions require `tokens:admin` permission on the API key.
 
 <Step number={1} title="Screen an address">
 
-Check a Solana address against configured compliance providers before onboarding a wallet or approving it as a transfer destination.
+Check a Solana address against your configured compliance providers before you onboard a wallet or approve it as a transfer destination.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Use the **Screen address** action in the Compliance section of the dashboard.
-
-Enter the wallet address and select the intent (e.g., transfer destination or Token Access Control allowlist candidate). Results appear per provider — each showing risk level, score, and flags.
+The token page has no screening action. When screening is enabled for your organization, the dashboard screens addresses in **Payments**: adding a Solana address to a counterparty checks it first (**Screen and add**).
 
 </Tab>
 <Tab value="API">
 
 <ApiExample operation="screen-compliance-address" />
 
-The response's `data.screening.providers[]` lists each provider's status, risk score, risk level, message, and evaluation time.
+Set `intent` to `transfer_destination`, `wallet_address_addition` or `unknown` (the default). `network` defaults to `solana`.
+
+`data.screening.providers[]` holds one result per provider (`range`, `elliptic`, `trm`, `chainalysis`): its `status` (`ok`, `pending`, `unavailable` or `error`), `riskScore` (which can be `null`), `riskLevel`, `message` and `evaluatedAt`.
 
 See the [Compliance API reference](/docs/reference/api/compliance) for the full schema.
 
@@ -49,35 +49,35 @@ See the [Compliance API reference](/docs/reference/api/compliance) for the full 
 
 <Step number={2} title="Freeze and unfreeze an account">
 
-Prevent a specific holder from sending or receiving this token. The freeze targets one associated token account — other accounts are unaffected.
+Stop one holder from sending or receiving this token. The freeze applies to that holder's token account for this mint; other holders are unaffected.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-On the token detail page, go to the **Compliance** tab and select **Freeze Controls**.
+On the token's **Operations** tab, find **Freeze authority** under **Transfers** and click **Freeze**.
 
-![Freeze Controls tab with empty wallet address and reason fields](/images/tokens/freeze-controls-empty.png)
+<img src="/docs/images/tokens/freeze-controls-empty.png" alt="Freeze form under Freeze authority with empty Wallet address and Reason fields" width="552" height="350" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
-Enter the holder's wallet address and an optional reason, then click **Freeze account**.
+Enter the holder's **Wallet address** and an optional **Reason**, which the audit history keeps. If several wallets hold the freeze authority, choose the signing wallet first. Click **Freeze account**.
 
-![Freeze Controls tab with wallet address and reason filled in](/images/tokens/freeze-controls-filled.png)
+<img src="/docs/images/tokens/freeze-controls-filled.png" alt="Freeze form with a holder's wallet address and a reason filled in" width="552" height="350" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
-Confirm the on-chain submission in the confirmation prompt.
+Confirm with **Freeze now**.
 
-![Freeze account confirmation dialog](/images/tokens/freeze-confirm.png)
+<img src="/docs/images/tokens/freeze-confirm.png" alt="Freeze balance? confirmation with a warning, the token, wallet address and network, and Freeze now" width="513" height="398" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
-The "Freeze transaction finalized." toast appears and the Frozen Accounts count updates to 1.
+The toast reads "Freeze transaction finalized."
 
-![Compliance tab showing Freeze transaction finalized toast and Frozen Accounts count updated to 1](/images/tokens/freeze-confirmed.png)
+![Compliance tab with one frozen account and the Freeze transaction finalized toast](/images/tokens/freeze-confirmed.png)
 
-To lift the freeze, find the account in the frozen list and click **Unfreeze**. Confirm the on-chain submission.
+To lift the freeze, open the same form, enter the address and click **Unfreeze account**, then **Unfreeze now**.
 
-![Unfreeze account confirmation dialog](/images/tokens/unfreeze-confirm.png)
+<img src="/docs/images/tokens/unfreeze-confirm.png" alt="Unfreeze balance? confirmation with a warning, the token, wallet address and network, and Unfreeze now" width="513" height="398" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
-The "Unfreeze transaction finalized." toast appears and the Frozen Accounts count returns to 0.
+The toast reads "Unfreeze transaction finalized."
 
-![Compliance tab showing Unfreeze transaction finalized toast and Frozen Accounts count back to 0](/images/tokens/unfreeze-confirmed.png)
+![Compliance tab with the frozen account count back to 0 and the Unfreeze transaction finalized toast](/images/tokens/unfreeze-confirmed.png)
 
 </Tab>
 <Tab value="API">
@@ -95,7 +95,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
   }'
 ```
 
-`accountAddress` accepts a holder wallet or its token account — SDP derives the associated token account when needed.
+`accountAddress` takes a holder wallet or its token account; for a wallet, SDP finds the token account. A freeze returns `201` with `data.frozenAccount`. An optional `signingCustodyWalletId` must control the current freeze authority.
 
 **Unfreeze:**
 
@@ -123,29 +123,27 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze", {
 
 <Step number={3} title="Pause and unpause the token">
 
-Halt all minting and transfer activity globally. Requires the `pausable` extension on the token.
+Stop every transfer of the token at once. The token needs the `pausable` extension.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-On the token detail page, go to the **Compliance** tab and select **Pause Controls**. Click **Pause token**.
+On **Operations**, click **Pause** on the **Transfers** row.
 
-![Pause Controls tab showing Pause token and Unpause token buttons](/images/tokens/pause-controls.png)
+![Transfers section on Operations with transfers Running and a Pause button](/images/tokens/pause-controls.png)
 
-Confirm the on-chain submission in the confirmation prompt.
+Read the warning, then click **Pause transfers**. It runs at once, unless several wallets hold the pause authority: then a dialog asks which one signs.
 
-![Pause token confirmation dialog](/images/tokens/pause-confirm.png)
+![Pause warning on the Transfers row with Pause transfers and Cancel](/images/tokens/pause-confirm.png)
 
-The prompt uses the only matching authority wallet automatically. If several custody records control the same authority, select the signer before confirming. The Unpause button uses the same selection rules.
+The toast reads "Pause transaction finalized." and the token shows **Paused**: transfers are stopped, and holders keep their balances.
 
-The "Pause transaction finalized." toast appears and an orange **Token is paused** banner displays across the page. All supply and transfer operations are now blocked.
+![Overview showing Paused: transfers are stopped and holders keep their balances, with Resume transfers](/images/tokens/pause-confirmed.png)
 
-![Compliance tab showing Token is paused banner and Pause transaction finalized toast](/images/tokens/pause-confirmed.png)
+To resume, click **Resume** on the **Transfers** row and then **Resume transfers**. **Resume transfers** on **Overview** does the same after a confirmation.
 
-To resume, click **Unpause token** and confirm.
-
-![Unpause token confirmation dialog](/images/tokens/unpause-confirm.png)
+<img src="/docs/images/tokens/unpause-confirm.png" alt="Resume transfers for all holders? confirmation with a warning, the signing wallet and Resume transfers" width="513" height="404" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
 </Tab>
 <Tab value="API">
@@ -158,9 +156,9 @@ To resume, click **Unpause token** and confirm.
 
 <ApiExample operation="unpause-token" />
 
-`signingCustodyWalletId` is optional when exactly one in-scope custody record matches the current pause authority; send `{}` to use that resolution. Multiple matches without a selector return `409`. An explicit choice must control the live authority and pass authorization and runtime checks. Reusing an idempotency key with a different wallet returns `409`.
+`signingCustodyWalletId` is optional when exactly one custody wallet in scope holds the current pause authority; send `{}` to use it. Several matches without a selector return `409`. A wallet you name must control the live authority and pass the authorization and runtime checks. Reusing an idempotency key with a different wallet returns `409`.
 
-While paused, all transfer-related and supply-management operations are rejected until unpause.
+While paused, SDP refuses mint, burn, seize and force burn with `400 TOKEN_PAUSED`, and the pausable extension stops transfers onchain. Pausing a paused token, or unpausing one that isn't, returns `400`.
 
 </Tab>
 </Tabs>
@@ -170,13 +168,13 @@ While paused, all transfer-related and supply-management operations are rejected
 
 <Step number={4} title="Seize tokens">
 
-Force-transfer tokens from a holder to a recovery address without the holder's signature. For court orders and regulatory enforcement. Requires `tokens:admin`.
+Move tokens from a holder to a recovery address without the holder's signature, using the permanent delegate. Use it for court orders and regulatory enforcement.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In the **Compliance** tab, click **Seize tokens**. Provide the source, destination, amount, and a memo (strongly recommended for audit records). Confirm to submit.
+On **Operations**, open **Recovery** and click **Force transfer**. Enter the **Source**, **Destination**, **Amount** and a **Memo** (recommended for the audit record), then click **Force transfer** and confirm with **Transfer now**.
 
 </Tab>
 <Tab value="API">
@@ -196,6 +194,8 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize \
   }'
 ```
 
+An optional `signingCustodyWalletId` must control the current permanent delegate. The destination must pass the token's access list: on an allowlist token it must be listed (`403 NOT_ON_TOKEN_ALLOWLIST`), and on a blocklist token it must not be (`403 ON_TOKEN_BLOCKLIST`).
+
 </Tab>
 </Tabs>
 </StepPanel>
@@ -206,7 +206,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize \
 
 ## Compliance response workflow
 
-1. **Screen** the address via the Compliance API
-2. **Freeze** the affected account while investigating
-3. Based on findings — **Unfreeze** if cleared, **Seize** tokens to a recovery address, or **Force-burn** (see [Mint and Burn](/docs/tokens/mint-and-burn))
-4. Record all actions with `memo` fields for the audit trail
+1. **Screen** the address with the Compliance API.
+2. **Freeze** the account while you investigate.
+3. Based on the findings, **unfreeze** it if cleared, **seize** its tokens to a recovery address, or **force-burn** them (see [Mint and Burn](/docs/tokens/mint-and-burn)).
+4. Record a reason or memo on every action for the audit trail.

@@ -75,6 +75,13 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - Update `docs/architecture/module-map.md` with `pnpm generate:module-map`; do not edit it by hand.
 - A new env key the API reads goes in `apps/sdp-api/src/types/env.d.ts`, `scripts/secret-keys.mjs` and
   `turbo.json` `globalEnv`: turbo drops undeclared keys, so without the last two the local API never sees it.
+- The self-hosting configurator (`packages/sdp-env-config/src/fields.ts`) writes only keys something reads.
+  `scripts/check-env-configurator-drift.mjs` also passes any key `infra/self-hosted/.env.example` or
+  `API_LOCAL_ENV_KEYS` lists, and neither proves a reader, so find the reader before adding a field; a choice
+  that only shapes the form goes in `UI_ONLY_KEYS` and that script's `IGNORE`.
+- The root `docker-compose.yml` passes each `sdp-api` and `sdp-web` key by hand, so a key the root `.env.example`
+  lists needs its passthrough there. `${KEY:-}` sends an empty string: use it only for a key whose reader treats
+  empty as unset.
 - **Migrations run while the previous revision still serves traffic.** `pnpm check:migration-compat`
   rejects one the previous image cannot run against and common DDL that holds a blocking lock on an
   existing table: build an index `CONCURRENTLY`, alone in a `-- sdp:migration-mode: non-transactional`

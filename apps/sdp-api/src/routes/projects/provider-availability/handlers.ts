@@ -2,9 +2,8 @@ import type { ProjectProviderAvailability } from "@sdp/types/provider-access";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";
-import { isCustodyProviderOffered } from "@/lib/feature-flags";
 import { success } from "@/lib/response";
-import { isModuleInChannel, isRampProviderInChannel } from "@/middleware/require-module";
+import { isProjectProviderEntryInChannel } from "@/middleware/require-module";
 import { EARN_PUBLIC_SURFACE_PUBLISHED } from "@/openapi/spec";
 import { getProjectProviderAvailability } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
@@ -31,17 +30,14 @@ function publishedProviderAvailability(
 ): ProjectProviderAvailability {
   return {
     ...availability,
-    providers: availability.providers.filter((entry) => {
-      if (entry.family === "ramps") return isRampProviderInChannel(c, entry.provider);
-      if (entry.family === "earn" && !EARN_PUBLIC_SURFACE_PUBLISHED) return false;
-      // "Offered", not the document's `isCustodyProviderPublished`: that never names
-      // `local`, which a self-hosted dashboard sets up through this route. The
-      // document's custody response enums are open, so a `local` entry still validates.
-      if (entry.family === "custody" && !isCustodyProviderOffered(c.env, entry.provider)) {
-        return false;
-      }
-      return isModuleInChannel(c, entry.family);
-    }),
+    // Custody uses "offered", not the document's `isCustodyProviderPublished`: that
+    // never names `local`, which a self-hosted dashboard sets up through this route.
+    // The document's custody response enums are open, so a `local` entry still validates.
+    providers: availability.providers.filter(
+      (entry) =>
+        !(entry.family === "earn" && !EARN_PUBLIC_SURFACE_PUBLISHED) &&
+        isProjectProviderEntryInChannel(c, entry)
+    ),
   };
 }
 

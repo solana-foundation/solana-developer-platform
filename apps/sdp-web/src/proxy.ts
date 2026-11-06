@@ -4,7 +4,6 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { SIGN_IN_PATH, SIGN_UP_PATH, signInHref } from "@/lib/clerk-config";
 import { parseDashboardPathname } from "@/lib/dashboard-project-path";
-import { isDemoSessionCookie } from "@/lib/payments-demo/demo-cookie";
 import {
   PROJECT_COOKIE_NAME,
   PROJECT_COOKIE_OPTIONS,
@@ -79,21 +78,6 @@ function isCrossSiteWrite(req: NextRequest): boolean {
   return ["cross-site", "same-site"].includes(fetchSite);
 }
 
-/**
- * The demo session's cookies to forget on this request: all of them on a full page load (a
- * refresh, a new tab, the demo switched on or off), none on the app's own navigations and
- * fetches. Demo changes live for one page load, as a browser tab's memory would.
- */
-export function demoSessionCookiesToDrop(req: NextRequest): string[] {
-  if (req.headers.get("sec-fetch-dest") !== "document") {
-    return [];
-  }
-  return req.cookies
-    .getAll()
-    .map((cookie) => cookie.name)
-    .filter(isDemoSessionCookie);
-}
-
 function getUnauthenticatedUrl(req: NextRequest): string {
   return new URL(signInHref(`${req.nextUrl.pathname}${req.nextUrl.search}`), req.url).toString();
 }
@@ -114,14 +98,6 @@ export const proxy = clerkMiddleware(
     const { projectId } = parseDashboardPathname(req.nextUrl.pathname);
     const requestHeaders = new Headers(req.headers);
     requestHeaders.set("x-sdp-pathname", req.nextUrl.pathname);
-    const droppedDemoCookies = demoSessionCookiesToDrop(req);
-    if (droppedDemoCookies.length > 0) {
-      // Filter the raw header, so every other cookie reaches the page byte for byte.
-      const kept = (req.headers.get("cookie") ?? "")
-        .split(";")
-        .filter((pair) => !isDemoSessionCookie(pair.split("=", 1)[0]?.trim() ?? ""));
-      requestHeaders.set("cookie", kept.join(";").trim());
-    }
 
     // The request's Project is the one its tab renders: page renders and server
     // actions (Next posts actions to the tab's URL) take it from this URL, browser
@@ -140,10 +116,6 @@ export const proxy = clerkMiddleware(
         headers: requestHeaders,
       },
     });
-
-    for (const name of droppedDemoCookies) {
-      response.cookies.set(name, "", { path: "/", maxAge: 0 });
-    }
 
     if (
       (req.nextUrl.pathname === SIGN_IN_PATH ||

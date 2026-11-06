@@ -14,3 +14,15 @@ export const RPC_UNAVAILABLE_REASONS = [
 ] as const;
 
 export type RpcUnavailableReason = (typeof RPC_UNAVAILABLE_REASONS)[number];
+
+/** The providers in SDP's managed RPC pool. `default` is the operator's fallback endpoint, not a provider a project sees. */
+export const MANAGED_RPC_PROVIDERS = [
+  "alchemy",
+  "default",
+  "helius",
+  "nodit",
+  "quicknode",
+  "triton",
+  "validationcloud",
+] as const;
+export type ManagedRpcProvider = (typeof MANAGED_RPC_PROVIDERS)[number];

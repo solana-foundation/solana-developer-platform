@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   activityKind,
+  formatDate,
+  formatDateTime,
   formatDecimalAmount,
   formatElapsedShort,
   formatSignedAmount,
@@ -52,20 +54,53 @@ describe("formatElapsedShort", () => {
   const now = Date.parse("2026-09-24T12:00:00Z");
 
   it("uses one narrow unit", () => {
-    expect(formatElapsedShort("2026-09-24T11:58:00Z", "en-US", now)).toBe("2m");
-    expect(formatElapsedShort("2026-09-24T09:00:00Z", "en-US", now)).toBe("3h");
-    expect(formatElapsedShort("2026-09-19T12:00:00Z", "en-US", now)).toBe("5d");
-    expect(formatElapsedShort("2026-09-24T11:59:50Z", "en-US", now)).toBe("1m");
+    expect(formatElapsedShort("2026-09-24T11:58:00Z", "en-US", "UTC", now)).toBe("2m");
+    expect(formatElapsedShort("2026-09-24T09:00:00Z", "en-US", "UTC", now)).toBe("3h");
+    expect(formatElapsedShort("2026-09-19T12:00:00Z", "en-US", "UTC", now)).toBe("5d");
+    expect(formatElapsedShort("2026-09-24T11:59:50Z", "en-US", "UTC", now)).toBe("1m");
   });
 
   it("switches to a date after a week or for future times", () => {
-    expect(formatElapsedShort("2026-09-10T12:00:00Z", "en-US", now)).toBe("Sep 10");
-    expect(formatElapsedShort("2026-09-25T12:00:00Z", "en-US", now)).toBe("Sep 25");
+    expect(formatElapsedShort("2026-09-10T12:00:00Z", "en-US", "UTC", now)).toBe("Sep 10");
+    expect(formatElapsedShort("2026-09-25T12:00:00Z", "en-US", "UTC", now)).toBe("Sep 25");
+  });
+
+  it("dates the day it was in the viewer's zone", () => {
+    expect(formatElapsedShort("2026-09-11T02:00:00Z", "en-US", "America/Chicago", now)).toBe(
+      "Sep 10"
+    );
   });
 
   it("returns null for a missing or invalid timestamp", () => {
-    expect(formatElapsedShort(undefined)).toBeNull();
-    expect(formatElapsedShort("not a date")).toBeNull();
+    expect(formatElapsedShort(undefined, "en-US", "UTC")).toBeNull();
+    expect(formatElapsedShort("not a date", "en-US", "UTC")).toBeNull();
+  });
+});
+
+describe("formatDateTime and formatDate", () => {
+  // An environment zone that is neither the server's nor the viewer's, so a format that falls
+  // back to it reads as neither.
+  beforeEach(() => {
+    vi.stubEnv("TZ", "Asia/Tokyo");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("formats in the zone it is given, not the environment's", () => {
+    expect(formatDateTime("2026-11-04T22:14:00Z", "en-US", "UTC")).toMatch(
+      /^Nov 4, 2026, 10:14\sPM$/
+    );
+    expect(formatDateTime("2026-11-04T22:14:00Z", "en-US", "America/Chicago")).toMatch(
+      /^Nov 4, 2026, 4:14\sPM$/
+    );
+    expect(formatDate("2026-11-05T03:00:00Z", "en-US", "America/Chicago")).toBe("Nov 4, 2026");
+    expect(formatDate("2026-11-05T03:00:00Z", "en-US", "UTC")).toBe("Nov 5, 2026");
+  });
+
+  it("returns null for a missing or invalid timestamp", () => {
+    expect(formatDateTime(null, "en-US", "UTC")).toBeNull();
+    expect(formatDate("not a date", "en-US", "UTC")).toBeNull();
   });
 });
 
@@ -143,5 +178,12 @@ describe("formatDecimalAmount", () => {
     expect(formatDecimalAmount("12000", "en")).toBe("12,000.00");
     expect(formatDecimalAmount("12.5", "en")).toBe("12.50");
     expect(formatDecimalAmount("abc", "en")).toBe("abc");
+  });
+
+  it("keeps every digit of an amount typed with a bare leading or trailing point", () => {
+    expect(formatDecimalAmount(".000001", "en")).toBe("0.000001");
+    expect(formatDecimalAmount("-.5", "en")).toBe("-0.50");
+    expect(formatDecimalAmount("1000000.", "en")).toBe("1,000,000.00");
+    expect(formatDecimalAmount(".", "en")).toBe(".");
   });
 });

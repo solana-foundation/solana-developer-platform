@@ -1,137 +1,135 @@
 "use client";
 
-import type { CustodyWalletSummary } from "@sdp/types/custody";
-import { Badge } from "@sdp/ui/badge";
-import { TableCell } from "@sdp/ui/table";
-import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
-import Link from "next/link";
+import type { CustodyProvider, CustodyWalletSummary } from "@sdp/types/custody";
+import { Button } from "@sdp/ui/button";
+import { PlusIcon } from "lucide-react";
+import { formatCustodyProviderName } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import { WalletAddressCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
 import {
-  formatCreatedDate,
   formatWalletMeta,
+  formatWalletPurposeLabel,
 } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-format-utils";
-import { useLocale, useTranslations } from "@/i18n/provider";
+import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
+import { EntityLink } from "@/components/entity-link";
+import { RecordBlock } from "@/components/refresh-record";
+import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
 /**
- * Formats a wallet's headline balance.
- *
- * Shows the largest holding rather than a total: the tokens are different
- * assets and summing them would invent a number. Wallets whose balances could
- * not be read show nothing rather than a zero, which would be a claim.
+ * The line under a wallet's name: the provider, then what the wallet is for, or why it cannot
+ * sign. A wallet on an ended connection cannot sign through it any more, whatever its own
+ * status still says.
  */
-function balanceLabel(wallet: CustodyWalletSummary): string | null {
-  const balances = wallet.balances;
-  if (!balances || balances.length === 0) return null;
-  const largest = [...balances].sort(
-    (left, right) => Number(right.uiAmount) - Number(left.uiAmount)
-  )[0];
-  if (!largest) return null;
-  return `${largest.uiAmount} ${largest.token}`;
+function walletSubtitle(
+  wallet: CustodyWalletSummary,
+  provider: CustodyProvider,
+  isDeactivated: boolean,
+  t: ReturnType<typeof useTranslations>
+): string {
+  const parts = [formatCustodyProviderName(provider)];
+  if (isDeactivated) {
+    parts.push(t("DashboardCustody.walletReadOnly"));
+  } else if (wallet.status !== "active") {
+    parts.push(wallet.status);
+  }
+  const purposeLabel = formatWalletPurposeLabel(wallet.purpose, t);
+  if (purposeLabel) {
+    parts.push(purposeLabel);
+  }
+  return parts.join(" · ");
+}
+
+function walletsEmptyMessage(
+  walletsUnavailable: boolean,
+  pendingWalletLabel: string | null,
+  t: ReturnType<typeof useTranslations>
+): string {
+  if (walletsUnavailable) {
+    return t("DashboardCustody.connectionWalletsUnavailable");
+  }
+  if (pendingWalletLabel) {
+    return t("DashboardCustody.walletsPendingSetup");
+  }
+  return t("DashboardCustody.connectionNoWallets");
 }
 
 /**
- * The connection's wallets, read-only.
+ * The connection's wallets.
  *
- * Read-only on purpose: wallets already have a page of their own that owns
- * every action on them, and duplicating those controls here would give the same
- * operation two homes that could disagree. A row is a link to that page.
+ * Each row links to the wallet's own page, which owns every action on it; duplicating those
+ * controls here would give the same operation two homes that could disagree. The one action
+ * here is adding a wallet to this connection.
  */
 export function ConnectionWalletsCard({
   wallets,
   walletsUnavailable,
   isDeactivated,
   pendingWalletLabel,
+  provider,
+  onAddWallet,
 }: {
   wallets: CustodyWalletSummary[];
   walletsUnavailable: boolean;
   isDeactivated: boolean;
   pendingWalletLabel: string | null;
+  provider: CustodyProvider;
+  /** `null` when the viewer cannot add a wallet here. */
+  onAddWallet: (() => void) | null;
 }) {
   const t = useTranslations();
-  const locale = useLocale();
   const href = useProjectHref();
 
   return (
-    <section className="rounded-2xl border border-border-default bg-surface-raised p-6">
-      <h2 className="text-base font-medium text-primary">{t("DashboardCustody.wallets")}</h2>
-      {/* The named container the Created column's `@2xl` query measures. Without
-          it the query has nothing to resolve against, so that column stayed
-          hidden at every width and the table rendered a column short. */}
-      <div className="@container/connection-wallets mt-3 overflow-hidden rounded-xl border border-border-default">
-        <Table className="[&_table]:w-full [&_table]:min-w-0 [&_table]:table-fixed">
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[40%]">{t("DashboardCustody.wallet")}</TableHead>
-              <TableHead className="w-[24%]">{t("DashboardCustody.balance")}</TableHead>
-              <TableHead className="w-[20%]">{t("DashboardCustody.status")}</TableHead>
-              <TableHead className="hidden w-[16%] @2xl/connection-wallets:table-cell">
-                {t("DashboardCustody.created")}
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {wallets.map((wallet) => (
-              <TableRow key={wallet.walletId} data-wallet-id={wallet.walletId}>
-                <TableCell className="font-medium">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <Link
-                      href={href(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`)}
-                      className="truncate hover:underline"
-                    >
-                      {wallet.label?.trim() || wallet.walletId}
-                    </Link>
-                  </span>
-                  <span className="mt-1 flex items-center gap-1">
-                    <span className="truncate font-mono text-[11px] font-normal text-tertiary">
-                      {formatWalletMeta(wallet.publicKey)}
-                    </span>
-                    <WalletAddressCopyButton
-                      address={wallet.publicKey}
-                      tooltip={wallet.publicKey}
-                    />
-                  </span>
-                </TableCell>
-                <TableCell className="text-xs text-secondary">
-                  {balanceLabel(wallet) ?? "—"}
-                </TableCell>
-                <TableCell className="text-xs">
-                  {/* A wallet on an ended connection cannot sign through it any
-                      more, whatever its own row still says. */}
-                  {isDeactivated ? (
-                    <Badge variant="outline">{t("DashboardCustody.walletReadOnly")}</Badge>
-                  ) : (
-                    <Badge variant={wallet.status === "active" ? "success" : "outline"}>
-                      {wallet.status === "active"
-                        ? t("DashboardCustody.connectionStatusActive")
-                        : wallet.status}
-                    </Badge>
-                  )}
-                </TableCell>
-                <TableCell className="hidden text-xs text-secondary @2xl/connection-wallets:table-cell">
-                  {formatCreatedDate(wallet.createdAt, locale)}
-                </TableCell>
-              </TableRow>
-            ))}
-            {wallets.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={3} className="py-8 text-center text-sm text-tertiary">
-                  {walletsUnavailable
-                    ? t("DashboardCustody.connectionWalletsUnavailable")
-                    : pendingWalletLabel
-                      ? t("DashboardCustody.walletsPendingSetup")
-                      : t("DashboardCustody.connectionNoWallets")}
-                </TableCell>
-                {/* Hides with the column it belongs to. A `colSpan` is a fixed
-                    number and cannot follow a container query, so spanning all
-                    four while Created was hidden gave the table a phantom
-                    fourth column: the header tint stopped short of this row. */}
-                <TableCell className="hidden @2xl/connection-wallets:table-cell" />
-              </TableRow>
-            ) : null}
-          </TableBody>
-        </Table>
-      </div>
-    </section>
+    <RecordBlock
+      title={t("DashboardCustody.wallets")}
+      hint={t("DashboardCustody.connectionWalletsHint")}
+    >
+      {wallets.length > 0 ? (
+        <ul>
+          {wallets.map((wallet) => (
+            <li
+              key={wallet.walletId}
+              data-wallet-id={wallet.walletId}
+              className="flex min-w-0 items-center gap-3 border-b border-border-subtle py-3 last:border-b-0"
+            >
+              <WalletProviderMark provider={provider} size="row" />
+              <div className="min-w-0 flex-1">
+                <EntityLink
+                  href={href(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`)}
+                  className="text-field text-primary"
+                >
+                  {wallet.label?.trim() || wallet.walletId}
+                </EntityLink>
+                <p className="truncate text-body text-secondary">
+                  {walletSubtitle(wallet, provider, isDeactivated, t)}
+                </p>
+              </div>
+              <span className="flex shrink-0 items-center gap-1">
+                <span className="text-body text-secondary tabular-nums">
+                  {formatWalletMeta(wallet.publicKey, 4, 4)}
+                </span>
+                <WalletAddressCopyButton address={wallet.publicKey} tooltip={wallet.publicKey} />
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-body text-tertiary">
+          {walletsEmptyMessage(walletsUnavailable, pendingWalletLabel, t)}
+        </p>
+      )}
+      {onAddWallet ? (
+        <div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onAddWallet}
+            iconLeft={<PlusIcon className="size-4" />}
+          >
+            {t("DashboardCustody.addWalletAction")}
+          </Button>
+        </div>
+      ) : null}
+    </RecordBlock>
   );
 }

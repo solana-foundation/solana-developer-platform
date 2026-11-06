@@ -77,26 +77,31 @@ const DECIMAL_AMOUNT = /^-?\d+(\.\d+)?$/;
 /**
  * A decimal amount with grouping and at least two fraction digits ("12,000.00"), keeping every
  * digit the value has: the string is formatted as written, not through a float, so no nonzero
- * amount rounds to "0.00" and a large one keeps its last digits. Non-numeric input passes
- * through.
+ * amount rounds to "0.00" and a large one keeps its last digits. A point with no digit before
+ * or after it (".5", "5.") is written too. Non-numeric input passes through.
  *
  * @param value - Decimal string.
  * @param locale - Formatting locale.
  * @returns The formatted amount.
  */
 export function formatDecimalAmount(value: string, locale?: string): string {
-  const trimmed = value.trim();
-  if (!DECIMAL_AMOUNT.test(trimmed)) {
-    const numeric = Number(trimmed);
-    return trimmed !== "" && Number.isFinite(numeric)
+  // ".000001" and "5." as typed, spelled "0.000001" and "5" so they take the exact path.
+  const decimal = value
+    .trim()
+    .replace(/^(-?)\.(?=\d)/, "$10.")
+    .replace(/(\d)\.$/, "$1");
+  if (!DECIMAL_AMOUNT.test(decimal)) {
+    const numeric = Number(decimal);
+    return decimal !== "" && Number.isFinite(numeric)
       ? new Intl.NumberFormat(locale, { minimumFractionDigits: 2 }).format(numeric)
       : value;
   }
-  const fractionDigits = trimmed.split(".")[1]?.length ?? 0;
+  const fractionDigits = decimal.split(".")[1]?.length ?? 0;
+  // SAFETY: DECIMAL_AMOUNT matched, so `decimal` is a decimal literal Intl formats exactly.
   return new Intl.NumberFormat(locale, {
     minimumFractionDigits: 2,
     maximumFractionDigits: Math.min(Math.max(2, fractionDigits), 100),
-  }).format(trimmed as `${number}`);
+  }).format(decimal as `${number}`);
 }
 
 /**
@@ -153,12 +158,14 @@ const ELAPSED_UNITS = [
  *
  * @param iso - ISO timestamp.
  * @param locale - Formatting locale.
+ * @param timeZone - The viewer's zone (`useTimeZone` or `getRequestTimeZone`), for the date.
  * @param now - Reference time, for tests.
  * @returns The elapsed label, or null for a missing or invalid timestamp.
  */
 export function formatElapsedShort(
   iso: string | undefined,
-  locale?: string,
+  locale: string,
+  timeZone: string,
   now: number = Date.now()
 ): string | null {
   if (!iso) return null;
@@ -166,7 +173,9 @@ export function formatElapsedShort(
   if (Number.isNaN(time)) return null;
   const elapsed = now - time;
   if (elapsed < 0 || elapsed >= 7 * 86_400_000) {
-    return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }).format(time);
+    return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", timeZone }).format(
+      time
+    );
   }
   const { unit, ms } =
     [...ELAPSED_UNITS].reverse().find((candidate) => elapsed >= candidate.ms) ?? ELAPSED_UNITS[0];
@@ -259,13 +268,20 @@ export function summarizeBatch(
 }
 
 /**
- * A list's created-at cell: "Aug 22, 2026, 10:18 AM".
+ * A list's created-at cell: "Aug 22, 2026, 10:18 AM". The zone is always passed: left to the
+ * environment, the server formats in its own and the browser in the viewer's, and a page the
+ * server rendered fails to hydrate.
  *
  * @param iso - ISO timestamp.
  * @param locale - Formatting locale.
+ * @param timeZone - The viewer's zone, from `useTimeZone` or `getRequestTimeZone`.
  * @returns The formatted date and time, or null for a missing or invalid timestamp.
  */
-export function formatDateTime(iso: string | null | undefined, locale?: string): string | null {
+export function formatDateTime(
+  iso: string | null | undefined,
+  locale: string,
+  timeZone: string
+): string | null {
   if (!iso) return null;
   const time = new Date(iso).getTime();
   if (Number.isNaN(time)) return null;
@@ -275,17 +291,23 @@ export function formatDateTime(iso: string | null | undefined, locale?: string):
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZone,
   }).format(time);
 }
 
 /**
- * A list's date-only cell: "Aug 5, 2026".
+ * A list's date-only cell: "Aug 5, 2026", the day it was in the viewer's zone.
  *
  * @param iso - ISO timestamp.
  * @param locale - Formatting locale.
+ * @param timeZone - The viewer's zone, from `useTimeZone` or `getRequestTimeZone`.
  * @returns The formatted date, or null for a missing or invalid timestamp.
  */
-export function formatDate(iso: string | null | undefined, locale?: string): string | null {
+export function formatDate(
+  iso: string | null | undefined,
+  locale: string,
+  timeZone: string
+): string | null {
   if (!iso) return null;
   const time = new Date(iso).getTime();
   if (Number.isNaN(time)) return null;
@@ -293,5 +315,6 @@ export function formatDate(iso: string | null | undefined, locale?: string): str
     month: "short",
     day: "numeric",
     year: "numeric",
+    timeZone,
   }).format(time);
 }

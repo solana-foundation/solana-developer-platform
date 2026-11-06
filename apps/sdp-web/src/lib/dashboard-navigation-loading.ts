@@ -27,13 +27,6 @@ export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
   recurring: "/dashboard/payments/recurring",
 } as const;
 
-export const DASHBOARD_INTEGRATIONS_SUBNAV_HREFS = {
-  custody: "/dashboard/integrations?tab=custody",
-  ramps: "/dashboard/integrations?tab=ramps",
-  compliance: "/dashboard/integrations?tab=compliance",
-  privacy: "/dashboard/integrations?tab=privacy",
-} as const;
-
 export type DashboardLoadingRoute =
   | "home"
   | "token-holdings"

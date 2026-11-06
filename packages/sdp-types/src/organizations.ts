@@ -70,7 +70,7 @@ export function memberStatusMayMoveMoney(status: string): boolean {
  */
 export const ORGANIZATION_SUSPENDED_REASON = "organization_suspended";
 
-export const INVITATION_STATUSES = ["pending", "accepted", "expired", "revoked"] as const;
+export const INVITATION_STATUSES = ["pending", "accepted", "expired", "revoked", "failed"] as const;
 export type InvitationStatus = (typeof INVITATION_STATUSES)[number];
 /**
  * `details.reason` on the 401 that refuses a person whose newest invitation to
@@ -78,6 +78,11 @@ export type InvitationStatus = (typeof INVITATION_STATUSES)[number];
  * rather than that they were never invited.
  */
 export const INVITATION_EXPIRED_REASON = "invitation_expired";
+/**
+ * `details.reason` on the 400 that refuses an invite to an address the identity
+ * provider does not let sign up, so the dashboard can say so.
+ */
+export const INVITEE_NOT_ALLOWED_REASON = "invitee_not_allowed";
 
 /**
  * Whether an invitation no longer admits because it expired: marked expired,
@@ -96,16 +101,6 @@ export function invitationHasExpired(
     (invitation.status === "pending" && new Date(invitation.expiresAt) <= now)
   );
 }
-export const ORGANIZATION_RPC_PROVIDERS = [
-  "alchemy",
-  "default",
-  "helius",
-  "nodit",
-  "quicknode",
-  "triton",
-  "validationcloud",
-] as const;
-export type OrganizationRpcProvider = (typeof ORGANIZATION_RPC_PROVIDERS)[number];
 
 export interface Organization {
   id: string; // org_xxxxxxxxxxxx

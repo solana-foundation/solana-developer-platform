@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TokenOperations } from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/asset-profile/use-token-operations";
@@ -94,6 +95,33 @@ function renderStatefulForm(initial: string) {
   return { ops: base, submitted };
 }
 
+/**
+ * The form when two custody wallets hold the authority, keeping the chosen signer as the hook
+ * does, with an action running when `pending`.
+ */
+function SignerHarness({ pending }: { pending: boolean }) {
+  const [signerWalletId, setSignerWalletId] = useState("");
+  const ops: TokenOperations = {
+    ...buildOps("Addr2"),
+    isPending: pending,
+    authorityModalSignerWalletId: signerWalletId,
+    authorityModalSignerSelection: {
+      wallets: [wallets[0], { ...wallets[0], id: "w3", walletId: "p3", label: "Treasury backup" }],
+      defaultWalletId: "",
+      unavailableReason: null,
+    },
+    setAuthorityModalSignerWalletId: setSignerWalletId,
+  };
+  return <AuthorityForm ops={ops} />;
+}
+
+/** The picker under the "Signing wallet" label; the holder field is a combobox too. */
+function signerPicker(): HTMLElement {
+  const block = screen.getByText(messages.DashboardIssuance.signer.label).closest("div");
+  if (!block) throw new Error("The signing wallet label sits outside its block");
+  return within(block).getByRole("combobox");
+}
+
 const save = () => screen.getByRole("button", { name: messages.DashboardIssuance.authority.save });
 
 describe("AuthorityForm", () => {
@@ -154,5 +182,29 @@ describe("AuthorityForm", () => {
     fireEvent.click(screen.getByRole("button", { name: authority.chooseWallet }));
     expect(ops.setAuthorityModalNewAuthority).toHaveBeenLastCalledWith("Addr1");
     expect(screen.queryByRole("textbox", { name: "Freeze authority" })).toBeNull();
+  });
+
+  it("keeps the signing wallet on screen once chosen when several wallets hold the authority", async () => {
+    const user = userEvent.setup();
+    render(
+      <I18nProvider locale="en" messages={messages}>
+        <SignerHarness pending={false} />
+      </I18nProvider>
+    );
+    expect(save()).toHaveProperty("disabled", true);
+
+    await user.click(signerPicker());
+    await user.click(await screen.findByRole("option", { name: /Treasury backup/ }));
+    expect(signerPicker().textContent).toContain("Treasury backup");
+    expect(save()).toHaveProperty("disabled", false);
+  });
+
+  it("locks the signing wallet while an action runs", () => {
+    render(
+      <I18nProvider locale="en" messages={messages}>
+        <SignerHarness pending />
+      </I18nProvider>
+    );
+    expect(signerPicker().hasAttribute("data-disabled")).toBe(true);
   });
 });

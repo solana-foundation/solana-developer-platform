@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useSyncExternalStore } from "react";
+import useSWR from "swr";
 import { z } from "zod";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
@@ -16,7 +17,6 @@ import {
   subscribeQuickStart,
   subscribeQuickStartStatusStale,
 } from "@/lib/dashboard-quick-start";
-import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { quickStartQueryKeys } from "./quick-start-query-key";
 
 const STATUS_REFRESH_MS = 120_000;
@@ -65,7 +65,7 @@ function useQuickStartStatus(
   skipped: QuickStartPrefs["skipped"]
 ): QuickStartStatus | null {
   const { initialQuickStartStatus, selectedProjectId } = useDashboardWorkspace();
-  const { data: status, mutate: refreshStatus } = usePersistedDashboardSWR(
+  const { data: status, mutate: refreshStatus } = useSWR(
     live && selectedProjectId ? quickStartQueryKeys.status(selectedProjectId) : null,
     fetchQuickStartStatus,
     {

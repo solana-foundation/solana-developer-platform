@@ -28,9 +28,9 @@ import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspac
 import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { copyPendingText } from "@/lib/copy-pending-text";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
-import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import {
   PAYMENT_REQUEST_NEW_HREF,
   PAYMENT_REQUESTS_HREF,
@@ -92,6 +92,7 @@ function PaymentRequestsTable({
   onCopyLink: ((request: PaymentRequest) => void) | null;
 }) {
   const t = useTranslations();
+  const timeZone = useTimeZone();
   return (
     <div className="overflow-x-auto -mx-3">
       <Table className="min-w-[760px] rounded-none border-0">
@@ -150,7 +151,7 @@ function PaymentRequestsTable({
               <TableCell
                 className={cn(PAYMENTS_TABLE_CELL, "whitespace-nowrap text-secondary tabular-nums")}
               >
-                {formatDateTime(request.createdAt, locale)}
+                {formatDateTime(request.createdAt, locale, timeZone)}
               </TableCell>
               {onCopyLink ? (
                 <TableCell className="text-right whitespace-nowrap">
@@ -395,7 +396,6 @@ export function PaymentRequestsWorkspace({
   listState,
 }: PaymentRequestsWorkspaceProps) {
   const t = useTranslations();
-  const demo = usePaymentsDemo();
   const locale = useLocale();
   const amountLabel = usePaymentRequestAmountLabel();
   const router = useRouter();
@@ -423,11 +423,6 @@ export function PaymentRequestsWorkspace({
   const listIsEmpty = total === 0 && listState.status === null && listState.search === null;
 
   const copyLink = (row: PaymentRequest) => {
-    // A demo request lives in this browser only, so the public pay page can't open its link.
-    if (demo) {
-      toast.info(t("DashboardPayments.demo.noPayLink"));
-      return;
-    }
     // Reads never carry the pay link (APE-849); the link read returns it only to a
     // member whose role may manage payment requests.
     let refusal: string | null = null;
