@@ -1,5 +1,8 @@
 import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapter";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SigningPort } from "@sdp/custody/signing";
+import type { CustodyMode } from "@sdp/types/custody";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as events from "@/runtime/money-path-events";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
 import type { CustodyCipher } from "@/services/custody-cipher/cipher-router";
 import {
@@ -9,6 +12,7 @@ import {
   type PrivyCredentialAdapterInput,
 } from "@/services/domain/signing/provider-adapter-factory";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import { inSandboxScope } from "@/test/helpers/cluster-rpc";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import type { Env } from "@/types/env";
 
@@ -74,6 +78,10 @@ describe("custody adapter factories and the release channel", () => {
     custodyReleaseChannel.outOfChannelMode = null;
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("refuses a Managed config out of channel before any decrypt", async () => {
     custodyReleaseChannel.outOfChannelMode = "managed";
     const decrypt = createRejectingDecrypt();
@@ -136,9 +144,57 @@ describe("custody adapter factories and the release channel", () => {
     custodyReleaseChannel.outOfChannelMode = "managed";
     const read = vi.fn();
 
-    const adapter = createPrivyAdapterFromCredential(createEnv(), createObservedCredential(read));
+    const adapter = inSandboxScope(() =>
+      createPrivyAdapterFromCredential(createEnv(), createObservedCredential(read))
+    );
 
     expect(adapter).toBeInstanceOf(KeychainPrivyAdapter);
     expect(read).toHaveBeenCalled();
+  });
+
+  it.each<[CustodyMode, () => Promise<SigningPort>]>([
+    [
+      "byok",
+      async () => createPrivyAdapterFromCredential(createEnv(), createObservedCredential(vi.fn())),
+    ],
+    [
+      "managed",
+      () =>
+        createAdapterFromEncryptedConfig(
+          {
+            ...createEnv(),
+            PRIVY_APP_ID: "privy-app-factory-managed",
+            PRIVY_APP_SECRET: "privy-secret-factory-managed",
+          },
+          ORGANIZATION_ID,
+          {
+            ...FIREBLOCKS_RECORD,
+            provider: "privy",
+            config: JSON.stringify({ provider: "privy" }),
+          },
+          { encrypt: vi.fn<CustodyCipher["encrypt"]>(), decrypt: createRejectingDecrypt() }
+        ),
+    ],
+  ])("logs a %s Privy adapter's calls with its custody mode and cluster", async (mode, build) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ address: "11111111111111111111111111111111", chain_type: "solana" })
+    );
+    const logEvent = vi.spyOn(events, "logEvent");
+
+    await inSandboxScope(async () =>
+      (await build()).getPublicKey("privy-wallet-factory-release-channel")
+    );
+
+    expect(logEvent).toHaveBeenCalledWith(
+      "info",
+      expect.objectContaining({
+        event: "sdp_api_vendor_call",
+        vendor: "privy",
+        operation: "getPublicKey",
+        outcome: "succeeded",
+        custody_mode: mode,
+        cluster: "devnet",
+      })
+    );
   });
 });
