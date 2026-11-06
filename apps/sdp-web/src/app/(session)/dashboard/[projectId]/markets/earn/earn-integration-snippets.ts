@@ -128,7 +128,7 @@ function floorForTolerance(quote: string, decimals: number, toleranceBps: number
 const STRATEGY_ID = ${JSON.stringify(strategy.id)};
 
 // Create an API key for this project in the dashboard with Earn Read, Execute
-// and Manage (Manage builds queued-withdrawal cancellations) and keep it on your
+// and Manage (Manage builds and submits cancellations) and keep it on your
 // server. The customer's wallet signs in your browser or mobile app; it never
 // sees this key.
 

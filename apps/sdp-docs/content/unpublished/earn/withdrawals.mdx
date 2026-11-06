@@ -213,6 +213,16 @@ reports a blocking issue.
 Resolve every `blockingIssues` entry in the preview, then build, sign, and
 submit as for an instant withdrawal. Save the returned `withdrawalRequestId`.
 
+Keep the signed request and its idempotency key until the request resolves.
+The wallet may already have broadcast it, so SDP accepts it even after its
+build expires:
+
+| Submit answer | What to do |
+| --- | --- |
+| `409 CONFLICT` on a late request | SDP released the build's reservation and accepts the request once the exact transaction is finalized. Retry the same bytes and key. For an operator redemption whose cycle already closed, contact support instead. |
+| `400 TRANSACTION_FAILED` | The transaction finalized as failed. Build a new request. |
+| `503` | SDP could not finish checking the request's history. Retry the same bytes and key, and contact support if it persists. |
+
 ### Track a request
 
 Poll [`GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-request)
@@ -228,7 +238,7 @@ every minute or two. Status values spell it `cancelled`.
 | `closedOrUnknown` | The request closed, and SDP has not yet proved a payout or a cancellation. | Pending; keep tracking. |
 | `fulfilled` | SDP observed the payout. `assetsPaid` holds the amount. | Done. |
 | `cancelled` | SDP observed the cancellation. | Canceled; refresh holdings. |
-| `failed` | It did not happen. `failureReason` says why. | Failed. |
+| `failed` | It did not happen: SDP decides that only after repeated checks find no trace of it. `failureReason` says why. | Failed. |
 
 Only `fulfilled`, `cancelled`, and `failed` are final, and only `fulfilled`
 pays out. Never credit `quotedAssets`, a request transaction, or a
@@ -253,13 +263,13 @@ never from a client clock; building one earlier returns `409 CONFLICT`. An
 operator redemption can be canceled while `pending` if its live terms allow
 it. Refresh the request first: a fulfillment can race the cancellation.
 
-| Step | Request | Grant |
-| --- | --- | --- |
-| Build | [`POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancel-transaction) | `earn.manage` |
-| Submit | [`POST /v1/earn/external-wallet/withdrawal-request-cancellations`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancellation) | `earn.execute` |
+| Step | Request |
+| --- | --- |
+| Build | [`POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancel-transaction) |
+| Submit | [`POST /v1/earn/external-wallet/withdrawal-request-cancellations`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancellation) |
 
-A full cancellation needs an API key with both grants, or one API key per
-step; the backend module reads one key, so give it both. Use a new
+Both steps take `earn.manage`, and cancellation stays available after
+production access is removed or new deposits are disabled. Use a new
 `Idempotency-Key` for the cancellation. A canceled solver request returns
 the escrowed shares; a canceled operator redemption leaves the intermediate
 token, not the original shares. Refresh holdings before another withdrawal.

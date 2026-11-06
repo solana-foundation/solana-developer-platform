@@ -64,7 +64,9 @@ rent for any account it creates:
 | A withdrawal request | The request's own accounts, about 0.0027 SOL. |
 
 Rent is separate from the deposit and its yield, and it is not part of
-`earned`. To pay these costs for your customer, sponsor the transaction:
+`earned`. Where a request's rent goes when it closes depends on the provider's
+program; Hastra returns it to the owner. To pay these costs for your
+customer, sponsor the transaction:
 
 1. Set `feePayer` to a wallet your backend controls when you build.
 2. Have the customer's wallet sign first.
@@ -162,6 +164,8 @@ idempotency key.
 | You reuse an idempotency key for a different build. | `409 CONFLICT`. Nothing runs. | Retry the original build, or use a new idempotency key for a new action. |
 | You submit the same build under a new idempotency key. | `409 CONFLICT`. | Find the original action and its idempotency key. |
 | The blockhash expired before you submitted. | Records the original signed bytes, which may already have landed. If they never did, the movement ends `failed` with `Transaction blockhash expired before confirmation`. | Submit the original and track it. Do not rebuild until it fails. |
+| A late withdrawal request returns `409 CONFLICT`. | Waits to see the exact signed transaction finalized. | Retry the same bytes and key. |
+| Recovery finds the transaction finalized as failed. | `400 TRANSACTION_FAILED`. Nothing moved. | Build a new transaction. |
 | An unsigned build expired. | Nothing has moved. | Build again before asking for a signature. |
 | The preview has blocking issues. | Nothing has moved. | Resolve them and preview again. |
 
@@ -184,10 +188,11 @@ The codes Earn integrations meet most:
 | Status | Code | Meaning | What to do |
 | --- | --- | --- | --- |
 | `400` | `BAD_REQUEST` | A field is invalid, the `Idempotency-Key` is missing, or the signed transaction differs from the build. | Read `message` and `details`, fix the request, and build again when the transaction changed. |
+| `400` | `TRANSACTION_FAILED` | Recovery found the submitted transaction finalized as failed. | Build a new transaction. |
 | `403` | `INSUFFICIENT_PERMISSIONS` | The API key lacks the grant in `details.action`. | Add the grant to the API key. |
 | `403` | `FORBIDDEN` | `details.reason` is `provider_not_entitled`: your organization is not activated for the provider. With `provider_not_offered`, SDP takes no new deposits for it. | Ask your SDP contact to activate it. Withdrawals still work either way. |
 | `404` | `NOT_FOUND` | No such strategy, position, movement, build, or request in your project. | Check the ID and the project. |
-| `409` | `CONFLICT` | An idempotency key or a signed transaction was already used differently, or a withdrawal request cannot be canceled yet. | See [Retry safely](#retry-safely). For a cancellation, wait for `expiredCancelable`. |
+| `409` | `CONFLICT` | An idempotency key or a signed transaction was already used differently, a late withdrawal request awaits proof that it landed, or a request cannot be canceled yet. | See [Retry safely](#retry-safely). Retry a late request with its exact bytes and key; for a cancellation, wait for `expiredCancelable`. |
 | `429` | `RATE_LIMITED` | You are over your rate limit. | Wait for `Retry-After`, then retry. |
 | `501` | `NOT_IMPLEMENTED` | The provider cannot quote this operation. | Continue without the preview when the floor policy is null. |
 | `503` | `PROVIDER_UNAVAILABLE` | SDP could not read the provider's live state or reach a dependency. | Retry with backoff, and show the action as unavailable meanwhile. Retry a submit with the same idempotency key and body. |
