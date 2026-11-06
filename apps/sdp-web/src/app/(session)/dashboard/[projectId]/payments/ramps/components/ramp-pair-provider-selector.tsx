@@ -11,8 +11,6 @@ import { useCallback, useMemo } from "react";
 import { useRampEstimate } from "@/app/(session)/dashboard/[projectId]/payments/ramps/hooks/use-ramp-estimate";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { demoRampPairs } from "@/lib/payments-demo/demo-ramp-assets";
-import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import type { RampProviderAccess } from "@/lib/provider-availability";
 import {
   findRampPair,
@@ -330,11 +328,7 @@ export function RampPairProviderSelector({
   onProviderSelect,
 }: RampPairProviderSelectorProps) {
   const { sdpEnvironment } = useDashboardWorkspace();
-  const demo = usePaymentsDemo();
-  const pairs = demoRampPairs(
-    pairsForDirection(direction, sdpEnvironment, enabledRampProviders),
-    demo
-  );
+  const pairs = pairsForDirection(direction, sdpEnvironment, enabledRampProviders);
   const selectedPairSupport = useMemo(
     () => findRampPair(pairs, selectedPair),
     [pairs, selectedPair]

@@ -168,10 +168,6 @@
     "reason": "Decorative typographic separator"
   },
   {
-    "candidate": "src/flags/definitions.ts:205:5:Offer Payments' Demo switch: sample data and simulated provider, KYC and settlement steps in every ramp flow, per project. Serves only Payments pages.",
-    "reason": "Vercel Flags Explorer metadata for operators (flag description and option labels); never rendered in the product UI"
-  },
-  {
     "candidate": "src/flags/index.ts:282:21:Hidden",
     "reason": "Vercel Flags Explorer metadata for operators (flag description and option labels); never rendered in the product UI"
   },

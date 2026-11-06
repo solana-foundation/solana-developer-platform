@@ -39,7 +39,6 @@ import { SolanaQrCode } from "@/components/solana-qr-code";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
-import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { transactionHref } from "@/lib/payments-routes";
 import { downloadSolanaQrCode } from "@/lib/solana-qr";
 import { useClientNow } from "@/lib/use-client-now";
@@ -190,9 +189,7 @@ function CopyLinkContent({ copied }: { copied: boolean }) {
 
 /**
  * The request's pay link on this origin, as the design lays it out: its QR code on a 128px tile,
- * the link beside it, and the copy, share and QR download under the link. A demo request lives
- * in this browser only, so it shows no code or link that would open a page that cannot find it,
- * and its actions say so instead of handing out a link nobody can open. It shows only while the
+ * the link beside it, and the copy, share and QR download under the link. It shows only while the
  * request can be paid. Opened by the new-request page, the link is marked and Copy link reads
  * Copied; when that copy failed, a line under the buttons says so until Copy link copies it.
  */
@@ -209,7 +206,6 @@ function RequestPaymentLink({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const demo = usePaymentsDemo();
   // The link is on this origin. The server render does not guess it, so a page it rendered gets
   // the link once hydrated; a page opened in the browser has it from its first frame, so the
   // link and its mark never arrive a frame apart.
@@ -225,10 +221,7 @@ function RequestPaymentLink({
     if (linkCopiedOnCreate !== null && linkRef.current !== null) playMark(linkRef.current);
   }, [linkCopiedOnCreate]);
 
-  const demoOnly = () => toast.info(t("DashboardPayments.demo.noPayLink"));
-
   async function copyLink() {
-    if (demo) return demoOnly();
     try {
       await navigator.clipboard.writeText(payLink);
     } catch {
@@ -241,7 +234,6 @@ function RequestPaymentLink({
 
   // The browser's share sheet where there is one; copying stands in elsewhere.
   async function shareLink() {
-    if (demo) return demoOnly();
     if (typeof navigator.share !== "function") return copyLink();
     try {
       await navigator.share({
@@ -257,43 +249,35 @@ function RequestPaymentLink({
   }
 
   async function downloadQrCode() {
-    if (demo) return demoOnly();
     await downloadSolanaQrCode({ url: payLink, fileName: `payment-request-${request.id}` });
   }
 
   return (
     // On a phone the tile sits over the link, so the link and its actions keep the full width.
     <div className="flex flex-col gap-4 border-t border-border-default pt-4 sm:flex-row sm:items-start sm:gap-6">
-      {/* The design's 128px tile: a 96px code on white with a 16px quiet zone; a demo request has
-          no link to draw. */}
-      {demo ? null : (
-        <div className="size-32 shrink-0 rounded-xs bg-white p-4">
-          {payLink ? (
-            <SolanaQrCode
-              url={payLink}
-              size={96}
-              label={t("DashboardPayments.requestDetail.qrCodeAlt")}
-            />
-          ) : (
-            <div className="size-full animate-pulse rounded-xs bg-fill" />
-          )}
-        </div>
-      )}
+      {/* The design's 128px tile: a 96px code on white with a 16px quiet zone. */}
+      <div className="size-32 shrink-0 rounded-xs bg-white p-4">
+        {payLink ? (
+          <SolanaQrCode
+            url={payLink}
+            size={96}
+            label={t("DashboardPayments.requestDetail.qrCodeAlt")}
+          />
+        ) : (
+          <div className="size-full animate-pulse rounded-xs bg-fill" />
+        )}
+      </div>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <span className="text-meta text-secondary">
           {t("DashboardPayments.requestDetail.paymentLink")}
         </span>
-        {demo ? (
-          <p className="text-body text-secondary">{t("DashboardPayments.demo.noPayLink")}</p>
-        ) : (
-          // Padded out to the mark's box and pulled back by as much, so the text stays put.
-          <span
-            ref={linkRef}
-            className="-mx-3 -my-1.5 min-w-0 truncate rounded-sm px-3 py-1.5 font-mono text-body text-primary"
-          >
-            {payLink || null}
-          </span>
-        )}
+        {/* Padded out to the mark's box and pulled back by as much, so the text stays put. */}
+        <span
+          ref={linkRef}
+          className="-mx-3 -my-1.5 min-w-0 truncate rounded-sm px-3 py-1.5 font-mono text-body text-primary"
+        >
+          {payLink || null}
+        </span>
         {/* 16px to the design's 30px buttons, 8px apart; the copy is filled while the request
             can still be paid. */}
         <div className="mt-2.5 flex flex-wrap items-center gap-2 [&_button]:[--button-height-md:1.875rem]">
@@ -438,15 +422,12 @@ const PAYMENT_WATCH_INTERVAL_MS = 10_000;
 
 /**
  * The request as the API holds it now. An open one is read again until it is paid, canceled or
- * expired, in a visible tab, and never in demo mode, whose requests are fixtures. The newer of
- * this read and the server's wins, so a cancel's refresh shows at once.
+ * expired, in a visible tab. The newer of this read and the server's wins, so a cancel's
+ * refresh shows at once.
  */
 function useWatchedPaymentRequest(served: PaymentRequest): PaymentRequest {
-  const demo = usePaymentsDemo();
   const { data } = useSWR(
-    demo || served.status !== "awaiting_payment"
-      ? null
-      : paymentsQueryKeys.paymentRequestWatch(served.id),
+    served.status !== "awaiting_payment" ? null : paymentsQueryKeys.paymentRequestWatch(served.id),
     ([, requestId]: readonly [string, string]) => fetchPaymentRequestFromBrowser(requestId),
     {
       // A fresh function each render re-arms SWR's timer with the latest read. Before the first
