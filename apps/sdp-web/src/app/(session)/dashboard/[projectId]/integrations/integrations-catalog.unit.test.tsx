@@ -99,11 +99,6 @@ describe("IntegrationsCatalog", () => {
     expect(within(section("Ramps")).queryByText(/connected$/)).toBeNull();
   });
 
-  it("names the first RPC provider as the one serving, without a count", () => {
-    expect(within(section("RPC")).getByText("Helius serving")).toBeTruthy();
-    expect(within(section("RPC")).queryByText(/connected$/)).toBeNull();
-  });
-
   it("shows each custody provider's category", () => {
     expect(within(row("Custody", "Privy")).getByText("API")).toBeTruthy();
     expect(within(row("Custody", "Fireblocks")).getByText("Institutional")).toBeTruthy();

@@ -98,15 +98,6 @@ function IntegrationRowItem({ row, t }: { row: IntegrationRow; t: Translate }) {
 }
 
 function SectionSummary({ section, t }: { section: IntegrationSection; t: Translate }) {
-  if (section.family === "rpc") {
-    const primary = section.rows[0];
-    return primary === undefined ? null : (
-      <span className="flex items-center gap-1.5 text-sm text-secondary">
-        {t("Shared.integrations.rpcServing", { provider: primary.label })}
-        <InfoHint text={t("Shared.integrations.rpcServingHint")} />
-      </span>
-    );
-  }
   const configurable = section.rows.filter((row) => isConfigurable(row.state));
   if (configurable.length === 0) {
     return null;
