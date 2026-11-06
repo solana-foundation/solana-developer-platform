@@ -10,37 +10,25 @@
 - AI guide: https://platform.solana.com/docs/reference/docs-for-ai
 
 ## Supported surfaces
-- Token issuance and lifecycle operations
 - Wallets and custody
 - API key management and projects
 - Payments, transfers, and recurring payments
-- Fiat on-ramps and off-ramps
-- Compliance screening
-- Asset profiles and public token metadata
 
 ## Public endpoint families
 - Health: https://api.solana.com/health
 - Wallets: https://api.solana.com/v1/wallets
 - Projects: https://api.solana.com/v1/projects
-- Issuance: https://api.solana.com/v1/issuance
 - Payments: https://api.solana.com/v1/payments
-- Compliance: https://api.solana.com/v1/compliance
 - Counterparties: https://api.solana.com/v1/counterparties
-- Asset Profiles: https://api.solana.com/v1/issuance
 
 ## Start here
-- [What is SDP?](https://platform.solana.com/docs/introduction): One project-scoped API for building on Solana with your chosen providers.
+- [What is SDP?](https://platform.solana.com/docs/introduction): One API for building on Solana with your chosen providers, from devnet to mainnet.
 - [Set up your workspace](https://platform.solana.com/docs/guides/setup-organization): Create your account and organization, which comes with a Sandbox and a Production project.
 - [Create a wallet](https://platform.solana.com/docs/guides/setup-wallets): Set up a custody provider and create wallets for signing transactions.
 - [Go to mainnet](https://platform.solana.com/docs/guides/go-to-mainnet): Request mainnet access, connect your own custody account, and go live.
 - [Manage API Keys](https://platform.solana.com/docs/developing-with-sdp/manage-api-keys): Create, rotate, and revoke API keys with explicit grants by module, a signing wallet scope, and zero-downtime rotation.
-- [Tokenize an Asset](https://platform.solana.com/docs/tokens/tokenize-an-asset): Map a real-world asset to the right SDP token model, authorities, and implementation flow.
-- [Create a Token](https://platform.solana.com/docs/tokens/create-a-token): Define a new token using a template or custom configuration.
-- [Deploy a Token](https://platform.solana.com/docs/tokens/deploy-a-token): Deploy a created token to the Solana blockchain.
-- [Mint and Burn](https://platform.solana.com/docs/tokens/mint-and-burn): Increase or decrease token supply by minting to an address or burning from an account you control.
 - [Payments](https://platform.solana.com/docs/payments): Send, accept and reconcile Solana payments from your SDP custody wallets.
 - [Basic payment](https://platform.solana.com/docs/payments/send-basic-payment): Send one token transfer from a custody wallet to a Solana address, from the dashboard or the API.
-- [Tokenization Templates](https://platform.solana.com/docs/reference/issuance-token-types): How to choose a token template, and the default controls each one applies.
 - [End-to-end Payment Flow](https://platform.solana.com/docs/tutorials/end-to-end-payment-flow): Send a payment from wallet setup through settlement and reconciliation.
 - [Infrastructure Provider Onboarding](https://platform.solana.com/docs/reference/provider-onboarding): Add an infrastructure provider integration to SDP through the self-service contribution process.
 - [AI resources](https://platform.solana.com/docs/reference/docs-for-ai): Machine-readable SDP docs, the agent skill, and setup for coding agents.
@@ -50,11 +38,8 @@
 - [Health](https://platform.solana.com/docs/reference/api/health): Service health and readiness endpoints.
 - [Wallets](https://platform.solana.com/docs/reference/api/wallets): Wallet signing provider configuration and wallet management.
 - [Projects](https://platform.solana.com/docs/reference/api/projects): Projects and their provider availability. Project members and keys are managed in the dashboard.
-- [Issuance](https://platform.solana.com/docs/reference/api/issuance): Token issuance, allowlists, and lifecycle operations.
 - [Payments](https://platform.solana.com/docs/reference/api/payments): Wallet balances, transfers, and payment flows.
-- [Compliance](https://platform.solana.com/docs/reference/api/compliance): Risk and compliance screening endpoints.
 - [Counterparties](https://platform.solana.com/docs/reference/api/counterparties): A counterparty is a person or business you pay or get paid by. You save their details and payment accounts once, then reuse them in payments.
-- [Asset Profiles](https://platform.solana.com/docs/reference/api/asset-profiles): Issued-asset identity and metadata profiles, plus the public token metadata URI.
 
 ## AI guide
 - [Docs for AI](https://platform.solana.com/docs/reference/docs-for-ai): Human-readable landing page for machine-readable SDP docs resources, usage guidance, and public AI scope.
