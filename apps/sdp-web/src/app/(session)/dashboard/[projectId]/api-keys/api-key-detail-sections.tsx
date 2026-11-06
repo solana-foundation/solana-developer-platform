@@ -8,7 +8,7 @@ import { Input } from "@sdp/ui/input";
 import { Textarea } from "@sdp/ui/textarea";
 import { PencilIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useState, useTransition } from "react";
+import { type ReactNode, useState, useTransition } from "react";
 import { z } from "zod";
 import { formatCustodyProviderName } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
@@ -44,17 +44,15 @@ function useSectionSave(keyId: string, flow: SectionFlow, onSaved: () => void) {
   const router = useRouter();
   const [saving, startSaving] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const { onPendingChange } = flow;
-  useEffect(() => {
-    onPendingChange(saving);
-  }, [onPendingChange, saving]);
   return {
     saving,
     error,
     clearError: () => setError(null),
-    save: (input: UpdateApiKeyInput) =>
+    save: (input: UpdateApiKeyInput) => {
+      flow.onPendingChange(true);
       startSaving(async () => {
         const result = await updateApiKeyAction(keyId, input);
+        flow.onPendingChange(false);
         if (!result.ok) {
           setError(result.message);
           return;
@@ -62,7 +60,8 @@ function useSectionSave(keyId: string, flow: SectionFlow, onSaved: () => void) {
         setError(null);
         onSaved();
         router.refresh();
-      }),
+      });
+    },
   };
 }
 

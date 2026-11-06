@@ -9,7 +9,7 @@ import { HoldButton } from "@sdp/ui/hold-button";
 import { Select, SelectItem } from "@sdp/ui/select";
 import { RefreshCwIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { RecordBlock, RecordRow, RecordStack } from "@/components/refresh-record";
@@ -101,21 +101,21 @@ function RotatePanel({
   const [grace, setGrace] = useState<ApiKeyRotationGraceHours>(24);
   const [rotating, startRotating] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const { onPendingChange } = flow;
-  useEffect(() => {
-    onPendingChange(rotating);
-  }, [onPendingChange, rotating]);
   const stopsAt = new Date(now + grace * 60 * 60 * 1000).toISOString();
 
-  const rotate = () =>
+  // On success the page moves to the new key, so the hold stays until this page is gone.
+  const rotate = () => {
+    flow.onPendingChange(true);
     startRotating(async () => {
       const result = await rotateApiKeyAction(apiKey.id, grace);
       if (!result.ok) {
+        flow.onPendingChange(false);
         setError(result.message);
         return;
       }
       router.push(href(`/dashboard/api-keys/${encodeURIComponent(result.keyId)}`));
     });
+  };
 
   return (
     <div className={PANEL_CLASS} data-api-key-rotate-panel>
@@ -190,14 +190,11 @@ function RevokePanel({
   const router = useRouter();
   const href = useProjectHref();
   const [cancelRecurringPayments, setCancelRecurringPayments] = useState(false);
-  const [revoking, startRevoking] = useTransition();
+  const [, startRevoking] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const { onPendingChange } = flow;
-  useEffect(() => {
-    onPendingChange(revoking);
-  }, [onPendingChange, revoking]);
 
-  const revoke = () =>
+  const revoke = () => {
+    flow.onPendingChange(true);
     startRevoking(async () => {
       const result = await revokeApiKeyAction({
         keyId: apiKey.id,
@@ -205,12 +202,14 @@ function RevokePanel({
         cancelRecurringPayments,
       });
       if (!result.ok) {
+        flow.onPendingChange(false);
         setError(result.message);
         return;
       }
       toast.success(result.message);
       router.push(href("/dashboard/api-keys"));
     });
+  };
 
   return (
     <div className={PANEL_CLASS} data-api-key-revoke-panel>
@@ -286,6 +285,97 @@ function usePageFlow(): { busy: boolean; flowFor: (source: FlowSource) => Sectio
   return { busy, flowFor: (source) => ({ busy, onPendingChange: reporters[source] }) };
 }
 
+/** The title's second line: prefix, environment, last use, and the lifetime when it needs attention. */
+function KeyFacts({
+  apiKey,
+  lifetime,
+  now,
+}: {
+  apiKey: ApiKeyDetails;
+  lifetime: ApiKeyLifetime;
+  now: number;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const timeZone = useTimeZone();
+  const facts = [
+    apiKey.keyPrefix,
+    apiKeyEnvironmentLabel(apiKey.environment, t),
+    t("DashboardCustody.apiKeyPage.lastUsedFact", {
+      when: formatLastUsed(apiKey.lastUsedAt, now, locale, timeZone, t),
+    }),
+  ];
+  const showLifetime = lifetime.kind !== "never" && lifetime.kind !== "until";
+  return (
+    <p className="flex flex-wrap items-center gap-x-1.5 text-body text-secondary">
+      <span>{facts.join(" · ")}</span>
+      {showLifetime ? (
+        <>
+          <span aria-hidden>·</span>
+          <ApiKeyLifetimeText lifetime={lifetime} now={now} />
+        </>
+      ) : null}
+    </p>
+  );
+}
+
+/** Revoking, behind one row until opened. */
+function DangerZone({
+  apiKey,
+  now,
+  revokeOpen,
+  busy,
+  flow,
+  onOpenRevoke,
+  onRotateInstead,
+  onKeep,
+}: {
+  apiKey: ApiKeyDetails;
+  now: number;
+  revokeOpen: boolean;
+  busy: boolean;
+  flow: SectionFlow;
+  onOpenRevoke: () => void;
+  onRotateInstead: (() => void) | null;
+  onKeep: () => void;
+}) {
+  const t = useTranslations();
+  const walletsLabel =
+    apiKey.walletScope === "all"
+      ? t("DashboardCustody.apiKeyPage.signsWithAll")
+      : t("DashboardCustody.apiKeyPage.signsWith", {
+          wallets: walletCountLabel(apiKey.walletIds.length, t),
+        });
+  return (
+    <RecordBlock title={t("DashboardCustody.dangerZoneTitle")}>
+      {revokeOpen ? (
+        <RevokePanel
+          apiKey={apiKey}
+          now={now}
+          walletsLabel={walletsLabel}
+          flow={flow}
+          onRotateInstead={onRotateInstead}
+          onKeep={onKeep}
+        />
+      ) : (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+          <div className="min-w-0">
+            <p className="text-field font-medium text-primary">
+              {t("DashboardCustody.apiKeyPage.revokeKey")}
+            </p>
+            <p className="text-body text-secondary">
+              {t("DashboardCustody.apiKeyPage.revokeRowBody")}
+            </p>
+          </div>
+          <Button variant="destructive" size="sm" onClick={onOpenRevoke} disabled={busy}>
+            {t("DashboardCustody.apiKeyPage.revokeKeyAction")}
+          </Button>
+        </div>
+      )}
+    </RecordBlock>
+  );
+}
+
 /**
  * One API key and everything that can be done to it, on one scrolling page: the secret right
  * after it was made, what the key may do and sign with, its details, and rotating or revoking it.
@@ -307,8 +397,6 @@ export function ApiKeyDetailView({
   now: number;
 }) {
   const t = useTranslations();
-  const locale = useLocale();
-  const timeZone = useTimeZone();
   const secret = useApiKeyFlashSecret(apiKey.id);
   const [secretSaved, setSecretSaved] = useState(false);
   const [panel, setPanel] = useState<"rotate" | "revoke" | null>(null);
@@ -318,13 +406,6 @@ export function ApiKeyDetailView({
   const canManage = canManageApiKeys && isApiKeyLive(lifetime);
   // A replaced key is already on its way out: its replacement is the one to rotate.
   const canRotate = canManage && lifetime.kind !== "stopping";
-  const walletsLabel =
-    apiKey.walletScope === "all"
-      ? t("DashboardCustody.apiKeyPage.signsWithAll")
-      : t("DashboardCustody.apiKeyPage.signsWith", {
-          wallets: walletCountLabel(apiKey.walletIds.length, t),
-        });
-
   const lifetimeKind = lifetime.kind;
   const revoked = API_KEY_ENDED_STATUSES.some((status) => status === apiKey.status);
   const badge = useMemo(() => statusBadge(lifetimeKind, revoked, t), [lifetimeKind, revoked, t]);
@@ -342,14 +423,6 @@ export function ApiKeyDetailView({
       ) : undefined,
     [busy, canRotate, panel, t]
   );
-  const facts = [
-    apiKey.keyPrefix,
-    apiKeyEnvironmentLabel(apiKey.environment, t),
-    t("DashboardCustody.apiKeyPage.lastUsedFact", {
-      when: formatLastUsed(apiKey.lastUsedAt, now, locale, timeZone, t),
-    }),
-  ];
-
   return (
     <div className="@container w-full" data-api-key={apiKey.id}>
       {/* While the new secret shows, the shell's own way out stays shut: the secret cannot be read again. */}
@@ -362,15 +435,7 @@ export function ApiKeyDetailView({
       <RecordStack spacing="loose">
         {/* The facts read as the title's second line, so they sit in the stack's top padding. */}
         <div className="-mt-4 flex flex-col gap-4 md:-mt-8">
-          <p className="flex flex-wrap items-center gap-x-1.5 text-body text-secondary">
-            <span>{facts.join(" · ")}</span>
-            {lifetime.kind === "never" || lifetime.kind === "until" ? null : (
-              <>
-                <span aria-hidden>·</span>
-                <ApiKeyLifetimeText lifetime={lifetime} now={now} />
-              </>
-            )}
-          </p>
+          <KeyFacts apiKey={apiKey} lifetime={lifetime} now={now} />
           {panel === "rotate" ? (
             <RotatePanel
               apiKey={apiKey}
@@ -410,37 +475,16 @@ export function ApiKeyDetailView({
         />
 
         {canManage ? (
-          <RecordBlock title={t("DashboardCustody.dangerZoneTitle")}>
-            {panel === "revoke" ? (
-              <RevokePanel
-                apiKey={apiKey}
-                now={now}
-                walletsLabel={walletsLabel}
-                flow={flowFor("revoke")}
-                onRotateInstead={canRotate ? () => setPanel("rotate") : null}
-                onKeep={() => setPanel(null)}
-              />
-            ) : (
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
-                <div className="min-w-0">
-                  <p className="text-field font-medium text-primary">
-                    {t("DashboardCustody.apiKeyPage.revokeKey")}
-                  </p>
-                  <p className="text-body text-secondary">
-                    {t("DashboardCustody.apiKeyPage.revokeRowBody")}
-                  </p>
-                </div>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => setPanel("revoke")}
-                  disabled={busy}
-                >
-                  {t("DashboardCustody.apiKeyPage.revokeKeyAction")}
-                </Button>
-              </div>
-            )}
-          </RecordBlock>
+          <DangerZone
+            apiKey={apiKey}
+            now={now}
+            revokeOpen={panel === "revoke"}
+            busy={busy}
+            flow={flowFor("revoke")}
+            onOpenRevoke={() => setPanel("revoke")}
+            onRotateInstead={canRotate ? () => setPanel("rotate") : null}
+            onKeep={() => setPanel(null)}
+          />
         ) : null}
       </RecordStack>
     </div>
