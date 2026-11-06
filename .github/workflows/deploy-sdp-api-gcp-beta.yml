@@ -1,9 +1,10 @@
 name: Deploy sdp-api to Cloud Run (beta)
 
 # Beta (api-beta.solana.com) is the devnet sandbox. The merge deploy calls this once the stage
-# deploy and smoke pass, alongside prod, so it never holds prod up. It runs the stage image on its
-# own services and database, and every step continues on error and skips while those services do
-# not exist yet: a failure reports to Slack (deploy) or Loki with target=beta (smoke).
+# deploy and smoke pass, alongside prod, so it never holds prod up. It runs in its own GCP project
+# with its own registry, services and database, and deploys the signed merge image the prod deploy
+# promotes. Every step continues on error and skips while those resources do not exist yet: a
+# failure reports to Slack (deploy) or Loki with target=beta (smoke).
 
 on:
   workflow_dispatch:
@@ -12,6 +13,7 @@ on:
 permissions:
   contents: read
   id-token: write
+  packages: read
 
 concurrency:
   group: sdp-api-gcp-deploy-beta
@@ -22,21 +24,22 @@ jobs:
     name: Deploy beta
     if: github.repository == 'solana-foundation/solana-developer-platform'
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 135
     continue-on-error: true
     permissions:
       contents: read
       id-token: write
+      packages: read
       statuses: write
     outputs:
       present: ${{ steps.find.outputs.present == 'true' }}
     env:
-      PROJECT_ID: solana-developer-platform-stg
+      PROJECT_ID: solana-developer-platform-beta
       REGION: us-central1
-      REPO: sdp-stage
-      BETA_SERVICE: sdp-stage-api-beta
-      BETA_WORKER_SERVICE: sdp-stage-worker-beta
-      BETA_MIGRATE_JOB: sdp-stage-api-beta-migrate
+      REPO: sdp-beta
+      BETA_SERVICE: sdp-beta-api-public
+      BETA_WORKER_SERVICE: sdp-beta-worker
+      BETA_MIGRATE_JOB: sdp-beta-api-public-migrate
       BETA_ORIGIN: https://api-beta.solana.com
     steps:
       - name: Checkout
@@ -50,8 +53,8 @@ jobs:
         timeout-minutes: 2
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
-          workload_identity_provider: ${{ vars.STAGE_DEPLOY_WIF_PROVIDER }}
-          service_account: ${{ vars.STAGE_DEPLOY_SA }}
+          workload_identity_provider: ${{ vars.BETA_DEPLOY_WIF_PROVIDER }}
+          service_account: ${{ vars.BETA_DEPLOY_SA }}
 
       - name: Set up gcloud
         id: gcloud
@@ -96,16 +99,121 @@ jobs:
               --region "${REGION}" --project "${PROJECT_ID}" --format='value(status.imageDigest)')"
             echo "Beta served ${previous} (${digest:-digest unknown}) before this deploy." >> "${GITHUB_STEP_SUMMARY}"
           fi
-          echo "image=${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public:${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
           echo "present=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Configure Docker for Artifact Registry
+        id: docker
+        if: steps.find.outputs.present == 'true'
+        continue-on-error: true
+        timeout-minutes: 2
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - name: Install Cosign
+        id: cosign
+        if: steps.docker.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Install crane
+        id: crane
+        if: steps.cosign.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: imjasonh/setup-crane@feee3b6bb0d4c68370f256a4502498c9227e5c6b # v0.7
+
+      - name: Log in to GHCR
+        id: ghcr
+        if: steps.crane.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # --password-stdin keeps the token off the command line.
+        run: printf '%s' "$GHCR_TOKEN" | crane auth login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # Same shape as the prod deploy: beta cannot read stage's registry, so it verifies the merge
+      # image release-images.yml signed for this commit and copies that same digest into its own
+      # registry. The wait covers release-images.yml's 60-minute publish timeout.
+      - name: Verify and promote merge image
+        id: promote
+        if: steps.ghcr.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 75
+        env:
+          DEPLOY_IMAGE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          SRC_BASE="ghcr.io/${{ github.repository_owner }}/sdp/sdp-api"
+          SRC_DIGEST=""
+          for attempt in $(seq 1 130); do
+            if SRC_DIGEST="$(crane digest "${SRC_BASE}:${DEPLOY_IMAGE_SHA}" 2>/dev/null)"; then
+              break
+            fi
+            echo "merge image not in GHCR yet (attempt ${attempt}/130); retrying in 30s"
+            sleep 30
+          done
+          if [[ -z "${SRC_DIGEST}" ]]; then
+            echo "merge image ${SRC_BASE}:${DEPLOY_IMAGE_SHA} never appeared in GHCR." >&2
+            exit 1
+          fi
+          verified=""
+          for attempt in $(seq 1 10); do
+            if cosign verify "${SRC_BASE}@${SRC_DIGEST}" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release-images.yml@refs/heads/main" \
+              --certificate-github-workflow-sha "${DEPLOY_IMAGE_SHA}"; then
+              verified=true
+              break
+            fi
+            echo "signature not verifiable yet (attempt ${attempt}/10); retrying in 30s"
+            sleep 30
+          done
+          if [[ -z "${verified}" ]]; then
+            echo "cosign verification failed for ${SRC_BASE}@${SRC_DIGEST}." >&2
+            exit 1
+          fi
+          DEST_BASE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public"
+          cosign copy --force "${SRC_BASE}@${SRC_DIGEST}" "${DEST_BASE}:${DEPLOY_IMAGE_SHA}"
+          echo "src_digest=${SRC_DIGEST}" >> "${GITHUB_OUTPUT}"
+
+      - name: Resolve immutable deploy image
+        id: image
+        if: steps.promote.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          DEPLOY_IMAGE_SHA: ${{ github.sha }}
+          SRC_DIGEST: ${{ steps.promote.outputs.src_digest }}
+        run: |
+          set -euo pipefail
+          image_base="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public"
+          tagged_image="${image_base}:${DEPLOY_IMAGE_SHA}"
+          resolved_image="$(
+            gcloud artifacts docker images describe "${tagged_image}" \
+              --project "${PROJECT_ID}" \
+              --format='value(image_summary.fully_qualified_digest)'
+          )"
+          expected_prefix="${image_base}@"
+          if [[ "${resolved_image}" != "${expected_prefix}"* ]]; then
+            echo "Artifact Registry returned an unexpected image reference for ${tagged_image}." >&2
+            exit 1
+          fi
+          digest="${resolved_image:${#expected_prefix}}"
+          if [[ "${digest}" != "${SRC_DIGEST}" ]]; then
+            echo "Artifact Registry digest ${digest} does not match the verified merge digest ${SRC_DIGEST}." >&2
+            exit 1
+          fi
+          echo "image=${resolved_image}" >> "${GITHUB_OUTPUT}"
+          echo "Deploying ${tagged_image} as ${resolved_image}" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Run beta database migrations
         id: migrate
-        if: steps.find.outputs.present == 'true'
+        if: steps.image.outcome == 'success'
         continue-on-error: true
         timeout-minutes: 10
         env:
-          IMAGE: ${{ steps.find.outputs.image }}
+          IMAGE: ${{ steps.image.outputs.image }}
         run: |
           gcloud run jobs update "${BETA_MIGRATE_JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
@@ -118,7 +226,7 @@ jobs:
         continue-on-error: true
         timeout-minutes: 5
         env:
-          IMAGE: ${{ steps.find.outputs.image }}
+          IMAGE: ${{ steps.image.outputs.image }}
         run: |
           gcloud run services update "${BETA_SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
@@ -172,7 +280,7 @@ jobs:
         continue-on-error: true
         timeout-minutes: 5
         env:
-          IMAGE: ${{ steps.find.outputs.image }}
+          IMAGE: ${{ steps.image.outputs.image }}
         run: |
           gcloud run services update "${BETA_WORKER_SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
@@ -218,7 +326,10 @@ jobs:
       - name: Install Doppler CLI
         if: >-
           steps.auth.outcome == 'failure' || steps.gcloud.outcome == 'failure' ||
-          steps.find.outcome == 'failure' || steps.migrate.outcome == 'failure' ||
+          steps.find.outcome == 'failure' || steps.docker.outcome == 'failure' ||
+          steps.cosign.outcome == 'failure' || steps.crane.outcome == 'failure' ||
+          steps.ghcr.outcome == 'failure' || steps.promote.outcome == 'failure' ||
+          steps.image.outcome == 'failure' || steps.migrate.outcome == 'failure' ||
           steps.service.outcome == 'failure' || steps.ready.outcome == 'failure' ||
           steps.channel.outcome == 'failure' || steps.worker.outcome == 'failure' ||
           steps.gate.outcome == 'failure'

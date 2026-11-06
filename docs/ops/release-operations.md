@@ -7,7 +7,7 @@
 | Event                                                             | Target              | Result                                                                                                                                                                                                                                                                                                               |
 | ----------------------------------------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Push to `main`                                                    | Stage               | Builds a SHA-tagged image, runs migrations, updates the stage service and worker, then runs the stage smoke                                                                                                                                                                                                          |
-| Push to `main`                                                    | Beta                | After the stage smoke passes, alongside production: runs the beta migrations, updates the beta service and worker with the stage image, posts the `sdp-web beta gate` status and smokes beta. Never gates production                                                                                                 |
+| Push to `main`                                                    | Beta                | After the stage smoke passes, alongside production: copies the signed merge image into its own project, runs the beta migrations, updates the beta service and worker, posts the `sdp-web beta gate` status and smokes beta. Never gates production                                                                  |
 | Push to `main` with repo variable `CONTINUOUS_PROD_DEPLOY=true`   | Production API      | After the stage smoke passes, runs migrations and promotes the signed per-merge image. When `main` carries migrations production has not applied yet, the merge deploy is held instead and dispatches `Apply pending migrations to prod`, which deploys that commit once a `release-production` reviewer approves it |
 | `chore(main): release X.Y.Z` commit on `main`                     | Release publication | Creates the `vX.Y.Z` tag, publishes the GitHub release, and triggers release-image/checksum workflows. Deploys nothing itself: the commit reaches production through the per-merge pipeline like any other push                                                                                                      |
 | Push to `main`                                                    | Production web      | Vercel's git integration builds sdp-web from that commit and holds it until the `sdp-web production gate` commit status passes, which the production API deploy of that same commit posts once it serves traffic                                                                                                     |
@@ -81,12 +81,12 @@ The release GitHub App needs `contents: write` and `pull_requests: write`, and i
 
 ### Cloud Run resources
 
-| Environment | Project                         | Artifact repository | Service                | Migration job                  | Worker service          |
-| ----------- | ------------------------------- | ------------------- | ---------------------- | ------------------------------ | ----------------------- |
-| Dev         | `solana-developer-platform-dev` | `sdp-dev`           | `sdp-dev-api-public`   | `sdp-dev-api-public-migrate`   | `sdp-dev-worker`        |
-| Stage       | `solana-developer-platform-stg` | `sdp-stage`         | `sdp-stage-api-public` | `sdp-stage-api-public-migrate` | `sdp-stage-worker`      |
-| Beta        | `solana-developer-platform-stg` | `sdp-stage`         | `sdp-stage-api-beta`   | `sdp-stage-api-beta-migrate`   | `sdp-stage-worker-beta` |
-| Production  | `solana-developer-platform`     | `sdp-prod`          | `sdp-prod-api-public`  | `sdp-prod-api-public-migrate`  | `sdp-prod-worker`       |
+| Environment | Project                          | Artifact repository | Service                | Migration job                  | Worker service     |
+| ----------- | -------------------------------- | ------------------- | ---------------------- | ------------------------------ | ------------------ |
+| Dev         | `solana-developer-platform-dev`  | `sdp-dev`           | `sdp-dev-api-public`   | `sdp-dev-api-public-migrate`   | `sdp-dev-worker`   |
+| Stage       | `solana-developer-platform-stg`  | `sdp-stage`         | `sdp-stage-api-public` | `sdp-stage-api-public-migrate` | `sdp-stage-worker` |
+| Beta        | `solana-developer-platform-beta` | `sdp-beta`          | `sdp-beta-api-public`  | `sdp-beta-api-public-migrate`  | `sdp-beta-worker`  |
+| Production  | `solana-developer-platform`      | `sdp-prod`          | `sdp-prod-api-public`  | `sdp-prod-api-public-migrate`  | `sdp-prod-worker`  |
 
 All resources currently use `us-central1`.
 
@@ -223,18 +223,20 @@ The workflow validates the SHA, resolves its tag to an immutable digest, verifie
 
 ## Beta
 
-Beta (`https://api-beta.solana.com`) is a devnet-only sibling of stage in the stage GCP project, with its own services, migration job and database. It runs the stage image of every merge that passes the stage smoke, the same gate production sits behind, reports `releaseChannel: beta` on `/health`, and never gates production.
+Beta (`https://api-beta.solana.com`) is a devnet-only environment in its own GCP project, `solana-developer-platform-beta`, with its own registry, services, migration job and database. It runs the signed merge image of every merge that passes the stage smoke, the same gate production sits behind, reports `releaseChannel: beta` on `/health`, and never gates production.
 
 ### Beta deploy
 
 The merge deploy calls [`deploy-sdp-api-gcp-beta.yml`](../../.github/workflows/deploy-sdp-api-gcp-beta.yml) once the stage deploy and smoke pass, in parallel with production, including while production is held for pending migrations (beta migrates its own database). Its `Deploy beta` job:
 
-1. Finds `sdp-stage-api-beta-migrate`, `sdp-stage-api-beta` and `sdp-stage-worker-beta`. While any of them does not exist, the job skips with a notice. It records the revision and digest beta served before this deploy in the run summary.
-2. Updates and executes the beta migration job with the new image.
-3. Updates `sdp-stage-api-beta` and waits for the revision to be Ready.
-4. Checks that `https://api-beta.solana.com/health` reports `releaseChannel: beta`.
-5. Updates `sdp-stage-worker-beta`.
-6. Posts the `sdp-web beta gate` commit status once `/health/ready` reports the deployed revision, the same way `release-web` posts the production gate.
+1. Authenticates as the beta deployer (`BETA_DEPLOY_WIF_PROVIDER`, `BETA_DEPLOY_SA`); the merge deploy skips beta while those variables are unset.
+2. Finds `sdp-beta-api-public-migrate`, `sdp-beta-api-public` and `sdp-beta-worker`. While any of them does not exist, the job skips with a notice. It records the revision and digest beta served before this deploy in the run summary.
+3. Verifies the merge image's signature in GHCR and copies that digest into the `sdp-beta` registry, the same way the production deploy promotes it.
+4. Updates and executes the beta migration job with that image.
+5. Updates `sdp-beta-api-public` and waits for the revision to be Ready.
+6. Checks that `https://api-beta.solana.com/health` reports `releaseChannel: beta`.
+7. Updates `sdp-beta-worker`.
+8. Posts the `sdp-web beta gate` commit status once `/health/ready` reports the deployed revision, the same way `release-web` posts the production gate.
 
 Each step runs only after the previous one succeeded, and each continues on error within a timeout: a beta failure posts `[FAILED] Deploy sdp-api (beta)` to the deploy Slack channel and fails nothing else. No production job waits on beta, so beta adds no time to production, and its job name sits outside the stage prefix the `Apply pending migrations to prod` approval checks. Once the deploy has found beta, `Beta API smoke` checks that `/health` reports the `beta` channel and `/health/ready` is ready. That pass is reported to Loki with `target="beta"` and never fails the run.
 
@@ -243,24 +245,24 @@ Each step runs only after the previous one succeeded, and each continues on erro
 Beta has no automatic restore and no hold. To go back, re-pin the beta service and worker to the digest beta served before the bad deploy: the `Deploy beta` run summary names that revision and digest, or read it from the revision list.
 
 ```bash
-gcloud run revisions list --service sdp-stage-api-beta \
-  --region us-central1 --project solana-developer-platform-stg
+gcloud run revisions list --service sdp-beta-api-public \
+  --region us-central1 --project solana-developer-platform-beta
 ```
 
 ```bash
 DIGEST=$(gcloud run revisions describe <previous-revision> \
-  --region us-central1 --project solana-developer-platform-stg \
+  --region us-central1 --project solana-developer-platform-beta \
   --format='value(status.imageDigest)')
 ```
 
 ```bash
-gcloud run services update sdp-stage-api-beta \
-  --region us-central1 --project solana-developer-platform-stg --image "${DIGEST}"
+gcloud run services update sdp-beta-api-public \
+  --region us-central1 --project solana-developer-platform-beta --image "${DIGEST}"
 ```
 
 ```bash
-gcloud run services update sdp-stage-worker-beta \
-  --region us-central1 --project solana-developer-platform-stg --image "${DIGEST}"
+gcloud run services update sdp-beta-worker \
+  --region us-central1 --project solana-developer-platform-beta --image "${DIGEST}"
 ```
 
 Re-pinning moves images, not SQL: the previous image must run on the schema the beta migration already applied, which [Schema compatibility](#schema-compatibility) guarantees. The next merge deploys beta again, so fix `main` before it lands.
