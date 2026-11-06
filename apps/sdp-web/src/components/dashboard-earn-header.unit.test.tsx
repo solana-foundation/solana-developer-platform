@@ -188,7 +188,7 @@ describe("dashboard route headers", () => {
   it.each([
     ["/dashboard/api-keys", "Shared.dashboardShell.apiKeys"],
     ["/dashboard/api-keys/new", "Shared.dashboardShell.newApiKey"],
-    ["/dashboard/api-keys/key_1/edit", "Shared.dashboardShell.editApiKey"],
+    ["/dashboard/api-keys/key_test_1", "Shared.dashboardShell.apiKey"],
     ["/dashboard/wallets", "Shared.dashboardShell.wallets"],
     ["/dashboard/wallets/setup", "Shared.dashboardShell.createWallet"],
     ["/dashboard/wallets/wallet_1", "Shared.dashboardShell.wallet"],

@@ -3,15 +3,11 @@
 import type { CustodyWalletSummary } from "@sdp/types/custody";
 import { cleanup, render as renderDOM, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { type ReactNode, useState } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  DashboardPageTitleContext,
-  type DashboardPageTitleOverride,
-} from "@/components/dashboard-page-title-context";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { HeaderHost } from "@/test/dashboard-page-title";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
@@ -123,22 +119,6 @@ function view({
         />
       </HeaderHost>
     </I18nProvider>
-  );
-}
-
-function HeaderHost({ children }: { children: ReactNode }) {
-  const [header, setHeader] = useState<DashboardPageTitleOverride | null>(null);
-  return (
-    <DashboardPageTitleContext.Provider value={setHeader}>
-      {header ? (
-        <header>
-          <h1>{header.title}</h1>
-          {header.badge}
-          {header.actions}
-        </header>
-      ) : null}
-      {children}
-    </DashboardPageTitleContext.Provider>
   );
 }
 

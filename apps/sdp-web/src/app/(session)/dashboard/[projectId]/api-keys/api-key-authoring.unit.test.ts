@@ -6,11 +6,9 @@ import {
 } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import {
-  type ApiKeyAuthoringDraft,
   buildEndpointWalletPayload,
   clearModuleGrants,
   clearOfferedGrants,
-  createApiKeyAuthoringDraft,
   defaultWalletScopeForGrants,
   everythingGrants,
   grantableActionsInChannel,
@@ -21,24 +19,15 @@ import {
   toggleGrant,
 } from "./api-key-authoring";
 
-function draftWith(overrides: Partial<ApiKeyAuthoringDraft>): ApiKeyAuthoringDraft {
-  return { ...createApiKeyAuthoringDraft(), ...overrides };
-}
-
 describe("API-key authoring: wallet access", () => {
-  it("sends a selected key's custody wallet ids, and none for all wallets", () => {
-    const selected = draftWith({
-      walletScope: "selected",
-      selectedWalletIds: ["cwlt_a", "cwlt_b", "cwlt_a"],
-    });
+  it("sends a selected key's custody wallet ids once each, and none for all wallets", () => {
+    const walletIds = ["cwlt_test_1", "cwlt_test_2", "cwlt_test_1"];
 
-    expect(buildEndpointWalletPayload(selected)).toEqual({
+    expect(buildEndpointWalletPayload("selected", walletIds)).toEqual({
       walletScope: "selected",
-      walletIds: ["cwlt_a", "cwlt_b"],
+      walletIds: ["cwlt_test_1", "cwlt_test_2"],
     });
-    expect(buildEndpointWalletPayload({ ...selected, walletScope: "all" })).toEqual({
-      walletScope: "all",
-    });
+    expect(buildEndpointWalletPayload("all", walletIds)).toEqual({ walletScope: "all" });
   });
 
   it("starts a key that can execute on selected wallets, and a read-only key on all", () => {

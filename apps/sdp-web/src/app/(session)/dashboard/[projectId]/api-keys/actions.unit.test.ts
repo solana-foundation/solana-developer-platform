@@ -1,213 +1,287 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { revalidatePath } from "@/test/next-cache";
 import { PRODUCTION_PROJECT } from "@/test/projects";
-import { setPageRequest } from "@/test/request-project";
+import { requestCookies, resetRequestProject, setPageRequest } from "@/test/request-project";
 
 const mocks = vi.hoisted(() => ({
   createSdpApiClient: vi.fn(),
-  revalidatePath: vi.fn(),
+  session: { sessionId: "sess_test_1", userId: "user_test_1" },
 }));
 
-vi.mock("@clerk/nextjs/server", () => ({
-  auth: vi.fn(async () => ({ userId: "user_test", orgId: "org_test", sessionId: null })),
-}));
-vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
+vi.mock("@clerk/nextjs/server", () => ({ auth: async () => mocks.session }));
+vi.mock("next/cache", () => import("@/test/next-cache"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
-vi.mock("@/i18n/server", () => ({
-  getTranslations: vi.fn(
-    async () => (key: string, values?: Record<string, string>) =>
-      values?.error ? `${key}: ${values.error}` : key
-  ),
-  getRequestLocale: vi.fn(async () => "en"),
-}));
 vi.mock("@/lib/sdp-api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
   createSdpApiClient: mocks.createSdpApiClient,
 }));
 
-import { deactivateApiKeyInlineAction, saveApiKeyAuthoringAction } from "./actions";
-import { createApiKeyAuthoringDraft } from "./api-key-authoring";
+import {
+  type CreateApiKeyInput,
+  createApiKeyAction,
+  revokeApiKeyAction,
+  rotateApiKeyAction,
+  updateApiKeyAction,
+} from "./actions";
+import { API_KEY_FLASH_COOKIE, API_KEY_FLASH_MAX_AGE_SECONDS } from "./api-key-flash";
+import { unsealApiKeyFlash } from "./api-key-flash-seal";
+import { API_KEY_ROTATION_GRACE_HOURS } from "./api-key-presentation";
 
-const client = { fetch: vi.fn() };
+const client = { fetch: vi.fn<(path: string, init: RequestInit) => Promise<unknown>>() };
 
-function lastBody(): Record<string, unknown> {
-  const call = client.fetch.mock.calls.at(-1);
-  return JSON.parse(String(call?.[1]?.body));
+const ISSUED = { apiKey: { id: "key_test_2", key: "sf_test_issued_secret" } };
+
+function sentRequest() {
+  expect(client.fetch).toHaveBeenCalledTimes(1);
+  const [path, init] = client.fetch.mock.calls[0];
+  return { path, method: init.method, body: JSON.parse(String(init.body)) };
 }
 
-function draft(overrides: Partial<ReturnType<typeof createApiKeyAuthoringDraft>> = {}) {
-  return {
-    ...createApiKeyAuthoringDraft(),
-    name: "Payouts worker",
-    grants: ["transfers.execute" as const],
-    ...overrides,
-  };
+async function flashedAt(now: number) {
+  const cookie = requestCookies.get(API_KEY_FLASH_COOKIE);
+  if (cookie === undefined) {
+    throw new Error("No API key flash cookie was set");
+  }
+  return unsealApiKeyFlash(cookie.value, mocks.session, now);
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("CLERK_SECRET_KEY", "sk_clerk_unit_test_secret");
+  resetRequestProject();
   setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys/new`);
   mocks.createSdpApiClient.mockResolvedValue(client);
-  client.fetch.mockResolvedValue({
-    apiKey: { id: "key_1", name: "Payouts worker", key: "sk_test_x", keyPrefix: "sk_test_x" },
-  });
+  client.fetch.mockResolvedValue(ISSUED);
 });
 
-describe("saveApiKeyAuthoringAction: create", () => {
-  it("creates a key with its explicit grants", async () => {
-    const result = await saveApiKeyAuthoringAction({ mode: "create", draft: draft() });
+describe("createApiKeyAction", () => {
+  const input: Omit<CreateApiKeyInput, "wallets"> = {
+    name: "  Payouts worker  ",
+    grants: ["transfers.execute"],
+    expiresAt: "2027-02-04T12:00:00.000Z",
+  };
 
-    expect(result.ok).toBe(true);
-    expect(client.fetch).toHaveBeenCalledTimes(1);
-    expect(client.fetch.mock.calls[0]?.[0]).toBe("/v1/api-keys");
-    expect(lastBody()).toEqual({
+  it("creates an all-wallets key and flashes its secret for its own page", async () => {
+    const result = await createApiKeyAction({ ...input, wallets: { walletScope: "all" } });
+
+    expect(result).toEqual({ ok: true, keyId: "key_test_2" });
+    expect(sentRequest()).toEqual({
+      path: "/v1/api-keys",
+      method: "POST",
+      body: {
+        name: "Payouts worker",
+        grants: ["transfers.execute"],
+        walletScope: "all",
+        expiresAt: "2027-02-04T12:00:00.000Z",
+      },
+    });
+    expect(await flashedAt(Date.now())).toEqual({
+      keyId: "key_test_2",
+      key: "sf_test_issued_secret",
+    });
+    expect(await flashedAt(Date.now() + (API_KEY_FLASH_MAX_AGE_SECONDS + 1) * 1000)).toBeNull();
+  });
+
+  it("sends a selected key's wallet ids, and no expiry for a key that never expires", async () => {
+    await createApiKeyAction({
+      ...input,
+      wallets: { walletScope: "selected", walletIds: ["cwlt_test_1", "cwlt_test_2"] },
+      expiresAt: null,
+    });
+
+    expect(sentRequest().body).toEqual({
       name: "Payouts worker",
       grants: ["transfers.execute"],
-      walletScope: "all",
-    });
-  });
-
-  it("creates a key with its IP allowlist, one entry per address", async () => {
-    await saveApiKeyAuthoringAction({
-      mode: "create",
-      draft: draft({ allowedIps: "203.0.113.10\n198.51.100.0/24, 203.0.113.10\n" }),
-    });
-
-    expect(lastBody()).toMatchObject({ allowedIps: ["203.0.113.10", "198.51.100.0/24"] });
-  });
-
-  it("refuses a key with no grants before calling the API", async () => {
-    const result = await saveApiKeyAuthoringAction({
-      mode: "create",
-      draft: draft({ grants: [] }),
-    });
-
-    expect(result).toEqual({ ok: false, message: "DashboardCustody.apiKeyGrantsRequired" });
-    expect(client.fetch).not.toHaveBeenCalled();
-  });
-
-  it("creates selected-wallet keys with their custody wallet ids", async () => {
-    await saveApiKeyAuthoringAction({
-      mode: "create",
-      draft: draft({
-        walletScope: "selected",
-        selectedWalletIds: ["cwlt_a", "cwlt_b"],
-      }),
-    });
-
-    expect(lastBody()).toMatchObject({
       walletScope: "selected",
-      walletIds: ["cwlt_a", "cwlt_b"],
+      walletIds: ["cwlt_test_1", "cwlt_test_2"],
     });
+  });
+
+  it("reports an API failure and flashes nothing", async () => {
+    client.fetch.mockRejectedValue(new Error("SDP API request failed (400): boom"));
+
+    const result = await createApiKeyAction({ ...input, wallets: { walletScope: "all" } });
+
+    expect(result).toEqual({
+      ok: false,
+      message: "API key could not be saved: SDP API request failed (400): boom",
+    });
+    expect(requestCookies.get(API_KEY_FLASH_COOKIE)).toBeUndefined();
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });
 
-describe("saveApiKeyAuthoringAction: edit", () => {
+describe("API key validation", () => {
+  const valid: CreateApiKeyInput = {
+    name: "Payouts worker",
+    grants: ["transfers.read"],
+    wallets: { walletScope: "all" },
+    expiresAt: null,
+  };
+
+  it.each([
+    [
+      "create",
+      "a blank name",
+      () => createApiKeyAction({ ...valid, name: "  " }),
+      "API key name is required.",
+    ],
+    [
+      "create",
+      "no grants",
+      () => createApiKeyAction({ ...valid, grants: [] }),
+      "Grant at least one permission.",
+    ],
+    [
+      "create",
+      "selected wallets with none picked",
+      () => createApiKeyAction({ ...valid, wallets: { walletScope: "selected", walletIds: [] } }),
+      "Select at least one wallet for a wallet-scoped API key.",
+    ],
+    [
+      "create",
+      "an unreadable expiry",
+      () => createApiKeyAction({ ...valid, expiresAt: "soon" }),
+      "Invalid expiration date.",
+    ],
+    [
+      "update",
+      "a blank name",
+      () => updateApiKeyAction("key_test_1", { name: "  " }),
+      "API key name is required.",
+    ],
+    [
+      "update",
+      "no grants",
+      () => updateApiKeyAction("key_test_1", { grants: [] }),
+      "Grant at least one permission.",
+    ],
+    [
+      "update",
+      "selected wallets with none picked",
+      () =>
+        updateApiKeyAction("key_test_1", { wallets: { walletScope: "selected", walletIds: [] } }),
+      "Select at least one wallet for a wallet-scoped API key.",
+    ],
+    [
+      "update",
+      "an unreadable expiry",
+      () => updateApiKeyAction("key_test_1", { expiresAt: "soon" }),
+      "Invalid expiration date.",
+    ],
+  ])(
+    "refuses to %s a key with %s before calling the API",
+    async (_action, _case, call, message) => {
+      expect(await call()).toEqual({ ok: false, message });
+      expect(client.fetch).not.toHaveBeenCalled();
+    }
+  );
+});
+
+describe("updateApiKeyAction", () => {
   beforeEach(() => {
+    setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys/key_test_1`);
     client.fetch.mockResolvedValue({ success: true });
   });
 
-  it("patches the key once, replacing its grants", async () => {
-    const result = await saveApiKeyAuthoringAction({
-      mode: "edit",
-      keyId: "key_1",
-      draft: draft({ grants: ["transfers.read", "wallets.read"] }),
-      grantsTouched: true,
+  it("patches only the details it is given, clearing the note and the expiry", async () => {
+    const result = await updateApiKeyAction("key_test_1", {
+      name: "  Payouts worker  ",
+      description: null,
+      expiresAt: null,
+      allowedIps: ["203.0.113.10"],
     });
 
-    expect(result.ok).toBe(true);
-    expect(client.fetch).toHaveBeenCalledTimes(1);
-    expect(client.fetch.mock.calls[0]?.[0]).toBe("/v1/api-keys/key_1");
-    expect(client.fetch.mock.calls[0]?.[1]?.method).toBe("PATCH");
-    expect(lastBody()).toMatchObject({ grants: ["transfers.read", "wallets.read"] });
-  });
-
-  it("clears the IP allowlist when the field is emptied", async () => {
-    await saveApiKeyAuthoringAction({
-      mode: "edit",
-      keyId: "key_1",
-      draft: draft({ allowedIps: "  " }),
+    expect(result).toEqual({ ok: true });
+    expect(sentRequest()).toEqual({
+      path: "/v1/api-keys/key_test_1",
+      method: "PATCH",
+      body: {
+        name: "Payouts worker",
+        description: null,
+        expiresAt: null,
+        allowedIps: ["203.0.113.10"],
+      },
     });
-
-    expect(lastBody()).toMatchObject({ allowedIps: null });
+    expect(revalidatePath.mock.calls).toEqual([
+      [`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`, "page"],
+      [`/dashboard/${PRODUCTION_PROJECT.id}/api-keys/key_test_1`, "page"],
+    ]);
   });
 
-  it("sends no grants when the permissions step was not touched", async () => {
-    await saveApiKeyAuthoringAction({
-      mode: "edit",
-      keyId: "key_1",
-      draft: draft(),
-      grantsTouched: false,
-    });
+  it("resets a key to every wallet with the wallet scope alone", async () => {
+    await updateApiKeyAction("key_test_1", { wallets: { walletScope: "all" } });
 
-    expect(lastBody()).not.toHaveProperty("grants");
+    expect(sentRequest().body).toEqual({ walletScope: "all" });
   });
 
-  it("resets an all-wallets key with walletScope alone, as the API requires", async () => {
-    await saveApiKeyAuthoringAction({ mode: "edit", keyId: "key_1", draft: draft() });
+  it("replaces the grants without touching anything else", async () => {
+    await updateApiKeyAction("key_test_1", { grants: ["transfers.read", "wallets.read"] });
 
-    const body = lastBody();
-    expect(body.walletScope).toBe("all");
-    expect(body).not.toHaveProperty("signingWalletId");
-    expect(body).not.toHaveProperty("signingWalletIds");
-    expect(body).not.toHaveProperty("walletBindings");
-  });
-
-  it("moves a key to selected wallets with their ids", async () => {
-    await saveApiKeyAuthoringAction({
-      mode: "edit",
-      keyId: "key_1",
-      draft: draft({ walletScope: "selected", selectedWalletIds: ["cwlt_a"] }),
-    });
-
-    expect(lastBody()).toMatchObject({ walletScope: "selected", walletIds: ["cwlt_a"] });
-  });
-
-  it("reports an API failure without a flash or a revalidation", async () => {
-    client.fetch.mockRejectedValue(new Error("SDP API request failed (400): boom"));
-
-    const result = await saveApiKeyAuthoringAction({
-      mode: "edit",
-      keyId: "key_1",
-      draft: draft(),
-    });
-
-    expect(result.ok).toBe(false);
-    expect(mocks.revalidatePath).not.toHaveBeenCalled();
-  });
-
-  it("refuses an edit without a key id", async () => {
-    const result = await saveApiKeyAuthoringAction({ mode: "edit", draft: draft() });
-
-    expect(result).toEqual({ ok: false, message: "DashboardCustody.apiKeyEditMissingId" });
-    expect(client.fetch).not.toHaveBeenCalled();
+    expect(sentRequest().body).toEqual({ grants: ["transfers.read", "wallets.read"] });
   });
 });
 
-describe("deactivateApiKeyInlineAction", () => {
-  const revoke = { keyId: "key_1", keyName: "Payouts worker", confirmation: "Payouts worker" };
+describe("rotateApiKeyAction", () => {
+  it.each(API_KEY_ROTATION_GRACE_HOURS)(
+    "rotates with %i hours of grace and flashes the replacement's secret",
+    async (gracePeriodHours) => {
+      const result = await rotateApiKeyAction("key_test_1", gracePeriodHours);
 
-  it("revokes without touching recurring payments unless asked", async () => {
+      expect(result).toEqual({ ok: true, keyId: "key_test_2" });
+      expect(sentRequest()).toEqual({
+        path: "/v1/api-keys/key_test_1/rotate",
+        method: "POST",
+        body: { gracePeriodHours },
+      });
+      expect(await flashedAt(Date.now())).toEqual({
+        keyId: "key_test_2",
+        key: "sf_test_issued_secret",
+      });
+    }
+  );
+
+  it("refuses a grace period the panel does not offer before calling the API", async () => {
+    const result = await rotateApiKeyAction("key_test_1", 2);
+
+    expect(result).toEqual({ ok: false, message: "Rotate failed: grace period" });
+    expect(client.fetch).not.toHaveBeenCalled();
+    expect(requestCookies.get(API_KEY_FLASH_COOKIE)).toBeUndefined();
+  });
+});
+
+describe("revokeApiKeyAction", () => {
+  const revoke = { keyId: "key_test_1", keyName: "Payouts worker" };
+
+  it("revokes with the key's name as confirmation, leaving recurring payments alone", async () => {
     client.fetch.mockResolvedValue({ recurringPayments: null });
 
-    const result = await deactivateApiKeyInlineAction(revoke);
+    const result = await revokeApiKeyAction({ ...revoke, cancelRecurringPayments: false });
 
-    expect(client.fetch.mock.calls[0]?.[0]).toBe("/v1/api-keys/key_1");
-    expect(lastBody()).toEqual({ confirmation: "Payouts worker", cancelRecurringPayments: false });
-    expect(result).toEqual({ ok: true, message: "DashboardCustody.apiKeyDeactivated" });
+    expect(sentRequest()).toEqual({
+      path: "/v1/api-keys/key_test_1",
+      method: "DELETE",
+      body: { confirmation: "Payouts worker", cancelRecurringPayments: false },
+    });
+    expect(result).toEqual({ ok: true, message: 'API key "Payouts worker" has been deactivated.' });
   });
 
-  it("asks the API to cancel what the key started, and reports both counts", async () => {
+  it("cancels the recurring payments the key started and reports both counts", async () => {
     client.fetch.mockResolvedValue({
-      recurringPayments: { canceled: ["prp_1", "prp_2"], failed: ["prp_3"] },
+      recurringPayments: { canceled: ["prp_test_1", "prp_test_2"], failed: ["prp_test_3"] },
     });
 
-    const result = await deactivateApiKeyInlineAction({ ...revoke, cancelRecurringPayments: true });
+    const result = await revokeApiKeyAction({ ...revoke, cancelRecurringPayments: true });
 
-    expect(lastBody()).toEqual({ confirmation: "Payouts worker", cancelRecurringPayments: true });
+    expect(sentRequest().body).toEqual({
+      confirmation: "Payouts worker",
+      cancelRecurringPayments: true,
+    });
     expect(result).toEqual({
       ok: true,
-      message: "DashboardCustody.apiKeyDeactivated DashboardCustody.apiKeyRecurringCanceled",
+      message:
+        'API key "Payouts worker" has been deactivated. Recurring payments canceled: 2. Not canceled: 1.',
     });
   });
 });

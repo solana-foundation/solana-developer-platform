@@ -9,11 +9,9 @@ vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
 
 import {
   API_KEY_FLASH_COOKIE,
-  API_KEY_FLASH_NOTICE_MAX_AGE_SECONDS,
-  API_KEY_FLASH_SECRET_MAX_AGE_SECONDS,
+  API_KEY_FLASH_MAX_AGE_SECONDS,
   type ApiKeyFlash,
   apiKeyFlashCookieOptions,
-  apiKeyFlashMaxAgeSeconds,
 } from "./api-key-flash";
 import { sealApiKeyFlash, unsealApiKeyFlash } from "./api-key-flash-seal";
 import { DELETE, POST } from "./flash/route";
@@ -22,12 +20,7 @@ const SESSION = { sessionId: "sess_owner", userId: "user_owner" };
 const OTHER_SESSION = { sessionId: "sess_other", userId: "user_owner" };
 const OTHER_USER = { sessionId: "sess_owner", userId: "user_other" };
 
-const SECRET_FLASH: ApiKeyFlash = {
-  level: "success",
-  message: "API key created",
-  key: "sk_test_generated_secret",
-  keyPrefix: "sk_test_gen",
-};
+const SECRET_FLASH: ApiKeyFlash = { keyId: "key_test_1", key: "sf_test_generated_secret" };
 
 const API_KEYS_COOKIE_PATH = `/dashboard/${PRODUCTION_PROJECT.id}/api-keys`;
 
@@ -101,24 +94,14 @@ describe("api key flash handoff", () => {
       vi.stubEnv("NODE_ENV", "production");
       const options = apiKeyFlashCookieOptions(
         PRODUCTION_PROJECT.id,
-        API_KEY_FLASH_SECRET_MAX_AGE_SECONDS
+        API_KEY_FLASH_MAX_AGE_SECONDS
       );
 
       expect(options.httpOnly).toBe(true);
       expect(options.secure).toBe(true);
       expect(options.sameSite).toBe("strict");
       expect(options.path).toBe(API_KEYS_COOKIE_PATH);
-      expect(options.maxAge).toBe(API_KEY_FLASH_SECRET_MAX_AGE_SECONDS);
-    });
-
-    it("keeps secret-bearing flashes shorter-lived than notices", () => {
-      expect(apiKeyFlashMaxAgeSeconds(SECRET_FLASH)).toBe(API_KEY_FLASH_SECRET_MAX_AGE_SECONDS);
-      expect(apiKeyFlashMaxAgeSeconds({ level: "success", message: "updated" })).toBe(
-        API_KEY_FLASH_NOTICE_MAX_AGE_SECONDS
-      );
-      expect(API_KEY_FLASH_SECRET_MAX_AGE_SECONDS).toBeLessThan(
-        API_KEY_FLASH_NOTICE_MAX_AGE_SECONDS
-      );
+      expect(options.maxAge).toBe(API_KEY_FLASH_MAX_AGE_SECONDS);
     });
   });
 

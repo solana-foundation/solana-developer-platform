@@ -134,8 +134,8 @@ describe("i18n messages", () => {
   });
 
   it("rejects missing interpolation values", () => {
-    expect(() => translate(getMessages("en"), "DashboardCustody.rotateKey")).toThrow(
-      "Missing interpolation value hours for DashboardCustody.rotateKey"
+    expect(() => translate(getMessages("en"), "DashboardCustody.apiKeyPage.rotateTitle")).toThrow(
+      "Missing interpolation value name for DashboardCustody.apiKeyPage.rotateTitle"
     );
   });
 });

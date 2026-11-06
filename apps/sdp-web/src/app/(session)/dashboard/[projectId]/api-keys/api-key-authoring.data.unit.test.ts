@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SdpApiClient } from "@/lib/sdp-api";
-import { fetchApiKeyAuthoringWallets, fetchApiKeyForAuthoring } from "./api-key-authoring.data";
+import { testApiKey } from "@/test/api-keys";
+import { fetchApiKeyAuthoringWallets, fetchApiKeyDetails } from "./api-key-authoring.data";
 
 const WALLET = {
   id: "wallet_a",
@@ -35,25 +36,25 @@ describe("fetchApiKeyAuthoringWallets", () => {
   });
 });
 
-describe("fetchApiKeyForAuthoring", () => {
-  it("returns the key with its grants", async () => {
-    const key = { id: "key_1", name: "Payouts", grants: ["transfers.execute"] };
+describe("fetchApiKeyDetails", () => {
+  it("returns the key's details", async () => {
+    const key = testApiKey({ status: "active", expiresAt: null, rotationDeadline: null });
     const { client, paths } = clientAnswering(() => Response.json({ data: key }));
 
-    await expect(fetchApiKeyForAuthoring(client, "key_1")).resolves.toEqual(key);
-    expect(paths).toEqual(["/v1/api-keys/key_1"]);
+    await expect(fetchApiKeyDetails(client, "key_test_1")).resolves.toEqual(key);
+    expect(paths).toEqual(["/v1/api-keys/key_test_1"]);
   });
 
   it("returns null for a key that does not exist", async () => {
     const { client } = clientAnswering(() => new Response(null, { status: 404 }));
 
-    await expect(fetchApiKeyForAuthoring(client, "missing")).resolves.toBeNull();
+    await expect(fetchApiKeyDetails(client, "key_test_missing")).resolves.toBeNull();
   });
 
   it("fails loudly on any other error", async () => {
     const { client } = clientAnswering(() => new Response(null, { status: 500 }));
 
-    await expect(fetchApiKeyForAuthoring(client, "key_1")).rejects.toThrow(
+    await expect(fetchApiKeyDetails(client, "key_test_1")).rejects.toThrow(
       "Unable to load API key (500)"
     );
   });

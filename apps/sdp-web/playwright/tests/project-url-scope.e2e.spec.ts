@@ -22,16 +22,13 @@ test.describe
       await productionTab.goto(projectHref(projects.production, "/dashboard/api-keys"));
       await expect(productionTab.getByText("No API keys found.")).toBeVisible();
 
-      await page.getByRole("link", { name: "Create new API key" }).click();
-      await page.getByLabel("Name").fill(keyName);
-      await page.getByRole("button", { name: "Continue" }).click();
-      // A read-only grant leaves the key on all wallets, so Access needs no pick.
+      await page.getByRole("link", { name: "Create key" }).click();
+      await page.getByLabel("Name", { exact: true }).fill(keyName);
       await page.getByRole("checkbox", { name: "Read on Transfers" }).check();
-      await page.getByRole("button", { name: "Continue" }).click();
-      await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Create key" }).click();
-      await expect(page.getByText("API key generated")).toBeVisible({ timeout: 120_000 });
-      await page.getByRole("button", { name: "Dismiss", exact: true }).click();
+      await expect(page.locator("[data-api-key-secret]")).toBeVisible({ timeout: 120_000 });
+      await expect(page).toHaveURL(new RegExp(`/dashboard/${projects.sandbox}/api-keys/`));
+      await page.getByRole("button", { name: "I have saved this key" }).click();
 
       await page.goto(projectHref(projects.sandbox, "/dashboard/api-keys"));
       await expect(page.getByRole("row", { name: keyName })).toBeVisible({ timeout: 120_000 });

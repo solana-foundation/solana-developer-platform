@@ -1,9 +1,24 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { projectHref } from "@/lib/dashboard-project-path";
 import {
   bootstrapLocalWalletFixtures,
   provisionWithAdminSession,
 } from "../support/local-dashboard-bootstrap";
+
+const SECRET_FORMAT = /^sf_[0-9a-f]{16}_[0-9A-Za-z]{49}$/;
+
+function recordSection(page: Page, title: RegExp) {
+  return page
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { level: 2, name: title }) })
+    .last();
+}
+
+function transfersAccessRow(page: Page) {
+  return page
+    .getByRole("row")
+    .filter({ has: page.getByRole("rowheader", { name: "Transfers", exact: true }) });
+}
 
 test.describe
   .serial("dashboard api keys e2e", () => {
@@ -26,116 +41,83 @@ test.describe
       const keyName = `Playwright Selected Wallet Key ${Date.now()}`;
 
       await page.goto(projectHref(projectId, "/dashboard/api-keys"));
-      await page.getByRole("link", { name: /^(Create new API key|New API key)$/ }).click();
+      await page.getByRole("link", { name: "Create key" }).click();
 
-      await page.getByLabel("Name").fill(keyName);
-      await page.getByRole("button", { name: "Continue" }).click();
-      // Grants are explicit (HOO-2099): nothing is granted until a verb is ticked.
-      await expect(page.getByRole("button", { name: "Continue" })).toBeDisabled();
+      await page.getByLabel("Name", { exact: true }).fill(keyName);
       await page.getByRole("checkbox", { name: "Execute on Transfers" }).check();
-      await page.getByRole("button", { name: "Continue" }).click();
-      await page.getByRole("radio", { name: /^Selected wallets/ }).check();
+      await expect(page.getByRole("radio", { name: "Selected wallets" })).toBeChecked();
       await page
         .getByRole("checkbox", { name: /^Select / })
         .first()
-        .check();
-      await page.getByRole("button", { name: "Continue" }).click();
-
-      await expect(page.getByText("Key identity")).toBeVisible();
-      await expect(page.getByText("Transfers: Read, Execute").first()).toBeVisible();
-
+        .check({ force: true });
       await page.getByRole("button", { name: "Create key" }).click();
 
-      await expect(page.getByText("API key generated")).toBeVisible({ timeout: 120_000 });
-      await expect(page.locator("#generated-key")).toHaveValue(/^sf_[0-9a-f]{16}_[0-9A-Za-z]{49}$/);
+      await expect(page).toHaveURL(new RegExp(`/dashboard/${projectId}/api-keys/(?!new$)[^/]+$`), {
+        timeout: 120_000,
+      });
+      const secret = page.locator("[data-api-key-secret]");
+      await expect(secret).toHaveText(SECRET_FORMAT);
 
-      await page.getByRole("button", { name: "Dismiss", exact: true }).click();
+      await page.getByRole("button", { name: "I have saved this key" }).click();
+      await expect(secret).toHaveCount(0);
       await page.reload();
+      await expect(page.getByRole("heading", { name: keyName })).toBeVisible({ timeout: 120_000 });
+      await expect(secret).toHaveCount(0);
 
-      await expect(page.locator("#generated-key")).toHaveCount(0);
-      await expect(page.getByText("Your full key (shown once)")).toHaveCount(0);
+      await page.goto(projectHref(projectId, "/dashboard/api-keys"));
       const keyRow = page.getByRole("row", { name: new RegExp(keyName) });
-      await expect(keyRow).toBeVisible({ timeout: 120_000 });
-      await expect(keyRow).toContainText("Transfers: Read, Execute");
-      await expect(keyRow).toContainText("1 selected");
-
-      const tableBeforeMenu = await page.getByRole("table").boundingBox();
-      const bodyOverflowBeforeMenu = await page.evaluate(
-        () => window.getComputedStyle(document.body).overflow
-      );
-
-      await keyRow.getByRole("button", { name: "Actions" }).click();
-      await expect(page.getByRole("menuitem", { name: "Edit API key" })).toBeVisible();
-
-      const tableAfterMenu = await page.getByRole("table").boundingBox();
-      expect(tableBeforeMenu).not.toBeNull();
-      expect(tableAfterMenu).not.toBeNull();
-      expect(tableAfterMenu?.x).toBe(tableBeforeMenu?.x);
-      expect(tableAfterMenu?.width).toBe(tableBeforeMenu?.width);
-      expect(await page.evaluate(() => window.getComputedStyle(document.body).overflow)).toBe(
-        bodyOverflowBeforeMenu
-      );
+      await expect(keyRow).toContainText("Can move funds", { timeout: 120_000 });
+      await expect(keyRow).toContainText("1 wallet");
     });
 
-    test("user can limit a key to reading transfers, keep the grant through rotation, and widen it", async ({
+    test("user can rotate a key with a grace period, then edit its wallets and access in place", async ({
       page,
     }) => {
       const keyName = `Playwright Limited Key ${Date.now()}`;
+      const secret = page.locator("[data-api-key-secret]");
 
       await page.goto(projectHref(projectId, "/dashboard/api-keys"));
-      await page.getByRole("link", { name: /^(Create new API key|New API key)$/ }).click();
-      await page.getByLabel("Name").fill(keyName);
-      await page.getByRole("button", { name: "Continue" }).click();
+      await page.getByRole("link", { name: "Create key" }).click();
+      await page.getByLabel("Name", { exact: true }).fill(keyName);
       await page.getByRole("checkbox", { name: "Read on Transfers" }).check();
-      await page.getByRole("button", { name: "Continue" }).click();
-      await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Create key" }).click();
+      await expect(secret).toHaveText(SECRET_FORMAT, { timeout: 120_000 });
+      const firstKeyUrl = page.url();
+      const firstSecret = await secret.textContent();
+      await page.getByRole("button", { name: "I have saved this key" }).click();
 
-      await expect(page.getByText("API key generated")).toBeVisible({ timeout: 120_000 });
-      await page.getByRole("button", { name: "Dismiss", exact: true }).click();
-
-      let keyRow = page.getByRole("row", { name: new RegExp(keyName) });
-      await expect(keyRow).toContainText("Transfers: Read", { timeout: 120_000 });
-
-      await keyRow.getByRole("button", { name: "Actions" }).click();
-      await page.getByRole("menuitem", { name: "Rotate key (24h grace)" }).click();
-      // Rotation asks first: the current secret stops working after the grace.
+      await page.getByRole("button", { name: "Rotate key…" }).click();
       await page.getByRole("button", { name: "Rotate key", exact: true }).click();
-      await expect(page.getByText("API key generated")).toBeVisible({ timeout: 120_000 });
-      await page.getByRole("button", { name: "Dismiss", exact: true }).click();
-      const rotatedKeyRows = page.getByRole("row", { name: new RegExp(keyName) });
-      await expect(rotatedKeyRows).toHaveCount(2);
-      await expect(rotatedKeyRows.nth(0)).toContainText("Transfers: Read");
-      await expect(rotatedKeyRows.nth(1)).toContainText("Transfers: Read");
-      keyRow = rotatedKeyRows.first();
+      await expect(page).not.toHaveURL(firstKeyUrl, { timeout: 120_000 });
+      await expect(secret).toHaveText(SECRET_FORMAT);
+      expect(await secret.textContent()).not.toBe(firstSecret);
+      await page.getByRole("button", { name: "I have saved this key" }).click();
+      await expect(transfersAccessRow(page)).toContainText("Not held");
 
-      // Changing wallet access keeps the grants and needs no confirmation.
-      await keyRow.getByRole("button", { name: "Actions" }).click();
-      await page.getByRole("menuitem", { name: "Edit API key" }).click();
-      await page.getByRole("button", { name: "Continue" }).click();
-      await page.getByRole("button", { name: "Continue" }).click();
-      await page.getByRole("radio", { name: /^Selected wallets/ }).check();
+      await recordSection(page, /^Wallets/)
+        .getByRole("button", { name: "Edit", exact: true })
+        .click();
+      await page.getByRole("radio", { name: "Selected wallets" }).check({ force: true });
       await page
         .getByRole("checkbox", { name: /^Select / })
         .first()
-        .check();
-      await page.getByRole("button", { name: "Continue" }).click();
-      await page.getByRole("button", { name: "Save changes" }).click();
+        .check({ force: true });
+      await page.getByRole("button", { name: "Save wallets" }).click();
+      await expect(recordSection(page, /^Wallets/)).not.toContainText(
+        "All wallets in this project",
+        { timeout: 120_000 }
+      );
 
-      keyRow = page.getByRole("row", { name: new RegExp(keyName) }).first();
-      await expect(keyRow).toContainText("Transfers: Read", { timeout: 120_000 });
-      await expect(keyRow).toContainText("1 selected");
-
-      // Widening the grant applies to the same key.
-      await keyRow.getByRole("button", { name: "Actions" }).click();
-      await page.getByRole("menuitem", { name: "Edit API key" }).click();
-      await page.getByRole("button", { name: "Continue" }).click();
+      await recordSection(page, /^Access/)
+        .getByRole("button", { name: "Edit", exact: true })
+        .click();
       await page.getByRole("checkbox", { name: "Execute on Transfers" }).check();
-      await page.getByRole("button", { name: "Continue" }).click();
-      await page.getByRole("button", { name: "Continue" }).click();
-      await page.getByRole("button", { name: "Save changes" }).click();
+      await page.getByRole("button", { name: "Save access" }).click();
+      await expect(transfersAccessRow(page)).not.toContainText("Not held", { timeout: 120_000 });
 
-      keyRow = page.getByRole("row", { name: new RegExp(keyName) }).first();
-      await expect(keyRow).toContainText("Transfers: Read, Execute", { timeout: 120_000 });
+      await page.goto(projectHref(projectId, "/dashboard/api-keys"));
+      const keyRows = page.getByRole("row", { name: new RegExp(keyName) });
+      await expect(keyRows).toHaveCount(2, { timeout: 120_000 });
+      await expect(keyRows.filter({ hasText: "Replaced" })).toHaveCount(1);
     });
   });
