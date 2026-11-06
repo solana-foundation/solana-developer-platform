@@ -50,8 +50,6 @@ import { useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
 import { MOVEMENT_POLL_INTERVAL_MS } from "@/lib/dashboard-fetch";
 import { isMovementInFlight } from "@/lib/idempotency";
-import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
-import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard";
@@ -203,9 +201,6 @@ function useBatchRecipientPage() {
  */
 function useBatchRecipientEntries() {
   const [entries, setEntries] = useState<Record<string, BatchRecipientEntry>>({});
-  // A recipient ticked in demo mode starts with an amount, so the batch can be sent at once.
-  const startingAmount = usePaymentsDemo() ? DEMO_PREFILL_AMOUNTS.batchRecipient : "";
-
   // Typing an amount also adds the row to the batch, so the input can show on every row.
   const setRecipientAmount = (recipient: BatchEligibleRecipient, amount: string) => {
     setEntries((prev) => ({
@@ -220,7 +215,7 @@ function useBatchRecipientEntries() {
       if (next[recipient.counterpartyAccountId]) {
         delete next[recipient.counterpartyAccountId];
       } else {
-        next[recipient.counterpartyAccountId] = { recipient, amount: startingAmount };
+        next[recipient.counterpartyAccountId] = { recipient, amount: "" };
       }
       return next;
     });
@@ -232,7 +227,7 @@ function useBatchRecipientEntries() {
       for (const recipient of recipientsToSet) {
         if (value) {
           if (!next[recipient.counterpartyAccountId]) {
-            next[recipient.counterpartyAccountId] = { recipient, amount: startingAmount };
+            next[recipient.counterpartyAccountId] = { recipient, amount: "" };
           }
         } else {
           delete next[recipient.counterpartyAccountId];

@@ -14,7 +14,6 @@ import { readApiErrorMessage } from "./api-error";
 import { projectHref } from "./dashboard-project-path";
 import { dashboardJson, dashboardResponseHeaders } from "./dashboard-response";
 import { type ApiAnswer, apiErrorCode, IDEMPOTENCY_KEY_HEADER } from "./idempotency";
-import { paymentsDemoResponse } from "./payments-demo/demo-mode";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 import {
   createTimedTrace,
@@ -152,12 +151,6 @@ function createSdpApiRequest(
         throw error;
       }
     };
-
-    // Payments demo mode answers payment reads and writes itself; nothing about them goes out.
-    const demoResponse = await paymentsDemoResponse(method, path, projectId, options.body, send);
-    if (demoResponse) {
-      return demoResponse;
-    }
 
     return send();
   };
