@@ -545,6 +545,24 @@ function createPoolTransport(endpoints: readonly RpcEndpoint[]) {
  * @throws RpcUnavailableError `not_configured` when a value isn't an https URL on its slot's host.
  */
 function configuredEndpointUrls(cluster: SolanaCluster): string[] {
+  return configuredPoolEndpoints(cluster).map(({ endpointUrl }) => endpointUrl);
+}
+
+/**
+ * The managed pool's providers with an endpoint configured for `cluster`, in failover order.
+ * Provider names only: the endpoint URLs carry provider keys and never leave this package.
+ *
+ * @param cluster - The cluster whose pool to read.
+ * @returns The configured providers, possibly none; `default` included when set.
+ * @throws RpcUnavailableError `not_configured` when a value isn't an https URL on its slot's host.
+ */
+export function configuredManagedRpcProviders(cluster: SolanaCluster): ManagedRpcProvider[] {
+  return configuredPoolEndpoints(cluster).map(({ provider }) => provider);
+}
+
+function configuredPoolEndpoints(
+  cluster: SolanaCluster
+): { provider: ManagedRpcProvider; endpointUrl: string }[] {
   const envKeys = MANAGED_RPC_ENV_KEYS[cluster];
   const providers = Object.keys(envKeys).filter((provider): provider is keyof typeof envKeys =>
     Object.hasOwn(envKeys, provider)
@@ -554,7 +572,7 @@ function configuredEndpointUrls(cluster: SolanaCluster): string[] {
     const endpointUrl = process.env[envKey];
     if (!endpointUrl) return [];
     assertManagedEndpointUrl(cluster, provider, envKey, endpointUrl);
-    return [endpointUrl];
+    return [{ provider, endpointUrl }];
   });
 }
 

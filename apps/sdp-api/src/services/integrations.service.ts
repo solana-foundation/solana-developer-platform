@@ -1,14 +1,21 @@
+import { configuredManagedRpcProviders } from "@sdp/rpc/factory";
 import { CUSTODY_PROVIDER_CATALOG, type ProviderMode } from "@sdp/types/custody";
 import type {
+  ComplianceIntegration,
   CustodyIntegration,
   IntegrationFamily,
   ProjectIntegrations,
+  RampIntegration,
+  RpcIntegration,
 } from "@sdp/types/integrations";
 import type {
   ProjectProviderAvailability,
   ProjectProviderAvailabilityEntry,
 } from "@sdp/types/provider-access";
-import type { DatabaseClient, DatabaseExecutor } from "@/db/client";
+import type { SdpModule } from "@sdp/types/release-channels";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
+import { asTransactionalClient, type DatabaseClient, type DatabaseExecutor } from "@/db/client";
+import { createPostgresPrivateChannelInstanceRepository } from "@/db/repositories/private-channel-instance.repository.postgres";
 import {
   getProjectProviderAvailability,
   type ProjectProviderScope,
@@ -23,6 +30,13 @@ interface ActiveCustodyRecordRow {
 interface ProjectIntegrationFacts {
   availability: ProjectProviderAvailability;
   activeCustodyModes: ReadonlyMap<string, ReadonlySet<ProviderMode>>;
+  privateChannelsActive: boolean | null;
+}
+
+/** What the deployment's release channel runs, as the request sees it. */
+export interface IntegrationReleaseChannel {
+  isProviderInChannel: (entry: ProjectProviderAvailabilityEntry) => boolean;
+  isModuleInChannel: (module: SdpModule) => boolean;
 }
 
 /**
@@ -33,7 +47,7 @@ interface ProjectIntegrationFacts {
  * @param env - Process environment naming the release channel and provider credentials.
  * @param db - Database client; the read runs in its own read-only transaction.
  * @param scope - The project the read is for.
- * @param isInChannel - Whether the deployment's release channel runs an availability entry's provider.
+ * @param channel - What the deployment's release channel runs.
  * @returns The project's integrations by family; absent families have no usable provider.
  * @throws 404 when the project is not an active project of the organization.
  */
@@ -41,18 +55,43 @@ export async function getProjectIntegrations(
   env: Env,
   db: DatabaseClient,
   scope: ProjectProviderScope,
-  isInChannel: (entry: ProjectProviderAvailabilityEntry) => boolean
+  channel: IntegrationReleaseChannel
 ): Promise<ProjectIntegrations> {
+  const privateChannelsInChannel = channel.isModuleInChannel("private_channels");
   const facts = await db.transaction(async (tx): Promise<ProjectIntegrationFacts> => {
     await tx.queryMany("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
     const availability = await getProjectProviderAvailability(env, tx, scope);
     const activeCustodyModes = await loadActiveCustodyModes(tx, scope);
-    return { availability, activeCustodyModes };
+    const privateChannelsActive = privateChannelsInChannel
+      ? (await createPostgresPrivateChannelInstanceRepository(
+          asTransactionalClient(tx)
+        ).getActiveByProject(scope)) !== null
+      : null;
+    return { availability, activeCustodyModes, privateChannelsActive };
   });
 
   const families: IntegrationFamily[] = [];
-  const custody = custodyIntegrations(facts, isInChannel);
+  const custody = custodyIntegrations(facts, channel.isProviderInChannel);
   if (custody.length > 0) families.push({ family: "custody", integrations: custody });
+  const rpc = rpcIntegrations(facts);
+  if (rpc.length > 0) families.push({ family: "rpc", integrations: rpc });
+  const ramps = rampIntegrations(facts, channel.isProviderInChannel);
+  if (ramps.length > 0) families.push({ family: "ramps", integrations: ramps });
+  const compliance = complianceIntegrations(facts, channel.isProviderInChannel);
+  if (compliance.length > 0) families.push({ family: "compliance", integrations: compliance });
+  if (facts.privateChannelsActive !== null) {
+    families.push({
+      family: "private_channels",
+      integrations: [
+        {
+          provider: "private_channels",
+          state: facts.privateChannelsActive
+            ? { status: "connected", mode: "managed" }
+            : { status: "not_configured", modes: ["managed"] },
+        },
+      ],
+    });
+  }
 
   return {
     projectId: facts.availability.projectId,
@@ -131,4 +170,34 @@ function custodyIntegrations(
       },
     ];
   });
+}
+
+function rpcIntegrations(facts: ProjectIntegrationFacts): RpcIntegration[] {
+  const cluster = CLUSTER_BY_SDP_ENVIRONMENT[facts.availability.environment];
+  // Failover order, so the first row is the provider the pool tries first.
+  return configuredManagedRpcProviders(cluster).flatMap((provider): RpcIntegration[] =>
+    provider === "default" ? [] : [{ provider, state: { status: "provided", modes: [] } }]
+  );
+}
+
+function rampIntegrations(
+  facts: ProjectIntegrationFacts,
+  isInChannel: (entry: ProjectProviderAvailabilityEntry) => boolean
+): RampIntegration[] {
+  return facts.availability.providers.flatMap((entry): RampIntegration[] =>
+    entry.family === "ramps" && entry.available && isInChannel(entry)
+      ? [{ provider: entry.provider, state: { status: "provided", modes: [] } }]
+      : []
+  );
+}
+
+function complianceIntegrations(
+  facts: ProjectIntegrationFacts,
+  isInChannel: (entry: ProjectProviderAvailabilityEntry) => boolean
+): ComplianceIntegration[] {
+  return facts.availability.providers.flatMap((entry): ComplianceIntegration[] =>
+    entry.family === "compliance" && entry.available && isInChannel(entry)
+      ? [{ provider: entry.provider, state: { status: "provided", modes: [] } }]
+      : []
+  );
 }
