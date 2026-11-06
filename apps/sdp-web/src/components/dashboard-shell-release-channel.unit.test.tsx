@@ -7,8 +7,11 @@ import {
   type SdpModule,
   type SdpReleaseChannel,
 } from "@sdp/types/release-channels";
+import { cleanup, render } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useHiddenHeaderTabs } from "@/components/dashboard-header-tabs";
 import * as quickStart from "@/components/dashboard-quick-start";
 import { DashboardShell } from "@/components/dashboard-shell";
 import * as languagePicker from "@/components/language-picker";
@@ -35,6 +38,8 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 const PROJECT = `/dashboard/${SANDBOX_PROJECT.id}`;
 const MESSAGES = getMessages("en");
 
+Element.prototype.scrollIntoView = () => {};
+
 type DashboardWorkspace = ReturnType<typeof workspace.useDashboardWorkspace>;
 
 /** The shell's workspace: an admin on the sandbox Project with the sidebar open. */
@@ -60,6 +65,12 @@ function workspaceFor(flags: DashboardFlags): DashboardWorkspace {
 }
 
 beforeEach(() => {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: false,
+    media: query,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  }));
   vi.spyOn(workspace, "useOptionalDashboardWorkspace").mockReturnValue(undefined);
   // Chrome with its own data reads, none of which lists a module.
   vi.spyOn(workspaceSwitcher, "WorkspaceSwitcher").mockReturnValue(<span />);
@@ -71,18 +82,23 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
-function shell(flags: DashboardFlags) {
+function shell(flags: DashboardFlags, page: ReactNode) {
   vi.spyOn(workspace, "useDashboardWorkspace").mockReturnValue(workspaceFor(flags));
   return (
     <I18nProvider locale="en" messages={MESSAGES}>
-      <DashboardShell flags={flags}>
-        <div />
-      </DashboardShell>
+      <DashboardShell flags={flags}>{page}</DashboardShell>
     </I18nProvider>
   );
+}
+
+function IntegrationsPageNamingNoHiddenFamily() {
+  useHiddenHeaderTabs([]);
+  return <div />;
 }
 
 function required<T>(value: T | null, what: string): T {
@@ -127,18 +143,21 @@ function sidebarLinks(flags: DashboardFlags): Set<string> {
   for (const path of PATHS) {
     setDashboardUrl(path, {});
     const root = document.createElement("div");
-    root.innerHTML = renderToStaticMarkup(shell(flags));
+    root.innerHTML = renderToStaticMarkup(shell(flags, <div />));
     const sidebar = required(root.querySelector("aside"), "sidebar");
     for (const href of hrefs(sidebar.querySelectorAll("a[href]"))) links.add(href);
   }
   return links;
 }
 
-function integrationsHeaderTabs(flags: DashboardFlags): string[] {
+function renderIntegrations(flags: DashboardFlags, page: ReactNode): HTMLElement {
   setDashboardUrl(`${PROJECT}/integrations`, {});
-  const root = document.createElement("div");
-  root.innerHTML = renderToStaticMarkup(shell(flags));
-  return [...root.querySelectorAll('[role="tab"]')].map((tab) =>
+  return render(shell(flags, page)).container;
+}
+
+function integrationsHeaderTabs(flags: DashboardFlags): string[] {
+  const container = renderIntegrations(flags, <IntegrationsPageNamingNoHiddenFamily />);
+  return [...container.querySelectorAll('[role="tab"]')].map((tab) =>
     required(tab.textContent, "tab label")
   );
 }
@@ -164,4 +183,11 @@ describe("dashboard navigation on each release channel", () => {
       }
     }
   );
+
+  it("holds the Integrations tab row behind a placeholder until the page names its families", () => {
+    const container = renderIntegrations(dashboardFlagsAt("stable"), <div />);
+
+    expect(container.querySelector('[data-header-tabs-placeholder="true"]')).not.toBeNull();
+    expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0);
+  });
 });

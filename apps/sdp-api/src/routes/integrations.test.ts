@@ -262,7 +262,7 @@ describe("GET /v1/integrations", () => {
     const response = await app.request(
       "/v1/integrations",
       { headers: clerkHeaders(token, PROJECT_IDS.production) },
-      DEPLOYMENT
+      { ...DEPLOYMENT, CLERK_ISSUER: env.CLERK_ISSUER, CLERK_JWKS_URL: env.CLERK_JWKS_URL }
     );
 
     expect(response.status).toBe(200);
@@ -417,7 +417,10 @@ describe("GET /v1/integrations", () => {
         PRIVY_APP_SECRET: undefined,
       })
     ).toEqual([
-      custodyFamily([privyIn({ status: "not_configured", modes: ["byok"] })]),
+      custodyFamily([
+        privyIn({ status: "not_configured", modes: ["byok"] }),
+        SANDBOX_PARA_NOT_CONFIGURED,
+      ]),
       PRIVATE_CHANNELS_NOT_CONFIGURED,
     ]);
   });

@@ -110,7 +110,7 @@ const integrationStatesDocumentSchema = z.object({
                                         z.object({
                                           properties: z.object({
                                             status: z.object({ enum: z.array(z.string()) }),
-                                            modes: z.unknown(),
+                                            modes: z.unknown().optional(),
                                           }),
                                         })
                                       ),
