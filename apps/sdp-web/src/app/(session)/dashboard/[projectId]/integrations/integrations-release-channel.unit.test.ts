@@ -1,8 +1,10 @@
 import { type ProjectIntegrations, projectIntegrationsSchema } from "@sdp/types/integrations";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import IntegrationsPage from "@/app/(session)/dashboard/[projectId]/integrations/(catalog)/page";
 import * as flags from "@/flags";
+import * as ramps from "@/flags/ramps";
 import * as sdpApi from "@/lib/sdp-api";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { resetRequestProject, setPageRequest } from "@/test/request-project";
@@ -26,6 +28,13 @@ const INTEGRATIONS: ProjectIntegrations = {
           category: "server",
           state: { status: "not_configured", modes: ["managed"] },
         },
+      ],
+    },
+    {
+      family: "ramps",
+      integrations: [
+        { provider: "moonpay", state: { status: "not_configured", modes: ["managed"] } },
+        { provider: "stripe", state: { status: "not_configured", modes: ["managed"] } },
       ],
     },
     {
@@ -79,19 +88,27 @@ afterEach(() => {
 });
 
 describe("integrations catalog page", () => {
-  it.each([true, false])(
-    "keeps the Private Channels family only while the per-user flag is on (%s)",
-    async (enabled) => {
-      vi.spyOn(flags, "privateChannels").mockResolvedValue(enabled);
+  it.each<[boolean, RampProviderId[], string[]]>([
+    [true, ["moonpay", "stripe"], ["privy", "moonpay", "stripe", "private_channels"]],
+    [false, ["moonpay", "stripe"], ["privy", "moonpay", "stripe"]],
+    [true, ["stripe"], ["privy", "stripe", "private_channels"]],
+    [true, [], ["privy", "private_channels"]],
+  ])(
+    "keeps only what the per-user flags allow (private channels %s, ramps %j)",
+    async (privateChannels, offeredRamps, shown) => {
+      vi.spyOn(flags, "privateChannels").mockResolvedValue(privateChannels);
+      vi.spyOn(ramps, "getOfferedRampProviders").mockResolvedValue(offeredRamps);
 
       const page = await IntegrationsPage();
       const { integrations } = z
         .object({ integrations: projectIntegrationsSchema })
         .parse(page.props);
 
-      expect(integrations.families.map((family) => family.family)).toEqual(
-        enabled ? ["custody", "private_channels"] : ["custody"]
-      );
+      expect(
+        integrations.families.flatMap((family) =>
+          family.integrations.map((integration) => integration.provider)
+        )
+      ).toEqual(shown);
     }
   );
 });

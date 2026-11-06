@@ -1,9 +1,10 @@
+import type { ManagedRpcEnv } from "@sdp/rpc/types";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
-  CUSTODY_CONFIG_STATUSES,
-  CUSTODY_CONNECTION_LIFECYCLES,
   type CustodyConfigStatus,
-  type CustodyConnectionLifecycle,
+  INACTIVE_CUSTODY_CONFIG_STATUSES,
+  INACTIVE_CUSTODY_CONNECTION_LIFECYCLES,
+  type InactiveCustodyConnectionLifecycle,
 } from "@sdp/types/custody";
 import type {
   CustodyIntegration,
@@ -33,8 +34,6 @@ import { setOrganizationProviderOverrides } from "@/test/helpers/provider-overri
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
-
-type InactiveConnectionLifecycle = Exclude<CustodyConnectionLifecycle, "active">;
 
 const ORGANIZATION_ID = "org_hoo2662_integrations";
 const MEMBER = organizationMember("hoo2662_integrations", "admin");
@@ -74,11 +73,7 @@ const RPC_POOL_URLS = {
   SOLANA_RPC_QUICKNODE_MAINNET_API_KEY_URL:
     "https://hoo2662.solana-mainnet.quiknode.pro/hoo2662-rpc-token",
   SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL: "https://rpc.hoo2662.test/hoo2662-rpc-token",
-} as const;
-const INACTIVE_CONNECTION_LIFECYCLES = CUSTODY_CONNECTION_LIFECYCLES.filter(
-  (status): status is InactiveConnectionLifecycle => status !== "active"
-);
-const INACTIVE_CONFIG_STATUSES = CUSTODY_CONFIG_STATUSES.filter((status) => status !== "active");
+} as const satisfies ManagedRpcEnv;
 const INACTIVE_CONNECTION_CHECKS = {
   pending: {
     lastCheckStatus: null,
@@ -109,7 +104,7 @@ const INACTIVE_CONNECTION_CHECKS = {
     deactivatedAt: SEEDED_AT,
   },
 } as const satisfies Record<
-  InactiveConnectionLifecycle,
+  InactiveCustodyConnectionLifecycle,
   Pick<
     TestCustodyConnection,
     "lastCheckStatus" | "lastCheckAt" | "lastCheckFailureCode" | "activatedAt" | "deactivatedAt"
@@ -188,7 +183,9 @@ async function seedSandboxPrivyConfig(status: CustodyConfigStatus): Promise<void
   });
 }
 
-async function seedSandboxPrivyConnection(status: InactiveConnectionLifecycle): Promise<void> {
+async function seedSandboxPrivyConnection(
+  status: InactiveCustodyConnectionLifecycle
+): Promise<void> {
   const db = getDb(env);
   const credential = { id: "pcred_hoo2662_sandbox", projectId: PROJECT_IDS.sandbox };
   await insertTestStoredProviderCredential(db, {
@@ -337,7 +334,7 @@ describe("GET /v1/integrations", () => {
     ]);
   });
 
-  it.each(INACTIVE_CONNECTION_LIFECYCLES)(
+  it.each(INACTIVE_CUSTODY_CONNECTION_LIFECYCLES)(
     "leaves Privy not configured while its only connection is %s",
     async (status) => {
       await seedSandboxPrivyConnection(status);
@@ -349,7 +346,7 @@ describe("GET /v1/integrations", () => {
     }
   );
 
-  it.each(INACTIVE_CONFIG_STATUSES)(
+  it.each(INACTIVE_CUSTODY_CONFIG_STATUSES)(
     "leaves Privy not configured while its only managed config is %s",
     async (status) => {
       await seedSandboxPrivyConfig(status);

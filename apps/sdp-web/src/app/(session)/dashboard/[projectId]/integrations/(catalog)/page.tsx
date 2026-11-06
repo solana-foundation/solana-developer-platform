@@ -1,9 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
+import type { IntegrationFamily } from "@sdp/types/integrations";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import { redirect } from "next/navigation";
 import { IntegrationsCatalog } from "@/app/(session)/dashboard/[projectId]/integrations/integrations-catalog";
 import { fetchProjectIntegrations } from "@/app/(session)/dashboard/[projectId]/integrations/project-integrations.data";
 import type { OnboardingStatusResponse } from "@/app/(session)/dashboard/[projectId]/onboarding-status";
 import { privateChannels } from "@/flags";
+import { getOfferedRampProviders } from "@/flags/ramps";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createRequestScopedSdpApiClients } from "@/lib/sdp-api";
 
@@ -26,23 +29,40 @@ export default async function IntegrationsPage() {
   if (!onboarding.linked || !onboarding.organization) {
     redirect("/dashboard");
   }
-  const [integrations, privateChannelsEnabled] = await Promise.all([
+  const [integrations, privateChannelsEnabled, offeredRampProviders] = await Promise.all([
     trace.step("fetch_integrations", () => fetchProjectIntegrations(projectClient)),
     privateChannels(),
+    getOfferedRampProviders(),
   ]);
 
   trace.log({ ok: true });
 
-  // Private Channels also has per-user flag targeting the API cannot see, so its
-  // family stays off the page for anyone the flag leaves out.
   return (
     <IntegrationsCatalog
       integrations={{
         ...integrations,
-        families: integrations.families.filter(
-          (family) => privateChannelsEnabled || family.family !== "private_channels"
+        families: integrations.families.flatMap((family) =>
+          familyForViewer(family, { privateChannelsEnabled, offeredRampProviders })
         ),
       }}
     />
   );
+}
+
+// Private Channels and each ramp provider also have per-user flag targeting the API
+// cannot see, so the page drops whatever those flags leave out for this viewer.
+function familyForViewer(
+  family: IntegrationFamily,
+  flags: { privateChannelsEnabled: boolean; offeredRampProviders: readonly RampProviderId[] }
+): IntegrationFamily[] {
+  if (family.family === "private_channels") {
+    return flags.privateChannelsEnabled ? [family] : [];
+  }
+  if (family.family === "ramps") {
+    const integrations = family.integrations.filter((integration) =>
+      flags.offeredRampProviders.includes(integration.provider)
+    );
+    return integrations.length > 0 ? [{ ...family, integrations }] : [];
+  }
+  return [family];
 }

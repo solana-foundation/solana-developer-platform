@@ -529,6 +529,14 @@ export function isUnarchivedCustodyConfigStatus(status: CustodyConfigStatus): bo
 /** Config statuses a provider lookup may return; archived rows are skipped. */
 export const UNARCHIVED_CUSTODY_CONFIG_STATUSES: readonly CustodyConfigStatus[] =
   CUSTODY_CONFIG_STATUSES.filter(isUnarchivedCustodyConfigStatus);
+
+export type InactiveCustodyConfigStatus = Exclude<CustodyConfigStatus, "active">;
+
+/** Config statuses that leave the provider unconnected for the project. */
+export const INACTIVE_CUSTODY_CONFIG_STATUSES: readonly InactiveCustodyConfigStatus[] =
+  CUSTODY_CONFIG_STATUSES.filter(
+    (status): status is InactiveCustodyConfigStatus => status !== "active"
+  );
 export type CustodyWalletStatus = "active" | "inactive";
 
 export interface FireblocksCustodyOptions {
@@ -807,6 +815,14 @@ export const CUSTODY_CONNECTION_LIFECYCLES = [
   "deactivated",
 ] as const;
 export type CustodyConnectionLifecycle = (typeof CUSTODY_CONNECTION_LIFECYCLES)[number];
+
+export type InactiveCustodyConnectionLifecycle = Exclude<CustodyConnectionLifecycle, "active">;
+
+/** Lifecycles that leave the provider unconnected for the project. */
+export const INACTIVE_CUSTODY_CONNECTION_LIFECYCLES: readonly InactiveCustodyConnectionLifecycle[] =
+  CUSTODY_CONNECTION_LIFECYCLES.filter(
+    (lifecycle): lifecycle is InactiveCustodyConnectionLifecycle => lifecycle !== "active"
+  );
 
 /** Outcome of a single connection install check. */
 export const CUSTODY_CONNECTION_CHECK_STATUSES = [
