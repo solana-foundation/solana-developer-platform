@@ -74,7 +74,7 @@ function ConnectionSummary({
   const t = useTranslations();
   if (connection.status === "active") {
     return (
-      <span className="block truncate text-body text-secondary">
+      <span className="block truncate text-xs text-secondary">
         {walletsPart(connection, wallets, walletsUnavailable, t)}
         {connection.isRuntimeExecutionAllowed ? null : (
           <>
@@ -100,7 +100,7 @@ function ConnectionSummary({
   return (
     <StatusText
       tone={LIFECYCLE_TONES[connection.status]}
-      className="flex min-w-0 items-center gap-2 text-body"
+      className="flex min-w-0 items-center gap-2 text-xs"
     >
       <span
         aria-hidden
@@ -196,12 +196,12 @@ export function ConnectionsList({
                 <span className="flex min-w-0 items-baseline gap-2">
                   <Link
                     href={connectionHref(connection.id)}
-                    className="truncate text-field font-medium text-primary hover:underline"
+                    className="truncate text-body font-medium text-primary hover:underline"
                     data-connection-link
                   >
                     {connection.label}
                   </Link>
-                  <span className="shrink-0 font-mono text-meta text-tertiary">
+                  <span className="shrink-0 font-mono text-xs text-secondary">
                     {`····${connection.id.slice(-4)}`}
                   </span>
                 </span>
@@ -213,7 +213,7 @@ export function ConnectionsList({
                   />
                 </span>
               </TableCell>
-              <TableCell className="hidden align-top py-3 text-right text-secondary tabular-nums sm:table-cell">
+              <TableCell className="hidden align-top py-3 text-right text-xs leading-5 text-secondary tabular-nums sm:table-cell">
                 {formatCreated(connection.createdAt, locale, timeZone)}
               </TableCell>
               <TableCell className="align-top py-3 text-right text-tertiary">

@@ -117,7 +117,7 @@ function IntegrationSectionBlock({ section, t }: { section: IntegrationSection; 
     <section className="space-y-2" data-integration-section={section.family}>
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-medium tracking-tight text-primary">{section.title}</h2>
+          <h2 className="text-subheading font-medium text-primary">{section.title}</h2>
           <InfoHint text={section.description} />
         </div>
         <SectionSummary section={section} t={t} />
