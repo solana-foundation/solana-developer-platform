@@ -8,10 +8,12 @@ import {
 import type {
   CustodyIntegration,
   IntegrationFamily,
+  IntegrationState,
   ProjectIntegrations,
 } from "@sdp/types/integrations";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
+import { createPostgresPrivateChannelInstanceRepository } from "@/db/repositories/private-channel-instance.repository.postgres";
 import { app } from "@/index";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey, type TestApiKeyMaterial } from "@/test/helpers/api-keys";
@@ -27,6 +29,7 @@ import {
 import { env } from "@/test/helpers/env";
 import { organizationMember, seedOrganizationMembers } from "@/test/helpers/organization-members";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { setOrganizationProviderOverrides } from "@/test/helpers/provider-overrides";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -54,6 +57,23 @@ const DEPLOYMENT: Env = {
   PRIVY_APP_SECRET: "privy_hoo2662_secret",
   PARA_API_KEY: "para_hoo2662_key",
 };
+const SANDBOX_RAMP_AND_COMPLIANCE_CREDENTIALS = {
+  MOONPAY_SANDBOX_API_KEY: "pk_test_hoo2662",
+  MOONPAY_SANDBOX_SECRET_KEY: "sk_test_hoo2662",
+  MOONPAY_SANDBOX_WEBHOOK_SECRET: "wk_test_hoo2662",
+  STRIPE_SANDBOX_SECRET_KEY: "sk_test_hoo2662",
+  STRIPE_SANDBOX_PUBLISHABLE_KEY: "pk_test_hoo2662",
+  STRIPE_SANDBOX_WEBHOOK_SECRET: "whsec_hoo2662",
+  RANGE_API_KEY: "range_hoo2662_key",
+} as const satisfies Partial<Env>;
+const RPC_POOL_URLS = {
+  SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL: "https://solana-devnet.g.alchemy.com/v2/hoo2662-rpc-token",
+  SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "https://hoo2662.devnet.rpcpool.com/hoo2662-rpc-token",
+  SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL: "https://rpc.hoo2662.test/hoo2662-rpc-token",
+  SOLANA_RPC_QUICKNODE_MAINNET_API_KEY_URL:
+    "https://hoo2662.solana-mainnet.quiknode.pro/hoo2662-rpc-token",
+  SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL: "https://rpc.hoo2662.test/hoo2662-rpc-token",
+} as const;
 const INACTIVE_CONNECTION_LIFECYCLES = CUSTODY_CONNECTION_LIFECYCLES.filter(
   (status): status is InactiveConnectionLifecycle => status !== "active"
 );
@@ -105,8 +125,25 @@ const SANDBOX_PARA_NOT_CONFIGURED: CustodyIntegration = {
   state: { status: "not_configured", modes: ["managed"] },
 };
 
+const PRIVATE_CHANNELS_NOT_CONFIGURED = privateChannelsFamily({
+  status: "not_configured",
+  modes: ["managed"],
+});
+const SANDBOX_UNSET_CUSTODY = custodyFamily([
+  SANDBOX_PRIVY_NOT_CONFIGURED,
+  SANDBOX_PARA_NOT_CONFIGURED,
+]);
+
 function custodyFamily(integrations: CustodyIntegration[]): IntegrationFamily {
   return { family: "custody", integrations };
+}
+
+function privateChannelsFamily(state: IntegrationState): IntegrationFamily {
+  return { family: "private_channels", integrations: [{ provider: "private_channels", state }] };
+}
+
+function apiKeyHeaders(environment: SdpEnvironment): Record<string, string> {
+  return { Authorization: `Bearer ${API_KEYS[environment].raw}` };
 }
 
 function privyIn(state: CustodyIntegration["state"]): CustodyIntegration {
@@ -124,10 +161,7 @@ async function readAs(
 }
 
 async function readFamilies(environment: SdpEnvironment, deployment: Env) {
-  const integrations = await readAs(
-    { Authorization: `Bearer ${API_KEYS[environment].raw}` },
-    deployment
-  );
+  const integrations = await readAs(apiKeyHeaders(environment), deployment);
   return integrations.families;
 }
 
@@ -216,6 +250,7 @@ describe("GET /v1/integrations", () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await clearKVStores(env);
   });
 
@@ -245,6 +280,15 @@ describe("GET /v1/integrations", () => {
               },
             ],
           },
+          {
+            family: "private_channels",
+            integrations: [
+              {
+                provider: "private_channels",
+                state: { status: "not_configured", modes: ["managed"] },
+              },
+            ],
+          },
         ],
       },
       meta: { requestId: expect.any(String), timestamp: expect.any(String) },
@@ -263,7 +307,10 @@ describe("GET /v1/integrations", () => {
   ])(
     "lists unset custody providers with the modes a $environment project allows",
     async ({ environment, integrations }) => {
-      expect(await readFamilies(environment, DEPLOYMENT)).toEqual([custodyFamily(integrations)]);
+      expect(await readFamilies(environment, DEPLOYMENT)).toEqual([
+        custodyFamily(integrations),
+        PRIVATE_CHANNELS_NOT_CONFIGURED,
+      ]);
     }
   );
 
@@ -275,6 +322,7 @@ describe("GET /v1/integrations", () => {
         privyIn({ status: "connected", mode: "managed" }),
         SANDBOX_PARA_NOT_CONFIGURED,
       ]),
+      PRIVATE_CHANNELS_NOT_CONFIGURED,
     ]);
   });
 
@@ -284,6 +332,7 @@ describe("GET /v1/integrations", () => {
 
     expect(await readFamilies("sandbox", DEPLOYMENT)).toEqual([
       custodyFamily([privyIn({ status: "connected", mode: "byok" }), SANDBOX_PARA_NOT_CONFIGURED]),
+      PRIVATE_CHANNELS_NOT_CONFIGURED,
     ]);
   });
 
@@ -293,7 +342,8 @@ describe("GET /v1/integrations", () => {
       await seedSandboxPrivyConnection(status);
 
       expect(await readFamilies("sandbox", DEPLOYMENT)).toEqual([
-        custodyFamily([SANDBOX_PRIVY_NOT_CONFIGURED, SANDBOX_PARA_NOT_CONFIGURED]),
+        SANDBOX_UNSET_CUSTODY,
+        PRIVATE_CHANNELS_NOT_CONFIGURED,
       ]);
     }
   );
@@ -304,7 +354,8 @@ describe("GET /v1/integrations", () => {
       await seedSandboxPrivyConfig(status);
 
       expect(await readFamilies("sandbox", DEPLOYMENT)).toEqual([
-        custodyFamily([SANDBOX_PRIVY_NOT_CONFIGURED, SANDBOX_PARA_NOT_CONFIGURED]),
+        SANDBOX_UNSET_CUSTODY,
+        PRIVATE_CHANNELS_NOT_CONFIGURED,
       ]);
     }
   );
@@ -319,17 +370,94 @@ describe("GET /v1/integrations", () => {
     await seedActivePrivyConnection("production");
 
     const integrations = await readAs(
-      {
-        Authorization: `Bearer ${API_KEYS.sandbox.raw}`,
-        "x-project-id": PROJECT_IDS.production,
-      },
+      { ...apiKeyHeaders("sandbox"), "x-project-id": PROJECT_IDS.production },
       DEPLOYMENT
     );
 
     expect(integrations).toEqual({
       projectId: PROJECT_IDS.sandbox,
       environment: "sandbox",
-      families: [custodyFamily([SANDBOX_PRIVY_NOT_CONFIGURED, SANDBOX_PARA_NOT_CONFIGURED])],
+      families: [SANDBOX_UNSET_CUSTODY, PRIVATE_CHANNELS_NOT_CONFIGURED],
     });
+  });
+
+  it("reports the project's active Private Channels instance as connected managed", async () => {
+    await createPostgresPrivateChannelInstanceRepository(getDb(env)).createActive({
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_IDS.sandbox,
+      createdBy: MEMBER.userId,
+      gatewayUrl: "https://gateway.hoo2662.test",
+      chainRpcUrl: "",
+      escrowProgramId: "prog_hoo2662_escrow",
+      withdrawProgramId: "prog_hoo2662_withdraw",
+      escrowInstanceAddr: "escrow_hoo2662",
+      authUrl: "https://auth.hoo2662.test",
+    });
+
+    expect(await readFamilies("sandbox", DEPLOYMENT)).toEqual([
+      SANDBOX_UNSET_CUSTODY,
+      privateChannelsFamily({ status: "connected", mode: "managed" }),
+    ]);
+  });
+
+  it("omits Private Channels on a release channel that does not run the module", async () => {
+    expect(await readFamilies("sandbox", { ...DEPLOYMENT, SDP_RELEASE_CHANNEL: "beta" })).toEqual([
+      SANDBOX_UNSET_CUSTODY,
+    ]);
+  });
+
+  it("lists the pool providers keyed for the project's cluster as provided, in failover order, without default or any URL", async () => {
+    for (const [envKey, endpointUrl] of Object.entries(RPC_POOL_URLS)) {
+      vi.stubEnv(envKey, endpointUrl);
+    }
+
+    const sandbox = await readAs(apiKeyHeaders("sandbox"), DEPLOYMENT);
+    const production = await readAs(apiKeyHeaders("production"), DEPLOYMENT);
+
+    expect(sandbox.families).toContainEqual({
+      family: "rpc",
+      integrations: [
+        { provider: "triton", state: { status: "provided", modes: [] } },
+        { provider: "alchemy", state: { status: "provided", modes: [] } },
+      ],
+    });
+    expect(production.families).toContainEqual({
+      family: "rpc",
+      integrations: [{ provider: "quicknode", state: { status: "provided", modes: [] } }],
+    });
+    expect(JSON.stringify([sandbox, production])).not.toMatch(/:\/\/|hoo2662-rpc-token/);
+  });
+
+  it("lists entitled ramp and compliance providers as provided in a Sandbox project", async () => {
+    await setOrganizationProviderOverrides(getDb(env), ORGANIZATION_ID, {
+      compliance: { range: true },
+    });
+
+    expect(
+      await readFamilies("sandbox", { ...DEPLOYMENT, ...SANDBOX_RAMP_AND_COMPLIANCE_CREDENTIALS })
+    ).toEqual([
+      SANDBOX_UNSET_CUSTODY,
+      {
+        family: "ramps",
+        integrations: [
+          { provider: "moonpay", state: { status: "provided", modes: [] } },
+          { provider: "stripe", state: { status: "provided", modes: [] } },
+        ],
+      },
+      {
+        family: "compliance",
+        integrations: [{ provider: "range", state: { status: "provided", modes: [] } }],
+      },
+      PRIVATE_CHANNELS_NOT_CONFIGURED,
+    ]);
+  });
+
+  it("omits ramps from a Production project while the deployment holds only sandbox ramp keys", async () => {
+    const families = await readFamilies("production", {
+      ...DEPLOYMENT,
+      ...SANDBOX_RAMP_AND_COMPLIANCE_CREDENTIALS,
+    });
+
+    expect(families.map((family) => family.family)).not.toContain("ramps");
   });
 });

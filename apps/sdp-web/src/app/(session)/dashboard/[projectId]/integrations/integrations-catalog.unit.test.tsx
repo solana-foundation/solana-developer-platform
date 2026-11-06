@@ -91,8 +91,12 @@ describe("IntegrationsCatalog", () => {
   it("counts connected rows only on sections with something to configure", () => {
     expect(within(section("Custody")).getByText("1 of 2 connected")).toBeTruthy();
     expect(within(section("Privacy")).getByText("0 of 1 connected")).toBeTruthy();
-    expect(within(section("RPC")).queryByText(/connected$/)).toBeNull();
     expect(within(section("Ramps")).queryByText(/connected$/)).toBeNull();
+  });
+
+  it("names the first RPC provider as the one serving, without a count", () => {
+    expect(within(section("RPC")).getByText("Helius serving")).toBeTruthy();
+    expect(within(section("RPC")).queryByText(/connected$/)).toBeNull();
   });
 
   it("shows each custody provider's category", () => {
