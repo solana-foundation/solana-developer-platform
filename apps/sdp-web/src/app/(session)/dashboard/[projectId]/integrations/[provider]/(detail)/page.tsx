@@ -1,17 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyConfigSummary } from "@sdp/types/custody";
-import type { ProjectProviderAvailability, RampProviderId } from "@sdp/types/provider-access";
+import type { ProjectProviderAvailability } from "@sdp/types/provider-access";
 import { notFound, redirect } from "next/navigation";
 import {
-  isKnownIntegrationProvider,
-  resolveIntegrationDetail,
-} from "@/app/(session)/dashboard/[projectId]/integrations/integration-detail";
-import { isIntegrationProviderEnabled } from "@/app/(session)/dashboard/[projectId]/integrations/integration-feature-gates";
-import {
-  resolveComplianceIntegrations,
-  resolveCustodyIntegrations,
-  resolveRampIntegrations,
-} from "@/app/(session)/dashboard/[projectId]/integrations/integrations-status";
+  fetchProjectIntegrations,
+  findCustodyIntegration,
+} from "@/app/(session)/dashboard/[projectId]/integrations/project-integrations.data";
 import type { OnboardingStatusResponse } from "@/app/(session)/dashboard/[projectId]/onboarding-status";
 import {
   buildConnectionsPageUrl,
@@ -27,16 +20,8 @@ import {
   type KnownCustodyProvider,
   providerSupportsStoredCredentialSetup,
 } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
-import { getOfferedRampProviders } from "@/flags/ramps";
-import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import {
-  availableComplianceProviders,
-  availableCustodyProviders,
-  availableRampProviders,
-  isProviderAvailableForProject,
-  offersCustodyMode,
-} from "@/lib/provider-availability";
+import { offersCustodyMode } from "@/lib/provider-availability";
 import { fetchProjectProviderAvailability } from "@/lib/provider-availability.server";
 import {
   createRequestScopedSdpApiClients,
@@ -45,21 +30,6 @@ import {
   type SdpApiClient,
 } from "@/lib/sdp-api";
 import { type CustodyConnectionsContext, IntegrationDetailView } from "./integration-detail-view";
-
-async function getConnectedCustodyProviders(
-  request: SdpApiClient["request"]
-): Promise<KnownCustodyProvider[]> {
-  const res = await request("/v1/wallets/configs");
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`SDP API request failed (${res.status}): ${body}`);
-  }
-  const json = (await res.json()) as { data: { configs: CustodyConfigSummary[] } };
-  return json.data.configs
-    .filter((config) => config.status === "active")
-    .map((config) => config.provider)
-    .filter(isKnownCustodyProvider);
-}
 
 /**
  * What the banner above the table asserts, or a summary that admits it knows
@@ -134,29 +104,15 @@ async function getCustodyConnections(
 }
 
 /**
- * Which provider's connections this page owns, if any.
- *
- * Connections exist only where a tenant can install its own credentials from
- * the Dashboard, which is what `self_service` means in the catalog, and only
- * while the project may set the provider up in `byok` mode. Gated on
- * `isKnownCustodyProvider` instead, this provider's connections list appeared
- * on every custody provider's page, and each row linked into the wrong
- * provider's detail route. `null` elsewhere, and the read is then skipped
- * entirely rather than fetched and discarded.
- *
- * @param provider - The provider id from the route.
- * @param custodyEnabled - Whether the custody module flag is on.
- * @param availability - The project's provider availability.
- * @returns The provider whose connections the page lists, or `null`.
+ * Connections exist only where a tenant installs its own credentials from the
+ * Dashboard (`self_service` in the catalog), and only while the project may set
+ * the provider up in `byok` mode. The integration state cannot say that for a
+ * provider connected in `managed` mode, so this asks the availability read.
  */
 function resolveConnectionsProvider(
-  provider: string,
-  custodyEnabled: boolean,
+  provider: KnownCustodyProvider,
   availability: ProjectProviderAvailability
 ): KnownCustodyProvider | null {
-  if (!custodyEnabled || !isKnownCustodyProvider(provider)) {
-    return null;
-  }
   return offersCustodyMode(availability, provider, "byok") &&
     providerSupportsStoredCredentialSetup(provider)
     ? provider
@@ -193,41 +149,9 @@ async function resolveRequestContext() {
 }
 
 /**
- * Resolves the provider on this page against the same family inputs the
- * catalog reads, so the detail header and the catalog card agree.
- *
- * @param params - The provider and the family inputs to resolve it against.
- * @param params.provider - The provider id from the route.
- * @param params.connectedProviders - Active custody providers.
- * @param params.availability - The project's provider availability.
- * @param params.rampProviders - The ramp providers offered (`getOfferedRampProviders`).
- * @returns The provider's detail, or `null` when no family lists it.
- */
-function resolveDetail({
-  provider,
-  connectedProviders,
-  availability,
-  rampProviders,
-}: {
-  provider: string;
-  connectedProviders: KnownCustodyProvider[];
-  availability: ProjectProviderAvailability;
-  rampProviders: readonly RampProviderId[];
-}) {
-  return resolveIntegrationDetail({
-    provider,
-    custody: resolveCustodyIntegrations({
-      connectedProviders,
-      custodyAvailability: availableCustodyProviders(availability),
-    }),
-    ramps: resolveRampIntegrations(availableRampProviders(availability), rampProviders),
-    compliance: resolveComplianceIntegrations(availableComplianceProviders(availability)),
-  });
-}
-
-/**
- * One provider's detail page, 404ing for unknown providers, for providers
- * whose module flag is off, and for providers the project cannot use.
+ * One custody provider's detail page. 404s for any provider the project's
+ * integrations read does not list under custody, so the page never states
+ * what the catalog row contradicts.
  *
  * @param props - The route props.
  * @param props.params - The route params carrying the provider id.
@@ -245,38 +169,23 @@ export default async function IntegrationDetailPage({
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { provider } = await params;
-  if (!isKnownIntegrationProvider(provider)) {
-    notFound();
-  }
-  const [custodyEnabled, rampProviders] = await Promise.all([
-    isModuleInDeploymentReleaseChannel("custody"),
-    getOfferedRampProviders(),
-  ]);
-  const complianceEnabled = isModuleInDeploymentReleaseChannel("compliance");
-  if (
-    !isIntegrationProviderEnabled(provider, {
-      custody: custodyEnabled,
-      rampProviders,
-      compliance: complianceEnabled,
-    })
-  ) {
+  if (!isKnownCustodyProvider(provider)) {
     notFound();
   }
 
   const { dashboardAccess, projectClient } = await resolveRequestContext();
   const resolvedSearchParams = (await searchParams) ?? {};
 
-  const [availability, connectedProviders] = await Promise.all([
+  const [integrations, availability] = await Promise.all([
+    fetchProjectIntegrations(projectClient),
     fetchProjectProviderAvailability(projectClient),
-    custodyEnabled && isKnownCustodyProvider(provider)
-      ? getConnectedCustodyProviders(projectClient.request)
-      : Promise.resolve([]),
   ]);
-  if (!isProviderAvailableForProject(availability, provider)) {
+  const integration = findCustodyIntegration(integrations, provider);
+  if (!integration) {
     notFound();
   }
 
-  const connectionsProvider = resolveConnectionsProvider(provider, custodyEnabled, availability);
+  const connectionsProvider = resolveConnectionsProvider(provider, availability);
   const connectionsRead = connectionsProvider
     ? await getCustodyConnections(
         projectClient.request,
@@ -300,20 +209,9 @@ export default async function IntegrationDetailPage({
     );
   }
 
-  const detail = resolveDetail({
-    provider,
-    connectedProviders,
-    availability,
-    rampProviders,
-  });
-
-  if (!detail) {
-    notFound();
-  }
-
   return (
     <IntegrationDetailView
-      detail={detail}
+      integration={integration}
       custodyConnections={connectionsRead?.context ?? null}
       canManageCustody={dashboardAccess.capabilities.canManageCustody}
     />

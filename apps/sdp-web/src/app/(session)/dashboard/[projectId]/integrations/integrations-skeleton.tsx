@@ -1,26 +1,40 @@
+import type { ProjectIntegrationFamily } from "@sdp/types/integrations";
 import { COMPLIANCE_PROVIDERS } from "@sdp/types/provider-access";
+import { MANAGED_RPC_PROVIDERS } from "@sdp/types/rpc";
+import { cn } from "@sdp/ui/cn";
 import { CUSTODY_PROVIDER_CATALOG } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import type { DashboardFlags } from "@/flags/dashboard";
-import {
-  type IntegrationsSkeletonLayout,
-  integrationsSkeletonLayout,
-} from "./integration-feature-gates";
-import type { IntegrationFamily } from "./integrations-filter";
+import { rampProvidersInReleaseChannel } from "@/flags/release-channel";
+import { INTEGRATION_ROW_COLUMNS, integrationTabFamilies } from "./integration-sections";
+
+export type IntegrationsSkeletonFlags = Pick<
+  DashboardFlags,
+  "compliance" | "custody" | "privateChannels" | "ramps" | "releaseChannel"
+>;
+
+interface IntegrationsSkeletonSection {
+  family: ProjectIntegrationFamily;
+  rows: number;
+}
 
 /**
- * How many cards each family settles at, read from the same catalogues the page
- * maps over. A flat four per section left the placeholder 22% shorter than the
- * page it stood in for, because custody alone renders ten.
+ * The most rows each family can list, from the same catalogues the read decides over, so the
+ * placeholder is never shorter than the page it stands in for.
  */
-function familyCardCount(family: IntegrationFamily, layout: IntegrationsSkeletonLayout): number {
+function familyRowCount(
+  family: ProjectIntegrationFamily,
+  releaseChannel: DashboardFlags["releaseChannel"]
+): number {
   switch (family) {
     case "custody":
       return CUSTODY_PROVIDER_CATALOG.filter((entry) => entry.visible).length;
+    case "rpc":
+      return MANAGED_RPC_PROVIDERS.filter((provider) => provider !== "default").length;
     case "ramps":
-      return layout.rampCards;
+      return rampProvidersInReleaseChannel(releaseChannel).length;
     case "compliance":
       return COMPLIANCE_PROVIDERS.length;
-    case "privacy":
+    case "private_channels":
       return 1;
     default: {
       const unhandledFamily: never = family;
@@ -29,8 +43,22 @@ function familyCardCount(family: IntegrationFamily, layout: IntegrationsSkeleton
   }
 }
 
+export function integrationsSkeletonSections(
+  flags: IntegrationsSkeletonFlags
+): IntegrationsSkeletonSection[] {
+  return integrationTabFamilies(flags).map((family) => ({
+    family,
+    rows: familyRowCount(family, flags.releaseChannel),
+  }));
+}
+
 /** Custody runs in every release channel, so it is the one family safe to draw unflagged. */
-const CUSTODY_ONLY_LAYOUT: IntegrationsSkeletonLayout = { families: ["custody"], rampCards: 0 };
+const CUSTODY_ONLY_SECTIONS: IntegrationsSkeletonSection[] = [
+  {
+    family: "custody",
+    rows: CUSTODY_PROVIDER_CATALOG.filter((entry) => entry.visible).length,
+  },
+];
 
 /**
  * The client loading path: the shell already holds the flag snapshot. Without one yet,
@@ -39,38 +67,37 @@ const CUSTODY_ONLY_LAYOUT: IntegrationsSkeletonLayout = { families: ["custody"],
 export function IntegrationsFlagsSkeleton({ flags }: { flags?: DashboardFlags }) {
   return (
     <IntegrationsSkeleton
-      layout={flags ? integrationsSkeletonLayout(flags) : CUSTODY_ONLY_LAYOUT}
+      sections={flags ? integrationsSkeletonSections(flags) : CUSTODY_ONLY_SECTIONS}
     />
   );
 }
 
-export function IntegrationsSkeleton({ layout }: { layout: IntegrationsSkeletonLayout }) {
+export function IntegrationsSkeleton({
+  sections,
+}: {
+  sections: readonly IntegrationsSkeletonSection[];
+}) {
   return (
-    <div className="w-full animate-pulse space-y-6 px-4 py-5 md:px-6">
-      {/* Matches the loaded toolbar: one segmented status control leading,
-          the search slot on the right from xl up, stacked below. */}
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div className="h-9 w-full max-w-[560px] rounded-full bg-fill-subtle" />
-        <div className="h-10 w-full max-w-xs rounded-[10px] bg-fill-subtle xl:w-64 xl:shrink-0" />
-      </div>
-      {/* One block per family the catalog renders for these flags: drawing every
-          family showed sections the release channel hides, which then vanished. */}
-      {layout.families.map((family) => (
-        <div key={family} className="space-y-4">
-          <div className="space-y-2">
+    <div className="w-full animate-pulse space-y-10">
+      {sections.map((section) => (
+        <div key={section.family} className="space-y-2">
+          <div className="flex h-6 items-center">
             <div className="h-5 w-28 rounded bg-fill-subtle" />
-            <div className="h-4 w-64 rounded bg-fill-subtle" />
           </div>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {Array.from({ length: familyCardCount(family, layout) }, (_, index) => index).map(
-              (card) => (
-                <div
-                  key={card}
-                  className="h-[120px] rounded-2xl border border-border-subtle bg-surface-raised"
-                />
-              )
-            )}
-          </div>
+          <ul className="divide-y divide-border-subtle">
+            {Array.from({ length: section.rows }, (_, index) => index).map((row) => (
+              <li key={row} className={cn(INTEGRATION_ROW_COLUMNS, "py-3")}>
+                <div className="size-10 rounded-full bg-fill-subtle" />
+                <div className="flex min-w-0 flex-col gap-1">
+                  <div className="h-4 w-32 rounded bg-fill-subtle" />
+                  <div className="h-3 w-56 max-w-full rounded bg-fill-subtle" />
+                </div>
+                <div className="hidden h-3 w-20 rounded bg-fill-subtle md:block" />
+                <div className="ml-auto h-3 w-24 rounded bg-fill-subtle" />
+                <div />
+              </li>
+            ))}
+          </ul>
         </div>
       ))}
     </div>

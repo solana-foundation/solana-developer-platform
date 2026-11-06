@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
-import { projectIntegrationsSchema } from "@sdp/types/integrations";
 import { redirect } from "next/navigation";
 import { IntegrationsCatalog } from "@/app/(session)/dashboard/[projectId]/integrations/integrations-catalog";
+import { fetchProjectIntegrations } from "@/app/(session)/dashboard/[projectId]/integrations/project-integrations.data";
 import type { OnboardingStatusResponse } from "@/app/(session)/dashboard/[projectId]/onboarding-status";
 import { privateChannels } from "@/flags";
 import { createTimedTrace } from "@/lib/request-tracing";
@@ -27,9 +27,7 @@ export default async function IntegrationsPage() {
     redirect("/dashboard");
   }
   const [integrations, privateChannelsEnabled] = await Promise.all([
-    trace.step("fetch_integrations", async () =>
-      projectIntegrationsSchema.parse(await projectClient.fetch<unknown>("/v1/integrations"))
-    ),
+    trace.step("fetch_integrations", () => fetchProjectIntegrations(projectClient)),
     privateChannels(),
   ]);
 
