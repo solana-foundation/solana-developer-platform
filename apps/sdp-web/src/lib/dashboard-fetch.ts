@@ -23,7 +23,6 @@ import {
   type IdempotencyKeyStore,
   idempotencyKeyScope,
 } from "./idempotency-key-store";
-import { TAB_DEMO_HEADER_NAME } from "./payments-demo/demo-cookie";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 
 export type DashboardFetchResult<T> =
@@ -61,18 +60,6 @@ export interface DashboardFetchOptions {
   headers?: HeadersInit;
   body?: unknown;
   signal?: AbortSignal;
-}
-
-let tabShowsDemo = false;
-
-/**
- * Set by the dashboard shell: whether this tab is showing Payments demo mode, so the calls it
- * makes say so (see {@link TAB_DEMO_HEADER_NAME}).
- *
- * @param on - True while the tab shows demo mode.
- */
-export function setTabShowsDemo(on: boolean): void {
-  tabShowsDemo = on;
 }
 
 /**
@@ -212,30 +199,18 @@ function inFlightMovementReadPath(body: ArrayBuffer): string | null {
     : MOVEMENT_READ_PATHS.recurringPayment(recurringPayment.id);
 }
 
-function sendWithProject(
-  path: string,
-  init: RequestInit,
-  headers: Headers,
-  demo: boolean = tabShowsDemo
-): Promise<Response> {
+function sendWithProject(path: string, init: RequestInit, headers: Headers): Promise<Response> {
   const { projectId } = parseDashboardPathname(window.location.pathname);
   if (projectId !== null) {
     headers.set(PROJECT_HEADER_NAME, projectId);
   }
-  if (demo) {
-    headers.set(TAB_DEMO_HEADER_NAME, "1");
-  }
   return fetch(path, { ...init, headers });
 }
 
-/**
- * The action a submit stands for: Project, demo or live mode, method, path and
- * body. The mode is part of it, so a live submit never joins a demo request of
- * the same body, or reuses its key.
- */
-function actionMaterial(path: string, init: RequestInit, demo: boolean): string {
+/** The action a submit stands for: Project, method, path and body. */
+function actionMaterial(path: string, init: RequestInit): string {
   const { projectId } = parseDashboardPathname(window.location.pathname);
-  return JSON.stringify([projectId, demo, init.method, path, init.body ?? ""]);
+  return JSON.stringify([projectId, init.method, path, init.body ?? ""]);
 }
 
 function abortable(response: Promise<Response>, signal: AbortSignal | null | undefined) {
@@ -269,9 +244,7 @@ async function sendUnderActionKey(
   if (init.signal?.aborted) {
     throw init.signal.reason;
   }
-  // The mode is fixed at submit, and the request is sent in that mode.
-  const demo = tabShowsDemo;
-  const material = actionMaterial(path, init, demo);
+  const material = actionMaterial(path, init);
   // Joined only within the signed-in user and org: after a switch in this tab,
   // the same submit is the new user's own request, never the first one's answer.
   const joinKey = JSON.stringify([idempotencyKeyScope(), material]);
@@ -297,7 +270,7 @@ async function sendUnderActionKey(
       }
       console.warn("Idempotency-Key not persisted; a reload will not recover it");
     }
-    sent = sendWithProject(path, shared, headers, demo).then(async (response) => {
+    sent = sendWithProject(path, shared, headers).then(async (response) => {
       // The answer only counts once its body has arrived: a download that
       // fails leaves the key pinned, so the retry recovers the first result.
       const body = await response.arrayBuffer();
@@ -333,13 +306,12 @@ async function sendUnderActionKey(
 const UNKEYED_PREFIXES = ["/api/playground/", "/api/dashboard/markets/dvp/"] as const;
 
 /**
- * Read-like POSTs, never keyed: an estimate, a quote or a simulation (the
- * ramps sandbox's `/simulate` included) writes nothing a retry could repeat,
- * and they fire as the user types, so each would leave an unanswered key
- * behind that never expires. The ramp quotes are the exception
+ * Read-like POSTs, never keyed: an estimate or a quote writes nothing a retry
+ * could repeat, and they fire as the user types, so each would leave an
+ * unanswered key behind that never expires. The ramp quotes are the exception
  * ({@link RAMP_QUOTE_PATHS}).
  */
-const READ_LIKE_POST = /\/(estimate|quote|simulate)$/;
+const READ_LIKE_POST = /\/(estimate|quote)$/;
 
 /**
  * Ramp quotes, keyed like any mutation: each creates the transfer the wizard

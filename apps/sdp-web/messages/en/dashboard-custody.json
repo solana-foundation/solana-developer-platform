@@ -256,7 +256,7 @@
     "invalidExpirationDate": "Invalid expiration date.",
     "apiKeyCreateFailed": "Create failed: {error}",
     "apiKeyRotateFailed": "Rotate failed: {error}",
-    "providerLocalDescription": "Self-hosted Ed25519 keypair signer from CUSTODY_PRIVATE_KEY.",
+    "providerLocalDescription": "Self-hosted signer: each project gets its own Ed25519 keypair.",
     "providerPrivyDescription": "Hosted wallet infrastructure for API signing.",
     "providerFireblocksDescription": "MPC custody with vault-based wallet controls.",
     "providerCoinbaseCdpDescription": "Programmatic wallet provisioning through Coinbase CDP.",

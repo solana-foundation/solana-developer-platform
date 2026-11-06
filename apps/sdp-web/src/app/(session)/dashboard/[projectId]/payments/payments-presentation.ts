@@ -77,26 +77,31 @@ const DECIMAL_AMOUNT = /^-?\d+(\.\d+)?$/;
 /**
  * A decimal amount with grouping and at least two fraction digits ("12,000.00"), keeping every
  * digit the value has: the string is formatted as written, not through a float, so no nonzero
- * amount rounds to "0.00" and a large one keeps its last digits. Non-numeric input passes
- * through.
+ * amount rounds to "0.00" and a large one keeps its last digits. A point with no digit before
+ * or after it (".5", "5.") is written too. Non-numeric input passes through.
  *
  * @param value - Decimal string.
  * @param locale - Formatting locale.
  * @returns The formatted amount.
  */
 export function formatDecimalAmount(value: string, locale?: string): string {
-  const trimmed = value.trim();
-  if (!DECIMAL_AMOUNT.test(trimmed)) {
-    const numeric = Number(trimmed);
-    return trimmed !== "" && Number.isFinite(numeric)
+  // ".000001" and "5." as typed, spelled "0.000001" and "5" so they take the exact path.
+  const decimal = value
+    .trim()
+    .replace(/^(-?)\.(?=\d)/, "$10.")
+    .replace(/(\d)\.$/, "$1");
+  if (!DECIMAL_AMOUNT.test(decimal)) {
+    const numeric = Number(decimal);
+    return decimal !== "" && Number.isFinite(numeric)
       ? new Intl.NumberFormat(locale, { minimumFractionDigits: 2 }).format(numeric)
       : value;
   }
-  const fractionDigits = trimmed.split(".")[1]?.length ?? 0;
+  const fractionDigits = decimal.split(".")[1]?.length ?? 0;
+  // SAFETY: DECIMAL_AMOUNT matched, so `decimal` is a decimal literal Intl formats exactly.
   return new Intl.NumberFormat(locale, {
     minimumFractionDigits: 2,
     maximumFractionDigits: Math.min(Math.max(2, fractionDigits), 100),
-  }).format(trimmed as `${number}`);
+  }).format(decimal as `${number}`);
 }
 
 /**

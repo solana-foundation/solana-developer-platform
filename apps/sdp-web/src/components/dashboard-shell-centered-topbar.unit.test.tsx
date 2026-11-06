@@ -57,13 +57,12 @@ describe("StandardDashboardTopBar", () => {
 });
 
 describe("StackedDashboardTopBar", () => {
-  it("stacks the menu button, the title and the action on a phone and rows them from md, utilities before the action", () => {
+  it("stacks the menu button, the title and the action on a phone and rows them from md", () => {
     const markup = renderToStaticMarkup(
       <StackedDashboardTopBar
         navigation={<button type="button">Menu</button>}
         title="Requests"
         action={<a href="/new">New</a>}
-        trailingContent={<span>Language</span>}
       />
     );
 
@@ -75,10 +74,6 @@ describe("StackedDashboardTopBar", () => {
     );
     expect(markup).toContain("col-span-3 row-start-3");
     expect(markup).toContain("md:col-start-3 md:row-start-1 md:mt-0 md:ml-3");
-    // The utilities share the menu button's row on a phone and sit before the action from md.
-    expect(markup).toContain(
-      "col-start-3 row-start-1 flex items-center justify-end empty:hidden md:col-start-2 md:ml-3"
-    );
     expect(markup.match(/<h1/g)).toHaveLength(1);
   });
 
@@ -88,7 +83,6 @@ describe("StackedDashboardTopBar", () => {
         navigation={<button type="button">Menu</button>}
         title="Home"
         hideTitle
-        trailingContent={<span>Language</span>}
       />
     );
 
@@ -103,7 +97,6 @@ describe("StackedDashboardTopBar", () => {
         title="Privy"
         mark={<span>Mark</span>}
         description="Hosted wallet infrastructure for API signing."
-        trailingContent={<span>Language</span>}
       />
     );
 

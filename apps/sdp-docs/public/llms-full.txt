@@ -14,20 +14,20 @@
 ### What is SDP?
 Source: https://platform.solana.com/docs/introduction
 
-> One project-scoped API for building on Solana with your chosen providers.
+> One API for building on Solana with your chosen providers, from devnet to mainnet.
 
-Solana Developer Platform (SDP) gives your app one API for the Solana services it uses. Set up a project in the dashboard, then call the API with a key scoped to that project.
+Solana Developer Platform (SDP) gives your app one API for the Solana services it uses. Build and test on devnet in the dashboard, then call the API with a key you create there.
 
 ## Why SDP
 
 Institutional assets are moving onchain. In October 2026, RWA.xyz tracked [about $39.5 billion in tokenized real-world assets](https://app.rwa.xyz/), including [about $5.2 billion on Solana](https://app.rwa.xyz/networks/solana). [Tokenized stocks](https://app.rwa.xyz/stocks) are one part of that growth.
 
-Assets at this scale need custody, enforceable compliance, and auditable controls. SDP puts the services your deployment supports behind one project-scoped API, so you can build on Solana without wiring up every provider yourself.
+Assets at this scale need custody, enforceable compliance, and auditable controls. SDP puts the services your deployment supports behind one API, so you can build on Solana without wiring up every provider yourself.
 
 ## How it fits together
 
-- **Projects** separate environments, keys, wallets, and team access. Start in your sandbox project, then move to production.
-- **Providers** supply the services behind SDP. You choose the providers each project uses; your app calls the same SDP API either way.
+- **Devnet and mainnet** each have their own keys, wallets, and settings. Build on devnet with test tokens, then [go to mainnet](/docs/guides/go-to-mainnet) once SDP approves your organization.
+- **Providers** supply the services behind SDP. You choose the providers you use; your app calls the same SDP API either way.
 - **Access** is explicit. An API key holds only the actions you grant it, and sensitive operations leave an audit trail.
 
 ## What you can build
@@ -43,14 +43,14 @@ This deployment publishes these modules:
 | **Compliance** | Screen wallets and transactions against your regulatory program |
 | **Asset profiles** | Issued-asset identity and metadata, and the public token metadata URI |
 
-[Get started](/docs) with your sandbox project, or [browse the API reference](/docs/reference/api).
+[Get started](/docs) on devnet, or [browse the API reference](/docs/reference/api).
 
 ---
 
 ### Get started
 Source: https://platform.solana.com/docs
 
-> Build on Solana with a project-scoped dashboard and REST API.
+> Build on Solana with one dashboard and REST API, from devnet to mainnet.
 
 <DocsHome />
 
@@ -15750,6 +15750,10 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 
   Same fields as `400`.
 
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
 - **`503`** Service Unavailable
 
   Same fields as `400`.
@@ -16331,6 +16335,10 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -17790,6 +17798,14 @@ Create a custody-executed outbound transfer batch.
 
   Same fields as `400`.
 
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -18740,6 +18756,14 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -19801,6 +19825,10 @@ Creates an SDP-custody outbound recurring payment intent. Activation and collect
 
   Same fields as `400`.
 
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -20514,6 +20542,14 @@ Updates a recurring payment. Pending payments are edited directly. Active metada
 
   Same fields as `400`.
 
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -21205,6 +21241,14 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
   Same fields as `400`.
 
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -21541,6 +21585,14 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -22239,6 +22291,14 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
   Same fields as `400`.
 
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -22659,6 +22719,14 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -23254,6 +23322,10 @@ Create payment request payload.
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -24224,6 +24296,10 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `paymen
 
   Same fields as `400`.
 
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -24516,6 +24592,10 @@ Creates an SDP subscription plan record. Prepare the on-chain Solana subscriptio
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -25077,6 +25157,10 @@ Optional overrides used when preparing the Solana subscriptions create-plan tran
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -26448,6 +26532,10 @@ Inputs for preparing the subscriber-signed Solana subscription authorization tra
 
   Same fields as `400`.
 
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -26735,6 +26823,10 @@ Empty request body for preparing subscriber-signed subscription lifecycle transa
 
   Same fields as `400`.
 
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -27009,6 +27101,10 @@ Empty request body for preparing subscriber-signed subscription lifecycle transa
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -27400,6 +27496,10 @@ Inputs for preparing the collector-signed Solana subscriptions transfer transact
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -39059,7 +39159,7 @@ The configurator also requires these. The stack starts without them, but most le
 | `CLERK_ISSUER` | Clerk issuer URL. Without it, dashboard sessions can't be verified, so sign-in fails. |
 | `FRONTEND_URL` | The dashboard URL the browser loads. With `ENVIRONMENT=production`, the compose default, the API accepts only Clerk sessions issued to this origin, and won't start if it isn't an `http(s)` URL. |
 | `SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL` | The devnet endpoint Sandbox projects read and send through. Without it, they get `503 RPC_UNAVAILABLE`. |
-| `SIGNING_PROVIDER` | The configurator's default signer, `local` unless you change it. The API reads it only at startup, where `local` (also its value when unset) requires `SDP_DEPLOYMENT_MODE=self_hosted`. |
+| `SIGNING_PROVIDER` | The configurator writes `local` unless you pick another provider. The API reads it only at startup, where `local` (also its value when unset) requires `SDP_DEPLOYMENT_MODE=self_hosted`. |
 | `CUSTODY_PRIVATE_KEY` | With local signing selected: SDP offers the local signer only while this is set. |
 | `CREDENTIAL_FINGERPRINT_PEPPER` | Without it, saving or rotating provider credentials in the dashboard fails. Keep it stable. |
 
@@ -39511,7 +39611,7 @@ A failed request returns an error status and this body. The health checks are th
 | `422` | The request is well formed but can't go ahead: its idempotency key was used for a different request, the transaction fee sponsor rejected the transaction, or the wallet's policy at its custody provider refused to sign it. | `IDEMPOTENCY_KEY_REUSED`, `SIGNING_REJECTED`, `CUSTODY_POLICY_REFUSED` |
 | `429` | Too many requests. See [Rate limits](/docs/reference/conventions/rate-limits). | `RATE_LIMITED` |
 | `500` | Something failed inside SDP. | `INTERNAL_ERROR` |
-| `502` | Solana RPC or a provider answered, but with something SDP couldn't use. | `SOLANA_RPC_ERROR`, `PROVIDER_RESPONSE_INVALID` |
+| `502` | Solana RPC or a provider answered, but with something SDP couldn't use, or the custody provider failed or timed out while signing. | `SOLANA_RPC_ERROR`, `PROVIDER_RESPONSE_INVALID`, `CUSTODY_ERROR` |
 | `503` | SDP, or a provider it depends on, is unavailable for now, or a provider isn't configured for the project's environment. | `SERVICE_UNAVAILABLE`, `PROVIDER_UNAVAILABLE`, `PROVIDER_NOT_CONFIGURED`, `RPC_UNAVAILABLE` |
 
 Each operation's page lists its statuses and shows a success example. The OpenAPI spec carries every response schema.
@@ -39524,6 +39624,7 @@ Each operation's page lists its statuses and shows a success example. The OpenAP
 - `409 IDEMPOTENCY_KEY_IN_FLIGHT` and `429`: wait for `Retry-After`, then retry with the same `Idempotency-Key`.
 - `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`: final for that key. Read the resource with `GET` to see whether the request ran, then send it again with a new key.
 - `503 RPC_UNAVAILABLE`: `details.reason` says why Solana RPC was unavailable. `upstream_unavailable` is temporary: wait for `Retry-After`, then retry as the `5xx` rule below says. `not_configured` and `cluster_mismatch` are SDP configuration problems that a retry won't fix. Quote `meta.requestId` when you report one.
+- `503 PROVIDER_NOT_CONFIGURED`: a provider the request needs, such as the custody provider that signs for the wallet, isn't configured for the project's environment. A retry won't fix it until that changes. Check the provider's configuration, or quote `meta.requestId` when you report it.
 - `5xx`: most routes store the error and return it again to a same-key retry. Read the resource with `GET` to see whether the request took effect, then retry with a new key. On the routes that move money, a same-key retry runs again and never acts twice.
 
 [Idempotency](/docs/developing-with-sdp/idempotency) covers what each retry returns.

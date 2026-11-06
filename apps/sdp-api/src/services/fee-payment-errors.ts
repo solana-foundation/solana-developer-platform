@@ -35,7 +35,7 @@ import {
   Token2022Instruction,
 } from "@solana-program/token-2022";
 import { z } from "zod";
-import { AppError } from "@/lib/errors";
+import { AppError, type ErrorCode } from "@/lib/errors";
 
 /** What a caller is told when their own wallet cannot cover the amount it sends. */
 export const INSUFFICIENT_FUNDS_MESSAGE =
@@ -230,7 +230,7 @@ export function simulatedInsufficientFundsError(
  */
 export function mapFeePaymentError(err: FeePaymentError): {
   status: 400 | 422 | 429 | 502 | 503;
-  code: string;
+  code: ErrorCode;
   message: string;
 } {
   const programError = simulatedProgramError(err.message)?.code;

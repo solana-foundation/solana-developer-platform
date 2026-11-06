@@ -70,16 +70,16 @@ function PartnerRow({ label, partners }: { label: string; partners: readonly Par
 }
 
 const MODEL_ITEMS = [
-  { label: "Project", detail: "One environment for your keys and wallets." },
-  { label: "API", detail: "One interface for every request." },
-  { label: "Providers", detail: "The services you choose behind it." },
+  { label: "Devnet", detail: "Build and test with test tokens." },
+  { label: "Mainnet", detail: "Go live with real funds once SDP approves you." },
+  { label: "Providers", detail: "The services you choose behind one API." },
 ] as const;
 
 const START_STEPS = [
   {
     number: "01",
     title: "Set up your workspace",
-    description: "Create an organization and sandbox project.",
+    description: "Create your account and organization.",
     href: "/docs/guides/setup-organization",
   },
   {
@@ -97,7 +97,7 @@ const START_STEPS = [
   {
     number: "04",
     title: "Send a payment",
-    description: "Make a request in your sandbox project.",
+    description: "Make your first request on devnet.",
     href: "/docs/payments/send-basic-payment",
   },
 ] as const;
@@ -142,7 +142,7 @@ export function DocsHome() {
     <div className="launch-home">
       <div className="launch-home-actions">
         <Link href="/docs/guides/setup-organization" className="launch-home-cta-primary">
-          Create a project
+          Get started
         </Link>
         <Link href="/docs/introduction" className="launch-home-cta-secondary">
           Learn more about SDP
@@ -152,10 +152,10 @@ export function DocsHome() {
       <section className="launch-home-system" aria-labelledby="launch-home-system-title">
         <div className="launch-home-section-heading">
           <span className="launch-home-eyebrow">The model</span>
-          <h2 id="launch-home-system-title">One project connects everything.</h2>
+          <h2 id="launch-home-system-title">One API, from devnet to mainnet.</h2>
           <p>
-            Configure a project in the dashboard, then use the REST API to build with your chosen
-            providers.
+            Build and test on devnet with the dashboard and REST API, then go live on mainnet with
+            the same API.
           </p>
         </div>
         <ul className="launch-home-model">
@@ -194,7 +194,7 @@ export function DocsHome() {
         <div className="launch-home-section-heading">
           <span className="launch-home-eyebrow">Ecosystem</span>
           <h2 id="launch-home-partners-title">Supported partners.</h2>
-          <p>Provider availability depends on your project and environment.</p>
+          <p>Provider availability differs between devnet and mainnet.</p>
         </div>
         <ul className="launch-home-partner-groups">
           <PartnerRow label="Custody" partners={custodyPartners} />
