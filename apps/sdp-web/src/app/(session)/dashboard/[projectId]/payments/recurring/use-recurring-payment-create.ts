@@ -30,8 +30,6 @@ import {
   walletComboboxOptions,
 } from "@/app/(session)/dashboard/[projectId]/payments/ramps/wallet-options";
 import { useTranslations } from "@/i18n/provider";
-import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
-import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { createRecurringPayment } from "./recurring-payments.data";
 import { accountAddress, getSchedulePresets, parsePeriodHours } from "./recurring-payments-shared";
@@ -209,13 +207,12 @@ export function useRecurringPaymentCreate({
   const [destinationAccountDialogOpen, setDestinationAccountDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const demo = usePaymentsDemo();
   const [fields, setFields] = useState<RecurringPaymentCreateFields>({
     counterpartyId: "",
     counterpartyAccountId: "",
     sourceCustodyWalletId: "",
     token: "",
-    amount: demo ? DEMO_PREFILL_AMOUNTS.schedule : "",
+    amount: "",
     schedulePreset: "24",
     customPeriodHours: "",
     firstCollectionAt: "",

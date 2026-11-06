@@ -1,22 +1,12 @@
 "use client";
 
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
-import type {
-  PaymentOnrampQuoteRequest,
-  PaymentRampQuote,
-  PaymentTransferSummary,
-} from "@sdp/types/payments";
+import type { PaymentOnrampQuoteRequest, PaymentTransferSummary } from "@sdp/types/payments";
 import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
-import { useState } from "react";
-import { toast } from "sonner";
 import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
-import {
-  fetchTransferById,
-  simulateSandboxTransfer,
-} from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
+import { fetchTransferById } from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
 import { rampTransferPollInterval } from "@/app/(session)/dashboard/[projectId]/payments/ramps/ramp-phase";
-import { getRampTransferState } from "@/app/(session)/dashboard/[projectId]/payments/ramps/ramp-transfer-state";
 import {
   depositDetailsSchema,
   depositSelectionSchema,
@@ -32,8 +22,6 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
-import { demoRampPairs } from "@/lib/payments-demo/demo-ramp-assets";
-import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { onrampPairs } from "@/lib/ramps";
 import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./use-ramp-wizard";
 
@@ -75,42 +63,13 @@ function getOnrampRequirementsStep(t: Translate): RampWizardStep<OnrampStepId> {
   };
 }
 
-interface SimulationContext {
-  quote: PaymentRampQuote | null;
-  transferId: string | null;
-  transferStatus: PaymentTransferSummary | undefined;
-  succeeded: boolean;
-  demo: boolean;
-  sandbox: boolean;
-}
-
-/**
- * Whether a deposit can be marked paid: while it waits for its money (and as done until it
- * finishes), through a sandbox provider's own simulation, or in demo mode for any provider, the
- * demo standing in for checkouts that would open elsewhere. A production deposit never offers
- * it: the sandbox can't fund a live deposit.
- */
-function simulationOffered(context: SimulationContext): context is SimulationContext & {
-  quote: PaymentRampQuote;
-  transferId: string;
-} {
-  const { quote, transferId, transferStatus } = context;
-  if (quote === null || transferId === null || transferStatus === undefined) return false;
-  if (getRampTransferState(transferStatus.status).terminal) return false;
-  if (transferStatus.status !== "awaiting_payment" && !context.succeeded) return false;
-  return context.demo;
-}
-
 export function useOnrampWizard(props: UseRampWizardProps) {
   const { sdpEnvironment } = useDashboardWorkspace();
-  const demo = usePaymentsDemo();
   const t = useTranslations();
   const locale = useLocale();
-  const [quoteSimulationLoading, setQuoteSimulationLoading] = useState(false);
-  const [quoteSimulationSucceeded, setQuoteSimulationSucceeded] = useState(false);
 
   const wizard = useRampWizard<OnrampStepId>(props, {
-    pairs: demoRampPairs(onrampPairs(sdpEnvironment, props.enabledRampProviders), demo),
+    pairs: onrampPairs(sdpEnvironment, props.enabledRampProviders),
     steps: getOnrampSteps(t),
     stepSchemas: { DEPOSIT: depositDetailsSchema },
     quoteStepId: "MEMO",
@@ -139,10 +98,6 @@ export function useOnrampWizard(props: UseRampWizardProps) {
         fiatAmount: fields.amount.trim(),
         rampsMemo,
       }) satisfies PaymentOnrampQuoteRequest,
-    onQuoteCreated: () => {
-      setQuoteSimulationLoading(false);
-      setQuoteSimulationSucceeded(false);
-    },
   });
 
   const amount = summaryAmount(wizard.fields.amount, locale);
@@ -183,57 +138,11 @@ export function useOnrampWizard(props: UseRampWizardProps) {
 
   const showCompleteScreen = transferStatus?.status === "completed";
 
-  const simulation = {
-    quote: wizard.quote,
-    transferId: wizard.quoteTransferId,
-    transferStatus,
-    succeeded: quoteSimulationSucceeded,
-    demo,
-    sandbox: sdpEnvironment === "sandbox",
-  };
-  const simulateAvailable = simulationOffered(simulation);
-
-  const simulateCurrentQuote = async () => {
-    if (!simulationOffered(simulation) || !wizard.selectedWallet) {
-      return;
-    }
-    const { transferId } = simulation;
-
-    setQuoteSimulationLoading(true);
-    const toastId = toast.loading(t("DashboardPayments.ramps.simulatingQuoteFunding"), {
-      position: "bottom-right",
-    });
-
-    try {
-      await simulateSandboxTransfer({ transferId }, t);
-      setQuoteSimulationSucceeded(true);
-      toast.success(t("DashboardPayments.ramps.quoteFundingSimulated"), {
-        id: toastId,
-        position: "bottom-right",
-      });
-    } catch (error) {
-      toast.error(t("DashboardPayments.ramps.quoteSimulationFailed"), {
-        id: toastId,
-        description:
-          error instanceof Error
-            ? error.message
-            : t("DashboardPayments.ramps.sandboxSimulationFailed"),
-        position: "bottom-right",
-      });
-    } finally {
-      setQuoteSimulationLoading(false);
-    }
-  };
-
   return {
     ...wizard,
     summaryDetails,
     transferStatus,
     transferStatusLoading,
-    quoteSimulationLoading,
-    quoteSimulationSucceeded,
-    simulateAvailable,
-    simulateCurrentQuote,
     showCompleteScreen,
   };
 }

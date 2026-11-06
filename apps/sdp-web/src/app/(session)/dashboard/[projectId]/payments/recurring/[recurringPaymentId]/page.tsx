@@ -16,8 +16,7 @@ import {
 } from "@/app/(session)/dashboard/[projectId]/payments/recurring/recurring-payments.data";
 import { getTranslations } from "@/i18n/server";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { PAYMENT_RECURRING_HREF } from "@/lib/payments-routes";
-import { requestProjectHref, type SdpApiClient } from "@/lib/sdp-api";
+import type { SdpApiClient } from "@/lib/sdp-api";
 
 export const dynamic = "force-dynamic";
 
@@ -113,13 +112,8 @@ export default async function RecurringPaymentDetailRoute({
       });
 
       if (!recurringPaymentResult.ok) {
-        const outcome = recurringPaymentReadFailureOutcome(
-          recurringPaymentId,
-          recurringPaymentResult.status
-        );
+        const outcome = recurringPaymentReadFailureOutcome(recurringPaymentResult.status);
         switch (outcome) {
-          case "list":
-            return redirect(await requestProjectHref(PAYMENT_RECURRING_HREF));
           case "not_found":
             return notFound();
           case "failed":

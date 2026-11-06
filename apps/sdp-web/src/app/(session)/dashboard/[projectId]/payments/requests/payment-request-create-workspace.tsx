@@ -26,8 +26,6 @@ import { useTimeZone } from "@/i18n/time-zone";
 import { copyPendingText } from "@/lib/copy-pending-text";
 import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch";
 import { fetchResultAnswer } from "@/lib/idempotency";
-import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
-import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { PAYMENT_REQUESTS_HREF, paymentRequestHref } from "@/lib/payments-routes";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
@@ -287,8 +285,7 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
     [sdpEnvironment]
   );
 
-  const demo = usePaymentsDemo();
-  const [amount, setAmount] = useState(demo ? DEMO_PREFILL_AMOUNTS.request : "");
+  const [amount, setAmount] = useState("");
   const [pickedToken, setPickedToken] = useState("");
   const [pickedWallet, setPickedWallet] = useState("");
   const [expiry, setExpiry] = useState<string>("none");
@@ -338,9 +335,8 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
           },
         }
       );
-      // The copy starts inside the press, before the answer that names the link. A demo request
-      // lives in this browser only, so the public pay page can't open its link.
-      linkCopied = demo ? null : copyPendingText(sent.then(createdPayLink));
+      // The copy starts inside the press, before the answer that names the link.
+      linkCopied = copyPendingText(sent.then(createdPayLink));
       const res = await sent;
       settleExpiresAt(input, expiresAt, res);
       if (!res.ok) {

@@ -31,7 +31,6 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
 import { copyPendingText } from "@/lib/copy-pending-text";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
-import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import {
   PAYMENT_REQUEST_NEW_HREF,
   PAYMENT_REQUESTS_HREF,
@@ -397,7 +396,6 @@ export function PaymentRequestsWorkspace({
   listState,
 }: PaymentRequestsWorkspaceProps) {
   const t = useTranslations();
-  const demo = usePaymentsDemo();
   const locale = useLocale();
   const amountLabel = usePaymentRequestAmountLabel();
   const router = useRouter();
@@ -425,11 +423,6 @@ export function PaymentRequestsWorkspace({
   const listIsEmpty = total === 0 && listState.status === null && listState.search === null;
 
   const copyLink = (row: PaymentRequest) => {
-    // A demo request lives in this browser only, so the public pay page can't open its link.
-    if (demo) {
-      toast.info(t("DashboardPayments.demo.noPayLink"));
-      return;
-    }
     // Reads never carry the pay link (APE-849); the link read returns it only to a
     // member whose role may manage payment requests.
     let refusal: string | null = null;

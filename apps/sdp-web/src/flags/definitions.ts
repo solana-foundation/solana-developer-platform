@@ -194,22 +194,6 @@ export function defineDashboardFlags({
     ],
   });
 
-  const paymentsDemoMode = flag<boolean, DashboardFlagEntities>({
-    key: "payments-demo-mode",
-    adapter: vercel(),
-    identify,
-    defaultValue: flagDefault(
-      "SDP_FLAG_PAYMENTS_DEMO_MODE",
-      process.env.VERCEL_ENV !== "production"
-    ),
-    description:
-      "Offer Payments' Demo switch: sample data and simulated provider, KYC and settlement steps in every ramp flow, per project. Serves only Payments pages.",
-    options: [
-      { value: false, label: "Hidden" },
-      { value: true, label: "Enabled" },
-    ],
-  });
-
   const rampProviderMoonpay = rampProviderFlag("moonpay", "MoonPay");
   const rampProviderStripe = rampProviderFlag("stripe", "Stripe");
 
@@ -222,7 +206,6 @@ export function defineDashboardFlags({
     markets,
     dvp,
     earn,
-    paymentsDemoMode,
     rampProviderMoonpay,
     rampProviderStripe,
   };

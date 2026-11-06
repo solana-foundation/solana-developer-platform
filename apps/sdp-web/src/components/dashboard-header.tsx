@@ -220,8 +220,6 @@ type DashboardTopBarProps = {
   action?: ReactNode;
   /** Set over a left title: an action page's way back. */
   above?: ReactNode;
-  /** Page-level controls at the title row's end (Payments puts its demo switch here). */
-  utilities?: ReactNode;
   /** Shown before the page's title, as a wallet's provider mark is. */
   mark?: ReactNode;
   /** Set under a marked title. */
@@ -341,14 +339,12 @@ function PageTitleLine({
 /**
  * The title block. On a phone it is the design's three rows: the navigation button, the
  * title 8px under it, then the page's action 16px under that. From md the button goes and the
- * action sits on the title's row. Any utilities (Payments' demo mode switch) sit at the far right
- * of the phone's navigation row, and from md on the title's row, before the action.
+ * action sits on the title's row.
  */
 export function StackedDashboardTopBar({
   navigation,
   title,
   action,
-  trailingContent,
   hideTitle = false,
   above,
   mark,
@@ -358,7 +354,6 @@ export function StackedDashboardTopBar({
   navigation: ReactNode;
   title: string;
   action?: ReactNode;
-  trailingContent: ReactNode;
   hideTitle?: boolean;
   /** Set over the title in its column: an action page's way back. */
   above?: ReactNode;
@@ -409,20 +404,6 @@ export function StackedDashboardTopBar({
           )}
         >
           {action}
-        </div>
-      ) : null}
-      {trailingContent ? (
-        // On a phone it shares the navigation button's row; from md it sits on the title's row
-        // before the action. The md columns have no gap, only margins, so a missing or hidden
-        // action leaves no empty gap at the right edge. Under a back link it keeps to the title's
-        // row as the action does, in a 36px box like the action's, so the two share a centre.
-        <div
-          className={cn(
-            "col-start-3 row-start-1 flex items-center justify-end empty:hidden md:col-start-2 md:ml-3",
-            above && "md:h-9 md:self-end"
-          )}
-        >
-          {trailingContent}
         </div>
       ) : null}
     </div>
@@ -521,20 +502,10 @@ export function DashboardTopBar({
   hasHeaderTabs = false,
   action,
   above,
-  utilities,
   mark,
   description,
   badge,
 }: DashboardTopBarProps) {
-  const utilityContent = utilities ?? null;
-  const trailingContent = action ? (
-    <>
-      {action}
-      {utilityContent}
-    </>
-  ) : (
-    utilityContent
-  );
   const centersPageTitle =
     titleVisibility !== "screen-reader-only" &&
     (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
@@ -551,7 +522,6 @@ export function DashboardTopBar({
         description={description}
         badge={badge}
         action={action}
-        trailingContent={utilityContent}
       />
     );
   }
@@ -570,7 +540,7 @@ export function DashboardTopBar({
             {topBarLeadingContent}
           </>
         }
-        trailingContent={trailingContent}
+        trailingContent={action}
       />
     );
   }
@@ -587,7 +557,7 @@ export function DashboardTopBar({
           {topBarLeadingContent}
         </>
       }
-      trailingContent={trailingContent}
+      trailingContent={action}
     />
   );
 }
