@@ -262,7 +262,7 @@ function mockGcpRotation(
     inventory?: (secretRef: string) => Response | Promise<Response>;
     destroyFailure?: boolean;
     writeFailure?: "create" | "lost_response";
-    privyStatus?: number;
+    privyStatuses?: number[];
   } = {}
 ) {
   env.CREDENTIAL_SECRET_STORE_BACKEND = "gcp_secret_manager";
@@ -281,7 +281,7 @@ function mockGcpRotation(
         : Response.json({ access_token: "gcp-test-token", expires_in: 300 });
     }
     if (url.hostname === "api.privy.io") {
-      return Response.json({ data: [] }, { status: options.privyStatus ?? 200 });
+      return Response.json({ data: [] }, { status: options.privyStatuses?.shift() ?? 200 });
     }
     if (url.hostname !== "gcp-lifecycle.test") throw new Error("Unexpected provider request");
     // Accept either project spelling while GCP responses and inventory stay canonical.
@@ -739,7 +739,10 @@ describe("provider credential lifecycle", () => {
   });
 
   it("keeps a pending child visible and cancelable after its eligible parent is deactivated", async () => {
-    const providerFetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
+    const providerFetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ data: [] }))
+      .mockResolvedValue(new Response(null, { status: 503 }));
     vi.stubGlobal("fetch", providerFetch);
     const pending = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
@@ -1119,7 +1122,7 @@ describe("provider credential lifecycle", () => {
   });
 
   it("retries failed GCP root destruction at its container scan and preserves its live child", async () => {
-    const options = { privyStatus: 503, destroyFailure: true };
+    const options = { privyStatuses: [200, 503], destroyFailure: true };
     const gcp = mockGcpRotation(options);
     const secretRef = z.string().parse(await seedActiveGcpCredential(gcp));
     const canonicalRef = secretRef.replace("projects/sdp-lifecycle-test/", "projects/1234567890/");
@@ -1259,6 +1262,7 @@ describe("provider credential lifecycle", () => {
       vi.spyOn(Date, "now").mockReturnValue(Date.now());
       const providerFetch = vi
         .fn()
+        .mockResolvedValueOnce(Response.json({ data: [] }))
         .mockImplementation(() =>
           Promise.resolve(
             action === "rollback"
@@ -1345,7 +1349,7 @@ describe("provider credential lifecycle", () => {
   });
 
   it("rotates every referencing connection after one continuity check", async () => {
-    const providerFetch = vi.fn().mockResolvedValue(Response.json({ data: [] }));
+    const providerFetch = vi.fn().mockImplementation(async () => Response.json({ data: [] }));
     vi.stubGlobal("fetch", providerFetch);
 
     const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
@@ -1363,7 +1367,7 @@ describe("provider credential lifecycle", () => {
       rotation: { status: "success" },
     });
     expect(body.data.providerCredential.id).not.toBe(CREDENTIAL_ID);
-    expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(providerFetch).toHaveBeenCalledTimes(2);
 
     const auditRows = await getDb(env).queryMany<{ metadata: string; user_id: string }>(
       "SELECT metadata, user_id FROM audit_logs ORDER BY ledger_sequence"
@@ -1431,7 +1435,7 @@ describe("provider credential lifecycle", () => {
   it("rolls back the whole cutover when retiring the predecessor fails", async () => {
     const logger = getLogger();
     const errorLog = vi.spyOn(logger, "error").mockImplementation(() => logger);
-    const providerFetch = vi.fn().mockResolvedValue(Response.json({ data: [] }));
+    const providerFetch = vi.fn().mockImplementation(async () => Response.json({ data: [] }));
     vi.stubGlobal("fetch", providerFetch);
     const db = getDb(env);
     await db.execute(
@@ -1462,7 +1466,7 @@ describe("provider credential lifecycle", () => {
       expect(JSON.stringify(errorLog.mock.calls)).not.toContain(
         "sdp_test_fail_provider_credential_retirement"
       );
-      expect(providerFetch).toHaveBeenCalledTimes(1);
+      expect(providerFetch).toHaveBeenCalledTimes(2);
       expect(
         await db.queryMany<{
           id: string;
@@ -1516,6 +1520,7 @@ describe("provider credential lifecycle", () => {
           ? new Response("1234567890")
           : Response.json({ access_token: "gcp-sensitive-token", expires_in: 300 });
       }
+      if (url.hostname === "api.privy.io") return Response.json({ data: [] });
       if (url.hostname !== "gcp-lifecycle.test") throw new Error("Unexpected provider request");
       const secretId = url.searchParams.get("secretId");
       if (secretId) {
@@ -1807,7 +1812,9 @@ describe("provider credential lifecycle", () => {
     expect(await activeConnectionCredentialIds()).toEqual([
       { provider_credential_id: CREDENTIAL_ID },
     ]);
-    expect(gcp.requests.some(({ url }) => new URL(url).hostname === "api.privy.io")).toBe(false);
+    expect(gcp.requests.filter(({ url }) => new URL(url).hostname === "api.privy.io")).toHaveLength(
+      1
+    );
     expect(
       (await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, request)).status
     ).toBe(409);
@@ -1873,7 +1880,7 @@ describe("provider credential lifecycle", () => {
       const db = getDb(env);
       const runTransaction = db.transaction.bind(db);
       const gcp = mockGcpRotation({
-        privyStatus,
+        privyStatuses: [200, privyStatus],
         beforeAddResponse: async () => {
           vi.spyOn(db, "transaction").mockImplementationOnce(async (callback) => {
             await runTransaction(callback);
@@ -2053,8 +2060,11 @@ describe("provider credential lifecycle", () => {
     ]);
   });
 
-  it("rejects only the candidate when Privy rejects the new credentials", async () => {
-    const providerFetch = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
+  it("rejects only the candidate when Privy rejects the new credentials after accepting the preflight", async () => {
+    const providerFetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ data: [] }))
+      .mockResolvedValue(new Response(null, { status: 401 }));
     vi.stubGlobal("fetch", providerFetch);
 
     const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
@@ -2085,8 +2095,45 @@ describe("provider credential lifecycle", () => {
     ).toEqual([{ provider_credential_id: CREDENTIAL_ID }]);
   });
 
+  it("keeps the current credential and writes no candidate when Privy rejects the rotation", async () => {
+    const providerFetch = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json({ code: "missing_or_invalid_privy_app_id" }, { status: 400 })
+      );
+    vi.stubGlobal("fetch", providerFetch);
+    const db = getDb(env);
+    const before = await db.queryMany("SELECT * FROM provider_credentials ORDER BY id");
+
+    const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+      method: "POST",
+      key: "rotate-preflight-rejected",
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "rejected-secret" } },
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "BAD_REQUEST",
+        message:
+          "The provider rejected these credentials. Check the credential fields, then connect again.",
+        details: { reason: "invalid_credentials" },
+      },
+      meta: { requestId: "req_provider_credential_lifecycle" },
+    });
+    expect(providerFetch).toHaveBeenCalledOnce();
+    expect(await db.queryMany("SELECT * FROM provider_credentials ORDER BY id")).toEqual(before);
+    expect(await lifecycleAuditAttempts("submit")).toEqual([]);
+    expect(await activeConnectionCredentialIds()).toEqual([
+      { provider_credential_id: CREDENTIAL_ID },
+    ]);
+  });
+
   it("audits a rejected rotation once across replays", async () => {
-    const providerFetch = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
+    const providerFetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ data: [] }))
+      .mockResolvedValue(new Response(null, { status: 401 }));
     vi.stubGlobal("fetch", providerFetch);
     const request = {
       method: "POST" as const,
@@ -2106,11 +2153,11 @@ describe("provider credential lifecycle", () => {
     const replay = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, request);
     expect(replay.status).toBe(200);
     expect(await rotationFailureEvents()).toEqual(events);
-    expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(providerFetch).toHaveBeenCalledTimes(2);
   });
 
   it("rejects a valid credential for a different Privy account without changing the current credential", async () => {
-    const providerFetch = vi.fn().mockResolvedValue(Response.json({ data: [] }));
+    const providerFetch = vi.fn().mockImplementation(async () => Response.json({ data: [] }));
     vi.stubGlobal("fetch", providerFetch);
     const db = getDb(env);
     const original = await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [
@@ -2137,7 +2184,7 @@ describe("provider credential lifecycle", () => {
       },
     });
     expect(body.data.providerCredential.id).not.toBe(CREDENTIAL_ID);
-    expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(providerFetch).toHaveBeenCalledTimes(2);
     expect(
       await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [CREDENTIAL_ID])
     ).toEqual(original);
@@ -2174,7 +2221,10 @@ describe("provider credential lifecycle", () => {
   });
 
   it("emits one rejection outcome when two completions reject the same candidate", async () => {
-    const providerFetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
+    const providerFetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ data: [] }))
+      .mockResolvedValue(new Response(null, { status: 503 }));
     vi.stubGlobal("fetch", providerFetch);
     const pending = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
@@ -2223,7 +2273,10 @@ describe("provider credential lifecycle", () => {
   it("keeps a rejection intent unresolved when the COMMIT response is lost", async () => {
     const logger = getLogger();
     const warning = vi.spyOn(logger, "warn").mockImplementation(() => logger);
-    const providerFetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
+    const providerFetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ data: [] }))
+      .mockResolvedValue(new Response(null, { status: 503 }));
     vi.stubGlobal("fetch", providerFetch);
     const pending = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
@@ -2310,6 +2363,7 @@ describe("provider credential lifecycle", () => {
         const secret = "commit-recovery-secret";
         const providerFetch = vi
           .fn()
+          .mockResolvedValueOnce(Response.json({ data: [] }))
           .mockResolvedValue(
             operation === "rollback"
               ? Response.json({ data: [] })
@@ -2398,8 +2452,8 @@ describe("provider credential lifecycle", () => {
     );
   });
 
-  it("refuses candidate submission before storage or Provider work when audit intent is unavailable", async () => {
-    const providerFetch = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
+  it("refuses candidate submission before storage or the candidate check when audit intent is unavailable", async () => {
+    const providerFetch = vi.fn().mockImplementation(async () => Response.json({ data: [] }));
     vi.stubGlobal("fetch", providerFetch);
     const db = getDb(env);
     await db.execute(
@@ -2420,7 +2474,7 @@ describe("provider credential lifecycle", () => {
            FROM provider_credentials WHERE idempotency_key = 'rotate-audit-unavailable'`
         )
       ).toBeNull();
-      expect(providerFetch).not.toHaveBeenCalled();
+      expect(providerFetch).toHaveBeenCalledOnce();
       expect(await rotationFailureEvents()).toEqual([]);
     } finally {
       await db.execute("ALTER TABLE audit_logs DROP CONSTRAINT sdp_test_fail_rotation_audit");
@@ -2432,6 +2486,7 @@ describe("provider credential lifecycle", () => {
     async (operation) => {
       const providerFetch = vi
         .fn()
+        .mockResolvedValueOnce(Response.json({ data: [] }))
         .mockResolvedValue(
           operation === "rollback"
             ? Response.json({ data: [] })
@@ -2459,7 +2514,7 @@ describe("provider credential lifecycle", () => {
           })
         ).rejects.toThrow("Required audit record could not be persisted");
         expect(secretLookup).not.toHaveBeenCalled();
-        expect(providerFetch).toHaveBeenCalledTimes(1);
+        expect(providerFetch).toHaveBeenCalledTimes(2);
       } finally {
         await db.execute("ALTER TABLE audit_logs DROP CONSTRAINT sdp_test_fail_check_audit");
       }
@@ -2522,7 +2577,7 @@ describe("provider credential lifecycle", () => {
   );
 
   it("keeps status reads and terminal replays available during audit outage", async () => {
-    const providerFetch = vi.fn().mockResolvedValue(Response.json({ data: [] }));
+    const providerFetch = vi.fn().mockImplementation(async () => Response.json({ data: [] }));
     vi.stubGlobal("fetch", providerFetch);
     const request = {
       method: "POST" as const,
@@ -2554,14 +2609,17 @@ describe("provider credential lifecycle", () => {
         ).status
       ).toBe(200);
       expect(await db.queryOne("SELECT count(*) AS count FROM audit_logs")).toEqual(count);
-      expect(providerFetch).toHaveBeenCalledTimes(1);
+      expect(providerFetch).toHaveBeenCalledTimes(2);
     } finally {
       await db.execute("ALTER TABLE audit_logs DROP CONSTRAINT sdp_test_fail_replay_audit");
     }
   });
 
   it("logs an unreadable candidate secret without exposing its stored contents", async () => {
-    const providerFetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
+    const providerFetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ data: [] }))
+      .mockResolvedValue(new Response(null, { status: 503 }));
     vi.stubGlobal("fetch", providerFetch);
     const pending = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
@@ -2596,7 +2654,7 @@ describe("provider credential lifecycle", () => {
     );
     expect(JSON.stringify(errorLog.mock.calls)).not.toContain("invalid-secret-ciphertext");
     expect(JSON.stringify(errorLog.mock.calls)).not.toContain("new-secret");
-    expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(providerFetch).toHaveBeenCalledTimes(2);
     expect(
       await getDb(env).queryMany(
         `SELECT user_id, request_id, status, metadata::jsonb ->> 'failureCode' AS failure_code
@@ -2617,6 +2675,7 @@ describe("provider credential lifecycle", () => {
   it("persists an uncertain candidate and resumes it without another secret submission", async () => {
     const providerFetch = vi
       .fn()
+      .mockResolvedValueOnce(Response.json({ data: [] }))
       .mockResolvedValueOnce(new Response(null, { status: 503 }))
       .mockResolvedValueOnce(Response.json({ data: [] }));
     vi.stubGlobal("fetch", providerFetch);
@@ -2646,11 +2705,14 @@ describe("provider credential lifecycle", () => {
         rotation: { status: "success" },
       },
     });
-    expect(providerFetch).toHaveBeenCalledTimes(2);
+    expect(providerFetch).toHaveBeenCalledTimes(3);
   });
 
   it("returns a conflict when cancellation wins before candidate secret access", async () => {
-    const providerFetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
+    const providerFetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ data: [] }))
+      .mockResolvedValue(new Response(null, { status: 503 }));
     vi.stubGlobal("fetch", providerFetch);
     const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
@@ -2694,11 +2756,11 @@ describe("provider credential lifecycle", () => {
 
     expect(cancellation.status).toBe(200);
     expect((await completion).status).toBe(409);
-    expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(providerFetch).toHaveBeenCalledTimes(2);
   });
 
   it("replays a completed rotation by idempotency key without another provider call", async () => {
-    const providerFetch = vi.fn().mockResolvedValue(Response.json({ data: [] }));
+    const providerFetch = vi.fn().mockImplementation(async () => Response.json({ data: [] }));
     vi.stubGlobal("fetch", providerFetch);
     const request = {
       method: "POST" as const,
@@ -2719,7 +2781,7 @@ describe("provider credential lifecycle", () => {
         rotation: { status: "success" },
       },
     });
-    expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(providerFetch).toHaveBeenCalledTimes(2);
   });
 
   it("replays the exact successful rotation after a later rotation", async () => {
@@ -2763,7 +2825,7 @@ describe("provider credential lifecycle", () => {
         rotation: { status: "success" },
       },
     });
-    expect(providerFetch).toHaveBeenCalledTimes(2);
+    expect(providerFetch).toHaveBeenCalledTimes(4);
     expect(
       await getDb(env).queryOne<{ count: number }>(
         "SELECT COUNT(*) AS count FROM provider_credentials"
@@ -2817,11 +2879,14 @@ describe("provider credential lifecycle", () => {
       status: "retired",
       secret_retention_expires_at: expect.any(String),
     });
-    expect(providerFetch).toHaveBeenCalledTimes(2);
+    expect(providerFetch).toHaveBeenCalledTimes(3);
   });
 
   it("allocates beyond failed versions when retrying with a new rotation intent", async () => {
-    const providerFetch = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
+    const providerFetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ data: [] }))
+      .mockResolvedValue(new Response(null, { status: 401 }));
     vi.stubGlobal("fetch", providerFetch);
     const rejected = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
@@ -2832,7 +2897,7 @@ describe("provider credential lifecycle", () => {
     expect(await rejected.json()).toMatchObject({
       data: { providerCredential: { status: "failed_validation" } },
     });
-    providerFetch.mockResolvedValue(Response.json({ data: [] }));
+    providerFetch.mockImplementation(async () => Response.json({ data: [] }));
     expect(
       await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
         method: "POST",
@@ -2895,7 +2960,7 @@ describe("provider credential lifecycle", () => {
   });
 
   it("returns a conflict when retention cleanup wins before rollback secret access", async () => {
-    const providerFetch = vi.fn().mockResolvedValue(Response.json({ data: [] }));
+    const providerFetch = vi.fn().mockImplementation(async () => Response.json({ data: [] }));
     vi.stubGlobal("fetch", providerFetch);
     const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
@@ -2943,12 +3008,18 @@ describe("provider credential lifecycle", () => {
     releaseSecretLookup();
 
     expect((await rollback).status).toBe(409);
-    expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(providerFetch).toHaveBeenCalledTimes(2);
   });
 
   it("cancels an unreferenced pending candidate without a fallible post-commit read", async () => {
     vi.spyOn(Date, "now").mockReturnValue(Date.now());
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 503 })));
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(Response.json({ data: [] }))
+        .mockResolvedValue(new Response(null, { status: 503 }))
+    );
     const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-before-cancel",
@@ -3004,7 +3075,13 @@ describe("provider credential lifecycle", () => {
   });
 
   it("keeps a committed GCP candidate cancellation successful when cleanup cannot start", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 503 })));
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(Response.json({ data: [] }))
+        .mockResolvedValue(new Response(null, { status: 503 }))
+    );
     const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-gcp-cancel",
@@ -3043,7 +3120,13 @@ describe("provider credential lifecycle", () => {
   });
 
   it("blocks cancellation when an invariant-breach reference owns an active wallet", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 503 })));
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(Response.json({ data: [] }))
+        .mockResolvedValue(new Response(null, { status: 503 }))
+    );
     const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-before-invariant-breach",
@@ -3105,7 +3188,13 @@ describe("provider credential lifecycle", () => {
   });
 
   it("returns 503 when a retryable Provider outcome cannot be persisted", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 503 })));
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(Response.json({ data: [] }))
+        .mockResolvedValue(new Response(null, { status: 503 }))
+    );
     vi.spyOn(ProviderCredentialStore.prototype, "recordRotationRetryUnknown").mockRejectedValueOnce(
       new Error("database unavailable")
     );
@@ -3131,7 +3220,7 @@ describe("provider credential lifecycle", () => {
       body: { provider: "privy", fields: { appId: ` ${appId} `, appSecret } },
     });
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(400);
     expect(providerFetch).toHaveBeenCalledExactlyOnceWith(
       expect.any(String),
       expect.objectContaining({
@@ -3208,6 +3297,8 @@ describe("provider credential lifecycle", () => {
     const providerFetch = vi
       .fn()
       .mockResolvedValueOnce(Response.json({ data: [] }))
+      .mockResolvedValueOnce(Response.json({ data: [] }))
+      .mockResolvedValueOnce(Response.json({ data: [] }))
       .mockResolvedValue(new Response(null, { status: 503 }));
     vi.stubGlobal("fetch", providerFetch);
     const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
@@ -3245,7 +3336,7 @@ describe("provider credential lifecycle", () => {
     });
 
     expect(response.status).toBe(409);
-    expect(providerFetch).toHaveBeenCalledTimes(2);
+    expect(providerFetch).toHaveBeenCalledTimes(4);
     const state = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
     expect(state.status).toBe(200);
     expect(await state.json()).toMatchObject({
@@ -3287,7 +3378,7 @@ describe("provider credential lifecycle", () => {
         rotationCandidate: null,
       },
     });
-    expect(providerFetch).toHaveBeenCalledTimes(2);
+    expect(providerFetch).toHaveBeenCalledTimes(4);
   });
 
   it.each([
@@ -3300,6 +3391,7 @@ describe("provider credential lifecycle", () => {
     async ({ failureCode, providerStatus, httpStatus }) => {
       const providerFetch = vi
         .fn()
+        .mockResolvedValueOnce(Response.json({ data: [] }))
         .mockResolvedValueOnce(Response.json({ data: [] }))
         .mockResolvedValueOnce(Response.json({ data: [] }, { status: providerStatus }));
       vi.stubGlobal("fetch", providerFetch);
@@ -3347,7 +3439,7 @@ describe("provider credential lifecycle", () => {
         { provider_credential_id: currentId },
       ]);
       expect(providerFetch).toHaveBeenCalledTimes(
-        failureCode === "credential_storage_unavailable" ? 1 : 2
+        failureCode === "credential_storage_unavailable" ? 2 : 3
       );
     }
   );

@@ -5,8 +5,6 @@ import {
   fetchConnectionListItem,
   isCredentialManagedHere,
   type LifecycleCredential,
-  ROLLBACK_WINDOW_MS,
-  resolveRetiredAt,
   rollbackHoursRemaining,
 } from "./connection-detail.data";
 
@@ -39,7 +37,7 @@ function makeLifecycle(
     },
     rollback: {
       providerCredential: makeCredential({ id: "pcred_previous", status: "retired" }),
-      expiresAt: new Date(NOW + ROLLBACK_WINDOW_MS).toISOString(),
+      expiresAt: new Date(NOW + 24 * 60 * 60 * 1000).toISOString(),
     },
     ...overrides,
   };
@@ -55,15 +53,6 @@ describe("credential source", () => {
 });
 
 describe("rollback window", () => {
-  it("derives the retirement moment from the deadline the API publishes", () => {
-    const expiresAt = new Date(NOW + ROLLBACK_WINDOW_MS).toISOString();
-    expect(resolveRetiredAt(expiresAt)?.toISOString()).toBe(new Date(NOW).toISOString());
-  });
-
-  it("ignores an unparseable deadline rather than inventing a date", () => {
-    expect(resolveRetiredAt("not-a-date")).toBeNull();
-  });
-
   it("counts whole hours left and never goes negative", () => {
     const expiresAt = new Date(NOW + 19 * 60 * 60 * 1000).toISOString();
     expect(rollbackHoursRemaining(expiresAt, NOW)).toBe(19);

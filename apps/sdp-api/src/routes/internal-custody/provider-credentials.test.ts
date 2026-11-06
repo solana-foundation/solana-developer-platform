@@ -277,6 +277,7 @@ function mockSubmissionGcp(addVersion?: (versionRef: string) => Promise<Response
   const versionCounts = new Map<string, number>();
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = new URL(String(input));
+    if (url.hostname === "api.privy.io") return Response.json({ data: [] });
     requests.push(url.href);
     if (url.hostname === "metadata.google.internal") {
       return url.pathname.endsWith("/numeric-project-id")
@@ -337,6 +338,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     env.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
     env.CUSTODY_ENCRYPTION_KEY = testEncryptionKey();
     env.CREDENTIAL_FINGERPRINT_PEPPER = "test-credential-fingerprint-pepper-for-unit-tests";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json({ data: [] }));
   });
 
   afterEach(async () => {
@@ -405,6 +407,143 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       status: "pending",
       setup_metadata: { pendingWalletLabel: "Treasury Wallet" },
     });
+  });
+
+  it.each([
+    [
+      "rejects",
+      () =>
+        Promise.resolve(
+          Response.json({ code: "missing_or_invalid_privy_app_id" }, { status: 400 })
+        ),
+      "The provider rejected these credentials. Check the credential fields, then connect again.",
+      "invalid_credentials",
+    ],
+    [
+      "cannot confirm",
+      () => Promise.reject(new Error("network failure")),
+      "Privy did not confirm these credentials, so nothing was saved. Try again.",
+      "provider_unconfirmed",
+    ],
+  ])(
+    "stores nothing when Privy %s the submitted credentials",
+    async (_case, privyOutcome, message, reason) => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(privyOutcome);
+      const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
+      const { app, token } = buildApp();
+
+      const response = await submit(app, token, {
+        projectId: PROJECT_ID,
+        key: `submission-preflight-${reason}`,
+        body: VALID_BODY,
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: { code: "BAD_REQUEST", message, details: { reason } },
+        meta: { requestId: "req_provider_credential_submit" },
+      });
+      expect(factory).not.toHaveBeenCalled();
+      expect(await getDomainCounts()).toEqual({ credentials: 0, connections: 0, wallets: 0 });
+      expect(
+        await getDb(env).queryMany(
+          `SELECT status, metadata::jsonb ->> 'reason' AS reason
+           FROM audit_logs WHERE action = 'submit_failed'`
+        )
+      ).toEqual([{ status: "failure", reason: "provider_preflight_refused" }]);
+    }
+  );
+
+  it("keeps the failed Connection's credential when Privy rejects its replacement", async () => {
+    const { app, token } = buildApp();
+    const first = await submit(app, token, {
+      projectId: PROJECT_ID,
+      key: "replacement-preflight-v1",
+      body: VALID_BODY,
+    });
+    const { data } = z
+      .object({
+        data: z.object({
+          providerCredential: z.object({ id: z.string() }),
+          connectionId: z.string(),
+        }),
+      })
+      .parse(await first.json());
+    await markInitialValidationFailed(getDb(env), {
+      credentialId: data.providerCredential.id,
+      connectionId: data.connectionId,
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ code: "missing_or_invalid_privy_app_id" }, { status: 400 })
+    );
+
+    const response = await replace(app, token, data.connectionId, {
+      projectId: PROJECT_ID,
+      key: "replacement-preflight-v2",
+      body: VALID_BODY,
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "BAD_REQUEST",
+        message:
+          "The provider rejected these credentials. Check the credential fields, then connect again.",
+        details: { reason: "invalid_credentials" },
+      },
+      meta: { requestId: "req_provider_credential_submit" },
+    });
+    expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
+    expect(await getConnectionForCredential(data.providerCredential.id)).toMatchObject({
+      id: data.connectionId,
+      status: "failed",
+    });
+  });
+
+  it("refuses a user's sixth Privy credential check in a window without contacting Privy", async () => {
+    const providerFetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () =>
+        Response.json({ code: "missing_or_invalid_privy_app_id" }, { status: 400 })
+      );
+    const { app, token } = buildApp();
+    for (const attempt of [1, 2, 3, 4, 5]) {
+      const refused = await submit(app, token, {
+        projectId: PROJECT_ID,
+        key: `privy-check-quota-${attempt}`,
+        body: VALID_BODY,
+      });
+      expect(refused.status).toBe(400);
+    }
+    providerFetch.mockClear();
+
+    const response = await submit(app, token, {
+      projectId: PROJECT_ID,
+      key: "privy-check-quota-6",
+      body: VALID_BODY,
+    });
+
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({
+      error: { code: "RATE_LIMITED", message: expect.stringMatching(/^Rate limit exceeded/) },
+      meta: { requestId: "req_provider_credential_submit" },
+    });
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
+  it("answers an unknown replacement Connection with 404 before contacting Privy", async () => {
+    const providerFetch = vi.spyOn(globalThis, "fetch");
+    const { app, token } = buildApp();
+
+    const response = await replace(app, token, "cconn_unknown_replacement_target", {
+      projectId: PROJECT_ID,
+      key: "replacement-unknown-connection",
+      body: VALID_BODY,
+    });
+
+    expect(response.status).toBe(404);
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(await getDomainCounts()).toEqual({ credentials: 0, connections: 0, wallets: 0 });
   });
 
   it("keeps a committed submission replayable when its audit outcome cannot be persisted", async () => {

@@ -142,6 +142,37 @@ describe("ProjectService", () => {
 
       expect(projects.find((p) => p.id === TEST_PROJECT.id)).toBeDefined();
     });
+
+    it("lists only the member's projects when memberUserId is given", async () => {
+      await db
+        .prepare("DELETE FROM project_members WHERE project_id = ? AND user_id = ?")
+        .bind(TEST_PRODUCTION_PROJECT.id, TEST_USER.id)
+        .run();
+
+      const projects = await projectService.listProjects(TEST_ORG.id, {
+        memberUserId: TEST_USER.id,
+      });
+
+      expect(projects.map((p) => p.id)).toEqual([TEST_PROJECT.id]);
+    });
+
+    it("keeps the membership rule when archived projects are included", async () => {
+      await db
+        .prepare("UPDATE projects SET status = 'archived' WHERE id = ?")
+        .bind(TEST_PROJECT.id)
+        .run();
+      await db
+        .prepare("DELETE FROM project_members WHERE project_id = ? AND user_id = ?")
+        .bind(TEST_PRODUCTION_PROJECT.id, TEST_USER.id)
+        .run();
+
+      const projects = await projectService.listProjects(TEST_ORG.id, {
+        includeArchived: true,
+        memberUserId: TEST_USER.id,
+      });
+
+      expect(projects.map((p) => p.id)).toEqual([TEST_PROJECT.id]);
+    });
   });
 
   describe("updateProject", () => {

@@ -62,7 +62,7 @@ Dashboard pages live under `app/(session)/dashboard/[projectId]/`, and the Proje
 - A missing page or an unmatched address inside a Project renders `[projectId]/not-found.tsx` in the shell; the `[...unmatched]` catch-all exists so unmatched URLs reach it instead of the root 404.
 - The shell keys its page frame (header and content) by pathname, so a route change replaces the frame rather than moving it. Whatever a page adds to the header after it mounts must not change the header's height: a title mark is held by the route's `titleMark`, and controls a page portals into the tab row (`DashboardHeaderTabsTrailing`) get a placeholder in the route's skeleton.
 - The shell sizes itself in `dvh` (`h-dvh`, `min-h-dvh`), never `h-screen`: a phone browser's `vh` is its height with the toolbars hidden, so a locked page (a flow's footer) sat under the toolbar.
-- Tests mock with `vi.mock("next/navigation", () => import("@/test/next-navigation"))` and `vi.mock("next/headers", () => import("@/test/next-headers"))`; fixtures live in `src/test/`.
+- Tests mock with `vi.mock("next/navigation", () => import("@/test/next-navigation"))` and `vi.mock("next/headers", () => import("@/test/next-headers"))`, plus `vi.mock("next/cache", () => import("@/test/next-cache"))` where a server action revalidates; fixtures live in `src/test/`.
 
 A button whose action is running takes `loading` and keeps its words: the
 design-system button spins in place at its own width, so there is no "…ing"
