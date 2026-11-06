@@ -9,11 +9,22 @@ import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapt
 import { KeychainTurnkeyAdapter } from "@sdp/custody/keychain/keychain-turnkey.adapter";
 import { KeychainUtilaAdapter } from "@sdp/custody/keychain/keychain-utila.adapter";
 import { buildKeychainUtilaConfig } from "@sdp/custody/keychain/utila-config";
-import { SigningError, type SigningPort } from "@sdp/custody/signing";
+import {
+  type FullSigningPort,
+  isFullSigningPort,
+  SigningError,
+  type SigningPort,
+} from "@sdp/custody/signing";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import type { CustodyMode } from "@sdp/types/custody";
-import type { Address } from "@solana/kit";
-import { instrumentVendorPort } from "@/runtime/vendor-calls";
+import type { CustodyMode, CustodyProvider } from "@sdp/types/custody";
+import type { Address, TransactionSigner } from "@solana/kit";
+import {
+  instrumentVendorPort,
+  logVendorCallFailure,
+  logVendorCallSuccess,
+  type VendorCallContext,
+  type VendorCallDetails,
+} from "@/runtime/vendor-calls";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { assertLocalSigningAllowed } from "@/services/adapters/signing";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
@@ -218,15 +229,79 @@ export async function createAdapterFromEncryptedConfig(
   );
 }
 
+const SIGNER_OPERATIONS = [
+  "signTransactions",
+  "signMessages",
+  "modifyAndSignTransactions",
+  "modifyAndSignMessages",
+  "signAndSendTransactions",
+] as const;
+
+type SignerOperations = Partial<
+  Record<(typeof SIGNER_OPERATIONS)[number], (...args: unknown[]) => Promise<unknown>>
+>;
+
+// Adapters cache one signer per wallet and kit rejects two signer objects for
+// one address, so each signer keeps exactly one instrumented twin.
+const instrumentedSigners = new WeakMap<TransactionSigner, TransactionSigner>();
+
 function instrumentCustodyPort(
-  provider: string,
+  provider: CustodyProvider,
   custodyMode: CustodyMode,
   port: SigningPort
 ): SigningPort {
-  return instrumentVendorPort(provider, port, undefined, {
+  const context: VendorCallContext = {
     cluster: currentClusterScope().cluster,
     custody_mode: custodyMode,
-  });
+  };
+  const instrumented = instrumentVendorPort(provider, port, undefined, context);
+  if (!isFullSigningPort(instrumented)) {
+    return instrumented;
+  }
+  const getTransactionSigner: FullSigningPort["getTransactionSigner"] = async (...args) =>
+    instrumentSigner(provider, context, await instrumented.getTransactionSigner(...args));
+  const withSigners: FullSigningPort = Object.create(instrumented);
+  Object.defineProperty(withSigners, "getTransactionSigner", { value: getTransactionSigner });
+  return withSigners;
+}
+
+// Inherits from the signer instead of copying or proxying it: signers may be
+// frozen kit objects or class instances with private fields.
+function instrumentSigner(
+  provider: CustodyProvider,
+  context: VendorCallContext,
+  signer: TransactionSigner
+): TransactionSigner {
+  const existing = instrumentedSigners.get(signer);
+  if (existing) {
+    return existing;
+  }
+  const details: VendorCallDetails = { boundary: "adapter_operation", ...context };
+  // SAFETY: every kit signer kind exposes its signing calls under these names
+  // as async methods; a kind that lacks one leaves it undefined.
+  const operations = signer as SignerOperations;
+  const instrumented: TransactionSigner = Object.create(signer);
+  for (const operation of SIGNER_OPERATIONS) {
+    const method = operations[operation];
+    if (!method) {
+      continue;
+    }
+    Object.defineProperty(instrumented, operation, {
+      value: async (...args: unknown[]) => {
+        const startedAt = Date.now();
+        try {
+          const result = await method.apply(signer, args);
+          logVendorCallSuccess(provider, operation, startedAt, details);
+          return result;
+        } catch (error) {
+          logVendorCallFailure(provider, operation, error, startedAt, details);
+          throw error;
+        }
+      },
+    });
+  }
+  instrumentedSigners.set(signer, instrumented);
+  return instrumented;
 }
 
 /**
