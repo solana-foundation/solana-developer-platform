@@ -52,7 +52,7 @@ import {
 import routeActionsJson from "./route-actions.generated.json";
 
 const EARN_TAG_DESCRIPTION =
-  "Strategy reads, previews, withdrawal-route discovery, unsigned builds, submission, queued actions, and tenant tracking.";
+  "Strategy reads, previews, withdrawal-route discovery, unsigned builds, submission, queued actions, and tenant tracking. Availability follows the deployment's release channel.";
 
 const OPENAPI_TAG = {
   HEALTH: { name: "Health", description: "Service health and readiness endpoints." },

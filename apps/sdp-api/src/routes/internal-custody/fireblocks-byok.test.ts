@@ -14,6 +14,7 @@ import { eraseExpiredFireblocksCsrs } from "@/services/custody/fireblocks-regist
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { ProviderCredentialSecretCleanupStore } from "@/services/stores/provider-credential-secret-cleanup.store";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { inSandboxScope } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -358,49 +359,51 @@ describe("Fireblocks BYOK lifecycle", () => {
       [connected.connectionId]
     );
     if (!wallet) throw new Error("Missing wallet");
-    const resolver = new CustodyRuntimeTargets(getDb(env), testEnv, new Map());
-    const managedAdapter = vi.fn();
-    const signer = await resolver.getTransactionSignerForWalletRecord(
-      ORGANIZATION_ID,
-      PROJECT_ID,
-      wallet.id,
-      "payments.transfer",
-      managedAdapter
-    );
-    expect(signer.address).toBe(ADDRESS);
-    expect(managedAdapter).not.toHaveBeenCalled();
-    expect(fetch).toHaveBeenCalledTimes(2);
-    await resolver.getTransactionSignerForWalletRecord(
-      ORGANIZATION_ID,
-      PROJECT_ID,
-      wallet.id,
-      "payments.transfer",
-      managedAdapter
-    );
-    expect(fetch).toHaveBeenCalledTimes(2);
-    await expect(
-      resolver.getTransactionSignerForWalletRecord(
-        ORGANIZATION_ID,
-        `${PROJECT_ID}_production`,
-        wallet.id,
-        "payments.transfer",
-        managedAdapter
-      )
-    ).rejects.toThrow();
-    expect(fetch).toHaveBeenCalledTimes(2);
-    fetch.mockImplementation(async () =>
-      Response.json({ addresses: [{ address: OTHER_ADDRESS }] })
-    );
-    const uncached = new CustodyRuntimeTargets(getDb(env), testEnv, new Map());
-    await expect(
-      uncached.getTransactionSignerForWalletRecord(
+    await inSandboxScope(async () => {
+      const resolver = new CustodyRuntimeTargets(getDb(env), testEnv, new Map());
+      const managedAdapter = vi.fn();
+      const signer = await resolver.getTransactionSignerForWalletRecord(
         ORGANIZATION_ID,
         PROJECT_ID,
         wallet.id,
         "payments.transfer",
         managedAdapter
-      )
-    ).rejects.toThrow();
+      );
+      expect(signer.address).toBe(ADDRESS);
+      expect(managedAdapter).not.toHaveBeenCalled();
+      expect(fetch).toHaveBeenCalledTimes(2);
+      await resolver.getTransactionSignerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        wallet.id,
+        "payments.transfer",
+        managedAdapter
+      );
+      expect(fetch).toHaveBeenCalledTimes(2);
+      await expect(
+        resolver.getTransactionSignerForWalletRecord(
+          ORGANIZATION_ID,
+          `${PROJECT_ID}_production`,
+          wallet.id,
+          "payments.transfer",
+          managedAdapter
+        )
+      ).rejects.toThrow();
+      expect(fetch).toHaveBeenCalledTimes(2);
+      fetch.mockImplementation(async () =>
+        Response.json({ addresses: [{ address: OTHER_ADDRESS }] })
+      );
+      const uncached = new CustodyRuntimeTargets(getDb(env), testEnv, new Map());
+      await expect(
+        uncached.getTransactionSignerForWalletRecord(
+          ORGANIZATION_ID,
+          PROJECT_ID,
+          wallet.id,
+          "payments.transfer",
+          managedAdapter
+        )
+      ).rejects.toThrow();
+    });
   });
   it("provisions an additional vault with tenant credentials and reuses its fetched address", async () => {
     const fetch = providerResponse();

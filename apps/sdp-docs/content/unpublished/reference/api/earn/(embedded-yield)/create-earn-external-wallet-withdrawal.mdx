@@ -10,7 +10,7 @@ apiReference: true
 
 <ApiEndpoint method="POST" path="/v1/earn/external-wallet/withdrawals" />
 
-It works like a deposit submit: SDP checks every signature against the exact built message, records the movement before broadcast, requires an Idempotency-Key, and accepts each built transaction once, with the same `409 CONFLICT` answers. Submit the original signed bytes even after the blockhash expires, since the transaction may already have landed. After an uncertain response, retry with the same key and body, then read the movement instead of building a new withdrawal.
+It works like a deposit submit: SDP checks every signature against the exact built message, records the movement before broadcast, requires an Idempotency-Key, and accepts each built transaction once, with the same `409 CONFLICT` answers. Submit the original signed bytes even after the blockhash expires, since the wallet may already have broadcast them. After an uncertain response, retry with the same key and body, then read the movement instead of building a new withdrawal. Withdrawals stay available while Earn is disabled.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
 

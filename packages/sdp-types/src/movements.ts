@@ -154,10 +154,10 @@ export const MOVEMENTS = {
   /** Requests a queued withdrawal; the proceeds go to the owner. */
   "earn.queued_withdraw_request": { module: "earn", kind: "exit" },
   /**
-   * Cancels a queued withdrawal, putting the shares back into the position.
-   * It undoes an exit, and refusing it traps nothing: the request still matures.
+   * Releases queued shares or delegated intermediate tokens to their owner.
+   * An expired Veda request must be cancelled to recover its shares.
    */
-  "earn.queued_withdraw_cancel": { module: "earn", kind: "start", actions: ["earn.manage"] },
+  "earn.queued_withdraw_cancel": { module: "earn", kind: "exit" },
 
   "private_channels.session": {
     module: "private_channels",

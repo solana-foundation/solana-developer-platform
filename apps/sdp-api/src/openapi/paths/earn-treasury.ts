@@ -351,10 +351,13 @@ export function registerEarnTreasuryPaths(
       idempotency: "required",
       signs: true,
       description:
-        "Signs and submits recovery for a cancelable custody withdrawal request. Solver " +
-        "requests return escrowed shares only after the deadline; operator cancellation " +
-        "leaves the wallet holding intermediate tokens instead of restoring the original " +
-        "shares. Fulfillment may race cancellation, so track the returned request.",
+        "Signs and submits a cancellation for a cancelable custody withdrawal request. Requires " +
+        "`earn.manage` and write access to the custody wallet. A solver queue request returns " +
+        "its escrowed shares only after the deadline; an operator redemption returns its " +
+        "delegated intermediate tokens, not the original shares. Cancellation stays available " +
+        "without production access and while Earn is disabled; a suspended organization still " +
+        "cannot authenticate. A fulfillment can race the cancellation, so track the returned " +
+        "request.",
     }
   );
   route(

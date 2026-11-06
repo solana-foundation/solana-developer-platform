@@ -10,9 +10,9 @@ apiReference: true
 
 <ApiEndpoint method="POST" path="/v1/earn/external-wallet/withdrawal-request-cancellations" />
 
-SDP verifies it, records it before broadcast, and returns the withdrawal request. Idempotency-Key is required, with the same `409 CONFLICT` answers as the other submits. Keep polling until the request is `cancelled`, `fulfilled` or `failed`, because a fulfillment can race the cancellation.
+SDP verifies it, records it before broadcast, and returns the withdrawal request. Idempotency-Key is required, with the same `409 CONFLICT` answers as the other submits. Requires `earn.manage`, and stays available without production access and while Earn is disabled; a suspended organization still cannot authenticate. Keep polling until the request is `cancelled`, `fulfilled` or `failed`, because a fulfillment can race the cancellation.
 
-Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.manage` action.
 
 ## Headers
 
@@ -286,7 +286,7 @@ Submit the signed bytes back. Requires the Idempotency-Key header; a retry with 
 
   Same fields as `400`.
 
-- **`403`** Forbidden. Requires the `earn.execute` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+- **`403`** Forbidden. Requires the `earn.manage` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
 
   Same fields as `400`.
 
@@ -400,9 +400,9 @@ r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawal-req
 {
   "error": {
     "code": "INSUFFICIENT_PERMISSIONS",
-    "message": "Missing action: earn.execute",
+    "message": "Missing action: earn.manage",
     "details": {
-      "action": "earn.execute"
+      "action": "earn.manage"
     }
   },
   "meta": {

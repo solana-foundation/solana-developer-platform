@@ -222,4 +222,34 @@ describe.each([
     expect(withdrawFromVault.mock.calls[0]?.[1]).toMatchObject({ positionId });
     expect(scopes).toEqual([expect.objectContaining({ environment: "production" })]);
   });
+
+  it("allows cancellation through the production entitlement gate", async () => {
+    const res = await request(
+      actor,
+      "POST",
+      "/v1/earn/vault-withdrawal-requests/earn_vault_withdrawal_request_missing/cancel",
+      {}
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("preserves the organization suspension authentication lockout", async () => {
+    await getDb(env)
+      .prepare("UPDATE organizations SET status = 'suspended' WHERE id = ?")
+      .bind(tenant.org.id)
+      .run();
+    const res = await request(
+      actor,
+      "POST",
+      "/v1/earn/vault-withdrawal-requests/earn_vault_withdrawal_request_missing/cancel",
+      {}
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({
+      error: {
+        code: "FORBIDDEN",
+        details: { reason: "organization_suspended" },
+      },
+    });
+  });
 });

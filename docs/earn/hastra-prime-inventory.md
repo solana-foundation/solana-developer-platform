@@ -150,7 +150,9 @@ still need written confirmation before SDP's production launch.
   the canonical owner ATA, and immediately closes the fresh account before the
   Jupiter swap or par request. A lower live output fails the fixed transfer; a
   higher output fails the close. The transaction rolls back in either case and
-  must be rebuilt at the new rate. Pre-existing or concurrently received wYLDS
+  must be rebuilt at the new rate. The temporary account refunds rent to its
+  current payer; an earlier share-account funder does not receive that rent.
+  Pre-existing or concurrently received wYLDS
   in the canonical ATA remains outside this equality check and is not included
   in the fixed swap or delegation amount. Position reads report that residual
   as the position's `parIntermediate`: the canonical ATA balance minus any

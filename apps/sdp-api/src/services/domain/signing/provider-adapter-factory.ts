@@ -9,10 +9,30 @@ import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapt
 import { KeychainTurnkeyAdapter } from "@sdp/custody/keychain/keychain-turnkey.adapter";
 import { KeychainUtilaAdapter } from "@sdp/custody/keychain/keychain-utila.adapter";
 import { buildKeychainUtilaConfig } from "@sdp/custody/keychain/utila-config";
-import { SigningError, type SigningPort } from "@sdp/custody/signing";
+import {
+  type FullSigningPort,
+  isFullSigningPort,
+  SigningError,
+  type SigningPort,
+} from "@sdp/custody/signing";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import type { Address } from "@solana/kit";
-import { instrumentVendorPort } from "@/runtime/vendor-calls";
+import type { CustodyMode, CustodyProvider } from "@sdp/types/custody";
+import {
+  type Address,
+  isMessageModifyingSigner,
+  isMessagePartialSigner,
+  isTransactionModifyingSigner,
+  isTransactionPartialSigner,
+  isTransactionSendingSigner,
+  type TransactionSigner,
+} from "@solana/kit";
+import {
+  instrumentVendorPort,
+  logVendorCallFailure,
+  logVendorCallSuccess,
+  type VendorCallContext,
+  type VendorCallDetails,
+} from "@/runtime/vendor-calls";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { assertLocalSigningAllowed } from "@/services/adapters/signing";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
@@ -210,7 +230,118 @@ export async function createAdapterFromEncryptedConfig(
   // their first await. Some runtimes report the adopted, briefly
   // handler-less promise as an unhandled rejection — dropping the await fails
   // shared-module test runs and would log rejection noise in production.
-  return instrumentVendorPort(parsed.provider, await factory({ env, orgId, parsed, cipher }));
+  return instrumentCustodyPort(
+    parsed.provider,
+    "managed",
+    await factory({ env, orgId, parsed, cipher })
+  );
+}
+
+// Adapters cache one signer per wallet and kit rejects two signer objects for
+// one address, so each signer keeps exactly one instrumented twin.
+const instrumentedSigners = new WeakMap<TransactionSigner, TransactionSigner>();
+
+function instrumentCustodyPort(
+  provider: CustodyProvider,
+  custodyMode: CustodyMode,
+  port: SigningPort
+): SigningPort {
+  const context: VendorCallContext = {
+    cluster: currentClusterScope().cluster,
+    custody_mode: custodyMode,
+  };
+  const instrumented = instrumentVendorPort(provider, port, undefined, context);
+  if (!isFullSigningPort(instrumented)) {
+    return instrumented;
+  }
+  const getTransactionSigner: FullSigningPort["getTransactionSigner"] = async (...args) =>
+    instrumentSigner(provider, context, await instrumented.getTransactionSigner(...args));
+  const withSigners: FullSigningPort = Object.create(instrumented);
+  Object.defineProperty(withSigners, "getTransactionSigner", { value: getTransactionSigner });
+  return withSigners;
+}
+
+// Inherits from the signer instead of copying or proxying it: signers may be
+// frozen kit objects or class instances with private fields.
+function instrumentSigner(
+  provider: CustodyProvider,
+  context: VendorCallContext,
+  signer: TransactionSigner
+): TransactionSigner {
+  const existing = instrumentedSigners.get(signer);
+  if (existing) {
+    return existing;
+  }
+  const details: VendorCallDetails = { boundary: "adapter_operation", ...context };
+  const instrumented: TransactionSigner = Object.create(signer);
+  if (isTransactionPartialSigner(signer)) {
+    defineTimedCall(
+      instrumented,
+      provider,
+      "signTransactions",
+      details,
+      signer.signTransactions.bind(signer)
+    );
+  }
+  if (isTransactionModifyingSigner(signer)) {
+    defineTimedCall(
+      instrumented,
+      provider,
+      "modifyAndSignTransactions",
+      details,
+      signer.modifyAndSignTransactions.bind(signer)
+    );
+  }
+  if (isTransactionSendingSigner(signer)) {
+    defineTimedCall(
+      instrumented,
+      provider,
+      "signAndSendTransactions",
+      details,
+      signer.signAndSendTransactions.bind(signer)
+    );
+  }
+  if (isMessagePartialSigner(signer)) {
+    defineTimedCall(
+      instrumented,
+      provider,
+      "signMessages",
+      details,
+      signer.signMessages.bind(signer)
+    );
+  }
+  if (isMessageModifyingSigner(signer)) {
+    defineTimedCall(
+      instrumented,
+      provider,
+      "modifyAndSignMessages",
+      details,
+      signer.modifyAndSignMessages.bind(signer)
+    );
+  }
+  instrumentedSigners.set(signer, instrumented);
+  return instrumented;
+}
+
+function defineTimedCall<TArgs extends unknown[], TResult>(
+  target: TransactionSigner,
+  provider: CustodyProvider,
+  operation: string,
+  details: VendorCallDetails,
+  call: (...args: TArgs) => Promise<TResult>
+): void {
+  const timed = async (...args: TArgs): Promise<TResult> => {
+    const startedAt = Date.now();
+    try {
+      const result = await call(...args);
+      logVendorCallSuccess(provider, operation, startedAt, details);
+      return result;
+    } catch (error) {
+      logVendorCallFailure(provider, operation, error, startedAt, details);
+      throw error;
+    }
+  };
+  Object.defineProperty(target, operation, { value: timed });
 }
 
 /**
@@ -236,13 +367,17 @@ export function createPrivyAdapterFromCredential(
     throw new SigningError("Privy credential or wallet is unavailable", "PROVIDER_NOT_CONFIGURED");
   }
 
-  return new KeychainPrivyAdapter({
-    appId: input.appId,
-    appSecret: input.appSecret,
-    defaultWalletId: input.walletId,
-    apiBaseUrl: env.PRIVY_API_BASE_URL,
-    requestDelayMs: input.requestDelayMs,
-  });
+  return instrumentCustodyPort(
+    "privy",
+    "byok",
+    new KeychainPrivyAdapter({
+      appId: input.appId,
+      appSecret: input.appSecret,
+      defaultWalletId: input.walletId,
+      apiBaseUrl: env.PRIVY_API_BASE_URL,
+      requestDelayMs: input.requestDelayMs,
+    })
+  );
 }
 
 /** Resolve only this connection's credentials and its exact stored vault wallet. */
@@ -268,12 +403,16 @@ export function createFireblocksAdapterFromCredential(
       "PROVIDER_NOT_CONFIGURED"
     );
   }
-  return new KeychainFireblocksAdapter({
-    apiKey: input.apiKey,
-    apiSecretPem: input.apiSecretPem,
-    vaultAccountId: input.walletId.startsWith("fb_") ? input.walletId.slice(3) : input.walletId,
-    assetId: input.assetId,
-    apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
-    requestDelayMs: input.requestDelayMs,
-  });
+  return instrumentCustodyPort(
+    "fireblocks",
+    "byok",
+    new KeychainFireblocksAdapter({
+      apiKey: input.apiKey,
+      apiSecretPem: input.apiSecretPem,
+      vaultAccountId: input.walletId.startsWith("fb_") ? input.walletId.slice(3) : input.walletId,
+      assetId: input.assetId,
+      apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
+      requestDelayMs: input.requestDelayMs,
+    })
+  );
 }

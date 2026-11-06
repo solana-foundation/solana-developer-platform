@@ -33,13 +33,17 @@ Create an API key in each project with the grants your integration uses:
 | Grant | Allows |
 | --- | --- |
 | `earn.read` | Strategies, previews, positions, movements, earnings, and withdrawal requests. |
-| `earn.execute` | Builds and submits for deposits, withdrawals, and withdrawal requests, plus submitting a cancellation. Includes `earn.read`. |
-| `earn.manage` | Building a withdrawal request cancellation. Includes `earn.read`. |
+| `earn.execute` | Builds and submits for deposits, withdrawals, and withdrawal requests. Includes `earn.read`. |
+| `earn.manage` | Building and submitting a withdrawal request cancellation. Includes `earn.read`. |
 
-`earn.execute` and `earn.manage` do not include each other, so canceling a
-withdrawal request end to end needs both. The backend module reads one
-`SDP_API_KEY`, so give that key every grant you call through it. See
-[Manage API keys](/docs/developing-with-sdp/manage-api-keys).
+`earn.execute` and `earn.manage` do not include each other. The backend
+module reads one `SDP_API_KEY`, so give that key every grant you call through
+it. See [Manage API keys](/docs/developing-with-sdp/manage-api-keys).
+
+Withdrawals and cancellations stay available after production access is
+removed or new deposits are disabled. A suspended organization still cannot
+authenticate, and Earn runs only on deployments whose release channel
+includes it.
 
 Your API key can read every customer wallet your project has recorded. Before
 any request, check that the signed-in customer owns the `ownerAddress` you

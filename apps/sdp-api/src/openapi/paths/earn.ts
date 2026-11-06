@@ -408,13 +408,12 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
       "signed bytes match the built transaction and that every required signature is valid " +
       "(the customer's, plus your fee payer's when the build named one), records the " +
       "movement, then broadcasts. Idempotency-Key is required: a retry with the same key " +
-      "returns the original movement with `replayed: true`, and each built transaction can " +
-      "be submitted once. Reusing a key with a different body, or submitting one build " +
-      "under a second key, returns `409 CONFLICT`. Submit the original signed bytes even " +
-      "after the blockhash " +
-      "expires, since the transaction may already have landed. After an uncertain response, " +
-      "retry with the same key and body, then read the movement instead of building a new " +
-      "deposit.",
+      "returns the original movement with `replayed: true`, and each built transaction can be " +
+      "submitted once. Reusing a key with a different body, or submitting one build under a " +
+      "second key, returns `409 CONFLICT`. Submit the original signed bytes even after the " +
+      "blockhash expires, since the wallet may already have broadcast them. After an " +
+      "uncertain response, retry with the same key and body, then read the movement; never " +
+      "replace a signed transaction whose outcome is unknown.",
     security,
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
@@ -508,10 +507,10 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
       "deposit submit: SDP checks every signature against the exact built message, records " +
       "the movement before broadcast, requires an Idempotency-Key, and accepts each built " +
       "transaction once, with the same `409 CONFLICT` answers. Submit the original signed " +
-      "bytes even after the blockhash expires, " +
-      "since the transaction may already have landed. After an uncertain response, retry " +
-      "with the same key and body, then read the movement instead of building a new " +
-      "withdrawal.",
+      "bytes even after the blockhash expires, since the wallet may already have broadcast " +
+      "them. After an uncertain response, retry with the same key and body, then read the " +
+      "movement instead of building a new withdrawal. Withdrawals stay available while Earn " +
+      "is disabled.",
     security,
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
@@ -641,11 +640,21 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     operationId: "createEarnExternalWalletWithdrawalRequest",
     description:
       "Submits a withdrawal request transaction signed by the customer's wallet. SDP checks " +
-      "every signature against the exact built message, records the request before " +
-      "broadcast, then sends it. Idempotency-Key is required: a retry with the same key " +
-      "returns the original request, and each built transaction can be submitted once. " +
-      "Reusing a key with a different body, or submitting one build under a second key, " +
-      "returns `409 CONFLICT`.",
+      "every signature against the exact built message, records the request before broadcast, " +
+      "then sends it. Idempotency-Key is required: a retry with the same key returns the " +
+      "original request, and each built transaction can be submitted once. Reusing a key with " +
+      "a different body, or submitting one build under a second key, returns `409 CONFLICT`. " +
+      "An expired build can still be submitted late. If its reservation was released or " +
+      "replaced, SDP accepts it only once the exact signed transaction is finalized as " +
+      "successful, so after a `409 CONFLICT` retry the same bytes and key until that shows. A " +
+      "late operator redemption whose original cycle already closed is refused for operator " +
+      "reconciliation, so it cannot claim a newer request at the same address. A transaction " +
+      "that recovery finds finalized as failed returns `400 TRANSACTION_FAILED`; build a new " +
+      "one. A recovery RPC outage returns `503 PROVIDER_UNAVAILABLE`: retry the original " +
+      "bytes and key. An unresolved 16-signature history window returns `503` and needs " +
+      "support to reconcile. An expired operator redemption build whose creation history is " +
+      "unavailable also returns `503`: keep and retry the original signed intent rather than " +
+      "signing a replacement.",
     security,
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
@@ -735,10 +744,11 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     description:
       "Builds an unsigned transaction that cancels a withdrawal request, for the customer's " +
       "wallet to sign. A solver queue request can be canceled only at `expiredCancelable`, " +
-      "because a solver may fulfill it until its deadline; before then the build returns " +
-      "`409 CONFLICT`. An operator redemption that allows cancellation can be canceled " +
-      "while `pending`, which leaves the customer holding the intermediate token, not the " +
-      "original shares.",
+      "because a solver may fulfill it until its deadline; before then the build returns `409 " +
+      "CONFLICT`. An operator redemption that allows cancellation can be canceled while " +
+      "`pending`, which leaves the customer holding the intermediate token, not the original " +
+      "shares. Requires `earn.manage`. Cancellation stays available without production access " +
+      "and while Earn is disabled; a suspended organization still cannot authenticate.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -766,9 +776,11 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     description:
       "Submits a cancellation transaction signed by the customer's wallet. SDP verifies it, " +
       "records it before broadcast, and returns the withdrawal request. Idempotency-Key is " +
-      "required, with the same `409 CONFLICT` answers as the other submits. Keep polling " +
-      "until the request is `cancelled`, `fulfilled` or `failed`, " +
-      "because a fulfillment can race the cancellation.",
+      "required, with the same `409 CONFLICT` answers as the other submits. Requires " +
+      "`earn.manage`, and stays available without production access and while Earn is " +
+      "disabled; a suspended organization still cannot authenticate. Keep polling until the " +
+      "request is `cancelled`, `fulfilled` or `failed`, because a fulfillment can race the " +
+      "cancellation.",
     security,
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,

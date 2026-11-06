@@ -15,6 +15,7 @@ import * as repositoryFactory from "@/db/repositories/repository-factory";
 import type { ApiKeyContext } from "@/lib/auth";
 import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { inSandboxScope } from "@/test/helpers/cluster-rpc";
 import {
   activateTestCustodyConnection,
   insertTestCustodyConnection,
@@ -37,11 +38,13 @@ function verifyPrivateChannelWallet(
   ...args: Parameters<typeof verifyPrivateChannelWalletUnscoped>
 ): ReturnType<typeof verifyPrivateChannelWalletUnscoped> {
   const caller = args[1];
-  return runAsMoneyPrincipal(
-    caller.apiKeyId
-      ? { kind: "api_key", apiKeyId: caller.apiKeyId }
-      : { kind: "member", userId: caller.userId ?? "" },
-    () => verifyPrivateChannelWalletUnscoped(...args)
+  return inSandboxScope(() =>
+    runAsMoneyPrincipal(
+      caller.apiKeyId
+        ? { kind: "api_key", apiKeyId: caller.apiKeyId }
+        : { kind: "member", userId: caller.userId ?? "" },
+      () => verifyPrivateChannelWalletUnscoped(...args)
+    )
   );
 }
 

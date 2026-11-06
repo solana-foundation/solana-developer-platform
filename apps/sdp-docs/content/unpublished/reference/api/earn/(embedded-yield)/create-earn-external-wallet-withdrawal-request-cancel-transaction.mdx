@@ -10,7 +10,7 @@ apiReference: true
 
 <ApiEndpoint method="POST" path="/v1/earn/external-wallet/withdrawal-request-cancel-transactions" />
 
-A solver queue request can be canceled only at `expiredCancelable`, because a solver may fulfill it until its deadline; before then the build returns `409 CONFLICT`. An operator redemption that allows cancellation can be canceled while `pending`, which leaves the customer holding the intermediate token, not the original shares.
+A solver queue request can be canceled only at `expiredCancelable`, because a solver may fulfill it until its deadline; before then the build returns `409 CONFLICT`. An operator redemption that allows cancellation can be canceled while `pending`, which leaves the customer holding the intermediate token, not the original shares. Requires `earn.manage`. Cancellation stays available without production access and while Earn is disabled; a suspended organization still cannot authenticate.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.manage` action.
 

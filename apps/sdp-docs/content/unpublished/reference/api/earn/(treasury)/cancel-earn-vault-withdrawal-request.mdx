@@ -1,7 +1,7 @@
 ---
 module: earn
 title: Cancel a custody withdrawal request
-description: Signs and submits recovery for a cancelable custody withdrawal request.
+description: Signs and submits a cancellation for a cancelable custody withdrawal request.
 icon: method:POST
 apiReference: true
 ---
@@ -14,7 +14,7 @@ This operation is internal. It is not part of the partner-facing Earn API.
 
 <ApiEndpoint method="POST" path="/v1/earn/vault-withdrawal-requests/{withdrawalRequestId}/cancel" />
 
-Solver requests return escrowed shares only after the deadline; operator cancellation leaves the wallet holding intermediate tokens instead of restoring the original shares. Fulfillment may race cancellation, so track the returned request. A new intentional operation needs a new Idempotency-Key, even with identical terms. Retrying an uncertain operation must reuse its key and exact payload.
+Requires `earn.manage` and write access to the custody wallet. A solver queue request returns its escrowed shares only after the deadline; an operator redemption returns its delegated intermediate tokens, not the original shares. Cancellation stays available without production access and while Earn is disabled; a suspended organization still cannot authenticate. A fulfillment can race the cancellation, so track the returned request. A new intentional operation needs a new Idempotency-Key, even with identical terms. Retrying an uncertain operation must reuse its key and exact payload.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.manage` action.
 
