@@ -17,11 +17,6 @@ const EARN_ENTRY_ROUTES = [
   "POST /v1/earn/external-wallet/deposits",
   "POST /v1/earn/programs",
   "PUT /v1/earn/programs/:programId",
-  // Cancelling a queued withdrawal puts the shares back, so it is a start
-  // (`earn.queued_withdraw_cancel`), refused here before any provider call.
-  "POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions",
-  "POST /v1/earn/external-wallet/withdrawal-request-cancellations",
-  "POST /v1/earn/vault-withdrawal-requests/:withdrawalRequestId/cancel",
 ];
 
 function earnRoutes(): Array<{ method: string; path: string }> {
@@ -75,6 +70,14 @@ describe("Earn exits without the production entitlement (APE-351, ADR 0002)", ()
     for (const { method, path } of routes.filter((r) => r.method === "GET")) {
       expect(isEarnExitOrRead(method, samplePath(path)), path).toBe(true);
     }
+  });
+
+  it.each([
+    "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+    "/v1/earn/external-wallet/withdrawal-request-cancellations",
+    "/v1/earn/vault-withdrawal-requests/request-id/cancel",
+  ])("keeps cancellation available as an exit: %s", (path) => {
+    expect(isEarnExitOrRead("POST", path)).toBe(true);
   });
 
   it("refuses unknown methods and paths outside Earn", () => {

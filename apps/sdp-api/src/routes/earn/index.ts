@@ -431,7 +431,7 @@ earn.post(
 );
 earn.post(
   "/external-wallet/withdrawal-request-cancellations",
-  requireAction("earn.execute"),
+  requireAction("earn.manage"),
   validateBody(earnExternalWalletSubmitSchema),
   createEarnExternalWalletWithdrawalRequestCancellation
 );

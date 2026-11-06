@@ -1,7 +1,9 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
+import { createPostgresEarnVaultWithdrawalRequestsRepository } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import { buildEarnVaultParRedemptionFingerprint } from "@/lib/idempotency";
+import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -46,6 +48,7 @@ vi.mock("./vault-intent-execution.service", async (importOriginal) => ({
 }));
 
 const service = await import("./vault-queued-withdraw.service");
+const clusterRpc = installClusterRpcResponder();
 
 /** Each call in the cluster scope the project middleware opens for the sandbox project. */
 function inProjectScope<TArgs extends unknown[], TResult>(
@@ -161,6 +164,7 @@ beforeEach(async () => {
   await seedTestDatabase(env);
   await seed();
   vi.clearAllMocks();
+  clusterRpc.respond("getTransaction", () => ({ result: null }));
   quoteParRedemption.mockResolvedValue({
     shares: "0",
     shareDecimals: 6,
@@ -269,9 +273,8 @@ describe("a par request over held intermediate", () => {
       intermediate_amount: "2000",
     });
 
-    // A signed build may already have been broadcast by its owner. Expiry
-    // cannot authorize forgetting it or asking for a newly signed request.
-    readConfirmedBlockHeight.mockResolvedValue(99999n);
+    // Persist the original signed intent before an uncertain broadcast. Its
+    // blockhash is still valid, so the worker can retry these same bytes.
     broadcastVaultTransaction.mockRejectedValueOnce(new Error("Blockhash not found"));
     const submitted = await submitExternalQueuedWithdrawalAction(env, {
       actor,
@@ -292,6 +295,74 @@ describe("a par request over held intermediate", () => {
         transactionId: built.id,
       }),
     });
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains an expired external build without claiming a request when history is missing", async () => {
+    buildParRedemptionRequest.mockResolvedValue(heldIntermediatePlan(EXTERNAL_REQUEST));
+    const actor = { organizationId: ORG, projectId: PROJECT, userId: USER };
+    const built = await buildExternalQueuedWithdrawalRequest(env, {
+      actor,
+      position: position(EXTERNAL_POSITION, EXTERNAL_OWNER, null),
+      terms,
+    });
+    readConfirmedBlockHeight.mockResolvedValue(99999n);
+
+    await expect(
+      submitExternalQueuedWithdrawalAction(env, {
+        actor,
+        transactionId: built.id,
+        signedTransaction: "CQk=",
+        clientRequestId: "par-intermediate-expired-key",
+        action: "request",
+      })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+
+    const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
+    await expect(
+      repository.getExternalWalletTransaction({ organizationId: ORG, transactionId: built.id })
+    ).resolves.toMatchObject({ consumed_action_id: null, intermediate_amount: "2000" });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("retries the original signed intent after a recovery RPC outage", async () => {
+    buildParRedemptionRequest.mockResolvedValue(heldIntermediatePlan(EXTERNAL_REQUEST));
+    const actor = { organizationId: ORG, projectId: PROJECT, userId: USER };
+    const built = await buildExternalQueuedWithdrawalRequest(env, {
+      actor,
+      position: position(EXTERNAL_POSITION, EXTERNAL_OWNER, null),
+      terms,
+    });
+    const input = {
+      actor,
+      transactionId: built.id,
+      signedTransaction: "CQk=",
+      clientRequestId: "par-intermediate-outage-key",
+      action: "request",
+    } as const;
+    clusterRpc.respond("getTransaction", () => ({
+      error: { code: -32603, message: "Private RPC endpoint is unavailable" },
+    }));
+
+    await expect(submitExternalQueuedWithdrawalAction(env, input)).rejects.toMatchObject({
+      code: "PROVIDER_UNAVAILABLE",
+      statusCode: 503,
+    });
+    const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
+    await expect(
+      repository.getExternalWalletTransaction({ organizationId: ORG, transactionId: built.id })
+    ).resolves.toMatchObject({ consumed_action_id: null });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+
+    clusterRpc.respond("getTransaction", () => ({ result: null }));
+    const submitted = await submitExternalQueuedWithdrawalAction(env, input);
+    expect(submitted.request).toMatchObject({
+      client_request_id: input.clientRequestId,
+      creation_signature: "sig_par_intermediate_external",
+    });
+    await expect(
+      repository.getExternalWalletTransaction({ organizationId: ORG, transactionId: built.id })
+    ).resolves.toMatchObject({ consumed_action_id: submitted.action.id });
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
   });
 });
