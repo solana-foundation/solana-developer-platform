@@ -1,28 +1,23 @@
+// @vitest-environment jsdom
+
 import type { CustodyWalletSummary } from "@sdp/types/custody";
+import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
-vi.mock("next/link", () => ({
-  default: ({ children, href }: { children: ReactNode; href: string }) => (
-    <a href={href}>{children}</a>
-  ),
-}));
-
-vi.mock("@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button", () => ({
-  WalletAddressCopyButton: () => null,
-}));
-
-vi.mock("@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark", () => ({
-  WalletProviderMark: () => <span>Provider mark</span>,
-}));
-
 import type { ConnectionsPageResult, CustodyConnectionListItem } from "./connections.data";
 import { ConnectionsList } from "./connections-list";
+
+afterEach(() => {
+  cleanup();
+  resetDashboardNavigation();
+});
 
 function makeConnection(
   overrides: Partial<CustodyConnectionListItem> & { id: string }
@@ -40,32 +35,43 @@ function makeConnection(
   };
 }
 
-function makeResult(
-  connections: CustodyConnectionListItem[],
-  total = connections.length,
-  offset = 0
-): ConnectionsPageResult {
-  return { connections, pagination: { limit: 20, offset, total } };
+function makeWallet(id: string): CustodyWalletSummary {
+  return {
+    id,
+    custodyConnectionId: "conn_test_a91c",
+    provider: "privy",
+    isRuntimeExecutionAllowed: true,
+    walletId: `${id}_provider`,
+    publicKey: "ByokPublicKey11111111111111111111111111111",
+    label: "Treasury",
+    purpose: "transfer",
+    status: "active",
+    createdAt: "2026-08-10T09:05:00.000Z",
+  };
 }
 
 function renderList({
-  result,
-  page = 1,
-  walletsByConnection = {},
-  walletsUnavailable = false,
+  connections,
+  total,
+  walletsByConnection,
+  walletsUnavailable,
   emptyStateAction,
 }: {
-  result: ConnectionsPageResult;
-  page?: number;
-  walletsByConnection?: Record<string, CustodyWalletSummary[]>;
-  walletsUnavailable?: boolean;
-  emptyStateAction?: React.ReactNode;
-}): string {
-  return renderToStaticMarkup(
+  connections: CustodyConnectionListItem[];
+  total: number;
+  walletsByConnection: Record<string, CustodyWalletSummary[]>;
+  walletsUnavailable: boolean;
+  emptyStateAction: ReactNode;
+}) {
+  const result: ConnectionsPageResult = {
+    connections,
+    pagination: { limit: 20, offset: 0, total },
+  };
+  return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
       <ConnectionsList
         result={result}
-        filters={{ page }}
+        filters={{ page: 1 }}
         walletsByConnection={walletsByConnection}
         walletsUnavailable={walletsUnavailable}
         provider="privy"
@@ -76,51 +82,60 @@ function renderList({
   );
 }
 
-const connectionWallet: CustodyWalletSummary = {
-  id: "wallet-row-1",
-  custodyConnectionId: "conn-active",
-  provider: "privy",
-  isRuntimeExecutionAllowed: true,
-  walletId: "wallet-byok-1",
-  publicKey: "ByokPublicKey11111111111111111111111111111",
-  label: "BYOK Treasury",
-  purpose: "transfer",
-  status: "active",
-  createdAt: "2026-08-10T09:05:00.000Z",
-};
+function connectionCell(container: HTMLElement, connectionId: string): string {
+  const cell = container.querySelector(`[data-connection-id="${connectionId}"] td`);
+  if (!cell) throw new Error(`no row for ${connectionId}`);
+  return cell.textContent;
+}
 
 describe("connections list", () => {
-  it("renders one row per exact connection without collapsing duplicate labels", () => {
-    const html = renderList({
-      result: makeResult([
-        makeConnection({ id: "conn-active", label: "Shared Privy app" }),
-        makeConnection({
-          id: "conn-second",
-          label: "Shared Privy app",
-          status: "pending",
-          activatedAt: null,
-        }),
-      ]),
+  it.each([
+    ["one wallet", [makeWallet("wal_test_1")], false, null, "1 wallet"],
+    [
+      "several wallets",
+      [makeWallet("wal_test_1"), makeWallet("wal_test_2")],
+      false,
+      null,
+      "2 wallets",
+    ],
+    ["an unreadable wallet list", [], true, null, "Wallets unavailable right now"],
+    ["a wallet still activating", [], false, "Treasury", "Wallet pending activation"],
+    ["no wallets", [], false, null, "No wallets yet"],
+  ])(
+    "summarises an active connection with %s by what it holds",
+    (_case, wallets, walletsUnavailable, pendingWalletLabel, summary) => {
+      const { container } = renderList({
+        connections: [makeConnection({ id: "conn_test_a91c", pendingWalletLabel })],
+        total: 1,
+        walletsByConnection: { conn_test_a91c: wallets },
+        walletsUnavailable,
+        emptyStateAction: null,
+      });
+
+      expect(connectionCell(container, "conn_test_a91c")).toBe(`Ops Privy app····a91c${summary}`);
+    }
+  );
+
+  it("adds that signing is disabled to an active connection the API would refuse", () => {
+    const { container } = renderList({
+      connections: [makeConnection({ id: "conn_test_a91c", isRuntimeExecutionAllowed: false })],
+      total: 1,
+      walletsByConnection: { conn_test_a91c: [makeWallet("wal_test_1")] },
+      walletsUnavailable: false,
+      emptyStateAction: null,
     });
 
-    expect(html.match(/data-connection-id=/g)).toHaveLength(2);
-    expect(html).toContain('data-connection-id="conn-active"');
-    expect(html).toContain('data-connection-id="conn-second"');
-    // Two connections can legitimately share a label — it belongs to the
-    // credential, not the connection — so each row has to address its own id
-    // rather than rely on the name to tell them apart.
-    expect(html).toContain("prj_test_sandbox/integrations/privy/connections/conn-active");
-    expect(html).toContain("prj_test_sandbox/integrations/privy/connections/conn-second");
-    expect(html).toContain("Active");
-    expect(html).toContain("Pending");
+    expect(connectionCell(container, "conn_test_a91c")).toBe(
+      "Ops Privy app····a91c1 wallet · Signing is disabled"
+    );
+    expect(container.querySelector('[data-signing-state="paused"]')).not.toBeNull();
   });
 
-  it("shows the joined wallet for a connection and a failure hint on failed rows", () => {
-    const html = renderList({
-      result: makeResult([
-        makeConnection({ id: "conn-active" }),
+  it("leads a failed connection with its state and the reason it failed", () => {
+    const { container } = renderList({
+      connections: [
         makeConnection({
-          id: "conn-failed",
+          id: "conn_test_b72d",
           status: "failed",
           activatedAt: null,
           lastCheck: {
@@ -129,66 +144,102 @@ describe("connections list", () => {
             failureCode: "invalid_credentials",
           },
         }),
-      ]),
-      walletsByConnection: { "conn-active": [connectionWallet] },
+      ],
+      total: 1,
+      walletsByConnection: {},
+      walletsUnavailable: false,
+      emptyStateAction: null,
     });
 
-    expect(html).toContain("BYOK Treasury");
-    expect(html).toContain("Credentials were rejected");
+    expect(connectionCell(container, "conn_test_b72d")).toBe(
+      "Ops Privy app····b72dFailed · Credentials were rejected"
+    );
   });
 
-  it("falls back to the pending wallet label before any wallet exists", () => {
-    const html = renderList({
-      result: makeResult([
+  it.each([
+    ["pending", "Pending"],
+    ["checking", "Checking"],
+    ["deactivated", "Deactivated"],
+  ] as const)("summarises a %s connection by its state alone", (status, label) => {
+    const { container } = renderList({
+      connections: [
         makeConnection({
-          id: "conn-pending",
-          status: "pending",
+          id: "conn_test_c83e",
+          status,
           activatedAt: null,
-          lastCheck: null,
-          pendingWalletLabel: "Treasury-to-be",
+          pendingWalletLabel: "Treasury",
         }),
-      ]),
+      ],
+      total: 1,
+      walletsByConnection: {},
+      walletsUnavailable: false,
+      emptyStateAction: null,
     });
 
-    expect(html).toContain("Treasury-to-be");
-    expect(html).toContain("Wallet pending activation");
+    expect(connectionCell(container, "conn_test_c83e")).toBe(`Ops Privy app····c83e${label}`);
+  });
+
+  it("opens a connection from anywhere on its row, and leaves the name to its own link", async () => {
+    const user = userEvent.setup();
+    renderList({
+      connections: [
+        makeConnection({ id: "conn_test_a91c", label: "Shared Privy app" }),
+        makeConnection({ id: "conn_test_b72d", label: "Shared Privy app" }),
+      ],
+      total: 2,
+      walletsByConnection: {},
+      walletsUnavailable: false,
+      emptyStateAction: null,
+    });
+
+    const links = screen.getAllByRole("link", { name: "Shared Privy app" });
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      "/dashboard/prj_test_sandbox/integrations/privy/connections/conn_test_a91c",
+      "/dashboard/prj_test_sandbox/integrations/privy/connections/conn_test_b72d",
+    ]);
+
+    await user.click(screen.getByText("····b72d"));
+    expect(dashboardRouter.push).toHaveBeenCalledExactlyOnceWith(
+      "/dashboard/prj_test_sandbox/integrations/privy/connections/conn_test_b72d"
+    );
+
+    await user.click(links[0]);
+    expect(dashboardRouter.push).toHaveBeenCalledOnce();
   });
 
   it("renders the empty state for an empty slice even when a stale total disagrees", () => {
-    const html = renderList({ result: makeResult([], 20) });
-
-    expect(html).toContain("No connections in Acme Payments yet");
-    expect(html).not.toContain("data-connection-id");
-  });
-
-  it("renders whatever empty-state action it is handed, and nothing when handed none", () => {
-    const emptyResult = makeResult([]);
-
-    // Gating the action on the custody-admin role is the section's job now —
-    // the list only places what it is given.
-    const withAction = renderList({
-      result: emptyResult,
+    const { container } = renderList({
+      connections: [],
+      total: 20,
+      walletsByConnection: {},
+      walletsUnavailable: false,
       emptyStateAction: <button type="button">Add connection</button>,
     });
-    expect(withAction).toContain("No connections in Acme Payments yet");
-    expect(withAction).toContain("Add connection");
 
-    const withoutAction = renderList({ result: emptyResult });
-    expect(withoutAction).toContain("No connections in Acme Payments yet");
-    expect(withoutAction).not.toContain("Add connection");
+    expect(screen.getByText("No connections in Acme Payments yet")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add connection" })).toBeTruthy();
+    expect(container.querySelector("[data-connection-id]")).toBeNull();
   });
 
-  it("paginates only past one page and marks degraded wallet reads", () => {
-    const singlePage = renderList({
-      result: makeResult([makeConnection({ id: "conn-active" })]),
-      walletsUnavailable: true,
+  it("paginates only past one page", () => {
+    const connections = [makeConnection({ id: "conn_test_a91c" })];
+    const single = renderList({
+      connections,
+      total: 1,
+      walletsByConnection: {},
+      walletsUnavailable: false,
+      emptyStateAction: null,
     });
-    expect(singlePage).not.toContain("Page 1 of");
-    expect(singlePage).toContain("Wallets unavailable right now");
+    expect(screen.queryByText(/Page 1 of/)).toBeNull();
+    single.unmount();
 
-    const multiPage = renderList({
-      result: makeResult([makeConnection({ id: "conn-active" })], 45),
+    renderList({
+      connections,
+      total: 45,
+      walletsByConnection: {},
+      walletsUnavailable: false,
+      emptyStateAction: null,
     });
-    expect(multiPage).toContain("Page 1 of 3");
+    expect(screen.getByText("Page 1 of 3")).toBeTruthy();
   });
 });

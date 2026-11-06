@@ -186,15 +186,9 @@ async function signBuilt(unsignedBase64: string, keyPair: CryptoKeyPair): Promis
 }
 
 describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", () => {
-  let originalMarketsEnabled: string | undefined;
-  let originalEarnEnabled: string | undefined;
   let strategyId: string;
 
   beforeAll(async () => {
-    originalMarketsEnabled = env.MARKETS_ENABLED;
-    originalEarnEnabled = env.EARN_ENABLED;
-    env.MARKETS_ENABLED = "true";
-    env.EARN_ENABLED = "true";
     await putForkClockAheadOfLazyClones();
     await initIntegrationSuite();
     await getDb(env)
@@ -232,8 +226,6 @@ describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", ()
   });
 
   afterAll(async () => {
-    env.MARKETS_ENABLED = originalMarketsEnabled;
-    env.EARN_ENABLED = originalEarnEnabled;
     await cleanupIntegrationSuite();
   });
 

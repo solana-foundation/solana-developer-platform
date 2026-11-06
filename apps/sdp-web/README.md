@@ -201,7 +201,6 @@ Requires environment variables set in Vercel project settings:
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
 - `CLERK_SECRET_KEY`
 - `NEXT_PUBLIC_SDP_API_BASE_URL`
-- `SENTRY_DSN` (optional)
 
 
 ## Troubleshooting

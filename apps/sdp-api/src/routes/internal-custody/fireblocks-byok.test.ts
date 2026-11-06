@@ -258,6 +258,7 @@ describe("Fireblocks BYOK lifecycle", () => {
   });
 
   it("keeps Privy and Fireblocks setup independent and refuses cross-provider replacement", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json({ data: [] }));
     const first = await request("/provider-credentials", body);
     const connectionId = (await first.json()).data.connectionId;
     const privy = {
