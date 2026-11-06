@@ -293,7 +293,6 @@ export function isCustodyConnectionRuntimeAvailable(
 }
 
 const RUNTIME_EXECUTION_UNAVAILABLE_REASON = "runtime_execution_unavailable";
-const CUSTODY_RUNTIME_TARGET_UNAVAILABLE_EVENT = "sdp_api_custody_runtime_target_unavailable";
 
 export class CustodyRuntimeTargets {
   constructor(
@@ -1450,7 +1449,7 @@ export class CustodyRuntimeTargets {
     custodyWalletId: string;
   }): void {
     logEvent("warn", {
-      event: CUSTODY_RUNTIME_TARGET_UNAVAILABLE_EVENT,
+      event: "sdp_api_custody_runtime_target_unavailable",
       organization_id: params.organizationId,
       project_id: params.projectId,
       custody_wallet_id: params.custodyWalletId,
@@ -1469,7 +1468,7 @@ export class CustodyRuntimeTargets {
     custodyWalletId?: string
   ): void {
     logEvent("warn", {
-      event: CUSTODY_RUNTIME_TARGET_UNAVAILABLE_EVENT,
+      event: "sdp_api_custody_runtime_target_unavailable",
       organization_id:
         target.kind === "config" ? target.config.organizationId : target.organizationId,
       project_id: target.kind === "config" ? target.config.projectId : target.projectId,
