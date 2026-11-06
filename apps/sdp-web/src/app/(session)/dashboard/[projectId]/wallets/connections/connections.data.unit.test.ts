@@ -183,7 +183,11 @@ describe("fetchProviderConnections", () => {
       jsonResponse({ data: { connections: [{ id: "conn-1" }], pagination: {} } })
     );
 
-    await expect(fetchProviderConnections(request, "privy")).rejects.toThrow();
+    // The rejection is the envelope schema's own validation error, not any
+    // incidental failure — the caller surfaces it as a read failure either way.
+    await expect(fetchProviderConnections(request, "privy")).rejects.toMatchObject({
+      name: "ZodError",
+    });
   });
 });
 
