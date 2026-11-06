@@ -12,8 +12,8 @@ import {
   IntegrationDetailSkeleton,
   IntegrationsFlagsSkeleton,
   IntegrationsSkeleton,
-  integrationsSkeletonSections,
 } from "./integrations-skeleton";
+import { integrationsSkeletonSections } from "./integrations-skeleton-sections";
 
 const SECTION = /class="space-y-2"/g;
 const ROW = /<li\b/g;

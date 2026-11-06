@@ -1,7 +1,5 @@
-import {
-  IntegrationsSkeleton,
-  integrationsSkeletonSections,
-} from "@/app/(session)/dashboard/[projectId]/integrations/integrations-skeleton";
+import { IntegrationsSkeleton } from "@/app/(session)/dashboard/[projectId]/integrations/integrations-skeleton";
+import { integrationsSkeletonSections } from "@/app/(session)/dashboard/[projectId]/integrations/integrations-skeleton-sections";
 import {
   deploymentReleaseChannel,
   isModuleInDeploymentReleaseChannel,

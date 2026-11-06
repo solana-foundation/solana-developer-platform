@@ -165,11 +165,10 @@ export default async function IntegrationDetailPage({
   }
 
   const { dashboardAccess, projectClient } = await resolveRequestContext();
-  const resolvedSearchParams = await searchParams;
-
-  const [integrations, availability] = await Promise.all([
+  const [integrations, availability, resolvedSearchParams] = await Promise.all([
     fetchProjectIntegrations(projectClient),
     fetchProjectProviderAvailability(projectClient),
+    searchParams,
   ]);
   const integration = findCustodyIntegration(integrations, provider);
   if (!integration) {
