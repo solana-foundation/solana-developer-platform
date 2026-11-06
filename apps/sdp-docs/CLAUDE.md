@@ -219,8 +219,8 @@ index. The sitemap is `/docs/sitemap.xml` (`src/app/docs/sitemap.ts`), and
 | `.launch-docs-nav-item.is-active` | Active page, or the top-level entry the page sits under: `--wash-strong` bg, `--ink`, weight 500                                  |
 | `.launch-docs-nav-folder`         | Folder container                                                                                                                  |
 | `.launch-docs-nav-folder-row`     | A folder's row and its one highlight, toggle included: `--wash` on hover, `--wash-strong` (`.is-active`) on the folder's own page |
-| `.launch-docs-nav-folder-btn`     | Non-linked folder label that toggles the folder: `--ink`, weight 500                                                              |
-| `.launch-docs-nav-folder-link`    | Linked folder: `--ink`, weight 500; a click opens the folder, or toggles it from the folder's own page                            |
+| `.launch-docs-nav-folder-btn`     | Non-linked folder toggle: same `--ink-secondary` and weight 400 as ordinary links                                                 |
+| `.launch-docs-nav-folder-link`    | Linked folder: ordinary link styling; inherits the row's selected-page highlight; click opens or toggles its folder               |
 | `.launch-docs-nav-toggle`         | Expand/collapse chevron button, 28px                                                                                              |
 | `.launch-docs-nav-children`       | Children container, 14px further in per level, highlights included                                                                |
 | `.launch-docs-sidebar-section`    | Section label: `--font-size-meta`, `--ink-tertiary`, sentence case                                                                |

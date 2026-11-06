@@ -392,6 +392,8 @@ body {
   display: flex;
   align-items: center;
   border-radius: var(--corner-control);
+  color: var(--ink-secondary);
+  font-weight: 400;
   transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
@@ -405,10 +407,10 @@ body {
   border: 0;
   border-radius: var(--corner-control);
   background: transparent;
-  color: var(--ink);
+  color: inherit;
   font-family: var(--font-sans);
   font-size: var(--font-size-body);
-  font-weight: 500;
+  font-weight: inherit;
   line-height: var(--line-height-body);
   cursor: pointer;
   text-align: left;
@@ -424,8 +426,8 @@ body {
 .launch-docs-nav-folder-link {
   flex: 1;
   padding: 5px 12px;
-  font-weight: 500;
-  color: var(--ink);
+  font-weight: inherit;
+  color: inherit;
 }
 
 .launch-docs-nav-toggle {
