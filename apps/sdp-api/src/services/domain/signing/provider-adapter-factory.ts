@@ -11,6 +11,7 @@ import { KeychainUtilaAdapter } from "@sdp/custody/keychain/keychain-utila.adapt
 import { buildKeychainUtilaConfig } from "@sdp/custody/keychain/utila-config";
 import { SigningError, type SigningPort } from "@sdp/custody/signing";
 import { currentClusterScope } from "@sdp/rpc/scope";
+import type { CustodyMode } from "@sdp/types/custody";
 import type { Address } from "@solana/kit";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
@@ -210,7 +211,22 @@ export async function createAdapterFromEncryptedConfig(
   // their first await. Some runtimes report the adopted, briefly
   // handler-less promise as an unhandled rejection — dropping the await fails
   // shared-module test runs and would log rejection noise in production.
-  return instrumentVendorPort(parsed.provider, await factory({ env, orgId, parsed, cipher }));
+  return instrumentCustodyPort(
+    parsed.provider,
+    "managed",
+    await factory({ env, orgId, parsed, cipher })
+  );
+}
+
+function instrumentCustodyPort(
+  provider: string,
+  custodyMode: CustodyMode,
+  port: SigningPort
+): SigningPort {
+  return instrumentVendorPort(provider, port, undefined, {
+    cluster: currentClusterScope().cluster,
+    custody_mode: custodyMode,
+  });
 }
 
 /**
@@ -236,13 +252,17 @@ export function createPrivyAdapterFromCredential(
     throw new SigningError("Privy credential or wallet is unavailable", "PROVIDER_NOT_CONFIGURED");
   }
 
-  return new KeychainPrivyAdapter({
-    appId: input.appId,
-    appSecret: input.appSecret,
-    defaultWalletId: input.walletId,
-    apiBaseUrl: env.PRIVY_API_BASE_URL,
-    requestDelayMs: input.requestDelayMs,
-  });
+  return instrumentCustodyPort(
+    "privy",
+    "byok",
+    new KeychainPrivyAdapter({
+      appId: input.appId,
+      appSecret: input.appSecret,
+      defaultWalletId: input.walletId,
+      apiBaseUrl: env.PRIVY_API_BASE_URL,
+      requestDelayMs: input.requestDelayMs,
+    })
+  );
 }
 
 /** Resolve only this connection's credentials and its exact stored vault wallet. */
@@ -268,12 +288,16 @@ export function createFireblocksAdapterFromCredential(
       "PROVIDER_NOT_CONFIGURED"
     );
   }
-  return new KeychainFireblocksAdapter({
-    apiKey: input.apiKey,
-    apiSecretPem: input.apiSecretPem,
-    vaultAccountId: input.walletId.startsWith("fb_") ? input.walletId.slice(3) : input.walletId,
-    assetId: input.assetId,
-    apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
-    requestDelayMs: input.requestDelayMs,
-  });
+  return instrumentCustodyPort(
+    "fireblocks",
+    "byok",
+    new KeychainFireblocksAdapter({
+      apiKey: input.apiKey,
+      apiSecretPem: input.apiSecretPem,
+      vaultAccountId: input.walletId.startsWith("fb_") ? input.walletId.slice(3) : input.walletId,
+      assetId: input.assetId,
+      apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
+      requestDelayMs: input.requestDelayMs,
+    })
+  );
 }

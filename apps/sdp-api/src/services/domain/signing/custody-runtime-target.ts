@@ -28,6 +28,7 @@ import {
   readMovementFactsWith,
 } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
+import { logEvent } from "@/runtime/money-path-events";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { AuditService } from "@/services/audit.service";
 import {
@@ -292,6 +293,7 @@ export function isCustodyConnectionRuntimeAvailable(
 }
 
 const RUNTIME_EXECUTION_UNAVAILABLE_REASON = "runtime_execution_unavailable";
+const CUSTODY_RUNTIME_TARGET_UNAVAILABLE_EVENT = "sdp_api_custody_runtime_target_unavailable";
 
 export class CustodyRuntimeTargets {
   constructor(
@@ -1447,15 +1449,13 @@ export class CustodyRuntimeTargets {
     projectId: string;
     custodyWalletId: string;
   }): void {
-    getLogger().warn(
-      {
-        organizationId: params.organizationId,
-        projectId: params.projectId,
-        custodyWalletId: params.custodyWalletId,
-        reason: "exact_wallet_not_found",
-      },
-      "custody_runtime_target_unavailable"
-    );
+    logEvent("warn", {
+      event: CUSTODY_RUNTIME_TARGET_UNAVAILABLE_EVENT,
+      organization_id: params.organizationId,
+      project_id: params.projectId,
+      custody_wallet_id: params.custodyWalletId,
+      reason: "exact_wallet_not_found",
+    });
   }
 
   private logUnavailable(
@@ -1468,19 +1468,17 @@ export class CustodyRuntimeTargets {
       | "credential_secret_unavailable",
     custodyWalletId?: string
   ): void {
-    getLogger().warn(
-      {
-        organizationId:
-          target.kind === "config" ? target.config.organizationId : target.organizationId,
-        projectId: target.kind === "config" ? target.config.projectId : target.projectId,
-        provider: target.provider,
-        targetKind: target.kind,
-        targetId: target.kind === "config" ? target.config.id : target.connectionId,
-        custodyWalletId: custodyWalletId ?? null,
-        reason,
-      },
-      "custody_runtime_target_unavailable"
-    );
+    logEvent("warn", {
+      event: CUSTODY_RUNTIME_TARGET_UNAVAILABLE_EVENT,
+      organization_id:
+        target.kind === "config" ? target.config.organizationId : target.organizationId,
+      project_id: target.kind === "config" ? target.config.projectId : target.projectId,
+      provider: target.provider,
+      custody_mode: target.kind === "config" ? "managed" : "byok",
+      target_id: target.kind === "config" ? target.config.id : target.connectionId,
+      custody_wallet_id: custodyWalletId,
+      reason,
+    });
   }
 }
 
