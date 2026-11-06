@@ -34,11 +34,7 @@ export function ProviderBrandMark({
     );
   }
   return (
-    <span
-      aria-hidden
-      className={markClass}
-      style={{ backgroundColor: mark.background }}
-    >
+    <span aria-hidden className={markClass} style={{ backgroundColor: mark.background }}>
       <Image src={mark.logo} alt="" width={logo} height={logo} className="object-contain" />
     </span>
   );

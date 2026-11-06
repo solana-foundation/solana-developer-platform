@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { CUSTODY_BRAND_MARKS, ProviderBrandMark } from "@/lib/provider-brand-marks";
+import { ProviderBrandMark } from "@/components/provider-brand-mark";
+import { CUSTODY_BRAND_MARKS } from "@/lib/provider-brand-marks";
 import { getDashboardPageConfig } from "./dashboard-header";
 
 type Translate = Parameters<typeof getDashboardPageConfig>[1];

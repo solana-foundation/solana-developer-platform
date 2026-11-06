@@ -21,6 +21,7 @@ import {
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
+import { ProviderBrandMark } from "@/components/provider-brand-mark";
 import { useTranslations } from "@/i18n/provider";
 import type { DashboardCapabilities } from "@/lib/dashboard-access";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
@@ -33,7 +34,7 @@ import {
   PAYMENT_REQUESTS_HREF,
   PAYMENT_TRANSACTIONS_HREF,
 } from "@/lib/payments-routes";
-import { CUSTODY_BRAND_MARKS, ProviderBrandMark } from "@/lib/provider-brand-marks";
+import { CUSTODY_BRAND_MARKS } from "@/lib/provider-brand-marks";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
 type DashboardPageConfig = {
