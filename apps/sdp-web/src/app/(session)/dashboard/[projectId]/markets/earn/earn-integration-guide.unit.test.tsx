@@ -288,7 +288,7 @@ describe("EarnIntegrationGuide", () => {
     expect(screen.getByText(/different network from this project/)).toBeTruthy();
     expect(screen.queryByText(/STRATEGY_ID = "earn_strategy_mainnet"/)).toBeNull();
 
-    await user.click(screen.getByRole("combobox", { name: "Select a strategy" }));
+    await user.click(screen.getByRole("combobox", { name: "Choose a strategy" }));
     const mainnetRow = await screen.findByRole("option", {
       name: /Kamino JLP Vault.*Mainnet only/,
     });
@@ -355,14 +355,14 @@ describe("EarnIntegrationGuide", () => {
 
     expect(screen.getByText("Strategy no longer available")).toBeTruthy();
     expect(screen.getByText(/no longer in the live catalogue/)).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Select a strategy" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Choose a strategy" })).toBeTruthy();
   });
 
   it("updates the strategy id and code in place when the dropdown changes", async () => {
     const user = userEvent.setup();
     renderWithEnglish(<EarnIntegrationGuide providerAccess={providerAccess} />);
 
-    await user.click(screen.getByRole("combobox", { name: "Select a strategy" }));
+    await user.click(screen.getByRole("combobox", { name: "Choose a strategy" }));
     await user.click(await screen.findByRole("option", { name: /Kamino Growth Vault.*8\.1%/ }));
 
     expect(screen.getByText("earn_strategy_growth")).toBeTruthy();
@@ -388,7 +388,7 @@ describe("EarnIntegrationGuide", () => {
     expect(screen.queryByText(/Sandbox projects only/)).toBeNull();
 
     // Dropdown: the disabled row carries the same verdict.
-    await user.click(screen.getByRole("combobox", { name: "Select a strategy" }));
+    await user.click(screen.getByRole("combobox", { name: "Choose a strategy" }));
     expect(
       await screen.findByRole("option", { name: /Jupiter Lend USDT.*Production only/ })
     ).toBeTruthy();

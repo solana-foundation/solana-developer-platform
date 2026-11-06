@@ -41,6 +41,26 @@ Missing or unsupported values select Earn API. Its expandable HTTP helper stays
 fully present in Markdown, search, and AI resources. The page outline follows
 the visible path; a heading fragment can still open the other path.
 
+## Vercel branch preview
+
+The docs build includes Earn only when both Vercel system values match:
+
+| Setting | Required value |
+| --- | --- |
+| `VERCEL_ENV` | `preview` |
+| `VERCEL_GIT_COMMIT_REF` | `earn-docs` |
+
+Production, other branches, and normal local builds keep Earn unpublished.
+The preview stages the nine partner guides and renders only the prospective
+partner API operations. Treasury and Programs stay excluded. Preview search,
+Markdown, Postman and AI resources use that same staged surface. Search engines
+receive `X-Robots-Tag: noindex, nofollow`.
+
+Staged files stay in the deployment checkout so Markdown routes can read them.
+The next build clears marked staging before regenerating the normal artifacts.
+Do not commit staged files or change `EARN_PUBLIC_SURFACE_PUBLISHED` to enable
+a preview. `pnpm --filter sdp-docs build` owns this workflow.
+
 ## Publication
 
 Content readiness is tracked in PRO-2395. PRO-2038 owns the separate launch

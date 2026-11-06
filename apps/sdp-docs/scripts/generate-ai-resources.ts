@@ -7,13 +7,14 @@ import { z } from "zod";
 import { DOCS_SKILL_NAME } from "@/lib/agent-setup";
 import { expandDocsBlocks, stripMdxEsm } from "@/lib/docs-blocks";
 import { DOCS_MODULES } from "@/lib/docs-catalog";
+import { isEarnDocsPreview } from "@/lib/earn-docs-preview.mjs";
 import {
   frontmatterOf,
   isModulePublished,
   isPageSourcePublished,
   pageGateOf,
 } from "@/lib/release-channel";
-import { canonicalSite, docsPageSlugOf } from "@/lib/site";
+import { canonicalSite, discoverySite, docsPageSlugOf } from "@/lib/site";
 import {
   buildSections,
   type DocsMeta,
@@ -32,7 +33,7 @@ const {
   docsUrl,
   getDocsMarkdownUrl,
   getDocsPageUrl,
-} = canonicalSite;
+} = discoverySite;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -230,6 +231,14 @@ function renderPageFull(page: DocsPage): string {
   return parts.join("\n");
 }
 
+/** The shared renderer stays canonical; this branch preview links its own artifacts. */
+function previewDiscoveryLinks(source: string): string {
+  if (!isEarnDocsPreview()) return source;
+  return source
+    .replaceAll(canonicalSite.docsOrigin, discoverySite.docsOrigin)
+    .replaceAll(canonicalSite.apiOpenApiUrl, discoverySite.apiOpenApiUrl);
+}
+
 function renderSectionFull(section: DocsSection): string {
   const pages = section.pages.map(renderPageFull).join("\n\n---\n\n");
   return `## ${section.title}\n\n${pages}`;
@@ -342,12 +351,14 @@ async function run(): Promise<void> {
   await Promise.all([
     writeFileIfChanged(
       llmsPath,
-      renderLlmsTxt({
-        audience: "docs",
-        document,
-        supportedSurfaces: FEATURE_SUMMARY,
-        startHere: keyPages,
-      })
+      previewDiscoveryLinks(
+        renderLlmsTxt({
+          audience: "docs",
+          document,
+          supportedSurfaces: FEATURE_SUMMARY,
+          startHere: keyPages,
+        })
+      )
     ),
     writeFileIfChanged(llmsFullPath, renderLlmsFull(sections)),
     ...skillPaths.map((skillPath) => writeFileIfChanged(skillPath, skill)),

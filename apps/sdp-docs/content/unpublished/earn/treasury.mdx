@@ -18,13 +18,22 @@ customer-signed Embedded Yield. Internal pages in the
 
 ## Set up the wallet
 
+Confirm your organization's and investing wallet's eligibility with the
+provider, including jurisdiction, subscription, and redemption requirements.
+SDP access authorizes API calls; it does not replace investment approval.
+
 1. [Create a custody wallet](/docs/guides/setup-wallets) in your project and
    fund it with the deposit token.
 2. Keep SOL for fees and rent unless sponsored. `feeSponsored` describes
-   Treasury sponsorship; swap-funded deposits still use wallet SOL. See
-   [fees and sponsorship](/docs/earn/integration-details#fees-and-sponsorship).
+   Treasury sponsorship, not customer-wallet sponsorship. Swap-funded deposits
+   still use wallet SOL. See
+   [fees and sponsorship](/docs/earn/integration-details#fees-and-sponsorship)
+   for the separate customer-controlled `feePayer` flow.
 3. Grant `earn.execute`. An API key must also scope the selected custody
    wallet. SDP rechecks authority when signing.
+
+Requests use the project's environment: sandbox runs on devnet, production
+on mainnet-beta. Strategy availability and provider access still apply.
 
 ## Deposit
 
@@ -61,7 +70,7 @@ Legacy deposit statuses are `pending`, `submitted`, `confirmed`, and `failed`.
 
 After confirmation:
 
-1. Refresh [positions](/docs/reference/api/earn/list-earn-vault-positions)
+1. Refresh [`GET /v1/earn/vault-positions`](/docs/reference/api/earn/list-earn-vault-positions)
    and the wallet's balances.
 2. To include a specific confirmed movement, pass `afterMovementIds` and
    check `balanceReadContext`.
@@ -69,12 +78,46 @@ After confirmation:
 
 ## Withdraw to the same wallet
 
-1. Read live `withdrawableShares` and [withdrawal options](/docs/reference/api/earn/get-earn-vault-withdrawal-options).
-2. Choose an available route and [preview](/docs/reference/api/earn/create-earn-vault-withdrawal-preview)
-   where supported.
-3. For a direct exit, [create the withdrawal](/docs/reference/api/earn/create-earn-vault-withdrawal)
-   with `positionId`, `shares`, a new `Idempotency-Key`, and `minAmountOut`
-   when required.
+Read live `withdrawableShares` and choose an available exit. These `POST`
+paths start with `/v1/earn/`:
 
-Proceeds return to the same custody wallet. For asynchronous lifecycles, see
-[Withdrawals](/docs/earn/withdrawals).
+| Action | Endpoint | Body |
+| --- | --- | --- |
+| Choose | [`vault-withdrawal-options`](/docs/reference/api/earn/get-earn-vault-withdrawal-options) | `positionId` |
+| Preview | [`vault-withdrawal-previews`](/docs/reference/api/earn/create-earn-vault-withdrawal-preview) | `positionId` and decimal-string `shares` |
+| Submit | [`vault-withdrawals`](/docs/reference/api/earn/create-earn-vault-withdrawal) | `positionId`, `shares`, and `minAmountOut` when required |
+
+Resolve preview `blockingIssues`. SDP builds and signs during submission;
+use a new `Idempotency-Key` for each intent and reuse its exact body on an
+uncertain retry. Proceeds return to the same custody wallet.
+
+## Asynchronous withdrawals
+
+Use the live options to choose a solver queue or operator redemption. The
+[withdrawal guide](/docs/earn/withdrawals#asynchronous-exits) explains each
+mechanism's shares, intermediate tokens, timing, and payout risks. Treasury
+uses these internal endpoints:
+
+| Action | Request |
+| --- | --- |
+| Preview | [`POST /v1/earn/vault-queued-withdrawal-previews`](/docs/reference/api/earn/create-earn-vault-queued-withdrawal-preview) |
+| Submit | [`POST /v1/earn/vault-withdrawal-requests`](/docs/reference/api/earn/create-earn-vault-withdrawal-request) |
+| Track | [`GET /v1/earn/vault-withdrawal-requests/{withdrawalRequestId}`](/docs/reference/api/earn/get-earn-vault-withdrawal-request) |
+| Restore | [`GET /v1/earn/vault-withdrawal-requests?settled=false`](/docs/reference/api/earn/list-earn-vault-withdrawal-requests) |
+
+Submit with `earn.execute` and a saved idempotency key. Save the returned
+`withdrawalRequestId` and poll its detail. On restart, restore every page of
+unsettled requests. `closedOrUnknown` is unresolved; only `fulfilled`,
+`cancelled`, and `failed` are terminal. A request transaction is not a payout.
+
+## Recover a request
+
+With `earn.manage`, call
+[`POST /v1/earn/vault-withdrawal-requests/{withdrawalRequestId}/cancel`](/docs/reference/api/earn/cancel-earn-vault-withdrawal-request)
+using a new `Idempotency-Key`. SDP builds and signs this recovery transaction.
+
+Enable solver recovery only at `expiredCancelable`. Operator recovery can be
+available while `pending` if live terms allow it. Fulfillment can race
+cancellation, so refresh before acting and keep tracking the request. Solver
+recovery returns escrowed shares; operator recovery leaves intermediate tokens
+instead of restoring the original shares. Refresh holdings before another exit.

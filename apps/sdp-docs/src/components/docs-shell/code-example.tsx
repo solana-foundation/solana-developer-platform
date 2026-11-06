@@ -79,7 +79,7 @@ function isLanguage(value: string): value is keyof typeof LANGUAGE_LABELS {
 }
 
 /** A code language's display name; unfamiliar Shiki languages retain their name. */
-export function codeLanguageLabel(language: string): string {
+function codeLanguageLabel(language: string): string {
   const key = language.toLowerCase();
   return isLanguage(key) ? LANGUAGE_LABELS[key] : language;
 }

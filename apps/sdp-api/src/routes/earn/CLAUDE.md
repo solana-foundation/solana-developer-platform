@@ -1287,8 +1287,8 @@ request before broadcast and can guarantee durable status and recovery
   provider's plan does not encode (Kamino's kvault withdraw takes only a share
   amount, so `plan.accepted.minAmountOut` is absent) is a **400**, never
   stored: recording it would claim a protection nothing on chain enforces.
-- `POST /external-wallet/withdrawals`: the submit, mirrored, including the
-  `409 TRANSACTION_EXPIRED` pre-record refusal.
+- `POST /external-wallet/withdrawals`: mirrors deposit submit, including
+  recording authenticated signed intent past blockhash expiry for reconciliation.
 - **NO requestGate and no wallet scope, deliberately** — this is not the
   vault-deposit cautionary tale repeating. A key's wallet scope governs the org's own
   custody at `createOrgSignerForCustodyWallet`; these routes never resolve a signer and

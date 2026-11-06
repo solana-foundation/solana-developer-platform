@@ -52,15 +52,15 @@ principal protection or immediate liquidity.
 
 ## Who signs
 
-| Integration | Who signs | Who holds the position |
-| --- | --- | --- |
-| [Embedded Yield](/docs/guides/embedded-yield) | The customer's wallet signs what SDP builds; your backend submits it. | The customer's wallet. |
-| [Treasury](/docs/earn/treasury) | SDP requests signing from your organization's configured custody provider. | The authorized custody wallet, which also receives withdrawals. |
+SDP builds the transaction, the customer's wallet signs it, and your backend
+submits it to SDP. The customer's wallet holds the position and receives the
+withdrawal payout. See [Embedded Yield](/docs/guides/embedded-yield) for the
+backend integration.
 
 Keep the API key on your backend. Embedded Yield never sends the customer's
 private key to SDP.
 
-Both use the project's environment: sandbox runs on devnet, production on
+Requests use the project's environment: sandbox runs on devnet, production on
 mainnet-beta. Strategy availability and investor eligibility still apply.
 
 ## When a withdrawal is complete

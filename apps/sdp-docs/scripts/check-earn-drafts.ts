@@ -53,8 +53,10 @@ async function mdxFiles(dir: string): Promise<string[]> {
 
 /** Checks future guide/reference links without publishing drafts to the site. */
 async function main(): Promise<void> {
-  const published = await mdxFiles(path.join(root, "docs"));
-  const unpublished = await mdxFiles(path.join(root, "unpublished"));
+  const [published, unpublished] = await Promise.all([
+    mdxFiles(path.join(root, "docs")),
+    mdxFiles(path.join(root, "unpublished")),
+  ]);
   const drafts = unpublished.filter((file) => {
     const relative = path.relative(path.join(root, "unpublished"), file);
     return (
@@ -72,8 +74,10 @@ async function main(): Promise<void> {
   }
 
   const problems: string[] = [];
-  for (const file of drafts) {
-    const source = await fs.readFile(file, "utf8");
+  const draftSources = await Promise.all(
+    drafts.map(async (file) => ({ file, source: await fs.readFile(file, "utf8") }))
+  );
+  for (const { file, source } of draftSources) {
     const label = path.relative(root, file);
     const header = source.match(frontmatter)?.[1];
     if (!header || !gateSchema.safeParse(parseYaml(header)).success) {

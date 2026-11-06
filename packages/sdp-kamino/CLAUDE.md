@@ -3,8 +3,9 @@
 Kit-native deposit AND withdraw **instruction building** for Kamino K-Vaults,
 plus the live position read. It builds unsigned plans and reads chain state; it
 never signs, never submits, never touches a database, and holds no credential —
-Kamino's data surface is public. Signing and submission belong to the API, which
-owns custody and the Kora fee-payment path.
+Kamino's data surface is public. The API coordinates submission and signing:
+external owners sign with their wallet; Treasury uses the organization's
+configured custody provider. The API also owns the Kora fee-payment path.
 
 Read `packages/sdp-earn/CLAUDE.md` for the catalogue side (what a K-Vault row IS)
 and ADR 0002 for the pluggability invariants. Kamino's own docs are agent-readable

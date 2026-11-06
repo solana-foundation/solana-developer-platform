@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { API_KEY_GRANTABLE_ACTIONS, actionsInModule, actionVerbOf } from "@sdp/types/actions";
 import { buildApiReference } from "@/openapi/reference";
 import { createOpenApiDocument, createPublicOpenApiDocument } from "@/openapi/spec";
 
@@ -25,20 +26,48 @@ const internal = buildApiReference({
   ),
   tags: document.tags?.filter((tag) => tag.name === "Earn"),
 });
-const partner = buildApiReference(
-  createPublicOpenApiDocument({ releaseChannel: "experimental", publishEarn: true })
-);
+const partnerDocument = createPublicOpenApiDocument({
+  releaseChannel: "experimental",
+  publishEarn: true,
+});
+const partner = buildApiReference(partnerDocument);
 const family = internal.families.find((candidate) => candidate.name === "Earn");
 if (!family) throw new Error("The internal OpenAPI document has no Earn family");
 
 const partnerOperationIds = partner.families
   .filter((candidate) => candidate.name === "Earn")
   .flatMap((candidate) => candidate.operations.map((operation) => operation.operationId));
+const partnerFamily = partner.families.find((candidate) => candidate.name === "Earn");
+if (!partnerFamily) throw new Error("The prospective public OpenAPI document has no Earn family");
 const outputDir = path.resolve(process.cwd(), "generated");
 await mkdir(outputDir, { recursive: true });
 await writeFile(
   path.join(outputDir, "earn-reference-preview.json"),
-  `${JSON.stringify({ reference: { families: [family] }, partnerOperationIds }, null, 2)}\n`,
+  `${JSON.stringify(
+    {
+      reference: { families: [family] },
+      partnerOperationIds,
+      partner: {
+        reference: { families: [partnerFamily] },
+        // Build-only input, never served by the API or copied into public artifacts.
+        document: {
+          ...partnerDocument,
+          paths: Object.fromEntries(
+            Object.entries(partnerDocument.paths).filter(([route]) => route.startsWith("/v1/earn/"))
+          ),
+          tags: partnerDocument.tags?.filter((tag) => tag.name === "Earn"),
+        },
+        grantableActions: {
+          module: "earn",
+          verbs: actionsInModule("earn")
+            .filter((action) => API_KEY_GRANTABLE_ACTIONS.includes(action))
+            .map(actionVerbOf),
+        },
+      },
+    },
+    null,
+    2
+  )}\n`,
   "utf8"
 );
 console.log(`Prepared ${family.operations.length} internal Earn operations for docs review.`);

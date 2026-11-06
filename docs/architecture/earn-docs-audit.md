@@ -130,6 +130,9 @@ issues or external comments were created by this audit.
 - PRO-2406 and PRO-1872 require named security sign-off for promotion.
 - `EARN_PUBLIC_SURFACE_PUBLISHED` remains false. Authored drafts also carry
   `module: earn`; normal builds do not read `content/unpublished`.
+- Only `VERCEL_ENV=preview` with `VERCEL_GIT_COMMIT_REF=earn-docs` stages the
+  partner guides and 21 prospective API operations. Treasury and Programs stay
+  excluded. Preview discovery links use its own origin and OpenAPI download.
 
 ## Validation
 
@@ -142,15 +145,15 @@ issues or external comments were created by this audit.
 - Generated integration snippet focus: 13 tests passed.
 - Direct Quickstart helper: TypeScript syntax and five mocked polling/pagination
   cases passed, including confirmation, failure, and invalid cursor handling.
-- Docs: 115 tests, typecheck, prose, production build, and link checks passed
+- Docs: 132 tests, typecheck, prose, production build, and link checks passed
   (176 pages, 670 links, 22 external URLs).
 - All 57 draft pages passed module gates, MDX/prose parsing, future links,
   and Markdown parity, including exact preservation of all 250 code examples.
   The private AI corpus includes all 57 pages once, with Earn's notice on each.
   The generated public build, OpenAPI, and AI resources contain no Earn drafts.
-- Desktop and mobile previews passed; the diagram and guide cards also retain
-  their text and links in Markdown. All ten guide pages return 200 with the
-  Earn development notice.
+- Desktop and mobile private authoring previews passed; the diagram and guide
+  cards retain their text and links in Markdown. All ten private guide pages
+  return 200 with the Earn development notice.
 - Browser checks passed for single-frame code shells, exact active-code copying,
   keyboard language selection, synchronized preferences, response tabs, and
   mobile overflow. No browser errors were observed.
@@ -164,9 +167,16 @@ issues or external comments were created by this audit.
   operation IDs and METHOD/path queries rank first; bare paths rank within
   three results. Code-only signing identifiers and all four deposit-stage
   links work, including repeated same-page navigation.
+- Branch preview: 16 guard, merge, origin, and staging tests passed. The built
+  site passed 14 route checks, including internal-page 404s, search, Markdown,
+  preview AI links, OpenAPI coverage, and noindex headers. Rebuilding with
+  `VERCEL_ENV=production` cleared staging and returned 404 on seven Earn URLs;
+  normal search, AI resources and public OpenAPI again excluded Earn.
+- CI fixes: the docs Docker builder passed after adding its missing Earn
+  package. The integration guide's 12 tests passed with the updated label.
 
 API focused suites used normal aliases/setup with Testcontainers startup
-omitted. Database-backed expired-submit tests were inspected, not run: no
-container runtime was available. Browser wallet flows, live provider calls,
+omitted. Database-backed expired-submit tests were inspected, not run.
+Browser wallet flows, live provider calls,
 funded sandbox deposits/exits, mainnet swaps, sponsor signing, and provider
 settlement were not run. They remain required release evidence.

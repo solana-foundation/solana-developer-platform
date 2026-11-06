@@ -54,8 +54,8 @@ verify the payer.
 - Bound the signer's SOL float, rate-limit sponsorship, and monitor spend.
 - Store signing credentials in your secret manager.
 
-A strategy's `feeSponsored` describes Treasury's paymaster. Embedded Yield
-requires your own sponsor setup.
+The catalogue's `feeSponsored` does not apply to customer-wallet transactions.
+Use your own `feePayer` to sponsor them.
 
 Full Kamino exits leave the share account open. Rent recovery requires a
 separate owner-authorized close. Do not promise customers or sponsors an

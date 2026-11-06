@@ -2,6 +2,7 @@
 
 import { AlignLeft } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { observeTableOfContents } from "@/lib/table-of-contents-observer";
 
 type TocItem = {
   title: ReactNode;
@@ -17,61 +18,15 @@ export function TableOfContents({ items, children }: { items: TocItem[]; childre
   useEffect(() => {
     const article = ref.current?.closest(".launch-docs-page")?.querySelector("article");
     if (!article) return;
-    let observed: HTMLElement[] | undefined;
-    let visibleIds = new Set<string>();
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting && visibleIds.has(entry.target.id)) {
-            setActiveId(`#${entry.target.id}`);
-            return;
-          }
-        }
+    return observeTableOfContents(
+      article,
+      items,
+      (visible) => {
+        setVisibleItems(visible);
+        setActiveId((current) => (visible.some((item) => item.url === current) ? current : ""));
       },
-      { rootMargin: "0px 0px -60% 0px", threshold: 0 }
+      setActiveId
     );
-
-    const updateHeadings = () => {
-      const headings = items.flatMap((item) => {
-        const element = document.getElementById(item.url.slice(1));
-        // Inactive Fumadocs panels stay mounted so search and hash links can open them.
-        if (
-          !element ||
-          !article.contains(element) ||
-          element.closest('[data-state="inactive"], [hidden]')
-        ) {
-          return [];
-        }
-        return [{ item, element }];
-      });
-      const elements = headings.map(({ element }) => element);
-      if (
-        observed?.length === elements.length &&
-        observed.every((element, index) => element === elements[index])
-      ) {
-        return;
-      }
-      observed = elements;
-      visibleIds = new Set(elements.map((element) => element.id));
-      setVisibleItems(headings.map(({ item }) => item));
-      setActiveId((current) => (visibleIds.has(current.slice(1)) ? current : ""));
-      observer.disconnect();
-      for (const element of elements) observer.observe(element);
-    };
-
-    updateHeadings();
-    const panels = new MutationObserver(updateHeadings);
-    panels.observe(article, {
-      subtree: true,
-      childList: true,
-      attributes: true,
-      attributeFilter: ["data-state", "hidden"],
-    });
-    return () => {
-      panels.disconnect();
-      observer.disconnect();
-    };
   }, [items]);
 
   return (

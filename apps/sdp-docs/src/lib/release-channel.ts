@@ -6,6 +6,7 @@ import type { SdpModule, SdpReleaseChannel } from "@sdp/types/release-channels";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import generatedSurface from "@/generated/public-surface.json";
+import { isEarnDocsPreview } from "./earn-docs-preview.mjs";
 
 /**
  * What this docs build may publish: the modules and ramp providers of the
@@ -19,6 +20,8 @@ import generatedSurface from "@/generated/public-surface.json";
  */
 export type PublicSurface = {
   releaseChannel: SdpReleaseChannel;
+  /** Build-only marker; never part of the API's public-surface manifest. */
+  earnDocsPreview?: boolean;
   modules: readonly SdpModule[];
   rampProviders: readonly RampProviderId[];
   /** The custody providers the public document names, which `<CustodyProviderTable />` lists. */
@@ -37,7 +40,20 @@ export type PublicSurface = {
 // SAFETY: createPublicSurfaceManifest (apps/sdp-api/src/openapi/spec.ts) writes
 // this file from the same types, and CI diffs it against a fresh generation;
 // JSON imports widen its unions to string.
-export const publicSurface = generatedSurface as PublicSurface;
+const declaredSurface = generatedSurface as PublicSurface;
+
+/** A staged manifest cannot admit Earn when used outside its branch preview. */
+export function enforceEarnPreviewGate(
+  surface: PublicSurface,
+  env: Record<string, string | undefined> = process.env
+): PublicSurface {
+  if (!surface.earnDocsPreview || isEarnDocsPreview(env)) return surface;
+  throw new Error(
+    "Stale Earn preview artifacts: run generate:api before using docs outside the earn-docs Vercel preview"
+  );
+}
+
+export const publicSurface = enforceEarnPreviewGate(declaredSurface);
 
 /** What a page or list entry is about: one module, or one ramp provider. */
 export type ChannelGate = { module: SdpModule } | { rampProvider: RampProviderId };
