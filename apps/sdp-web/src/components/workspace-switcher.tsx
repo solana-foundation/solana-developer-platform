@@ -13,12 +13,14 @@ import {
   DropdownMenuTrigger,
 } from "@sdp/ui/dropdown-menu";
 import { SkeletonBlock } from "@sdp/ui/skeleton-block";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@sdp/ui/tooltip";
 import {
   Building2Icon,
   CheckIcon,
   ChevronsUpDownIcon,
   FlaskConicalIcon,
   GlobeIcon,
+  LockIcon,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -143,6 +145,62 @@ function EnvironmentItem({
   );
 }
 
+function LockedProductionItem({
+  canRequestAccess,
+  disabled,
+}: {
+  canRequestAccess: boolean;
+  disabled: boolean;
+}) {
+  const t = useTranslations();
+  const projectHref = useProjectHref();
+  const { icon: Icon, labelKey } = ENVIRONMENT_PRESENTATIONS.production;
+  const label = (
+    <>
+      <Icon className="size-4 shrink-0 text-tertiary" aria-hidden="true" />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-secondary">{t(labelKey)}</span>
+        <span className="truncate text-xs font-normal text-tertiary">
+          {t("Shared.SharedComponents.environmentProductionLockedDetail")}
+        </span>
+      </span>
+    </>
+  );
+
+  if (!canRequestAccess) {
+    const adminOnly = t("Shared.SharedComponents.mainnetAccessAdminOnly");
+    // A disabled item takes no pointer events, so the wrapper carries the hover.
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div>
+              <DropdownMenuItem disabled className="gap-2.5">
+                {label}
+                <span className="sr-only">{adminOnly}</span>
+                <LockIcon className="ml-auto size-4 shrink-0 text-tertiary" aria-hidden="true" />
+              </DropdownMenuItem>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="right" className="max-w-60">
+            {adminOnly}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+  return (
+    <DropdownMenuItem asChild disabled={disabled} className="gap-2.5">
+      <Link href={projectHref(`${DASHBOARD_SIDE_NAV_HREFS.settings}#mainnet-access`)}>
+        {label}
+        <span className="ml-auto shrink-0 text-xs font-medium text-primary">
+          {t("Shared.SharedComponents.requestMainnetAccess")}
+        </span>
+      </Link>
+    </DropdownMenuItem>
+  );
+}
+
 export function WorkspaceSwitcher({
   collapsed = false,
   onOrganizationSwitchingChange,
@@ -165,6 +223,7 @@ export function WorkspaceSwitcher({
     selectProject,
     switchOrganization,
     isProjectSwitching,
+    dashboardAccess,
   } = useDashboardWorkspace();
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
   // Each answer costs an API read per organization, so they are asked for only once the
@@ -306,6 +365,13 @@ export function WorkspaceSwitcher({
                 onSelect={selectProject}
               />
             ))}
+            {/* The API lists no production project until the organization is entitled to one. */}
+            {productionProject === null ? (
+              <LockedProductionItem
+                canRequestAccess={dashboardAccess.capabilities.canManageOrgSettings}
+                disabled={isSwitching}
+              />
+            ) : null}
           </>
         ) : null}
         <DropdownMenuSeparator />
