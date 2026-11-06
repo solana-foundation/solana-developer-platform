@@ -79,7 +79,7 @@ doppler run --config "${DOPPLER_CONFIG}" -- <command>
 
 - Secret-aware CI jobs authenticate to Doppler via OIDC: each job exchanges its GitHub Actions identity token for a short-lived Doppler session using the service-account identity in the `DOPPLER_CI_IDENTITY_ID` repository variable, then reads `dev_ci`.
 - Fork pull requests cannot mint the GitHub OIDC token and use the workflow's documented fork-safe paths or skip live provider coverage.
-- Vercel receives web/docs configuration through the configured Doppler integration.
+- Doppler does not sync to Vercel: web/docs environment values are set in each Vercel project directly.
 - Release automation does not need a Doppler token.
 
 Keep the CI service account scoped to read-only `dev_ci` access. There is no long-lived token to rotate; changing the identity means updating `DOPPLER_CI_IDENTITY_ID` and verifying a secret-aware CI run.
@@ -103,7 +103,7 @@ An image update preserves the service/job configuration already stored in GCP. A
 When rotating a runtime secret:
 
 1. Update its source of truth.
-2. Update every consumer boundary that uses it: local/CI Doppler configs, Vercel sync, and/or GCP Secret Manager references.
+2. Update every consumer boundary that uses it: local/CI Doppler configs, Vercel project environment, and/or GCP Secret Manager references.
 3. Exercise the affected API or provider in dev.
 4. Roll the production service and jobs if the platform does not pick up the new secret version automatically.
 5. Revoke the old value only after all consumers are healthy.

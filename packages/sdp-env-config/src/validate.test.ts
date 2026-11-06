@@ -27,7 +27,6 @@ test("invisible required field is not validated", () => {
     CUSTODY_PRIVATE_KEY: "",
     FIREBLOCKS_API_KEY: "k",
     FIREBLOCKS_API_SECRET: "s",
-    FIREBLOCKS_VAULT_ID: "0",
   });
   assert.equal(errors.CUSTODY_PRIVATE_KEY, undefined);
 });
