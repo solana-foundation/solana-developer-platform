@@ -1,0 +1,308 @@
+name: Deploy sdp-api to Cloud Run (beta)
+
+# Beta (api-beta.solana.com) is the devnet sandbox. The merge deploy calls this once the stage
+# deploy and smoke pass, alongside prod, so it never holds prod up. It runs the stage image on its
+# own services and database, and every step continues on error and skips while those services do
+# not exist yet: a failure reports to Slack (deploy) or Loki with target=beta (smoke).
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: sdp-api-gcp-deploy-beta
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy beta
+    if: github.repository == 'solana-foundation/solana-developer-platform'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    continue-on-error: true
+    permissions:
+      contents: read
+      id-token: write
+      statuses: write
+    outputs:
+      present: ${{ steps.find.outputs.present == 'true' }}
+    env:
+      PROJECT_ID: solana-developer-platform-stg
+      REGION: us-central1
+      REPO: sdp-stage
+      BETA_SERVICE: sdp-stage-api-beta
+      BETA_WORKER_SERVICE: sdp-stage-worker-beta
+      BETA_MIGRATE_JOB: sdp-stage-api-beta-migrate
+      BETA_ORIGIN: https://api-beta.solana.com
+    steps:
+      - name: Checkout
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Authenticate to GCP
+        id: auth
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.STAGE_DEPLOY_WIF_PROVIDER }}
+          service_account: ${{ vars.STAGE_DEPLOY_SA }}
+
+      - name: Set up gcloud
+        id: gcloud
+        if: steps.auth.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 3
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Find beta resources
+        id: find
+        if: steps.gcloud.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          err="$(mktemp)"
+          missing=()
+          describe() {
+            if gcloud run "$@" --region "${REGION}" --project "${PROJECT_ID}" --format='value(metadata.name)' >/dev/null 2>"${err}"; then
+              return 0
+            elif grep -qiE "NOT_FOUND|could not be found|cannot find" "${err}"; then
+              missing+=("$3")
+              return 0
+            fi
+            cat "${err}" >&2
+            return 1
+          }
+          describe jobs describe "${BETA_MIGRATE_JOB}"
+          describe services describe "${BETA_SERVICE}"
+          describe services describe "${BETA_WORKER_SERVICE}"
+          if [[ "${#missing[@]}" -gt 0 ]]; then
+            echo "::notice::Beta not created yet (missing: ${missing[*]}); skipping the beta deploy."
+            echo "present=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          # The rollback in docs/ops/release-operations.md re-pins this digest.
+          previous="$(gcloud run services describe "${BETA_SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" \
+            --format='value(status.latestReadyRevisionName)')"
+          if [[ -n "${previous}" ]]; then
+            digest="$(gcloud run revisions describe "${previous}" \
+              --region "${REGION}" --project "${PROJECT_ID}" --format='value(status.imageDigest)')"
+            echo "Beta served ${previous} (${digest:-digest unknown}) before this deploy." >> "${GITHUB_STEP_SUMMARY}"
+          fi
+          echo "image=${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public:${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "present=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Run beta database migrations
+        id: migrate
+        if: steps.find.outputs.present == 'true'
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          IMAGE: ${{ steps.find.outputs.image }}
+        run: |
+          gcloud run jobs update "${BETA_MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+          gcloud run jobs execute "${BETA_MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --wait
+
+      - name: Deploy beta service
+        id: service
+        if: steps.migrate.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          IMAGE: ${{ steps.find.outputs.image }}
+        run: |
+          gcloud run services update "${BETA_SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+
+      - name: Verify beta revision readiness
+        id: ready
+        if: steps.service.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          REVISION=$(gcloud run services describe "${BETA_SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" \
+            --format='value(status.latestCreatedRevisionName)')
+          echo "candidate revision: ${REVISION}"
+          for attempt in $(seq 1 12); do
+            READY=$(gcloud run revisions describe "${REVISION}" \
+              --region "${REGION}" --project "${PROJECT_ID}" --format=json \
+              | jq -r '.status.conditions[] | select(.type == "Ready") | .status')
+            if [ "${READY}" = "True" ]; then
+              echo "revision ${REVISION} is ready"
+              echo "revision=${REVISION}" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            echo "attempt ${attempt}/12: revision ${REVISION} not ready yet (${READY:-unknown})"
+            sleep 10
+          done
+          echo "revision ${REVISION} never became ready" >&2
+          exit 1
+
+      - name: Check the beta release channel
+        id: channel
+        if: steps.ready.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          channel=""
+          for attempt in 1 2 3; do
+            if channel="$(curl --fail --silent --show-error --max-time 10 "${BETA_ORIGIN}/health" | jq -er '.releaseChannel')"; then
+              break
+            fi
+            sleep $((attempt * 10))
+          done
+          echo "${BETA_ORIGIN}/health reports releaseChannel=${channel:-unreadable}"
+          [[ "${channel}" == "beta" ]]
+
+      - name: Update beta worker image
+        id: worker
+        if: steps.channel.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          IMAGE: ${{ steps.find.outputs.image }}
+        run: |
+          gcloud run services update "${BETA_WORKER_SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+
+      # Same shape as release-web in deploy-sdp-api-gcp-prod.yml: posts only while beta still
+      # serves the revision this run deployed.
+      - name: Post the sdp-web beta gate status
+        id: gate
+        if: steps.worker.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_SHA: ${{ github.sha }}
+          DEPLOYED_REVISION: ${{ steps.ready.outputs.revision }}
+        run: |
+          set -euo pipefail
+          serving=""
+          for attempt in 1 2 3; do
+            if serving="$(curl --fail --silent --show-error --max-time 10 "${BETA_ORIGIN}/health/ready" | jq -er '.revision')"; then
+              break
+            fi
+            sleep $((attempt * 10))
+          done
+          if [[ -z "${serving}" ]]; then
+            echo "Could not read the serving beta revision; beta web stays held for ${IMAGE_SHA}." >&2
+            exit 1
+          fi
+          if [[ "${serving}" != "${DEPLOYED_REVISION}" ]]; then
+            echo "Beta now serves ${serving}, not ${DEPLOYED_REVISION} from ${IMAGE_SHA}; leaving its web held." >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            if gh api "repos/${GITHUB_REPOSITORY}/statuses/${IMAGE_SHA}" \
+              -f state=success -f context="sdp-web beta gate" -f description="Beta API serves this commit"; then
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          echo "Could not post the sdp-web beta gate for ${IMAGE_SHA}." >&2
+          exit 1
+
+      - name: Install Doppler CLI
+        if: >-
+          steps.auth.outcome == 'failure' || steps.gcloud.outcome == 'failure' ||
+          steps.find.outcome == 'failure' || steps.migrate.outcome == 'failure' ||
+          steps.service.outcome == 'failure' || steps.ready.outcome == 'failure' ||
+          steps.channel.outcome == 'failure' || steps.worker.outcome == 'failure' ||
+          steps.gate.outcome == 'failure'
+        id: doppler
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
+
+      - name: Doppler OIDC login
+        id: doppler_login
+        if: steps.doppler.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 2
+        run: scripts/doppler/oidc-login.sh "${{ vars.DOPPLER_CI_IDENTITY_ID }}"
+
+      - name: Notify Slack — beta deploy failed
+        if: steps.doppler_login.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          DOPPLER_PROJECT: solana-developer-platform
+          DOPPLER_CONFIG: dev_ci
+          SERVICE: sdp-api
+          ENV: beta
+          STATUS: failure
+          VERSION: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          COMMIT="$(git log -1 --format='%h — %s' HEAD 2>/dev/null | cut -c1-140 || true)"
+          export COMMIT
+          ./scripts/notify-slack.sh
+
+  smoke:
+    name: Beta API smoke
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    if: needs.deploy.outputs.present == 'true'
+    env:
+      SMOKE_TARGET: beta
+      BETA_ORIGIN: https://api-beta.solana.com
+    steps:
+      - name: Checkout
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Probe the beta API
+        id: smoke
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          HEALTH=$(curl -sS -m 15 "${BETA_ORIGIN}/health")
+          echo "$HEALTH"
+          echo "$HEALTH" | jq -e '.releaseChannel == "beta"' >/dev/null
+          READY=$(curl -sS -m 15 "${BETA_ORIGIN}/health/ready")
+          echo "$READY"
+          echo "$READY" | jq -e '.status == "ready" and .checks.database == "ok" and .checks.redis == "ok"' >/dev/null
+
+      - name: Install Doppler CLI
+        id: doppler
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
+
+      - name: Doppler OIDC login
+        id: doppler_login
+        if: steps.doppler.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 2
+        run: scripts/doppler/oidc-login.sh "${{ vars.DOPPLER_STAGE_SMOKE_IDENTITY_ID }}"
+
+      - name: Report beta run to Loki
+        if: steps.doppler_login.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          DOPPLER_PROJECT: solana-developer-platform
+          DOPPLER_CONFIG: stg_ci
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: doppler run --scope=. --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" --preserve-env=SMOKE_OUTCOME,SMOKE_TARGET,RUN_ID,RUN_URL -- ./scripts/report-smoke-to-loki.sh

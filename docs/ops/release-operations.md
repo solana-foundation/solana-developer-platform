@@ -7,7 +7,7 @@
 | Event                                                             | Target              | Result                                                                                                                                                                                                                                                                                                               |
 | ----------------------------------------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Push to `main`                                                    | Stage               | Builds a SHA-tagged image, runs migrations, updates the stage service and worker, then runs the stage smoke                                                                                                                                                                                                          |
-| Push to `main`                                                    | Beta                | In the stage deploy, runs the beta migrations and updates the beta service and worker with the stage image, then posts the `sdp-web beta gate` status. Never gates production                                                                                                                                        |
+| Push to `main`                                                    | Beta                | After the stage smoke passes, alongside production: runs the beta migrations, updates the beta service and worker with the stage image, posts the `sdp-web beta gate` status and smokes beta. Never gates production                                                                                                 |
 | Push to `main` with repo variable `CONTINUOUS_PROD_DEPLOY=true`   | Production API      | After the stage smoke passes, runs migrations and promotes the signed per-merge image. When `main` carries migrations production has not applied yet, the merge deploy is held instead and dispatches `Apply pending migrations to prod`, which deploys that commit once a `release-production` reviewer approves it |
 | `chore(main): release X.Y.Z` commit on `main`                     | Release publication | Creates the `vX.Y.Z` tag, publishes the GitHub release, and triggers release-image/checksum workflows. Deploys nothing itself: the commit reaches production through the per-merge pipeline like any other push                                                                                                      |
 | Push to `main`                                                    | Production web      | Vercel's git integration builds sdp-web from that commit and holds it until the `sdp-web production gate` commit status passes, which the production API deploy of that same commit posts once it serves traffic                                                                                                     |
@@ -223,11 +223,11 @@ The workflow validates the SHA, resolves its tag to an immutable digest, verifie
 
 ## Beta
 
-Beta (`https://api-beta.solana.com`) is a devnet-only sibling of stage in the stage GCP project, with its own services, migration job and database. It runs the stage image of every merge, reports `releaseChannel: beta` on `/health`, and never gates production.
+Beta (`https://api-beta.solana.com`) is a devnet-only sibling of stage in the stage GCP project, with its own services, migration job and database. It runs the stage image of every merge that passes the stage smoke, the same gate production sits behind, reports `releaseChannel: beta` on `/health`, and never gates production.
 
 ### Beta deploy
 
-The `Deploy beta` job in [`deploy-sdp-api-gcp-stage.yml`](../../.github/workflows/deploy-sdp-api-gcp-stage.yml) runs after the stage worker update:
+The merge deploy calls [`deploy-sdp-api-gcp-beta.yml`](../../.github/workflows/deploy-sdp-api-gcp-beta.yml) once the stage deploy and smoke pass, in parallel with production, including while production is held for pending migrations (beta migrates its own database). Its `Deploy beta` job:
 
 1. Finds `sdp-stage-api-beta-migrate`, `sdp-stage-api-beta` and `sdp-stage-worker-beta`. While any of them does not exist, the job skips with a notice. It records the revision and digest beta served before this deploy in the run summary.
 2. Updates and executes the beta migration job with the new image.
@@ -236,7 +236,7 @@ The `Deploy beta` job in [`deploy-sdp-api-gcp-stage.yml`](../../.github/workflow
 5. Updates `sdp-stage-worker-beta`.
 6. Posts the `sdp-web beta gate` commit status once `/health/ready` reports the deployed revision, the same way `release-web` posts the production gate.
 
-Each step runs only after the previous one succeeded. The merge deploy and the `Apply pending migrations to prod` approval both require every stage job to succeed, so every beta step continues on error: a beta failure posts `[FAILED] Deploy sdp-api (beta)` to the deploy Slack channel and the run carries on to production. The stage smoke then also probes beta (`Beta API smoke` in [`sdp-stage-smoke.yml`](../../.github/workflows/sdp-stage-smoke.yml)): `/health` must report the `beta` channel and `/health/ready` must be ready. That pass is reported to Loki with `target="beta"` and never fails the run. The stage smoke starts once the beta job ends, so beta adds its deploy time to every merge deploy; each beta step has a timeout, so a hung step fails and the job continues instead of holding production.
+Each step runs only after the previous one succeeded, and each continues on error within a timeout: a beta failure posts `[FAILED] Deploy sdp-api (beta)` to the deploy Slack channel and fails nothing else. No production job waits on beta, so beta adds no time to production, and its job name sits outside the stage prefix the `Apply pending migrations to prod` approval checks. Once the deploy has found beta, `Beta API smoke` checks that `/health` reports the `beta` channel and `/health/ready` is ready. That pass is reported to Loki with `target="beta"` and never fails the run.
 
 ### Beta rollback
 
@@ -388,7 +388,8 @@ Resolve each resource's image reference, choose the intended release SHA/digest,
 ## References
 
 - [Dev Cloud Run workflow](../../.github/workflows/deploy-sdp-api-gcp.yml)
-- [Stage and beta Cloud Run workflow](../../.github/workflows/deploy-sdp-api-gcp-stage.yml)
+- [Stage Cloud Run workflow](../../.github/workflows/deploy-sdp-api-gcp-stage.yml)
+- [Beta Cloud Run workflow](../../.github/workflows/deploy-sdp-api-gcp-beta.yml)
 - [Production Cloud Run workflow](../../.github/workflows/deploy-sdp-api-gcp-prod.yml)
 - [Release Flow workflow](../../.github/workflows/release-please.yml)
 - [Doppler Secrets Operations](./doppler-secrets.md)

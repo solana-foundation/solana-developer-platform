@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const workflowsDir = path.resolve(here, "../.github/workflows");
 const stageDeployFile = "deploy-sdp-api-gcp-stage.yml";
-const smokeFile = "sdp-stage-smoke.yml";
+const betaDeployFile = "deploy-sdp-api-gcp-beta.yml";
 const betaGateContext = "sdp-web beta gate";
 
 function readWorkflow(fileName) {
@@ -104,12 +104,11 @@ function runScript(script, { stubs, env }) {
   };
 }
 
-const betaJob = () => jobBlock(readWorkflow(stageDeployFile), "beta");
-const betaSmokeJob = () => jobBlock(readWorkflow(smokeFile), "beta");
+const betaJob = () => jobBlock(readWorkflow(betaDeployFile), "deploy");
+const betaSmokeJob = () => jobBlock(readWorkflow(betaDeployFile), "smoke");
 
-test("the stage deploy runs the beta steps in order after the stage worker update", () => {
+test("the beta workflow runs the beta steps in order", () => {
   const beta = betaJob();
-  assertLine(beta, "    needs: deploy");
   assertLine(beta, "      BETA_SERVICE: sdp-stage-api-beta");
   assertLine(beta, "      BETA_WORKER_SERVICE: sdp-stage-worker-beta");
   assertLine(beta, "      BETA_MIGRATE_JOB: sdp-stage-api-beta-migrate");
@@ -153,14 +152,10 @@ test("the stage deploy runs the beta steps in order after the stage worker updat
   );
 });
 
-// The merge deploy gates prod on the stage workflow's result, and the migration approval run on
-// every stage job concluding success, so no beta job or step may fail, be skipped or be needed.
-test("beta can never fail, skip or gate a stage job", () => {
-  const beta = betaJob();
-  const betaSmoke = betaSmokeJob();
+test("a beta failure stays in its job: every job and step continues on error within a timeout", () => {
   for (const [label, block] of [
-    ["deploy beta", beta],
-    ["beta smoke", betaSmoke],
+    ["deploy beta", betaJob()],
+    ["beta smoke", betaSmokeJob()],
   ]) {
     assertLine(block, "    continue-on-error: true");
     let stepMinutes = 0;
@@ -175,21 +170,34 @@ test("beta can never fail, skip or gate a stage job", () => {
     const jobMinutes = Number(block.match(/\n {4}timeout-minutes: (\d+)\n/)[1]);
     assert.ok(stepMinutes < jobMinutes, `${label} steps can outlast the job timeout`);
   }
-  assert.doesNotMatch(beta, /^ {4}if:/m);
-  assertLine(
-    betaSmoke,
-    "    if: github.repository == 'solana-foundation/solana-developer-platform'"
-  );
-  assert.doesNotMatch(betaSmoke, /^ {4}if:.*inputs/m);
+});
 
-  const smoke = jobBlock(readWorkflow(stageDeployFile), "smoke");
-  assertLine(smoke, "    needs: [deploy, beta]");
-  assertLine(smoke, `    if: ${expression("!cancelled() && needs.deploy.result == 'success'")}`);
-  assertLine(smoke, `      beta: ${expression("needs.beta.outputs.present == 'true'")}`);
-
+test("beta deploys only after a green stage deploy and smoke, alongside prod", () => {
   const deployWorkflow = readWorkflow("deploy.yml");
-  const deployProd = jobBlock(deployWorkflow, "deploy-api-prod");
-  assert.match(deployProd, /needs\.deploy-api-stage\.result == 'success'/);
+  const betaCaller = jobBlock(deployWorkflow, "deploy-api-beta");
+  assertLine(betaCaller, "    needs: [changes, deploy-api-stage]");
+  assertLine(betaCaller, "    if: always() && needs.deploy-api-stage.result == 'success'");
+  assertLine(betaCaller, `    uses: ./.github/workflows/${betaDeployFile}`);
+  assert.match(betaCaller, /\n {4}permissions:\n(?: {6}.+\n)* {6}statuses: write\n/);
+  // The migration approval run requires every job under the stage caller's name to succeed.
+  const stageName = jobBlock(deployWorkflow, "deploy-api-stage").match(/\n {4}name: (.+)\n/)[1];
+  const betaName = betaCaller.match(/\n {4}name: (.+)\n/)[1];
+  assert.ok(!betaName.startsWith(stageName), `${betaName} falls under the stage gate`);
+  assert.match(
+    readWorkflow("apply-prod-migrations.yml"),
+    new RegExp(`startswith\\("${stageName.replace(/[+]/g, "\\+")}"\\)`)
+  );
+
+  for (const jobName of ["schema", "deploy-api-prod", "request-schema-approval", "notify-end"]) {
+    assert.doesNotMatch(
+      jobBlock(deployWorkflow, jobName),
+      /needs:.*deploy-api-beta/,
+      `${jobName} waits on beta`
+    );
+  }
+  assert.doesNotMatch(jobBlock(deployWorkflow, "deploy-api-stage"), /statuses: write/);
+  assert.doesNotMatch(readWorkflow(stageDeployFile), /beta/i);
+  assert.doesNotMatch(readWorkflow("sdp-stage-smoke.yml"), /beta/i);
   for (const fileName of [
     "deploy-sdp-api-gcp-prod.yml",
     "apply-prod-migrations.yml",
@@ -197,14 +205,13 @@ test("beta can never fail, skip or gate a stage job", () => {
   ]) {
     assert.doesNotMatch(readWorkflow(fileName), /beta/i, `${fileName} mentions beta`);
   }
-  assert.match(
-    jobBlock(deployWorkflow, "deploy-api-stage"),
-    /\n {4}permissions:\n(?: {6}.+\n)* {6}statuses: write\n/
-  );
+  assert.match(jobBlock(deployWorkflow, "changes"), /\(-prod\|-stage\|-beta\)/);
 });
 
-test("the beta smoke asserts the channel and reports to Loki as target beta", () => {
+test("the beta smoke follows a deploy that found beta, asserts the channel and reports to Loki as target beta", () => {
   const betaSmoke = betaSmokeJob();
+  assertLine(betaSmoke, "    needs: deploy");
+  assertLine(betaSmoke, "    if: needs.deploy.outputs.present == 'true'");
   assertLine(betaSmoke, "      SMOKE_TARGET: beta");
   assert.deepEqual(
     steps(betaSmoke).map(({ name }) => name),
@@ -316,9 +323,9 @@ test("the beta gate fails without posting when the serving revision cannot be re
   assert.deepEqual(run.posts, []);
 });
 
-test("only the stage deploy posts the beta gate", () => {
+test("only the beta workflow posts the beta gate", () => {
   const posters = fs
     .readdirSync(workflowsDir)
     .filter((fileName) => readWorkflow(fileName).includes(betaGateContext));
-  assert.deepEqual(posters, [stageDeployFile]);
+  assert.deepEqual(posters, [betaDeployFile]);
 });

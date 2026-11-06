@@ -56,7 +56,7 @@ jobs:
             auto|*)
               # Every surviving push deploys: a superseded pending run would otherwise
               # strand its changes behind a later merge that touches none of these paths.
-              if [ "$EVENT_NAME" = push ] || match "^(apps/sdp-api/|apps/sdp-web/|packages/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.github/workflows/deploy(-sdp-api-gcp(-prod|-stage)?)?\.yml|\.github/workflows/sdp-stage-smoke\.yml)"; then
+              if [ "$EVENT_NAME" = push ] || match "^(apps/sdp-api/|apps/sdp-web/|packages/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.github/workflows/deploy(-sdp-api-gcp(-prod|-stage|-beta)?)?\.yml|\.github/workflows/sdp-stage-smoke\.yml)"; then
                 api=true
               fi
               ;;
@@ -199,9 +199,22 @@ jobs:
     permissions:
       contents: read
       id-token: write
-      # The beta job posts the commit status that releases beta web.
-      statuses: write
     uses: ./.github/workflows/deploy-sdp-api-gcp-stage.yml
+
+  # Beta sits behind the same stage gate as prod and runs alongside it. Neither the prod jobs nor
+  # notify-end need it, so beta never holds prod up. It also deploys while prod is held for pending
+  # migrations, since beta migrates its own database. The name must not start with the stage
+  # job's: the migration approval run gates on every job under that prefix.
+  deploy-api-beta:
+    name: sdp-api + worker — beta + smoke
+    needs: [changes, deploy-api-stage]
+    if: always() && needs.deploy-api-stage.result == 'success'
+    permissions:
+      contents: read
+      id-token: write
+      # Posts the commit status that releases beta web.
+      statuses: write
+    uses: ./.github/workflows/deploy-sdp-api-gcp-beta.yml
 
   schema:
     name: Check pending migrations against prod
