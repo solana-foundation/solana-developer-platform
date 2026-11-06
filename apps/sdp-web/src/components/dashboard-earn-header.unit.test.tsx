@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { integrationProviderIdentity } from "@/app/(session)/dashboard/[projectId]/integrations/integration-detail";
-import { IntegrationProviderMark } from "@/app/(session)/dashboard/[projectId]/integrations/integration-provider-mark";
+import { CUSTODY_BRAND_MARKS, ProviderBrandMark } from "@/lib/provider-brand-marks";
 import { getDashboardPageConfig } from "./dashboard-header";
 
 type Translate = Parameters<typeof getDashboardPageConfig>[1];
@@ -130,53 +129,29 @@ describe("Integrations dashboard headers", () => {
     expect(config.headerTabs).toBeUndefined();
   });
 
-  it.each([
-    [
-      "privy",
-      "Privy",
-      "DashboardCustody.providerPrivyDescription",
-      "Shared.integrations.custodyTitle",
-    ],
-    [
-      "moonpay",
-      "MoonPay",
-      "Shared.integrations.rampMoonpayDescription",
-      "Shared.integrations.rampsTitle",
-    ],
-    [
-      "range",
-      "Range",
-      "Shared.integrations.complianceRangeDescription",
-      "Shared.integrations.complianceTitle",
-    ],
-  ])(
-    "names %s with its mark and description, back to its family",
-    (provider, title, description, family) => {
-      const config = getDashboardPageConfig(`/dashboard/integrations/${provider}`, t, [], true);
+  it("names a custody provider with its mark and description, back to the custody family", () => {
+    expect(getDashboardPageConfig("/dashboard/integrations/privy", t, [], true)).toMatchObject({
+      title: "Privy",
+      description: "DashboardCustody.providerPrivyDescription",
+      contentWidthClass: "max-w-page",
+      backAction: { href: "/dashboard/integrations", label: "Shared.integrations.custodyTitle" },
+      titleMark: { type: ProviderBrandMark, props: { mark: CUSTODY_BRAND_MARKS.privy } },
+    });
+  });
 
-      expect(config).toMatchObject({
-        title,
-        description,
+  it.each(["not-a-provider", "moonpay"])(
+    "keeps the Integrations title for %s, which has no provider page",
+    (provider) => {
+      expect(getDashboardPageConfig(`/dashboard/integrations/${provider}`, t, [], true)).toEqual({
+        title: "Shared.dashboardShell.integrations",
         contentWidthClass: "max-w-page",
-        backAction: { href: "/dashboard/integrations", label: family },
-        titleMark: {
-          type: IntegrationProviderMark,
-          props: { identity: integrationProviderIdentity(provider) },
+        backAction: {
+          href: "/dashboard/integrations",
+          label: "Shared.integrations.backToIntegrations",
         },
       });
     }
   );
-
-  it("keeps the Integrations title for a provider the catalog does not name", () => {
-    expect(getDashboardPageConfig("/dashboard/integrations/not-a-provider", t, [], true)).toEqual({
-      title: "Shared.dashboardShell.integrations",
-      contentWidthClass: "max-w-page",
-      backAction: {
-        href: "/dashboard/integrations",
-        label: "Shared.integrations.backToIntegrations",
-      },
-    });
-  });
 
   it("frames a new connection as a flow, back to its provider, ahead of the connection route", () => {
     expect(

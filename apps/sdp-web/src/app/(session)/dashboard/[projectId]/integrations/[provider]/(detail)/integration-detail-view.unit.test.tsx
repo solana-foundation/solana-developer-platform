@@ -1,4 +1,4 @@
-import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import type { CustodyIntegration } from "@sdp/types/integrations";
 import {
   isModuleInReleaseChannel,
   SDP_RAMP_PROVIDER_MATURITY,
@@ -6,25 +6,13 @@ import {
 } from "@sdp/types/release-channels";
 import { prerender } from "react-dom/static";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveIntegrationDetail } from "@/app/(session)/dashboard/[projectId]/integrations/integration-detail";
-import {
-  resolveComplianceIntegrations,
-  resolveCustodyIntegrations,
-  resolveRampIntegrations,
-} from "@/app/(session)/dashboard/[projectId]/integrations/integrations-status";
 import {
   type CustodyConnectionListItem,
   summarizeProviderConnections,
 } from "@/app/(session)/dashboard/[projectId]/wallets/connections/connections.data";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import {
-  availableComplianceProviders,
-  availableCustodyProviders,
-  availableRampProviders,
-} from "@/lib/provider-availability";
 import { SANDBOX_PROJECT } from "@/test/projects";
-import { projectProviderAvailability } from "@/test/provider-availability";
 import { resetRequestProject, setPageRequest } from "@/test/request-project";
 import { type CustodyConnectionsContext, IntegrationDetailView } from "./integration-detail-view";
 
@@ -37,26 +25,22 @@ vi.mock(
 
 const PROJECT_PATH = `/dashboard/${SANDBOX_PROJECT.id}`;
 
-const AVAILABILITY = projectProviderAvailability({
-  project: SANDBOX_PROJECT,
-  custody: [
-    { provider: "privy", modes: ["managed", "byok"] },
-    { provider: "para", modes: ["managed"] },
-    { provider: "fireblocks", modes: ["managed", "byok"] },
-    { provider: "anchorage", modes: ["managed"] },
-  ],
-  compliance: ["range"],
-  ramps: ["moonpay"],
-  earn: [],
-});
+const PRIVY_CONNECTED: CustodyIntegration = {
+  provider: "privy",
+  category: "server",
+  state: { status: "connected", mode: "managed" },
+};
 
-const INPUTS = {
-  custody: resolveCustodyIntegrations({
-    connectedProviders: ["privy"],
-    custodyAvailability: availableCustodyProviders(AVAILABILITY),
-  }),
-  ramps: resolveRampIntegrations(availableRampProviders(AVAILABILITY), RAMP_PROVIDERS),
-  compliance: resolveComplianceIntegrations(availableComplianceProviders(AVAILABILITY)),
+const PARA_NOT_CONFIGURED: CustodyIntegration = {
+  provider: "para",
+  category: "server",
+  state: { status: "not_configured", modes: ["managed"] },
+};
+
+const ANCHORAGE_NOT_CONFIGURED: CustodyIntegration = {
+  provider: "anchorage",
+  category: "institutional",
+  state: { status: "not_configured", modes: ["managed"] },
 };
 
 function makeConnection(id: string, isRuntimeExecutionAllowed: boolean): CustodyConnectionListItem {
@@ -74,23 +58,21 @@ function makeConnection(id: string, isRuntimeExecutionAllowed: boolean): Custody
 }
 
 async function render({
-  provider,
+  integration,
   releaseChannel,
   canManageCustody,
   custodyConnections,
 }: {
-  provider: string;
+  integration: CustodyIntegration;
   releaseChannel: SdpReleaseChannel;
   canManageCustody: boolean;
   custodyConnections: CustodyConnectionsContext;
 }): Promise<string> {
-  const detail = resolveIntegrationDetail({ provider, ...INPUTS });
-  if (!detail) throw new Error(`unknown provider ${provider}`);
   vi.stubEnv("SDP_RELEASE_CHANNEL", releaseChannel);
   const { prelude } = await prerender(
     <I18nProvider locale="en" messages={getMessages("en")}>
       <IntegrationDetailView
-        detail={detail}
+        integration={integration}
         custodyConnections={custodyConnections}
         canManageCustody={canManageCustody}
       />
@@ -99,9 +81,12 @@ async function render({
   return new Response(prelude).text();
 }
 
-function renderWithoutConnections(provider: string, canManageCustody: boolean): Promise<string> {
+function renderWithoutConnections(
+  integration: CustodyIntegration,
+  canManageCustody: boolean
+): Promise<string> {
   return render({
-    provider,
+    integration,
     releaseChannel: "experimental",
     canManageCustody,
     custodyConnections: null,
@@ -124,51 +109,38 @@ beforeEach(() => {
 
 describe("IntegrationDetailView", () => {
   it("gives a connected custody provider without a connections list a manage action", async () => {
-    const markup = await renderWithoutConnections("privy", true);
+    const markup = await renderWithoutConnections(PRIVY_CONNECTED, true);
     expect(markup).toContain('data-state-band="ok"');
     expect(markup).toContain("Connected");
     expect(markup).toContain(`href="${PROJECT_PATH}/wallets"`);
     expect(markup).toContain("Manage");
   });
 
-  it("routes an available custody provider into setup", async () => {
-    const markup = await renderWithoutConnections("para", true);
+  it("routes a custody provider that is not configured into setup", async () => {
+    const markup = await renderWithoutConnections(PARA_NOT_CONFIGURED, true);
     expect(markup).toContain('data-state-band="neutral"');
-    expect(markup).toContain("Ready to connect");
+    expect(markup).toContain("Not configured");
+    expect(markup).toContain("Configure");
     expect(markup).toContain(`${PROJECT_PATH}/wallets/setup?provider=para`);
   });
 
   it("offers no setup action to a member who cannot manage custody", async () => {
-    const markup = await renderWithoutConnections("para", false);
-    expect(markup).toContain("Ready to connect");
+    const markup = await renderWithoutConnections(PARA_NOT_CONFIGURED, false);
+    expect(markup).toContain("Not configured");
     expect(markup).not.toContain("/wallets/setup");
   });
 
   it("says a manual provider is set up by the SDP team, by arrangement", async () => {
-    const markup = await renderWithoutConnections("anchorage", true);
+    const markup = await renderWithoutConnections(ANCHORAGE_NOT_CONFIGURED, true);
     expect(markup).toContain(`${PROJECT_PATH}/wallets/setup?provider=anchorage`);
     expect(recordLine(markup, "Set up by")).toBe("The SDP team, by arrangement");
     expect(markup).toContain("Available by arrangement");
   });
 
-  it.each([
-    ["moonpay", "Ramps"],
-    ["range", "Compliance"],
-  ])("shows %s as enabled by the operator, with no action", async (provider, family) => {
-    const markup = await renderWithoutConnections(provider, true);
-    expect(markup).toContain("Enabled");
-    expect(markup).not.toContain("Manage");
-    expect(markup).not.toContain("/wallets/setup");
-    expect(recordLine(markup, "Family")).toBe(family);
-    expect(recordLine(markup, "Kind")).toBeNull();
-    expect(recordLine(markup, "Set up by")).toBe("Your SDP operator");
-    expect(markup).toContain("Provisioned per deployment");
-  });
-
   it("puts the signing count in the band and the list below it, with no band action", async () => {
     const signing = makeConnection("conn_test_a91c", true);
     const markup = await render({
-      provider: "privy",
+      integration: PRIVY_CONNECTED,
       releaseChannel: "experimental",
       canManageCustody: true,
       custodyConnections: {
@@ -189,7 +161,7 @@ describe("IntegrationDetailView", () => {
 
   it("tells a viewer who cannot read connections why, without a band action", async () => {
     const markup = await render({
-      provider: "privy",
+      integration: PRIVY_CONNECTED,
       releaseChannel: "experimental",
       canManageCustody: false,
       custodyConnections: "restricted",
@@ -200,7 +172,7 @@ describe("IntegrationDetailView", () => {
   });
 
   it("details a self-service provider's credentials without the name or scope fields", async () => {
-    const markup = await renderWithoutConnections("privy", true);
+    const markup = await renderWithoutConnections(PRIVY_CONNECTED, true);
     expect(recordLine(markup, "Family")).toBe("Custody");
     expect(recordLine(markup, "Kind")).toBe("API");
     expect(recordLine(markup, "Set up by")).toBe("You, with your Privy app");
@@ -215,7 +187,7 @@ describe("IntegrationDetailView", () => {
     const labels = getMessages("en").DashboardCustody;
     const usesOn = async (releaseChannel: SdpReleaseChannel) => {
       const markup = await render({
-        provider: "privy",
+        integration: PRIVY_CONNECTED,
         releaseChannel,
         canManageCustody: true,
         custodyConnections: null,
