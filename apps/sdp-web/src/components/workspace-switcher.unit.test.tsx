@@ -223,6 +223,33 @@ describe("WorkspaceSwitcher", () => {
     expect(screen.queryByRole("menuitem", { name: /Globex$/ })).toBeNull();
   });
 
+  it("asks about the other organizations only once the menu opens", async () => {
+    const asked = vi
+      .spyOn(unlinkedOrganizations, "useUnlinkedOrganizations")
+      .mockReturnValue({ unlinkedIds: new Set(), isResolved: true });
+    showProject(SANDBOX_PROJECT);
+    renderSwitcher();
+
+    expect(asked.mock.calls.every(([ids]) => ids.length === 0)).toBe(true);
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Acme" }));
+
+    expect(asked).toHaveBeenLastCalledWith([mocks.globex.id]);
+  });
+
+  it("lists only the active organization until the answers are in", async () => {
+    vi.spyOn(unlinkedOrganizations, "useUnlinkedOrganizations").mockReturnValue({
+      unlinkedIds: new Set(),
+      isResolved: false,
+    });
+    showProject(SANDBOX_PROJECT);
+    await openSwitcher();
+
+    expect(screen.getByRole("menuitem", { name: /Acme$/ })).toBeDefined();
+    expect(screen.queryByRole("menuitem", { name: /Globex$/ })).toBeNull();
+    expect(screen.getByText("Loading…")).toBeDefined();
+  });
+
   it("marks the beta deployment beside the organization's name", () => {
     mocks.workspace.flags = { releaseChannel: "beta" };
     showProject(SANDBOX_PROJECT);

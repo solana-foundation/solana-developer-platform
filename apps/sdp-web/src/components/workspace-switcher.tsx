@@ -167,18 +167,26 @@ export function WorkspaceSwitcher({
     isProjectSwitching,
   } = useDashboardWorkspace();
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
+  // Each answer costs an API read per organization, so they are asked for only once the
+  // menu that lists them has opened, not on every page the switcher renders on.
+  const [hasOpened, setHasOpened] = useState(false);
 
   const loadedMemberships = userMemberships.data ?? [];
   // The dashboard renders only for an organization SDP admitted, so the active one is not asked about.
-  const { unlinkedIds } = useUnlinkedOrganizations(
-    loadedMemberships
-      .map((membership) => membership.organization.id)
-      .filter((organizationId) => organizationId !== activeOrg?.id)
+  const { unlinkedIds, isResolved } = useUnlinkedOrganizations(
+    hasOpened
+      ? loadedMemberships
+          .map((membership) => membership.organization.id)
+          .filter((organizationId) => organizationId !== activeOrg?.id)
+      : []
   );
   // An organization this deployment does not link is another deployment's: switching to it
-  // only lands on the organization picker, so it is not offered.
-  const memberships = loadedMemberships.filter(
-    (membership) => !unlinkedIds.has(membership.organization.id)
+  // only lands on the organization picker, so it is not offered. Until the answers are in,
+  // only the active organization is listed, so none is offered and then withdrawn.
+  const memberships = loadedMemberships.filter((membership) =>
+    isResolved
+      ? !unlinkedIds.has(membership.organization.id)
+      : membership.organization.id === activeOrg?.id
   );
   const environmentProjects = [sandboxProject, productionProject].filter(
     (project): project is Project => project !== null
@@ -223,7 +231,12 @@ export function WorkspaceSwitcher({
   }
 
   return (
-    <DropdownMenu modal={false}>
+    <DropdownMenu
+      modal={false}
+      onOpenChange={(open) => {
+        if (open) setHasOpened(true);
+      }}
+    >
       <DropdownMenuTrigger asChild>
         <button
           type="button"
@@ -269,10 +282,15 @@ export function WorkspaceSwitcher({
         <OrganizationItems
           memberships={memberships}
           activeOrganizationId={activeOrg?.id}
-          isLoaded={isLoaded}
+          isLoaded={isLoaded && isResolved}
           disabled={isSwitching}
           onSwitch={pickOrganization}
         />
+        {isResolved ? null : (
+          <p role="status" className="px-2.5 py-2 text-xs text-tertiary">
+            {t("Shared.SharedComponents.loading")}
+          </p>
+        )}
         {activeOrg && environmentProjects.length > 0 ? (
           <>
             <DropdownMenuSeparator />
