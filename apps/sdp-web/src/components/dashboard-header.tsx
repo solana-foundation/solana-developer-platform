@@ -630,14 +630,6 @@ function refreshFlowPageConfig(config: {
 /** Width of the overview and list pages: the design's 900px column. */
 const PAGE_WIDTH = "max-w-page";
 
-const ALL_INTEGRATION_FAMILIES: readonly ProjectIntegrationFamily[] = [
-  "custody",
-  "rpc",
-  "ramps",
-  "compliance",
-  "private_channels",
-];
-
 function actionPageConfig(config: {
   title: string;
   backHref: string;
@@ -1296,9 +1288,9 @@ function getHomePageConfig(
 export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
+  integrationFamilies: readonly ProjectIntegrationFamily[],
   paymentsEnabled = true,
-  rampsEnabled = false,
-  integrationFamilies: readonly ProjectIntegrationFamily[] = ALL_INTEGRATION_FAMILIES
+  rampsEnabled = false
 ): DashboardPageConfig {
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;

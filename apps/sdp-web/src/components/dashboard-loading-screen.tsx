@@ -30,9 +30,9 @@ export function DashboardLoadingScreen({
   const config = getDashboardPageConfig(
     path,
     t,
+    flags ? integrationTabFamilies(flags) : [],
     flags?.payments,
-    flags?.ramps,
-    flags ? integrationTabFamilies(flags) : undefined
+    flags?.ramps
   );
 
   return (

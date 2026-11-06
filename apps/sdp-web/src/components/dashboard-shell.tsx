@@ -449,9 +449,9 @@ export function DashboardShell({
   const pageConfig = getDashboardPageConfig(
     pathname,
     t,
+    integrationTabFamilies(flags),
     paymentsEnabled,
-    rampsEnabled,
-    integrationTabFamilies(flags)
+    rampsEnabled
   );
   const { favorites: walletFavorites } = useWalletFavorites();
   const walletFavoriteItems: SubNavItem[] = walletFavorites.map((favorite) => ({
