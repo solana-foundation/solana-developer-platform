@@ -17,7 +17,10 @@ import {
   HeaderBackAction,
 } from "@/components/dashboard-header";
 import { DashboardHeaderTabs } from "@/components/dashboard-header-tabs";
-import { DashboardHeaderTabsTrailingContext } from "@/components/dashboard-header-tabs-trailing-context";
+import {
+  DashboardHeaderTabsHideContext,
+  DashboardHeaderTabsTrailingContext,
+} from "@/components/dashboard-header-tabs-trailing-context";
 import { DashboardLoadingScreen } from "@/components/dashboard-loading-screen";
 import {
   DASHBOARD_SUBNAV_GROUPS,
@@ -327,16 +330,20 @@ function DashboardSidebarContent({
 function DashboardShellPageContexts({
   setPageTitle,
   headerTabsTrailingSlot,
+  setHiddenHeaderTabIds,
   children,
 }: {
   setPageTitle: (override: DashboardPageTitleOverride | null) => void;
   headerTabsTrailingSlot: HTMLElement | null;
+  setHiddenHeaderTabIds: (tabIds: readonly string[]) => void;
   children: ReactNode;
 }) {
   return (
     <DashboardPageTitleContext.Provider value={setPageTitle}>
       <DashboardHeaderTabsTrailingContext.Provider value={headerTabsTrailingSlot}>
-        {children}
+        <DashboardHeaderTabsHideContext.Provider value={setHiddenHeaderTabIds}>
+          {children}
+        </DashboardHeaderTabsHideContext.Provider>
       </DashboardHeaderTabsTrailingContext.Provider>
     </DashboardPageTitleContext.Provider>
   );
@@ -421,6 +428,7 @@ export function DashboardShell({
   );
   // Set once the header tab row's trailing slot mounts, so a page's controls portal into it.
   const [headerTabsTrailingSlot, setHeaderTabsTrailingSlot] = useState<HTMLElement | null>(null);
+  const [hiddenHeaderTabIds, setHiddenHeaderTabIds] = useState<readonly string[]>([]);
   const [openSubnavs, setOpenSubnavs] = useState<Record<DashboardSubnavKey, boolean>>(() => {
     const initial = {} as Record<DashboardSubnavKey, boolean>;
     for (const [key, group] of Object.entries(DASHBOARD_SUBNAV_GROUPS)) {
@@ -482,7 +490,9 @@ export function DashboardShell({
   const headerTabs = pageConfig.headerTabs && {
     ...pageConfig.headerTabs,
     tabs: pageConfig.headerTabs.tabs.filter(
-      (tab) => !tab.capability || dashboardAccess.capabilities[tab.capability]
+      (tab) =>
+        (!tab.capability || dashboardAccess.capabilities[tab.capability]) &&
+        !hiddenHeaderTabIds.includes(tab.id)
     ),
   };
   const routeTabs = pageConfig.routeTabs;
@@ -643,6 +653,7 @@ export function DashboardShell({
       <DashboardShellPageContexts
         setPageTitle={setPageTitleOverride}
         headerTabsTrailingSlot={headerTabsTrailingSlot}
+        setHiddenHeaderTabIds={setHiddenHeaderTabIds}
       >
         <PaymentsDemoProvider value={paymentsDemoOn}>
           {paymentsDemoOn ? <PaymentsDemoNotice /> : null}

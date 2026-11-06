@@ -153,11 +153,10 @@ describe("IntegrationsCatalog tabs and search", () => {
     expect(sectionTitles()).toEqual(["Ramps"]);
   });
 
-  it("says a family tab with nothing for the project is empty", () => {
+  it("lands on All when a family tab names a family with nothing for the project", () => {
     openCatalog("?tab=compliance");
 
-    expect(sectionTitles()).toEqual([]);
-    expect(screen.getByText("Nothing in this family for this project yet.")).toBeTruthy();
+    expect(sectionTitles()).toEqual(["Custody", "RPC", "Ramps", "Privacy"]);
   });
 
   it("filters rows by provider name or id, hiding sections without a match", async () => {

@@ -12,7 +12,10 @@ import { SearchInput } from "@sdp/ui/search-input";
 import { ChevronRightIcon, CircleCheckIcon } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { DashboardHeaderTabsTrailing } from "@/components/dashboard-header-tabs";
+import {
+  DashboardHeaderTabsTrailing,
+  useHiddenHeaderTabs,
+} from "@/components/dashboard-header-tabs";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { useProjectHref } from "@/lib/use-dashboard-project";
@@ -139,9 +142,17 @@ export function IntegrationsCatalog({ integrations }: { integrations: ProjectInt
   const [query, setQuery] = useState("");
   const sections = useMemo(() => integrationSections(integrations, t), [integrations, t]);
 
-  // The header shows a tab for every family the deployment runs; one this
-  // project has no provider in still selects, and says so.
-  const tabFamily = urlTab !== null && isProjectIntegrationFamily(urlTab) ? urlTab : null;
+  // A family with no provider for this project loses its tab, and a link to it lands on All.
+  const presentFamilies = sections.map((section) => section.family);
+  useHiddenHeaderTabs(
+    Object.keys(INTEGRATION_FAMILY_COPY_KEYS).filter(
+      (family) => isProjectIntegrationFamily(family) && !presentFamilies.includes(family)
+    )
+  );
+  const tabFamily =
+    urlTab !== null && isProjectIntegrationFamily(urlTab) && presentFamilies.includes(urlTab)
+      ? urlTab
+      : null;
   const normalizedQuery = query.trim().toLowerCase();
   const visibleSections = sections
     .filter((section) => tabFamily === null || section.family === tabFamily)
@@ -165,7 +176,7 @@ export function IntegrationsCatalog({ integrations }: { integrations: ProjectInt
       {visibleSections.map((section) => (
         <IntegrationSectionBlock key={section.family} section={section} t={t} />
       ))}
-      {visibleSections.length === 0 && normalizedQuery.length > 0 ? (
+      {visibleSections.length === 0 ? (
         <div className="py-10 text-center" data-integrations-empty="search">
           <p className="text-base font-medium text-primary">
             {t("Shared.integrations.emptyTitle")}
@@ -174,11 +185,6 @@ export function IntegrationsCatalog({ integrations }: { integrations: ProjectInt
             {t("Shared.integrations.clearSearch")}
           </Button>
         </div>
-      ) : null}
-      {visibleSections.length === 0 && normalizedQuery.length === 0 ? (
-        <p className="py-10 text-center text-sm text-tertiary" data-integrations-empty="family">
-          {t("Shared.integrations.familyEmpty")}
-        </p>
       ) : null}
     </div>
   );

@@ -673,7 +673,6 @@
     "rpcDescription": "Solana RPC providers serving your project's cluster. SDP runs them for every project, so there is nothing to set up.",
     "rpcProviderDescription": "Solana RPC for your project's cluster, provided by SDP.",
     "tabAll": "All",
-    "familyEmpty": "Nothing in this family for this project yet.",
     "clearSearch": "Clear search"
   },
   "idempotency": {
