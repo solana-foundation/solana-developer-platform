@@ -68,6 +68,10 @@
     "reason": "Ramp provider brand name"
   },
   {
+    "candidate": "src/lib/ramps.ts:40:19:Hercle",
+    "reason": "Ramp provider brand name"
+  },
+  {
     "candidate": "src/app/(session)/dashboard/payments/counterparty/counterparty-detail-workspace.tsx:832:9:details",
     "reason": "Internal counterparty tab identifier"
   },

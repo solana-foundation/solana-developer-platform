@@ -38,6 +38,7 @@ export const RPC_BRAND_MARKS = {
 export const RAMP_BRAND_MARKS = {
   moonpay: { logo: "/provider-logos/brand/moonpay.png", background: "#ffffff" },
   stripe: { logo: "/provider-logos/brand/stripe.svg", background: "#533afd" },
+  hercle: { logo: "/provider-logos/hercle.png", background: "#000000" },
 } as const satisfies Record<RampProviderId, BrandMark>;
 
 export const COMPLIANCE_BRAND_MARKS = {

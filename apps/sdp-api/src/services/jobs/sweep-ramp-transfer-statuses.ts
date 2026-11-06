@@ -50,6 +50,9 @@ const RAMP_ABANDONMENT_HORIZON_MS = {
   moonpay: { onramp: 72 * HOUR_MS, offramp: 24 * HOUR_MS },
   // Stripe runs onramp only.
   stripe: { onramp: 24 * HOUR_MS, offramp: 24 * HOUR_MS },
+  // Hercle runs onramp only. Hercle expires an order when its 15-minute funding window closes.
+  // A wire sent inside the window can land after it, so a quiet order stays open for a banking day.
+  hercle: { onramp: 24 * HOUR_MS, offramp: 24 * HOUR_MS },
 } as const satisfies Record<RampProviderId, Record<RampTransferType, number>>;
 
 /**
@@ -82,6 +85,7 @@ function isUntimedNoNews(event: RampSettlementEvent): boolean {
 /**
  * Pairs a provider client's status pull with that provider's webhook processor,
  * so a pulled event takes exactly the path a delivered webhook does.
+ * The processor may apply more events than a pull returns, such as Hercle's customer events.
  */
 function statusPull<Event extends RampSettlementEvent>(
   client: {
@@ -90,7 +94,7 @@ function statusPull<Event extends RampSettlementEvent>(
       lookup: RampTransferLookup
     ): Promise<readonly Event[]>;
   },
-  processor: WebhookProcessor<Event>
+  processor: Pick<WebhookProcessor<Event>, "process">
 ): RampStatusPull {
   return async (ctx, env, environment, lookup) => {
     const outcomes: RampStatusPullOutcome[] = [];
@@ -110,6 +114,7 @@ function statusPull<Event extends RampSettlementEvent>(
 const RAMP_STATUS_PULLS = {
   moonpay: statusPull(RAMP_PROVIDER_CLIENTS.moonpay, RAMP_PROVIDER_WEBHOOK_PROCESSOR.moonpay),
   stripe: statusPull(RAMP_PROVIDER_CLIENTS.stripe, RAMP_PROVIDER_WEBHOOK_PROCESSOR.stripe),
+  hercle: statusPull(RAMP_PROVIDER_CLIENTS.hercle, RAMP_PROVIDER_WEBHOOK_PROCESSOR.hercle),
 } as const satisfies Record<RampProviderId, RampStatusPull>;
 
 /** One provider's tally for one sweep. */

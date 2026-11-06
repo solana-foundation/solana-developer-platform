@@ -1,12 +1,26 @@
 "use client";
 
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
-import type { PaymentOnrampQuoteRequest, PaymentTransferSummary } from "@sdp/types/payments";
+import {
+  isAwaitingPayInRampTransferStatus,
+  type PaymentOnrampQuoteRequest,
+  type PaymentRampQuote,
+  type PaymentTransferStatus,
+  type PaymentTransferSummary,
+} from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
 import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
-import { fetchTransferById } from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
+import {
+  fetchTransferById,
+  simulateSandboxTransfer,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
 import { rampTransferPollInterval } from "@/app/(session)/dashboard/[projectId]/payments/ramps/ramp-phase";
+import { getRampTransferState } from "@/app/(session)/dashboard/[projectId]/payments/ramps/ramp-transfer-state";
 import {
   depositDetailsSchema,
   depositSelectionSchema,
@@ -22,7 +36,7 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
-import { onrampPairs } from "@/lib/ramps";
+import { offersSandboxSettlement, onrampPairs } from "@/lib/ramps";
 import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./use-ramp-wizard";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
@@ -63,10 +77,44 @@ function getOnrampRequirementsStep(t: Translate): RampWizardStep<OnrampStepId> {
   };
 }
 
+interface SimulationContext {
+  quote: PaymentRampQuote | null;
+  transferId: string | null;
+  transferStatus: PaymentTransferSummary | undefined;
+  succeeded: boolean;
+  environment: SdpEnvironment;
+  /** The providers the channel-capped flags offer on this request. */
+  enabledRampProviders: readonly RampProviderId[];
+}
+
+/** A bank-instruction order waits for its wire from the moment it opens, so its transfer can still be `pending`. */
+function awaitsPayment(quote: PaymentRampQuote, status: PaymentTransferStatus): boolean {
+  return quote.deliveryMode === "manual_instructions"
+    ? isAwaitingPayInRampTransferStatus(status)
+    : status === "awaiting_payment";
+}
+
+/**
+ * Whether a deposit can be marked paid: while it waits for its money, and as done until it finishes.
+ * Only a sandbox provider the API settles on request offers it, never a production deposit.
+ */
+function simulationOffered(context: SimulationContext): context is SimulationContext & {
+  quote: PaymentRampQuote;
+  transferId: string;
+} {
+  const { quote, transferId, transferStatus } = context;
+  if (quote === null || transferId === null || transferStatus === undefined) return false;
+  if (getRampTransferState(transferStatus.status).terminal) return false;
+  if (!awaitsPayment(quote, transferStatus.status) && !context.succeeded) return false;
+  return offersSandboxSettlement(quote.provider, context.environment, context.enabledRampProviders);
+}
+
 export function useOnrampWizard(props: UseRampWizardProps) {
   const { sdpEnvironment } = useDashboardWorkspace();
   const t = useTranslations();
   const locale = useLocale();
+  const [quoteSimulationLoading, setQuoteSimulationLoading] = useState(false);
+  const [quoteSimulationSucceeded, setQuoteSimulationSucceeded] = useState(false);
 
   const wizard = useRampWizard<OnrampStepId>(props, {
     pairs: onrampPairs(sdpEnvironment, props.enabledRampProviders),
@@ -124,7 +172,11 @@ export function useOnrampWizard(props: UseRampWizardProps) {
   const transferStatusKey = wizard.quoteTransferId
     ? paymentsQueryKeys.onrampTransferStatus({ transferId: wizard.quoteTransferId })
     : null;
-  const { data: transferStatus, isValidating: transferStatusLoading } = useSWR(
+  const {
+    data: transferStatus,
+    isValidating: transferStatusLoading,
+    mutate: refreshTransferStatus,
+  } = useSWR(
     transferStatusKey,
     ([, transferId]): Promise<PaymentTransferSummary> => fetchTransferById({ transferId }, t),
     {
@@ -138,11 +190,59 @@ export function useOnrampWizard(props: UseRampWizardProps) {
 
   const showCompleteScreen = transferStatus?.status === "completed";
 
+  const simulation = {
+    quote: wizard.quote,
+    transferId: wizard.quoteTransferId,
+    transferStatus,
+    succeeded: quoteSimulationSucceeded,
+    environment: sdpEnvironment,
+    enabledRampProviders: props.enabledRampProviders,
+  };
+  const simulateAvailable = simulationOffered(simulation);
+
+  const simulateCurrentQuote = async () => {
+    if (!simulationOffered(simulation) || !wizard.selectedWallet) {
+      return;
+    }
+    const { transferId } = simulation;
+
+    setQuoteSimulationLoading(true);
+    const toastId = toast.loading(t("DashboardPayments.ramps.simulatingQuoteFunding"), {
+      position: "bottom-right",
+    });
+
+    try {
+      await simulateSandboxTransfer({ transferId }, t);
+      setQuoteSimulationSucceeded(true);
+      // The provider moves the transfer once it settles the order; read it now, not on the next tick.
+      void refreshTransferStatus();
+      toast.success(t("DashboardPayments.ramps.quoteFundingSimulated"), {
+        id: toastId,
+        position: "bottom-right",
+      });
+    } catch (error) {
+      toast.error(t("DashboardPayments.ramps.quoteSimulationFailed"), {
+        id: toastId,
+        description:
+          error instanceof Error
+            ? error.message
+            : t("DashboardPayments.ramps.sandboxSimulationFailed"),
+        position: "bottom-right",
+      });
+    } finally {
+      setQuoteSimulationLoading(false);
+    }
+  };
+
   return {
     ...wizard,
     summaryDetails,
     transferStatus,
     transferStatusLoading,
+    quoteSimulationLoading,
+    quoteSimulationSucceeded,
+    simulateAvailable,
+    simulateCurrentQuote,
     showCompleteScreen,
   };
 }

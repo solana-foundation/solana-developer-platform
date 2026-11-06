@@ -439,7 +439,7 @@ export const transferSchema = z
       .openapi({
         [MODULE_GATE]: "ramps",
         description:
-          "How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `session_widget` in a provider SDK session. `manual_instructions` appears only on a retired provider's records.",
+          "How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `manual_instructions` by funding the instructions its quote returned, `session_widget` in a provider SDK session.",
         example: "session_widget",
       }),
     fiatCurrency: z
@@ -1493,7 +1493,7 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
   .extend({
     provider: withOpenApi(createOnrampQuoteSchemaBase.shape.provider, {
       description:
-        "Ramp provider to quote with. The response's `quote.deliveryMode` says how that provider hands off: a hosted URL or a session widget.",
+        "Ramp provider to quote with. The response's `quote.deliveryMode` says how that provider hands off: a hosted URL, funding instructions or a session widget.",
       example: "moonpay",
     }),
     counterpartyId: withOpenApi(createOnrampQuoteSchemaBase.shape.counterpartyId, {
@@ -1528,7 +1528,7 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
   })
   .openapi({
     description:
-      "Create an on-ramp quote. The response's `quote.deliveryMode` says whether to open a provider-hosted page (`hosted`) or mount a provider session widget (`session_widget`).",
+      "Create an on-ramp quote. The response's `quote.deliveryMode` says whether to open a provider-hosted page (`hosted`), show funding instructions (`manual_instructions`) or mount a provider session widget (`session_widget`).",
     example: {
       provider: "moonpay",
       counterpartyId: "cpty_example",
@@ -1661,6 +1661,43 @@ export const paymentOfframpCurrenciesQuerySchema = listOfframpCurrenciesQuerySch
   })
   .openapi({ description: "Off-ramp currency support query parameters." });
 
+const hercleFiatFundingInstructionSchema = z
+  .object({
+    provider: z.literal("hercle").openapi({
+      description: "Provider that produced this instruction.",
+      example: "hercle",
+    }),
+    kind: z.literal("fiat_funding").openapi({
+      description: "Wire fiat to the business's Hercle account to receive crypto.",
+      example: "fiat_funding",
+    }),
+    fiatCurrency: z
+      .string()
+      .openapi({ description: "Fiat currency the business wires.", example: "EUR" }),
+    bankAccount: z
+      .object({
+        iban: z.string().openapi({
+          description:
+            "The business's own account at Hercle's bank; Hercle attributes the wire by it.",
+        }),
+        bic: z.string().optional(),
+        bankName: z.string().optional(),
+        accountHolder: z.string().optional(),
+        paymentReference: z.string().openapi({
+          description: "Reference the wire must carry so Hercle matches it to the order.",
+        }),
+        payerAccountHolder: z.string().openapi({
+          description:
+            "The account holder the wire must come from: the business itself. The bank returns a wire from any other account.",
+        }),
+      })
+      .openapi({ description: "Where and how to wire the order's fiat." }),
+    instructionsNotes: z
+      .string()
+      .openapi({ description: "Additional human-readable funding instructions." }),
+  })
+  .openapi({ description: "Hercle on-ramp funding instruction." });
+
 const onrampQuoteSchema = z
   .object({
     id: z.string().openapi({ description: "Quote identifier.", example: "ramp_quote_example" }),
@@ -1674,9 +1711,9 @@ const onrampQuoteSchema = z
         "Always `pending`: a quote opens its transfer before the customer pays, and SDP never updates the quote. Follow the transfer for progress.",
       example: "pending",
     }) satisfies z.ZodType<PaymentRampQuote["status"]>,
-    deliveryMode: z.enum(["hosted", "session_widget"]).openapi({
+    deliveryMode: z.enum(["manual_instructions", "hosted", "session_widget"]).openapi({
       description:
-        "`hosted` means open `hostedUrl`; `session_widget` means mount the provider SDK session.",
+        "`hosted` means open `hostedUrl`; `manual_instructions` means display `paymentInstructions`; `session_widget` means mount the provider SDK session.",
       example: "hosted",
     }) satisfies z.ZodType<PaymentRampQuote["deliveryMode"]>,
     hostedUrl: z
@@ -1684,6 +1721,13 @@ const onrampQuoteSchema = z
       .url()
       .optional()
       .openapi({ description: "Provider-hosted URL for hosted quote delivery." }),
+    paymentInstructions: z.array(hercleFiatFundingInstructionSchema).optional().openapi({
+      description: "Funding instructions for `manual_instructions` delivery.",
+    }),
+    expiresAt: z.string().optional().openapi({
+      description:
+        "For `manual_instructions`, when the order's funding window closes; a wire after it is not matched to the order.",
+    }),
     clientSecret: z
       .string()
       .optional()
@@ -1702,7 +1746,17 @@ const onrampQuoteSchema = z
       .optional()
       .openapi({ description: "Provider redirect URL associated with the widget session." }),
   })
-  .openapi({ description: "On-ramp quote details." });
+  // The sampler fills every optional array, so without this example a hosted quote would show bank instructions.
+  .openapi({
+    description: "On-ramp quote details.",
+    example: {
+      id: "ramp_quote_example",
+      provider: "moonpay",
+      status: "pending",
+      deliveryMode: "hosted",
+      hostedUrl: "https://buy-sandbox.moonpay.com/?apiKey=pk_test_example",
+    },
+  });
 
 const onrampCurrencyPairSchema = z
   .object({

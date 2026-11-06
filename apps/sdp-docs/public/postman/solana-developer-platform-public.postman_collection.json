@@ -1562,7 +1562,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/payments/ramps/onramp/currency",
-            "description": "Lists generated fiat-to-crypto on-ramp pairs and the providers that support each pair. Supports optional source, destination rail, and provider filters."
+            "description": "Lists generated fiat-to-crypto on-ramp pairs and the providers that support each pair. Supports optional source, destination rail, and provider filters. A rail whose asset has no mint on the project's cluster is left out, since SDP refuses its quote there (devnet has no USDT)."
           }
         },
         {
@@ -1571,7 +1571,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/payments/ramps/offramp/currency",
-            "description": "Lists generated crypto-to-fiat off-ramp pairs and the providers that support each pair. Supports optional source rail, destination fiat, and provider filters."
+            "description": "Lists generated crypto-to-fiat off-ramp pairs and the providers that support each pair. Supports optional source rail, destination fiat, and provider filters. A rail whose asset has no mint on the project's cluster is left out, since SDP refuses its quote there."
           }
         },
         {
@@ -1586,7 +1586,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/ramps/onramp/quote",
-            "description": "Creates an on-ramp quote with the provider you name, and the transfer that follows it. `quote.deliveryMode` says how to hand the customer to the provider: `hosted` returns a provider-hosted URL, and `session_widget` a provider session to mount.",
+            "description": "Creates an on-ramp quote with the provider you name, and the transfer that follows it. `quote.deliveryMode` says how to hand the customer to the provider: `hosted` returns a provider-hosted URL, `manual_instructions` funding instructions to show, and `session_widget` a provider session to mount.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationCustodyWalletId\": \"cwlt_example\",\n  \"assetRail\": \"usdc.solana\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\"\n}",
@@ -1610,7 +1610,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/ramps/sandbox/simulate",
-            "description": "Sandbox-only, and unavailable for every ramp provider SDP integrates: none offers a simulated pay-in, so a transfer that passes the checks below gets `400`. To complete a sandbox on-ramp, pay in the provider's own hosted page or session with its test payment details.\n\nAfter the action check (`403`) and body validation (`400`), the checks run in order: a project outside Sandbox gets `403`, an unknown transfer `404`, a transfer that isn't an on-ramp `400`, one that isn't `awaiting_payment` `409`, and one whose provider the project can't use `403` or `503`.",
+            "description": "Sandbox-only. Simulates the fiat pay-in for an on-ramp transfer that still awaits it, when its provider offers a simulated pay-in. With any other provider, pay in the provider's own hosted page or session with its test payment details.\n\nAfter the action check (`403`) and body validation (`400`), the checks run in order: a project outside Sandbox gets `403`, an unknown transfer `404`, a transfer that isn't an on-ramp `400`, one no longer awaiting its pay-in (`pending` or `awaiting_payment`) `409`, one whose provider the project can't use `403` or `503`, and one whose provider offers no simulated pay-in `400`.\n\nEach transfer is simulated at most once: a later request, or one sent at the same time, answers `409`. Only a simulation the provider refused outright can be sent again. After any other failure the provider may still have delivered the crypto, so quote again if the transfer never settles.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"transferId\": \"xfr_example\"\n}",

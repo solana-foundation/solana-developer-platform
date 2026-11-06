@@ -58,6 +58,19 @@ export type RequirementField =
       required: boolean;
       /** Nested parts collected under dotted keys, e.g. `customer.address.line1`. */
       fields: RequirementField[];
+    }
+  | {
+      /**
+       * An affirmative acceptance of a provider document (terms of service, privacy policy), collected as `"true"`.
+       * The label is the sentence up to the document's name, and `documentLabel` completes it as a link to `documentUrl`.
+       * The person reads what they accept where they accept it.
+       */
+      kind: "consent";
+      key: string;
+      label: string;
+      required: boolean;
+      documentUrl: string;
+      documentLabel?: string;
     };
 
 export type RequirementFieldKind = RequirementField["kind"];
@@ -105,10 +118,21 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: RampProviderId; status: "ready" }
   | { provider: RampProviderId; status: "collect"; fields: RequirementField[] }
   | { provider: RampProviderId; status: "unsupported"; reason: string }
+  | {
+      provider: "hercle";
+      status: "customer_verification_required";
+      /** Hercle's hosted KYB link, minted for this answer and never stored. */
+      verificationUrl: string;
+    }
+  | { provider: "hercle"; status: "customer_verifying" }
+  | { provider: "hercle"; status: "customer_verification_failed" }
 );
 
-export const COUNTERPARTY_REQUIREMENTS_POLL_STATUSES =
-  [] as const satisfies readonly CounterpartyRequirements["status"][];
+/** Statuses the provider moves on its own, so a client re-reads requirements until they change. */
+export const COUNTERPARTY_REQUIREMENTS_POLL_STATUSES = [
+  "customer_verification_required",
+  "customer_verifying",
+] as const satisfies readonly CounterpartyRequirements["status"][];
 
 export type CounterpartyRequirementsPollStatus =
   (typeof COUNTERPARTY_REQUIREMENTS_POLL_STATUSES)[number];

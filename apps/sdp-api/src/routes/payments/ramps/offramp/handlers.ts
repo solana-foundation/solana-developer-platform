@@ -48,14 +48,14 @@ export async function extractOfframpQuoteRequest(
   c: ValidatedBodyContext<typeof createOfframpQuoteSchema>
 ): Promise<RequestGateExtraction> {
   const input = c.req.valid("json");
-  const { scope, projectId, counterparty, wallet, walletAddress } = await resolveRampQuoteRequest(
+  const resolved: RampQuoteResolved = await resolveRampQuoteRequest(
     c,
     "offramp",
     input,
     input.sourceCustodyWalletId
   );
 
-  return { body: input, resolved: { scope, projectId, counterparty, wallet, walletAddress } };
+  return { body: input, resolved };
 }
 
 export async function estimateOfframp(c: ValidatedBodyContext<typeof estimateOfframpSchema>) {
@@ -63,7 +63,7 @@ export async function estimateOfframp(c: ValidatedBodyContext<typeof estimateOff
   const row = OFFRAMP_SUPPORT.find(
     (pair) => pair.source === input.assetRail && pair.dest === input.fiatCurrency
   );
-  const providers = row ? filterProviders(c, row.providers) : [];
+  const providers = row ? filterProviders(c, input.assetRail, row.providers) : [];
 
   const estimates = await estimateAcrossProviders(c, "offramp", providers, (client, ctx) =>
     client.estimateOfframp(ctx, {
@@ -230,7 +230,7 @@ export async function listOfframpCurrencies(c: AppContext) {
   const pairs: OfframpCurrencyPair[] = OFFRAMP_SUPPORT.flatMap((row) => {
     if (source && row.source !== source) return [];
     if (dest && row.dest !== dest) return [];
-    const providers = filterProviders(c, row.providers, provider);
+    const providers = filterProviders(c, row.source, row.providers, provider);
     if (providers.length === 0) return [];
     return [{ source: row.source, dest: row.dest, providers }];
   });

@@ -5,7 +5,7 @@
     "families": {
       "Health": 2,
       "Wallets": 10,
-      "Projects": 4,
+      "Projects": 5,
       "Issuance": 37,
       "Payments": 41,
       "Compliance": 1,
@@ -756,6 +756,10 @@
               {
                 "label": "stripe",
                 "value": "stripe"
+              },
+              {
+                "label": "hercle",
+                "value": "hercle"
               }
             ]
           },
@@ -3750,6 +3754,10 @@
               {
                 "label": "stripe",
                 "value": "stripe"
+              },
+              {
+                "label": "hercle",
+                "value": "hercle"
               }
             ]
           }
@@ -3987,6 +3995,10 @@
               {
                 "label": "stripe",
                 "value": "stripe"
+              },
+              {
+                "label": "hercle",
+                "value": "hercle"
               }
             ]
           }
@@ -4054,7 +4066,8 @@
               "id": "ramp_quote_example",
               "provider": "moonpay",
               "status": "pending",
-              "deliveryMode": "hosted"
+              "deliveryMode": "hosted",
+              "hostedUrl": "https://buy-sandbox.moonpay.com/?apiKey=pk_test_example"
             },
             "transferId": "transfer_example"
           },
@@ -4888,6 +4901,10 @@
               {
                 "label": "stripe",
                 "value": "stripe"
+              },
+              {
+                "label": "hercle",
+                "value": "hercle"
               }
             ]
           },
@@ -8791,7 +8808,7 @@
       "rampProvider": "stripe"
     },
     "hercle": {
-      "module": "ramps"
+      "rampProvider": "hercle"
     },
     "mural": {
       "module": "ramps"

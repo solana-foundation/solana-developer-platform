@@ -84,11 +84,13 @@ export const INTEGRATION_ROW_COLUMNS =
 const RAMP_PROVIDER_LABELS = {
   moonpay: "MoonPay",
   stripe: "Stripe",
+  hercle: "Hercle",
 } as const satisfies Record<RampIntegration["provider"], string>;
 
 const RAMP_DESCRIPTION_KEYS = {
   moonpay: "Shared.integrations.rampMoonpayDescription",
   stripe: "Shared.integrations.rampStripeDescription",
+  hercle: "Shared.integrations.rampHercleDescription",
 } as const satisfies Record<RampIntegration["provider"], MessageKey>;
 
 const COMPLIANCE_PROVIDER_LABELS = {

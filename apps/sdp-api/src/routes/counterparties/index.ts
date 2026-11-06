@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { authorize, authorizeNone } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
+import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireAction } from "@/middleware/require-action";
 import { requireModule } from "@/middleware/require-module";
@@ -66,6 +67,7 @@ counterparties.post(
   "/:counterpartyId/requirements",
   requireAction("counterparties.execute"),
   validateBody(submitCounterpartyRequirementsSchema),
+  meteredQuota({ name: "ramp-requirements", actorMax: 30, orgMax: 120 }),
   submitCounterpartyRequirements
 );
 counterparties.patch(

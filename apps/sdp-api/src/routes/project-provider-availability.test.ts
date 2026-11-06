@@ -113,6 +113,10 @@ const DEPLOYMENT_CREDENTIALS = {
   STRIPE_SANDBOX_SECRET_KEY: "sk_test_project_provider_availability",
   STRIPE_SANDBOX_PUBLISHABLE_KEY: "pk_test_project_provider_availability",
   STRIPE_SANDBOX_WEBHOOK_SECRET: "whsec_project_provider_availability",
+  HERCLE_SANDBOX_CLIENT_ID: "hpk_test_ProviderAvailability01",
+  HERCLE_SANDBOX_SECRET_KEY: "ProviderAvailabilitySecret00000000000000000",
+  HERCLE_SANDBOX_WEBHOOK_PUBLIC_KEY:
+    "-----BEGIN PUBLIC KEY-----\nprovider-availability\n-----END PUBLIC KEY-----\n",
 } as const satisfies Partial<Env>;
 const SANDBOX_UNENTITLED_CUSTODY_MODES: CustodyUnavailableModes = [
   { mode: "managed", reason: "provider_not_entitled" },
@@ -212,6 +216,7 @@ const SANDBOX_AVAILABILITY: ProjectProviderAvailability = {
     ...COMPLIANCE_AVAILABILITY,
     { family: "ramps", provider: "moonpay", available: true },
     { family: "ramps", provider: "stripe", available: true },
+    { family: "ramps", provider: "hercle", available: true },
     ...EARN_AVAILABILITY,
   ],
 };
@@ -285,6 +290,8 @@ const PRODUCTION_AVAILABILITY: ProjectProviderAvailability = {
     ...COMPLIANCE_AVAILABILITY,
     { family: "ramps", provider: "moonpay", available: false, reason: "provider_not_configured" },
     { family: "ramps", provider: "stripe", available: false, reason: "provider_not_configured" },
+    // Hercle is surfaced in sandbox only, whatever keys the deployment holds.
+    { family: "ramps", provider: "hercle", available: false, reason: "provider_not_offered" },
     ...EARN_AVAILABILITY,
   ],
 };

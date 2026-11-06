@@ -10,7 +10,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "vitest run --typecheck.enabled --typecheck.only --typecheck.include='src/**/*.test.ts' --passWithNoTests"
+    "typecheck": "vitest run --typecheck.enabled --typecheck.only --typecheck.include=\"src/**/*.test.ts\" --passWithNoTests"
   },
   "dependencies": {
     "@sdp/private-channels": "workspace:*",

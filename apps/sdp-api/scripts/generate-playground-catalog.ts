@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -142,12 +143,17 @@ function generateCatalog(): string {
   )}\n`;
 }
 
+// Run the root's biome through node: `pnpm` is a .cmd shim on Windows, which execFileSync cannot spawn.
+const biomeCli = createRequire(path.join(repositoryRoot, "package.json")).resolve(
+  "@biomejs/biome/bin/biome"
+);
+
 function formatCatalog(catalog: string): string {
-  return execFileSync(
-    "pnpm",
-    ["--dir", repositoryRoot, "exec", "biome", "format", "--stdin-file-path", outputPath],
-    { input: catalog, encoding: "utf8" }
-  );
+  return execFileSync(process.execPath, [biomeCli, "format", "--stdin-file-path", outputPath], {
+    cwd: repositoryRoot,
+    input: catalog,
+    encoding: "utf8",
+  });
 }
 
 const expected = formatCatalog(generateCatalog());

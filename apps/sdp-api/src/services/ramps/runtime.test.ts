@@ -21,11 +21,14 @@ interface ManagedRampModeCase {
   publicKey: MountedKey;
   secretKey: MountedKey;
   webhookSecret: MountedKey;
-  /** The other mode's keys, as mounted under this mode's names by mistake. */
-  otherModeKeys: { publicKey: string; secretKey: string };
+  /**
+   * The other mode's keys, as mounted under this mode's names by mistake.
+   * A secret whose format is the same in both modes (Hercle's) cannot be told apart, so it has none.
+   */
+  otherModeKeys: { publicKey: string; secretKey?: string };
 }
 
-const LABELS = { moonpay: "MoonPay", stripe: "Stripe" } as const satisfies Record<
+const LABELS = { moonpay: "MoonPay", stripe: "Stripe", hercle: "Hercle" } as const satisfies Record<
   RampProviderId,
   string
 >;
@@ -63,6 +66,26 @@ const CASES = {
       secretKey: ["STRIPE_PRODUCTION_SECRET_KEY", "sk_live_managed"],
       webhookSecret: ["STRIPE_PRODUCTION_WEBHOOK_SECRET", "whsec_production_managed"],
       otherModeKeys: { publicKey: "pk_test_by_mistake", secretKey: "rk_test_by_mistake" },
+    },
+  },
+  hercle: {
+    sandbox: {
+      publicKey: ["HERCLE_SANDBOX_CLIENT_ID", "hpk_test_ManagedClientId0000001"],
+      secretKey: ["HERCLE_SANDBOX_SECRET_KEY", "ManagedSandboxSecretKey00000000000000000000"],
+      webhookSecret: [
+        "HERCLE_SANDBOX_WEBHOOK_PUBLIC_KEY",
+        "-----BEGIN PUBLIC KEY-----\nmanaged-sandbox\n-----END PUBLIC KEY-----",
+      ],
+      otherModeKeys: { publicKey: "hpk_live_ByMistakeClientId00001" },
+    },
+    production: {
+      publicKey: ["HERCLE_PRODUCTION_CLIENT_ID", "hpk_live_ManagedClientId0000001"],
+      secretKey: ["HERCLE_PRODUCTION_SECRET_KEY", "ManagedProductionSecretKey00000000000000000"],
+      webhookSecret: [
+        "HERCLE_PRODUCTION_WEBHOOK_PUBLIC_KEY",
+        "-----BEGIN PUBLIC KEY-----\nmanaged-production\n-----END PUBLIC KEY-----",
+      ],
+      otherModeKeys: { publicKey: "hpk_test_ByMistakeClientId00001" },
     },
   },
 } as const satisfies Record<RampProviderId, Record<SdpEnvironment, ManagedRampModeCase>>;
@@ -133,10 +156,11 @@ describe.each(RAMP_PROVIDERS)("SDP's managed %s keys", (provider) => {
       }
     );
 
-    it.each([
-      [keys.publicKey[0], keys.otherModeKeys.publicKey],
-      [keys.secretKey[0], keys.otherModeKeys.secretKey],
-    ])("refuse the other mode's key mounted as %s", (name, otherModeKey) => {
+    const otherModeMounts: MountedKey[] = [[keys.publicKey[0], keys.otherModeKeys.publicKey]];
+    if (keys.otherModeKeys.secretKey !== undefined) {
+      otherModeMounts.push([keys.secretKey[0], keys.otherModeKeys.secretKey]);
+    }
+    it.each(otherModeMounts)("refuse the other mode's key mounted as %s", (name, otherModeKey) => {
       expect(
         resolveManagedRampCredentials({ ...env, [name]: otherModeKey }, provider, mode)
       ).toEqual({ ok: false, reason: wrongModeKeys });

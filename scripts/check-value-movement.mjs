@@ -373,6 +373,14 @@ function handsModuleOut(checker, node, pinnedNamespaces) {
   return !(ts.isExportDeclaration(node) && !node.exportClause);
 }
 
+/**
+ * A program file's path from the repo root, in the posix form the capability lists use.
+ * TypeScript names files with forward slashes on every platform, so an absolute `path.join` never matches one on Windows.
+ */
+function repoRelativePath(rootDir, fileName) {
+  return path.relative(rootDir, fileName).split(path.sep).join("/");
+}
+
 /** Resolves a package specifier (an external constructor) the way the program does. */
 function resolveModuleSource(program, specifier, containingFile) {
   const resolved = ts.resolveModuleName(
@@ -393,8 +401,10 @@ function ownerSourceFile(program, rootDir, capability) {
   if (capability.owners.length === 0) {
     return program.getRootFileNames()[0];
   }
-  const ownerDir = path.join(rootDir, capability.owners[0], "/");
-  const source = program.getSourceFiles().find((file) => file.fileName.startsWith(ownerDir));
+  const ownerDir = path.posix.join(capability.owners[0], "/");
+  const source = program
+    .getSourceFiles()
+    .find((file) => repoRelativePath(rootDir, file.fileName).startsWith(ownerDir));
   if (!source) {
     throw new Error(
       `Capability ${capability.id} owner ${capability.owners[0]} has no file in the program`
@@ -480,7 +490,7 @@ export function findValueMovementViolations({ rootDir, tsconfig, capabilities, s
   const used = new Map(capabilities.map((capability) => [capability.id, new Set()]));
   for (const source of program.getSourceFiles()) {
     if (source.isDeclarationFile) continue;
-    const relativePath = path.relative(rootDir, source.fileName).split(path.sep).join("/");
+    const relativePath = repoRelativePath(rootDir, source.fileName);
     if (relativePath.startsWith("..") || relativePath.includes("node_modules/")) continue;
     if (!scanRoots.some((scanRoot) => relativePath.startsWith(scanRoot))) continue;
     if (isTestFile(relativePath)) continue;

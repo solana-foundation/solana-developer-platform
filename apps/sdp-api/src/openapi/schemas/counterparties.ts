@@ -134,12 +134,27 @@ const requirementDateFieldSchema = z.object({
   before: z.string().optional(),
 });
 
+const requirementConsentFieldSchema = z.object({
+  kind: z.literal("consent"),
+  key: z.string(),
+  label: withOpenApi(z.string(), {
+    description: "The sentence up to the document's name; `documentLabel` completes it.",
+  }),
+  required: z.boolean(),
+  documentUrl: withOpenApi(z.string(), {
+    description:
+      'The provider document the counterparty accepts. Submit the string `"true"` as the field\'s `collectedData` value to accept; a JSON boolean is refused. An optional consent also takes `"false"` or `""`.',
+  }),
+  documentLabel: z.string().optional(),
+});
+
 const requirementFieldSchema = z.discriminatedUnion("kind", [
   requirementTextFieldSchema,
   requirementSelectFieldSchema,
   requirementCountryFieldSchema,
   requirementCurrencyFieldSchema,
   requirementDateFieldSchema,
+  requirementConsentFieldSchema,
   z.object({
     kind: z.literal("address"),
     key: z.string(),
@@ -186,12 +201,34 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
       ...requirementBase,
       provider: z.enum(RAMP_PROVIDERS),
       status: z.literal("unsupported"),
-      reason: z.string(),
+      reason: withOpenApi(z.string(), {
+        description:
+          "Why the provider does not serve this counterparty in this direction. Some reasons are temporary, such as the provider suspending the counterparty's account, so read the requirements again later.",
+      }),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("hercle"),
+      status: z.literal("customer_verification_required"),
+      verificationUrl: withOpenApi(z.string(), {
+        description:
+          "Hercle's hosted business verification. Minted for this response and never stored; read the requirements again for a fresh link.",
+      }),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("hercle"),
+      status: z.literal("customer_verifying"),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("hercle"),
+      status: z.literal("customer_verification_failed"),
     }),
   ]),
   {
     description:
-      "Current provider-specific readiness state and any fields or actions required before creating a ramp quote.",
+      "Current provider-specific readiness state and any fields or actions required before creating a ramp quote. A provider that verifies the counterparty itself can withdraw a `ready` later, by revoking its verdict or suspending the account, and give it back when it reinstates the counterparty.",
   }
 );
 

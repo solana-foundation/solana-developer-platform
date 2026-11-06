@@ -20,7 +20,7 @@ export const counterpartyIdParamsSchema = z.object({
 export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("direction", [
   z
     .object({
-      provider: z.enum(["moonpay", "stripe"], {
+      provider: z.enum(["moonpay", "stripe", "hercle"], {
         error: "provider does not support onramp requirements",
       }),
       direction: z.literal("onramp"),
@@ -74,7 +74,18 @@ export const listCounterpartyAccountsQuerySchema = z.object({
   ids: z.string().trim().min(1).max(20000).optional(),
 });
 
+/**
+ * The fields a `collect` answer asked for, by key.
+ * The provider checks them against its own fields and passes them on; SDP stores none of them.
+ */
+const collectedFieldDataSchema = z.record(z.string().min(1).max(128), z.string().max(1024));
+
 export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provider", [
   z.object({ provider: z.literal("moonpay"), direction: rampDirectionSchema }),
   z.object({ provider: z.literal("stripe"), direction: rampDirectionSchema }),
+  z.object({
+    provider: z.literal("hercle"),
+    direction: z.literal("onramp", { error: "hercle does not support offramp requirements" }),
+    collectedData: collectedFieldDataSchema.default({}),
+  }),
 ]);

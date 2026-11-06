@@ -1,7 +1,10 @@
+import { ONRAMP_SUPPORT } from "@sdp/types/generated/ramp";
+import { cryptoRailMint, SOLANA_CRYPTO_RAILS } from "@sdp/types/payment-rails";
 import { isRampProviderSurfaced, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { AppError } from "@/lib/errors";
 import { requireAction } from "@/middleware/require-action";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
@@ -142,6 +145,32 @@ describe("ramp currency provider details", () => {
       )) {
         expect(sortedProvidersFromPairs(data.pairs)).not.toContain(unsurfaced);
         expect(data.providerDetails).not.toHaveProperty(unsurfaced);
+      }
+    }
+  });
+
+  it("lists no pair on a rail the project's cluster has no mint for", async () => {
+    expect(
+      ONRAMP_SUPPORT.some(
+        (row) =>
+          cryptoRailMint(row.dest, "devnet") === undefined &&
+          row.providers.some((provider) => isRampProviderSurfaced(provider, "sandbox"))
+      )
+    ).toBe(true);
+
+    for (const direction of ["onramp", "offramp"] as const) {
+      const response = await buildApp("sandbox").request(
+        `/v1/payments/ramps/${direction}/currency`,
+        {},
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const data = await responseData(response);
+      const rails = data.pairs.map((pair) => (direction === "onramp" ? pair.dest : pair.source));
+      expect(rails.length).toBeGreaterThan(0);
+      for (const rail of rails) {
+        expect(cryptoRailMint(z.enum(SOLANA_CRYPTO_RAILS).parse(rail), "devnet")).toBeDefined();
       }
     }
   });

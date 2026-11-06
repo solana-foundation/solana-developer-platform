@@ -522,7 +522,8 @@ describe("ramp transfer status writers", () => {
     for (const file of apiSourceFiles(path.join(repositoryRoot, "apps/sdp-api/src"))) {
       const calls = readFileSync(file, "utf8").match(GUARDED_STATUS_WRITE)?.length ?? 0;
       if (calls > 0) {
-        actual[path.relative(repositoryRoot, file)] = calls;
+        // Posix-separated, so it keys the same as RAMP_STATUS_WRITERS on every platform.
+        actual[path.relative(repositoryRoot, file).split(path.sep).join("/")] = calls;
       }
     }
 
