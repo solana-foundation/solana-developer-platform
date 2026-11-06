@@ -1,4 +1,8 @@
-export const DEFAULT_SDP_DOCS_URL = "https://platform.solana.com/docs";
+export const DEFAULT_SDP_WEB_URL = "https://platform.solana.com";
+export const DEFAULT_SDP_DOCS_URL = `${DEFAULT_SDP_WEB_URL}/docs`;
+/** The SDP Terms of Use (`SDP_TERMS`), a public page of the dashboard app. */
+export const SDP_TERMS_PATH = "/terms";
+export const DEFAULT_SDP_TERMS_URL = `${DEFAULT_SDP_WEB_URL}${SDP_TERMS_PATH}`;
 export const DEFAULT_SDP_API_URL = "https://api.solana.com";
 /** The docs page that guides agents and AI systems, as a slug under the docs URL. */
 export const SDP_AI_GUIDE_DOCS_SLUG = "reference/docs-for-ai";

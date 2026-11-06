@@ -10,8 +10,6 @@ SDP Web is a Next.js application with two main surfaces:
 
 - **Landing page** (`/`) — Product overview and marketing
 - **Sign-up / Sign-in** (`/sign-up`, `/sign-in`) — Clerk authentication
-- **Allowlist form** (`/allowlist`) — Request access form
-- **Member invite** (`/members`) — Token-gated invite acceptance
 
 ### Internal Surface (Authenticated Dashboard)
 
@@ -158,14 +156,14 @@ Changes to `src/app/`, `src/components/`, and `src/lib/` automatically reload in
 
 ### Adding a New Page
 
-1. Create file in `src/app/dashboard/your-page/page.tsx`
+1. Create file in `src/app/(session)/dashboard/your-page/page.tsx`
 2. Use Clerk's `useAuth()` hook for authentication
 3. Proxy requests to SDP API via `/api/dashboard/*`
 
 Example:
 
 ```typescript
-// src/app/dashboard/users/page.tsx
+// src/app/(session)/dashboard/users/page.tsx
 "use client";
 import { useAuth } from "@clerk/nextjs";
 
@@ -203,7 +201,7 @@ Requires environment variables set in Vercel project settings:
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
 - `CLERK_SECRET_KEY`
 - `NEXT_PUBLIC_SDP_API_BASE_URL`
-- `SENTRY_DSN` (optional)
+- `NEXT_PUBLIC_SENTRY_DSN` (optional)
 
 
 ## Troubleshooting

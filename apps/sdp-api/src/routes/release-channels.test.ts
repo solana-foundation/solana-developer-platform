@@ -49,8 +49,6 @@ const MODULE_PROBES = {
 
 // Every module flag on, so only the release channel can refuse a request.
 const ALL_FLAGS_ON = {
-  MARKETS_ENABLED: "true",
-  EARN_ENABLED: "true",
   PRIVATE_CHANNELS_ENABLED: "true",
   HELIUS_RINGS_ENABLED: "true",
   SDP_FLAG_ASSET_PROFILES: "true",

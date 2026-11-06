@@ -1,3 +1,6 @@
+import { z } from "zod";
+import { AppError, type ErrorResponse, PUBLIC_INTERNAL_ERROR_MESSAGE } from "@/lib/errors";
+
 /**
  * Clerk returns failures as `{"errors":[{"message":"…","long_message":"…"}]}`.
  * Reporting only "Clerk request failed" leaves an operator with a 500 and no
@@ -41,4 +44,44 @@ function extractClerkReason(body: string): string | null {
   }
 
   return truncate(trimmed);
+}
+
+/** The part of Clerk's error body that names what went wrong, by code. */
+const clerkErrorBodySchema = z.object({
+  errors: z.array(z.object({ code: z.string() })),
+});
+
+/**
+ * A failed Clerk Backend API call. The message carries Clerk's reason for the
+ * logs, and `details` its status and body for the callers that branch on them,
+ * but neither reaches the response: Clerk's wording describes Clerk's state, not
+ * anything a dashboard user can act on, so they see the generic internal error.
+ */
+export class ClerkRequestError extends AppError {
+  readonly clerkStatus: number;
+
+  constructor(status: number, body: string) {
+    super("INTERNAL_ERROR", describeClerkFailure(status, body), { status, body });
+    this.name = "ClerkRequestError";
+    this.clerkStatus = status;
+  }
+
+  /** Clerk's machine-readable code for its first error, when the body names one. */
+  get clerkCode(): string | null {
+    const body = this.details?.body;
+    if (typeof body !== "string") {
+      return null;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return null;
+    }
+    return clerkErrorBodySchema.safeParse(parsed).data?.errors[0]?.code ?? null;
+  }
+
+  override toResponse(): ErrorResponse {
+    return { error: { code: "INTERNAL_ERROR", message: PUBLIC_INTERNAL_ERROR_MESSAGE } };
+  }
 }

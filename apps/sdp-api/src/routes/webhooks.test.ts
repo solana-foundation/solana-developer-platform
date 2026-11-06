@@ -431,6 +431,37 @@ describe("Clerk webhooks", () => {
       meta: { requestId: expect.any(String) },
     });
   });
+  it("refuses a bad signature without saying why", async () => {
+    const response = await app.request(
+      "/webhooks/clerk/link-orgs",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "svix-id": `msg_${crypto.randomUUID()}`,
+          "svix-timestamp": String(Math.floor(Date.now() / 1000)),
+          "svix-signature": "v1,bm90LWEtcmVhbC1zaWduYXR1cmU=",
+        },
+        body: JSON.stringify({ type: "user.deleted", data: {} }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({
+      error: { code: "UNAUTHORIZED", message: "Invalid webhook signature" },
+      meta: { requestId: expect.any(String) },
+    });
+  });
+  it("answers a missing signing secret with a bare internal error", async () => {
+    env.CLERK_WEBHOOK_SECRET = undefined;
+    const response = await simulateClerkWebhook({ type: "user.deleted", data: {} });
+
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body.error.code).toBe("INTERNAL_ERROR");
+    expect(JSON.stringify(body)).not.toContain("CLERK_WEBHOOK_SECRET");
+  });
   it("refuses the organization's API keys once Clerk deletes it", async () => {
     const clerkOrgId = "org_clerk_webhook_cache_invalidation";
     const orgId = "org_webhook_cache_invalidation";

@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
 import {
   CUSTODY_PROVIDER_CATALOG,
   isKnownCustodyProvider,
   type KnownCustodyProvider,
-} from "@/app/dashboard/[projectId]/custody/provider-catalog";
+} from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
+import { dashboardJson } from "@/lib/dashboard-response";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createOrgSdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 
@@ -50,7 +50,7 @@ export async function GET(request: Request) {
     const onboarding = await orgClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status");
 
     if (!onboarding.linked) {
-      const response = NextResponse.json(
+      const response = dashboardJson(
         {
           custodyEnabled: false,
           walletProvisioningEnabled: false,
@@ -58,10 +58,7 @@ export async function GET(request: Request) {
           walletProvisioningProviders: [] as KnownCustodyProvider[],
         },
         {
-          headers: {
-            "X-SDP-Trace-ID": trace.traceId,
-            "Server-Timing": trace.serverTiming(),
-          },
+          trace,
         }
       );
       logRouteResult(trace, 200, { linked: false });
@@ -74,7 +71,7 @@ export async function GET(request: Request) {
     const configsResponse = await apiClient.request("/v1/wallets/configs");
 
     if (configsResponse.status === 404) {
-      const response = NextResponse.json(
+      const response = dashboardJson(
         {
           custodyEnabled: false,
           walletProvisioningEnabled: false,
@@ -82,10 +79,7 @@ export async function GET(request: Request) {
           walletProvisioningProviders: [] as KnownCustodyProvider[],
         },
         {
-          headers: {
-            "X-SDP-Trace-ID": trace.traceId,
-            "Server-Timing": trace.serverTiming(),
-          },
+          trace,
         }
       );
       logRouteResult(trace, 200, { configsMissing: true });
@@ -119,7 +113,7 @@ export async function GET(request: Request) {
         ? `Connect ${formatProviderHint(additionalWalletProviderLabels)} to create additional wallets.`
         : "Enable wallets first in the custody providers section.";
 
-    const response = NextResponse.json(
+    const response = dashboardJson(
       {
         custodyEnabled,
         walletProvisioningEnabled,
@@ -127,10 +121,7 @@ export async function GET(request: Request) {
         walletProvisioningProviders,
       },
       {
-        headers: {
-          "X-SDP-Trace-ID": trace.traceId,
-          "Server-Timing": trace.serverTiming(),
-        },
+        trace,
       }
     );
     logRouteResult(trace, 200, {
@@ -140,17 +131,14 @@ export async function GET(request: Request) {
     });
     return response;
   } catch (error) {
-    const response = NextResponse.json(
+    const response = dashboardJson(
       {
         error:
           error instanceof Error ? error.message : "Failed to resolve wallet quick action status",
       },
       {
         status: 500,
-        headers: {
-          "X-SDP-Trace-ID": trace.traceId,
-          "Server-Timing": trace.serverTiming(),
-        },
+        trace,
       }
     );
     logRouteResult(trace, 500, {

@@ -29,6 +29,7 @@ describe("dashboard workspace tab URL state", () => {
     "/dashboard/payments/counterparty",
     "/dashboard/payments/requests",
     "/dashboard/settings",
+    "/dashboard/integrations/private-channels/overview",
   ])("clears a leaked playground tab on %s", (pathname) => {
     expect(
       shouldClearDashboardTabAfterPathnameChange({
@@ -56,27 +57,8 @@ describe("dashboard workspace tab URL state", () => {
     ).toBe(true);
   });
 
-  it("keeps the playground tab when landing on the private channels overview", () => {
-    // A cross-route jump from a sibling sub-page, and the legacy
-    // /api-playground redirect, both arrive here carrying tab=playground.
-    expect(
-      shouldClearDashboardTabAfterPathnameChange({
-        previousPathname: "/dashboard/integrations/private-channels/members",
-        pathname: "/dashboard/integrations/private-channels/overview",
-        tab: "playground",
-      })
-    ).toBe(false);
-    expect(
-      shouldClearDashboardTabAfterPathnameChange({
-        previousPathname: "/dashboard/integrations/private-channels/api-playground",
-        pathname: "/dashboard/integrations/private-channels/overview",
-        tab: "playground",
-      })
-    ).toBe(false);
-  });
-
-  it.each(["custody", "ramps", "compliance", "privacy"])(
-    "keeps the %s tab an Integrations submenu link opens from another page",
+  it.each(["custody", "rpc", "ramps", "compliance", "private_channels"])(
+    "keeps the %s family tab a link to Integrations opens from another page",
     (tab) => {
       expect(
         shouldClearDashboardTabAfterPathnameChange({
@@ -87,6 +69,20 @@ describe("dashboard workspace tab URL state", () => {
       ).toBe(false);
     }
   );
+
+  it.each([
+    ["/dashboard/payments", "members", false],
+    ["/dashboard/payments", "security", false],
+    ["/dashboard/payments", "playground", true],
+  ])("from %s, Settings clears the %s tab: %s", (previousPathname, tab, cleared) => {
+    expect(
+      shouldClearDashboardTabAfterPathnameChange({
+        previousPathname,
+        pathname: "/dashboard/settings",
+        tab,
+      })
+    ).toBe(cleared);
+  });
 
   it("clears tabs the Integrations hub does not own", () => {
     for (const tab of ["playground", "overview"]) {

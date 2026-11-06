@@ -1,18 +1,21 @@
-import { NextResponse } from "next/server";
 import {
   buildHomeActivityRows,
   computeTodaysVolume,
   fetchOrgIssuanceActivity,
-} from "@/app/dashboard/[projectId]/home-page.data";
+} from "@/app/(session)/dashboard/[projectId]/home-page.data";
 import {
   fetchDashboardPaymentTransfers,
   fetchPaymentsIssuedTokenSymbols,
   WALLET_TRANSFERS_DEADLINE_MS,
-} from "@/app/dashboard/[projectId]/payments/payments-page.data";
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
 import { issuance } from "@/flags";
 import { getTranslations } from "@/i18n/server";
+import { dashboardJson } from "@/lib/dashboard-response";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
+
+/** The newest transfers Home reads: the list shows them, and the volume knows they may stop short. */
+const HOME_TRANSFERS_WINDOW = 20;
 
 /**
  * Home's recent activity and today's volume, from one read of the transfers.
@@ -32,7 +35,7 @@ export async function GET(request: Request) {
     );
     const [transfersResult, issuanceActivityResult, issuedTokenSymbolsResult] = await Promise.all([
       trace.step("fetch_payment_transfers", () =>
-        fetchDashboardPaymentTransfers(apiClient.request, 20, {
+        fetchDashboardPaymentTransfers(apiClient.request, HOME_TRANSFERS_WINDOW, {
           walletDeadlineMs: WALLET_TRANSFERS_DEADLINE_MS,
         })
       ),
@@ -79,23 +82,22 @@ export async function GET(request: Request) {
     const completeTransfers =
       transfersResult.ok && transfersResult.walletsNotLoaded === 0 && transfersResult.data;
 
-    const response = NextResponse.json(
+    const response = dashboardJson(
       {
         data: {
           activityRows,
           activityError,
           activityNotice: activityNotice || null,
-          todaysVolume: completeTransfers ? computeTodaysVolume(completeTransfers) : null,
+          todaysVolume: completeTransfers
+            ? computeTodaysVolume(completeTransfers, HOME_TRANSFERS_WINDOW)
+            : null,
           todaysVolumeError: completeTransfers
             ? null
             : t("Shared.homeWorkspace.paymentsActivityUnavailable"),
         },
       },
       {
-        headers: {
-          "X-SDP-Trace-ID": trace.traceId,
-          "Server-Timing": trace.serverTiming(),
-        },
+        trace,
       }
     );
 
@@ -108,17 +110,14 @@ export async function GET(request: Request) {
 
     return response;
   } catch (error) {
-    const response = NextResponse.json(
+    const response = dashboardJson(
       {
         error:
           error instanceof Error ? error.message : t("Shared.homeWorkspace.failedToLoadActivity"),
       },
       {
         status: 500,
-        headers: {
-          "X-SDP-Trace-ID": trace.traceId,
-          "Server-Timing": trace.serverTiming(),
-        },
+        trace,
       }
     );
 

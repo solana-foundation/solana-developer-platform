@@ -1,4 +1,5 @@
 import { SigningError } from "@sdp/custody/signing";
+import { FeePaymentError } from "@sdp/fee-payment/port";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type * as solanaRpc from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
@@ -11,6 +12,8 @@ import {
   type PaymentRecurringPaymentStatus,
   type PaymentRecurringPaymentUpdateAttemptStage,
   type PaymentSubscriptionCollectionAttemptMetadata,
+  type PaymentSubscriptionCollectionAttemptStatus,
+  type PaymentTransferStatus,
   RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
   RECURRING_PAYMENT_COLLECTION_CONFIG,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
@@ -66,7 +69,9 @@ import { paymentRecurringPaymentListResponseSchema } from "@/openapi/schemas/pay
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { SigningService } from "@/services/domain/signing.service";
+import { INSUFFICIENT_FUNDS_MESSAGE } from "@/services/fee-payment-errors";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
+import * as counterpartyAccountResolution from "@/services/payments/counterparty-account-resolution";
 import { cancelRecurringPaymentsActivatedByKey } from "@/services/payments/recurring-payments/cancel-activated-by-key";
 import { skipRefusedRecurringCollectionPeriod } from "@/services/payments/recurring-payments/collection";
 import * as recurringShared from "@/services/payments/recurring-payments/shared";
@@ -1284,8 +1289,64 @@ describe("Payments routes — recurring", () => {
     expect(sendTransactionMock).toHaveBeenCalledTimes(sendsBefore);
   });
 
+  it.each(["counterparty", "account", "legacy_parent"] as const)(
+    "refuses activation for an unavailable %s before claiming or signing",
+    async (target) => {
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      if (target === "legacy_parent") {
+        await getDb(env).execute("UPDATE counterparties SET status = 'archived' WHERE id = ?", [
+          created.counterpartyId,
+        ]);
+      } else {
+        const path = `/v1/counterparties/${created.counterpartyId}`;
+        const archived = await app.request(
+          target === "account" ? `${path}/accounts/${created.counterpartyAccountId}` : path,
+          { method: "DELETE", headers: RECURRING_HEADERS },
+          env
+        );
+        expect(archived.status).toBe(204);
+      }
+      const before = await recurringExecutionSnapshot(created.id);
+      const calls = recurringExecutionCallCounts();
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${created.id}/activate`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(response.status).toBe(404);
+      expect(await recurringExecutionSnapshot(created.id)).toEqual(before);
+      expect(recurringExecutionCallCounts()).toEqual(calls);
+    }
+  );
+
+  it("does not claim activation or sign when the recipient lookup fails", async () => {
+    const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const lookup = vi
+      .spyOn(counterpartyAccountResolution, "resolveSolanaCounterpartyAccount")
+      .mockRejectedValueOnce(new Error("recipient database unavailable"));
+    onTestFinished(() => lookup.mockRestore());
+    const before = await recurringExecutionSnapshot(created.id);
+    const calls = recurringExecutionCallCounts();
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${created.id}/activate`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(response.status).toBe(500);
+    expect(await recurringExecutionSnapshot(created.id)).toEqual(before);
+    expect(recurringExecutionCallCounts()).toEqual(calls);
+  });
+
   it("activates recurring payments through SDP API routes", async () => {
     const signAsFeePayerMock = recurringExecution.signAsFeePayerMock();
+    const activationHeaders = {
+      ...RECURRING_HEADERS,
+      "Idempotency-Key": "activate-before-archive",
+    };
     const created = await createRecurringPaymentFixture({
       ...DEFAULT_RECURRING_FIXTURE,
       headers: RECURRING_HEADERS,
@@ -1295,7 +1356,7 @@ describe("Payments routes — recurring", () => {
       `/v1/payments/recurring-payments/${created.id}/activate`,
       {
         method: "POST",
-        headers: RECURRING_HEADERS,
+        headers: activationHeaders,
         body: "{}",
       },
       env
@@ -1342,18 +1403,27 @@ describe("Payments routes — recurring", () => {
       authorization_signature: activateBody.data.recurringPayment.authorizationSignature,
     });
 
+    const archived = await app.request(
+      `/v1/counterparties/${created.counterpartyId}`,
+      { method: "DELETE", headers: RECURRING_HEADERS },
+      env
+    );
+    expect(archived.status).toBe(204);
+
     const replayRes = await app.request(
       `/v1/payments/recurring-payments/${created.id}/activate`,
       {
         method: "POST",
-        headers: RECURRING_HEADERS,
+        headers: activationHeaders,
         body: "{}",
       },
       env
     );
 
     expect(replayRes.status).toBe(200);
+    expect(replayRes.headers.get("Idempotent-Replayed")).toBe("true");
     const replayBody = await parseRecurringResponse(replayRes);
+    expect(replayBody).toEqual(activateBody);
     expect(replayBody.data.recurringPayment).toMatchObject({
       id: created.id,
       status: "active",
@@ -3141,6 +3211,193 @@ describe("Payments routes — recurring", () => {
     expect(dbRow?.status).toBe("canceled");
   });
 
+  it.each(["counterparty", "account", "legacy_parent", "wrong_parent"] as const)(
+    "pauses manual and automated collections for an unavailable %s",
+    async (target) => {
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      await setRecurringCollectionDue({
+        recurringPaymentId: activated.id,
+        subscriptionId: activated.subscriptionId,
+        dueAt: new Date(Date.now() - 60_000).toISOString(),
+      });
+      if (target === "legacy_parent") {
+        // Historical archives left the account active. Admission checks both.
+        await getDb(env).execute("UPDATE counterparties SET status = 'archived' WHERE id = ?", [
+          activated.counterpartyId,
+        ]);
+      } else if (target === "wrong_parent") {
+        const other = await seedCounterparty();
+        const otherAccount = await seedCryptoWalletCounterpartyAccount({
+          counterpartyId: other,
+          address: TEST_SOLANA_ADDRESSES.wallet2,
+        });
+        await getDb(env).execute(
+          "UPDATE payment_recurring_payments SET counterparty_account_id = ? WHERE id = ?",
+          [otherAccount, activated.id]
+        );
+      } else {
+        const path = `/v1/counterparties/${activated.counterpartyId}`;
+        const archived = await app.request(
+          target === "account" ? `${path}/accounts/${activated.counterpartyAccountId}` : path,
+          { method: "DELETE", headers: RECURRING_HEADERS },
+          env
+        );
+        expect(archived.status).toBe(204);
+      }
+      const calls = recurringExecutionCallCounts();
+      const manual = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/collect`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+      expect(manual.status).toBe(409);
+      const readPaused = async () => {
+        const response = await app.request(
+          `/v1/payments/recurring-payments/${activated.id}`,
+          { headers: RECURRING_HEADERS },
+          env
+        );
+        return (await parseRecurringResponse(response)).data.recurringPayment;
+      };
+      expect(await readPaused()).toMatchObject({
+        status: "paused",
+        pausedReason: "destination_unavailable",
+      });
+      // Rewind only the pause so the cron exercises the same admission itself.
+      await getDb(env).execute(
+        "UPDATE payment_recurring_payments SET status = 'active', paused_reason = NULL WHERE id = ?",
+        [activated.id]
+      );
+      const automated = await collectDueRecurringPaymentsIn("sandbox", new Date());
+      expect(automated).toMatchObject({ collected: 0, skipped: 1, failed: 0 });
+      expect(await readPaused()).toMatchObject({
+        status: "paused",
+        pausedReason: "destination_unavailable",
+      });
+      expect(await collectionAttempts(activated.subscriptionId)).toEqual([]);
+      expect(await failedCollectionAttempts(activated.id)).toBe(0);
+      expect(recurringExecutionCallCounts()).toEqual(calls);
+
+      // Collect and resume on the paused schedule both say what to do (HOO-2634).
+      const recipientGuidance = {
+        error: {
+          code: "CONFLICT",
+          message:
+            "Recurring payment recipient is unavailable; cancel this schedule and create a new one",
+        },
+      };
+      const collectAgain = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/collect`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+      expect(collectAgain.status).toBe(409);
+      expect(await collectAgain.json()).toMatchObject(recipientGuidance);
+      const resume = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/resume`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+      expect(resume.status).toBe(409);
+      expect(await resume.json()).toMatchObject(recipientGuidance);
+      expect((await readPaused()).status).toBe("paused");
+      expect(recurringExecutionCallCounts()).toEqual(calls);
+    }
+  );
+
+  it("does not pause or sign when the recipient lookup fails", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+    const lookup = vi
+      .spyOn(counterpartyAccountResolution, "resolveSolanaCounterpartyAccount")
+      .mockRejectedValueOnce(new Error("recipient database unavailable"));
+    onTestFinished(() => lookup.mockRestore());
+    const calls = recurringExecutionCallCounts();
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/collect`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(response.status).toBe(500);
+    expect((await recurringPaymentDueAt(activated.id)).status).toBe("active");
+    expect(await collectionAttempts(activated.subscriptionId)).toEqual([]);
+    expect(recurringExecutionCallCounts()).toEqual(calls);
+  });
+
+  it("leaves an unsigned in-flight claim recoverable, then pauses after it becomes stale", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const dueAt = new Date(Date.now() - 60_000).toISOString();
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt,
+    });
+    const attemptId = `psca_${crypto.randomUUID()}`;
+    await seedRecurringCollectionJournal({
+      stage: "claimed",
+      attemptId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      collectionDueAt: dueAt,
+      token: DEVNET_USDC_MINT,
+      amount: "25.00",
+      attemptedAt: new Date().toISOString(),
+    });
+    const archived = await app.request(
+      `/v1/counterparties/${activated.counterpartyId}`,
+      { method: "DELETE", headers: RECURRING_HEADERS },
+      env
+    );
+    expect(archived.status).toBe(204);
+    const calls = recurringExecutionCallCounts();
+    const collect = () =>
+      app.request(
+        `/v1/payments/recurring-payments/${activated.id}/collect`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+    expect((await collect()).status).toBe(409);
+    expect((await recurringPaymentDueAt(activated.id)).status).toBe("active");
+    expect(await collectionAttempts(activated.subscriptionId)).toMatchObject([
+      { status: "processing" },
+    ]);
+    const staleAt = new Date(
+      Date.now() - RECURRING_PAYMENT_COLLECTION_CONFIG.staleAfterMs - 1000
+    ).toISOString();
+    await getDb(env).execute(
+      "UPDATE payment_subscription_collection_attempts SET updated_at = ? WHERE id = ?",
+      [staleAt, attemptId]
+    );
+    expect((await collect()).status).toBe(409);
+    const read = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      { headers: RECURRING_HEADERS },
+      env
+    );
+    expect((await parseRecurringResponse(read)).data.recurringPayment).toMatchObject({
+      status: "paused",
+      pausedReason: "destination_unavailable",
+    });
+    expect(await collectionAttempts(activated.subscriptionId)).toMatchObject([
+      { status: "failed" },
+    ]);
+    expect(recurringExecutionCallCounts()).toEqual(calls);
+    // Cancel stays available for a recipient pause and unwinds the mandate.
+    const canceled = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(canceled.status).toBe(200);
+    expect((await parseRecurringResponse(canceled)).data.recurringPayment.status).toBe("canceled");
+  });
+
   it("resumes a paused recurring payment without signing", async () => {
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     await pauseRecurringPayment(activated.id);
@@ -4011,6 +4268,68 @@ describe("Payments routes — recurring", () => {
     return { subscriptionId: activated.subscriptionId, collect };
   }
 
+  it("recovers an in-flight collection after its counterparty is archived without signing again", async () => {
+    const { subscriptionId, collect } = await leaveCollectionUnanswered();
+    const row = required(
+      await getDb(env)
+        .prepare("SELECT counterparty_id FROM payment_recurring_payments WHERE subscription_id = ?")
+        .bind(subscriptionId)
+        .first<{ counterparty_id: string }>()
+    );
+    const archived = await app.request(
+      `/v1/counterparties/${row.counterparty_id}`,
+      { method: "DELETE", headers: RECURRING_HEADERS },
+      env
+    );
+    expect(archived.status).toBe(204);
+    const signatures = poolSentSignatures();
+    recordSignatureStatus(required(signatures[2]), null);
+    const recovered = await collect();
+    expect(recovered.status).toBe(200);
+    expect((await parseCollectionResponse(recovered)).data.collectionAttempt).toMatchObject({
+      status: "confirmed",
+      signature: signatures[2],
+    });
+    expect(poolSentSignatures()).toEqual(signatures);
+  });
+
+  it("does not retry an expired signed collection after its recipient is archived", async () => {
+    const { subscriptionId, collect } = await leaveCollectionUnanswered();
+    const row = required(
+      await getDb(env)
+        .prepare(
+          "SELECT id, counterparty_id FROM payment_recurring_payments WHERE subscription_id = ?"
+        )
+        .bind(subscriptionId)
+        .first<{ id: string; counterparty_id: string }>()
+    );
+    const archived = await app.request(
+      `/v1/counterparties/${row.counterparty_id}`,
+      { method: "DELETE", headers: RECURRING_HEADERS },
+      env
+    );
+    expect(archived.status).toBe(204);
+    const signatures = poolSentSignatures();
+    answerChainTip(SAVED_LAST_VALID_BLOCK_HEIGHT + 1);
+    expect((await collect()).status).toBe(409);
+    expect(await collectionAttempts(subscriptionId)).toMatchObject([
+      {
+        status: "failed",
+        error: "Recurring payment collection expired without landing on-chain",
+      },
+    ]);
+    const read = await app.request(
+      `/v1/payments/recurring-payments/${row.id}`,
+      { headers: RECURRING_HEADERS },
+      env
+    );
+    expect((await parseRecurringResponse(read)).data.recurringPayment).toMatchObject({
+      status: "paused",
+      pausedReason: "destination_unavailable",
+    });
+    expect(poolSentSignatures()).toEqual(signatures);
+  });
+
   it("fails a recovered collection whose pull has no record past its expiry, then pulls the period again", async () => {
     mockDistinctRecentBlockhashes();
     const { subscriptionId, collect } = await leaveCollectionUnanswered();
@@ -4079,6 +4398,48 @@ describe("Payments routes — recurring", () => {
       .first<{ status: string; signature: string | null }>();
     expect(transfer?.status).toBe("failed");
     expect(transfer?.signature).toBeTruthy();
+  });
+
+  it("records why a collection from a wallet short of funds failed (HOO-2621)", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt,
+    });
+    // Instruction 2 is the subscriptions pull; 0 creates the receiver account, 1 approves.
+    recurringExecution
+      .signAsFeePayerMock()
+      .mockRejectedValueOnce(
+        new FeePaymentError(
+          "Failed to sign transaction as fee payer: Kora Error -32000: Invalid transaction: Transaction simulation failed: Error processing Instruction 2: custom program error: 0x1",
+          "PROVIDER_REJECTED"
+        )
+      );
+
+    const collectRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/collect`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(collectRes.status).toBe(400);
+    const collectBody = errorResponseSchema.parse(await collectRes.json());
+    expect(collectBody.error.code).toBe("TRANSACTION_FAILED");
+    expect(collectBody.error.message).toBe(INSUFFICIENT_FUNDS_MESSAGE);
+    const attempt = await getDb(env)
+      .prepare(
+        "SELECT status, error, transfer_id FROM payment_subscription_collection_attempts WHERE subscription_id = ?"
+      )
+      .bind(activated.subscriptionId)
+      .first<{ status: string; error: string | null; transfer_id: string | null }>();
+    expect(attempt).toMatchObject({ status: "failed", error: INSUFFICIENT_FUNDS_MESSAGE });
+    const transfer = await getDb(env)
+      .prepare("SELECT status, error FROM payment_transfers WHERE id = ?")
+      .bind(attempt?.transfer_id)
+      .first<{ status: string; error: string | null }>();
+    expect(transfer).toMatchObject({ status: "failed", error: INSUFFICIENT_FUNDS_MESSAGE });
   });
 
   it.each(["amount", "transfer_hook_accounts"] as const)(
@@ -4718,6 +5079,102 @@ describe("Payments routes — recurring", () => {
       error: null,
     });
     expect(sendTransactionMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a collection whose send was saved after recovery read it unsent (APE SOLA9-816)", async () => {
+    const sourceSigner = recurringExecution.sourceSigner();
+    const savedSignature = signature(
+      "4hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13"
+    );
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    const staleAt = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    const transferId = `xfr_${crypto.randomUUID()}`;
+    const attemptId = `psca_${crypto.randomUUID()}`;
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt,
+    });
+    await seedRecurringCollectionJournal({
+      stage: "submitted",
+      attemptId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      collectionDueAt: dueAt,
+      token: DEVNET_USDC_MINT,
+      amount: "25.00",
+      attemptedAt: staleAt,
+      transfer: {
+        id: transferId,
+        walletId: TEST_WALLET_ID,
+        counterpartyId: activated.counterpartyId,
+        sourceAddress: sourceSigner.address,
+        destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+        signature: savedSignature,
+      },
+    });
+    // A stale run that never saved its send: no signature on the transfer or the attempt.
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET signature = NULL WHERE id = ?")
+      .bind(transferId)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_subscription_collection_attempts SET signature = NULL WHERE id = ?")
+      .bind(attemptId)
+      .run();
+    // Right after recovery reads the transfer unsent, the original collector saves and starts
+    // its send: the interleaving SOLA9-816 describes.
+    const createPaymentsRepository = paymentsRepositoryPostgres.createPostgresPaymentsRepository;
+    let raced = false;
+    vi.spyOn(paymentsRepositoryPostgres, "createPostgresPaymentsRepository").mockImplementation(
+      (...args) => {
+        const repo = createPaymentsRepository(...args);
+        return {
+          ...repo,
+          getTransferById: async (params) => {
+            const row = await repo.getTransferById(params);
+            if (row?.id === transferId && !raced) {
+              raced = true;
+              await getDb(env)
+                .prepare(
+                  `UPDATE payment_transfers
+                      SET signature = ?, signed_transaction = 'AQ==', last_valid_block_height = '1',
+                          submission_started_at = ?
+                    WHERE id = ?`
+                )
+                .bind(savedSignature, new Date().toISOString(), transferId)
+                .run();
+            }
+            return row;
+          },
+        };
+      }
+    );
+
+    const sendsBeforeCollect = sendTransactionMock.mock.calls.length;
+    const collectRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/collect`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(raced).toBe(true);
+    expect(collectRes.status).toBe(409);
+    const transfer = await getDb(env)
+      .prepare("SELECT status, signature FROM payment_transfers WHERE id = ?")
+      .bind(transferId)
+      .first<{ status: PaymentTransferStatus; signature: string | null }>();
+    expect(transfer).toEqual({ status: "processing", signature: savedSignature });
+    const attempt = await getDb(env)
+      .prepare("SELECT status FROM payment_subscription_collection_attempts WHERE id = ?")
+      .bind(attemptId)
+      .first<{ status: PaymentSubscriptionCollectionAttemptStatus }>();
+    expect(attempt?.status).toBe("processing");
+    // Recovery sends nothing of its own.
+    expect(sendTransactionMock).toHaveBeenCalledTimes(sendsBeforeCollect);
   });
 
   it("journals failed recovered recurring payment collection attempts and allows retry", async () => {
@@ -6084,6 +6541,39 @@ describe("Payments routes — recurring", () => {
       stage: "finalize",
       authorization_signature: authorizationSignature,
     });
+  });
+
+  it("refuses new delegation signing during activation recovery after the recipient is archived", async () => {
+    const { recurringPayment, attemptId } = await seedStaleActivationAfterPlan();
+    await getDb(env).execute("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?", [
+      new Date(Date.now() - 16 * 60 * 1000).toISOString(),
+      recurringPayment.id,
+    ]);
+    const archived = await app.request(
+      `/v1/counterparties/${recurringPayment.counterpartyId}`,
+      { method: "DELETE", headers: RECURRING_HEADERS },
+      env
+    );
+    expect(archived.status).toBe(204);
+    const calls = recurringExecutionCallCounts();
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(response.status).toBe(404);
+    expect((await recurringPaymentDueAt(recurringPayment.id)).status).toBe("pending_activation");
+    expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledTimes(calls.custodySigner);
+    expect(createKoraAdapterMock).toHaveBeenCalledTimes(calls.feePaymentAdapter);
+    expect(sendTransactionMock).toHaveBeenCalledTimes(calls.send);
+    expect(
+      await getDb(env)
+        .prepare("SELECT status FROM payment_recurring_payment_activation_attempts WHERE id = ?")
+        .bind(attemptId)
+        .first<{ status: string }>()
+    ).toEqual({ status: "failed" });
   });
 
   it("refuses to recover a stale activation an incident revoke overtook after its first claim", async () => {
@@ -9249,6 +9739,12 @@ describe("Payments routes — recurring", () => {
             staleAt
           )
           .run();
+        const archived = await app.request(
+          `/v1/counterparties/${created.counterpartyId}`,
+          { method: "DELETE", headers: RECURRING_HEADERS },
+          env
+        );
+        expect(archived.status).toBe(204);
         const sent = sends();
 
         const retry = await app.request(
@@ -9390,6 +9886,291 @@ describe("Payments routes — recurring", () => {
 
         expect((await recurringPaymentDueAt(created.id)).status).toBe("active");
         expect(sent).toHaveBeenCalledTimes(1);
+      });
+    });
+  });
+
+  describe("lease fencing (SOLA9-697, SOLA9-732, SOLA9-716)", () => {
+    const TAKEOVER_LEASE = "lease_takeover";
+
+    /**
+     * Another run takes the claim over, as a stale claim's takeover does: a new lease and a
+     * fresh `updated_at` on the row, nothing else. The original run carries on afterwards.
+     */
+    function takeOver(recurringPaymentId: string) {
+      return getDb(env)
+        .prepare("UPDATE payment_recurring_payments SET lease_id = ?, updated_at = ? WHERE id = ?")
+        .bind(TAKEOVER_LEASE, new Date().toISOString(), recurringPaymentId)
+        .run();
+    }
+
+    /** Takes the claim over while the original run builds its next send, before it saves it. */
+    function takeOverBeforeNextSend(recurringPaymentId: string) {
+      const blockhash = required(getRecentBlockhashMock.getMockImplementation());
+      getRecentBlockhashMock.mockImplementationOnce(async (...args) => {
+        await takeOver(recurringPaymentId);
+        return blockhash(...args);
+      });
+    }
+
+    function scheduleState(recurringPaymentId: string) {
+      return getDb(env)
+        .prepare(
+          `SELECT status, lease_id, plan_creation_signature, authorization_signature
+             FROM payment_recurring_payments
+            WHERE id = ?`
+        )
+        .bind(recurringPaymentId)
+        .first<{
+          status: PaymentRecurringPaymentStatus;
+          lease_id: string | null;
+          plan_creation_signature: string | null;
+          authorization_signature: string | null;
+        }>();
+    }
+
+    async function errorMessage(response: Response) {
+      return errorResponseSchema.parse(await response.json()).error.message;
+    }
+
+    it("refuses an activation's save after a takeover, broadcasting and resetting nothing", async () => {
+      const created = await createRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        headers: RECURRING_HEADERS,
+      });
+      takeOverBeforeNextSend(created.id);
+      const sendsBefore = sendTransactionMock.mock.calls.length;
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${created.id}/activate`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(response.status).toBe(409);
+      expect(await errorMessage(response)).toBe(
+        "Recurring payment activation was taken over by another run"
+      );
+      expect(sendTransactionMock).toHaveBeenCalledTimes(sendsBefore);
+      // The schedule is the new run's: still activating under its lease, no signature saved,
+      // and the attempt it resumes still in flight.
+      expect(await scheduleState(created.id)).toEqual({
+        status: "activating",
+        lease_id: TAKEOVER_LEASE,
+        plan_creation_signature: null,
+        authorization_signature: null,
+      });
+      expect(await activationState(created.id)).toMatchObject({
+        attempt_status: "processing",
+        last_valid_block_height: null,
+      });
+    });
+
+    it("refuses an activation's finalize after a takeover, leaving the schedule activating", async () => {
+      const created = await createRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        headers: RECURRING_HEADERS,
+      });
+      // The takeover lands once the authorization is sent, while the run confirms it.
+      const confirm = required(confirmTransactionMock.getMockImplementation());
+      confirmTransactionMock
+        .mockImplementationOnce(confirm)
+        .mockImplementationOnce(async (...args) => {
+          await takeOver(created.id);
+          return confirm(...args);
+        });
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${created.id}/activate`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(response.status).toBe(409);
+      expect(await errorMessage(response)).toBe(
+        "Recurring payment activation was taken over by another run"
+      );
+      const [planCreationSignature, authorizationSignature] = poolSentSignatures();
+      expect(await scheduleState(created.id)).toEqual({
+        status: "activating",
+        lease_id: TAKEOVER_LEASE,
+        plan_creation_signature: planCreationSignature,
+        authorization_signature: authorizationSignature,
+      });
+      expect((await activationState(created.id))?.attempt_status).toBe("processing");
+    });
+
+    it("refuses an update's save after a takeover, broadcasting and resetting nothing", async () => {
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      takeOverBeforeNextSend(activated.id);
+      const sendsBefore = sendTransactionMock.mock.calls.length;
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}`,
+        {
+          method: "PATCH",
+          headers: RECURRING_HEADERS,
+          body: JSON.stringify({ metadataUri: "https://example.com/recurring/fenced.json" }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(409);
+      expect(await errorMessage(response)).toBe(
+        "Recurring payment update was taken over by another run"
+      );
+      expect(sendTransactionMock).toHaveBeenCalledTimes(sendsBefore);
+      expect(await scheduleState(activated.id)).toMatchObject({
+        status: "updating",
+        lease_id: TAKEOVER_LEASE,
+      });
+      const attempt = await getDb(env)
+        .prepare(
+          `SELECT status, plan_update_signature, last_valid_block_height, error
+             FROM payment_recurring_payment_update_attempts
+            WHERE recurring_payment_id = ?`
+        )
+        .bind(activated.id)
+        .first();
+      expect(attempt).toEqual({
+        status: "processing",
+        plan_update_signature: null,
+        last_valid_block_height: null,
+        error: null,
+      });
+    });
+
+    it("refuses an update's finalize after a takeover, leaving the schedule updating", async () => {
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const before = required(
+        await getDb(env)
+          .prepare("SELECT metadata_uri FROM payment_recurring_payments WHERE id = ?")
+          .bind(activated.id)
+          .first<{ metadata_uri: string | null }>()
+      );
+      const confirm = required(confirmTransactionMock.getMockImplementation());
+      confirmTransactionMock.mockImplementationOnce(async (...args) => {
+        await takeOver(activated.id);
+        return confirm(...args);
+      });
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}`,
+        {
+          method: "PATCH",
+          headers: RECURRING_HEADERS,
+          body: JSON.stringify({
+            metadataUri: "https://example.com/recurring/fenced-finalize.json",
+          }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(409);
+      expect(await errorMessage(response)).toBe(
+        "Recurring payment update was taken over by another run"
+      );
+      expect(await scheduleState(activated.id)).toMatchObject({
+        status: "updating",
+        lease_id: TAKEOVER_LEASE,
+      });
+      const after = await getDb(env)
+        .prepare("SELECT metadata_uri FROM payment_recurring_payments WHERE id = ?")
+        .bind(activated.id)
+        .first<{ metadata_uri: string | null }>();
+      expect(after).toEqual(before);
+      const attempt = required(
+        await getDb(env)
+          .prepare(
+            `SELECT status, plan_update_signature, error
+               FROM payment_recurring_payment_update_attempts
+              WHERE recurring_payment_id = ?`
+          )
+          .bind(activated.id)
+          .first<{
+            status: PaymentRecurringPaymentAttemptStatus;
+            plan_update_signature: string | null;
+            error: string | null;
+          }>()
+      );
+      // The send was saved before the takeover; nothing after it was written.
+      expect(attempt.status).toBe("processing");
+      expect(attempt.plan_update_signature).not.toBeNull();
+      expect(attempt.error).toBeNull();
+    });
+
+    it("refuses a cancel's save after a takeover, broadcasting and resetting nothing", async () => {
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      takeOverBeforeNextSend(activated.id);
+      const sendsBefore = sendTransactionMock.mock.calls.length;
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/cancel`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(response.status).toBe(409);
+      expect(await errorMessage(response)).toBe(
+        "Recurring payment cancel was taken over by another run"
+      );
+      expect(sendTransactionMock).toHaveBeenCalledTimes(sendsBefore);
+      expect(await scheduleState(activated.id)).toMatchObject({
+        status: "canceling",
+        lease_id: TAKEOVER_LEASE,
+      });
+      const attempt = await getDb(env)
+        .prepare(
+          `SELECT status, signature, last_valid_block_height, error
+             FROM payment_recurring_payment_lifecycle_attempts
+            WHERE recurring_payment_id = ?`
+        )
+        .bind(activated.id)
+        .first();
+      expect(attempt).toEqual({
+        status: "processing",
+        signature: null,
+        last_valid_block_height: null,
+        error: null,
+      });
+    });
+
+    it("refuses a cancel's finalize after a takeover, leaving the schedule canceling", async () => {
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const confirm = required(confirmTransactionMock.getMockImplementation());
+      confirmTransactionMock.mockImplementationOnce(async (...args) => {
+        await takeOver(activated.id);
+        return confirm(...args);
+      });
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/cancel`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(response.status).toBe(409);
+      expect(await errorMessage(response)).toBe(
+        "Recurring payment cancel was taken over by another run"
+      );
+      expect(await scheduleState(activated.id)).toMatchObject({
+        status: "canceling",
+        lease_id: TAKEOVER_LEASE,
+      });
+      const attempt = await getDb(env)
+        .prepare(
+          `SELECT status, stage, signature, error
+             FROM payment_recurring_payment_lifecycle_attempts
+            WHERE recurring_payment_id = ?`
+        )
+        .bind(activated.id)
+        .first();
+      // The send was saved before the takeover; nothing after it was written.
+      expect(attempt).toEqual({
+        status: "processing",
+        stage: "submit",
+        signature: poolSentSignatures()[2],
+        error: null,
       });
     });
   });

@@ -55,7 +55,11 @@ export const listProjects = async (c: AppContext) => {
 
     projectList = includeArchived || project.status === "active" ? [project] : [];
   } else {
-    projectList = await projectService.listProjects(auth.organizationId, { includeArchived });
+    // Only projects the user is a member of, the rule the header and path scopes apply.
+    projectList = await projectService.listProjects(auth.organizationId, {
+      includeArchived,
+      memberUserId: auth.userId,
+    });
   }
 
   const orgState = await getOrganizationTierState(db, auth.organizationId);

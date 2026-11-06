@@ -44,6 +44,7 @@ import {
   listDvpInboundTradesResponseSchema,
   listDvpTradesResponseSchema,
 } from "@/openapi/schemas/dvp";
+import { projectIntegrationsResponseSchema } from "@/openapi/schemas/integrations";
 import {
   executeBurnResponseSchema,
   executeForceBurnResponseSchema,
@@ -81,12 +82,15 @@ import {
   organizationSchema,
 } from "@/openapi/schemas/organizations";
 import {
+  createdPaymentRequestSchema,
   offrampCurrenciesResponseSchema,
   onrampCurrenciesResponseSchema,
   onrampQuoteResponseSchema,
   paymentRecurringPaymentCollectionResponseSchema,
   paymentRecurringPaymentListResponseSchema,
   paymentRecurringPaymentResponseSchema,
+  paymentRequestLinkSchema,
+  paymentRequestListResponseSchema,
   paymentRequestSchema,
   paymentSubscriptionCollectionAttemptListResponseSchema,
   paymentSubscriptionListResponseSchema,
@@ -161,6 +165,7 @@ export const projectResponse = successResponseSchema(projectResponseSchema);
 export const listProjectsResponse = successResponseSchema(listProjectsResponseSchema);
 export const listProjectMembersResponse = successResponseSchema(listProjectMembersResponseSchema);
 export const listProjectApiKeysResponse = successResponseSchema(listProjectApiKeysResponseSchema);
+export const projectIntegrationsResponse = successResponseSchema(projectIntegrationsResponseSchema);
 /**
  * The project provider availability envelope, with or without the Earn family.
  *
@@ -291,6 +296,9 @@ export const transferBatchEstimateResponse = successResponseSchema(
   transferBatchEstimateResponseSchema
 );
 export const paymentRequestResponse = successResponseSchema(paymentRequestSchema);
+export const createdPaymentRequestResponse = successResponseSchema(createdPaymentRequestSchema);
+export const paymentRequestLinkResponse = successResponseSchema(paymentRequestLinkSchema);
+export const paymentRequestListResponse = successResponseSchema(paymentRequestListResponseSchema);
 export const paymentRecurringPaymentResponse = successResponseSchema(
   paymentRecurringPaymentResponseSchema
 );

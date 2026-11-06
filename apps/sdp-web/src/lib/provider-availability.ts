@@ -107,53 +107,6 @@ export function availableCustodyProviders(
 }
 
 /**
- * The ramp providers the project can use.
- *
- * @param availability - The project's provider availability.
- * @returns The available ramp providers, in tuple order.
- */
-export function availableRampProviders(
-  availability: ProjectProviderAvailability
-): RampProviderId[] {
-  return availability.providers.flatMap((entry) =>
-    entry.family === "ramps" && entry.available ? [entry.provider] : []
-  );
-}
-
-/**
- * The compliance providers the project can use.
- *
- * @param availability - The project's provider availability.
- * @returns The available compliance providers, in tuple order.
- */
-export function availableComplianceProviders(
-  availability: ProjectProviderAvailability
-): ComplianceProviderId[] {
-  return availability.providers.flatMap((entry) =>
-    entry.family === "compliance" && entry.available ? [entry.provider] : []
-  );
-}
-
-/**
- * Whether the project can use a provider in any family: a custody provider in
- * at least one mode, any other provider when it is available.
- *
- * @param availability - The project's provider availability.
- * @param provider - A provider id from any family.
- * @returns False for a provider the project cannot use or the deployment does not know.
- */
-export function isProviderAvailableForProject(
-  availability: ProjectProviderAvailability,
-  provider: string
-): boolean {
-  return availability.providers.some(
-    (entry) =>
-      entry.provider === provider &&
-      (entry.family === "custody" ? entry.modes.length > 0 : entry.available)
-  );
-}
-
-/**
  * Whether the project may set a custody provider up in a mode.
  *
  * @param availability - The project's provider availability.

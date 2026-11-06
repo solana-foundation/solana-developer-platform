@@ -1,12 +1,12 @@
 import { expect, type Page, test } from "@playwright/test";
 import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types/payments";
-import type { ListProjectsResponse, Project } from "@sdp/types/projects";
+import type { ListProjectsResponse, Project, ProjectEnvironment } from "@sdp/types/projects";
 import type { TokenTransactionListItem } from "@sdp/types/tokens";
 import { parseDashboardPathname, projectHref } from "@/lib/dashboard-project-path";
 import {
   formatCurrencyAmount,
   resolveTotalBalance,
-} from "../../src/app/dashboard/[projectId]/payments/payments-overview.utils";
+} from "../../src/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
 import { getE2EEnv } from "../env";
 import { CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS } from "../support/clerk-activation";
 import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
@@ -22,6 +22,11 @@ interface ReadOnlyFixture {
   transfers: PaymentTransferSummary[];
   wallets: PaymentsDashboardWallet[];
 }
+
+const ENVIRONMENT_LABELS = {
+  sandbox: "Sandbox",
+  production: "Production",
+} as const satisfies Record<ProjectEnvironment, string>;
 
 interface PageFailureCapture {
   failures: string[];
@@ -85,13 +90,18 @@ async function assertExactIdentityAndProject(page: Page, fixture: ReadOnlyFixtur
     .toBe(env.clerkOrgId);
 
   expect(parseDashboardPathname(new URL(page.url()).pathname).projectId).toBe(fixture.project.id);
-  await expect(page.getByText(fixture.project.name, { exact: true }).first()).toBeVisible();
+  await expect(
+    page.getByText(ENVIRONMENT_LABELS[fixture.project.environment], { exact: true }).first()
+  ).toBeVisible();
 }
 
-async function proveDashboardHydrated(page: Page, projectName: string): Promise<void> {
-  const switcher = page.getByRole("button").filter({ hasText: projectName }).first();
+async function proveDashboardHydrated(page: Page, environment: ProjectEnvironment): Promise<void> {
+  const switcher = page
+    .getByRole("button")
+    .filter({ hasText: ENVIRONMENT_LABELS[environment] })
+    .first();
   await switcher.click();
-  await expect(page.getByText("Projects", { exact: true })).toBeVisible();
+  await expect(page.getByText(/^Environments of /)).toBeVisible();
   await page.keyboard.press("Escape");
 }
 
@@ -270,7 +280,7 @@ test.describe("GCP dev dashboard read-only smoke", () => {
 
     await gotoProjectPage(page, fixture.project.id, "/dashboard/payments");
     await expect(page.getByRole("heading", { level: 1, name: "Payments" })).toBeVisible();
-    await proveDashboardHydrated(page, fixture.project.name);
+    await proveDashboardHydrated(page, fixture.project.environment);
     await assertExactIdentityAndProject(page, fixture);
     expect(hydrationRequests).toEqual([]);
     capture.assertClean();
@@ -339,7 +349,7 @@ test.describe("GCP dev dashboard read-only smoke", () => {
         page.locator("article").filter({ hasText: fixture.populatedWallet.publicKey }).first()
       ).toContainText(fixture.populatedWalletBalanceLabel);
     }
-    await proveDashboardHydrated(page, fixture.project.name);
+    await proveDashboardHydrated(page, fixture.project.environment);
     await assertExactIdentityAndProject(page, fixture);
     expect(batchBalanceRequests).toHaveLength(1);
     expect(legacyBalanceRequests).toEqual([]);

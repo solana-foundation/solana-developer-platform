@@ -83,8 +83,6 @@ describe.each([
     const env = {
       ...baseEnv,
       SDP_RELEASE_CHANNEL: "experimental",
-      MARKETS_ENABLED: "true",
-      EARN_ENABLED: "true",
       PRIVATE_CHANNELS_ENABLED: "true",
       HELIUS_RINGS_ENABLED: "true",
       SDP_ALLOW_PRODUCTION_PROJECTS: allowProductionProjects,

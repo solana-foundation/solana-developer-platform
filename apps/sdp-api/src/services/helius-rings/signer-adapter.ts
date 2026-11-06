@@ -1,4 +1,4 @@
-import { SigningError } from "@sdp/custody/signing";
+import { SigningError, type SigningErrorCode } from "@sdp/custody/signing";
 import { derivationMessageBase64 } from "@sdp/helius-rings-sdk/custody-ka/seed";
 import type { MovementOf } from "@sdp/types/movements";
 import { getBase64Codec } from "@solana/codecs";
@@ -38,12 +38,11 @@ import { RingsAdapterError } from "./adapter-error";
  */
 
 /** Signer errors that a retry cannot fix. */
-const NON_RETRYABLE_SIGNING_CODES = new Set([
+const NON_RETRYABLE_SIGNING_CODES: ReadonlySet<SigningErrorCode> = new Set<SigningErrorCode>([
   "PROVIDER_NOT_CONFIGURED",
   "WALLET_NOT_FOUND",
   "NOT_FOUND",
   "INVALID_REQUEST",
-  "APPROVAL_REJECTED",
 ]);
 
 /**

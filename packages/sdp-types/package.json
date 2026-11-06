@@ -109,6 +109,11 @@
       "import": "./src/kamino-programs.ts",
       "default": "./src/kamino-programs.ts"
     },
+    "./integrations": {
+      "types": "./src/integrations.ts",
+      "import": "./src/integrations.ts",
+      "default": "./src/integrations.ts"
+    },
     "./kyc": {
       "types": "./src/kyc.ts",
       "import": "./src/kyc.ts",
@@ -258,6 +263,11 @@
       "types": "./src/mainnet-access.ts",
       "import": "./src/mainnet-access.ts",
       "default": "./src/mainnet-access.ts"
+    },
+    "./sdp-terms-text": {
+      "types": "./src/sdp-terms-text.ts",
+      "import": "./src/sdp-terms-text.ts",
+      "default": "./src/sdp-terms-text.ts"
     }
   },
   "scripts": {

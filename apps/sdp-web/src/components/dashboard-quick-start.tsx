@@ -1,18 +1,18 @@
 "use client";
 
 import { Button } from "@sdp/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
 import { cn } from "@sdp/ui/cn";
 import { CheckIcon, ChevronDownIcon, ChevronRightIcon, ListChecks, MinusIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import {
+  RecordActionRow,
+  RecordSection,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import {
-  DASHBOARD_INTEGRATIONS_SUBNAV_HREFS,
-  DASHBOARD_SIDE_NAV_HREFS,
-} from "@/lib/dashboard-navigation-loading";
+import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import {
   countSettledQuickStartSteps,
   dismissQuickStart,
@@ -31,6 +31,8 @@ type Translate = ReturnType<typeof useTranslations>;
 
 const TOTAL_STEPS = QUICK_START_STEP_IDS.length;
 const CREATE_API_KEY_HREF = "/dashboard/api-keys/new";
+// A project's first wallet sets its custody provider up, so the step opens wallet setup.
+const CREATE_WALLET_HREF = "/dashboard/wallets/setup";
 
 /** Re-renders on an interval so "40s ago" keeps counting while the guide is open. */
 function useNow(intervalMs: number): number {
@@ -99,17 +101,22 @@ function stepCopy(
   const { t, locale, now, status, storageKey, skippedAt } = context;
   if (step.id === "custody") {
     const connect = {
-      label: t("Shared.quickStart.custodyConnect"),
-      href: DASHBOARD_INTEGRATIONS_SUBNAV_HREFS.custody,
+      label: t("Shared.quickStart.custodyCreate"),
+      href: CREATE_WALLET_HREF,
     };
     const title = t("Shared.quickStart.custodyTitle");
     if (step.state === "done") {
       return {
         title,
-        href: connect.href,
+        href: DASHBOARD_SIDE_NAV_HREFS.wallets,
         description: t("Shared.quickStart.custodyDoneDescription"),
         meta: t("Shared.quickStart.custodyDoneMeta"),
-        actions: [{ ...connect, label: t("Shared.quickStart.custodyManage") }],
+        actions: [
+          {
+            label: t("Shared.quickStart.custodyViewWallets"),
+            href: DASHBOARD_SIDE_NAV_HREFS.wallets,
+          },
+        ],
       };
     }
     if (step.state === "skipped" && skippedAt) {
@@ -464,7 +471,8 @@ function SidebarQuickStart({
               );
             })}
           </ul>
-          <div className="flex h-8 items-center justify-between border-t border-border-subtle px-1">
+          {/* The header folds the card, so the foot holds only the way out of the guide. */}
+          <div className="flex h-8 items-center border-t border-border-subtle px-1">
             <button
               type="button"
               onClick={() => dismissQuickStart(storageKey)}
@@ -472,15 +480,6 @@ function SidebarQuickStart({
               className="inline-flex h-7 items-center rounded-control px-2 text-meta text-secondary transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
             >
               {t("Shared.quickStart.dismiss")}
-            </button>
-            <button
-              type="button"
-              aria-expanded
-              aria-controls={listId}
-              onClick={() => setQuickStartCollapsed(storageKey, "sidebar", true)}
-              className="inline-flex h-7 items-center rounded-control px-2 text-meta text-secondary transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
-            >
-              {t("Shared.quickStart.hide")}
             </button>
           </div>
         </>
@@ -511,33 +510,32 @@ function SettingsQuickStart({ quickStart }: { quickStart: ReturnType<typeof useQ
   }
   const canOpen = eligible && (status !== null || prefs.dismissed) && !complete;
   return (
-    <Card id="onboarding" className="scroll-mt-6">
-      <CardHeader>
-        <CardTitle>
-          <h2>{t("Shared.quickStart.settingsTitle")}</h2>
-        </CardTitle>
-        <CardDescription>{t("Shared.quickStart.newDesign.settingsDescription")}</CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0 space-y-1">
-          <h3 className="text-sm font-medium">{t("Shared.quickStart.newDesign.title")}</h3>
-          <p className="text-sm text-secondary">{description}</p>
-        </div>
-        {canOpen ? (
-          <Button
-            variant="secondary"
-            onClick={() => {
-              if (prefs.dismissed) resumeQuickStart(storageKey);
-              router.push(projectHref(DASHBOARD_SIDE_NAV_HREFS.home));
-            }}
-          >
-            {t(
-              prefs.dismissed ? "Shared.quickStart.settingsShow" : "Shared.quickStart.settingsOpen"
-            )}
-          </Button>
-        ) : null}
-      </CardContent>
-    </Card>
+    <RecordSection id="onboarding" title={t("Shared.quickStart.settingsTitle")}>
+      <RecordActionRow
+        help={t("Shared.quickStart.newDesign.settingsDescription")}
+        label={t("Shared.quickStart.newDesign.title")}
+        hint={description}
+        control={
+          canOpen ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (prefs.dismissed) resumeQuickStart(storageKey);
+                router.push(projectHref(DASHBOARD_SIDE_NAV_HREFS.home));
+              }}
+            >
+              {t(
+                prefs.dismissed
+                  ? "Shared.quickStart.settingsShow"
+                  : "Shared.quickStart.settingsOpen"
+              )}
+            </Button>
+          ) : null
+        }
+      />
+    </RecordSection>
   );
 }
 

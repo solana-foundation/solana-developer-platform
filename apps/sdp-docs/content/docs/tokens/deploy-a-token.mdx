@@ -8,12 +8,13 @@ steps:
   - Confirm deployment
 ---
 
-After [creating a token](/docs/tokens/create-a-token), deploy it onchain. Deployment creates the mint account on Solana and signs the deployment with the exact SDP Wallet selected for execution.
+Deploying [a draft](/docs/tokens/create-a-token) creates its mint on Solana with the draft's settings, signed by the custody wallet you choose. The mint lands on the project's network: devnet for a sandbox project, mainnet for production.
 
 ## Prerequisites
 
-- A token in `pending` status
-- The exact SDP Wallet `id` returned by `GET /v1/wallets` (for example, `cwlt_*`)
+- A draft token (`status: "pending"`)
+- The SDP wallet `id` that signs the deploy (`cwlt_…`, from `GET /v1/wallets`). It receives the mint authority.
+- For the API, a key with the `issuance.execute` grant
 
 ## How it works
 
@@ -21,26 +22,26 @@ After [creating a token](/docs/tokens/create-a-token), deploy it onchain. Deploy
 
 <Step number={1} title="Open the deploy action">
 
-Locate the token you want to deploy. Deployment is irreversible — the mint account and its configured authorities are created onchain.
+Find the draft. Deploying can't be undone: the mint address is permanent, and the symbol and decimals lock with it.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In the **Issuance** list, click the token with a `Pending` badge to open its detail page.
+In **Issuance**, open the token marked **Draft**. Its **Overview** tab shows **Deploy this token**: the **Signing wallet**, where the **Authorities** go, and whether it's **Reversible**.
 
-The **Deploy** button appears in the token header and in the fund management panel.
+Save or discard any edits first: the dashboard holds the deploy while changes are unsaved.
 
-![Token detail page showing Not deployed status and Deploy button](/images/tokens/token-detail-pending.png)
+![Acme Dollar's Overview tab in the Draft state, with Deploy this token and its Deploy token button](/images/tokens/token-detail-pending.png)
 
 </Tab>
 <Tab value="API">
 
-You need the `tokenId` returned when you created the token. If you don't have it, list your tokens:
+You need the token `id` (`tok_…`) from create. If you don't have it, list your tokens:
 
 <ApiExample operation="list-tokens" />
 
-Note the token `id` (e.g., `tok_abc123`) — required for all deploy and post-deploy calls. Also list your wallets and use the wallet record's `id`, not its provider-specific `walletId` or public key:
+Then list your wallets and use the wallet record's `id`, not its provider `walletId` or public key:
 
 <ApiExample operation="list-wallets" />
 
@@ -52,21 +53,17 @@ Note the token `id` (e.g., `tok_abc123`) — required for all deploy and post-de
 
 <Step number={2} title="Deploy the token">
 
-SDP signs and submits the deploy transaction using `signingCustodyWalletId`. If you supply it here, it overrides the pending draft's execution wallet; if you omit it, SDP uses the value stored on the draft. One of those values is required. An override changes the deployment signer and historical attribution, but it does not rewrite immutable authority values already captured in the token's configuration.
+SDP signs and sends the deploy with `signingCustodyWalletId`. A value in the request overrides the draft's wallet; without one, SDP uses the draft's. With neither, the request fails with `400`.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Click **Deploy**. A modal shows the signer wallet that will authorize the transaction. Review the wallet ID and public key, then click **Deploy now**.
+Click **Deploy token**. In the **Deploy token** dialog, check the **Signing wallet** (choose one if several can sign), then click **Deploy token**.
 
-![Deploy token modal showing the signer wallet details](/images/tokens/token-deploy-modal.png)
+<img src="/docs/images/tokens/token-deploy-modal.png" alt="Deploy token dialog with the Treasury signing wallet" width="449" height="320" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
-A confirmation prompt asks you to confirm the on-chain submission. Click **Deploy now** to proceed.
-
-![Deploy token confirmation dialog](/images/tokens/token-deploy-confirm.png)
-
-SDP submits the transaction to Solana and polls for confirmation. The page updates automatically when deployment completes.
+SDP signs, sends and confirms the deploy in one request. The token shows **Deploying** while it runs, and you can leave the page.
 
 </Tab>
 <Tab value="API">
@@ -93,10 +90,17 @@ const res = await fetch(
   }
 );
 const { data } = await res.json();
-// data.token.mintAddress — the onchain mint address
+// data.token.mintAddress: the onchain mint address
 ```
 
-Always pass an `Idempotency-Key` — retrying with the same key after a network error prevents double-deployment.
+Optional fields:
+
+- `authorityCustodyWalletIds`: custody wallets for the `metadata`, `freeze` and `permanentDelegate` authorities. Roles the token has and you omit go to the signing wallet, unless the token's extensions already name an address. Naming a wallet for a role the token lacks returns `400`.
+- `feePayment`: `sponsored` (the default) has SDP's fee sponsor pay. With `wallet`, the signing wallet pays rent and fees from its own SOL, and a wallet that can't cover them gets `400` before anything is sent.
+
+Always send an `Idempotency-Key`. A retry with the same key never deploys twice: after a deploy that landed, it returns the deployed token. Reusing the key with a different body returns `409`.
+
+If a deploy fails before the mint lands, the token returns to `pending`, so retry with a new key. If the mint lands but setting its metadata URI fails, SDP records the mint and returns `400 TRANSACTION_FAILED` with `details.mintAddress`. Don't redeploy.
 
 </Tab>
 </Tabs>
@@ -106,30 +110,32 @@ Always pass an `Idempotency-Key` — retrying with the same key after a network 
 
 <Step number={3} title="Confirm deployment">
 
-Once the transaction is confirmed, the token is active and ready for minting and transfers.
+Once the transaction confirms, the token is active and ready for minting and transfers.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-The token status badge changes from `Not deployed` to the onchain mint address. The detail page shows Mint and Burn actions in the Operations tab, and a confirmed deploy transaction in the Transactions table.
+The toast reads "Deploy transaction finalized." and the token shows **Live onchain** with its mint address. Its operations open on the **Operations** tab, where **Transactions** lists the deploy.
 
-![Deployed token detail page with mint address, Operations tab, and confirmed deploy transaction](/images/tokens/token-deployed.png)
+If the deploy fails, the token shows **Deploy failed** with the reason, **Retry deploy** and **Open wallets**.
+
+![Acme Dollar after the deploy: Live onchain, with Explorer and Mint tokens](/images/tokens/token-deployed.png)
 
 </Tab>
 <Tab value="API">
 
-The deploy response includes the confirmed state:
+The deploy response carries the confirmed state:
 
 ```typescript title="deploy-token.ts"
-// data.token.status      — "active"
-// data.token.mintAddress — e.g., "AcMeXYZ..."
-// data.token.signingCustodyWalletId — exact wallet used for deployment
+// data.token.status: "active"
+// data.token.mintAddress: for example "AcMeXYZ..."
+// data.token.signingCustodyWalletId: the wallet that deployed
 ```
 
-After deployment, `signingCustodyWalletId` is historical deployment attribution. Mint and admin actions resolve their current on-chain authority, while a standard burn uses its exact source wallet; none use the deployment wallet as a fallback.
+After deployment, `signingCustodyWalletId` only records who deployed. Mint and admin actions use each authority's current holder, and a standard burn uses its own source wallet; none fall back to the deployment wallet.
 
-Fetch the token at any time to verify:
+Fetch the token at any time to check:
 
 <ApiExample operation="get-token" />
 

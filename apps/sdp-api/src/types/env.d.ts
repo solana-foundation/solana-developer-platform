@@ -35,7 +35,6 @@ export interface Env extends ManagedRpcEnv {
   // Injected automatically by Cloud Run services and jobs.
   K_SERVICE?: string;
   K_REVISION?: string;
-  CLOUD_RUN_JOB?: string;
   // Explicit proxy-trust assertion; never inferred from K_SERVICE (APE-810).
   // "gclb": ingress is restricted to the Google external load balancer, which
   // appends the verified client address. "true": a deployment-owned proxy
@@ -151,7 +150,6 @@ export interface Env extends ManagedRpcEnv {
   // Fireblocks configuration (@solana/keychain-fireblocks)
   FIREBLOCKS_API_KEY?: string;
   FIREBLOCKS_API_SECRET?: string;
-  FIREBLOCKS_VAULT_ID?: string;
   FIREBLOCKS_ASSET_ID?: string;
   FIREBLOCKS_API_BASE_URL?: string;
 
@@ -160,7 +158,6 @@ export interface Env extends ManagedRpcEnv {
   PRIVY_APP_SECRET?: string;
   PRIVY_WALLET_ID?: string;
   PRIVY_API_BASE_URL?: string;
-  PRIVY_REQUEST_DELAY_MS?: string;
 
   // Coinbase CDP Server Wallet configuration (Solana)
   COINBASE_CDP_API_KEY_ID?: string;
@@ -168,37 +165,29 @@ export interface Env extends ManagedRpcEnv {
   COINBASE_CDP_WALLET_SECRET?: string;
   COINBASE_CDP_API_BASE_URL?: string;
   COINBASE_CDP_NETWORK?: "solana" | "solana-devnet";
-  COINBASE_CDP_WALLET_ID?: string;
   COINBASE_CDP_ACCOUNT_NAMESPACE?: string;
 
   // Para Server Wallet configuration (Solana)
   PARA_API_KEY?: string;
   PARA_API_BASE_URL?: string;
-  PARA_REQUEST_DELAY_MS?: string;
-  PARA_WALLET_ID?: string;
 
   // Turnkey Server Wallet configuration (Solana)
   TURNKEY_API_PUBLIC_KEY?: string;
   TURNKEY_API_PRIVATE_KEY?: string;
   TURNKEY_ORGANIZATION_ID?: string;
   TURNKEY_API_BASE_URL?: string;
-  TURNKEY_REQUEST_DELAY_MS?: string;
-  TURNKEY_PRIVATE_KEY_ID?: string;
-  TURNKEY_PUBLIC_KEY?: string;
 
   // DFNS Server Wallet configuration (Solana)
   DFNS_AUTH_TOKEN?: string;
   DFNS_CREDENTIAL_ID?: string;
   DFNS_PRIVATE_KEY?: string;
   DFNS_API_BASE_URL?: string;
-  DFNS_WALLET_ID?: string;
 
   // IBM Digital Asset Haven configuration (white-label Dfns; Solana)
   IBM_HAVEN_AUTH_TOKEN?: string;
   IBM_HAVEN_CREDENTIAL_ID?: string;
   IBM_HAVEN_PRIVATE_KEY?: string;
   IBM_HAVEN_API_BASE_URL?: string;
-  IBM_HAVEN_WALLET_ID?: string;
 
   // Anchorage wallet lifecycle configuration
   ANCHORAGE_API_KEY?: string;
@@ -231,10 +220,6 @@ export interface Env extends ManagedRpcEnv {
   KORA_PER_TRANSACTION_BUDGET_LAMPORTS?: string;
   KORA_SURFPOOL_SHIM?: string;
   KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS?: string;
-
-  // MagicBlock private payments configuration
-  MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL?: string;
-  MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN?: string;
 
   // Self-hosted Asset Profiles production opt-in; managed rollout uses Vercel.
   SDP_FLAG_ASSET_PROFILES?: string;
@@ -284,9 +269,6 @@ export interface Env extends ManagedRpcEnv {
   STRIPE_PRODUCTION_SECRET_KEY?: string;
   STRIPE_PRODUCTION_WEBHOOK_SECRET?: string;
 
-  // Markets module gate. Clearing it dark-launches every Markets API surface.
-  MARKETS_ENABLED?: string;
-  EARN_ENABLED?: string;
   // Optional Hastra PRIME -> wYLDS -> Jupiter -> USDC exit. Off by default;
   // Hastra's operator-settled par redemption remains available independently.
   EARN_HASTRA_DEX_EXIT_ENABLED?: string;

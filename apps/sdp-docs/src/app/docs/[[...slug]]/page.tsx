@@ -1,21 +1,17 @@
 import { findNeighbour } from "fumadocs-core/page-tree";
-import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import type { ComponentType } from "react";
-import { z } from "zod";
-import { type BreadcrumbItem, DocsBreadcrumb } from "@/components/docs-shell/breadcrumb";
+import { DocsBreadcrumb } from "@/components/docs-shell/breadcrumb";
 import { DevelopmentNotice } from "@/components/docs-shell/development-notice";
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "@/components/docs-shell/page";
 import { PageActions } from "@/components/docs-shell/page-actions";
+import { breadcrumbsFor, resolvePage } from "@/lib/breadcrumbs";
 import { getDocsMarkdownPath, getDocsMarkdownUrl, getDocsPagePath } from "@/lib/site";
 import { source } from "@/lib/source";
 import { getMDXComponents } from "@/mdx-components";
 
-const mdxComponents = getMDXComponents({
-  Tabs,
-  Tab,
-});
+const mdxComponents = getMDXComponents();
 
 type DocsData = {
   title: string;
@@ -34,72 +30,6 @@ type DocsData = {
 type DocsPageProps = {
   params: Promise<{ slug?: string[] }>;
 };
-
-type ResolvedPage = {
-  page: NonNullable<ReturnType<typeof source.getPage>>;
-  pageSlug: string[];
-};
-
-const breadcrumbMetadataSchema = z.object({ breadcrumbParent: z.string().optional() });
-
-function resolvePage(slug?: string[]): ResolvedPage | null {
-  if (!slug || slug.length === 0) {
-    const rootPage = source.getPage([]);
-    return rootPage ? { page: rootPage, pageSlug: [] } : null;
-  }
-
-  const directPage = source.getPage(slug);
-  if (directPage) {
-    return { page: directPage, pageSlug: slug };
-  }
-
-  const indexSlug = [...slug, "index"];
-  const indexPage = source.getPage(indexSlug);
-  if (indexPage) {
-    return { page: indexPage, pageSlug: indexSlug };
-  }
-
-  return null;
-}
-
-function breadcrumbsFor(page: ResolvedPage["page"]): BreadcrumbItem[] {
-  const topLevelUrls = new Set(
-    source.pageTree.children.flatMap((node) => (node.type === "page" ? [node.url] : []))
-  );
-  if (topLevelUrls.has(page.url)) return [];
-
-  const items: BreadcrumbItem[] = [];
-  const seen = new Set([page.url]);
-  let current = page;
-
-  while (!topLevelUrls.has(current.url)) {
-    const { breadcrumbParent: override } = breadcrumbMetadataSchema.parse(current.data);
-    const segments = current.url
-      .replace(/^\/docs\/?/, "")
-      .split("/")
-      .filter(Boolean);
-    const parent = override
-      ? resolvePage(
-          override
-            .replace(/^\/docs\/?/, "")
-            .split("/")
-            .filter(Boolean)
-        )?.page
-      : [...segments.keys()]
-          .slice(1)
-          .reverse()
-          .map((length) => resolvePage(segments.slice(0, length))?.page)
-          .find((candidate) => candidate && candidate.url !== current.url);
-
-    if (override && !parent) throw new Error(`Unknown breadcrumb parent: ${override}`);
-    if (!parent || seen.has(parent.url)) break;
-    seen.add(parent.url);
-    items.unshift({ name: String(parent.data.title), url: parent.url });
-    current = parent;
-  }
-
-  return items;
-}
 
 /** A page's headings. An API operation's page has none: its samples take the right column. */
 function headingsToc(data: DocsData) {

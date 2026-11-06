@@ -31,7 +31,8 @@ export type InterfaceSnippet = {
 
 const API = DEFAULT_SDP_API_URL;
 const PROMPT: CodeToken = { kind: "prompt", text: "$" };
-const AUTH = '-H "Authorization: Bearer sk_test_…"';
+/** Keys are `sf_<key id>_<secret>` (apps/sdp-api/src/lib/api-key-format.ts). */
+const AUTH = '-H "Authorization: Bearer sf_…"';
 const JSON_TYPE = '-H "Content-Type: application/json"';
 /** A transfer moves money, so the API refuses one without a key (IDEMPOTENCY_REQUIRED_ROUTES). */
 const IDEMPOTENCY = '-H "Idempotency-Key: payment-invoice-1234"';

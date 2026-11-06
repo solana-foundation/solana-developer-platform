@@ -1,14 +1,17 @@
-import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import { z } from "zod";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "./dashboard-cache-scope";
 
 /**
- * What the server knows about an organization's setup: the custody provider it connected, and
- * whether any of its keys has signed a request yet. Read once per
- * page load by the dashboard layout and refreshed while the guide is on screen.
+ * What the server knows about setup: whether the open project has a wallet, and whether any of
+ * the organization's keys has signed a request yet. Read once per page load by the dashboard
+ * layout and refreshed while the guide is on screen.
  */
 export const quickStartStatusSchema = z.object({
-  custodyProvider: z.enum(CUSTODY_PROVIDERS).nullable(),
+  /**
+   * The open project lists a wallet. The wallet step links into this project (setup, then its
+   * wallet list), so its state is read from the same place.
+   */
+  hasWallet: z.boolean(),
   apiKeyCount: z.number().int().nonnegative(),
   /** When a key last signed a request; null until the first one arrives. */
   lastCallAt: z.string().nullable(),
@@ -19,7 +22,7 @@ export const QUICK_START_STEP_IDS = ["custody", "first-call"] as const;
 type QuickStartStepId = (typeof QUICK_START_STEP_IDS)[number];
 
 /**
- * - done: the signal is in (a provider is connected, a call arrived).
+ * - done: the signal is in (the open project has a wallet, a call arrived).
  * - skipped: the person chose to leave it; only custody can be skipped.
  * - pending: waiting on the person.
  */
@@ -47,12 +50,12 @@ export const EMPTY_QUICK_START_PREFS: QuickStartPrefs = Object.freeze({
   skipped: Object.freeze({}),
 });
 
-/** A connected provider wins over an earlier skip. */
+/** A wallet in the open project wins over an earlier skip. */
 function resolveCustodyState(
   status: QuickStartStatus,
   skipped: QuickStartPrefs["skipped"]
 ): QuickStartStepState {
-  if (status.custodyProvider) return "done";
+  if (status.hasWallet) return "done";
   if (skipped.custody) return "skipped";
   return "pending";
 }

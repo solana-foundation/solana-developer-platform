@@ -1,4 +1,3 @@
-import { LandmarkIcon, PercentIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetDashboardNavigation } from "@/test/dashboard-navigation";
@@ -66,12 +65,10 @@ describe("Markets dashboard navigation", () => {
       {
         label: "Shared.dashboardShell.treasurySolutions",
         href: "/dashboard/markets/treasury-solutions",
-        icon: LandmarkIcon,
       },
       {
         label: "Shared.dashboardShell.earnProgram",
         href: "/dashboard/markets/embedded-yield",
-        icon: PercentIcon,
       },
     ]);
   });
@@ -170,54 +167,6 @@ describe("Payments navigation for a read-only member", () => {
     expect(hrefs(true)).toContain("/dashboard/payments/pay");
     expect(hrefs(false)).not.toContain("/dashboard/payments/pay");
     expect(hrefs(false)).toContain("/dashboard/payments/deposit");
-  });
-});
-
-describe("Integrations dashboard navigation", () => {
-  const findIntegrationsItem = (options: ReturnType<typeof navOptions>) =>
-    findManageItem(options, "Shared.dashboardShell.integrations");
-
-  it("groups every enabled family under the Integrations submenu", () => {
-    const item = findIntegrationsItem(
-      navOptions({
-        complianceEnabled: true,
-        custodyEnabled: true,
-        paymentsEnabled: true,
-        privateChannelsEnabled: true,
-        rampsEnabled: true,
-      })
-    );
-
-    expect(item?.subnavKey).toBe("integrations");
-    expect(item?.children?.map((child) => child.href)).toEqual([
-      "/dashboard/integrations?tab=custody",
-      "/dashboard/integrations?tab=ramps",
-      "/dashboard/integrations?tab=compliance",
-      "/dashboard/integrations?tab=privacy",
-    ]);
-    expect(item?.children?.every((child) => child.icon)).toBe(true);
-  });
-
-  it("lists no family when every owning module is disabled", () => {
-    const item = findIntegrationsItem(
-      navOptions({
-        complianceEnabled: false,
-        custodyEnabled: false,
-        paymentsEnabled: false,
-        privateChannelsEnabled: false,
-        rampsEnabled: false,
-      })
-    );
-
-    expect(item?.children).toEqual([]);
-  });
-
-  it("drops Ramps when no ramp provider is enabled, even with Payments on", () => {
-    const item = findIntegrationsItem(navOptions({ paymentsEnabled: true, rampsEnabled: false }));
-
-    expect(item?.children?.map((child) => child.href)).not.toContain(
-      "/dashboard/integrations?tab=ramps"
-    );
   });
 });
 

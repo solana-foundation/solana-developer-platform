@@ -1,32 +1,31 @@
 ---
 title: AI resources
-description: Machine-readable docs and setup guidance for coding agents.
+description: Machine-readable SDP docs, the agent skill, and setup for coding agents.
 ---
 
-Use this page when you need the public AI-facing entry points for Solana Developer Platform.
+Give your coding agent these entry points. They cover the supported public surface only.
 
 ## Machine-readable resources
 
-- [llms.txt](/docs/ai/llms.txt): Concise discovery file with canonical URLs, supported surfaces, and key starting pages.
-- [llms-full.txt](/docs/ai/llms-full.txt): Expanded docs map generated from the docs navigation and public API reference.
-- [SKILL.md](/SKILL.md): Agent skill with the rules for building on SDP: environments, API key grants, idempotency, and prepare versus execute. The **Agent setup** menu in the sidebar has the command that installs it for your coding agent.
-- [OpenAPI](/docs/reference/api): Human-readable API reference generated from the public contract.
-- [OpenAPI JSON](https://api.solana.com/openapi.json): Machine-readable API contract for the public SDP API.
-- [API llms.txt](https://api.solana.com/llms.txt): API-only discovery entry point for endpoint families and authentication expectations.
-- [Postman Collection](/docs/reference/postman-collection): Downloadable public collection generated from the same OpenAPI source.
+- [llms.txt](/docs/ai/llms.txt): canonical URLs, supported surfaces, the public endpoint families, and the key pages to start from. The site root serves it too, at `/llms.txt`.
+- [llms-full.txt](/docs/ai/llms-full.txt): the full text of every published page, the API reference included, in one file. Also at `/llms-full.txt`.
+- Markdown pages: add `.md` to any docs URL (`/docs/reference/docs-for-ai.md`), or request the page with `Accept: text/markdown`. `/docs.md` lists every page. Each page's **Copy page** menu copies the same Markdown.
+- [SKILL.md](/SKILL.md): an agent skill with SDP's rules for environments, API key grants, idempotency, and prepare versus execute. The sidebar's **Agent setup** menu has the install command for your agent. The agent-neutral one is `npx skills add solana-foundation/solana-developer-platform --skill sdp-docs`.
+- [API reference](/docs/reference/api): every public operation, generated from the public OpenAPI contract.
+- [OpenAPI JSON](https://api.solana.com/openapi.json): the public API contract itself.
+- [API llms.txt](https://api.solana.com/llms.txt): the API's own discovery file, with its endpoint families and how to authenticate.
+- [Postman collection](/docs/reference/postman-collection): the public API as a collection, generated from the same contract.
 
 ## Recommended ingestion order
 
 1. Start with [llms.txt](/docs/ai/llms.txt).
-2. Expand to [llms-full.txt](/docs/ai/llms-full.txt) when you need broader site coverage.
+2. Load [llms-full.txt](/docs/ai/llms-full.txt) when you need every page.
 3. Use the [API reference](/docs/reference/api) and [OpenAPI JSON](https://api.solana.com/openapi.json) for exact request and response schemas.
-4. Use the product guides for workflow sequencing, operational constraints, and supported patterns.
+4. Use the product guides for workflow order, operational limits, and supported patterns.
 
 ## Scope
 
-- These AI resources are limited to the supported public SDP surface.
-- Hidden or internal-only route families are intentionally excluded.
-- Public docs should be treated as the source of truth ahead of internal implementation details.
+Treat the public docs as the source of truth over internal implementation details. Hidden and internal-only route families are left out of every resource on this page.
 
 ## Coverage focus
 

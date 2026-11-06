@@ -51,6 +51,7 @@ packages/*
 !packages/sdp-rpc
 !packages/sdp-custody
 !packages/sdp-redaction
+!packages/sdp-ip
 !packages/sdp-solana
 !packages/sdp-payments
 !packages/sdp-fee-payment

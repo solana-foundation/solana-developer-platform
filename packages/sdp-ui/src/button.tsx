@@ -3,7 +3,7 @@ import {
   type ButtonProps as SolanaButtonProps,
 } from "@solana/design-system/button";
 import { Slot } from "@solana/design-system/utils";
-import type { ComponentProps } from "react";
+import { type ComponentProps, cloneElement, isValidElement, type ReactNode } from "react";
 
 import { cn } from "./cn";
 
@@ -22,8 +22,7 @@ const variantClassNames: Record<ButtonVariant, string | undefined> = {
   default: undefined,
   destructive:
     "bg-destructive text-on-primary hover:bg-destructive-strong focus-visible:ring-destructive-border",
-  outline:
-    "border border-border-default bg-surface-raised text-primary hover:bg-surface-sunken refresh:border-border-strong refresh:bg-transparent refresh:hover:bg-fill-subtle",
+  outline: "border border-border-strong bg-transparent text-primary hover:bg-fill-subtle",
   secondary: undefined,
   ghost: "bg-transparent text-secondary hover:bg-fill-subtle hover:text-primary",
   link: "h-auto bg-transparent px-0 text-primary underline-offset-4 hover:bg-transparent hover:underline",
@@ -57,8 +56,7 @@ const slotVariantClassNames: Record<ButtonVariant, string> = {
   default: "bg-primary !text-on-primary hover:opacity-90 visited:!text-on-primary",
   destructive:
     "bg-destructive text-on-primary hover:bg-destructive-strong focus-visible:ring-destructive-border",
-  outline:
-    "border border-border-default bg-surface-raised text-primary hover:bg-surface-sunken refresh:border-border-strong refresh:bg-transparent refresh:hover:bg-fill-subtle",
+  outline: "border border-border-strong bg-transparent text-primary hover:bg-fill-subtle",
   secondary: "bg-fill text-primary hover:bg-fill-strong",
   ghost: "bg-transparent text-secondary hover:bg-fill-subtle hover:text-primary",
   link: "h-auto bg-transparent px-0 text-primary underline-offset-4 hover:bg-transparent hover:underline",
@@ -107,7 +105,7 @@ function Button({
           className
         )}
       >
-        {children}
+        {slottedChild(children, iconLeft, iconRight)}
       </Slot>
     );
   }
@@ -130,3 +128,12 @@ function Button({
 }
 
 export { Button, slotVariantClassNames as buttonVariantClassNames };
+
+// Slot renders its one child, so an icon given beside `asChild` goes inside that child,
+// around its own content, or it would be dropped.
+function slottedChild(children: ReactNode, iconLeft: ReactNode, iconRight: ReactNode): ReactNode {
+  if (!isValidElement<{ children?: ReactNode }>(children) || (!iconLeft && !iconRight)) {
+    return children;
+  }
+  return cloneElement(children, undefined, iconLeft, children.props.children, iconRight);
+}

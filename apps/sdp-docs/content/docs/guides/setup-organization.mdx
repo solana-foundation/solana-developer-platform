@@ -1,34 +1,28 @@
 ---
 title: Set up your workspace
-description: Create an organization and a sandbox project.
+description: Create your account and organization, which comes with a Sandbox and a Production project.
 breadcrumbParent: /docs
 ---
 
-Every SDP user works through an **organization** — a team workspace containing one or more **projects**, each a provisioned environment with its own API keys, wallets, and members. This guide creates your organization and covers how projects scope your resources.
+Everything you do in SDP belongs to an **organization**, your team's workspace. An organization holds **projects**, and each project has its own API keys, wallets, and members. This guide creates your account and organization.
 
-### 1. Sign up
+### 1. Create your account
 
-Go to [platform.solana.com](https://platform.solana.com) and click **Dashboard**. On the sign-in screen, click **Sign up** to create a new account.
-
-![SDP sign-in screen with Sign up link](/images/getting-started/sign-in.png)
+Go to [platform.solana.com](https://platform.solana.com) and click **Create account**. The sign-in screen has the same button at the top right. When sign-up is closed, these buttons read **Join the waitlist** and **Request access** instead.
 
 Enter your email address and a password to create your account.
 
-![Create your account screen](/images/getting-started/create-account.png)
+### 2. Create your organization
 
-### 2. Create or select an organization
+After you sign in, **Name your organization** asks for an **Organization name**. Enter it and click **Create organization**. You become the organization's admin. If you've been invited to an organization, accept the invitation or pick the organization from the list instead.
 
-After signing in you'll be prompted to set up your organization. Upload a logo and enter your organization name, then click **Continue**.
+To switch organizations or projects later, click your organization's name at the top of the sidebar.
 
-![Setup your organization screen](/images/getting-started/setup-organization.png)
+<img src="/docs/images/getting-started/org-switcher.png" alt="Organization switcher with your organizations, the project list and the organization ID" width="262" height="322" style={{ display: "block", maxWidth: "100%", height: "auto" }} />
 
-If you already have an organization, the **Organization Switcher** in the top-left of the sidebar lets you switch between them or create a new one.
+### 3. Work in a project
 
-<img src="/docs/images/getting-started/org-switcher.png" alt="Organization Switcher dropdown" width="436" style={{ display: "block", maxWidth: "100%" }} />
-
-### 3. Organize with projects
-
-A **project** is a provisioned environment within your organization — sandbox or production-style — with its own API keys, wallets, tokens, and members, so teams don't share the same wallet and token surface. See the [Projects API reference](/docs/reference/api/projects) for managing them programmatically.
+Your organization comes with two projects: **Default Sandbox Project** on devnet and **Default Production Project** on mainnet. Build in the sandbox project. Production can't move money until SDP approves your organization; see [Go to mainnet](/docs/guides/go-to-mainnet). To read projects with an API key, see the [Projects API reference](/docs/reference/api/projects).
 
 ### 4. Next steps
 

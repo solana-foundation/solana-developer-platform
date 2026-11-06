@@ -1507,7 +1507,6 @@
         "saveAndExit": "Save and exit",
         "continue": "Continue",
         "createDraft": "Create draft",
-        "creating": "Creating",
         "saveFailed": "The draft could not be saved",
         "saved": "Draft saved",
         "savedBody": "You can finish it from Issuance whenever you like.",
@@ -1642,8 +1641,7 @@
         "nothingSaved": "Nothing is saved until you press Save changes.",
         "fixErrors": "{count} fields need a look before saving.",
         "discard": "Discard",
-        "saveChanges": "Save changes",
-        "saving": "Saving"
+        "saveChanges": "Save changes"
       },
       "publicInfo": {
         "included": "Included in public view",
@@ -1683,8 +1681,10 @@
         "approved": "Approved",
         "blocked": "Blocked",
         "entries": "{count} entries",
+        "entriesOne": "{count} entry",
         "frozenAccounts": "Frozen accounts",
         "accounts": "{count} accounts",
+        "accountsOne": "{count} account",
         "emptyTitle": "Nothing is on the list yet",
         "emptyApproved": "Nobody is approved yet, so no transfer can land. Add the first address.",
         "address": "Address",
