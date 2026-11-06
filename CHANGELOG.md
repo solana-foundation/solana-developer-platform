@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.88.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.87.0...v0.88.0) (2026-11-06)
+
+### Features
+
+* **api:** log BYOK signing calls with custody mode and cluster ([#2813](https://github.com/solana-foundation/solana-developer-platform/pull/2813)) ([8d6d1af](https://github.com/solana-foundation/solana-developer-platform/commit/8d6d1afc950da4bb3dd256ec19ff0f1b8dfcf35c))
+* **web:** show Production locked in the workspace switcher until mainnet access ([#2823](https://github.com/solana-foundation/solana-developer-platform/pull/2823)) ([2ba9571](https://github.com/solana-foundation/solana-developer-platform/commit/2ba95717e2fd2007f21163df22100b24442ecc34))
+* **web:** provider page states from the integrations read; old catalog vocabulary removed ([#2814](https://github.com/solana-foundation/solana-developer-platform/pull/2814)) ([ccf31cb](https://github.com/solana-foundation/solana-developer-platform/commit/ccf31cb30d856b1dd8cb49e1774d068efda0f23b))
+* **api:** project integrations read and the catalog built on it ([#2812](https://github.com/solana-foundation/solana-developer-platform/pull/2812)) ([6be2c29](https://github.com/solana-foundation/solana-developer-platform/commit/6be2c29813e30cf45a1f88bca0eb223765192ad2))
+* **api:** generate the served path list from the mounted routes ([#2817](https://github.com/solana-foundation/solana-developer-platform/pull/2817)) ([47e0b2d](https://github.com/solana-foundation/solana-developer-platform/commit/47e0b2db93831a4df9479dc158e8de027f0f99be))
+* **web:** account menu opens upward with full-width separators and the refreshed design ([#2816](https://github.com/solana-foundation/solana-developer-platform/pull/2816)) ([deb1667](https://github.com/solana-foundation/solana-developer-platform/commit/deb1667d1a9ac42b69601429c523012578ae13fb))
+* **api:** log custody credential setup with its cluster ([#2811](https://github.com/solana-foundation/solana-developer-platform/pull/2811)) ([605333d](https://github.com/solana-foundation/solana-developer-platform/commit/605333dc38423964b9191a708dc3ee85d1c7179a))
+
+### Bug Fixes
+
+* **earn:** keep withdrawals recoverable ([#2807](https://github.com/solana-foundation/solana-developer-platform/pull/2807)) ([e08e4db](https://github.com/solana-foundation/solana-developer-platform/commit/e08e4db0cab71bd6053ad16986a12aea781c3c8e))
+* **web:** set the API keys page in the page column ([#2822](https://github.com/solana-foundation/solana-developer-platform/pull/2822)) ([5a045f8](https://github.com/solana-foundation/solana-developer-platform/commit/5a045f8854e1b344082466bec628ede2a90dfa5d))
+* **web:** correct issuance counts, confirm amounts and signer pickers ([#2794](https://github.com/solana-foundation/solana-developer-platform/pull/2794)) ([fe359dd](https://github.com/solana-foundation/solana-developer-platform/commit/fe359ddcfb6b2c7e515c317f1846016512d6030e))
+* **api:** answer signer config errors at 503, declare payments 5xx ([#2795](https://github.com/solana-foundation/solana-developer-platform/pull/2795)) ([7f89490](https://github.com/solana-foundation/solana-developer-platform/commit/7f89490aa3b4eef5e76b082d1363da09652100b8))
+* **env:** stop telling operators to fund CUSTODY_PRIVATE_KEY ([#2791](https://github.com/solana-foundation/solana-developer-platform/pull/2791)) ([63f1a6e](https://github.com/solana-foundation/solana-developer-platform/commit/63f1a6e0c3ed3e1d25d50ccf129bbe6eaf85953b))
+* **api:** answer only documented error codes from the error handler ([#2792](https://github.com/solana-foundation/solana-developer-platform/pull/2792)) ([6104fac](https://github.com/solana-foundation/solana-developer-platform/commit/6104facc06ff2a69bb71d7138f95e64c9dde98a8))
+
+### Documentation
+
+* **docs:** lead the docs home with devnet and mainnet, not projects ([#2820](https://github.com/solana-foundation/solana-developer-platform/pull/2820)) ([306f223](https://github.com/solana-foundation/solana-developer-platform/commit/306f22342f2e9dd4aed9280c7ba9795c02529d52))
+
+### Refactors
+
+* **web:** remove Payments demo mode ([#2810](https://github.com/solana-foundation/solana-developer-platform/pull/2810)) ([4789ef6](https://github.com/solana-foundation/solana-developer-platform/commit/4789ef653cd86d532726854a9367ea0a5fc1ab19))
+
 ## [0.87.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.86.0...v0.87.0) (2026-11-06)
 
 ### ⚠ BREAKING CHANGES
