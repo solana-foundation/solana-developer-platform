@@ -7,8 +7,6 @@ import { clearKVStores } from "@/test/mocks/kv";
 const OWNER = "7YfVedaQueueOwner111111111111111111111111111";
 
 beforeEach(async () => {
-  env.MARKETS_ENABLED = "true";
-  env.EARN_ENABLED = "true";
   await seedTestDatabase(env);
   await clearKVStores(env);
 });

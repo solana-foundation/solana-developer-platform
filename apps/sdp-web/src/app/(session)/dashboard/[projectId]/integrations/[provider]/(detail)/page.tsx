@@ -75,7 +75,7 @@ async function getCustodyConnectionsSummary(
   try {
     return summarizeProviderConnections(await fetchProviderConnections(request, provider));
   } catch {
-    return { signingPaused: false, complete: false };
+    return { signingPaused: false, signingCount: 0, complete: false };
   }
 }
 

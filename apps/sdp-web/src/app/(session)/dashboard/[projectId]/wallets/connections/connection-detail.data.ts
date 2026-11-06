@@ -9,15 +9,6 @@ import { z } from "zod";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { type CustodyConnectionListItem, connectionsPageEnvelopeSchema } from "./connections.data";
 
-/**
- * The API grants exactly 24 hours of secret retention at cut-over
- * (`secret_retention_expires_at = now + interval '24 hours'`), and exposes only
- * the deadline. The moment the predecessor was retired is therefore the
- * deadline minus that window, which is what the credentials card labels
- * "Retired".
- */
-export const ROLLBACK_WINDOW_MS = 24 * 60 * 60 * 1000;
-
 const COMPLETION_STATUSES = ["running", "success", "failed", "retry_unknown"] as const;
 
 /**
@@ -198,15 +189,6 @@ export async function fetchConnectionWallets(
  */
 export function isCredentialManagedHere(credential: LifecycleCredential): boolean {
   return credential.source === "stored";
-}
-
-/**
- * The retired predecessor's cut-over moment, derived from the deadline the API
- * publishes. See {@link ROLLBACK_WINDOW_MS}.
- */
-export function resolveRetiredAt(expiresAt: string): Date | null {
-  const deadline = Date.parse(expiresAt);
-  return Number.isNaN(deadline) ? null : new Date(deadline - ROLLBACK_WINDOW_MS);
 }
 
 /**

@@ -58,10 +58,11 @@ export function useSyncDashboardUrlStateWithRouter(): void {
 
 /**
  * Applies search-param updates to the current URL via the native History API,
- * so the change stays shallow (no RSC refetch). Next.js patches pushState, so
- * "push" keeps `useSearchParams` in sync; "replace" hands Next its own history
- * state, which its patch treats as internal, so only the store behind
- * `useDashboardUrlState` / `useDashboardTab` observes a replace.
+ * so the change stays shallow (no RSC refetch). Both calls pass `null` state so
+ * Next.js's patch records the URL as its own: handing it Next's history state
+ * makes the patch treat the call as internal and skip it, and the router's copy
+ * of the URL then lags, so the next server render (a server action's answer, a
+ * refresh) writes the stale URL back over the address bar.
  *
  * @param updates - Param values to set; null or blank values delete the param.
  * @param mode - "push" adds a history entry, "replace" rewrites the current one.
@@ -91,7 +92,7 @@ function applySearchParamUpdates(updates: Record<string, string | null>, mode: "
   if (mode === "push") {
     window.history.pushState(null, "", nextUrl);
   } else {
-    window.history.replaceState(window.history.state, "", nextUrl);
+    window.history.replaceState(null, "", nextUrl);
   }
   emitUrlStateChange();
 }

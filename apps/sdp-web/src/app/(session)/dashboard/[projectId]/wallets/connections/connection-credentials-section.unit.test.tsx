@@ -1,18 +1,11 @@
-// @vitest-environment jsdom
-
-import { cleanup, render as renderDOM, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
-import { toast } from "sonner";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
-import { setPageRequest } from "@/test/request-project";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("next/cache", () => import("@/test/next-cache"));
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ orgId: "org_test", getToken: async () => "test-token" }),
 }));
@@ -23,17 +16,16 @@ import type {
   CustodyInstallationConnection,
   LifecycleCredential,
 } from "./connection-detail.data";
-import { ROLLBACK_WINDOW_MS } from "./connection-detail.data";
+import {
+  type RotationState,
+  resolveCredentialActions,
+  rotatableLifecycle,
+} from "./credential-actions";
 
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-  vi.unstubAllEnvs();
-  resetDashboardNavigation();
-});
+const HOUR_MS = 60 * 60 * 1000;
+const IDLE: RotationState = { lifecycle: null, open: false };
 
-function makeCredential(overrides: Partial<LifecycleCredential> = {}): LifecycleCredential {
+function makeCredential(overrides: Partial<LifecycleCredential>): LifecycleCredential {
   return {
     id: "pcred_current",
     provider: "privy",
@@ -49,7 +41,7 @@ function makeCredential(overrides: Partial<LifecycleCredential> = {}): Lifecycle
 }
 
 function makeConnection(
-  overrides: Partial<CustodyInstallationConnection> = {}
+  overrides: Partial<CustodyInstallationConnection>
 ): CustodyInstallationConnection {
   return {
     id: "cconn_1",
@@ -64,11 +56,9 @@ function makeConnection(
   };
 }
 
-function makeLifecycle(
-  overrides: Partial<CustodyCredentialLifecycle> = {}
-): CustodyCredentialLifecycle {
+function makeLifecycle(overrides: Partial<CustodyCredentialLifecycle>): CustodyCredentialLifecycle {
   return {
-    providerCredential: makeCredential(),
+    providerCredential: makeCredential({}),
     rotationCandidate: null,
     impact: {
       projects: [{ id: "prj_1", name: "Acme Payments" }],
@@ -79,14 +69,25 @@ function makeLifecycle(
   };
 }
 
+const UNUSED = { connections: [], projects: [] };
+
+function restorable(hoursLeft: number): CustodyCredentialLifecycle["rollback"] {
+  return {
+    providerCredential: makeCredential({ id: "pcred_previous", status: "retired" }),
+    expiresAt: new Date(Date.now() + hoursLeft * HOUR_MS).toISOString(),
+  };
+}
+
 function render({
   lifecycle,
-  connection = makeConnection(),
-  canManageCustody = true,
+  connection,
+  canManageCustody,
+  rotation,
 }: {
   lifecycle: CustodyCredentialLifecycle | "restricted" | null;
-  connection?: CustodyInstallationConnection;
-  canManageCustody?: boolean;
+  connection: CustodyInstallationConnection;
+  canManageCustody: boolean;
+  rotation: RotationState;
 }): string {
   return renderToStaticMarkup(
     <I18nProvider locale="en" messages={getMessages("en")}>
@@ -95,85 +96,129 @@ function render({
         connection={connection}
         provider="privy"
         canManageCustody={canManageCustody}
+        rotation={rotation}
+        onRotationChange={vi.fn()}
       />
     </I18nProvider>
   );
 }
 
-/** Whether the rendered button carrying this label is disabled. */
+const renderManaged = (lifecycle: CustodyCredentialLifecycle | "restricted" | null) =>
+  render({ lifecycle, connection: makeConnection({}), canManageCustody: true, rotation: IDLE });
+
 function buttonDisabled(html: string, label: string): boolean {
-  const index = html.indexOf(label);
+  const index = html.indexOf(`${label}</span>`);
   expect(index, `expected a control labelled "${label}"`).toBeGreaterThan(-1);
   const opening = html.lastIndexOf("<button", index);
   return html.slice(opening, index).includes("disabled");
 }
 
+describe("credential actions", () => {
+  it("starts a rotation from a stored credential this connection signs with", () => {
+    const lifecycle = makeLifecycle({});
+    expect(rotatableLifecycle(lifecycle, true, IDLE)).toBe(lifecycle);
+  });
+
+  it("starts no second rotation while the page holds one", () => {
+    const lifecycle = makeLifecycle({});
+    expect(rotatableLifecycle(lifecycle, true, { lifecycle, open: false })).toBeNull();
+  });
+
+  it.each([
+    ["the viewer cannot manage custody", makeLifecycle({}), false],
+    [
+      "the deployment supplies the credential",
+      makeLifecycle({ providerCredential: makeCredential({ source: "runtime" }) }),
+      true,
+    ],
+    [
+      "a candidate is waiting",
+      makeLifecycle({ rotationCandidate: makeCredential({ id: "pcred_candidate" }) }),
+      true,
+    ],
+    ["no connection uses the credential", makeLifecycle({ impact: UNUSED }), true],
+    ["the read was restricted", "restricted", true],
+    ["the read failed", null, true],
+  ] as const)("starts no rotation when %s", (_case, lifecycle, canManageCustody) => {
+    expect(rotatableLifecycle(lifecycle, canManageCustody, IDLE)).toBeNull();
+  });
+
+  it.each([
+    ["active", "stored", true, true],
+    ["pending", "stored", true, true],
+    ["retired", "stored", true, false],
+    ["deactivated", "stored", true, false],
+    ["failed_validation", "stored", true, false],
+    ["active", "runtime", true, false],
+    ["active", "stored", false, false],
+  ] as const)(
+    "lets a %s %s credential be deactivated by a manager=%s: %s",
+    (status, source, canManageCustody, canDeactivate) => {
+      const lifecycle = makeLifecycle({ providerCredential: makeCredential({ status, source }) });
+      expect(resolveCredentialActions(lifecycle, canManageCustody).canDeactivate).toBe(
+        canDeactivate
+      );
+    }
+  );
+});
+
 describe("credentials section", () => {
-  it("shows only the masked App ID suffix, never a secret", () => {
-    const html = render({ lifecycle: makeLifecycle() });
+  it("shows the masked App ID and when the stored secret went into use", () => {
+    const html = renderManaged(makeLifecycle({}));
+
     expect(html).toContain("····9f2a");
+    expect(html).toContain("In use since Sep 09, 2026");
+    expect(html).not.toContain("Not tracked by SDP");
     expect(html).not.toContain("appSecret");
   });
 
-  describe("credentials supplied by the deployment", () => {
-    const lifecycle = makeLifecycle({
-      providerCredential: makeCredential({ source: "runtime" }),
-    });
+  it("says where deployment-supplied credentials are managed and offers no rollback", () => {
+    const html = renderManaged(
+      makeLifecycle({
+        providerCredential: makeCredential({ source: "runtime" }),
+        rollback: restorable(19.5),
+      })
+    );
 
-    it("labels where they are managed and that SDP does not track a version", () => {
-      const html = render({ lifecycle });
-      expect(html).toContain("Deployment configuration");
-      expect(html).toContain("Not tracked by SDP");
-      expect(html).toContain("take effect on restart");
-    });
-
-    it("leaves rotate and roll back visible but disabled, rather than hiding them", () => {
-      const html = render({ lifecycle });
-
-      // A control that vanishes reads as a bug; one that is visibly
-      // unavailable teaches where the change is actually made.
-      expect(buttonDisabled(html, "Rotate credentials")).toBe(true);
-      expect(buttonDisabled(html, "Roll back")).toBe(true);
-    });
-
-    it("offers no credential deactivation, which only applies to a stored secret", () => {
-      expect(render({ lifecycle })).not.toContain("Deactivate credentials");
-    });
+    expect(html).toContain("Deployment configuration");
+    expect(html).toContain("take effect on restart");
+    expect(html).toContain("Not tracked by SDP");
+    expect(html).not.toContain("In use since");
+    expect(html).not.toContain("Roll back secret");
   });
 
-  describe("a rotation waiting to settle", () => {
-    const lifecycle = makeLifecycle({
-      rotationCandidate: makeCredential({ id: "pcred_candidate", status: "pending" }),
-      rollback: {
-        providerCredential: makeCredential({ id: "pcred_previous", status: "retired" }),
-        expiresAt: new Date(Date.now() + ROLLBACK_WINDOW_MS).toISOString(),
-      },
-    });
+  it("offers the previous secret back while it is restorable", () => {
+    const html = renderManaged(makeLifecycle({ rollback: restorable(19.5) }));
 
-    it("says the current credentials are still in use and offers retry and cancel", () => {
-      const html = render({ lifecycle });
-      expect(html).toContain("A rotation is waiting to finish.");
-      expect(html).toContain("still in use");
-      expect(html).toContain("Cancel rotation");
-    });
-
-    it("blocks a second rotation and explains why rollback is unavailable", () => {
-      const html = render({ lifecycle });
-      expect(buttonDisabled(html, "Rotate credentials")).toBe(true);
-      expect(html).toContain("Cancel the waiting rotation before rolling back.");
-    });
+    expect(html).toContain("Restorable for 19 h, until ");
+    expect(buttonDisabled(html, "Roll back secret")).toBe(false);
   });
 
-  it("offers credential deactivation after the last connection is deactivated", () => {
+  it("keeps rollback disabled behind a waiting rotation and says why", () => {
+    const html = renderManaged(
+      makeLifecycle({
+        rotationCandidate: makeCredential({ id: "pcred_candidate", status: "pending" }),
+        rollback: restorable(19.5),
+      })
+    );
+
+    expect(html).toContain("A rotation is waiting to finish.");
+    expect(html).toContain("still in use");
+    expect(buttonDisabled(html, "Cancel rotation")).toBe(false);
+    expect(buttonDisabled(html, "Roll back secret")).toBe(true);
+    expect(html).toContain("Cancel the waiting rotation before rolling back.");
+  });
+
+  it("offers no rollback to a viewer who cannot manage custody", () => {
     const html = render({
-      lifecycle: makeLifecycle({ impact: { connections: [], projects: [] } }),
-      connection: makeConnection({ status: "deactivated" }),
+      lifecycle: makeLifecycle({ rollback: restorable(19.5) }),
+      connection: makeConnection({}),
+      canManageCustody: false,
+      rotation: IDLE,
     });
 
-    expect(html).toContain("No connections use these credentials.");
-    expect(html).not.toContain("Secret deleted");
-    expect(buttonDisabled(html, "Deactivate credentials")).toBe(false);
-    expect(buttonDisabled(html, "Rotate credentials")).toBe(true);
+    expect(html).toContain("Restorable for 19 h");
+    expect(html).not.toContain("Roll back secret");
   });
 
   it.each([
@@ -186,9 +231,11 @@ describe("credentials section", () => {
         lifecycle: makeLifecycle({
           providerCredential: makeCredential({ status: "deactivated" }),
           rotationCandidate: makeCredential({ id: "pcred_candidate", status }),
-          impact: { connections: [], projects: [] },
+          impact: UNUSED,
         }),
         connection: makeConnection({ status: "deactivated" }),
+        canManageCustody: true,
+        rotation: IDLE,
       });
 
       expect(html).not.toContain("The current credentials are still in use.");
@@ -197,12 +244,35 @@ describe("credentials section", () => {
     }
   );
 
-  it("distinguishes a forbidden read from a failed one", () => {
-    // Not permitted is a settled answer; a failed read is not, and inviting a
-    // retry is only honest in the second case.
-    expect(render({ lifecycle: "restricted" })).toContain("custody admin role");
+  it("says when no connection uses the credential any more", () => {
+    expect(renderManaged(makeLifecycle({ impact: UNUSED }))).toContain(
+      "No connections use these credentials."
+    );
+  });
 
-    const failed = render({ lifecycle: null });
+  it("counts the other connections that share the credential", () => {
+    const html = renderManaged(
+      makeLifecycle({
+        impact: {
+          projects: [
+            { id: "prj_1", name: "Acme Payments" },
+            { id: "prj_other", name: "Treasury" },
+          ],
+          connections: [
+            { id: "cconn_1", projectId: "prj_1", status: "active" },
+            { id: "cconn_other", projectId: "prj_other", status: "active" },
+          ],
+        },
+      })
+    );
+
+    expect(html).toContain("1 other connections across 1 projects");
+  });
+
+  it("distinguishes a forbidden read from a failed one", () => {
+    expect(renderManaged("restricted")).toContain("custody admin role");
+
+    const failed = renderManaged(null);
     expect(failed).toContain("reload to try again");
     expect(failed).not.toContain("custody admin role");
   });
@@ -211,153 +281,32 @@ describe("credentials section", () => {
     ["deactivated", "Deactivated"],
     ["retired", "Retired"],
     ["failed_validation", "Validation failed"],
-  ] as const)("shows the credential's %s state without offering mutations", (status, label) => {
+  ] as const)("names the credential's %s state", (status, label) => {
     const html = render({
-      lifecycle: makeLifecycle({
-        providerCredential: makeCredential({ status }),
-        impact: { connections: [], projects: [] },
-      }),
+      lifecycle: makeLifecycle({ providerCredential: makeCredential({ status }), impact: UNUSED }),
       connection: makeConnection({ status: "deactivated" }),
+      canManageCustody: true,
+      rotation: IDLE,
     });
 
     expect(html).toContain(label);
-    expect(html).not.toContain("Secret deleted");
-    expect(html).not.toContain("Deactivate credentials");
-    expect(html).not.toContain("Rotate credentials");
   });
 
-  it("hides every mutating control from a viewer who cannot manage custody", () => {
-    const html = render({ lifecycle: makeLifecycle(), canManageCustody: false });
-    expect(html).not.toContain("Deactivate credentials");
-    expect(buttonDisabled(html, "Rotate credentials")).toBe(true);
+  it("names no state for an active credential", () => {
+    expect(renderManaged(makeLifecycle({}))).not.toContain(">Status<");
   });
 
-  describe("deactivation through a deactivated connection", () => {
-    function mockApi(status = 200) {
-      setPageRequest("/dashboard/prj_test_sandbox/integrations/privy/connections/cconn_1");
-      vi.stubEnv("SDP_API_BASE_URL", "https://api.example.test");
-      vi.spyOn(console, "info").mockImplementation(() => undefined);
-      const api = vi.fn(async (url: RequestInfo | URL, _init?: RequestInit) => {
-        if (String(url).endsWith("/provider-credentials/pcred_current/deactivate")) {
-          return Response.json(
-            status === 200
-              ? { data: { providerCredential: makeCredential({ status: "deactivated" }) } }
-              : { error: { message: "Deactivation could not be confirmed." } },
-            { status }
-          );
-        }
-        throw new Error(`Unexpected API request: ${url}`);
-      });
-      vi.stubGlobal("fetch", api);
-      return api;
-    }
-
-    function mount(
-      lifecycle = makeLifecycle({ impact: { connections: [], projects: [] } }),
-      canManageCustody = true
-    ) {
-      return renderDOM(
-        <I18nProvider locale="en" messages={getMessages("en")}>
-          <ConnectionCredentialsSection
-            lifecycle={lifecycle}
-            connection={makeConnection({ status: "deactivated" })}
-            provider="privy"
-            canManageCustody={canManageCustody}
-          />
-        </I18nProvider>
-      );
-    }
-
-    async function openDialog() {
-      await userEvent.click(screen.getByRole("button", { name: "Deactivate credentials" }));
-      return screen.findByRole("dialog", {
-        name: "Deactivate “Privy production app” credentials?",
-      });
-    }
-
-    it.each(["active", "pending"] as const)(
-      "deactivates an unused %s credential without claiming deletion",
-      async (status) => {
-        const api = mockApi();
-        const success = vi.spyOn(toast, "success").mockImplementation(() => "test-toast");
-        mount(
-          makeLifecycle({
-            providerCredential: makeCredential({ status }),
-            impact: { connections: [], projects: [] },
-          })
-        );
-        const dialog = await openDialog();
-        expect(
-          within(dialog).getByText(/does not revoke credentials at the provider/)
-        ).toBeTruthy();
-        await userEvent.click(
-          within(dialog).getByRole("button", { name: "Deactivate credentials" })
-        );
-
-        await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-        expect(api).toHaveBeenCalledWith(
-          "https://api.example.test/internal/dashboard/custody/provider-credentials/pcred_current/deactivate",
-          expect.objectContaining({ method: "POST" })
-        );
-        expect(success).toHaveBeenCalledWith("Credentials deactivated", {
-          description: "These credentials can no longer be used for signing through SDP.",
-        });
-        expect(dashboardRouter.refresh).toHaveBeenCalled();
-      }
-    );
-
-    it("keeps a shared credential active and explains why deactivation is blocked", async () => {
-      const api = mockApi();
-      mount(
-        makeLifecycle({
-          impact: {
-            projects: [{ id: "prj_other", name: "Treasury" }],
-            connections: [{ id: "cconn_other", projectId: "prj_other", status: "active" }],
-          },
-        })
-      );
-      expect(screen.getByText("Active")).toBeTruthy();
-      expect(screen.getByText("1 other connections across 1 projects")).toBeTruthy();
-      expect(screen.queryByText("No connections use these credentials.")).toBeNull();
-
-      const dialog = await openDialog();
-      expect(
-        within(dialog).getByText(/1 connections reference these credentials, in Treasury/)
-      ).toBeTruthy();
-      const confirm = within(dialog).getByRole("button", { name: "Deactivate credentials" });
-      expect(confirm).toHaveProperty("disabled", true);
-      await userEvent.click(confirm);
-      expect(api).not.toHaveBeenCalled();
+  it.each([
+    ["an available", makeLifecycle({})],
+    ["a failed", null],
+  ] as const)("offers to resume a dismissed rotation over %s read", (_case, lifecycle) => {
+    const html = render({
+      lifecycle,
+      connection: makeConnection({}),
+      canManageCustody: true,
+      rotation: { lifecycle: makeLifecycle({}), open: false },
     });
 
-    it.each([
-      [403, "error", "Credentials not deactivated"],
-      [409, "warning", "This connection changed while you were working."],
-      [503, "warning", "Result unknown"],
-    ] as const)(
-      "keeps the dialog open on HTTP %s without claiming success",
-      async (status, notification, title) => {
-        mockApi(status);
-        const success = vi.spyOn(toast, "success").mockImplementation(() => "test-toast");
-        const notice = vi.spyOn(toast, notification).mockImplementation(() => "test-toast");
-        mount();
-        const dialog = await openDialog();
-        await userEvent.click(
-          within(dialog).getByRole("button", { name: "Deactivate credentials" })
-        );
-
-        await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalled());
-        expect(screen.getByRole("dialog")).toBeTruthy();
-        expect(success).not.toHaveBeenCalled();
-        expect(notice).toHaveBeenCalledWith(title, {
-          description: "Deactivation could not be confirmed.",
-        });
-      }
-    );
-
-    it("does not offer unused-credential deactivation without custody permissions", () => {
-      mount(makeLifecycle({ impact: { connections: [], projects: [] } }), false);
-      expect(screen.queryByRole("button", { name: "Deactivate credentials" })).toBeNull();
-    });
+    expect(html).toContain("Resume rotation");
   });
 });
