@@ -1,0 +1,346 @@
+---
+module: earn
+title: Preview an asynchronous external-wallet withdrawal
+description: Quotes either a solver queue's discounted payout and timing or an operator redemption's intermediate-token conversion and par payout.
+icon: method:POST
+apiReference: true
+---
+
+<ApiOperation>
+
+<ApiEndpoint method="POST" path="/v1/earn/external-wallet/queued-withdrawal-previews" />
+
+Validate the selected mechanism against withdrawal-options first, then refuse any blockingIssues before asking the customer to confirm. Read-only and safe to retry.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+## Request body
+
+`application/json` · required
+
+Preview a solver-queue or operator-redemption request against live provider limits. Read-only: nothing is built or persisted.
+
+Any of:
+
+- **object**
+
+  - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_example`
+
+    The caller's tenant-scoped external-wallet position.
+
+  - **`shares`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `10`
+
+    Shares to place into the selected asynchronous exit, in share units.
+
+  - **`mechanism`** · `string` · always `solverQueue`
+
+    Selects the solver queue. May be omitted for backwards compatibility; operator redemptions must be explicit.
+
+  - **`discountBps`** · `integer` · required · min 0 · max 10000 · example `25`
+
+    Discount offered to a solver, in basis points. It must stay inside the live queueAsset minimum and maximum.
+
+  - **`deadlineSeconds`** · `integer` · required · greater than 0 · max 7776000 · example `86400`
+
+    Solver window after maturity, in seconds. It must stay inside the live queueAsset minimum and maximum.
+
+- **object**
+
+  - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_example`
+
+    The caller's tenant-scoped external-wallet position.
+
+  - **`shares`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `10`
+
+    Shares to place into the selected asynchronous exit, in share units.
+
+  - **`mechanism`** · `string` · required · always `operatorRedemption`
+
+    Selects an issuer/operator-completed par redemption with no solver discount or deadline.
+
+- **object**
+
+  - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_example`
+
+    The caller's tenant-scoped external-wallet position.
+
+  - **`intermediateAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `2000`
+
+    Intermediate token the owner already holds outside any request (such as a cancelled request's wYLDS) to redeem at par, in that token's units. Send instead of `shares`, never with it.
+
+  - **`mechanism`** · `string` · required · always `operatorRedemption`
+
+    Selects an issuer/operator-completed par redemption with no solver discount or deadline.
+
+## Responses
+
+- **`200`** Expected asynchronous-withdrawal terms
+
+  - **`data`** · `object` · required
+
+    Any of:
+
+    - **object**
+
+      - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_example`
+
+        The caller's tenant-scoped external-wallet position.
+
+      - **`assetMint`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
+
+        Base58 Solana mint address.
+
+      - **`shares`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+        Positive decimal string with at least one non-zero digit; never a float.
+
+      - **`shareDecimals`** · `integer` · required · min 0 · max 38
+
+      - **`assets`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `9.975`
+
+        Expected payout after the selected discount, in asset units.
+
+      - **`assetDecimals`** · `integer` · required · min 0 · max 38
+
+      - **`discountBps`** · `integer` · required · min 0 · max 10000
+
+      - **`maturityTimestamp`** · `string` · required · pattern `^\d+$` · example `1789722000`
+
+        Expected Unix time when solver fulfilment may begin.
+
+      - **`deadlineTimestamp`** · `string` · required · pattern `^\d+$` · example `1789808400`
+
+        Expected Unix deadline. Fulfilment is allowed through this instant; cancellation is allowed only after it.
+
+      - **`blockingIssues`** · `object[]` · required
+
+        - **`code`** · `string` · required · example `SHARE_LOCKED`
+
+        - **`message`** · `string` · required
+
+    - **object**
+
+      - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_example`
+
+        The caller's tenant-scoped external-wallet position.
+
+      - **`mechanism`** · `string` · required · always `operatorRedemption`
+
+      - **`shares`** · `string` · required · max length 128 · pattern `^\d+(\.\d+)?$` · example `10`
+
+        Position shares the request burns, in share units; "0" when it redeems intermediate the owner already holds.
+
+      - **`shareDecimals`** · `integer` · required · min 0 · max 38
+
+      - **`intermediateMint`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
+
+        Token the request creates or delegates for later operator settlement.
+
+      - **`intermediateAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+        Expected intermediate-token amount, in that token's units.
+
+      - **`assetMint`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
+
+        Base58 Solana mint address.
+
+      - **`assets`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `10`
+
+        Expected par payout when the operator completes the redemption.
+
+      - **`assetDecimals`** · `integer` · required · min 0 · max 38
+
+      - **`blockingIssues`** · `object[]` · required
+
+        - **`code`** · `string` · required · example `SHARE_LOCKED`
+
+        - **`message`** · `string` · required
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `earn.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`429`** Too Many Requests
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`501`** The provider does not support this operation.
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
+<ApiPanel>
+
+## Example request
+
+```bash tab="cURL"
+curl -X POST 'https://api.solana.com/v1/earn/external-wallet/queued-withdrawal-previews' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "positionId": "earn_position_example",
+    "shares": "10",
+    "mechanism": "solverQueue",
+    "discountBps": 25,
+    "deadlineSeconds": 86400
+  }'
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/earn/external-wallet/queued-withdrawal-previews", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    "positionId": "earn_position_example",
+    "shares": "10",
+    "mechanism": "solverQueue",
+    "discountBps": 25,
+    "deadlineSeconds": 86400
+  })
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.post("https://api.solana.com/v1/earn/external-wallet/queued-withdrawal-previews",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
+  json={
+    "positionId": "earn_position_example",
+    "shares": "10",
+    "mechanism": "solverQueue",
+    "discountBps": 25,
+    "deadlineSeconds": 86400
+  })
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "positionId": "earn_position_example",
+    "assetMint": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
+    "shares": "25",
+    "shareDecimals": 1,
+    "assets": "9.975",
+    "assetDecimals": 1,
+    "discountBps": 1,
+    "maturityTimestamp": "1789722000",
+    "deadlineTimestamp": "1789808400",
+    "blockingIssues": [
+      {
+        "code": "SHARE_LOCKED",
+        "message": "example"
+      }
+    ]
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: earn.read",
+    "details": {
+      "action": "earn.read"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+</ApiPanel>
+
+</ApiOperation>

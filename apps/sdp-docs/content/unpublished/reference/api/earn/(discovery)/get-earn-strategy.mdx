@@ -1,0 +1,289 @@
+---
+module: earn
+title: Get one yield strategy
+description: Returns one catalogue row by id, whatever its cluster; fundable still answers whether the instrument exists on the caller's own cluster.
+icon: method:GET
+apiReference: true
+---
+
+<ApiOperation>
+
+<ApiEndpoint method="GET" path="/v1/earn/strategies/{strategyId}" />
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
+
+## Path parameters
+
+- **`strategyId`** · `string` · required · min length 1
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+## Responses
+
+- **`200`** One strategy-catalogue row
+
+  - **`data`** · `object` · required
+
+    - **`strategy`** · `object` · required
+
+      One synced strategy-catalogue row.
+
+      - **`id`** · `string` · required · example `earn_strategy_example`
+
+        Catalogue id — the `strategyId` the deposit build takes.
+
+      - **`provider`** · `string` · required · example `kamino`
+
+        Open provider id (e.g. `kamino`, `veda`).
+
+      - **`providerReference`** · `string` · required · example `7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx`
+
+        The instrument's identity at the provider — the vault's on-chain address.
+
+      - **`name`** · `string` · required · example `Allez USDC`
+
+      - **`sourceKind`** · `string` · required · one of `defi`, `rwa`
+
+        Where the yield comes from: on-chain DeFi or real-world assets.
+
+      - **`underlyingSource`** · `string` · example `kamino`
+
+        Open id of the underlying protocol or fund, when the provider reports one.
+
+      - **`depositMints`** · `string[]` · required
+
+        Mints the instrument accepts directly; the FIRST is the deposit token.
+
+      - **`shareMint`** · `string` · example `hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2`
+
+        The share token a vault-direct deposit mints, when the instrument has one.
+
+      - **`apyType`** · `string` · required · one of `variable`, `fixed`
+
+      - **`currentApy`** · `string` · example `0.062`
+
+        Latest observed APY as a decimal ratio string (`"0.062"` = 6.2%), refreshed about every five minutes. Absent when the provider reports none.
+
+      - **`liquidityTerm`** · `string` · required · one of `instant`, `delayed`
+
+      - **`redemptionDelayDays`** · `number` · example `2`
+
+        For `delayed` liquidity: the provider's stated redemption delay.
+
+      - **`riskMetadata`** · `object`
+
+        Curator and risk framework metadata, as published by the provider. Curators publish heterogeneous frameworks, so this is an open shape.
+
+        - **`curator`** · `string` · example `allez`
+
+        - **`riskTier`** · `string`
+
+        - **`frameworkUrl`** · `string`
+
+        - **`*`** · `any`
+
+      - **`status`** · `string` · required · one of `active`, `paused`, `deprecated`
+
+        Catalogue lifecycle. Only `active` strategies accept new deposits.
+
+      - **`depositSlippage`** · `object | null` · required
+
+        Non-null when a deposit build for this strategy, in your environment, refuses to run without an explicit `minSharesOut`. Quote the deposit first and derive the floor from the live figure minus a chosen tolerance. Most production strategies are non-null; a next-NAV subscription may be null when no on-chain instruction can enforce a floor. Answered per request, like `fundable`.
+
+        - **`quoteRequired`** · `boolean` · required · always `true`
+
+          The live quote endpoint must be called before building this direction.
+
+        - **`defaultToleranceBps`** · `integer` · required · example `50`
+
+          Suggested starting tolerance in basis points; the customer may choose another accepted value.
+
+      - **`withdrawalSlippage`** · `object | null` · required
+
+        Non-null when this provider's withdrawal builder refuses to run without an explicit `minAmountOut`: call the withdrawal preview first and derive the floor from `assetsOut`. Null when this withdrawal cannot enforce a floor; omit `minAmountOut`.
+
+        - **`quoteRequired`** · `boolean` · required · always `true`
+
+          The live quote endpoint must be called before building this direction.
+
+        - **`defaultToleranceBps`** · `integer` · required · example `50`
+
+          Suggested starting tolerance in basis points; the customer may choose another accepted value.
+
+      - **`hostCluster`** · `string` · required · one of `devnet`, `mainnet-beta`
+
+        The cluster the INSTRUMENT lives on — a stored fact about the vault.
+
+      - **`fundable`** · `boolean` · required
+
+        Whether the instrument exists on the caller's own cluster. `false` is definitive: a deposit can never work here. `true` is necessary but NOT sufficient — the strategy must also be `active`, and an authenticated organization must be entitled to the provider, so branch on it rather than assuming a listed strategy takes deposits.
+
+      - **`feeSponsored`** · `boolean` · required
+
+        Whether SDP's treasury vault flow would use its configured paymaster for a movement on this strategy from your environment: the same gate execution applies, derived per request. Read it for fee copy instead of the deposit preview's flag: providers with no quote-derived floor never need a preview. Always `false` when not `fundable`. A swap-funded deposit is wallet-pays regardless.
+
+      - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        ISO 8601 timestamp.
+
+      - **`updatedAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        ISO 8601 timestamp.
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `earn.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`429`** Too Many Requests
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
+<ApiPanel>
+
+## Example request
+
+```bash tab="cURL"
+curl 'https://api.solana.com/v1/earn/strategies/strategy_example' \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/earn/strategies/strategy_example", {
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.get("https://api.solana.com/v1/earn/strategies/strategy_example",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "strategy": {
+      "id": "earn_strategy_example",
+      "provider": "kamino",
+      "providerReference": "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+      "name": "Allez USDC",
+      "sourceKind": "defi",
+      "underlyingSource": "kamino",
+      "depositMints": [
+        "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
+      ],
+      "shareMint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+      "apyType": "variable",
+      "currentApy": "0.062",
+      "liquidityTerm": "instant",
+      "redemptionDelayDays": 2,
+      "riskMetadata": {
+        "curator": "allez"
+      },
+      "status": "active",
+      "depositSlippage": {
+        "quoteRequired": true,
+        "defaultToleranceBps": 50
+      },
+      "withdrawalSlippage": {
+        "quoteRequired": true,
+        "defaultToleranceBps": 50
+      },
+      "hostCluster": "devnet",
+      "fundable": false,
+      "feeSponsored": false,
+      "createdAt": "2025-01-01T00:00:00.000Z",
+      "updatedAt": "2025-01-01T00:00:00.000Z"
+    }
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: earn.read",
+    "details": {
+      "action": "earn.read"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+</ApiPanel>
+
+</ApiOperation>

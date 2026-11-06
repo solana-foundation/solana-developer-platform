@@ -13,6 +13,8 @@
     "lint:fix": "biome check --write .",
     "generate:api": "pnpm -C ../sdp-api run openapi:generate && tsx scripts/generate-api-docs.mjs && tsx scripts/generate-guide-api-examples.ts && tsx scripts/generate-postman-collection.mjs && pnpm exec biome check --write content/docs/meta.json content/docs/reference/api/meta.json src/generated/public-surface.json",
     "generate:ai": "tsx scripts/generate-ai-resources.ts",
+    "generate:earn-preview": "pnpm -C ../sdp-api exec node --import tsx scripts/generate-earn-reference-preview.ts && node --import tsx scripts/generate-earn-preview.ts && pnpm exec biome check --write content/unpublished/reference/api/earn",
+    "check:earn-drafts": "node --import tsx scripts/check-earn-drafts.ts",
     "generate:source": "node scripts/generate-source.mjs",
     "check:links": "tsx scripts/check-links.ts",
     "test": "tsx --test scripts/*.test.ts",

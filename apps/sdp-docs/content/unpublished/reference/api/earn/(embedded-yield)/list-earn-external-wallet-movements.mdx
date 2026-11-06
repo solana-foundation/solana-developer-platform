@@ -1,0 +1,252 @@
+---
+module: earn
+title: List one external wallet's activity
+description: Returns one keyset page of the wallet's recorded deposits and withdrawals, newest first, in ledger vocabulary (requested, submitted, confirmed, finalized, failed; only finalized and failed are terminal).
+icon: method:GET
+apiReference: true
+---
+
+<ApiOperation>
+
+<ApiEndpoint method="GET" path="/v1/earn/external-wallet/movements" />
+
+`ownerAddress` is required; a wallet with no recorded movements in the active partner project answers 200 with an empty `movements` list, never 404. Each movement carries `tokenAmount` in `tokenMint` units for display (a withdrawal's observed payout once finalized) alongside the on-chain `amount`/`denomination`. Reports on money that already moved, so no provider gate applies.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
+
+## Query parameters
+
+- **`ownerAddress`** · `string` · required
+
+- **`direction`** · `string` · one of `deposit`, `withdrawal`
+
+- **`status`** · `string` · min length 1 · max length 64
+
+- **`limit`** · `integer` · min 1 · max 100 · default `20`
+
+- **`before`** · `string` · min length 1
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+## Responses
+
+- **`200`** External-wallet movement page
+
+  - **`data`** · `object` · required
+
+    - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+
+      The external wallet: the customer's own Solana address. It signs and owns the shares; SDP holds no key for it. It also pays the network fee unless an authenticated build names a `feePayer`. The pattern is necessary but not sufficient — the string must additionally decode to a 32-byte public key, which no pattern can express, so a well-shaped base58 string that does not decode still answers 400.
+
+    - **`movements`** · `object[]` · required
+
+      The wallet's recorded movements, newest first, in ledger vocabulary.
+
+      - **`movementId`** · `string` · required · example `earn_movement_example`
+
+      - **`positionId`** · `string` · required · example `earn_position_example`
+
+      - **`provider`** · `string` · required · example `kamino`
+
+      - **`providerReference`** · `string` · required · example `7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx`
+
+      - **`direction`** · `string` · required · one of `deposit`, `withdrawal`
+
+      - **`status`** · `string` · required · one of `requested`, `submitted`, `confirmed`, `finalized`, `failed`
+
+        Ledger vocabulary. `requested` means SDP recorded the signed transaction but has not yet confirmed it reached the network. `confirmed` is optimistic and can still be dropped by a fork; only `finalized` and `failed` are terminal.
+
+      - **`settlement`** · `string` · required · one of `atomic`, `provider_order`
+
+        Atomic transfers may show Done at confirmed while SDP tracks finality. Provider orders remain pending until fulfillment; chain confirmation alone is not payout. Older servers may omit this field; treat absent settlement semantics as unknown.
+
+      - **`signature`** · `string` · required
+
+        The transaction signature, for explorers.
+
+      - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+
+        The external wallet: the customer's own Solana address. It signs and owns the shares; SDP holds no key for it. It also pays the network fee unless an authenticated build names a `feePayer`. The pattern is necessary but not sufficient — the string must additionally decode to a 32-byte public key, which no pattern can express, so a well-shaped base58 string that does not decode still answers 400.
+
+      - **`amount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+        Requested quantity, denominated in `denomination`.
+
+      - **`denomination`** · `string` · required · example `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
+
+        Token mint for a deposit; share mint for a withdrawal.
+
+      - **`tokenMint`** · `string` · required · example `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
+
+        The position's deposit-token mint. Render `tokenAmount` in these units; `amount`/`denomination` is the on-chain quantity (shares on a withdrawal).
+
+      - **`tokenAmount`** · `string | null` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+        Quantity in `tokenMint` units. Kamino deposits and all withdrawals require a finalized observation; null beforehand or when the actual debit/payout cannot be observed. Other deposits report their fixed input amount.
+
+      - **`failureReason`** · `string | null` · required
+
+      - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        ISO 8601 timestamp.
+
+      - **`confirmedAt`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        ISO 8601 timestamp.
+
+      - **`settledAt`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        ISO 8601 timestamp.
+
+      - **`replayed`** · `boolean`
+
+        True when the idempotency key already produced this movement and nothing was re-sent.
+
+    - **`hasMore`** · `boolean` · required
+
+    - **`nextCursor`** · `string | null` · required
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `earn.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`429`** Too Many Requests
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
+<ApiPanel>
+
+## Example request
+
+```bash tab="cURL"
+curl 'https://api.solana.com/v1/earn/external-wallet/movements?ownerAddress=11111111111111111111111111111111' \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/earn/external-wallet/movements?ownerAddress=11111111111111111111111111111111", {
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.get("https://api.solana.com/v1/earn/external-wallet/movements?ownerAddress=11111111111111111111111111111111",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    "movements": [
+      {
+        "movementId": "earn_movement_example",
+        "positionId": "earn_position_example",
+        "provider": "kamino",
+        "providerReference": "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+        "direction": "deposit",
+        "status": "requested",
+        "settlement": "atomic",
+        "signature": "example",
+        "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+        "amount": "25",
+        "denomination": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "tokenAmount": "25",
+        "failureReason": "example",
+        "createdAt": "2025-01-01T00:00:00.000Z",
+        "confirmedAt": "2025-01-01T00:00:00.000Z",
+        "settledAt": "2025-01-01T00:00:00.000Z"
+      }
+    ],
+    "hasMore": false,
+    "nextCursor": "example"
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: earn.read",
+    "details": {
+      "action": "earn.read"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+</ApiPanel>
+
+</ApiOperation>

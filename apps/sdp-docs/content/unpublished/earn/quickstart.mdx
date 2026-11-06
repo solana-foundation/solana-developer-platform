@@ -1,0 +1,256 @@
+---
+module: earn
+title: Quickstart
+description: Make your first sandbox deposit with the Earn API or Embedded Yield.
+---
+
+Make a sandbox deposit into a Kamino devnet strategy. Choose your integration
+below; both paths keep signing in your wallet.
+
+| Before you start | What you need |
+| --- | --- |
+| Backend | [Sandbox API key](/docs/developing-with-sdp/manage-api-keys) with `earn.execute`; keep it server-side. |
+| Wallet | Connected Kit wallet signer, devnet SOL, and the strategy's test deposit token. The wallet pays fees. |
+| Access | Authenticate your customer and [check wallet access](/docs/guides/embedded-yield#authenticate-on-your-backend). |
+
+<Tabs items={["Earn API", "Embedded Yield"]} queryParam="integration" className="launch-guide-paths">
+<Tab value="Earn API">
+
+Use REST requests directly, with your own integration code.
+
+### 1. Build on your backend
+
+1. Copy the helper below into your server-only `earn-api.ts` file. Set
+   `SDP_API_KEY` on your backend to your sandbox key.
+2. [Choose a strategy](/docs/earn/deposit-api#1-choose-a-strategy) and fund your
+   wallet with its deposit token.
+3. Replace `strategyId` and `ownerAddress` below with your strategy ID and wallet
+   public key. `amount` is in deposit tokens.
+
+#### TypeScript request helper
+
+<details>
+<summary>Show the complete earn-api.ts helper</summary>
+
+```typescript title="earn-api.ts"
+const SDP_API_URL = "https://api.solana.com";
+const SDP_API_KEY = process.env.SDP_API_KEY;
+if (!SDP_API_KEY) throw new Error("Set your sandbox SDP_API_KEY on the backend");
+
+export async function earnRequest(path: string, body?: string, idempotencyKey?: string) {
+  const response = await fetch(`${SDP_API_URL}${path}`, {
+    method: body === undefined ? "GET" : "POST",
+    headers: {
+      Authorization: `Bearer ${SDP_API_KEY}`,
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+    },
+    body,
+  });
+  if (!response.ok) {
+    throw new Error(`SDP returned ${response.status}: ${await response.text()}`);
+  }
+  return response.json();
+}
+
+export async function waitForEarnMovement(movementId: string) {
+  while (true) {
+    const { data: { movement } } = await earnRequest(
+      `/v1/earn/external-wallet/movements/${encodeURIComponent(movementId)}`,
+    );
+    if (movement.status === "finalized" || movement.status === "failed") {
+      return movement;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+}
+
+export async function listEarnPositions(ownerAddress: string) {
+  const positions: unknown[] = [];
+  const query = new URLSearchParams({ ownerAddress });
+  const cursors = new Set<string>();
+  while (true) {
+    const { data } = await earnRequest(`/v1/earn/external-wallet/positions?${query}`);
+    positions.push(...data.positions);
+    if (!data.hasMore) return positions;
+    const cursor = data.nextCursor;
+    if (typeof cursor !== "string" || !cursor || cursors.has(cursor)) {
+      throw new Error("SDP positions cursor did not advance");
+    }
+    cursors.add(cursor);
+    query.set("before", cursor);
+  }
+}
+```
+
+</details>
+
+Build the deposit with that helper:
+
+```typescript
+import { earnRequest } from "./earn-api";
+
+const strategyId = "<strategy ID>";
+const ownerAddress = "<your wallet public key>";
+const amount = "25";
+
+const { data: preview } = await earnRequest(
+  "/v1/earn/vault-deposit-previews",
+  JSON.stringify({ strategyId, amount }),
+);
+if (preview.blockingIssues.length > 0) {
+  console.log(preview.blockingIssues);
+  throw new Error("Resolve the preview blockers before building");
+}
+
+const { data } = await earnRequest(
+  "/v1/earn/external-wallet/deposit-transactions",
+  JSON.stringify({ strategyId, ownerAddress, amount }),
+);
+const built = data.transaction;
+```
+
+### 2. Sign with your wallet
+
+Send `built` to your wallet app. With its connected `walletSigner`, sign
+unchanged and without broadcasting:
+
+```typescript
+import {
+  getBase64EncodedWireTransaction,
+  getBase64Encoder,
+  getTransactionDecoder,
+} from "@solana/kit";
+
+const unsigned = getTransactionDecoder().decode(
+  getBase64Encoder().encode(built.transaction),
+);
+const [signed] = await walletSigner.modifyAndSignTransactions([unsigned]);
+if (!signed) throw new Error("The wallet returned no signed transaction");
+const signedTransaction = getBase64EncodedWireTransaction(signed);
+```
+
+Return `signedTransaction` to your backend promptly.
+
+### 3. Submit and read your position
+
+Save the signed body and one UUID before sending. This local example refuses
+to overwrite an existing intent; use durable application storage in production.
+
+```typescript
+import { randomUUID } from "node:crypto";
+import { readFile, writeFile } from "node:fs/promises";
+import { listEarnPositions, waitForEarnMovement } from "./earn-api";
+
+const intent = {
+  key: randomUUID(),
+  body: JSON.stringify({
+    transactionId: built.transactionId,
+    signedTransaction: "<base64 signed bytes returned by your wallet>",
+  }),
+};
+await writeFile("deposit.json", JSON.stringify(intent), {
+  flag: "wx", mode: 0o600, flush: true,
+});
+
+// First send and every retry start from this saved intent.
+const saved = JSON.parse(await readFile("deposit.json", "utf8"));
+const { data: { deposit } } = await earnRequest(
+  "/v1/earn/external-wallet/deposits", saved.body, saved.key,
+);
+const movement = await waitForEarnMovement(deposit.movementId);
+if (movement.status === "failed") {
+  throw new Error(movement.failureReason ?? "Deposit failed");
+}
+console.log(await listEarnPositions(ownerAddress));
+```
+
+The helper polls once a second until `finalized` or `failed`. At `finalized`,
+your wallet holds the shares and the helper reads every page of positions.
+If tracking stops, resume with the same `movementId`.
+
+[See the complete cURL and TypeScript walkthrough](/docs/earn/deposit-api).
+
+</Tab>
+<Tab value="Embedded Yield">
+
+Use the dashboard's generated backend module to add Earn to your app.
+
+### 1. Get your backend module
+
+1. [Choose a strategy](/docs/guides/embedded-yield#get-the-backend-module) in the
+   integration guide, then copy its backend module.
+2. Save the copied module as your server-only `earn.ts` file. Set
+   `SDP_API_KEY` on your backend to your sandbox key.
+3. Replace `ownerAddress` below with your wallet public key. Fund the wallet
+   with the selected strategy's deposit token.
+
+```typescript
+import { buildEarnDepositTransaction } from "./earn";
+
+const ownerAddress = "<your wallet public key>";
+const built = await buildEarnDepositTransaction({ ownerAddress, amount: "25" });
+```
+
+### 2. Sign with your wallet
+
+Send `built` to your wallet app. With its connected `walletSigner`, sign
+unchanged and without broadcasting:
+
+```typescript
+import {
+  getBase64EncodedWireTransaction,
+  getBase64Encoder,
+  getTransactionDecoder,
+} from "@solana/kit";
+
+const unsigned = getTransactionDecoder().decode(
+  getBase64Encoder().encode(built.transaction),
+);
+const [signed] = await walletSigner.modifyAndSignTransactions([unsigned]);
+if (!signed) throw new Error("The wallet returned no signed transaction");
+const signedTransaction = getBase64EncodedWireTransaction(signed);
+```
+
+Return `signedTransaction` to your backend promptly.
+
+### 3. Submit and read your position
+
+Save the signed body and one UUID before sending. This local example refuses
+to overwrite an existing intent; use durable application storage in production.
+
+```typescript
+import { readFile, writeFile } from "node:fs/promises";
+import { listEarnPositions, submitEarnDeposit, waitForEarnMovement } from "./earn";
+
+const submission = {
+  transactionId: built.transactionId,
+  signedTransaction: "<base64 signed bytes returned by your wallet>",
+  idempotencyKey: crypto.randomUUID(),
+};
+await writeFile("deposit.json", JSON.stringify(submission), {
+  flag: "wx", mode: 0o600, flush: true,
+});
+
+// First send and every retry start from this saved intent.
+const saved = JSON.parse(await readFile("deposit.json", "utf8"));
+const deposit = await submitEarnDeposit(saved);
+const movement = await waitForEarnMovement(deposit.movementId);
+if (movement.status === "failed") {
+  throw new Error(movement.failureReason ?? "Deposit failed");
+}
+console.log(await listEarnPositions(ownerAddress));
+```
+
+At `finalized`, your wallet holds the shares and the helper reads your position.
+
+[Continue the Embedded Yield integration](/docs/guides/embedded-yield).
+
+</Tab>
+</Tabs>
+
+| Next | What to do |
+| --- | --- |
+| Uncertain submit response | [Retry the same saved body and key](/docs/earn/integration-details#retry-safely). An expired blockhash does not prove failure. |
+| Read holdings | [Balances and earnings](/docs/earn/reporting). Keep unavailable values distinct from zero. |
+| Exit your position | [Withdraw funds](/docs/earn/withdrawals). |

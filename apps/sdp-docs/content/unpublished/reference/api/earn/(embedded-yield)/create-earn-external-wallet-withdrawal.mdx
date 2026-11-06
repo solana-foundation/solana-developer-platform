@@ -1,0 +1,273 @@
+---
+module: earn
+title: Submit a signed external-wallet withdrawal
+description: "The exit mirror of the deposit submit: signature verified over the exact built message, movement recorded before broadcast, Idempotency-Key required, one submission per built transaction."
+icon: method:POST
+apiReference: true
+---
+
+<ApiOperation>
+
+<ApiEndpoint method="POST" path="/v1/earn/external-wallet/withdrawals" />
+
+Submit the original signed bytes even after the blockhash expires: the transaction may already have landed. Retry with the same key and payload, then read the movement instead of rebuilding an uncertain withdrawal.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+- **`Idempotency-Key`** · `string` · required · pattern `^[\x20-\x7e]{1,255}$` · example `idempotency_example_12345`
+
+  Idempotency key for safely retrying mutating requests. 1-255 printable ASCII characters; echoed back on the response.
+
+## Request body
+
+`application/json` · required
+
+Submit the signed bytes back. Requires the Idempotency-Key header; a retry with the same key resolves the original movement or withdrawal request instead of acting twice.
+
+- **`transactionId`** · `string` · required · min length 1 · max length 128 · example `earn_external_wallet_transaction_example`
+
+  The built transaction being submitted; single-use.
+
+- **`signedTransaction`** · `string` · required · min length 1 · max length 1700 · pattern `^[A-Za-z0-9+/]+={0,2}$` · example `AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOAAQABAvSV602SJ67iQCUGLwHzVtPnlMbZqL79wnV/nb+Mi9SJBUpTWpkpIQZNJOhxYNo4fHw1td28kruB5B+oQEEFRI0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEBAAtzZHAtZXhhbXBsZQA=`
+
+  Base64 wire bytes of the signed transaction. They must be byte-for-byte the built message with only signatures added.
+
+## Responses
+
+- **`200`** Recorded withdrawal movement
+
+  - **`data`** · `object` · required
+
+    - **`withdrawal`** · `object` · required
+
+      One recorded external-wallet vault movement.
+
+      - **`movementId`** · `string` · required · example `earn_movement_example`
+
+      - **`positionId`** · `string` · required · example `earn_position_example`
+
+      - **`provider`** · `string` · required · example `kamino`
+
+      - **`providerReference`** · `string` · required · example `7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx`
+
+      - **`direction`** · `string` · required · one of `deposit`, `withdrawal`
+
+      - **`status`** · `string` · required · one of `requested`, `submitted`, `confirmed`, `finalized`, `failed`
+
+        Ledger vocabulary. `requested` means SDP recorded the signed transaction but has not yet confirmed it reached the network. `confirmed` is optimistic and can still be dropped by a fork; only `finalized` and `failed` are terminal.
+
+      - **`settlement`** · `string` · required · one of `atomic`, `provider_order`
+
+        Atomic transfers may show Done at confirmed while SDP tracks finality. Provider orders remain pending until fulfillment; chain confirmation alone is not payout. Older servers may omit this field; treat absent settlement semantics as unknown.
+
+      - **`signature`** · `string` · required
+
+        The transaction signature, for explorers.
+
+      - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+
+        The external wallet: the customer's own Solana address. It signs and owns the shares; SDP holds no key for it. It also pays the network fee unless an authenticated build names a `feePayer`. The pattern is necessary but not sufficient — the string must additionally decode to a 32-byte public key, which no pattern can express, so a well-shaped base58 string that does not decode still answers 400.
+
+      - **`amount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+        Requested quantity, denominated in `denomination`.
+
+      - **`denomination`** · `string` · required · example `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
+
+        Token mint for a deposit; share mint for a withdrawal.
+
+      - **`tokenMint`** · `string` · required · example `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
+
+        The position's deposit-token mint. Render `tokenAmount` in these units; `amount`/`denomination` is the on-chain quantity (shares on a withdrawal).
+
+      - **`tokenAmount`** · `string | null` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+        Quantity in `tokenMint` units. Kamino deposits and all withdrawals require a finalized observation; null beforehand or when the actual debit/payout cannot be observed. Other deposits report their fixed input amount.
+
+      - **`failureReason`** · `string | null` · required
+
+      - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        ISO 8601 timestamp.
+
+      - **`confirmedAt`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        ISO 8601 timestamp.
+
+      - **`settledAt`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        ISO 8601 timestamp.
+
+      - **`replayed`** · `boolean`
+
+        True when the idempotency key already produced this movement and nothing was re-sent.
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `earn.execute` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`409`** Conflict
+
+  Same fields as `400`.
+
+- **`422`** Unprocessable Entity
+
+  Same fields as `400`.
+
+- **`429`** Too Many Requests
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
+<ApiPanel>
+
+## Example request
+
+```bash tab="cURL"
+curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawals' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "transactionId": "earn_external_wallet_transaction_example",
+    "signedTransaction": "AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOAAQABAvSV602SJ67iQCUGLwHzVtPnlMbZqL79wnV/nb+Mi9SJBUpTWpkpIQZNJOhxYNo4fHw1td28kruB5B+oQEEFRI0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEBAAtzZHAtZXhhbXBsZQA="
+  }'
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdrawals", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Idempotency-Key": crypto.randomUUID(),
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    "transactionId": "earn_external_wallet_transaction_example",
+    "signedTransaction": "AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOAAQABAvSV602SJ67iQCUGLwHzVtPnlMbZqL79wnV/nb+Mi9SJBUpTWpkpIQZNJOhxYNo4fHw1td28kruB5B+oQEEFRI0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEBAAtzZHAtZXhhbXBsZQA="
+  })
+});
+```
+
+```python tab="Python"
+import os, requests, uuid
+
+r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawals",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  json={
+    "transactionId": "earn_external_wallet_transaction_example",
+    "signedTransaction": "AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOAAQABAvSV602SJ67iQCUGLwHzVtPnlMbZqL79wnV/nb+Mi9SJBUpTWpkpIQZNJOhxYNo4fHw1td28kruB5B+oQEEFRI0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEBAAtzZHAtZXhhbXBsZQA="
+  })
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "withdrawal": {
+      "movementId": "earn_movement_example",
+      "positionId": "earn_position_example",
+      "provider": "kamino",
+      "providerReference": "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+      "direction": "deposit",
+      "status": "requested",
+      "settlement": "atomic",
+      "signature": "example",
+      "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+      "amount": "25",
+      "denomination": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+      "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+      "tokenAmount": "25",
+      "failureReason": "example",
+      "createdAt": "2025-01-01T00:00:00.000Z",
+      "confirmedAt": "2025-01-01T00:00:00.000Z",
+      "settledAt": "2025-01-01T00:00:00.000Z"
+    }
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: earn.execute",
+    "details": {
+      "action": "earn.execute"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+</ApiPanel>
+
+</ApiOperation>

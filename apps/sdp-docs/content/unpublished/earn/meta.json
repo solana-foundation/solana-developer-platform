@@ -1,0 +1,15 @@
+{
+  "title": "Earn",
+  "pages": [
+    "concepts",
+    "quickstart",
+    "providers",
+    "deposit-api",
+    "reporting",
+    "withdrawals",
+    "---Integrate---",
+    "../guides/embedded-yield",
+    "treasury",
+    "integration-details"
+  ]
+}

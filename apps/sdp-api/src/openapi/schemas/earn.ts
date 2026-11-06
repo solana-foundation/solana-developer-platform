@@ -1,6 +1,15 @@
 import { EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS } from "@sdp/types/earn";
 import { z } from "zod";
-import { isoDateTimeSchema, successResponseSchema } from "@/openapi/schemas/base";
+import {
+  errorResponseSchema,
+  isoDateTimeSchema,
+  successResponseSchema,
+} from "@/openapi/schemas/base";
+
+/** A missing Earn provider capability, returned by SdpEarnError rather than AppError. */
+export const earnNotImplementedErrorResponseSchema = errorResponseSchema.extend({
+  error: errorResponseSchema.shape.error.extend({ code: z.literal("NOT_IMPLEMENTED") }),
+});
 
 // ---------------------------------------------------------------------------
 // The strategy catalogue: the synced shelf of yield opportunities. Partners
@@ -45,7 +54,7 @@ const earnStrategySchema = z
     }),
     name: z.string().openapi({ example: "Allez USDC" }),
     sourceKind: z.enum(["defi", "rwa"]).openapi({
-      description: "Where the yield comes from: on-chain DeFi or a real-world-asset fund.",
+      description: "Where the yield comes from: on-chain DeFi or real-world assets.",
     }),
     underlyingSource: z.string().optional().openapi({
       description: "Open id of the underlying protocol or fund, when the provider reports one.",
@@ -766,15 +775,25 @@ const earnAsyncWithdrawalRequestCommonFields = {
   assetMint: earnSolanaMintSchema,
   shareMint: earnSolanaMintSchema,
   shares: earnDecimalAmountSchema,
-  quotedAssets: earnDecimalAmountSchema,
+  quotedAssets: earnDecimalAmountSchema.openapi({
+    description: "Expected payout at request creation, in asset units. Not a settled amount.",
+  }),
   shareDecimals: z.number().int().min(0).max(38),
   assetDecimals: z.number().int().min(0).max(38),
   nonce: z.string().nullable(),
   creationTimestamp: z.string().regex(/^\d+$/).nullable(),
-  creationSignature: z.string().nullable(),
-  cancelSignature: z.string().nullable(),
-  closingSignature: z.string().nullable(),
-  assetsPaid: earnDecimalAmountSchema.nullable(),
+  creationSignature: z.string().nullable().openapi({
+    description: "Request-creation transaction. Confirmation does not prove asset payout.",
+  }),
+  cancelSignature: z.string().nullable().openapi({
+    description: "Cancellation transaction, when recovery was submitted.",
+  }),
+  closingSignature: z.string().nullable().openapi({
+    description: "Provider-authenticated fulfillment or cancellation transaction, when known.",
+  }),
+  assetsPaid: earnDecimalAmountSchema.nullable().openapi({
+    description: "Observed fulfillment payout in asset units, or null before it is known.",
+  }),
   failureReason: z.string().nullable(),
   fulfilledAt: isoDateTimeSchema.nullable(),
   cancelledAt: isoDateTimeSchema.nullable(),
@@ -845,7 +864,7 @@ export const earnExternalWalletSubmitRequest = z
   .openapi({
     description:
       "Submit the signed bytes back. Requires the Idempotency-Key header; a retry with the " +
-      "same key resolves the original movement instead of moving money twice.",
+      "same key resolves the original movement or withdrawal request instead of acting twice.",
   });
 
 const earnExternalWalletTransactionSchema = z
@@ -853,10 +872,16 @@ const earnExternalWalletTransactionSchema = z
     transactionId: z.string().openapi({ example: "earn_external_wallet_transaction_example" }),
     transaction: z.string().openapi({
       description:
-        "Base64 wire bytes of the UNSIGNED transaction for the external wallet to sign. It " +
-        "expires with its blockhash (about a minute).",
+        "Base64 wire bytes of the unsigned transaction. Add every required signature without " +
+        "changing the message, then submit through SDP. The blockhash bounds when the network " +
+        "can first accept it; retain the original signed bytes for recovery.",
     }),
-    lastValidBlockHeight: z.string().openapi({ example: "361186610" }),
+    lastValidBlockHeight: z.string().openapi({
+      description:
+        "Last block height at which the network can first accept this transaction. This is " +
+        "a block height, not a slot or timestamp.",
+      example: "361186610",
+    }),
     sponsored: z.boolean().openapi({
       description:
         "Whether SDP supplied and signed the fee payer. A partner-controlled feePayer leaves " +

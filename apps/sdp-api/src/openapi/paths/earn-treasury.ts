@@ -6,7 +6,7 @@ import {
   earnVaultWithdrawalSchema,
 } from "@sdp/types/earn-wire";
 import { z } from "zod";
-import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
+import { successResponseSchema } from "@/openapi/schemas/base";
 import {
   earnExternalWalletWithdrawalRequestResponse,
   earnExternalWalletWithdrawalRequestsResponse,
@@ -27,8 +27,10 @@ import {
   pageFields,
 } from "@/openapi/schemas/earn-treasury";
 import * as requests from "@/routes/earn/schemas";
+import { earnErrorResponses } from "./earn-errors";
+import { EARN_GROUPS } from "./earn-groups";
 import {
-  errorResponses,
+  DOCS_GROUP,
   jsonContent,
   projectScopeHeaders,
   projectScopeWithIdempotencyHeaders,
@@ -53,16 +55,16 @@ export function registerEarnTreasuryPaths(
       body?: z.ZodType;
       query?: Query;
       params?: Query;
-      idempotency?: "required" | "either";
+      idempotency?: "required" | "either" | "optional-either";
       signs?: true;
       created?: boolean;
-      description?: string;
-    } = {}
+      description: string;
+    }
   ) {
     const headers =
       options.idempotency === "required"
         ? projectScopeWithRequiredIdempotencyHeaders
-        : options.idempotency === "either"
+        : options.idempotency === "either" || options.idempotency === "optional-either"
           ? projectScopeWithIdempotencyHeaders
           : projectScopeHeaders;
     registry.registerPath({
@@ -71,16 +73,18 @@ export function registerEarnTreasuryPaths(
       operationId,
       summary,
       tags: ["Earn"],
+      [DOCS_GROUP]: path.startsWith("programs") ? EARN_GROUPS.programs : EARN_GROUPS.treasury,
       security,
       description:
-        (options.description ??
-          `Tenant-scoped Treasury operation. Requires earn:${method === "get" || path.endsWith("preview") || path.includes("previews") || path.endsWith("options") ? "read" : "write"}.`) +
+        options.description +
         (options.idempotency
           ? " A new intentional operation needs a new Idempotency-Key, even with identical terms. Retrying an uncertain operation must reuse its key and exact payload."
           : "") +
         (options.idempotency === "either"
-          ? " Supply exactly one UUIDv4 key, through Idempotency-Key or body requestId."
-          : ""),
+          ? " Supply exactly one key through Idempotency-Key or body requestId (UUIDv4)."
+          : options.idempotency === "optional-either"
+            ? " An idempotency key is optional; send Idempotency-Key or body requestId (UUIDv4), never both."
+            : ""),
       request: {
         headers,
         ...(options.params ? { params: options.params } : {}),
@@ -92,8 +96,7 @@ export function registerEarnTreasuryPaths(
         ...(options.created
           ? { 201: { description: "Created", content: jsonContent(response) } }
           : {}),
-        ...errorResponses(
-          errorResponseSchema,
+        ...earnErrorResponses(
           options.signs
             ? [400, 401, 403, 404, 409, 422, 429, 500, 501, 503]
             : [400, 401, 403, 404, 409, 429, 500, 501, 503]
@@ -112,7 +115,14 @@ export function registerEarnTreasuryPaths(
     "listEarnMovements",
     "List all scoped Earn movements",
     envelope({ movements: z.array(earnMovementSchema), ...pageFields }),
-    { query: requests.earnMovementsQuerySchema }
+    {
+      query: requests.earnMovementsQuerySchema,
+      description:
+        "Returns one keyset page of recorded custody-wallet and provider-program movements, " +
+        "newest first. Amounts use each row's denomination; do not sum different tokens or " +
+        "USD together. External-wallet movements use their own per-owner endpoint. This " +
+        "history remains available when a provider is disabled.",
+    }
   );
   route(
     "post",
@@ -126,6 +136,11 @@ export function registerEarnTreasuryPaths(
         .openapi({ not: { required: ["requestId"] } }),
       idempotency: "required",
       signs: true,
+      description:
+        "Builds, signs and broadcasts a deposit from an authorized custody wallet. Quote " +
+        "first when the strategy requires minSharesOut. Swap-funded deposits stay atomic; " +
+        "if the combined transaction cannot fit, the request is refused without sending. " +
+        "Convert funds separately or deposit the vault's own token before retrying.",
     }
   );
   route(
@@ -134,7 +149,13 @@ export function registerEarnTreasuryPaths(
     "listEarnVaultDeposits",
     "List custody deposits",
     envelope({ deposits: z.array(earnVaultDepositRecordSchema), ...pageFields }),
-    { query: requests.earnVaultDepositsQuerySchema }
+    {
+      query: requests.earnVaultDepositsQuerySchema,
+      description:
+        "Returns recorded custody deposits, newest first, within the project and wallet " +
+        "scope. Filter by requestId using the original Idempotency-Key to recover a deposit " +
+        "whose response was lost. Use settled=false to restore deposits still being tracked.",
+    }
   );
   route(
     "get",
@@ -142,7 +163,14 @@ export function registerEarnTreasuryPaths(
     "getEarnVaultDeposit",
     "Read one custody deposit",
     depositRecord,
-    { params: requests.earnVaultDepositParamsSchema }
+    {
+      params: requests.earnVaultDepositParamsSchema,
+      description:
+        "Returns one recorded custody deposit and refreshes its chain observation when " +
+        "available. This response uses legacy status names: pending means recorded, and " +
+        "confirmed covers both chain confirmation and finality. For provider-order deposits, " +
+        "confirmed does not prove receipt of shares; settled=false remains the recovery read.",
+    }
   );
   route(
     "get",
@@ -157,7 +185,11 @@ export function registerEarnTreasuryPaths(
     {
       query: requests.earnVaultPositionsQuerySchema,
       description:
-        "Requires `earn.read`. Optional afterMovementIds is a comma-separated list of up to 100 visible custody movement IDs. Each affected position must be read at or after its movements' maximum confirmed slot; unrelated positions are not constrained. balanceReadContext acknowledges that bound; unavailable or stale provider values remain absent. confirmed is optimistic chain commitment; finalized or provider settlement supplies final amounts.",
+        "Returns live balances for the project's authorized custody positions. Optional " +
+        "afterMovementIds accepts up to 100 comma-separated movement IDs and requires each " +
+        "affected balance to be read at or after its latest confirmed slot. The returned " +
+        "balanceReadContext acknowledges that bound. Unavailable or stale live values stay " +
+        "absent; do not display them as zero.",
     }
   );
   route(
@@ -172,6 +204,11 @@ export function registerEarnTreasuryPaths(
         .openapi({ not: { required: ["requestId"] } }),
       idempotency: "required",
       signs: true,
+      description:
+        "Redeems a position's shares into the custody wallet that owns them. Call " +
+        "vault-withdrawal-options first to select a supported route, then quote the direct " +
+        "exit when minAmountOut is required. A strategy disabled for new deposits remains " +
+        "exitable. Provider-order exits finish only when the provider completes the payout.",
     }
   );
   route(
@@ -180,7 +217,13 @@ export function registerEarnTreasuryPaths(
     "listEarnVaultWithdrawals",
     "List custody withdrawals",
     envelope({ withdrawals: z.array(earnVaultWithdrawalSchema), ...pageFields }),
-    { query: requests.earnVaultWithdrawalsQuerySchema }
+    {
+      query: requests.earnVaultWithdrawalsQuerySchema,
+      description:
+        "Returns recorded custody withdrawals, newest first, within the project and wallet " +
+        "scope. Filter by requestId using the original Idempotency-Key after a lost response. " +
+        "Use settled=false to restore withdrawals still being tracked.",
+    }
   );
   route(
     "get",
@@ -188,7 +231,15 @@ export function registerEarnTreasuryPaths(
     "getEarnVaultWithdrawal",
     "Read one custody withdrawal",
     withdrawal,
-    { params: requests.earnVaultWithdrawalParamsSchema }
+    {
+      params: requests.earnVaultWithdrawalParamsSchema,
+      description:
+        "Returns one recorded custody withdrawal and refreshes its chain observation when " +
+        "available. Atomic withdrawals may show Done at confirmed; provider-order " +
+        "withdrawals remain pending until authenticated provider completion. shares is the " +
+        "requested share quantity, not a deposit-token payout; the movement feed reports " +
+        "tokenAmount once a finalized payout has been observed.",
+    }
   );
   route(
     "post",
@@ -196,7 +247,14 @@ export function registerEarnTreasuryPaths(
     "createEarnVaultWithdrawalPreview",
     "Preview a custody withdrawal",
     earnVaultWithdrawalPreviewResponse,
-    { body: requests.earnVaultWithdrawalPreviewSchema }
+    {
+      body: requests.earnVaultWithdrawalPreviewSchema,
+      description:
+        "Quotes the live deposit-token payout for a custody position's shares. Derive " +
+        "minAmountOut from assetsOut minus your chosen tolerance, quantized to assetDecimals. " +
+        "Read-only and safe to retry. Providers without exit quoting return 501; a " +
+        "provider-order route with no slippage policy does not require this preview.",
+    }
   );
   route(
     "post",
@@ -204,21 +262,33 @@ export function registerEarnTreasuryPaths(
     "getEarnVaultWithdrawalOptions",
     "Discover custody withdrawal routes",
     earnVaultWithdrawalOptionsResponse,
-    { body: requests.earnVaultWithdrawalOptionsSchema }
+    {
+      body: requests.earnVaultWithdrawalOptionsSchema,
+      description:
+        "Discovers atomic, provider-order, solver-queue and operator-redemption routes from " +
+        "live provider state. Call when starting a withdrawal and let the customer choose " +
+        "when several routes are available. Do not infer availability from liquidityTerm.",
+    }
   );
   route(
     "post",
     "vault-queued-withdrawal-previews",
     "createEarnVaultQueuedWithdrawalPreview",
-    "Preview a queued custody withdrawal",
+    "Preview an asynchronous custody withdrawal",
     earnVaultQueuedWithdrawalPreviewResponse,
-    { body: requests.earnVaultQueuedWithdrawalPreviewSchema }
+    {
+      body: requests.earnVaultQueuedWithdrawalPreviewSchema,
+      description:
+        "Quotes the selected solver queue's payout and timing, or an operator redemption's " +
+        "intermediate-token conversion and expected par payout. Read the live withdrawal " +
+        "options first and resolve blockingIssues before confirming. Nothing moves.",
+    }
   );
   route(
     "post",
     "vault-withdrawal-requests",
     "createEarnVaultWithdrawalRequest",
-    "Request a queued custody withdrawal",
+    "Request an asynchronous custody withdrawal",
     earnExternalWalletWithdrawalRequestResponse,
     {
       body: z
@@ -231,6 +301,11 @@ export function registerEarnTreasuryPaths(
         .openapi({ not: { required: ["requestId"] } }),
       idempotency: "required",
       signs: true,
+      description:
+        "Signs and submits a durable asynchronous withdrawal request. Solver queues escrow " +
+        "shares; operator redemptions convert shares into delegated intermediate tokens, or " +
+        "delegate intermediate tokens already held. The request transaction is not a payout. " +
+        "Track withdrawalRequestId until fulfilled, cancelled or failed.",
     }
   );
   route(
@@ -239,7 +314,13 @@ export function registerEarnTreasuryPaths(
     "listEarnVaultWithdrawalRequests",
     "List custody withdrawal requests",
     earnExternalWalletWithdrawalRequestsResponse,
-    { query: requests.earnVaultWithdrawalRequestsQuerySchema }
+    {
+      query: requests.earnVaultWithdrawalRequestsQuerySchema,
+      description:
+        "Returns one keyset page of asynchronous withdrawal requests for authorized custody " +
+        "positions. Restore open requests with settled=false and page until hasMore is false. " +
+        "closedOrUnknown remains open until provider-authenticated evidence resolves it.",
+    }
   );
   route(
     "get",
@@ -247,7 +328,13 @@ export function registerEarnTreasuryPaths(
     "getEarnVaultWithdrawalRequest",
     "Read a custody withdrawal request",
     earnExternalWalletWithdrawalRequestResponse,
-    { params: requests.earnVaultWithdrawalRequestParamsSchema }
+    {
+      params: requests.earnVaultWithdrawalRequestParamsSchema,
+      description:
+        "Returns the last durable lifecycle observation for an asynchronous custody exit. " +
+        "Only fulfilled, cancelled and failed are terminal. A finalized request transaction " +
+        "does not prove payout; keep polling closedOrUnknown until the outcome is known.",
+    }
   );
   route(
     "post",
@@ -260,6 +347,11 @@ export function registerEarnTreasuryPaths(
       body: requests.earnVaultWithdrawalRequestCancelSchema.omit({ requestId: true }),
       idempotency: "required",
       signs: true,
+      description:
+        "Signs and submits recovery for a cancelable custody withdrawal request. Solver " +
+        "requests return escrowed shares only after the deadline; operator cancellation " +
+        "leaves the wallet holding intermediate tokens instead of restoring the original " +
+        "shares. Fulfillment may race cancellation, so track the returned request.",
     }
   );
   route(
@@ -268,12 +360,23 @@ export function registerEarnTreasuryPaths(
     "listEarnPrograms",
     "List provider-managed programs",
     envelope({ programs: z.array(earnProgramSchema), ...listFields }),
-    { query: requests.earnProgramsListQuerySchema }
+    {
+      query: requests.earnProgramsListQuerySchema,
+      description:
+        "Lists the project's linked provider programs with live wallet balances and yield. " +
+        "A failed provider read fails the whole page; programs holding funds are never " +
+        "silently dropped. Use the provider filter to isolate one provider.",
+    }
   );
   route("post", "programs", "createEarnProgram", "Create a provider-managed program", program, {
     body: requests.earnProgramCreateSchema,
     idempotency: "either",
     created: true,
+    description:
+      "Creates and links a provider-managed wallet for the project, without funding it. " +
+      "Fund wallet.solanaDepositAddress separately after creation. Each supplied token group " +
+      "currently requires one allocation at 100 percent. Returns 201 for a new program and " +
+      "200 for an idempotent replay.",
   });
   route(
     "get",
@@ -281,7 +384,13 @@ export function registerEarnTreasuryPaths(
     "getEarnProgram",
     "Read a provider-managed program",
     program,
-    { params: requests.earnProgramParamsSchema }
+    {
+      params: requests.earnProgramParamsSchema,
+      description:
+        "Reads a linked program's balances, allocations and yield directly from its " +
+        "provider. The program remains readable when new deposits are disabled, provided " +
+        "the provider capability and credentials remain available.",
+    }
   );
   route(
     "put",
@@ -289,7 +398,15 @@ export function registerEarnTreasuryPaths(
     "retargetEarnProgram",
     "Change a program's allocation",
     program,
-    { params: requests.earnProgramParamsSchema, body: requests.earnProgramRetargetSchema }
+    {
+      params: requests.earnProgramParamsSchema,
+      body: requests.earnProgramRetargetSchema,
+      idempotency: "optional-either",
+      description:
+        "Updates the provider program's allocation in place and returns fresh live state. " +
+        "Each supplied token group currently requires one allocation at 100 percent; " +
+        "omitted token groups keep their existing allocation. The program label is unchanged.",
+    }
   );
   route(
     "get",
@@ -300,7 +417,13 @@ export function registerEarnTreasuryPaths(
       deposits: z.array(earnPortfolioDepositSchema),
       nextCursor: z.string().nullable(),
     }),
-    { params: requests.earnProgramParamsSchema, query: requests.earnProgramDepositsQuerySchema }
+    {
+      params: requests.earnProgramParamsSchema,
+      query: requests.earnProgramDepositsQuerySchema,
+      description:
+        "Reads deposit history directly from the program's provider. Pass its nextCursor " +
+        "back as cursor to continue; null means there are no more deposits.",
+    }
   );
   route(
     "post",
@@ -308,7 +431,14 @@ export function registerEarnTreasuryPaths(
     "previewEarnProgramWithdrawal",
     "Preview a program withdrawal or read liquidity",
     envelope({ preview: earnProgramWithdrawalPreviewSchema }),
-    { params: requests.earnProgramParamsSchema, body: requests.earnProgramWithdrawalPreviewSchema }
+    {
+      params: requests.earnProgramParamsSchema,
+      body: requests.earnProgramWithdrawalPreviewSchema,
+      description:
+        "Reads live withdrawal liquidity and fees without moving funds. Omit amountUsd " +
+        "to read liquidity only, or include it to preview a payout. Wallet-scoped API keys " +
+        "cannot use this provider account; use an organization-wide key.",
+    }
   );
   route(
     "post",
@@ -321,6 +451,11 @@ export function registerEarnTreasuryPaths(
       body: requests.earnProgramWithdrawalCreateSchema,
       idempotency: "either",
       created: true,
+      description:
+        "Requests a provider-managed payout to destinationAddress and records the intent " +
+        "before calling the provider. Wallet-scoped API keys are refused. Returns 201 for " +
+        "an accepted request and 200 for a matching replay; reuse the original key and " +
+        "payload after an uncertain response. Track the live provider withdrawal outcome.",
     }
   );
   route(
@@ -332,6 +467,10 @@ export function registerEarnTreasuryPaths(
     {
       params: requests.earnProgramParamsSchema,
       query: requests.earnProgramWithdrawalsListQuerySchema,
+      description:
+        "Lists the program's recorded payout intents from SDP, including requests awaiting " +
+        "provider acceptance. This audit history remains available if provider credentials " +
+        "are removed. Use withdrawalRef with the detail endpoint for live provider state.",
     }
   );
   route(
@@ -340,6 +479,12 @@ export function registerEarnTreasuryPaths(
     "getEarnProgramWithdrawal",
     "Read a program withdrawal",
     programWithdrawal,
-    { params: requests.earnProgramWithdrawalParamsSchema }
+    {
+      params: requests.earnProgramWithdrawalParamsSchema,
+      description:
+        "Reads one payout's current state directly from the provider and refreshes its " +
+        "recorded observation. Use the withdrawalRef returned after provider acceptance. " +
+        "A partially_completed result reports a partial payout; it is not full payment.",
+    }
   );
 }

@@ -318,10 +318,10 @@ ${depositFloor}
 }
 
 /**
- * Submit once every required wallet has signed. A build expires with its
- * blockhash (about a minute): an expired build is refused with 409
- * TRANSACTION_EXPIRED and nothing is recorded, so build again. Reuse the same
- * idempotency key when retrying this exact submission.
+ * Submit promptly once every required wallet has signed. SDP records the
+ * authenticated signed intent before broadcast. An expired blockhash does
+ * not prove failure: resolve the original attempt before replacing it, and
+ * reuse the same idempotency key and signed body on an uncertain retry.
  */
 export async function submitEarnDeposit({
   transactionId,

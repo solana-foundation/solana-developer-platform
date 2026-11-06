@@ -1,0 +1,87 @@
+---
+module: earn
+title: Earn
+description: Strategy reads, previews, withdrawal-route discovery, unsigned builds, submission, queued actions, and tenant tracking.
+---
+
+## Discovery
+
+<ApiOperationTable>
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/earn/strategies` | [List yield strategies](/docs/reference/api/earn/list-earn-strategies) |
+| `GET` | `/v1/earn/strategies/{strategyId}` | [Get one yield strategy](/docs/reference/api/earn/get-earn-strategy) |
+| `POST` | `/v1/earn/vault-deposit-previews` | [Preview a direct vault deposit](/docs/reference/api/earn/create-earn-vault-deposit-preview) |
+
+</ApiOperationTable>
+
+## Embedded Yield
+
+<ApiOperationTable>
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/earn/external-wallet/positions/summary` | [Get external-wallet position totals](/docs/reference/api/earn/get-earn-external-wallet-position-summary) |
+| `GET` | `/v1/earn/external-wallet/positions` | [List one external wallet's positions](/docs/reference/api/earn/list-earn-external-wallet-positions) |
+| `GET` | `/v1/earn/external-wallet/movements` | [List one external wallet's activity](/docs/reference/api/earn/list-earn-external-wallet-movements) |
+| `GET` | `/v1/earn/external-wallet/movements/{movementId}` | [Get one external-wallet movement](/docs/reference/api/earn/get-earn-external-wallet-movement) |
+| `GET` | `/v1/earn/external-wallet/earnings` | [Get one external wallet's balance and earnings](/docs/reference/api/earn/get-earn-external-wallet-earnings) |
+| `POST` | `/v1/earn/external-wallet/deposit-transactions` | [Build an unsigned external-wallet deposit transaction](/docs/reference/api/earn/create-earn-external-wallet-deposit-transaction) |
+| `POST` | `/v1/earn/external-wallet/deposits` | [Submit a signed external-wallet deposit](/docs/reference/api/earn/create-earn-external-wallet-deposit) |
+| `POST` | `/v1/earn/external-wallet/withdrawal-previews` | [Preview an external-wallet exit](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-preview) |
+| `POST` | `/v1/earn/external-wallet/withdrawal-transactions` | [Build an unsigned external-wallet exit transaction](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-transaction) |
+| `POST` | `/v1/earn/external-wallet/withdrawals` | [Submit a signed external-wallet withdrawal](/docs/reference/api/earn/create-earn-external-wallet-withdrawal) |
+| `POST` | `/v1/earn/external-wallet/withdrawal-options` | [Discover external-wallet withdrawal routes](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-options) |
+| `POST` | `/v1/earn/external-wallet/queued-withdrawal-previews` | [Preview an asynchronous external-wallet withdrawal](/docs/reference/api/earn/create-earn-external-wallet-queued-withdrawal-preview) |
+| `POST` | `/v1/earn/external-wallet/withdrawal-request-transactions` | [Build an unsigned asynchronous-withdrawal request](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-transaction) |
+| `POST` | `/v1/earn/external-wallet/withdrawal-requests` | [Submit a signed asynchronous-withdrawal request](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request) |
+| `GET` | `/v1/earn/external-wallet/withdrawal-requests` | [List an external wallet's asynchronous withdrawals](/docs/reference/api/earn/list-earn-external-wallet-withdrawal-requests) |
+| `GET` | `/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}` | [Get one asynchronous-withdrawal request](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-request) |
+| `POST` | `/v1/earn/external-wallet/withdrawal-request-cancel-transactions` | [Build an unsigned asynchronous-withdrawal cancellation](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancel-transaction) |
+| `POST` | `/v1/earn/external-wallet/withdrawal-request-cancellations` | [Submit a signed asynchronous-withdrawal cancellation](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancellation) |
+
+</ApiOperationTable>
+
+## Treasury
+
+<ApiOperationTable>
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/earn/movements` | [List all scoped Earn movements](/docs/reference/api/earn/list-earn-movements) |
+| `POST` | `/v1/earn/vault-deposits` | [Deposit from a custody wallet](/docs/reference/api/earn/create-earn-vault-deposit) |
+| `GET` | `/v1/earn/vault-deposits` | [List custody deposits](/docs/reference/api/earn/list-earn-vault-deposits) |
+| `GET` | `/v1/earn/vault-deposits/{movementId}` | [Read one custody deposit](/docs/reference/api/earn/get-earn-vault-deposit) |
+| `GET` | `/v1/earn/vault-positions` | [List live custody positions](/docs/reference/api/earn/list-earn-vault-positions) |
+| `POST` | `/v1/earn/vault-withdrawals` | [Withdraw from a custody position](/docs/reference/api/earn/create-earn-vault-withdrawal) |
+| `GET` | `/v1/earn/vault-withdrawals` | [List custody withdrawals](/docs/reference/api/earn/list-earn-vault-withdrawals) |
+| `GET` | `/v1/earn/vault-withdrawals/{movementId}` | [Read one custody withdrawal](/docs/reference/api/earn/get-earn-vault-withdrawal) |
+| `POST` | `/v1/earn/vault-withdrawal-previews` | [Preview a custody withdrawal](/docs/reference/api/earn/create-earn-vault-withdrawal-preview) |
+| `POST` | `/v1/earn/vault-withdrawal-options` | [Discover custody withdrawal routes](/docs/reference/api/earn/get-earn-vault-withdrawal-options) |
+| `POST` | `/v1/earn/vault-queued-withdrawal-previews` | [Preview an asynchronous custody withdrawal](/docs/reference/api/earn/create-earn-vault-queued-withdrawal-preview) |
+| `POST` | `/v1/earn/vault-withdrawal-requests` | [Request an asynchronous custody withdrawal](/docs/reference/api/earn/create-earn-vault-withdrawal-request) |
+| `GET` | `/v1/earn/vault-withdrawal-requests` | [List custody withdrawal requests](/docs/reference/api/earn/list-earn-vault-withdrawal-requests) |
+| `GET` | `/v1/earn/vault-withdrawal-requests/{withdrawalRequestId}` | [Read a custody withdrawal request](/docs/reference/api/earn/get-earn-vault-withdrawal-request) |
+| `POST` | `/v1/earn/vault-withdrawal-requests/{withdrawalRequestId}/cancel` | [Recover a cancelable withdrawal request](/docs/reference/api/earn/cancel-earn-vault-withdrawal-request) |
+| `GET` | `/v1/earn/vault-share-reconciliation` | [Reconcile custody vault shares against recorded positions](/docs/reference/api/earn/get-earn-vault-share-reconciliation) |
+
+</ApiOperationTable>
+
+## Programs
+
+<ApiOperationTable>
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/earn/programs` | [List provider-managed programs](/docs/reference/api/earn/list-earn-programs) |
+| `POST` | `/v1/earn/programs` | [Create a provider-managed program](/docs/reference/api/earn/create-earn-program) |
+| `GET` | `/v1/earn/programs/{programId}` | [Read a provider-managed program](/docs/reference/api/earn/get-earn-program) |
+| `PUT` | `/v1/earn/programs/{programId}` | [Change a program's allocation](/docs/reference/api/earn/retarget-earn-program) |
+| `GET` | `/v1/earn/programs/{programId}/deposits` | [List program deposits](/docs/reference/api/earn/list-earn-program-deposits) |
+| `POST` | `/v1/earn/programs/{programId}/withdrawal-preview` | [Preview a program withdrawal or read liquidity](/docs/reference/api/earn/preview-earn-program-withdrawal) |
+| `POST` | `/v1/earn/programs/{programId}/withdrawals` | [Withdraw from a provider-managed program](/docs/reference/api/earn/create-earn-program-withdrawal) |
+| `GET` | `/v1/earn/programs/{programId}/withdrawals` | [List recorded program withdrawals](/docs/reference/api/earn/list-earn-program-withdrawals) |
+| `GET` | `/v1/earn/programs/{programId}/withdrawals/{withdrawalRef}` | [Read a program withdrawal](/docs/reference/api/earn/get-earn-program-withdrawal) |
+
+</ApiOperationTable>

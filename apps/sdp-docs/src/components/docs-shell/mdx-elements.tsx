@@ -1,7 +1,24 @@
+import { Callout } from "fumadocs-ui/components/callout";
 import defaultMdxComponents from "fumadocs-ui/mdx";
 import type React from "react";
 import { ExternalDocsLink } from "@/components/docs-shell/external-link";
 import { cn } from "@/lib/utils";
+
+/** Shared callouts keep status icons without a decorative side stripe. */
+export function MDXCallout({
+  className,
+  type = "info",
+  ...props
+}: React.ComponentProps<typeof Callout>) {
+  return (
+    <Callout
+      {...props}
+      type={type}
+      data-type={type}
+      className={cn("launch-docs-callout", className)}
+    />
+  );
+}
 
 export function MDXHeading2({ className, ...props }: React.ComponentPropsWithoutRef<"h2">) {
   const Component = defaultMdxComponents.h2 as React.ComponentType<

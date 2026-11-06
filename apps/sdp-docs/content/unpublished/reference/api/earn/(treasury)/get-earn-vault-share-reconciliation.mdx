@@ -1,0 +1,278 @@
+---
+module: earn
+title: Reconcile custody vault shares against recorded positions
+description: "Report-only comparison of each scoped custody wallet's on-chain share balances against the recorded claim set, both directions: share balances of catalogued vaults with no recorded position (for example, shares acquired by signing outside SDP), and recorded open positions whose wallet holds none of their shares."
+icon: method:GET
+apiReference: true
+---
+<Callout type="info">
+This operation is internal. It is not part of the partner-facing Earn API.
+</Callout>
+
+
+<ApiOperation>
+
+<ApiEndpoint method="GET" path="/v1/earn/vault-share-reconciliation" />
+
+Writes nothing. Takes the same wallet-binding scope as the positions read and no provider gate.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+## Responses
+
+- **`200`** Reconciliation report
+
+  - **`data`** · `object` · required
+
+    - **`unrecordedHoldings`** · `object[]` · required
+
+      Share balances the custody wallet holds for catalogued vaults with no recorded open position behind them (for example, shares acquired by signing outside SDP).
+
+      - **`custodyWalletId`** · `string` · required · example `cwlt_example`
+
+      - **`walletAddress`** · `string` · required · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+
+      - **`provider`** · `string` · required · example `kamino`
+
+      - **`strategyId`** · `string` · required · example `earn_strategy_example`
+
+      - **`strategyName`** · `string` · required · example `USDC Prime Vault`
+
+      - **`vaultAddress`** · `string` · required
+
+        The catalogued vault the held share mint attributes to.
+
+      - **`shareMint`** · `string` · required
+
+      - **`shares`** · `string` · required · example `500`
+
+        Raw share-token amount in base units.
+
+      - **`decimals`** · `integer` · required · example `6`
+
+      - **`uiShares`** · `string` · required · example `0.0005`
+
+      - **`ambiguousAttribution`** · `boolean` · required
+
+        True when more than one catalogued vault identity claims this share mint, so the attribution is the best candidate rather than the only one.
+
+    - **`unbackedPositions`** · `object[]` · required
+
+      Recorded open positions whose wallet holds none of their shares. Positions with an unsettled movement are excluded: the ledger already explains that disagreement. So is a position provably backed by the intermediate token its cancelled operator redemption left in place of its shares; one whose backing the report cannot decide carries `ambiguousBacking`. Positions with an open queued withdrawal request are listed in `queuedWithdrawalPositions` instead.
+
+      - **`positionId`** · `string` · required · example `earn_position_example`
+
+      - **`custodyWalletId`** · `string` · required · example `cwlt_example`
+
+      - **`walletAddress`** · `string` · required
+
+      - **`provider`** · `string` · required · example `kamino`
+
+      - **`vaultAddress`** · `string | null` · required
+
+      - **`shareMint`** · `string | null` · required
+
+      - **`label`** · `string` · required
+
+      - **`ambiguousBacking`** · `boolean` · required
+
+        True when the wallet holds intermediate tokens this position's cancelled operator redemption may have left, but an unresolved request or another position's redemption could own them, so the report cannot tell whether they back it.
+
+    - **`queuedWithdrawalPositions`** · `object[]` · required
+
+      Recorded open positions whose wallet holds none of their shares while queued withdrawal requests are open. The requests escrowed or burned shares ahead of the payout, but only the shares they cover, so these positions are listed with their requests rather than judged. A position provably backed by its cancelled operator redemption's intermediate token is omitted from both lists.
+
+      - **`positionId`** · `string` · required · example `earn_position_example`
+
+      - **`custodyWalletId`** · `string` · required · example `cwlt_example`
+
+      - **`walletAddress`** · `string` · required
+
+      - **`provider`** · `string` · required · example `veda`
+
+      - **`vaultAddress`** · `string | null` · required
+
+      - **`shareMint`** · `string | null` · required
+
+      - **`label`** · `string` · required
+
+      - **`ambiguousBacking`** · `boolean` · required
+
+        True when the wallet holds intermediate tokens this position's cancelled operator redemption may have left, but an unresolved request or another position's redemption could own them, so the report cannot tell whether they back it.
+
+      - **`withdrawalRequestIds`** · `string[]` · required
+
+    - **`unreadableWallets`** · `object[]` · required
+
+      Wallets whose balance read failed or ran out of the request budget. Their claims are unjudged in this report, never closed or marked unbacked.
+
+      - **`custodyWalletId`** · `string` · required · example `cwlt_example`
+
+      - **`walletAddress`** · `string` · required
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`401`** Unauthorized
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`403`** Forbidden. Requires the `earn.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `401`.
+
+- **`429`** Too Many Requests
+
+  Same fields as `401`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `401`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `401`.
+
+<ApiPanel>
+
+## Example request
+
+```bash tab="cURL"
+curl 'https://api.solana.com/v1/earn/vault-share-reconciliation' \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/earn/vault-share-reconciliation", {
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.get("https://api.solana.com/v1/earn/vault-share-reconciliation",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "unrecordedHoldings": [
+      {
+        "custodyWalletId": "cwlt_example",
+        "walletAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+        "provider": "kamino",
+        "strategyId": "earn_strategy_example",
+        "strategyName": "USDC Prime Vault",
+        "vaultAddress": "11111111111111111111111111111111",
+        "shareMint": "example",
+        "shares": "500",
+        "decimals": 6,
+        "uiShares": "0.0005",
+        "ambiguousAttribution": false
+      }
+    ],
+    "unbackedPositions": [
+      {
+        "positionId": "earn_position_example",
+        "custodyWalletId": "cwlt_example",
+        "walletAddress": "11111111111111111111111111111111",
+        "provider": "kamino",
+        "vaultAddress": "11111111111111111111111111111111",
+        "shareMint": "example",
+        "label": "example",
+        "ambiguousBacking": false
+      }
+    ],
+    "queuedWithdrawalPositions": [
+      {
+        "positionId": "earn_position_example",
+        "custodyWalletId": "cwlt_example",
+        "walletAddress": "11111111111111111111111111111111",
+        "provider": "veda",
+        "vaultAddress": "11111111111111111111111111111111",
+        "shareMint": "example",
+        "label": "example",
+        "ambiguousBacking": false,
+        "withdrawalRequestIds": [
+          "earn_vault_withdrawal_request_example"
+        ]
+      }
+    ],
+    "unreadableWallets": [
+      {
+        "custodyWalletId": "cwlt_example",
+        "walletAddress": "11111111111111111111111111111111"
+      }
+    ]
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: earn.read",
+    "details": {
+      "action": "earn.read"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+</ApiPanel>
+
+</ApiOperation>

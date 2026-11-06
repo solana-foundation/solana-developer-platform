@@ -1,0 +1,85 @@
+---
+module: earn
+title: Balances and earnings
+description: Read live positions, track settlement, and report earnings accurately.
+---
+
+Read live holdings alongside SDP's recorded movements.
+
+## Read positions
+
+Read [customer positions](/docs/reference/api/earn/list-earn-external-wallet-positions)
+on your backend with `GET /v1/earn/external-wallet/positions?ownerAddress=<wallet>`.
+Treasury uses [`GET /v1/earn/vault-positions`](/docs/reference/api/earn/list-earn-vault-positions).
+
+| Field | Use |
+| --- | --- |
+| `id` | Identify the position for exits. |
+| `shares` | Current holdings. |
+| `withdrawableShares` | Current exit ceiling. |
+| `tokenValue` | Value in the deposit token. |
+
+- **Missing value or shares:** show “Unavailable” and disable dependent actions. Never substitute zero or an old quote.
+- **Provider lock:** zero `withdrawableShares` can come with `unlockTimestamp`. Re-read before exiting.
+
+`parIntermediate` is a redemption token held outside an open request. It keeps
+the position open and can contribute to earnings `currentValue`, separately
+from the share position's `tokenValue`. See
+[operator redemptions](/docs/earn/withdrawals#operator-redemptions).
+
+## Track movements through settlement
+
+Poll [`GET /v1/earn/external-wallet/movements/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement).
+Restore [history](/docs/reference/api/earn/list-earn-external-wallet-movements)
+from `GET /v1/earn/external-wallet/movements?ownerAddress=<wallet>`.
+
+| State | Meaning |
+| --- | --- |
+| `requested` | Signed intent recorded; chain outcome unresolved. |
+| `submitted` | Submitted; keep tracking. |
+| `confirmed` | Chain confirmation; inspect `settlement` before showing completion. |
+| `finalized` | Atomic movement reached finality; use observed amounts. |
+| `failed` | Definitive failure; show `failureReason`. |
+
+| `settlement` | What confirmation means |
+| --- | --- |
+| `atomic` | You may show confirmation while reconciliation tracks finality. |
+| `provider_order` | Only the payment or share leg confirmed. Wait for provider fulfillment; chain finality alone is insufficient. |
+| Missing | Unknown; never assume atomic settlement. |
+
+Use `tokenAmount` with `tokenMint` for observed amounts. Withdrawal `amount` can
+mean shares, not payout. Null `tokenAmount` means pending or unavailable, not
+zero. Label requested amounts and expected queue payouts accordingly.
+
+## Report earnings
+
+Read [`GET /v1/earn/external-wallet/earnings?ownerAddress=<wallet>`](/docs/reference/api/earn/get-earn-external-wallet-earnings)
+for `currentValue`, `totalDeposited`, `totalWithdrawn`, and exact `earned`. If
+`earned` is absent, read each token total's `earnedUnavailableReason`: pending
+movements, open withdrawals, missing receipts, or unavailable live value can
+prevent calculation.
+
+- **Held positions only:** fully exited positions drop out.
+- **Outside transfers distort returns:** live value includes tokens acquired outside SDP; deposit and withdrawal totals only use SDP's ledger.
+- **Accounting needs your reconciled ledger:** this API supplies neither lifetime realized performance nor complete yield-accrual history.
+
+## Protect customer data
+
+[`GET /v1/earn/external-wallet/positions/summary`](/docs/reference/api/earn/get-earn-external-wallet-position-summary)
+aggregates across the project.
+Wallet addresses are omitted unless `includeOwnerAddresses=true`;
+`includePositions=true` requires that personal-data opt-in too.
+
+`earn.read` is project-scoped. Your backend must authenticate each customer and
+authorize their `ownerAddress`. Never expose the project key or full summary to
+a customer's browser.
+
+## Paginate every list
+
+The catalogue uses `page` and `pageSize`. Positions, movements, and withdrawal
+requests use cursors: follow the operation's cursor parameter and `nextCursor`
+until `hasMore: false`. Treat missing or repeated cursors as errors; never
+silently truncate holdings.
+
+See [Pagination](/docs/reference/conventions/pagination) and the
+[API reference](/docs/reference/api/earn).

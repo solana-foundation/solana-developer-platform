@@ -1,5 +1,4 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
-import { errorResponseSchema } from "@/openapi/schemas/base";
 import {
   earnExternalWalletDepositResponse,
   earnExternalWalletDepositTransactionRequest,
@@ -41,9 +40,11 @@ import {
   earnVaultWithdrawalRequestParamsSchema,
   listEarnStrategiesQuerySchema,
 } from "@/routes/earn/schemas";
+import { earnErrorResponses } from "./earn-errors";
+import { EARN_GROUPS } from "./earn-groups";
 import { registerEarnTreasuryPaths } from "./earn-treasury";
 import {
-  errorResponses,
+  DOCS_GROUP,
   jsonContent,
   projectScopeHeaders,
   projectScopeWithRequiredIdempotencyHeaders,
@@ -56,13 +57,13 @@ const earnConfigurationSecurity: EarnSecurity = [{ apiKeyAuth: [] }, { clerkBear
 const earnPublicSecurity: EarnSecurity = [{ apiKeyAuth: [] }];
 
 export function registerEarnPaths(registry: OpenAPIRegistry) {
-  registerEarnTreasuryPaths(registry, earnConfigurationSecurity);
   registerEarnStrategyPaths(registry, earnConfigurationSecurity);
   registerEarnDepositPreviewPath(registry, earnConfigurationSecurity);
+  registerEarnExternalWalletPaths(registry, earnConfigurationSecurity);
+  registerEarnTreasuryPaths(registry, earnConfigurationSecurity);
   // Treasury-facing, so the internal document only: partners hold no custody
   // wallets for this read to reconcile.
   registerEarnVaultShareReconciliationPath(registry, earnConfigurationSecurity);
-  registerEarnExternalWalletPaths(registry, earnConfigurationSecurity);
 }
 
 /** The partner-facing surface: the strategy catalogue plus the caller-signed money routes. */
@@ -82,6 +83,7 @@ function registerEarnStrategyPaths(
     method: "get",
     path: "/v1/earn/strategies",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.discovery,
     summary: "List yield strategies",
     operationId: "listEarnStrategies",
     description:
@@ -101,7 +103,7 @@ function registerEarnStrategyPaths(
         description: "One page of the strategy catalogue",
         content: jsonContent(earnStrategiesResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 429, 500, 503]),
     },
   });
 
@@ -109,6 +111,7 @@ function registerEarnStrategyPaths(
     method: "get",
     path: "/v1/earn/strategies/{strategyId}",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.discovery,
     summary: "Get one yield strategy",
     operationId: "getEarnStrategy",
     description:
@@ -124,7 +127,7 @@ function registerEarnStrategyPaths(
         description: "One strategy-catalogue row",
         content: jsonContent(earnStrategyResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 503]),
     },
   });
 }
@@ -137,6 +140,7 @@ function registerEarnDepositPreviewPath(
     method: "post",
     path: "/v1/earn/vault-deposit-previews",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.discovery,
     summary: "Preview a direct vault deposit",
     operationId: "createEarnVaultDepositPreview",
     description:
@@ -158,7 +162,7 @@ function registerEarnDepositPreviewPath(
         description: "Live deposit quote",
         content: jsonContent(earnVaultDepositPreviewResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 501, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 501, 503]),
     },
   });
 }
@@ -171,6 +175,7 @@ function registerEarnVaultShareReconciliationPath(
     method: "get",
     path: "/v1/earn/vault-share-reconciliation",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.treasury,
     summary: "Reconcile custody vault shares against recorded positions",
     operationId: "getEarnVaultShareReconciliation",
     description:
@@ -188,7 +193,7 @@ function registerEarnVaultShareReconciliationPath(
         description: "Reconciliation report",
         content: jsonContent(earnVaultShareReconciliationResponse),
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 429, 500, 503]),
+      ...earnErrorResponses([401, 403, 429, 500, 503]),
     },
   });
 }
@@ -202,6 +207,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     method: "get",
     path: "/v1/earn/external-wallet/positions/summary",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Get external-wallet position totals",
     operationId: "getEarnExternalWalletPositionSummary",
     description:
@@ -218,7 +224,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
         description: "Complete external-wallet position aggregate",
         content: jsonContent(earnExternalWalletPositionSummaryResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 429, 500, 503]),
     },
   });
 
@@ -226,6 +232,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     method: "get",
     path: "/v1/earn/external-wallet/positions",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "List one external wallet's positions",
     operationId: "listEarnExternalWalletPositions",
     description:
@@ -245,7 +252,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
         description: "External-wallet position page",
         content: jsonContent(earnExternalWalletPositionsResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 429, 500, 503]),
     },
   });
 
@@ -253,6 +260,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     method: "get",
     path: "/v1/earn/external-wallet/movements",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "List one external wallet's activity",
     operationId: "listEarnExternalWalletMovements",
     description:
@@ -274,7 +282,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
         description: "External-wallet movement page",
         content: jsonContent(earnExternalWalletMovementsResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 429, 500, 503]),
     },
   });
 
@@ -282,15 +290,16 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     method: "get",
     path: "/v1/earn/external-wallet/movements/{movementId}",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Get one external-wallet movement",
     operationId: "getEarnExternalWalletMovement",
     description:
-      "Polls one recorded movement to a terminal state — the read that settles a submit whose " +
-      "outcome the caller never learned. Each poll observes the movement's exact signature on " +
-      "chain and advances the recorded status immediately, so state lands as fast as the " +
-      "network decides it; if the chain read is unavailable the last durable status is served " +
-      "and a background reconciler (about every minute) remains the recovery path. Keep " +
-      "polling until `finalized` or `failed` — those are the only terminal states.",
+      "Returns a recorded movement and refreshes its chain status when available. Use it to " +
+      "recover a submit whose response was lost. When the chain read fails, the last durable " +
+      "status is returned and background reconciliation continues. Atomic movements may show " +
+      "Done at `confirmed`; keep tracking `finalized` or `failed` for terminal state. For " +
+      "`settlement: provider_order`, chain confirmation is not payout: wait for authenticated " +
+      "provider fulfillment.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -301,7 +310,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
         description: "Recorded movement",
         content: jsonContent(earnExternalWalletMovementDetailResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 503]),
     },
   });
 
@@ -309,6 +318,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     method: "get",
     path: "/v1/earn/external-wallet/earnings",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Get one external wallet's balance and earnings",
     operationId: "getEarnExternalWalletEarnings",
     description:
@@ -332,7 +342,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
         description: "External-wallet earnings",
         content: jsonContent(earnExternalWalletEarningsResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 429, 500, 503]),
     },
   });
 
@@ -340,13 +350,15 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     method: "post",
     path: "/v1/earn/external-wallet/deposit-transactions",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Build an unsigned external-wallet deposit transaction",
     operationId: "createEarnExternalWalletDepositTransaction",
     description:
       "Builds one unsigned vault deposit transaction for a wallet SDP does not custody. The " +
       "build takes the provider entitlement, persists a submit-capable build, and may name a " +
-      "caller-controlled `feePayer` that signs alongside the owner. The transaction expires " +
-      "with its blockhash, and nothing moves during the build.",
+      "caller-controlled `feePayer` that signs alongside the owner. Nothing moves during the " +
+      "build. A swap-funded deposit that cannot fit one transaction returns a swap/deposit " +
+      "split instead of `transaction`; inspect the response before requesting a signature.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -360,7 +372,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
         description: "Unsigned deposit transaction",
         content: jsonContent(earnExternalWalletDepositTransactionResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 501, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 501, 503]),
     },
   });
 
@@ -368,6 +380,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     method: "post",
     path: "/v1/earn/external-wallet/deposits",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Submit a signed external-wallet deposit",
     operationId: "createEarnExternalWalletDeposit",
     description:
@@ -375,8 +388,9 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
       "signature is genuine (the owner's, and the fee payer's when the build named one), " +
       "records the movement, then broadcasts. Requires the Idempotency-Key header: " +
       "a retry with the same key resolves the original movement (`replayed: true`), and each " +
-      "built transaction is consumable exactly once. A build whose blockhash has expired is " +
-      "refused with 409 TRANSACTION_EXPIRED before anything is recorded; build again.",
+      "built transaction is consumable exactly once. Submit the original signed bytes even " +
+      "after the blockhash expires: the transaction may already have landed. Retry with the " +
+      "same key and payload, then read the movement instead of rebuilding an uncertain deposit.",
     security,
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
@@ -390,7 +404,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
         description: "Recorded deposit movement",
         content: jsonContent(earnExternalWalletDepositResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 409, 422, 429, 500, 503]),
     },
   });
 
@@ -398,6 +412,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     method: "post",
     path: "/v1/earn/external-wallet/withdrawal-previews",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Preview an external-wallet exit",
     operationId: "createEarnExternalWalletWithdrawalPreview",
     description:
@@ -420,7 +435,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
         description: "Live exit quote",
         content: jsonContent(earnExternalWalletWithdrawalPreviewResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 501, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 501, 503]),
     },
   });
 
@@ -428,13 +443,16 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     method: "post",
     path: "/v1/earn/external-wallet/withdrawal-transactions",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Build an unsigned external-wallet exit transaction",
     operationId: "createEarnExternalWalletWithdrawalTransaction",
     description:
       "Builds one unsigned external-wallet exit for a tenant position and persists a " +
       "submit-capable build. ADR 0002 exit safety applies, so the exit works while the " +
       "provider is disabled for new deposits. A strategy with a withdrawal slippage policy " +
-      "still requires `minAmountOut`.",
+      "requires a quote-derived `minAmountOut`. When `withdrawalSlippage` is null, omit the " +
+      "floor; a provider-order route may not support a preview at all. That route submits " +
+      "an order for later payout, not an atomic redemption.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -448,7 +466,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
         description: "Unsigned exit transaction",
         content: jsonContent(earnExternalWalletWithdrawalTransactionResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 501, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 501, 503]),
     },
   });
 
@@ -456,13 +474,15 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     method: "post",
     path: "/v1/earn/external-wallet/withdrawals",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Submit a signed external-wallet withdrawal",
     operationId: "createEarnExternalWalletWithdrawal",
     description:
       "The exit mirror of the deposit submit: signature verified over the exact built message, " +
       "movement recorded before broadcast, Idempotency-Key required, one submission per built " +
-      "transaction. A build whose blockhash has expired is refused with 409 TRANSACTION_EXPIRED " +
-      "before anything is recorded; build again.",
+      "transaction. Submit the original signed bytes even after the blockhash expires: the " +
+      "transaction may already have landed. Retry with the same key and payload, then read " +
+      "the movement instead of rebuilding an uncertain withdrawal.",
     security,
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
@@ -476,7 +496,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
         description: "Recorded withdrawal movement",
         content: jsonContent(earnExternalWalletWithdrawalResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 409, 422, 429, 500, 503]),
     },
   });
 
@@ -491,6 +511,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     method: "post",
     path: "/v1/earn/external-wallet/withdrawal-options",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Discover external-wallet withdrawal routes",
     operationId: "getEarnExternalWalletWithdrawalOptions",
     description:
@@ -511,7 +532,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
         description: "Live withdrawal routes and asynchronous-exit limits",
         content: jsonContent(earnExternalWalletWithdrawalOptionsResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 501, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 501, 503]),
     },
   });
 
@@ -519,6 +540,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     method: "post",
     path: "/v1/earn/external-wallet/queued-withdrawal-previews",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Preview an asynchronous external-wallet withdrawal",
     operationId: "createEarnExternalWalletQueuedWithdrawalPreview",
     description:
@@ -539,7 +561,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
         description: "Expected asynchronous-withdrawal terms",
         content: jsonContent(earnExternalWalletQueuedWithdrawalPreviewResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 501, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 501, 503]),
     },
   });
 
@@ -547,6 +569,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     method: "post",
     path: "/v1/earn/external-wallet/withdrawal-request-transactions",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Build an unsigned asynchronous-withdrawal request",
     operationId: "createEarnExternalWalletWithdrawalRequestTransaction",
     description:
@@ -567,7 +590,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
         description: "Unsigned asynchronous-withdrawal request transaction",
         content: jsonContent(earnExternalWalletWithdrawalRequestTransactionResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 429, 500, 501, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 409, 429, 500, 501, 503]),
     },
   });
 
@@ -575,6 +598,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     method: "post",
     path: "/v1/earn/external-wallet/withdrawal-requests",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Submit a signed asynchronous-withdrawal request",
     operationId: "createEarnExternalWalletWithdrawalRequest",
     description:
@@ -591,7 +615,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
         description: "Recorded asynchronous-withdrawal request",
         content: jsonContent(earnExternalWalletWithdrawalRequestResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 409, 422, 429, 500, 503]),
     },
   });
 
@@ -599,6 +623,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     method: "get",
     path: "/v1/earn/external-wallet/withdrawal-requests",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "List an external wallet's asynchronous withdrawals",
     operationId: "listEarnExternalWalletWithdrawalRequests",
     description:
@@ -615,7 +640,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
         description: "Asynchronous-withdrawal request page",
         content: jsonContent(earnExternalWalletWithdrawalRequestsResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 429, 500, 503]),
     },
   });
 
@@ -623,6 +648,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     method: "get",
     path: "/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Get one asynchronous-withdrawal request",
     operationId: "getEarnExternalWalletWithdrawalRequest",
     description:
@@ -640,7 +666,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
         description: "Durable asynchronous-withdrawal request",
         content: jsonContent(earnExternalWalletWithdrawalRequestResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 503]),
     },
   });
 
@@ -648,6 +674,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     method: "post",
     path: "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Build an unsigned asynchronous-withdrawal cancellation",
     operationId: "createEarnExternalWalletWithdrawalRequestCancelTransaction",
     description:
@@ -668,7 +695,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
         description: "Unsigned asynchronous-withdrawal cancellation transaction",
         content: jsonContent(earnExternalWalletWithdrawalRequestTransactionResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 429, 500, 501, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 409, 429, 500, 501, 503]),
     },
   });
 
@@ -676,6 +703,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     method: "post",
     path: "/v1/earn/external-wallet/withdrawal-request-cancellations",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Submit a signed asynchronous-withdrawal cancellation",
     operationId: "createEarnExternalWalletWithdrawalRequestCancellation",
     description:
@@ -692,7 +720,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
         description: "Recorded asynchronous-withdrawal cancellation",
         content: jsonContent(earnExternalWalletWithdrawalRequestResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 409, 422, 429, 500, 503]),
     },
   });
 }

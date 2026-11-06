@@ -72,7 +72,11 @@ const server = createFromSource(source, {
       breadcrumbs: breadcrumbsFor(page).map((item) => item.name),
       structuredData: {
         headings: structuredData.headings,
-        contents: structuredData.contents.filter((entry) => !isRepeated(counts, entry.content)),
+        contents: [
+          ...structuredData.contents.filter((entry) => !isRepeated(counts, entry.content)),
+          // Canonical URLs make operation names and direct page links searchable too.
+          { heading: undefined, content: page.url },
+        ],
       },
     };
   },

@@ -1,0 +1,93 @@
+---
+module: earn
+title: Integration details
+description: Quote protection, fees, sponsorship, and recovery for Embedded Yield.
+---
+
+Use these rules with the [Embedded Yield flow](/docs/guides/embedded-yield).
+
+## Quote protection
+
+Read the strategy's policies and resolve the preview's `blockingIssues`
+before building.
+
+| Policy | When non-null | When null |
+| --- | --- | --- |
+| `depositSlippage` | Derive and send `minSharesOut` from live `sharesOut`. | Omit the share floor. |
+| `withdrawalSlippage` | Derive and send `minAmountOut` from live `assetsOut`. | Omit the token floor. |
+
+A null policy can mean the instruction cannot enforce a floor, including
+later-priced provider orders. Do not invent one or promise unsupported price
+protection. Previews estimate an outcome; they do not reserve an exchange rate.
+
+Calculate the floor with integer base units:
+
+1. Parse a positive quote at `shareDecimals` for deposits or `assetDecimals`
+   for withdrawals. Reject significant precision beyond that scale.
+2. Multiply by `(10_000 - toleranceBps)`, divide by `10_000`, and round down.
+   Keep at least one base unit.
+3. Convert back to a decimal string. Never round-trip amounts through a
+   JavaScript `number`.
+
+The [backend module](/docs/guides/embedded-yield#get-the-backend-module)
+includes `floorForTolerance` when the selected strategy requires a floor.
+
+## Fees and sponsorship
+
+Customers pay network fees and account rent in SOL by default, including on
+a first stablecoin deposit that creates an account. Rent is separate from
+principal and yield.
+
+To sponsor a customer's transaction:
+
+1. Set your backend-controlled `feePayer` when building.
+2. Have the customer sign first.
+3. Verify the unchanged message and expected payer, then co-sign the same
+   transaction. Submit both signatures.
+
+Changing the payer requires a new build and signatures. The
+[backend module](/docs/guides/embedded-yield#get-the-backend-module) provides
+`signEarnTransaction` to check message equality and `createSponsorSigner` to
+verify the payer.
+
+- Only sign SDP builds initiated for an authenticated customer.
+- Bound the signer's SOL float, rate-limit sponsorship, and monitor spend.
+- Store signing credentials in your secret manager.
+
+A strategy's `feeSponsored` describes Treasury's paymaster. Embedded Yield
+requires your own sponsor setup.
+
+Full Kamino exits leave the share account open. Rent recovery requires a
+separate owner-authorized close. Do not promise customers or sponsors an
+automatic refund.
+
+## Swap-funded deposits
+
+Set `sourceTokenMint` to fund a different deposit token through Jupiter using
+a supported source stablecoin. Routes require mainnet and cannot be tested
+in sandbox. Normally, swap and deposit share one transaction.
+
+If `requiresSeparateSwap: true`, the response supplies `swap` and `followUp`:
+
+1. Save the swap's signed bytes, signature, and follow-up body durably.
+2. Broadcast the standalone swap yourself and confirm it.
+3. Build the follow-up deposit with its original floor and fee payer.
+
+SDP does not record the standalone swap as an Earn movement. Your app owns
+its recovery. Reconcile an unresolved swap before starting another.
+
+## Retry safely
+
+| Situation | Action |
+| --- | --- |
+| An unsigned build expires. | Build again before requesting a signature. |
+| Submit times out or returns an uncertain server error. | Retry the exact signed body and original key. |
+| A signed direct deposit or withdrawal reaches SDP after expiry. | Submit the original intent and track it; expiry cannot prove it never landed. |
+| A key or build was consumed with different terms. | Find the original action before creating a replacement. |
+| Preview has blocking issues. | Resolve them and preview again. |
+
+- Submit queued requests and cancellations promptly through SDP.
+- If a wallet broadcasts one itself, submitting after the build expires may
+  fail to restore tracking.
+- Keep unresolved operations visible and escalate a missing request. Do not
+  assume no funds moved.

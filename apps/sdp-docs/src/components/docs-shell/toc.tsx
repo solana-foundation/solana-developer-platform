@@ -1,7 +1,7 @@
 "use client";
 
 import { AlignLeft } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 type TocItem = {
   title: ReactNode;
@@ -10,20 +10,20 @@ type TocItem = {
 };
 
 export function TableOfContents({ items, children }: { items: TocItem[]; children?: ReactNode }) {
+  const ref = useRef<HTMLElement>(null);
   const [activeId, setActiveId] = useState("");
+  const [visibleItems, setVisibleItems] = useState(items);
 
   useEffect(() => {
-    const ids = items.map((item) => item.url.slice(1));
-    const elements = ids
-      .map((id) => document.getElementById(id))
-      .filter((el): el is HTMLElement => el !== null);
-
-    if (elements.length === 0) return;
+    const article = ref.current?.closest(".launch-docs-page")?.querySelector("article");
+    if (!article) return;
+    let observed: HTMLElement[] | undefined;
+    let visibleIds = new Set<string>();
 
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
-          if (entry.isIntersecting) {
+          if (entry.isIntersecting && visibleIds.has(entry.target.id)) {
             setActiveId(`#${entry.target.id}`);
             return;
           }
@@ -32,20 +32,56 @@ export function TableOfContents({ items, children }: { items: TocItem[]; childre
       { rootMargin: "0px 0px -60% 0px", threshold: 0 }
     );
 
-    elements.forEach((el) => {
-      observer.observe(el);
+    const updateHeadings = () => {
+      const headings = items.flatMap((item) => {
+        const element = document.getElementById(item.url.slice(1));
+        // Inactive Fumadocs panels stay mounted so search and hash links can open them.
+        if (
+          !element ||
+          !article.contains(element) ||
+          element.closest('[data-state="inactive"], [hidden]')
+        ) {
+          return [];
+        }
+        return [{ item, element }];
+      });
+      const elements = headings.map(({ element }) => element);
+      if (
+        observed?.length === elements.length &&
+        observed.every((element, index) => element === elements[index])
+      ) {
+        return;
+      }
+      observed = elements;
+      visibleIds = new Set(elements.map((element) => element.id));
+      setVisibleItems(headings.map(({ item }) => item));
+      setActiveId((current) => (visibleIds.has(current.slice(1)) ? current : ""));
+      observer.disconnect();
+      for (const element of elements) observer.observe(element);
+    };
+
+    updateHeadings();
+    const panels = new MutationObserver(updateHeadings);
+    panels.observe(article, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["data-state", "hidden"],
     });
-    return () => observer.disconnect();
+    return () => {
+      panels.disconnect();
+      observer.disconnect();
+    };
   }, [items]);
 
   return (
-    <aside className="launch-docs-toc" aria-label="On this page">
+    <aside ref={ref} className="launch-docs-toc" aria-label="On this page">
       <div className="launch-docs-toc-title">
         <AlignLeft size={13} aria-hidden="true" />
         On this page
       </div>
       <nav>
-        {items.map((item) => (
+        {visibleItems.map((item) => (
           <a
             key={item.url}
             href={item.url}

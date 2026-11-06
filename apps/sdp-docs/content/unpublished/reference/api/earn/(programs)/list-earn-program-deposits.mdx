@@ -1,0 +1,218 @@
+---
+module: earn
+title: List program deposits
+description: Reads deposit history directly from the program's provider.
+icon: method:GET
+apiReference: true
+---
+<Callout type="info">
+This operation is internal. It is not part of the partner-facing Earn API.
+</Callout>
+
+
+<ApiOperation>
+
+<ApiEndpoint method="GET" path="/v1/earn/programs/{programId}/deposits" />
+
+Pass its nextCursor back as cursor to continue; null means there are no more deposits.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
+
+## Path parameters
+
+- **`programId`** · `string` · required · min length 1
+
+## Query parameters
+
+- **`cursor`** · `string` · min length 1
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+## Responses
+
+- **`200`** Result
+
+  - **`data`** · `object` · required
+
+    - **`deposits`** · `object[]` · required
+
+      - **`id`** · `string` · required
+
+      - **`amountUsd`** · `string` · required
+
+      - **`token`** · `string` · required · one of `usdc`, `usdt` · example `usdc`
+
+      - **`status`** · `string` · required · one of `processing`, `completed`, `failed`
+
+      - **`fromAddress`** · `string`
+
+      - **`transactionSignature`** · `string`
+
+      - **`createdAt`** · `string` · required
+
+      - **`completedAt`** · `string`
+
+    - **`nextCursor`** · `string | null` · required
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `earn.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`409`** Conflict
+
+  Same fields as `400`.
+
+- **`429`** Too Many Requests
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`501`** The provider does not support this operation.
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
+<ApiPanel>
+
+## Example request
+
+```bash tab="cURL"
+curl 'https://api.solana.com/v1/earn/programs/program_example/deposits' \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/earn/programs/program_example/deposits", {
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.get("https://api.solana.com/v1/earn/programs/program_example/deposits",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "deposits": [
+      {
+        "id": "_example",
+        "amountUsd": "example",
+        "token": "usdc",
+        "status": "processing",
+        "createdAt": "example"
+      }
+    ],
+    "nextCursor": "example"
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: earn.read",
+    "details": {
+      "action": "earn.read"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+</ApiPanel>
+
+</ApiOperation>

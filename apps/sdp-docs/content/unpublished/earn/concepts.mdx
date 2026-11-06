@@ -1,0 +1,75 @@
+---
+module: earn
+title: How Earn works
+description: Compare DeFi and RWA strategies, then understand shares and withdrawals.
+---
+
+A strategy puts stablecoins into a vault, lending market, or yield-bearing
+token. Your wallet holds the resulting position until you withdraw.
+
+## DeFi and real-world assets
+
+| Source | Where yield comes from |
+| --- | --- |
+| DeFi (`defi`) | Onchain lending or vault strategies, such as Kamino and Jupiter Lend. Returns depend on protocol activity. |
+| Real-world assets (`rwa`) | Tokenized investments outside crypto. For example, Ondo USDY is a note linked to US Treasuries and bank deposits; issuer terms apply. |
+
+The catalogue's `sourceKind` describes the yield source, not how a deposit or
+withdrawal settles. An RWA token can trade in one transaction; another product
+may need a provider order. Check each position's
+[withdrawal options](/docs/earn/withdrawals#1-choose-an-exit).
+
+## Three amounts to understand
+
+| Amount | What it tells you |
+| --- | --- |
+| Shares (`shares`) | How much of the position you own, in share units. |
+| Share value (`tokenValue`) | The shares' current value in the deposit token. |
+| Withdrawable shares (`withdrawableShares`) | The live ceiling for an exit, given locks and liquidity. |
+
+Shares and stablecoins are different units. A withdrawal takes a share amount;
+its stablecoin payout depends on the provider's live state. Use the position's
+live values and a [withdrawal preview](/docs/earn/withdrawals#2-preview-and-submit)
+rather than calculating a payout from a requested deposit or an old exchange
+rate. Missing live values mean unavailable, not zero.
+
+## Where funds go
+
+A vault deposit sends stablecoins through a transaction and returns shares or
+receipt tokens to the owner's wallet. A token strategy instead acquires a
+yield-bearing token; its exit may sell that token or use a provider redemption.
+Never send tokens directly to a strategy's `providerReference`: it identifies
+the instrument, not a funding address. Use a
+[deposit transaction](/docs/earn/quickstart).
+
+The deposited stablecoins go to the protocol or provider, not an SDP-owned
+pooled account. Holding shares or tokens in your wallet does not remove the
+provider's custody or withdrawal-escrow risks.
+
+The position's value can rise or fall with returns, losses, and fees. An
+observed APY is not a guaranteed return, and owning a token does not guarantee
+principal protection or immediate liquidity.
+
+## Who signs
+
+| Integration | Who signs | Who holds the position |
+| --- | --- | --- |
+| [Embedded Yield](/docs/guides/embedded-yield) | The customer's wallet signs what SDP builds; your backend submits it. | The customer's wallet. |
+| [Treasury](/docs/earn/treasury) | SDP requests signing from your organization's configured custody provider. | The authorized custody wallet, which also receives withdrawals. |
+
+Keep the API key on your backend. Embedded Yield never sends the customer's
+private key to SDP.
+
+Both use the project's environment: sandbox runs on devnet, production on
+mainnet-beta. Strategy availability and investor eligibility still apply.
+
+## When a withdrawal is complete
+
+An instant exit can transfer tokens in one transaction. Other routes create a
+provider order or a separate withdrawal request and pay later. A confirmed
+request does not prove that funds arrived. Track
+[settlement and the observed payout](/docs/earn/reporting#track-movements-through-settlement)
+before crediting a balance or sending a payment.
+
+[Choose a strategy](/docs/earn/providers), then make
+[a sandbox deposit](/docs/earn/quickstart).

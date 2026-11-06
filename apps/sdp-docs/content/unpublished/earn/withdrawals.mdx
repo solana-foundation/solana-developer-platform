@@ -1,0 +1,127 @@
+---
+module: earn
+title: Withdraw funds
+description: Choose an available exit and track funds back to the owner's wallet.
+---
+
+Withdraw from a position using its live `withdrawableShares`. Proceeds return
+to the wallet that owns it; a request can confirm before its payout arrives.
+
+## 1. Choose an exit
+
+Call the options endpoint with `positionId`:
+
+| Integration | Endpoint |
+| --- | --- |
+| Embedded Yield | [`POST /v1/earn/external-wallet/withdrawal-options`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-options) |
+| Treasury | [`POST /v1/earn/vault-withdrawal-options`](/docs/reference/api/earn/get-earn-vault-withdrawal-options) |
+
+Use the returned `instant`, `providerOrder`, `queued`, and `parRedemption` options:
+
+- Check live liquidity and supported previews, not only the strategy's liquidity label.
+- Missing live shares or a failed read means unavailable, not zero.
+- Keep the user's chosen route; never silently switch it.
+
+## 2. Preview and submit
+
+1. Preview a supported direct quote with `positionId` and decimal-string `shares`.
+2. Resolve `blockingIssues`; include `minAmountOut` only when `withdrawalSlippage` requires it. See [quote protection](/docs/earn/integration-details#quote-protection).
+3. Build, sign, and submit with the endpoints below.
+
+All paths below start with `/v1/earn/`:
+
+| Action | Embedded Yield | Treasury |
+| --- | --- | --- |
+| Preview | [`external-wallet/withdrawal-previews`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-preview) | [`vault-withdrawal-previews`](/docs/reference/api/earn/create-earn-vault-withdrawal-preview) |
+| Build | [`external-wallet/withdrawal-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-transaction) | SDP builds and signs during submission. |
+| Submit | [`external-wallet/withdrawals`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal) | [`vault-withdrawals`](/docs/reference/api/earn/create-earn-vault-withdrawal) |
+
+These are `POST` requests. External wallets sign the build before submission.
+Use a new `Idempotency-Key` for each intent and reuse its exact body on an
+uncertain retry.
+
+For a `providerOrder`:
+
+- Exact shares may be accepted without an instant quote. Preview `501` does not disable the order's build.
+- Later NAV or payout cannot be bounded by a floor. Omit `minAmountOut` when its policy is null.
+- Confirmation is not payout. See [settlement states](/docs/earn/reporting#track-movements-through-settlement) for the distinction from atomic confirmation.
+
+## Asynchronous exits
+
+### Solver queues
+
+Shares enter escrow. A solver may pay the agreed discounted amount after
+maturity and before the deadline. Show the live `queueAsset` minimum shares,
+discount range, maturity, and deadline range before confirming.
+
+Preview and request with `mechanism: "solverQueue"`, `shares`, `discountBps`,
+and `deadlineSeconds`. The deadline counts the solver window after maturity,
+not after creation. The request transaction is not a payout.
+
+### Operator redemptions
+
+The request converts shares to an intermediate token and authorizes the
+operator to settle it for the payout asset. Read live `parRedemption` minimums,
+`intermediateMint`, `assetMint`, and cancellation availability.
+
+Send `mechanism: "operatorRedemption"` with either `shares` or
+`intermediateAmount` from an existing `parIntermediate` holding, never both.
+
+- Null `minimumShares` means the conversion rate is unavailable. Resolve the preview blocker.
+- Cancellation revokes the operator's claim and leaves intermediate tokens, not original shares. Refresh `parIntermediate` before another redemption.
+
+### Create and restore requests
+
+These `POST` paths also start with `/v1/earn/`:
+
+| Action | Embedded Yield | Treasury |
+| --- | --- | --- |
+| Preview | [`external-wallet/queued-withdrawal-previews`](/docs/reference/api/earn/create-earn-external-wallet-queued-withdrawal-preview) | [`vault-queued-withdrawal-previews`](/docs/reference/api/earn/create-earn-vault-queued-withdrawal-preview) |
+| Build | [`external-wallet/withdrawal-request-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-transaction) | SDP builds and signs during submission. |
+| Submit | [`external-wallet/withdrawal-requests`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request) | [`vault-withdrawal-requests`](/docs/reference/api/earn/create-earn-vault-withdrawal-request) |
+
+1. Submit with `earn.execute` and a saved idempotency key.
+2. Save `withdrawalRequestId`; poll its detail endpoint ([Embedded Yield](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-request), [Treasury](/docs/reference/api/earn/get-earn-vault-withdrawal-request)).
+3. On restart, restore every page of unsettled requests:
+
+| Integration | Restore with `GET /v1/earn/` |
+| --- | --- |
+| Embedded Yield | [`external-wallet/withdrawal-requests?ownerAddress=<wallet>&settled=false`](/docs/reference/api/earn/list-earn-external-wallet-withdrawal-requests) |
+| Treasury | [`vault-withdrawal-requests?settled=false`](/docs/reference/api/earn/list-earn-vault-withdrawal-requests) |
+
+External wallets sign without broadcasting; submit promptly through SDP.
+Independently broadcast queued transactions may lose SDP recovery after an
+unconsumed build expires.
+
+| Status | Display or action |
+| --- | --- |
+| `creating` | Signed intent recorded; chain outcome unresolved. |
+| `pending` | Waiting for maturity or operator settlement. |
+| `fulfillable` | The solver window is open. |
+| `expiredCancelable` | Solver deadline passed; offer recovery. |
+| `cancelling` | Recovery submitted; fulfillment can race it. |
+| `closedOrUnknown` | No proof of payout or recovery; keep tracking. |
+| `fulfilled` | Finalized provider evidence established payout. |
+| `cancelled` | Finalized provider evidence established recovery; refresh holdings. |
+| `failed` | Show the definitive `failureReason`. |
+
+Only `fulfilled` creates a payout movement. Never credit quoted assets, request
+transactions, or cancellations as received funds.
+
+## Recover a request
+
+Enable solver recovery only at `expiredCancelable`, not from a client clock.
+Operator recovery can be available while `pending` if live terms allow it.
+Refresh before acting; fulfillment can race cancellation.
+
+All paths below use `POST /v1/earn/`. Embedded Yield builds first, collects
+signatures, then submits.
+
+| Action | Endpoint | Grant |
+| --- | --- | --- |
+| Treasury cancel | [`vault-withdrawal-requests/{withdrawalRequestId}/cancel`](/docs/reference/api/earn/cancel-earn-vault-withdrawal-request) | `earn.manage` |
+| Embedded Yield build | [`external-wallet/withdrawal-request-cancel-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancel-transaction) | `earn.manage` |
+| Embedded Yield submit | [`external-wallet/withdrawal-request-cancellations`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancellation) | `earn.execute` |
+
+Use a new idempotency key for cancellation. Solver recovery returns shares;
+operator recovery leaves intermediate tokens. Refresh holdings before another exit.

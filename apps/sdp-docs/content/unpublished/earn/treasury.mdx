@@ -1,0 +1,80 @@
+---
+module: earn
+title: Treasury
+description: Deposit from an organization custody wallet and track its yield positions.
+---
+
+Invest from your organization's custody wallet. Its custody provider signs;
+the wallet holds the resulting shares or yield-bearing tokens.
+
+Use [Embedded Yield](/docs/guides/embedded-yield) when your customer's
+wallet signs.
+
+<Callout type="info">
+Treasury routes are internal. The partner Earn API covers discovery and
+customer-signed Embedded Yield. Internal pages in the
+[reference draft](/docs/reference/api/earn) are not supported partner endpoints.
+</Callout>
+
+## Set up the wallet
+
+1. [Create a custody wallet](/docs/guides/setup-wallets) in your project and
+   fund it with the deposit token.
+2. Keep SOL for fees and rent unless sponsored. `feeSponsored` describes
+   Treasury sponsorship; swap-funded deposits still use wallet SOL. See
+   [fees and sponsorship](/docs/earn/integration-details#fees-and-sponsorship).
+3. Grant `earn.execute`. An API key must also scope the selected custody
+   wallet. SDP rechecks authority when signing.
+
+## Deposit
+
+Open [Markets → Treasury Solutions](https://platform.solana.com/dashboard?return_to=%2Fdashboard%2Fmarkets%2Ftreasury-solutions).
+Choose a strategy and a wallet, enter an amount, and review. The strategy must be
+active and fundable; provider access or the live preview can still block deposits.
+
+Through the API:
+
+1. Choose a strategy from the [strategy catalogue](/docs/reference/api/earn/list-earn-strategies).
+2. [Preview the deposit](/docs/reference/api/earn/create-earn-vault-deposit-preview)
+   with `strategyId` and `amount`.
+3. Resolve `blockingIssues`; derive `minSharesOut` when `depositSlippage` requires it.
+4. [Create the deposit](/docs/reference/api/earn/create-earn-vault-deposit) with
+   a durable `Idempotency-Key`.
+
+The deposit body names `strategyId`, `custodyWalletId`, and a decimal-string
+`amount`, plus any required floor. `providerReference` identifies an instrument,
+not a deposit address. Never send stablecoins there. See
+[quote protection](/docs/earn/integration-details#quote-protection).
+
+## Track the outcome
+
+Save `movementId` and `positionId`.
+
+| Task | Request |
+| --- | --- |
+| Track the deposit | [Get the deposit](/docs/reference/api/earn/get-earn-vault-deposit) by `movementId`. |
+| Recover a lost response | [List deposits](/docs/reference/api/earn/list-earn-vault-deposits) with `requestId=<your-idempotency-key>`, or retry the original key and body. |
+| Check settlement | [List movements](/docs/reference/api/earn/list-earn-movements). Atomic movements expose `finalized`; provider orders await economic fulfillment. |
+
+Legacy deposit statuses are `pending`, `submitted`, `confirmed`, and `failed`.
+`confirmed` does not promise settlement.
+
+After confirmation:
+
+1. Refresh [positions](/docs/reference/api/earn/list-earn-vault-positions)
+   and the wallet's balances.
+2. To include a specific confirmed movement, pass `afterMovementIds` and
+   check `balanceReadContext`.
+3. Display the refreshed balances. Never add requested amounts to old balances.
+
+## Withdraw to the same wallet
+
+1. Read live `withdrawableShares` and [withdrawal options](/docs/reference/api/earn/get-earn-vault-withdrawal-options).
+2. Choose an available route and [preview](/docs/reference/api/earn/create-earn-vault-withdrawal-preview)
+   where supported.
+3. For a direct exit, [create the withdrawal](/docs/reference/api/earn/create-earn-vault-withdrawal)
+   with `positionId`, `shares`, a new `Idempotency-Key`, and `minAmountOut`
+   when required.
+
+Proceeds return to the same custody wallet. For asynchronous lifecycles, see
+[Withdrawals](/docs/earn/withdrawals).

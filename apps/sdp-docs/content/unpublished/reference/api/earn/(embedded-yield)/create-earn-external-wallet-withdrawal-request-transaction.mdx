@@ -1,0 +1,461 @@
+---
+module: earn
+title: Build an unsigned asynchronous-withdrawal request
+description: Builds a keyed, submit-capable asynchronous request for a tenant position.
+icon: method:POST
+apiReference: true
+---
+
+<ApiOperation>
+
+<ApiEndpoint method="POST" path="/v1/earn/external-wallet/withdrawal-request-transactions" />
+
+A solver request escrows shares; an operator redemption converts shares into a delegated intermediate token. Neither request transaction pays the customer. Persist the later withdrawalRequestId and track it through operator/solver fulfilment or cancellation.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+## Request body
+
+`application/json` · required
+
+Build a keyed asynchronous withdrawal request. A solver request escrows shares; an operator redemption converts them into the provider's intermediate token, or delegates intermediate the owner already holds. Neither action pays assets.
+
+Any of:
+
+- **object**
+
+  - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_example`
+
+    The caller's tenant-scoped external-wallet position.
+
+  - **`shares`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `10`
+
+    Shares to place into the selected asynchronous exit, in share units.
+
+  - **`mechanism`** · `string` · always `solverQueue`
+
+    Selects the solver queue. May be omitted for backwards compatibility; operator redemptions must be explicit.
+
+  - **`discountBps`** · `integer` · required · min 0 · max 10000 · example `25`
+
+    Discount offered to a solver, in basis points. It must stay inside the live queueAsset minimum and maximum.
+
+  - **`deadlineSeconds`** · `integer` · required · greater than 0 · max 7776000 · example `86400`
+
+    Solver window after maturity, in seconds. It must stay inside the live queueAsset minimum and maximum.
+
+  - **`feePayer`** · `string` · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
+
+    Authenticated builds only: pay for this transaction from your own wallet instead of the customer's. The named address becomes the transaction's fee payer. It pays the network fee, funds any share-account rent, and must sign alongside the owner. Co-sign server-side with the fee payer's key before submitting. Simulation refuses the build with a 400 naming the fee payer when it cannot pay. Sending the owner's own address uses the default: the owner pays and signs alone.
+
+- **object**
+
+  - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_example`
+
+    The caller's tenant-scoped external-wallet position.
+
+  - **`shares`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `10`
+
+    Shares to place into the selected asynchronous exit, in share units.
+
+  - **`mechanism`** · `string` · required · always `operatorRedemption`
+
+    Selects an issuer/operator-completed par redemption with no solver discount or deadline.
+
+  - **`feePayer`** · `string` · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
+
+    Authenticated builds only: pay for this transaction from your own wallet instead of the customer's. The named address becomes the transaction's fee payer. It pays the network fee, funds any share-account rent, and must sign alongside the owner. Co-sign server-side with the fee payer's key before submitting. Simulation refuses the build with a 400 naming the fee payer when it cannot pay. Sending the owner's own address uses the default: the owner pays and signs alone.
+
+- **object**
+
+  - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_example`
+
+    The caller's tenant-scoped external-wallet position.
+
+  - **`intermediateAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `2000`
+
+    Intermediate token the owner already holds outside any request (such as a cancelled request's wYLDS) to redeem at par, in that token's units. Send instead of `shares`, never with it.
+
+  - **`mechanism`** · `string` · required · always `operatorRedemption`
+
+    Selects an issuer/operator-completed par redemption with no solver discount or deadline.
+
+  - **`feePayer`** · `string` · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
+
+    Authenticated builds only: pay for this transaction from your own wallet instead of the customer's. The named address becomes the transaction's fee payer. It pays the network fee, funds any share-account rent, and must sign alongside the owner. Co-sign server-side with the fee payer's key before submitting. Simulation refuses the build with a 400 naming the fee payer when it cannot pay. Sending the owner's own address uses the default: the owner pays and signs alone.
+
+## Responses
+
+- **`200`** Unsigned asynchronous-withdrawal request transaction
+
+  - **`data`** · `object` · required
+
+    - **`transaction`** · `object` · required
+
+      Any of:
+
+      - **One unsigned transaction SDP built for an external wallet to sign.**
+
+        - **`transactionId`** · `string` · required · example `earn_external_wallet_transaction_example`
+
+        - **`transaction`** · `string` · required
+
+          Base64 wire bytes of the unsigned transaction. Add every required signature without changing the message, then submit through SDP. The blockhash bounds when the network can first accept it; retain the original signed bytes for recovery.
+
+        - **`lastValidBlockHeight`** · `string` · required · example `361186610`
+
+          Last block height at which the network can first accept this transaction. This is a block height, not a slot or timestamp.
+
+        - **`sponsored`** · `boolean` · required · example `false`
+
+          Whether SDP supplied and signed the fee payer. A partner-controlled feePayer leaves this false.
+
+        - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+
+          The external wallet: the customer's own Solana address. It signs and owns the shares; SDP holds no key for it. It also pays the network fee unless an authenticated build names a `feePayer`. The pattern is necessary but not sufficient — the string must additionally decode to a 32-byte public key, which no pattern can express, so a well-shaped base58 string that does not decode still answers 400.
+
+        - **`feePayer`** · `string` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
+
+          Echo of an authenticated build request's `feePayer`. Present, this transaction requires the fee payer's signature IN ADDITION to the owner's — co-sign server-side before submitting; the submit refuses a missing or invalid fee-payer signature. Absent, the owner signs alone and pays the fee.
+
+        - **`provider`** · `string` · required · example `kamino`
+
+        - **`providerReference`** · `string` · required · example `7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx`
+
+          The vault's on-chain address — the instrument.
+
+        - **`tokenMint`** · `string` · required · example `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
+
+        - **`shareMint`** · `string` · required · example `hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2`
+
+        - **`positionId`** · `string` · required · example `earn_position_example`
+
+        - **`action`** · `string` · required · always `request`
+
+        - **`mechanism`** · `string` · required · always `solverQueue`
+
+        - **`requestAddress`** · `string` · required
+
+          Provider request account address.
+
+        - **`shares`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+          Positive decimal string with at least one non-zero digit; never a float.
+
+        - **`assets`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+          Positive decimal string with at least one non-zero digit; never a float.
+
+        - **`discountBps`** · `integer` · required · min 0 · max 10000
+
+        - **`maturityTimestamp`** · `string` · required · pattern `^\d+$`
+
+        - **`deadlineTimestamp`** · `string` · required · pattern `^\d+$`
+
+      - **One unsigned transaction SDP built for an external wallet to sign.**
+
+        - **`transactionId`** · `string` · required · example `earn_external_wallet_transaction_example`
+
+        - **`transaction`** · `string` · required
+
+          Base64 wire bytes of the unsigned transaction. Add every required signature without changing the message, then submit through SDP. The blockhash bounds when the network can first accept it; retain the original signed bytes for recovery.
+
+        - **`lastValidBlockHeight`** · `string` · required · example `361186610`
+
+          Last block height at which the network can first accept this transaction. This is a block height, not a slot or timestamp.
+
+        - **`sponsored`** · `boolean` · required · example `false`
+
+          Whether SDP supplied and signed the fee payer. A partner-controlled feePayer leaves this false.
+
+        - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+
+          The external wallet: the customer's own Solana address. It signs and owns the shares; SDP holds no key for it. It also pays the network fee unless an authenticated build names a `feePayer`. The pattern is necessary but not sufficient — the string must additionally decode to a 32-byte public key, which no pattern can express, so a well-shaped base58 string that does not decode still answers 400.
+
+        - **`feePayer`** · `string` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
+
+          Echo of an authenticated build request's `feePayer`. Present, this transaction requires the fee payer's signature IN ADDITION to the owner's — co-sign server-side before submitting; the submit refuses a missing or invalid fee-payer signature. Absent, the owner signs alone and pays the fee.
+
+        - **`provider`** · `string` · required · example `kamino`
+
+        - **`providerReference`** · `string` · required · example `7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx`
+
+          The vault's on-chain address — the instrument.
+
+        - **`tokenMint`** · `string` · required · example `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
+
+        - **`shareMint`** · `string` · required · example `hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2`
+
+        - **`positionId`** · `string` · required · example `earn_position_example`
+
+        - **`action`** · `string` · required · always `request`
+
+        - **`mechanism`** · `string` · required · always `operatorRedemption`
+
+        - **`requestAddress`** · `string` · required
+
+          Provider request account address.
+
+        - **`shares`** · `string` · required · max length 128 · pattern `^\d+(\.\d+)?$` · example `10`
+
+          Position shares the request burns, in share units; "0" when it redeems intermediate the owner already holds.
+
+        - **`assets`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+          Positive decimal string with at least one non-zero digit; never a float.
+
+        - **`intermediateMint`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
+
+          Base58 Solana mint address.
+
+        - **`intermediateAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+          Positive decimal string with at least one non-zero digit; never a float.
+
+      - **One unsigned transaction SDP built for an external wallet to sign.**
+
+        - **`transactionId`** · `string` · required · example `earn_external_wallet_transaction_example`
+
+        - **`transaction`** · `string` · required
+
+          Base64 wire bytes of the unsigned transaction. Add every required signature without changing the message, then submit through SDP. The blockhash bounds when the network can first accept it; retain the original signed bytes for recovery.
+
+        - **`lastValidBlockHeight`** · `string` · required · example `361186610`
+
+          Last block height at which the network can first accept this transaction. This is a block height, not a slot or timestamp.
+
+        - **`sponsored`** · `boolean` · required · example `false`
+
+          Whether SDP supplied and signed the fee payer. A partner-controlled feePayer leaves this false.
+
+        - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+
+          The external wallet: the customer's own Solana address. It signs and owns the shares; SDP holds no key for it. It also pays the network fee unless an authenticated build names a `feePayer`. The pattern is necessary but not sufficient — the string must additionally decode to a 32-byte public key, which no pattern can express, so a well-shaped base58 string that does not decode still answers 400.
+
+        - **`feePayer`** · `string` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
+
+          Echo of an authenticated build request's `feePayer`. Present, this transaction requires the fee payer's signature IN ADDITION to the owner's — co-sign server-side before submitting; the submit refuses a missing or invalid fee-payer signature. Absent, the owner signs alone and pays the fee.
+
+        - **`provider`** · `string` · required · example `kamino`
+
+        - **`providerReference`** · `string` · required · example `7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx`
+
+          The vault's on-chain address — the instrument.
+
+        - **`tokenMint`** · `string` · required · example `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
+
+        - **`shareMint`** · `string` · required · example `hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2`
+
+        - **`positionId`** · `string` · required · example `earn_position_example`
+
+        - **`withdrawalRequestId`** · `string` · required · example `earn_vault_withdrawal_request_example`
+
+        - **`action`** · `string` · required · always `cancel`
+
+        - **`mechanism`** · `string` · required · one of `solverQueue`, `operatorRedemption`
+
+        - **`requestAddress`** · `string` · required
+
+          Provider request account address.
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `earn.execute` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`409`** Conflict
+
+  Same fields as `400`.
+
+- **`429`** Too Many Requests
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`501`** The provider does not support this operation.
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
+<ApiPanel>
+
+## Example request
+
+```bash tab="cURL"
+curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-request-transactions' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "positionId": "earn_position_example",
+    "shares": "10",
+    "mechanism": "solverQueue",
+    "discountBps": 25,
+    "deadlineSeconds": 86400,
+    "feePayer": "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF"
+  }'
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdrawal-request-transactions", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    "positionId": "earn_position_example",
+    "shares": "10",
+    "mechanism": "solverQueue",
+    "discountBps": 25,
+    "deadlineSeconds": 86400,
+    "feePayer": "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF"
+  })
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawal-request-transactions",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
+  json={
+    "positionId": "earn_position_example",
+    "shares": "10",
+    "mechanism": "solverQueue",
+    "discountBps": 25,
+    "deadlineSeconds": 86400,
+    "feePayer": "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF"
+  })
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "transaction": {
+      "transactionId": "earn_external_wallet_transaction_example",
+      "transaction": "example",
+      "lastValidBlockHeight": "361186610",
+      "sponsored": false,
+      "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+      "feePayer": "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF",
+      "provider": "kamino",
+      "providerReference": "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+      "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+      "shareMint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+      "positionId": "earn_position_example",
+      "action": "request",
+      "mechanism": "solverQueue",
+      "requestAddress": "11111111111111111111111111111111",
+      "shares": "25",
+      "assets": "25",
+      "discountBps": 1,
+      "maturityTimestamp": "example",
+      "deadlineTimestamp": "example"
+    }
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: earn.execute",
+    "details": {
+      "action": "earn.execute"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+</ApiPanel>
+
+</ApiOperation>

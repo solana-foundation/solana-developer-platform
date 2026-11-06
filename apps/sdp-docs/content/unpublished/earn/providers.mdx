@@ -1,0 +1,71 @@
+---
+module: earn
+title: Strategies
+description: Choose a strategy and check eligibility, funding, and exit terms.
+---
+
+Choose a strategy from your project's
+[catalogue](/docs/reference/api/earn/list-earn-strategies). Check funding,
+eligibility, and exit terms before depositing.
+Use `sourceKind` to distinguish
+[DeFi and real-world assets](/docs/earn/concepts#defi-and-real-world-assets).
+
+## Check availability
+
+| Check | What it tells you |
+| --- | --- |
+| `status: "active"` | The strategy has not paused or stopped new deposits. |
+| `fundable: true` | The instrument exists on your project's cluster. |
+| `depositMints[0]` | The direct deposit's native token mint. |
+| `depositSlippage` | Whether the build requires a quote-derived share floor. |
+| Preview with `blockingIssues: []` | No reported provider condition blocks the quoted operation. |
+
+Execution also requires deployment support, organization access, and any
+required provider approval. A
+[deposit preview](/docs/reference/api/earn/create-earn-vault-deposit-preview)
+neither reserves liquidity nor guarantees a build.
+
+Sandbox uses devnet; production uses mainnet-beta. The catalogue defaults to
+your project's cluster. In sandbox, `?cluster=mainnet-beta` returns a mirrored
+mainnet shelf with `fundable: false`, without enabling deposits.
+
+## Confirm eligibility
+
+SDP access authorizes API calls, not investment. For restricted products, confirm
+investor, jurisdiction, wallet, subscription, and redemption requirements with
+the provider.
+
+| Integration | Check eligibility for |
+| --- | --- |
+| Embedded Yield | The end investor and wallet receiving the position. |
+| Treasury | Your organization and investing wallet. |
+
+An SDP API key cannot replace that approval. One usable strategy does not make
+the provider permissionless.
+
+## Follow the funds
+
+| Strategy shape | Money in | Money out |
+| --- | --- | --- |
+| Vault or lending position | A transaction exchanges the deposit token for shares or receipt tokens. | Shares redeem under the provider's liquidity and exit rules. |
+| Yield-bearing token | A transaction acquires the token in the owner's wallet. | Sales depend on market liquidity; redemption may need separate provider approval. |
+| Provider order | A transaction records a payment or redemption leg. | The provider must complete economic settlement later. |
+
+Read each position's [withdrawal options](/docs/earn/withdrawals#1-choose-an-exit).
+Market sales and issuer redemptions differ in eligibility, pricing, timing,
+and liquidity. An RWA classification alone does not tell you which exit applies.
+
+## Show rates and risk
+
+`currentApy: "0.062"` means 6.2%. If it is absent, show an unavailable rate,
+not zero. APY describes a rate, not a guaranteed return.
+`redemptionDelayDays` is expected timing, not a guaranteed deadline.
+
+Use current risk metadata and provider terms. Holding tokens in your own wallet
+does not guarantee principal protection, segregated backing, or liquidity.
+
+Paused deposits or delisting do not hide existing positions. Use their
+[position IDs to withdraw](/docs/earn/withdrawals), subject to provider capability
+and liquidity.
+
+Make your first deposit with the [sandbox quickstart](/docs/earn/quickstart).

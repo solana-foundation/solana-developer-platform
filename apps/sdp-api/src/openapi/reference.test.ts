@@ -1,5 +1,6 @@
 import { type ApiSchema, apiReferenceSchema } from "@sdp/api-catalog/reference";
 import { buildSnippets, SNIPPET_LANGUAGES } from "@sdp/api-catalog/snippets";
+import { SdpEarnError, type SdpEarnErrorCode } from "@sdp/earn/errors";
 import { SDP_RELEASE_CHANNEL_NAMES } from "@sdp/types/release-channels";
 import { DEFAULT_SDP_API_URL } from "@sdp/types/site";
 import type { OpenAPIObject, OperationObject } from "openapi3-ts/oas30";
@@ -26,8 +27,19 @@ function documentOperations(document: OpenAPIObject): Map<string, string[]> {
 }
 
 const errorExampleSchema = z.object({
-  error: z.object({ code: z.custom<ErrorCode>((value) => isErrorCode(value)) }),
+  error: z.object({
+    code: z.custom<ErrorCode | SdpEarnErrorCode>(
+      (value) => value === "NOT_IMPLEMENTED" || isErrorCode(value)
+    ),
+  }),
 });
+
+/** The app forwards missing SDK capabilities as 501 rather than converting them to AppError. */
+function statusOfErrorCode(code: ErrorCode | SdpEarnErrorCode): number {
+  return code === "NOT_IMPLEMENTED"
+    ? new SdpEarnError(code).statusCode
+    : new AppError(code).statusCode;
+}
 
 /** A document with one operation, for the shapes the published documents do not exercise. */
 function documentWith(operation: Record<string, unknown>): OpenAPIObject {
@@ -72,7 +84,7 @@ describe("buildApiReference", () => {
             expect(response.body.kind).toBe("json");
             if (response.body.kind !== "json") continue;
             const { error } = errorExampleSchema.parse(response.body.example);
-            expect(String(new AppError(error.code).statusCode)).toBe(response.status);
+            expect(String(statusOfErrorCode(error.code))).toBe(response.status);
           }
         }
       });
@@ -132,6 +144,40 @@ describe("buildApiReference", () => {
       });
     });
   }
+
+  it("builds the opt-in Earn reference with every documented response, including SDK 501s", () => {
+    const document = createPublicOpenApiDocument({
+      publishEarn: true,
+      releaseChannel: "experimental",
+    });
+    const reference = apiReferenceSchema.parse(buildApiReference(document));
+    const earn = reference.families.find((family) => family.name === "Earn");
+    if (!earn) throw new Error("The opted-in Earn family is missing");
+    const documented = new Map(
+      [...documentOperations(document)].filter(([operation]) => operation.includes("/v1/earn/"))
+    );
+    expect(
+      earn.operations.map((operation) => `${operation.method} ${operation.path}`).sort()
+    ).toEqual([...documented.keys()].sort());
+    let missingCapabilityExamples = 0;
+    for (const operation of earn.operations) {
+      expect(operation.responses.map((response) => response.status).sort()).toEqual(
+        documented.get(`${operation.method} ${operation.path}`)?.sort()
+      );
+      for (const response of operation.responses) {
+        if (!/^[45]/.test(response.status)) continue;
+        expect(response.body.kind).toBe("json");
+        if (response.body.kind !== "json") continue;
+        const { error } = errorExampleSchema.parse(response.body.example);
+        expect(String(statusOfErrorCode(error.code))).toBe(response.status);
+        if (response.status === "501") {
+          expect(error.code).toBe("NOT_IMPLEMENTED");
+          missingCapabilityExamples += 1;
+        }
+      }
+    }
+    expect(missingCapabilityExamples).toBeGreaterThan(0);
+  });
 
   it("keys a write's samples by the header the route declares, not by its method", () => {
     const operations = buildApiReference(
@@ -351,10 +397,22 @@ describe("buildApiReference", () => {
 
 describe("exampleErrorCode", () => {
   it("picks, for each status, a code the API answers with that status", () => {
-    for (const status of ["400", "401", "403", "404", "409", "422", "429", "500", "502", "503"]) {
+    for (const status of [
+      "400",
+      "401",
+      "403",
+      "404",
+      "409",
+      "422",
+      "429",
+      "500",
+      "501",
+      "502",
+      "503",
+    ]) {
       for (const takesIdempotencyKey of [true, false]) {
         const code = exampleErrorCode(status, takesIdempotencyKey, "test");
-        expect(String(new AppError(code).statusCode)).toBe(status);
+        expect(String(statusOfErrorCode(code))).toBe(status);
       }
     }
   });
