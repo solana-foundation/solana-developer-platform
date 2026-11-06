@@ -83,8 +83,6 @@ const VAULT = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
 const CUSTODY_WALLET_ID = "cwlt_earn_pa_submit";
 const CONNECTION_ID = "cconn_earn_pa_submit";
 
-let originalMarketsEnabled: string | undefined;
-let originalEarnEnabled: string | undefined;
 let originalEncryptionKey: string | undefined;
 
 async function seedAuth(): Promise<void> {
@@ -277,11 +275,7 @@ async function actionRow(actionId: string) {
 installClusterRpcStub();
 
 beforeEach(async () => {
-  originalMarketsEnabled = env.MARKETS_ENABLED;
-  originalEarnEnabled = env.EARN_ENABLED;
   originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
-  env.MARKETS_ENABLED = "true";
-  env.EARN_ENABLED = "true";
   surfacingEnabled.value = true;
   await seedTestDatabase(env);
   await clearKVStores(env);
@@ -289,8 +283,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  env.MARKETS_ENABLED = originalMarketsEnabled;
-  env.EARN_ENABLED = originalEarnEnabled;
   env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
 });
 
