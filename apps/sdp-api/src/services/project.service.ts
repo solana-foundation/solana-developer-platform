@@ -114,52 +114,37 @@ export class ProjectService {
   }
 
   /**
-   * List all projects in an organization
+   * List an organization's projects, newest first.
+   *
+   * @param organizationId - The organization.
+   * @param options - Listing options.
+   * @param options.includeArchived - Include projects that are not active.
+   * @param options.memberUserId - List only projects this user has a
+   *   `project_members` row for: the rule every dashboard-session project scope uses.
+   * @returns The projects.
    */
   async listProjects(
     organizationId: string,
-    options: { includeArchived?: boolean } = {}
+    options: { includeArchived?: boolean; memberUserId?: string } = {}
   ): Promise<Project[]> {
-    const statusFilter = options.includeArchived ? "" : "AND status = 'active'";
+    const statusFilter = options.includeArchived ? "" : "AND p.status = 'active'";
+    const memberFilter =
+      options.memberUserId === undefined
+        ? ""
+        : "AND EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id = ?)";
+    const bindings =
+      options.memberUserId === undefined
+        ? [organizationId]
+        : [organizationId, options.memberUserId];
 
-    const result = await this.db
-      .prepare(
-        `SELECT id, organization_id, name, slug, description, environment, settings, status, created_by, created_at, updated_at
-         FROM projects
-         WHERE organization_id = ? ${statusFilter}
-         ORDER BY created_at DESC`
-      )
-      .bind(organizationId)
-      .all<{
-        id: string;
-        organization_id: string;
-        name: string;
-        slug: string;
-        description: string | null;
-        environment: string;
-        settings: string | null;
-        status: string;
-        created_by: string;
-        created_at: string;
-        updated_at: string;
-      }>();
-
-    return result.results.map((row) => this.mapRowToProject(row));
-  }
-
-  /**
-   * List projects a user is a member of
-   */
-  async listUserProjects(userId: string, organizationId: string): Promise<Project[]> {
     const result = await this.db
       .prepare(
         `SELECT p.id, p.organization_id, p.name, p.slug, p.description, p.environment, p.settings, p.status, p.created_by, p.created_at, p.updated_at
          FROM projects p
-         JOIN project_members pm ON pm.project_id = p.id
-         WHERE pm.user_id = ? AND p.organization_id = ? AND p.status = 'active'
+         WHERE p.organization_id = ? ${statusFilter} ${memberFilter}
          ORDER BY p.created_at DESC`
       )
-      .bind(userId, organizationId)
+      .bind(...bindings)
       .all<{
         id: string;
         organization_id: string;
