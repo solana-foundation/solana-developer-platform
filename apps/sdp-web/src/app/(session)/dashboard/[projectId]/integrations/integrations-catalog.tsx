@@ -1,6 +1,7 @@
 "use client";
 
 import type { IntegrationState, ProjectIntegrations } from "@sdp/types/integrations";
+import { cn } from "@sdp/ui/cn";
 import { InfoHint } from "@sdp/ui/info-hint";
 import { ChevronRightIcon, CircleCheckIcon } from "lucide-react";
 import Link from "next/link";
@@ -48,7 +49,11 @@ function IntegrationRowItem({
   const href = useProjectHref();
   return (
     <li
-      className="group relative flex items-center gap-4 py-4"
+      className={cn(
+        "group relative isolate flex items-center gap-4 py-4",
+        row.href !== null &&
+          "before:absolute before:inset-y-0 before:-inset-x-3 before:-z-10 before:rounded-lg before:bg-fill-subtle before:opacity-0 before:transition-opacity before:content-[''] hover:before:opacity-100 has-[:focus-visible]:before:opacity-100 motion-reduce:before:transition-none"
+      )}
       data-integration-row={row.key}
       data-integration-status={row.state.status}
     >
@@ -85,7 +90,16 @@ function IntegrationRowItem({
   );
 }
 
-function SectionCount({ section, t }: { section: IntegrationSection; t: Translate }) {
+function SectionSummary({ section, t }: { section: IntegrationSection; t: Translate }) {
+  if (section.family === "rpc") {
+    const primary = section.rows[0];
+    return primary === undefined ? null : (
+      <span className="flex items-center gap-1.5 text-sm text-secondary">
+        {t("Shared.integrations.rpcServing", { provider: primary.label })}
+        <InfoHint text={t("Shared.integrations.rpcServingHint")} />
+      </span>
+    );
+  }
   const configurable = section.rows.filter((row) => isConfigurable(row.state));
   if (configurable.length === 0) {
     return null;
@@ -107,7 +121,7 @@ function IntegrationSectionBlock({ section, t }: { section: IntegrationSection; 
           <h2 className="text-lg font-medium tracking-tight text-primary">{section.title}</h2>
           <InfoHint text={section.description} />
         </div>
-        <SectionCount section={section} t={t} />
+        <SectionSummary section={section} t={t} />
       </div>
       <ul className="divide-y divide-border-subtle">
         {section.rows.map((row) => (
@@ -123,7 +137,7 @@ export function IntegrationsCatalog({ integrations }: { integrations: ProjectInt
   const sections = useMemo(() => integrationSections(integrations, t), [integrations, t]);
 
   return (
-    <div className="w-full space-y-10 px-4 py-5 md:px-6">
+    <div className="w-full space-y-10">
       {sections.map((section) => (
         <IntegrationSectionBlock key={section.family} section={section} t={t} />
       ))}

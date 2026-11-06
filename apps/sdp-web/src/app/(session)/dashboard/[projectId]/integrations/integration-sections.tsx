@@ -86,7 +86,7 @@ function LogoMark({ src }: { src: string }) {
   return (
     <span
       aria-hidden
-      className="relative inline-flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border-subtle bg-[white] p-2"
+      className="relative inline-flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border-subtle bg-[white] p-3"
     >
       <span className="relative size-full">
         <Image src={src} alt="" fill sizes="40px" className="object-contain" />
@@ -109,7 +109,7 @@ function familyRows(family: IntegrationFamily, t: Translate): IntegrationRow[] {
           provider: integration.provider,
           label: entry.label,
           description: t(entry.descriptionKey),
-          icon: <WalletProviderMark provider={integration.provider} size="page" />,
+          icon: <WalletProviderMark provider={integration.provider} size="list" />,
           category: t(CUSTODY_PROVIDER_CATEGORY_DETAILS[integration.category].labelKey),
           state: integration.state,
           href: hrefWhenConfigurable(

@@ -3,6 +3,7 @@ import { projectIntegrationsSchema } from "@sdp/types/integrations";
 import { redirect } from "next/navigation";
 import { IntegrationsCatalog } from "@/app/(session)/dashboard/[projectId]/integrations/integrations-catalog";
 import type { OnboardingStatusResponse } from "@/app/(session)/dashboard/[projectId]/onboarding-status";
+import { privateChannels } from "@/flags";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createRequestScopedSdpApiClients } from "@/lib/sdp-api";
 
@@ -25,11 +26,25 @@ export default async function IntegrationsPage() {
   if (!onboarding.linked || !onboarding.organization) {
     redirect("/dashboard");
   }
-  const integrations = await trace.step("fetch_integrations", async () =>
-    projectIntegrationsSchema.parse(await projectClient.fetch<unknown>("/v1/integrations"))
-  );
+  const [integrations, privateChannelsEnabled] = await Promise.all([
+    trace.step("fetch_integrations", async () =>
+      projectIntegrationsSchema.parse(await projectClient.fetch<unknown>("/v1/integrations"))
+    ),
+    privateChannels(),
+  ]);
 
   trace.log({ ok: true });
 
-  return <IntegrationsCatalog integrations={integrations} />;
+  // Private Channels also has per-user flag targeting the API cannot see, so its
+  // family stays off the page for anyone the flag leaves out.
+  return (
+    <IntegrationsCatalog
+      integrations={{
+        ...integrations,
+        families: integrations.families.filter(
+          (family) => privateChannelsEnabled || family.family !== "private_channels"
+        ),
+      }}
+    />
+  );
 }
