@@ -85,7 +85,8 @@ interface BrandMark {
   ringed: boolean;
 }
 
-const CUSTODY_BRAND_MARKS: Partial<Record<CustodyIntegration["provider"], BrandMark>> = {
+const CUSTODY_BRAND_MARKS = {
+  local: null,
   anchorage: { logo: "/provider-logos/brand/anchorage.png", background: "#0f0f13", ringed: false },
   coinbase_cdp: { logo: "/provider-logos/brand/coinbase.png", background: "#ffffff", ringed: true },
   dfns: { logo: "/provider-logos/brand/dfns.svg", background: "#f0f1f4", ringed: true },
@@ -99,7 +100,7 @@ const CUSTODY_BRAND_MARKS: Partial<Record<CustodyIntegration["provider"], BrandM
   privy: { logo: "/provider-logos/brand/privy.png", background: "#010110", ringed: false },
   turnkey: { logo: "/provider-logos/brand/turnkey.png", background: "#050a0b", ringed: false },
   utila: { logo: "/provider-logos/brand/utila.png", background: "#0f0f13", ringed: false },
-};
+} as const satisfies Record<CustodyIntegration["provider"], BrandMark | null>;
 
 const RPC_BRAND_MARKS = {
   alchemy: { logo: "/provider-logos/brand/alchemy.svg", background: "#363ff9", ringed: false },
@@ -132,8 +133,8 @@ const COMPLIANCE_BRAND_MARKS = {
 
 const MARK_CLASS = "relative inline-flex size-10 shrink-0 items-center justify-center rounded-full";
 
-function IntegrationMark({ mark }: { mark: BrandMark | undefined }) {
-  if (mark === undefined) {
+function IntegrationMark({ mark }: { mark: BrandMark | null }) {
+  if (mark === null) {
     return (
       <span aria-hidden className={cn(MARK_CLASS, "bg-fill-strong")}>
         <KeyRoundIcon className="size-5 text-secondary" />
