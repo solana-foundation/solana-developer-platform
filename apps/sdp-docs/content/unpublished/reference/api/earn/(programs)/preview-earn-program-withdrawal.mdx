@@ -1,0 +1,231 @@
+---
+module: earn
+title: Preview a program withdrawal
+description: Reads live withdrawal liquidity and fees without moving funds.
+icon: method:POST
+apiReference: true
+---
+<Callout type="info">
+This operation is internal. It is not part of the partner-facing Earn API.
+</Callout>
+
+
+<ApiOperation>
+
+<ApiEndpoint method="POST" path="/v1/earn/programs/{programId}/withdrawal-preview" />
+
+Omit amountUsd to read liquidity only, or include it to preview a payout. Wallet-scoped API keys cannot use this provider account; use an organization-wide key.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
+
+## Path parameters
+
+- **`programId`** · `string` · required · min length 1
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+## Request body
+
+`application/json` · required
+
+- **`amountUsd`** · `string` · pattern `^(?!0+(?:\.0+)?$)\d+(?:\.\d{1,6})?$`
+
+- **`token`** · `string` · required · one of `usdc`, `usdt`
+
+## Responses
+
+- **`200`** Result
+
+  - **`data`** · `object` · required
+
+    - **`preview`** · `object` · required
+
+      - **`amountRequestedUsd`** · `string`
+
+      - **`feeUsd`** · `string` · required
+
+      - **`withdrawableUsd`** · `string` · required
+
+      - **`totalUsdAfterWithdrawal`** · `string` · required
+
+      - **`processingEstimate`** · `object`
+
+        - **`basis`** · `string` · required · one of `elapsed_seconds`, `banking_days`
+
+        - **`typicalMinDuration`** · `string` · required
+
+        - **`typicalMaxDuration`** · `string` · required
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `earn.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`409`** Conflict
+
+  Same fields as `400`.
+
+- **`429`** Too Many Requests
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`501`** The provider does not support this operation.
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
+<ApiPanel>
+
+## Example request
+
+```bash tab="cURL"
+curl -X POST 'https://api.solana.com/v1/earn/programs/program_example/withdrawal-preview' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "token": "usdc"
+  }'
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/earn/programs/program_example/withdrawal-preview", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    "token": "usdc"
+  })
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.post("https://api.solana.com/v1/earn/programs/program_example/withdrawal-preview",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
+  json={
+    "token": "usdc"
+  })
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "preview": {
+      "feeUsd": "example",
+      "withdrawableUsd": "example",
+      "totalUsdAfterWithdrawal": "example",
+      "processingEstimate": {
+        "basis": "elapsed_seconds",
+        "typicalMinDuration": "example",
+        "typicalMaxDuration": "example"
+      }
+    }
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: earn.read",
+    "details": {
+      "action": "earn.read"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+</ApiPanel>
+
+</ApiOperation>

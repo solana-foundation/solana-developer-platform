@@ -1,0 +1,206 @@
+---
+module: earn
+title: Get earnings
+description: Gets one customer wallet's live balance and earnings per deposit token.
+icon: method:GET
+apiReference: true
+---
+
+<ApiOperation>
+
+<ApiEndpoint method="GET" path="/v1/earn/external-wallet/earnings" />
+
+`earned` is live value plus observed withdrawal payouts (`totalWithdrawn`) minus finalized deposits (`totalDeposited`), and appears only when it is exact. Otherwise it is left out with an `earnedUnavailableReason`, such as a live value that is unavailable, movements that are still settling, or a withdrawal payout SDP did not observe; never show it as zero. A wallet with no positions returns `positionCount: 0` and an empty `totalsByToken`, not 404. Totals cover the positions the wallet holds now: a fully withdrawn position drops out here but stays in the movements list. Live value reads the wallet's whole balance in the strategy, so shares acquired outside SDP raise it.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
+
+## Query parameters
+
+- **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+
+  The customer's wallet address: an external wallet, so SDP holds no key for it. It signs, owns the shares, and pays the network fee unless the build names a `feePayer`. It must decode to a 32-byte public key; a base58 string that matches the pattern but does not decode returns 400.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+## Responses
+
+- **`200`** Earnings per deposit token
+
+  - **`data`** · `object` · required
+
+    - **`earnings`** · `object` · required
+
+      - **`ownerAddress`** · `string` · required · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+
+        The customer's wallet address.
+
+      - **`positionCount`** · `integer` · required · min 0
+
+      - **`unavailablePositionCount`** · `integer` · required · min 0
+
+      - **`totalsByToken`** · `object[]` · required
+
+        - **`tokenMint`** · `string` · required · example `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
+
+        - **`positionCount`** · `integer` · required · min 0
+
+        - **`unavailablePositionCount`** · `integer` · required · min 0
+
+          Positions whose live value could not be read.
+
+        - **`currentValue`** · `string` · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
+
+          Live value across the token's positions, including any par intermediate they hold. Absent when any contributing position is unavailable, so partial money is never presented as complete.
+
+        - **`totalDeposited`** · `string` · required · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
+
+          Sum of observed finalized SDP deposits. Excludes unobserved receipts (see `deposits_not_valued`).
+
+        - **`totalWithdrawn`** · `string` · required · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
+
+          Sum of the observed payouts of finalized withdrawals. Always present. Excludes withdrawals whose payout SDP did not observe (see `withdrawals_not_valued`).
+
+        - **`earned`** · `string` · max length 129 · pattern `^-?\d+(\.\d+)?$` · example `5.2`
+
+          `currentValue + totalWithdrawn - totalDeposited`, present only when exact and never zero-filled. The live value reads the wallet's whole balance in the strategy, so shares acquired outside SDP raise this figure.
+
+        - **`earnedUnavailableReason`** · `string` · one of `live_value_unavailable`, `movements_pending`, `withdrawals_pending`, `deposits_not_valued`, `withdrawals_not_valued`
+
+          Why `earned` is absent: `live_value_unavailable` (a live value could not be read), `movements_pending` (a movement is still settling), `withdrawals_pending` (a held position has an open withdrawal request, whose shares leave the wallet before its payout, which can take days), or `deposits_not_valued` and `withdrawals_not_valued` (SDP did not observe a finalized deposit or withdrawal, so `totalDeposited` or `totalWithdrawn` is incomplete).
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `earn.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`429`** Too Many Requests
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
+<ApiPanel>
+
+## Example request
+
+```bash tab="cURL"
+curl 'https://api.solana.com/v1/earn/external-wallet/earnings?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM' \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/earn/external-wallet/earnings?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", {
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.get("https://api.solana.com/v1/earn/external-wallet/earnings?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "earnings": {
+      "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+      "positionCount": 1,
+      "unavailablePositionCount": 0,
+      "totalsByToken": [
+        {
+          "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+          "positionCount": 1,
+          "unavailablePositionCount": 0,
+          "currentValue": "25.031",
+          "totalDeposited": "25",
+          "totalWithdrawn": "0",
+          "earned": "0.031"
+        }
+      ]
+    }
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: earn.read",
+    "details": {
+      "action": "earn.read"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+</ApiPanel>
+
+</ApiOperation>

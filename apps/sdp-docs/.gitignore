@@ -4,6 +4,7 @@ build
 .source
 content/docs/reference/api/
 .vercel
+.earn-docs-preview.json
 
 # env files (can opt-in for committing if needed)
 .env*

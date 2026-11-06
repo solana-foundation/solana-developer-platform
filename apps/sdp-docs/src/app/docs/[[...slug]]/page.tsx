@@ -1,3 +1,4 @@
+import type { SdpModule } from "@sdp/types/release-channels";
 import { findNeighbour } from "fumadocs-core/page-tree";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
@@ -15,6 +16,7 @@ const mdxComponents = getMDXComponents();
 
 type DocsData = {
   title: string;
+  module?: SdpModule;
   description?: string;
   hideTitle?: boolean;
   body?: ComponentType<{ components?: Record<string, unknown> }>;
@@ -67,6 +69,7 @@ export default async function Page({ params }: DocsPageProps) {
   const isHome = resolvedPage.pageSlug.length === 0;
   const isApiReference =
     resolvedPage.pageSlug[0] === "reference" && resolvedPage.pageSlug[1] === "api";
+  const isEarn = data.module === "earn" || (isApiReference && resolvedPage.pageSlug[2] === "earn");
   const baseToc = headingsToc(data);
   const steps = data.steps ?? [];
   let toc = baseToc;
@@ -101,7 +104,9 @@ export default async function Page({ params }: DocsPageProps) {
           />
         </div>
         {!data.hideTitle && <DocsDescription>{data.description}</DocsDescription>}
-        {(isHome || isApiReference) && <DevelopmentNotice />}
+        {(isHome || isApiReference || isEarn) && (
+          <DevelopmentNotice product={isEarn ? "Earn" : "SDP"} />
+        )}
         <DocsBody prev={prev} next={next} bare={data.hideTitle} apiReference={data.apiReference}>
           <MDX components={mdxComponents} />
         </DocsBody>

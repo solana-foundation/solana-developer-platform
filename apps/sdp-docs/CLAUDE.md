@@ -95,8 +95,10 @@ import { DocsPage, DocsTitle, DocsDescription, DocsBody } from "@/components/doc
 
 `DevelopmentNotice` (`src/components/docs-shell/development-notice.tsx`) is the
 shared active development banner. The catch-all route places it below the
-description on the docs home and every `reference/api` page. Reuse the component
-for other placements; its marker, fill and border use the `--attention*` tokens.
+description on the docs home and every `reference/api` page. Earn pages use the
+same component with Earn-specific copy from `src/lib/development-notice.ts`;
+`expandDocsBlocks` includes that notice in Markdown and AI output too. Its
+marker, fill and border use the `--attention*` tokens.
 
 ### Page actions and the Markdown agents get
 
@@ -104,9 +106,34 @@ for other placements; its marker, fill and border use the `--attention*` tokens.
 
 Popovers (`fumadocs-ui/components/ui/popover`) render in a portal outside `.sdp-docs-shell`: give their content `.launch-popover`, which sets the type, surface, `--elevation-popover` and the motion-token animation.
 
-A guide's `<Tab>` (`tab.tsx`) stays mounted while another tab shows, hidden, so the table of contents and search can link to its headings; following such a link opens the tab. Fumadocs' `<Tabs>` reacts only to page load and `hashchange`, so the search dialog sets the hash itself for a result on the page already open (`router.push` fires none).
+A guide's `<Tab>` maps to `DocsTab` in `code-example.tsx`. Inactive panels stay
+mounted and hidden so search and heading links can open them. The table of
+contents shows only the visible path's headings and updates when tabs change.
+Fumadocs reacts to page load and `hashchange`, so the search dialog sets the hash
+itself for a result on the page already open (`router.push` fires none).
 
-A guide's `<Tabs>` panel is a card. A panel holding only a code block (` ```lang tab="…" ` fences, or a `<Tab>` with one block) is not: the tab card is the one frame, and an untitled block's copy button sits at the end of the tab row instead of over the code (`globals.css`, "Tab panels"). A panel with prose or several blocks keeps each block's own button.
+### Code examples and guide tabs
+
+The shared MDX mappings use `CodeExample`, `DocsCodeBlockTabs`, `DocsTabs` and
+`DocsTab` (`src/components/docs-shell/code-example.tsx`). Every code example
+has one frame and one header with its language and Copy button. Alternative
+languages use a dropdown; a single language uses a static label. Workflow steps
+and HTTP response statuses remain tabs. A panel with prose or several blocks
+keeps each block's own header. Do not nest another code frame or copy control.
+
+Keep the Shiki `data-language` transformer in `source.config.ts`: the shared
+components identify server-rendered code through that metadata and its Shiki
+class. Language choices synchronize across matching groups; optional browser
+storage must never be required for the controls to work.
+
+`expandDocsBlocks` unwraps `Tabs`, `Tab`, `Callout`, `details` and `summary` into
+plain Markdown. Every variant and closed helper remains in Copy page, `.md`
+and AI output. `EarnFlow` and `GuideCards` have equivalent Markdown too. Keep
+copyable source in MDX; do not depend on evaluated JSX to supply agent content.
+
+Earn guides say "choose a strategy" without recommending a provider. Filter
+examples by live availability and required capabilities, never provider name.
+Name a provider only to explain its specific behavior or show an API value.
 
 ### CSS classes (for custom elements within pages)
 
@@ -154,7 +181,22 @@ Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` 
 
 ### Search
 
-⌘K search: `RootProvider` (root `layout.tsx`) provides the hotkey and `DocsSearchDialog` (`search-dialog.tsx`), Fumadocs' default dialog pointed at `docsSearchApiPath` (`/docs/api/search`, `src/lib/site.ts`), the Orama route at `src/app/docs/api/search/route.ts`. It must stay under `/docs`: platform.solana.com forwards only `/docs/*` and a few root files here, so Fumadocs' default `/api/search` reaches the dashboard's sign-in redirect and every search fails (`site-urls.test.ts` pins it). The route leaves out text that 12 or more pages repeat word for word (shared header and envelope descriptions), gives each result its breadcrumb, and ranks pages whose title (then title and description) hold the query first (`rankTitlesFirst`, `src/lib/search-rank.ts`). The sidebar header has a "Search docs" trigger button (`.launch-docs-sidebar-search`). Only `content/docs/` MDX is indexed: JSX-rendered content like `DocsHome` is not. The sitemap is `/docs/sitemap.xml` (`src/app/docs/sitemap.ts`) for the same reason; `robots.txt` names it.
+`RootProvider` (root `layout.tsx`) supplies the search hotkey and
+`DocsSearchDialog` (`search-dialog.tsx`), pointed at `docsSearchApiPath`
+(`/docs/api/search`, `src/lib/site.ts`) and the Orama route at
+`src/app/docs/api/search/route.ts`. Keep it under `/docs`: the dashboard proxy
+does not forward `/api/search` (`site-urls.test.ts` pins this). The route removes
+text repeated across 12 or more pages and gives each result its breadcrumb.
+`rankTitlesFirst` (`src/lib/search-rank.ts`) prioritizes exact page URLs,
+operation names, endpoint labels and titles, then relevant headings and title
+or description matches. Guides win ties with API reference pages.
+
+Only admitted `content/docs/` MDX enters search; JSX-rendered content like
+`DocsHome` does not. Fumadocs normally omits code fences. For admitted Earn
+pages, `remarkDocsBlocks` also indexes code identifiers under their enclosing
+headings. Keep the module gate intact; private drafts must not enter the public
+index. The sitemap is `/docs/sitemap.xml` (`src/app/docs/sitemap.ts`), and
+`robots.txt` names it. The sidebar's trigger is `.launch-docs-sidebar-search`.
 
 ---
 
@@ -174,8 +216,8 @@ Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` 
 | `.launch-docs-nav-item.is-active` | Active page, or the top-level entry the page sits under: `--wash-strong` bg, `--ink`, weight 500                                  |
 | `.launch-docs-nav-folder`         | Folder container                                                                                                                  |
 | `.launch-docs-nav-folder-row`     | A folder's row and its one highlight, toggle included: `--wash` on hover, `--wash-strong` (`.is-active`) on the folder's own page |
-| `.launch-docs-nav-folder-btn`     | Non-linked folder label that toggles the folder: `--ink`, weight 500                                                              |
-| `.launch-docs-nav-folder-link`    | Linked folder: `--ink`, weight 500; a click opens the folder, or toggles it from the folder's own page                            |
+| `.launch-docs-nav-folder-btn`     | Non-linked folder toggle: same `--ink-secondary` and weight 400 as ordinary links                                                 |
+| `.launch-docs-nav-folder-link`    | Linked folder: ordinary link styling; inherits the row's selected-page highlight; click opens or toggles its folder               |
 | `.launch-docs-nav-toggle`         | Expand/collapse chevron button, 28px                                                                                              |
 | `.launch-docs-nav-children`       | Children container, 14px further in per level, highlights included                                                                |
 | `.launch-docs-sidebar-section`    | Section label: `--font-size-meta`, `--ink-tertiary`, sentence case                                                                |
@@ -206,7 +248,8 @@ Every MDX under `content/docs/` is built, served, indexed for search, and
 included in `llms-full.txt` when its release channel publishes it. Removing a
 nav entry only hides the sidebar link. To take a page down while keeping it in
 the repo:
-1. `git mv` it under `content/unpublished/` (same relative path). Nothing reads that directory.
+1. `git mv` it under `content/unpublished/` (same relative path). Production
+   builds and public generators do not read that directory.
 2. Remove it from the section `meta.json`.
 3. Repoint or drop inbound links from other pages; `check:links` fails on a link to a missing page.
 4. Run `pnpm generate:api && pnpm generate:ai` and commit `public/llms*.txt`; CI diffs them against the generated output.
@@ -296,7 +339,33 @@ keep Swagger UI for their own release channel.
 
 Reference > Conventions (`content/docs/reference/conventions/`) holds the rules every route shares (errors, pagination, rate limits, versioning) and links the authentication, environments and idempotency guides; the API Reference index links it. It is written by hand, apart from `<RateLimitTable />`, names no module, and lives outside `reference/api/`, which `generate:api` rewrites.
 
-Currently unpublished: the whole Earn family, guide and API reference, until PRO-2038.
+`scripts/lib/ai-resource-pages.ts` orders admitted pages by navigation, resolves
+metadata paths relative to their folder, and includes unlisted pages once.
+Metadata never admits a gated page. Keep optional Earn discovery links behind
+the same filtered page map.
+
+### Private Earn authoring
+
+The Earn guides and generated reference stay under `content/unpublished/`
+until PRO-2038. See `content/unpublished/README.md` for the authoring and
+promotion checks. Use `pnpm --filter sdp-docs generate:earn-preview` to render
+the private reference from internal OpenAPI, then
+`pnpm --filter sdp-docs check:earn-drafts` to check gates, MDX, prose, future
+links and complete Markdown parity. The preview generator writes an ignored
+API intermediate and the unpublished reference, without changing the public
+OpenAPI document. Treasury and Programs remain internal; do not copy this
+whole reference into the public tree. Public promotion requires named security
+sign-off and regeneration from the approved public OpenAPI document.
+
+`scripts/build.ts` stages the partner guides and intended public Earn reference
+only when `VERCEL_ENV=preview` **and** `VERCEL_GIT_COMMIT_REF=earn-docs`. Keep both
+conditions exact. Production, other branches and normal local builds keep the
+hold. The preview includes search, Markdown and AI output, with a noindex header;
+it excludes Treasury and Programs. Staged MDX remains through Vercel packaging
+for Markdown reads. Every build first removes marked staging and regenerates
+normal artifacts. Never enable a preview by changing the API publication flag.
+Direct source or AI generation rejects a staged preview manifest outside that
+exact context. Run `generate:api` to reset it before normal generation.
 
 ---
 

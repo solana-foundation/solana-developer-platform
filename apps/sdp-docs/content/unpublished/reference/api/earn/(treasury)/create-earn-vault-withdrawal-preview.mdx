@@ -1,0 +1,232 @@
+---
+module: earn
+title: Preview a custody withdrawal
+description: Quotes the live deposit-token payout for a custody position's shares.
+icon: method:POST
+apiReference: true
+---
+<Callout type="info">
+This operation is internal. It is not part of the partner-facing Earn API.
+</Callout>
+
+
+<ApiOperation>
+
+<ApiEndpoint method="POST" path="/v1/earn/vault-withdrawal-previews" />
+
+Derive minAmountOut from assetsOut minus your chosen tolerance, quantized to assetDecimals. Read-only and safe to retry. Providers without exit quoting return 501; a provider-order route with no slippage policy does not require this preview.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+## Request body
+
+`application/json` · required
+
+- **`positionId`** · `string` · required · min length 1 · max length 128
+
+- **`shares`** · `string` · required · max length 128 · pattern `^\d+(\.\d+)?$`
+
+## Responses
+
+- **`200`** Result
+
+  - **`data`** · `object` · required
+
+    - **`positionId`** · `string` · required
+
+    - **`assetsOut`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25.02`
+
+      What redeeming the shares would pay at the live rate, decimal string in the deposit token's units. A truthful `minAmountOut` floor is derived from this figure.
+
+    - **`assetDecimals`** · `integer` · required · example `6`
+
+      The deposit token's decimals, which define the scale used to quantize a floor.
+
+    - **`blockingIssues`** · `object[]` · required
+
+      Conditions the provider reports would block this withdrawal; empty when none.
+
+      - **`code`** · `string` · required · example `SHARE_LOCKED`
+
+      - **`message`** · `string` · required
+
+    - **`feeSponsored`** · `boolean` · required
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `earn.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`409`** Conflict
+
+  Same fields as `400`.
+
+- **`429`** Too Many Requests
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`501`** The provider does not support this operation.
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
+<ApiPanel>
+
+## Example request
+
+```bash tab="cURL"
+curl -X POST 'https://api.solana.com/v1/earn/vault-withdrawal-previews' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "positionId": "position_example",
+    "shares": "example"
+  }'
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/earn/vault-withdrawal-previews", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    "positionId": "position_example",
+    "shares": "example"
+  })
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.post("https://api.solana.com/v1/earn/vault-withdrawal-previews",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
+  json={
+    "positionId": "position_example",
+    "shares": "example"
+  })
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "positionId": "position_example",
+    "assetsOut": "25.02",
+    "assetDecimals": 6,
+    "blockingIssues": [
+      {
+        "code": "SHARE_LOCKED",
+        "message": "example"
+      }
+    ],
+    "feeSponsored": false
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: earn.read",
+    "details": {
+      "action": "earn.read"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+</ApiPanel>
+
+</ApiOperation>

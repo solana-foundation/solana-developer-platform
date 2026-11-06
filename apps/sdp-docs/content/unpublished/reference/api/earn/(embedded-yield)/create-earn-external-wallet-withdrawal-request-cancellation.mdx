@@ -1,0 +1,418 @@
+---
+module: earn
+title: Submit a cancellation
+description: Submits a cancellation transaction signed by the customer's wallet.
+icon: method:POST
+apiReference: true
+---
+
+<ApiOperation>
+
+<ApiEndpoint method="POST" path="/v1/earn/external-wallet/withdrawal-request-cancellations" />
+
+SDP verifies it, records it before broadcast, and returns the withdrawal request. Idempotency-Key is required, with the same `409 CONFLICT` answers as the other submits. Requires `earn.manage`, and stays available without production access and while Earn is disabled; a suspended organization still cannot authenticate. Keep polling until the request is `cancelled`, `fulfilled` or `failed`, because a fulfillment can race the cancellation.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.manage` action.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+- **`Idempotency-Key`** · `string` · required · pattern `^[\x20-\x7e]{1,255}$` · example `idempotency_example_12345`
+
+  Idempotency key for safely retrying mutating requests. 1-255 printable ASCII characters; echoed back on the response.
+
+## Request body
+
+`application/json` · required
+
+Submit the signed bytes back. Requires the Idempotency-Key header; a retry with the same key resolves the original movement or withdrawal request instead of acting twice.
+
+- **`transactionId`** · `string` · required · min length 1 · max length 128 · example `earn_external_wallet_transaction_e7a88258-1d19-48f3-8d0e-81fefa4bf3b3`
+
+  The built transaction being submitted; single-use.
+
+- **`signedTransaction`** · `string` · required · min length 1 · max length 1700 · pattern `^[A-Za-z0-9+/]+={0,2}$` · example `AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOAAQABAvSV602SJ67iQCUGLwHzVtPnlMbZqL79wnV/nb+Mi9SJBUpTWpkpIQZNJOhxYNo4fHw1td28kruB5B+oQEEFRI0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEBAAtzZHAtZXhhbXBsZQA=`
+
+  Base64 wire bytes of the signed transaction. They must be byte-for-byte the built message with only signatures added.
+
+## Responses
+
+- **`200`** The withdrawal request with its cancellation recorded
+
+  - **`data`** · `object` · required
+
+    - **`withdrawalRequest`** · `object` · required
+
+      Any of:
+
+      - **mechanism: "solverQueue"**
+
+        - **`withdrawalRequestId`** · `string` · required · example `earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9`
+
+        - **`positionId`** · `string` · required · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
+
+        - **`provider`** · `string` · required · example `veda`
+
+        - **`providerReference`** · `string` · required
+
+          The strategy's onchain address.
+
+        - **`ownerAddress`** · `string` · required · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+
+          The customer's wallet address.
+
+        - **`requestAddress`** · `string` · required
+
+          Provider request account address.
+
+        - **`status`** · `string` · required · one of `creating`, `pending`, `fulfillable`, `expiredCancelable`, `cancelling`, `fulfilled`, `cancelled`, `closedOrUnknown`, `failed`
+
+          The request's status. Only `fulfilled`, `cancelled` and `failed` are final. Keep tracking every other status, `closedOrUnknown` included: SDP resolves it from a finalized close event.
+
+        - **`assetMint`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
+
+          Base58 Solana mint address.
+
+        - **`shareMint`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
+
+          Base58 Solana mint address.
+
+        - **`shares`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+          Positive decimal string with at least one non-zero digit; never a float.
+
+        - **`quotedAssets`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+          Expected payout at request creation, in `assetMint` units. Not a settled amount.
+
+        - **`shareDecimals`** · `integer` · required · min 0 · max 38
+
+        - **`assetDecimals`** · `integer` · required · min 0 · max 38
+
+        - **`nonce`** · `string | null` · required
+
+        - **`creationTimestamp`** · `string | null` · required · pattern `^\d+$`
+
+        - **`creationSignature`** · `string | null` · required
+
+          The request-creation transaction. Its confirmation does not prove a payout.
+
+        - **`cancelSignature`** · `string | null` · required
+
+          The cancellation transaction, once one is submitted.
+
+        - **`closingSignature`** · `string | null` · required
+
+          Provider-authenticated fulfillment or cancellation transaction, when known.
+
+        - **`assetsPaid`** · `string | null` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+          The payout SDP observed at fulfillment, in `assetMint` units; null until then.
+
+        - **`failureReason`** · `string | null` · required
+
+        - **`fulfilledAt`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+          ISO 8601 timestamp.
+
+        - **`cancelledAt`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+          ISO 8601 timestamp.
+
+        - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+          ISO 8601 timestamp.
+
+        - **`updatedAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+          ISO 8601 timestamp.
+
+        - **`replayed`** · `boolean`
+
+        - **`mechanism`** · `string` · required · always `solverQueue`
+
+        - **`intermediateMint`** · `any` · required
+
+        - **`intermediateAmount`** · `any` · required
+
+        - **`discountBps`** · `integer` · required · min 0 · max 10000
+
+        - **`maturityTimestamp`** · `string` · required · pattern `^\d+$`
+
+        - **`deadlineTimestamp`** · `string` · required · pattern `^\d+$`
+
+      - **mechanism: "operatorRedemption"**
+
+        - **`withdrawalRequestId`** · `string` · required · example `earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9`
+
+        - **`positionId`** · `string` · required · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
+
+        - **`provider`** · `string` · required · example `veda`
+
+        - **`providerReference`** · `string` · required
+
+          The strategy's onchain address.
+
+        - **`ownerAddress`** · `string` · required · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+
+          The customer's wallet address.
+
+        - **`requestAddress`** · `string` · required
+
+          Provider request account address.
+
+        - **`status`** · `string` · required · one of `creating`, `pending`, `fulfillable`, `expiredCancelable`, `cancelling`, `fulfilled`, `cancelled`, `closedOrUnknown`, `failed`
+
+          The request's status. Only `fulfilled`, `cancelled` and `failed` are final. Keep tracking every other status, `closedOrUnknown` included: SDP resolves it from a finalized close event.
+
+        - **`assetMint`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
+
+          Base58 Solana mint address.
+
+        - **`shareMint`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
+
+          Base58 Solana mint address.
+
+        - **`shares`** · `string` · required · max length 128 · pattern `^\d+(\.\d+)?$` · example `10`
+
+          Position shares the request burns, in share units; "0" when it redeems intermediate the owner already holds.
+
+        - **`quotedAssets`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+          Expected payout at request creation, in `assetMint` units. Not a settled amount.
+
+        - **`shareDecimals`** · `integer` · required · min 0 · max 38
+
+        - **`assetDecimals`** · `integer` · required · min 0 · max 38
+
+        - **`nonce`** · `string | null` · required
+
+        - **`creationTimestamp`** · `string | null` · required · pattern `^\d+$`
+
+        - **`creationSignature`** · `string | null` · required
+
+          The request-creation transaction. Its confirmation does not prove a payout.
+
+        - **`cancelSignature`** · `string | null` · required
+
+          The cancellation transaction, once one is submitted.
+
+        - **`closingSignature`** · `string | null` · required
+
+          Provider-authenticated fulfillment or cancellation transaction, when known.
+
+        - **`assetsPaid`** · `string | null` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+          The payout SDP observed at fulfillment, in `assetMint` units; null until then.
+
+        - **`failureReason`** · `string | null` · required
+
+        - **`fulfilledAt`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+          ISO 8601 timestamp.
+
+        - **`cancelledAt`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+          ISO 8601 timestamp.
+
+        - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+          ISO 8601 timestamp.
+
+        - **`updatedAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+          ISO 8601 timestamp.
+
+        - **`replayed`** · `boolean`
+
+        - **`mechanism`** · `string` · required · always `operatorRedemption`
+
+        - **`intermediateMint`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
+
+          Base58 Solana mint address.
+
+        - **`intermediateAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+          Positive decimal string with at least one non-zero digit; never a float.
+
+        - **`discountBps`** · `any` · required
+
+        - **`maturityTimestamp`** · `any` · required
+
+        - **`deadlineTimestamp`** · `any` · required
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `earn.manage` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`409`** Conflict
+
+  Same fields as `400`.
+
+- **`429`** Too Many Requests
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
+<ApiPanel>
+
+## Example request
+
+```bash tab="cURL"
+curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-request-cancellations' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "transactionId": "earn_external_wallet_withdrawal_request_transaction_9a3c1e27-5d84-4f0b-b6e2-7f19c4a8d035",
+    "signedTransaction": "AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOA"
+  }'
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdrawal-request-cancellations", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Idempotency-Key": crypto.randomUUID(),
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    "transactionId": "earn_external_wallet_withdrawal_request_transaction_9a3c1e27-5d84-4f0b-b6e2-7f19c4a8d035",
+    "signedTransaction": "AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOA"
+  })
+});
+```
+
+```python tab="Python"
+import os, requests, uuid
+
+r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawal-request-cancellations",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  json={
+    "transactionId": "earn_external_wallet_withdrawal_request_transaction_9a3c1e27-5d84-4f0b-b6e2-7f19c4a8d035",
+    "signedTransaction": "AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOA"
+  })
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "withdrawalRequest": {
+      "withdrawalRequestId": "earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9",
+      "positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc",
+      "provider": "veda",
+      "providerReference": "3wbKP5UGLT7gAZBAsLjvPC1NbfnWKtT3Dq7cniMWkzfU",
+      "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+      "requestAddress": "DKw4pYcvXNLs91RssedGFznWRpbvPttp2AAwNCG7fQRz",
+      "status": "cancelling",
+      "mechanism": "solverQueue",
+      "assetMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+      "shareMint": "CdV7pjj6WANsdasKsBvdKAn7qJL7cQ2Q3CJMBEe13WAV",
+      "intermediateMint": null,
+      "intermediateAmount": null,
+      "shares": "15",
+      "quotedAssets": "14.985",
+      "shareDecimals": 6,
+      "assetDecimals": 6,
+      "discountBps": 10,
+      "nonce": "0",
+      "creationTimestamp": "1793987449",
+      "maturityTimestamp": "1793991049",
+      "deadlineTimestamp": "1793991109",
+      "creationSignature": "3dhkSPLiQZQPXL96fWzMdWJtdbtAffkBKXw2xhsYbV3VNSnYrVAcdx1czsnLsE1ou4SvLecGdSYe4QpAuZdfjJAf",
+      "cancelSignature": "q7g4PK7KtYN8aUWuWL3VAGeecsLWdS4KeSPVpL5YJGLHt5HAz5Ajgr9pwFWTTfK4dh6XjCjuCp3gdex678CPU8h",
+      "closingSignature": null,
+      "assetsPaid": null,
+      "failureReason": null,
+      "fulfilledAt": null,
+      "cancelledAt": null,
+      "createdAt": "2026-11-06T18:10:18.900Z",
+      "updatedAt": "2026-11-06T19:12:41.020Z"
+    }
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: earn.manage",
+    "details": {
+      "action": "earn.manage"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+</ApiPanel>
+
+</ApiOperation>

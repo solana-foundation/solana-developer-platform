@@ -1,0 +1,298 @@
+---
+module: earn
+title: Get position totals
+description: Gets live position totals across every customer wallet in your project, grouped by strategy and token.
+icon: method:GET
+apiReference: true
+---
+
+<ApiOperation>
+
+<ApiEndpoint method="GET" path="/v1/earn/external-wallet/positions/summary" />
+
+Wallet addresses are left out unless you pass `includeOwnerAddresses=true`; add `includePositions=true` to also receive each wallet's positions, which saves one read per wallet. A total that depends on an unavailable live value is left out, never reported as zero or partial.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
+
+## Query parameters
+
+- **`includeOwnerAddresses`** · `string` · one of `true`, `false`
+
+- **`includePositions`** · `string` · one of `true`, `false`
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+## Responses
+
+- **`200`** Position totals
+
+  - **`data`** · `object` · required
+
+    - **`summary`** · `object` · required
+
+      - **`walletCount`** · `integer` · required · min 0
+
+      - **`positionCount`** · `integer` · required · min 0
+
+      - **`unavailablePositionCount`** · `integer` · required · min 0
+
+      - **`totalsByStrategy`** · `object[]` · required
+
+        - **`provider`** · `string` · required · example `kamino`
+
+        - **`providerReference`** · `string` · required · example `7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx`
+
+        - **`label`** · `string` · required · example `Allez USDC`
+
+        - **`ownerAddresses`** · `string[]` · each min length 32 · each max length 44 · each pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · each example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+
+          The customer wallets behind this total. Absent unless the request passes `includeOwnerAddresses=true`. The list is personal data about your customers, so opt in only where you show per-customer detail.
+
+        - **`positions`** · `object[]`
+
+          Complete live positions contributing to this strategy total. Present only when the request passes `includePositions=true` together with `includeOwnerAddresses=true`; use this single drill-down instead of one live request per owner.
+
+          - **`id`** · `string` · required · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
+
+          - **`ownerAddress`** · `string` · required · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+
+            The customer's wallet address.
+
+          - **`provider`** · `string` · required · example `kamino`
+
+          - **`providerReference`** · `string` · required · example `7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx`
+
+            The strategy's onchain address.
+
+          - **`label`** · `string` · required · example `Allez USDC`
+
+          - **`tokenMint`** · `string` · required · example `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
+
+          - **`shareMint`** · `string` · required · example `hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2`
+
+          - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+            ISO 8601 timestamp.
+
+          - **`closedAt`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+            ISO 8601 timestamp.
+
+          - **`shares`** · `string` · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
+
+            Live share balance. Absent when the live read is unavailable; never zero-filled.
+
+          - **`withdrawableShares`** · `string` · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
+
+            Shares you can withdraw right now. Absent when the live read is unavailable.
+
+          - **`unlockTimestamp`** · `string | null` · pattern `^\d+$` · example `1789722000`
+
+            Unix time, in seconds, when locked shares become withdrawable. Null or absent when no lock applies. To tell an unavailable read apart, check `shares`.
+
+          - **`tokenValue`** · `string` · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
+
+            Live value of the position in the deposit token (`tokenMint`), as the provider reports it: shares times the rate for rate-based strategies, or a withdrawal quote for the whole position for quote-based providers such as Veda and Ondo. A quote already includes spread and price impact, so it does not scale to other share amounts. It is a deposit-token amount, not a share count or a USD conversion; every Earn deposit token is a USD stablecoin, so at par it reads as dollars. Absent when the live read is unavailable.
+
+          - **`parIntermediate`** · `object`
+
+            The operator redemption's intermediate token the wallet holds outside any open request, such as Hastra wYLDS after a canceled operator redemption. It belongs to this position and is not included in `tokenValue`. Present only while non-zero.
+
+            - **`mint`** · `string` · required · example `8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih`
+
+            - **`amount`** · `string` · required · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
+
+              Live decimal value returned by the vault provider; never a float.
+
+            - **`withdrawableAmount`** · `string` · required · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
+
+              Zero while the provider has frozen the token account.
+
+            - **`tokenValue`** · `string` · required · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
+
+              Value in the position's deposit token (`tokenMint`).
+
+        - **`walletCount`** · `integer` · required · min 0
+
+        - **`positionCount`** · `integer` · required · min 0
+
+        - **`totalsByToken`** · `object[]` · required
+
+          - **`tokenMint`** · `string` · required · example `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
+
+          - **`walletCount`** · `integer` · required · min 0
+
+          - **`positionCount`** · `integer` · required · min 0
+
+          - **`unavailablePositionCount`** · `integer` · required · min 0
+
+          - **`tokenValue`** · `string` · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
+
+            Exact live total in the deposit token (`tokenMint`): the sum of the positions' `tokenValue` plus any `parIntermediate.tokenValue`, a dollar figure at par. Absent when any contributing position is unavailable, so partial money is never presented as complete.
+
+      - **`totalsByToken`** · `object[]` · required
+
+        - **`tokenMint`** · `string` · required · example `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
+
+        - **`walletCount`** · `integer` · required · min 0
+
+        - **`positionCount`** · `integer` · required · min 0
+
+        - **`unavailablePositionCount`** · `integer` · required · min 0
+
+        - **`tokenValue`** · `string` · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
+
+          Exact live total in the deposit token (`tokenMint`): the sum of the positions' `tokenValue` plus any `parIntermediate.tokenValue`, a dollar figure at par. Absent when any contributing position is unavailable, so partial money is never presented as complete.
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `earn.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`429`** Too Many Requests
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
+<ApiPanel>
+
+## Example request
+
+```bash tab="cURL"
+curl 'https://api.solana.com/v1/earn/external-wallet/positions/summary' \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/earn/external-wallet/positions/summary", {
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.get("https://api.solana.com/v1/earn/external-wallet/positions/summary",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "summary": {
+      "walletCount": 2,
+      "positionCount": 2,
+      "unavailablePositionCount": 0,
+      "totalsByStrategy": [
+        {
+          "provider": "kamino",
+          "providerReference": "C7N2fqV2GvhFghDf5PJSwstyjedjLNCY1cm2Ak7TeU83",
+          "label": "Kamino Vault USDC",
+          "walletCount": 2,
+          "positionCount": 2,
+          "totalsByToken": [
+            {
+              "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+              "walletCount": 2,
+              "positionCount": 2,
+              "unavailablePositionCount": 0,
+              "tokenValue": "50.062"
+            }
+          ]
+        }
+      ],
+      "totalsByToken": [
+        {
+          "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+          "walletCount": 2,
+          "positionCount": 2,
+          "unavailablePositionCount": 0,
+          "tokenValue": "50.062"
+        }
+      ]
+    }
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: earn.read",
+    "details": {
+      "action": "earn.read"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+</ApiPanel>
+
+</ApiOperation>

@@ -1,0 +1,256 @@
+---
+module: earn
+title: Withdraw from a custody position
+description: Redeems a position's shares into the custody wallet that owns them.
+icon: method:POST
+apiReference: true
+---
+<Callout type="info">
+This operation is internal. It is not part of the partner-facing Earn API.
+</Callout>
+
+
+<ApiOperation>
+
+<ApiEndpoint method="POST" path="/v1/earn/vault-withdrawals" />
+
+Call vault-withdrawal-options first to select a supported route, then quote the direct exit when minAmountOut is required. A strategy disabled for new deposits remains exitable. Provider-order exits finish only when the provider completes the payout. A new intentional operation needs a new Idempotency-Key, even with identical terms. Retrying an uncertain operation must reuse its key and exact payload.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+- **`Idempotency-Key`** · `string` · required · pattern `^[\x20-\x7e]{1,255}$` · example `idempotency_example_12345`
+
+  Idempotency key for safely retrying mutating requests. 1-255 printable ASCII characters; echoed back on the response.
+
+## Request body
+
+`application/json` · required
+
+- **`positionId`** · `string` · required · min length 1 · max length 128
+
+- **`shares`** · `string` · required · max length 128 · pattern `^\d+(\.\d+)?$`
+
+- **`minAmountOut`** · `string` · max length 128 · pattern `^\d+(\.\d+)?$`
+
+## Responses
+
+- **`200`** Result
+
+  - **`data`** · `object` · required
+
+    - **`withdrawal`** · `object` · required
+
+      - **`movementId`** · `string` · required
+
+      - **`positionId`** · `string` · required
+
+      - **`provider`** · `string` · required
+
+      - **`providerReference`** · `string` · required
+
+      - **`status`** · `string` · required · one of `requested`, `submitted`, `confirmed`, `finalized`, `failed`
+
+      - **`signature`** · `string` · required
+
+      - **`shares`** · `string` · required
+
+      - **`shareMint`** · `string` · required
+
+      - **`failureReason`** · `string | null` · required
+
+      - **`createdAt`** · `string` · required
+
+      - **`confirmedAt`** · `string | null` · required
+
+      - **`settledAt`** · `string | null` · required
+
+      - **`replayed`** · `boolean`
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `earn.execute` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`409`** Conflict
+
+  Same fields as `400`.
+
+- **`422`** Unprocessable Entity
+
+  Same fields as `400`.
+
+- **`429`** Too Many Requests
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`501`** The provider does not support this operation.
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
+<ApiPanel>
+
+## Example request
+
+```bash tab="cURL"
+curl -X POST 'https://api.solana.com/v1/earn/vault-withdrawals' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "positionId": "position_example",
+    "shares": "example"
+  }'
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/earn/vault-withdrawals", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Idempotency-Key": crypto.randomUUID(),
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    "positionId": "position_example",
+    "shares": "example"
+  })
+});
+```
+
+```python tab="Python"
+import os, requests, uuid
+
+r = requests.post("https://api.solana.com/v1/earn/vault-withdrawals",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  json={
+    "positionId": "position_example",
+    "shares": "example"
+  })
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "withdrawal": {
+      "movementId": "movement_example",
+      "positionId": "position_example",
+      "provider": "example",
+      "providerReference": "example",
+      "status": "requested",
+      "signature": "example",
+      "shares": "example",
+      "shareMint": "example",
+      "failureReason": "example",
+      "createdAt": "example",
+      "confirmedAt": "example",
+      "settledAt": "example"
+    }
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: earn.execute",
+    "details": {
+      "action": "earn.execute"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+</ApiPanel>
+
+</ApiOperation>

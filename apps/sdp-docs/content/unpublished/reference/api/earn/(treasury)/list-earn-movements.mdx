@@ -1,0 +1,286 @@
+---
+module: earn
+title: List all movements
+description: Lists recorded custody-wallet and provider-program movements, newest first, one page at a time.
+icon: method:GET
+apiReference: true
+---
+<Callout type="info">
+This operation is internal. It is not part of the partner-facing Earn API.
+</Callout>
+
+
+<ApiOperation>
+
+<ApiEndpoint method="GET" path="/v1/earn/movements" />
+
+Amounts use each row's denomination, so never sum different tokens or mix them with USD. Customer-wallet movements have their own per-wallet endpoint. History stays available after a provider is disabled.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
+
+## Query parameters
+
+- **`limit`** · `integer` · min 1 · max 100 · default `20`
+
+- **`before`** · `string` · min length 1
+
+- **`direction`** · `string` · one of `deposit`, `withdrawal`
+
+- **`status`** · `string` · min length 1 · max length 64
+
+- **`provider`** · `string` · min length 1 · max length 64
+
+- **`positionId`** · `string` · min length 1 · max length 128
+
+- **`sourceAddress`** · `string` · min length 1 · max length 128
+
+- **`destinationAddress`** · `string` · min length 1 · max length 128
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+## Responses
+
+- **`200`** Result
+
+  - **`data`** · `object` · required
+
+    - **`movements`** · `object[]` · required
+
+      - **`id`** · `string` · required
+
+      - **`provider`** · `string` · required
+
+      - **`executionModel`** · `string` · required · one of `custodial`, `vault_direct`
+
+      - **`direction`** · `string` · required · one of `deposit`, `withdrawal`
+
+      - **`status`** · `string` · required · one of `requested`, `processing`, `pending_approval`, `completed`, `partially_completed`, `failed`, `cancelled`, `submitted`, `confirmed`, `finalized`
+
+      - **`positionId`** · `string` · required
+
+      - **`denomination`** · `string` · required
+
+        usd for provider programs; token or share mint for vault movements.
+
+      - **`amountRequested`** · `string` · required · example `25`
+
+        Requested quantity in denomination units. Withdrawals may be share-denominated.
+
+      - **`amountSettled`** · `string`
+
+        Observed settled quantity in the same denomination as amountRequested.
+
+      - **`tokenAmount`** · `string`
+
+        Observed finalized vault-withdrawal payout, in tokenMint units. Absent if unvalued.
+
+      - **`tokenMint`** · `string`
+
+        Deposit-token mint denominating tokenAmount, when payout was observed.
+
+      - **`feeAmount`** · `string`
+
+      - **`minSharesOut`** · `string`
+
+      - **`sharesOut`** · `string`
+
+      - **`payoutToken`** · `string`
+
+      - **`vaultAddress`** · `string`
+
+      - **`sourceAddress`** · `string`
+
+      - **`destinationAddress`** · `string`
+
+      - **`providerReference`** · `string`
+
+      - **`signature`** · `string`
+
+      - **`failureReason`** · `string`
+
+      - **`createdBy`** · `string`
+
+      - **`initiatedByKeyId`** · `string`
+
+      - **`createdAt`** · `string` · required
+
+      - **`updatedAt`** · `string` · required
+
+      - **`confirmedAt`** · `string`
+
+      - **`settledAt`** · `string`
+
+    - **`hasMore`** · `boolean` · required
+
+    - **`nextCursor`** · `string | null` · required
+
+      Pass as before to read the next page. Null when no more rows remain.
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `earn.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`409`** Conflict
+
+  Same fields as `400`.
+
+- **`429`** Too Many Requests
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`501`** The provider does not support this operation.
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
+<ApiPanel>
+
+## Example request
+
+```bash tab="cURL"
+curl 'https://api.solana.com/v1/earn/movements' \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/earn/movements", {
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.get("https://api.solana.com/v1/earn/movements",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "movements": [
+      {
+        "id": "_example",
+        "provider": "example",
+        "executionModel": "custodial",
+        "direction": "deposit",
+        "status": "requested",
+        "positionId": "position_example",
+        "denomination": "example",
+        "amountRequested": "25",
+        "createdAt": "example",
+        "updatedAt": "example"
+      }
+    ],
+    "hasMore": false,
+    "nextCursor": "example"
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: earn.read",
+    "details": {
+      "action": "earn.read"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+</ApiPanel>
+
+</ApiOperation>

@@ -9,6 +9,7 @@ import { unified } from "unified";
 import { z } from "zod";
 import generatedExamples from "@/generated/api-examples.json";
 import { apiExampleOf, type GuideApiExamples, renderApiExample } from "./api-example";
+import { developmentNoticeMarkdown } from "./development-notice";
 import {
   DOCS_ACTION_MODULES,
   DOCS_CUSTODY_PROVIDERS,
@@ -196,10 +197,14 @@ const WRAPPERS = {
   ActionLinks: "layout",
   ApiOperation: "layout",
   ApiPanel: "layout",
+  EarnFlow: "layout",
+  GuideCards: "layout",
+  details: "layout",
+  summary: "layout",
 } as const satisfies Record<string, "links" | "layout">;
 
 type Wrapper = {
-  element: Extract<RootContent, { type: "mdxJsxFlowElement" }>;
+  element: Extract<RootContent, { type: "mdxJsxFlowElement" | "mdxJsxTextElement" }>;
   kind: (typeof WRAPPERS)[keyof typeof WRAPPERS];
 };
 
@@ -209,7 +214,12 @@ function isWrapperName(name: string | null): name is keyof typeof WRAPPERS {
 
 /** The wrapper a node is, with its kind, or undefined for any other node. */
 function wrapperOf(node: RootContent, where: string): Wrapper | undefined {
-  if (node.type !== "mdxJsxFlowElement" || !isWrapperName(node.name)) return undefined;
+  if (
+    (node.type !== "mdxJsxFlowElement" && node.type !== "mdxJsxTextElement") ||
+    !isWrapperName(node.name)
+  ) {
+    return undefined;
+  }
   if (node.attributes.length > 0) throw new Error(`${where}: <${node.name}> takes no attributes`);
   return { element: node, kind: WRAPPERS[node.name] };
 }
@@ -253,6 +263,57 @@ function unwrap(
   return [...tags, ...links];
 }
 
+/** A presentation label must be readable without evaluating MDX JavaScript. */
+function stringLabel(
+  node: Extract<RootContent, { type: "mdxJsxFlowElement" }>,
+  name: string,
+  where: string
+): string | undefined {
+  let label: string | undefined;
+  for (const attribute of node.attributes) {
+    if (attribute.type !== "mdxJsxAttribute") {
+      throw new Error(`${where}: <${node.name}> cannot spread label attributes`);
+    }
+    if (attribute.name !== name) continue;
+    if (label !== undefined) throw new Error(`${where}: <${node.name}> repeats ${name}`);
+    if (typeof attribute.value !== "string" || attribute.value.trim() === "") {
+      throw new Error(`${where}: <${node.name}> ${name} must be a non-empty string`);
+    }
+    label = attribute.value.replace(/\s+/g, " ").trim();
+  }
+  return label;
+}
+
+/** Escape a UI label as text; its Markdown must not create headings or links. */
+function plainLabel(label: string): string {
+  return label.replace(/[\\`*_[\]<>{}]/g, "\\$&");
+}
+
+/** Keep every tab and callout in Markdown, with labels and code in source order. */
+function presentationEdits(
+  node: RootContent,
+  source: string,
+  where: string
+): { start: number; end: number; markdown: string }[] | undefined {
+  if (node.type !== "mdxJsxFlowElement") return undefined;
+  if (node.name !== "Tabs" && node.name !== "Tab" && node.name !== "Callout") return undefined;
+  let label: string | undefined;
+  if (node.name === "Tab") {
+    label = stringLabel(node, "value", where);
+    if (label === undefined) throw new Error(`${where}: <Tab> needs a string value`);
+  } else if (node.name === "Callout") {
+    const type = stringLabel(node, "type", where);
+    const title = stringLabel(node, "title", where);
+    label = title && type ? `${title} (${type})` : (title ?? type ?? "Note");
+  }
+  // Tabs' items/default/group expressions only control the UI; never evaluate them.
+  const tags = unwrap({ element: node, kind: "layout" }, source, where);
+  return tags.map((edit, index) => ({
+    ...edit,
+    markdown: index === 0 && label !== undefined ? `\n\n**${plainLabel(label)}**\n\n` : "\n\n",
+  }));
+}
+
 /** A reference component's text, or undefined for any other node. */
 function elementTextOf(node: RootContent, where: string): string | undefined {
   if (node.type !== "mdxJsxFlowElement" || !isElementName(node.name)) return undefined;
@@ -286,15 +347,11 @@ const defaultExamples: GuideApiExamples = {
   releaseChannel: publicSurface.releaseChannel,
 };
 
-function compiledPagePublished(
-  file: Parameters<typeof embedSource>[0],
-  where: string,
-  surface: PublicSurface
-): boolean {
+function compiledPageData(file: Parameters<typeof embedSource>[0], where: string) {
   // Fumadocs passes the MDX body without its frontmatter to remark.
   const source =
     file.path && existsSync(file.path) ? readFileSync(file.path, "utf8") : String(file.value);
-  return isPagePublished(frontmatterOf(source, where).data, where, surface);
+  return frontmatterOf(source, where).data;
 }
 
 function embedGuideExample(
@@ -332,7 +389,9 @@ export function remarkDocsBlocks(
   const examples = options.examples ?? defaultExamples;
   return (tree: Root, file: Parameters<typeof embedSource>[0]) => {
     const where = file.path ?? "MDX page";
-    const pagePublished = compiledPagePublished(file, where, surface);
+    const pageData = compiledPageData(file, where);
+    const pagePublished = isPagePublished(pageData, where, surface);
+    const earnPage = pageData.module === "earn" || EARN_REFERENCE_PAGE.test(where);
     const referencePage = REFERENCE_PAGE.test(where);
     const walk = (parent: Parent) => {
       parent.children = parent.children.flatMap((child) => {
@@ -362,6 +421,14 @@ export function remarkDocsBlocks(
             structuredData: { contents: [{ heading: undefined, content: elementText }] },
           };
           return [child];
+        }
+        if (child.type === "code" && earnPage && pagePublished) {
+          // Code identifiers are useful Earn queries too. Fumadocs keeps the
+          // enclosing heading, so a hit opens the correct stage or example.
+          child.data = {
+            ...child.data,
+            structuredData: { contents: [{ heading: undefined, content: child.value }] },
+          };
         }
         const referenceContent = referencePage ? referenceNodes(child, parent) : undefined;
         if (referenceContent !== undefined) return referenceContent;
@@ -406,6 +473,7 @@ const FACT_SEPARATOR = " · ";
 
 /** The generated API reference's pages. */
 const REFERENCE_PAGE = /[\\/]content[\\/]docs[\\/]reference[\\/]api[\\/]/;
+const EARN_REFERENCE_PAGE = /(?:^|[\\/])reference[\\/]api[\\/]earn[\\/]/;
 
 /**
  * Text with its fact separators as spans, so the page can give the dots room (globals.css). The
@@ -462,7 +530,7 @@ export function stripMdxEsm(markdown: string, where: string): string {
   return result;
 }
 
-/** Expands a page's generated blocks in its raw MDX, keeping everything else byte for byte. */
+/** Expands generated blocks and makes presentation wrappers readable as Markdown. */
 export function expandDocsBlocks(
   source: string,
   where: string,
@@ -482,6 +550,7 @@ export function expandDocsBlocks(
       const example = apiExampleOf(child, where);
       const elementText = elementTextOf(child, where);
       const wrapper = wrapperOf(child, where);
+      const presentation = presentationEdits(child, source, where);
       if (child.type === "code" && child.meta?.includes("rotate-providers") && leadProvider) {
         // The page rotates this fence's provider; text names the first published one.
         const span = spanOf(child, where);
@@ -508,6 +577,9 @@ export function expandDocsBlocks(
         // Its content is the page's own Markdown, with its own components and wrappers.
         blocks.push(...unwrap(wrapper, source, where));
         walk(wrapper.element);
+      } else if (presentation !== undefined) {
+        blocks.push(...presentation);
+        if ("children" in child) walk(child);
       } else if ("children" in child) {
         walk(child);
       }
@@ -517,6 +589,11 @@ export function expandDocsBlocks(
   let result = source;
   for (const block of blocks.sort((left, right) => right.start - left.start)) {
     result = result.slice(0, block.start) + block.markdown + result.slice(block.end);
+  }
+  if (data.module === "earn" || EARN_REFERENCE_PAGE.test(where)) {
+    const notice = developmentNoticeMarkdown("Earn");
+    const body = result.slice(raw.length).trimStart();
+    if (!body.startsWith(notice)) result = `${raw}\n${notice}\n\n${body}`;
   }
   return result;
 }

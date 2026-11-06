@@ -392,6 +392,8 @@ body {
   display: flex;
   align-items: center;
   border-radius: var(--corner-control);
+  color: var(--ink-secondary);
+  font-weight: 400;
   transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
@@ -405,10 +407,10 @@ body {
   border: 0;
   border-radius: var(--corner-control);
   background: transparent;
-  color: var(--ink);
+  color: inherit;
   font-family: var(--font-sans);
   font-size: var(--font-size-body);
-  font-weight: 500;
+  font-weight: inherit;
   line-height: var(--line-height-body);
   cursor: pointer;
   text-align: left;
@@ -424,8 +426,8 @@ body {
 .launch-docs-nav-folder-link {
   flex: 1;
   padding: 5px 12px;
-  font-weight: 500;
-  color: var(--ink);
+  font-weight: inherit;
+  color: inherit;
 }
 
 .launch-docs-nav-toggle {
@@ -2264,7 +2266,15 @@ a.rounded-lg.border.p-4 > p.truncate {
    so a tab panel in a portaled popover (the Agent setup menu) keeps its own surface. A panel
    holding only a code block (```lang tab="…"```) is not a card: the tab card around it is the
    one frame. ── */
-.sdp-docs-shell [role="tabpanel"]:not(:has(> figure.shiki:only-child)) {
+.sdp-docs-shell [role="tabpanel"] > :first-child {
+  margin-top: 0;
+}
+
+.sdp-docs-shell [role="tabpanel"] > :last-child {
+  margin-bottom: 0;
+}
+
+.sdp-docs-shell :not([role="tablist"]) > [role="tabpanel"]:not(:has(> figure.shiki:only-child)) {
   background-color: var(--color-fd-card);
   color: var(--color-fd-card-foreground);
   border: 1px solid var(--color-fd-border);
@@ -2295,6 +2305,38 @@ a.rounded-lg.border.p-4 > p.truncate {
 /* With the button out of the code, a line keeps the left padding on its right too. */
 .sdp-docs-shell [role="tabpanel"] > figure.shiki:only-child pre {
   --padding-right: var(--padding-left);
+}
+
+.launch-docs-body details {
+  margin: 16px 0;
+}
+
+.launch-docs-body details > summary {
+  width: fit-content;
+  color: var(--ink);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.launch-docs-body details > summary:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 4px;
+}
+
+.sdp-docs-shell .launch-docs-callout {
+  border-color: var(--rule);
+  border-radius: var(--corner-card);
+  padding: 16px;
+  background: var(--paper-card);
+}
+
+.launch-docs-callout > [role="none"] {
+  display: none;
+}
+
+.launch-docs-callout[data-type="info"] > svg {
+  fill: none;
+  color: var(--ink-tertiary);
 }
 
 /* ── HowItWorks step layout ── */
@@ -2391,4 +2433,117 @@ a.rounded-lg.border.p-4 > p.truncate {
 .launch-docs-nav-item.is-start .launch-docs-nav-icon svg {
   width: 18px;
   height: 18px;
+}
+
+/* Guides keep their diagram and choices as ordinary Markdown lists. */
+.launch-earn-flow,
+.launch-guide-cards {
+  margin: 1.5rem 0;
+}
+
+:is(.launch-earn-flow, .launch-guide-cards) > .launch-mdx-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.launch-earn-flow > .launch-mdx-list {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--rule);
+  border-radius: var(--corner-card);
+  background: var(--paper-card);
+}
+
+.launch-earn-flow :where(.launch-mdx-list-item) {
+  position: relative;
+  padding: 1.25rem;
+}
+
+.launch-earn-flow :where(.launch-mdx-list-item + .launch-mdx-list-item) {
+  border-left: 1px solid var(--rule);
+}
+
+.launch-earn-flow :where(.launch-mdx-list-item:not(:last-child))::after {
+  position: absolute;
+  z-index: 1;
+  top: 1.625rem;
+  right: -0.5rem;
+  padding: 0 0.125rem;
+  background: var(--paper-card);
+  color: var(--ink-tertiary);
+  content: "→";
+}
+
+:is(.launch-earn-flow, .launch-guide-cards) :where(.launch-mdx-paragraph) {
+  margin: 0;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+}
+
+:is(.launch-earn-flow, .launch-guide-cards) :where(.launch-mdx-paragraph + .launch-mdx-paragraph) {
+  margin-top: 0.5rem;
+  color: var(--ink-secondary);
+}
+
+.launch-guide-cards > .launch-mdx-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.launch-guide-cards :where(.launch-mdx-list-item) {
+  position: relative;
+  padding: 1.25rem;
+  border: 1px solid var(--rule);
+  border-radius: var(--corner-card);
+  background: var(--paper-card);
+}
+
+.launch-guide-cards :where(.launch-mdx-list-item):hover {
+  background: var(--wash);
+}
+
+.launch-guide-cards .launch-mdx-link {
+  color: var(--ink);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.launch-guide-cards .launch-mdx-link::after {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--corner-card);
+  content: "";
+}
+
+.launch-guide-cards .launch-mdx-link:focus-visible {
+  outline: none;
+}
+
+.launch-guide-cards .launch-mdx-link:focus-visible::after {
+  outline: 2px solid var(--ink-secondary);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  :is(.launch-earn-flow, .launch-guide-cards) > .launch-mdx-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .launch-earn-flow :where(.launch-mdx-list-item + .launch-mdx-list-item) {
+    border-top: 1px solid var(--rule);
+    border-left: 0;
+  }
+
+  .launch-earn-flow :where(.launch-mdx-list-item)::before {
+    margin-bottom: 0.5rem;
+  }
+
+  .launch-earn-flow :where(.launch-mdx-list-item:not(:last-child))::after {
+    top: auto;
+    right: 1.5rem;
+    bottom: -0.75rem;
+    content: "↓";
+  }
 }

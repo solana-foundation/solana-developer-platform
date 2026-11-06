@@ -35397,8 +35397,7 @@ A **custody wallet** is a Solana keypair whose key a custody provider holds. SDP
 | **Anchorage** | Regulated institutional crypto custody |
 | **Utila** | Vault-backed wallet signing through service accounts |
 
-<Tabs items={["Dashboard", "API"]}>
-<Tab value="Dashboard">
+**Dashboard**
 
 ### 1. Open wallet setup
 
@@ -35433,8 +35432,7 @@ For SDP's account or an existing connection, enter a **Wallet label**, pick a **
 
 A connection signs only with its current credentials. If you rotate or remove them while a request is signing, that request returns `409 CONFLICT` with `details.reason` set to `runtime_execution_unavailable`. Retry it as [Idempotency](/docs/developing-with-sdp/idempotency) describes for that operation. A transfer that recorded the failure replays it under the same `Idempotency-Key`, so send the transfer again with a new key.
 
-</Tab>
-<Tab value="API">
+**API**
 
 #### 1. Set up the provider in the dashboard
 
@@ -35459,8 +35457,8 @@ curl -X POST https://api.solana.com/v1/wallets \
 
 Every wallet names the provider account it lives under: `provider` for SDP's account of that provider (Managed), or `connectionId` for a connection your project added. Send exactly one of them; a body with both or neither returns `400`. There is no default account to fall back to.
 
-<Tabs items={["curl", "TypeScript", "Java"]}>
-<Tab value="curl">
+**curl**
+
 ```bash
 curl -X POST 'https://api.solana.com/v1/wallets' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -35472,8 +35470,9 @@ curl -X POST 'https://api.solana.com/v1/wallets' \
     "purpose": "transfer"
   }'
 ```
-</Tab>
-<Tab value="TypeScript">
+
+**TypeScript**
+
 ```typescript
 const res = await fetch("https://api.solana.com/v1/wallets", {
   method: "POST",
@@ -35489,8 +35488,9 @@ const res = await fetch("https://api.solana.com/v1/wallets", {
   })
 });
 ```
-</Tab>
-<Tab value="Java">
+
+**Java**
+
 ```java title="CreateWallet.java"
 String idempotencyKey = java.util.UUID.randomUUID().toString();
 HttpRequest request = HttpRequest.newBuilder()
@@ -35506,21 +35506,20 @@ HttpRequest request = HttpRequest.newBuilder()
         }"""))
     .build();
 ```
-</Tab>
-</Tabs>
 
 `purpose` is optional and defaults to `transfer`. Only a `transfer` wallet can be the source of a transfer, transfer batch, or recurring payment; any other purpose is refused with `403` and `details.reason` set to `wallet_purpose`. Reuse the same `Idempotency-Key` when you retry a wallet creation.
 
 #### 3. List wallets
 
-<Tabs items={["curl", "TypeScript", "Java"]}>
-<Tab value="curl">
+**curl**
+
 ```bash title="Terminal"
 curl "https://api.solana.com/v1/wallets?view=summary" \
   -H "Authorization: Bearer sf_..."
 ```
-</Tab>
-<Tab value="TypeScript">
+
+**TypeScript**
+
 ```typescript title="list-wallets.ts"
 const response = await fetch("https://api.solana.com/v1/wallets?view=summary", {
   headers: { "Authorization": "Bearer sf_..." },
@@ -35528,8 +35527,9 @@ const response = await fetch("https://api.solana.com/v1/wallets?view=summary", {
 const { data } = await response.json();
 // data.wallets includes id, walletId, publicKey, provider, label, purpose, and status
 ```
-</Tab>
-<Tab value="Java">
+
+**Java**
+
 ```java title="ListWallets.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/wallets?view=summary"))
@@ -35537,8 +35537,6 @@ HttpRequest request = HttpRequest.newBuilder()
     .GET()
     .build();
 ```
-</Tab>
-</Tabs>
 
 Every operation that signs names its wallet; there is no default wallet. Transfers take the wallet's `id` (`cwlt_…`) as `sourceCustodyWalletId`, and other modules' pages name their field. An API key limited to selected wallets lists the same `id` in `walletIds`.
 
@@ -35550,9 +35548,6 @@ const body = {
   amount: "100.00",
 };
 ```
-
-</Tab>
-</Tabs>
 
 ---
 
@@ -35598,9 +35593,9 @@ In the sandbox project, open **API keys** and create two keys ([Manage API keys]
 
 The dashboard starts a key that holds an Execute grant on **Selected wallets**: select your custody wallet there, or choose **All wallets**. Only an organization admin can grant Enforce, because you can grant only actions you hold. An API key can't create keys.
 
-<Callout type="warn">
+**warn**
+
 The full key is shown only once. Store it in your secrets manager right away; SDP doesn't show it again.
-</Callout>
 
 ### 4. Wire up your client and verify
 
@@ -35769,9 +35764,9 @@ A successful response carries the token with `status: "active"` and its `mintAdd
 
 `mintAuthority`, `freezeAuthority` and `metadataAuthority` are the public key of the custody wallet you deployed with. The permanent delegate appears in `extensions.permanentDelegate`, not as a top-level authority. From now on `signingCustodyWalletId` only records who deployed: each authority-gated call is checked against its live onchain authority, and a standard burn signs with its source wallet.
 
-<Callout type="warn">
+**warn**
+
 If a deploy fails before the mint lands, the token returns to `pending`. Retry with a new `Idempotency-Key`: the same key never deploys twice. If the mint lands but setting its metadata URI fails, SDP records the mint and returns `400 TRANSACTION_FAILED` with `details.mintAddress`. Don't redeploy.
-</Callout>
 
 ### 3. Confirm the deploy
 
@@ -35951,9 +35946,9 @@ A successful mint returns the transaction record and the token account that rece
 
 ### 3. Tie mints to reserve attestations
 
-<Callout type="info">
+**info**
+
 The GENIUS Act requires a permitted payment stablecoin issuer to publish a monthly attestation of reserve composition, signed by a registered public accounting firm, with separate CEO/CFO certification. The mint memo closes the engineering side of that obligation.
-</Callout>
 
 Every mint memo should carry at least a reserve reference that maps to one reserve event in the custodian's records. Two minimal patterns:
 
@@ -36528,14 +36523,15 @@ Source: https://platform.solana.com/docs/wallet-operations/balances
 
 `walletId` is the provider wallet ID: the `walletId` field from `GET /v1/wallets`, not the wallet's `id` (`cwlt_…`) or its address. The request needs an API key with `wallets.read`; a key limited to selected wallets reads only those.
 
-<Tabs items={["curl", "TypeScript", "Java"]}>
-<Tab value="curl">
+**curl**
+
 ```bash
 curl 'https://api.solana.com/v1/payments/wallets/privy_wallet_123/balances' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
-</Tab>
-<Tab value="TypeScript">
+
+**TypeScript**
+
 ```typescript
 const res = await fetch("https://api.solana.com/v1/payments/wallets/privy_wallet_123/balances", {
   method: "GET",
@@ -36544,8 +36540,9 @@ const res = await fetch("https://api.solana.com/v1/payments/wallets/privy_wallet
   }
 });
 ```
-</Tab>
-<Tab value="Java">
+
+**Java**
+
 ```java title="GetWalletBalances.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/wallets/privy_wallet_123/balances"))
@@ -36553,8 +36550,6 @@ HttpRequest request = HttpRequest.newBuilder()
     .GET()
     .build();
 ```
-</Tab>
-</Tabs>
 
 If SDP can't read the SOL balance or any token balance, the request returns `503` instead of partial or zero balances. To read state no older than a slot you already saw, pass `minimumSlot`; the response echoes it in `data.balanceReadContext.minimumSlot`.
 
@@ -36700,7 +36695,7 @@ You get what you need to **send**, **track** and **reconcile** payments transfer
 
 ---
 
-## Payments — Send Payments
+## Payments: Send Payments
 
 ### Basic payment
 Source: https://platform.solana.com/docs/payments/send-basic-payment
@@ -36726,8 +36721,8 @@ Pass `sourceCustodyWalletId` as the wallet's SDP `id` (`cwlt_…` from `GET /v1/
 Specify the source, destination, token, and amount.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 Go to **Payments** in the sidebar. The overview shows your **Available balance**, recent **Activity**, and the **Move money** actions.
 
@@ -36745,8 +36740,7 @@ Click **Pay**. The **Single** tab opens on the **Details** step, "Who are you pa
 
 ![Details step with every field filled in](/images/payments/pay-details-filled.png)
 
-</Tab>
-<Tab value="API">
+**API**
 
 Build the request body:
 
@@ -36760,8 +36754,6 @@ const body = {
 };
 ```
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -36771,18 +36763,17 @@ const body = {
 Submit the transfer. SDP signs with the source custody wallet and submits the transaction.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 Click **Continue to review**, check the **Review transfer** summary, then click **Send transfer**.
 
 The page waits while Solana finalizes the transfer, then shows the outcome: **Transfer sent** with its status and signature, **Transfer submitted** while it is still settling, or **Transfer failed** with the reason.
 
-</Tab>
-<Tab value="API">
+**API**
 
-<Tabs items={["curl", "TypeScript", "Java"]}>
-<Tab value="curl">
+**curl**
+
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sf_..." \
@@ -36796,8 +36787,9 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
     "memo": "Payment for invoice #1234"
   }'
 ```
-</Tab>
-<Tab value="TypeScript">
+
+**TypeScript**
+
 ```typescript title="execute-transfer.ts"
 const response = await fetch(
   "https://api.solana.com/v1/payments/transfers",
@@ -36820,8 +36812,9 @@ const response = await fetch(
 const { data } = await response.json();
 // data.transfer is the transfer record: id, status, signature
 ```
-</Tab>
-<Tab value="Java">
+
+**Java**
+
 ```java title="ExecuteTransfer.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
@@ -36838,13 +36831,9 @@ HttpRequest request = HttpRequest.newBuilder()
         }"""))
     .build();
 ```
-</Tab>
-</Tabs>
 
 A successful request waits for finality and returns the transfer at `finalized`. A `processing` answer means it is still settling: don't send it again, read it instead (step 3).
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -36854,15 +36843,14 @@ A successful request waits for finality and returns the transfer at `finalized`.
 Check that the transfer settled.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 Click **View on explorer** to open the transaction on Solana Explorer. The transfer also appears under **Payments** > **Transactions** with its status, such as **Finalized**.
 
 Click a row to open the transaction's record, which has its own **View on explorer** link.
 
-</Tab>
-<Tab value="API">
+**API**
 
 ```typescript title="verify-transfer.ts"
 // data.transfer.status: "finalized" once Solana finalizes the transaction
@@ -36876,8 +36864,6 @@ curl 'https://api.solana.com/v1/payments/transfers/xfr_example' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -36944,8 +36930,8 @@ SDP stores the memo on its own record. It does **not** add a Solana memo instruc
 
 ## API usage
 
-<Tabs items={["curl", "TypeScript", "Java"]}>
-<Tab value="curl">
+**curl**
+
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sf_..." \
@@ -36959,8 +36945,9 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
     "memo": "order_2026-05-14_4837"
   }'
 ```
-</Tab>
-<Tab value="TypeScript">
+
+**TypeScript**
+
 ```typescript title="send-payment-with-memo.ts"
 const response = await fetch(
   "https://api.solana.com/v1/payments/transfers",
@@ -36982,8 +36969,9 @@ const response = await fetch(
 );
 const { data } = await response.json();
 ```
-</Tab>
-<Tab value="Java">
+
+**Java**
+
 ```java title="SendPaymentWithMemo.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
@@ -37000,8 +36988,6 @@ HttpRequest request = HttpRequest.newBuilder()
         }"""))
     .build();
 ```
-</Tab>
-</Tabs>
 
 The memo comes back on the transfer:
 
@@ -37177,8 +37163,8 @@ Two layers keep a worker that dies mid-run from paying anyone twice:
 
 A new key is a new payment, even with an identical body. The `signature` is unique across SDP transfers once set: use it to cross-check another indexer, not to retry.
 
-<Tabs items={["curl", "TypeScript", "Java"]}>
-<Tab value="curl">
+**curl**
+
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sf_..." \
@@ -37192,8 +37178,9 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
     "memo": "payout_2026-05-14_marketplace_sellers/row_4837"
   }'
 ```
-</Tab>
-<Tab value="TypeScript">
+
+**TypeScript**
+
 ```typescript title="payout-recipient.ts"
 async function payoutRecipient(row: PayoutRow): Promise<string> {
   if (row.transferId) return row.transferId; // already submitted
@@ -37223,8 +37210,9 @@ async function payoutRecipient(row: PayoutRow): Promise<string> {
   return data.transfer.id;
 }
 ```
-</Tab>
-<Tab value="Java">
+
+**Java**
+
 ```java title="PayoutRecipient.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
@@ -37241,21 +37229,20 @@ HttpRequest request = HttpRequest.newBuilder()
         }""".formatted(sourceCustodyWalletId, destination, token, amount, batchId, rowId)))
     .build();
 ```
-</Tab>
-</Tabs>
 
 ## Reconciling a run
 
 After the loop finishes, list all outbound transfers in the run's time window and tally against your recipient table:
 
-<Tabs items={["curl", "TypeScript"]}>
-<Tab value="curl">
+**curl**
+
 ```bash title="Terminal"
 curl "https://api.solana.com/v1/payments/transfers?direction=outbound&from=2026-05-14T00:00:00Z&to=2026-05-14T23:59:59Z&pageSize=100" \
   -H "Authorization: Bearer sf_..."
 ```
-</Tab>
-<Tab value="TypeScript">
+
+**TypeScript**
+
 ```typescript title="list-outbound-transfers.ts"
 async function* listOutboundTransfers(from: string, to: string) {
   let page = 1;
@@ -37277,8 +37264,6 @@ async function* listOutboundTransfers(from: string, to: string) {
   }
 }
 ```
-</Tab>
-</Tabs>
 
 To scope the list to one run, add `search=<run id>`, which matches part of the memo, or filter on `memo.startsWith(runId)` yourself. Match each recipient row by its transfer `id`.
 
@@ -37300,7 +37285,7 @@ Handle these outcomes for each transfer:
 
 ---
 
-## Payments — Accept Payments
+## Payments: Accept Payments
 
 ### Accept payments
 Source: https://platform.solana.com/docs/payments/accept-overview
@@ -37437,14 +37422,15 @@ Source: https://platform.solana.com/docs/payments/accept-indexing
 
 The minimal inbound request:
 
-<Tabs items={["curl", "TypeScript"]}>
-<Tab value="curl">
+**curl**
+
 ```bash title="Terminal"
 curl "https://api.solana.com/v1/payments/transfers?direction=inbound&pageSize=50" \
   -H "Authorization: Bearer sf_..."
 ```
-</Tab>
-<Tab value="TypeScript">
+
+**TypeScript**
+
 ```typescript title="list-inbound-transfers.ts"
 const url = new URL("https://api.solana.com/v1/payments/transfers");
 url.searchParams.set("direction", "inbound");
@@ -37457,8 +37443,6 @@ const { data, meta } = await res.json();
 // data: Transfer[]
 // meta: { total, page, pageSize, hasMore, requestId }
 ```
-</Tab>
-</Tabs>
 
 Without `includeObserved`, this returns recorded inbound transfers only, such as paid payment requests.
 
@@ -37509,8 +37493,8 @@ A paid payment request needs none of this: SDP records it as an inbound `finaliz
 
 A worker that checks each open order's wallet on every tick:
 
-<Tabs items={["TypeScript"]}>
-<Tab value="TypeScript">
+**TypeScript**
+
 ```typescript title="reconcile-tick.ts"
 // Observed reads have their own quota (30 a minute per API key), and each
 // page is one read. Past it, the worker waits out Retry-After and reads the
@@ -37551,8 +37535,6 @@ async function reconcileTick(openOrders: Order[]) {
   }
 }
 ```
-</Tab>
-</Tabs>
 
 Stop polling an order's wallet once the order is paid or expired, so the quota goes to open orders. `sameAmount` compares decimal strings by value: `"100"` and `"100.00"` are the same amount.
 
@@ -37565,7 +37547,7 @@ Stop polling an order's wallet once the order is paid or expired, so the quota g
 
 ---
 
-## Payments — Ramps
+## Payments: Ramps
 
 ### Ramps
 Source: https://platform.solana.com/docs/payments/ramps
@@ -37603,8 +37585,8 @@ curl "https://api.solana.com/v1/payments/ramps/onramp/currency?source=USD&dest=u
 
 `POST /v1/payments/ramps/onramp/estimate` and `POST /v1/payments/ramps/offramp/estimate` preview a rate without creating anything, and need no counterparty or wallet. SDP asks every provider on the corridor and returns one entry per provider in `estimates`. An onramp estimate takes `fiatAmount`; an offramp estimate takes `cryptoAmount`.
 
-<Tabs items={["curl", "TypeScript"]}>
-<Tab value="curl">
+**curl**
+
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/ramps/onramp/estimate \
   -H "Authorization: Bearer sf_..." \
@@ -37615,8 +37597,9 @@ curl -X POST https://api.solana.com/v1/payments/ramps/onramp/estimate \
     "fiatAmount": "100.00"
   }'
 ```
-</Tab>
-<Tab value="TypeScript">
+
+**TypeScript**
+
 ```typescript title="estimate-onramp.ts"
 const response = await fetch(
   "https://api.solana.com/v1/payments/ramps/onramp/estimate",
@@ -37636,8 +37619,6 @@ const response = await fetch(
 const { data } = await response.json();
 // data.estimates: one entry per provider on the corridor
 ```
-</Tab>
-</Tabs>
 
 Each entry has a `status`:
 
@@ -37649,8 +37630,8 @@ Each entry has a `status`:
 
 `POST /v1/payments/ramps/onramp/quote` (fiat to crypto) and `POST /v1/payments/ramps/offramp/quote` (crypto to fiat) create the **Ramp Quote** with the provider you name. Unlike an estimate, a quote needs a counterparty and a wallet, and it opens a record at the provider. The request is the same for every provider: only `provider` changes. A pair the provider doesn't cover returns `400 UNSUPPORTED_CORRIDOR`, with the providers that do in `details.supportedProviders`.
 
-<Tabs items={["curl", "TypeScript", "Python"]}>
-<Tab value="curl">
+**curl**
+
 ```bash title="Terminal" rotate-providers
 curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
   -H "Authorization: Bearer sf_..." \
@@ -37664,8 +37645,9 @@ curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
     "fiatAmount": "100.00"
   }'
 ```
-</Tab>
-<Tab value="TypeScript">
+
+**TypeScript**
+
 ```typescript title="onramp-quote.ts" rotate-providers
 const response = await fetch(
   "https://api.solana.com/v1/payments/ramps/onramp/quote",
@@ -37688,8 +37670,9 @@ const response = await fetch(
 const { data } = await response.json();
 // data.quote.deliveryMode says how to hand off; data.transferId names the transfer to follow
 ```
-</Tab>
-<Tab value="Python">
+
+**Python**
+
 ```python title="onramp_quote.py" rotate-providers
 import requests
 
@@ -37707,8 +37690,6 @@ response = requests.post(
 )
 data = response.json()["data"]
 ```
-</Tab>
-</Tabs>
 
 ### Request fields
 
@@ -37923,8 +37904,8 @@ At deploy, SDP gives every authority to the custody wallet that signs the deploy
 
 Token-2022 extensions make compliance enforceable onchain. Freeze one holder's account, pause the token, seize or force-burn tokens, and manage the token's **Token Access Control** list. Freeze takes a `reason`; seize and force burn take a `memo`. Every token operation is one `POST` on the token:
 
-<Tabs items={["JavaScript", "Python", "curl"]}>
-<Tab value="JavaScript">
+**JavaScript**
+
 ```javascript title="compliance-action.js" rotate-token-ops
 const response = await fetch(
   "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze",
@@ -37940,8 +37921,9 @@ const response = await fetch(
 );
 const result = await response.json();
 ```
-</Tab>
-<Tab value="Python">
+
+**Python**
+
 ```python title="compliance_action.py" rotate-token-ops
 import requests
 import uuid
@@ -37953,8 +37935,9 @@ response = requests.post(
 )
 result = response.json()
 ```
-</Tab>
-<Tab value="curl">
+
+**curl**
+
 ```bash title="Terminal" rotate-token-ops
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
   -H "Authorization: Bearer sf_..." \
@@ -37962,8 +37945,6 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
   -H "Content-Type: application/json" \
   -d "$OPERATION_PARAMS"
 ```
-</Tab>
-</Tabs>
 
 ## Audit trail
 
@@ -38058,8 +38039,8 @@ The dashboard creates `stablecoin` tokens (**Stablecoin**) and `custom` tokens (
 The template fixes the token's extensions and defaults. You review them before you create the draft.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 Open **Issuance** in the sidebar and click **Create a draft**. The flow has five steps.
 
@@ -38072,8 +38053,7 @@ Click **Continue**.
 
 <img src="/docs/images/tokens/token-create-templates.png" alt="What is this token? step with the name Acme Dollar and Stablecoin selected" width="693" height="484" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
-</Tab>
-<Tab value="API">
+**API**
 
 List the templates to see what each one sets:
 
@@ -38093,8 +38073,6 @@ const res = await fetch("https://api.solana.com/v1/issuance/templates", {
 
 Pass a template's `id` as `template` when you create the token. Without `template`, the token is `custom`.
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -38104,8 +38082,8 @@ Pass a template's `id` as `template` when you create the token. Without `templat
 Set the name, symbol and decimals. Symbol and decimals lock with the mint at deploy.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 On **Token details**, fill in:
 
@@ -38119,8 +38097,7 @@ Click **Continue**.
 
 <img src="/docs/images/tokens/token-create-identity.png" alt="Token details step with symbol ACME, 6 decimals, a description, issuer name and currency" width="693" height="679" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
-</Tab>
-<Tab value="API">
+**API**
 
 Send the details to `POST /v1/issuance/tokens`:
 
@@ -38139,8 +38116,6 @@ curl -X POST https://api.solana.com/v1/issuance/tokens \
 
 `uri` is optional: an `http` or `https` URL of your metadata JSON. Without it, SDP serves the token's metadata JSON at `GET /v1/issuance/tokens/{tokenId}/metadata.json` and writes that URL onchain at deploy.
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -38150,8 +38125,8 @@ curl -X POST https://api.solana.com/v1/issuance/tokens \
 Decide what the token can do and which wallet holds each of its keys.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 On **What this token can do**, choose the controls: **Freezable**, **Pausable**, **Permanent delegate**, **Access list** and **Mintable**. A stablecoin keeps all of them on, and its **Access list** is a blocklist or an allowlist. Any other token can turn them off, except **Mintable**, which is always on.
 
@@ -38161,8 +38136,7 @@ On **Who holds the keys**, choose a wallet for **Mint authority** (it also signs
 
 <img src="/docs/images/tokens/token-create-keys.png" alt="Who holds the keys step with the Treasury wallet holding every authority" width="693" height="360" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
-</Tab>
-<Tab value="API">
+**API**
 
 Add the controls to the same body. `signingCustodyWalletId` is the SDP wallet `id` from `GET /v1/wallets` (`cwlt_…`), not the provider's `walletId` or the wallet's public key. It's optional on create; you can set it at deploy. `isMintable` and `isFreezable` default to `true`.
 
@@ -38209,8 +38183,6 @@ body: JSON.stringify({
 
 The signing wallet gets every authority unless you assign other custody wallets with `authorityCustodyWalletIds` [at deploy](/docs/tokens/deploy-a-token).
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -38220,8 +38192,8 @@ The signing wallet gets every authority unless you assign other custody wallets 
 SDP stores the token with status `pending`. Nothing is written to Solana yet.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 On **Review**, check the draft and click **Create draft**. The **Draft created** toast confirms it, and the token's page opens in the **Draft** state.
 
@@ -38233,8 +38205,7 @@ The draft's **Overview** tab holds **Deploy token**, the next step.
 
 ![Acme Dollar's Overview tab in the Draft state, with Deploy this token and its Deploy token button](/images/tokens/token-detail-pending.png)
 
-</Tab>
-<Tab value="API">
+**API**
 
 A `201` response returns the token:
 
@@ -38247,8 +38218,6 @@ const { data } = await res.json();
 
 Pass `data.token.id` to [Deploy a Token](/docs/tokens/deploy-a-token).
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -38279,8 +38248,8 @@ Deploying [a draft](/docs/tokens/create-a-token) creates its mint on Solana with
 Find the draft. Deploying can't be undone: the mint address is permanent, and the symbol and decimals lock with it.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 In **Issuance**, open the token marked **Draft**. Its **Overview** tab shows **Deploy this token**: the **Signing wallet**, where the **Authorities** go, and whether it's **Reversible**.
 
@@ -38288,8 +38257,7 @@ Save or discard any edits first: the dashboard holds the deploy while changes ar
 
 ![Acme Dollar's Overview tab in the Draft state, with Deploy this token and its Deploy token button](/images/tokens/token-detail-pending.png)
 
-</Tab>
-<Tab value="API">
+**API**
 
 You need the token `id` (`tok_…`) from create. If you don't have it, list your tokens:
 
@@ -38305,8 +38273,6 @@ curl 'https://api.solana.com/v1/wallets' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -38316,8 +38282,8 @@ curl 'https://api.solana.com/v1/wallets' \
 SDP signs and sends the deploy with `signingCustodyWalletId`. A value in the request overrides the draft's wallet; without one, SDP uses the draft's. With neither, the request fails with `400`.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 Click **Deploy token**. In the **Deploy token** dialog, check the **Signing wallet** (choose one if several can sign), then click **Deploy token**.
 
@@ -38325,8 +38291,7 @@ Click **Deploy token**. In the **Deploy token** dialog, check the **Signing wall
 
 SDP signs, sends and confirms the deploy in one request. The token shows **Deploying** while it runs, and you can leave the page.
 
-</Tab>
-<Tab value="API">
+**API**
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy \
@@ -38362,8 +38327,6 @@ Always send an `Idempotency-Key`. A retry with the same key never deploys twice:
 
 If a deploy fails before the mint lands, the token returns to `pending`, so retry with a new key. If the mint lands but setting its metadata URI fails, SDP records the mint and returns `400 TRANSACTION_FAILED` with `details.mintAddress`. Don't redeploy.
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -38373,8 +38336,8 @@ If a deploy fails before the mint lands, the token returns to `pending`, so retr
 Once the transaction confirms, the token is active and ready for minting and transfers.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 The toast reads "Deploy transaction finalized." and the token shows **Live onchain** with its mint address. Its operations open on the **Operations** tab, where **Transactions** lists the deploy.
 
@@ -38382,8 +38345,7 @@ If the deploy fails, the token shows **Deploy failed** with the reason, **Retry 
 
 ![Acme Dollar after the deploy: Live onchain, with Explorer and Mint tokens](/images/tokens/token-deployed.png)
 
-</Tab>
-<Tab value="API">
+**API**
 
 The deploy response carries the confirmed state:
 
@@ -38402,8 +38364,6 @@ curl 'https://api.solana.com/v1/issuance/tokens/tok_example' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -38434,8 +38394,8 @@ After [deploying a token](/docs/tokens/deploy-a-token), mint new supply to any a
 Open the token. Mint and burn both live on its **Operations** tab.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 In **Issuance**, open a token marked **Live onchain** and go to **Operations**.
 
@@ -38443,8 +38403,7 @@ The **Supply** block shows the **Issued supply** with **Mint** and **Burn**, the
 
 ![Operations tab with Supply: Issued supply with Mint and Burn, the Supply cap and the Mint authority](/images/tokens/token-operations.png)
 
-</Tab>
-<Tab value="API">
+**API**
 
 Supply operations share one URL pattern:
 
@@ -38458,8 +38417,6 @@ POST /v1/issuance/tokens/{tokenId}/force-burn
 
 `signingCustodyWalletId` is always the SDP wallet `id`, never a provider `walletId` or a public key. A standard burn requires it: that wallet holds the tokens and signs. For mint and force burn it's optional, but a wallet you name must hold the current mint or permanent-delegate authority. Without one, exactly one custody wallet must hold that live authority, or the call returns `409`. No call falls back to the deployment wallet.
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -38469,8 +38426,8 @@ POST /v1/issuance/tokens/{tokenId}/force-burn
 Issue new tokens to a destination address. SDP creates the destination's token account if it doesn't exist.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 Click **Mint**. Under **Issued supply**, fill in:
 
@@ -38488,8 +38445,7 @@ The toast reads "Mint transaction finalized." and **Transactions** lists the min
 
 ![Transactions listing the confirmed mint above the deploy, with the Mint transaction finalized toast](/images/tokens/mint-confirmed.png)
 
-</Tab>
-<Tab value="API">
+**API**
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
@@ -38530,8 +38486,6 @@ const res = await fetch(
 
 The response holds the `transaction` and the destination's `tokenAccount`. A mint past the token's `maxSupply` fails with `400 MAX_SUPPLY_EXCEEDED`. On a token with an access list, [Allowlists](/docs/tokens/allowlists) explains which destinations a mint accepts.
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -38541,8 +38495,8 @@ The response holds the `transaction` and the destination's `tokenAccount`. A min
 Reduce supply by burning tokens that a custody wallet holds. To burn from any other holder, use a force burn.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 Click **Burn**. Under **Issued supply**, if several wallets can sign, choose the **Signing wallet** that holds the tokens. Then enter the **Source**: that wallet, or its token account.
 
@@ -38562,8 +38516,7 @@ The toast reads "Burn transaction finalized." and **Transactions** lists the bur
 
 For a force burn, open **Recovery** on **Operations** and click **Force burn**. It needs the permanent delegate; see [Freeze and Compliance](/docs/tokens/freeze-and-compliance).
 
-</Tab>
-<Tab value="API">
+**API**
 
 **Burn from a custody wallet.** The `source` must be the signing wallet or its token account, or the call fails with `400 INVALID_BURN_SOURCE`. A wallet that holds too little gets `400 INSUFFICIENT_TOKEN_BALANCE`.
 
@@ -38599,8 +38552,6 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
 });
 ```
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -38610,8 +38561,8 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
 The token's `totalSupply` is cached. Refresh it from the mint account when you need the onchain value.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 The dashboard reloads the token after each confirmed operation, so **Issued supply** updates on its own. **Transactions** lists every operation (deploy, mint, burn) with its status.
 
@@ -38619,8 +38570,7 @@ The dashboard reloads the token after each confirmed operation, so **Issued supp
 
 Reload the page if the supply looks stale.
 
-</Tab>
-<Tab value="API">
+**API**
 
 ```bash
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/supply/refresh' \
@@ -38629,8 +38579,6 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/supply/refre
 
 Call it after a mint or burn whose outcome you didn't see, such as a timeout: it reconciles the cached supply with the chain. It's rate-limited per key and per organization (`429 RATE_LIMITED`).
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -38662,8 +38610,8 @@ The token's list is separate from an API key's [grants](/docs/developing-with-sd
 Choose the access list before you deploy. You can change `requiresAllowlist` on a draft, but after deployment the API refuses the change with `400`.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 In **Create a draft**, on **What this token can do**, set **Access list** to **Allowlist · only named addresses may hold**. A stablecoin offers **Blocklist** or **Allowlist**; a non-security digital token offers **Allowlist** or **Off**.
 
@@ -38671,8 +38619,7 @@ On the token page, the **Compliance** tab shows **Approved recipients**, with th
 
 <img src="/docs/images/tokens/token-create-settings.png" alt="What this token can do step with every control on and Access list set to Allowlist" width="693" height="594" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
-</Tab>
-<Tab value="API">
+**API**
 
 Set `requiresAllowlist: true` when you create the token. `tokenized-security` turns it on by default; with `false`, that template uses a blocklist instead.
 
@@ -38690,8 +38637,6 @@ body: JSON.stringify({
 
 SDP creates the onchain list when the token deploys and enforces it from then on.
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -38704,8 +38649,8 @@ Add an address before you force-transfer tokens to it. Mints check the list as f
 - With a list kept only in SDP, a mint to an unlisted address fails with `403 NOT_ON_TOKEN_ALLOWLIST`.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 On the token page, open **Compliance**. Under **Add an address**, enter the **Address** and an optional **Label**, then click **Add entry**.
 
@@ -38717,8 +38662,7 @@ The entry appears under **Approved recipients**, with a trash button that remove
 
 ![Approved recipients listing the Treasury wallet with its label, the date added and a trash button](/images/tokens/allowlist-entry-added.png)
 
-</Tab>
-<Tab value="API">
+**API**
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
@@ -38748,8 +38692,6 @@ const { data } = await res.json();
 
 For an onchain list, the body takes an optional `signingCustodyWalletId` (a `cwlt_…` id). It must control the list's current authority, which can differ from the token's freeze authority. Without it, several matching custody wallets return `409`. Naming a wallet doesn't skip permission or availability checks.
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -38759,13 +38701,12 @@ For an onchain list, the body takes an optional `signingCustodyWalletId` (a `cwl
 Check which addresses are approved, before minting to a new destination or during a compliance audit.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 **Compliance** lists each address with its **Label** and the date it was **Added**, 25 per page.
 
-</Tab>
-<Tab value="API">
+**API**
 
 ```bash title="Terminal"
 curl "https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist?search=So1&label=Treasury" \
@@ -38793,8 +38734,6 @@ curl 'https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/labels' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -38804,13 +38743,12 @@ curl 'https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/labels' \
 Remove an address when the holder's compliance status changes. Existing holdings are unaffected; the address just can't receive the token through mints or force transfers.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 On **Compliance**, click the trash button beside the address. For an onchain list with several matching wallets, choose the signer in the dialog. The list and its count refresh.
 
-</Tab>
-<Tab value="API">
+**API**
 
 ```bash
 curl -X DELETE 'https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/al_example' \
@@ -38821,8 +38759,6 @@ Use the entry `id` (`tal_…`) from the add response. A removal returns `204`. I
 
 For an onchain list, pass the signer as a query parameter: `?signingCustodyWalletId=cwlt_example`. To find the list's current authority, request `GET /v1/issuance/tokens/{tokenId}?includeAllowlistAuthority=true` and read `data.allowlistAuthority` (`null` for a list kept only in SDP). Match that address against your wallets; don't infer it from the freeze authority.
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -38861,13 +38797,12 @@ Token controls need the `issuance.enforce` grant on the API key; screening needs
 Check a Solana address against your configured compliance providers before you onboard a wallet or approve it as a transfer destination.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 The token page has no screening action. When screening is enabled for your organization, the dashboard screens addresses in **Payments**: adding a Solana address to a counterparty checks it first (**Screen and add**).
 
-</Tab>
-<Tab value="API">
+**API**
 
 ```bash
 curl -X POST 'https://api.solana.com/v1/compliance/address-screenings' \
@@ -38887,8 +38822,6 @@ Set `intent` to `transfer_destination`, `wallet_address_addition` or `unknown` (
 
 See the [Compliance API reference](/docs/reference/api/compliance) for the full schema.
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -38898,8 +38831,8 @@ See the [Compliance API reference](/docs/reference/api/compliance) for the full 
 Stop one holder from sending or receiving this token. The freeze applies to that holder's token account for this mint; other holders are unaffected.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 On the token's **Operations** tab, find **Freeze authority** under **Transfers** and click **Freeze**.
 
@@ -38925,8 +38858,7 @@ The toast reads "Unfreeze transaction finalized."
 
 ![Compliance tab with the frozen account count back to 0 and the Unfreeze transaction finalized toast](/images/tokens/unfreeze-confirmed.png)
 
-</Tab>
-<Tab value="API">
+**API**
 
 **Freeze:**
 
@@ -38964,8 +38896,6 @@ curl 'https://api.solana.com/v1/issuance/tokens/tok_example/frozen' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -38975,8 +38905,8 @@ curl 'https://api.solana.com/v1/issuance/tokens/tok_example/frozen' \
 Stop every transfer of the token at once. The token needs the `pausable` extension.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 On **Operations**, click **Pause** on the **Transfers** row.
 
@@ -38994,8 +38924,7 @@ To resume, click **Resume** on the **Transfers** row and then **Resume transfers
 
 <img src="/docs/images/tokens/unpause-confirm.png" alt="Resume transfers for all holders? confirmation with a warning, the signing wallet and Resume transfers" width="513" height="404" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
-</Tab>
-<Tab value="API">
+**API**
 
 **Pause:**
 
@@ -39025,8 +38954,6 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/unpause' \
 
 While paused, SDP refuses mint, burn, seize and force burn with `400 TOKEN_PAUSED`, and the pausable extension stops transfers onchain. Pausing a paused token, or unpausing one that isn't, returns `400`.
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -39036,13 +38963,12 @@ While paused, SDP refuses mint, burn, seize and force burn with `400 TOKEN_PAUSE
 Move tokens from a holder to a recovery address without the holder's signature, using the permanent delegate. Use it for court orders and regulatory enforcement.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 On **Operations**, open **Recovery** and click **Force transfer**. Enter the **Source**, **Destination**, **Amount** and a **Memo** (recommended for the audit record), then click **Force transfer** and confirm with **Transfer now**.
 
-</Tab>
-<Tab value="API">
+**API**
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize \
@@ -39061,8 +38987,6 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize \
 
 An optional `signingCustodyWalletId` must control the current permanent delegate. The destination must pass the token's access list: on an allowlist token it must be listed (`403 NOT_ON_TOKEN_ALLOWLIST`), and on a blocklist token it must not be (`403 ON_TOKEN_BLOCKLIST`).
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -39099,8 +39023,8 @@ After deployment, you can move a token's authorities to other wallets, give them
 Review the token's authorities and configuration before you change them.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 Open the token. **Overview** shows its supply, identity and authorities.
 
@@ -39114,8 +39038,7 @@ Below them, **Extensions** shows the template and whether the token is freezable
 
 ![Extensions below the authorities: the Stablecoin template, with freezable, allowlist, pausable, permanent delegate and mintable enabled](/images/tokens/token-settings-extensions.png)
 
-</Tab>
-<Tab value="API">
+**API**
 
 Fetch the token:
 
@@ -39126,8 +39049,6 @@ curl 'https://api.solana.com/v1/issuance/tokens/tok_example' \
 
 `data.token` holds `mintAuthority`, `freezeAuthority`, `metadataAuthority`, `extensions` (including `permanentDelegate`) and `status` (`pending`, `active`, `paused` or `revoked`). For a live onchain lookup of one authority, add `includeMetadataAuthority`, `includeFreezeAuthority`, `includePauseAuthority` or `includeAllowlistAuthority=true`.
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -39137,8 +39058,8 @@ curl 'https://api.solana.com/v1/issuance/tokens/tok_example' \
 Move an authority to another wallet, to change who signs or to hand control to an outside key holder.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 On **Permissions**, click **Edit** beside the authority. Pick another wallet, or click **Use custom address** and enter a Solana address. Then click **Save authority**.
 
@@ -39146,8 +39067,7 @@ On **Permissions**, click **Edit** beside the authority. Pick another wallet, or
 
 > SDP can't sign with an authority held outside SDP custody, and can't take it back. Its holder must move it to a custody wallet before SDP can run the operations it controls.
 
-</Tab>
-<Tab value="API">
+**API**
 
 SDP signs the rotation:
 
@@ -39166,8 +39086,6 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
 
 `role` is `mint`, `freeze`, `permanentDelegate` or `metadata`. An optional `signingCustodyWalletId` must control the authority you're changing; `currentAuthority` is optional too.
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -39177,8 +39095,8 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
 Remove an authority for good. Without its mint authority the token can never be minted again; without the freeze authority, accounts can't be frozen or unfrozen; without the permanent delegate, force transfer and force burn stop; without the metadata authority, metadata can't change.
 
 <StepPanel>
-<Tabs items={["UI", "API"]} groupId="how-it-works">
-<Tab value="UI">
+
+**UI**
 
 On **Permissions**, click **Edit**, choose **None** and click **Save authority**. The form explains what you give up; confirm with **Yes, set to None**.
 
@@ -39186,8 +39104,7 @@ On a token with an onchain access list, the dashboard lets you move the freeze a
 
 To end minting at the cap, use **Lock supply** on **Operations**: it mints what's left of the cap, then gives up the mint authority.
 
-</Tab>
-<Tab value="API">
+**API**
 
 Set `newAuthority` to `null`:
 
@@ -39202,8 +39119,6 @@ body: JSON.stringify({
 
 Revocation is permanent: once the mint authority is gone, no one can mint the token again.
 
-</Tab>
-</Tabs>
 </StepPanel>
 
 </Step>
@@ -39297,9 +39212,9 @@ Take a fresh self-hosted install from healthy containers to a first devnet workf
 
 Start after the [Quickstart](/docs/self-hosting/quickstart). This path runs on devnet with the local signer. Set up a provider's signing later, when you harden the deployment.
 
-<Callout type="warn">
+**warn**
+
 The public devnet RPC endpoint is fine for smoke tests, but it can rate-limit you or miss data that balance-heavy wallet views need. Use a dedicated devnet endpoint from your RPC provider before you rely on this flow.
-</Callout>
 
 <Steps>
 
@@ -39782,9 +39697,9 @@ Matches the **Non-security digital token** classification in the dashboard: asse
 | Regulated security (equity, debt, or fund), or an instrument that pays a return | `tokenized-security` |
 | Any other asset, or one requiring extensions the other templates do not offer | `custom` (Non-security digital token) |
 
-<Callout type="warn">
+**warn**
+
 Token-2022 extensions are set when the mint is created and can't change afterward. The template choice is permanent for a token: changing it means issuing a new token.
-</Callout>
 
 This page is general guidance, not legal advice. Regulatory treatment depends on the jurisdiction and on how the instrument is structured.
 

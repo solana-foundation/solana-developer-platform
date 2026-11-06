@@ -19,6 +19,12 @@ integrator's SDP API key.
   configuration failure. They say nothing about whether an integrator supplied
   an SDP API key.
 
+Earn guides and API reference drafts live in
+`apps/sdp-docs/content/unpublished`; its README covers authoring and validation.
+`pnpm --filter sdp-docs generate:earn-preview` renders the internal contract
+there without publishing it. Keep `EARN_PUBLIC_SURFACE_PUBLISHED` false until
+the separate security-approved launch promotion.
+
 ## Local development — the whole Earn stack
 
 **Absolute rule: local resources only.** Never point any of this at a shared or

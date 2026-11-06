@@ -1,0 +1,224 @@
+---
+module: earn
+title: Preview a withdrawal
+description: Quotes what withdrawing these shares would pay right now, from the strategy's live accounting.
+icon: method:POST
+apiReference: true
+---
+
+<ApiOperation>
+
+<ApiEndpoint method="POST" path="/v1/earn/external-wallet/withdrawal-previews" />
+
+When the strategy's `withdrawalSlippage` is not null, set `minAmountOut` from this quote: take your tolerance off `assetsOut`, rounded down to `assetDecimals`. The preview is read-only, takes no Idempotency-Key, and still works after a strategy is deprecated or its provider stops taking deposits. It does not check the wallet's balance, so keep `shares` within the position's `withdrawableShares`. It returns 501 when the provider cannot quote withdrawals.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+## Request body
+
+`application/json` · required
+
+Quote one withdrawal from a position against the strategy's live accounting. Read-only: nothing is built or saved.
+
+- **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
+
+  The position's ID, from the positions list or the deposit submit response.
+
+- **`shares`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `10`
+
+  Shares to withdraw, as a decimal string in share units. Keep it within the position's `withdrawableShares`: the preview does not check the balance.
+
+## Responses
+
+- **`200`** Live withdrawal quote
+
+  - **`data`** · `object` · required
+
+    - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
+
+      The position's ID, from the positions list or the deposit submit response.
+
+    - **`assetsOut`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25.02`
+
+      What redeeming the shares would pay at the live rate, decimal string in the deposit token's units. A truthful `minAmountOut` floor is derived from this figure.
+
+    - **`assetDecimals`** · `integer` · required · example `6`
+
+      The deposit token's decimals, which define the scale used to quantize a floor.
+
+    - **`blockingIssues`** · `object[]` · required
+
+      Conditions the provider reports would block this withdrawal; empty when none.
+
+      - **`code`** · `string` · required · example `SHARE_LOCKED`
+
+      - **`message`** · `string` · required
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `earn.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`429`** Too Many Requests
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`501`** The provider does not support this operation.
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
+<ApiPanel>
+
+## Example request
+
+```bash tab="cURL"
+curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-previews' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
+    "shares": "10"
+  }'
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdrawal-previews", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
+    "shares": "10"
+  })
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawal-previews",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
+  json={
+    "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
+    "shares": "10"
+  })
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
+    "assetsOut": "10.0224",
+    "assetDecimals": 6,
+    "blockingIssues": []
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: earn.read",
+    "details": {
+      "action": "earn.read"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+</ApiPanel>
+
+</ApiOperation>

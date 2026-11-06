@@ -1,0 +1,395 @@
+---
+module: earn
+title: Build a deposit transaction
+description: Builds an unsigned deposit transaction for the customer's wallet to sign.
+icon: method:POST
+apiReference: true
+---
+
+<ApiOperation>
+
+<ApiEndpoint method="POST" path="/v1/earn/external-wallet/deposit-transactions" />
+
+Nothing moves until you submit the signed transaction. The build applies provider access checks and can name your own `feePayer`, which then signs alongside the customer. A swap-funded deposit that cannot fit in one transaction returns a separate swap and follow-up deposit instead of `transaction`, so check the response before you request a signature.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+## Request body
+
+`application/json` · required
+
+Build one unsigned deposit transaction for an external wallet.
+
+- **`strategyId`** · `string` · required · min length 1 · example `earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e`
+
+- **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+
+  The customer's wallet address: an external wallet, so SDP holds no key for it. It signs, owns the shares, and pays the network fee unless the build names a `feePayer`. It must decode to a 32-byte public key; a base58 string that matches the pattern but does not decode returns 400.
+
+- **`feePayer`** · `string` · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
+
+  Pay for this transaction from a wallet your backend controls instead of the customer's. The named address becomes the fee payer: it pays the network fee, funds any share-account rent, and must sign alongside the customer. Co-sign on your backend before you submit. The build returns 400, naming the fee payer, when it cannot pay. Sending the customer's own address keeps the default: the customer pays and signs alone.
+
+- **`amount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+  The deposit amount as a decimal string, in deposit-token units. For a swap-funded build (`sourceTokenMint`), it is in source-token units instead: the swap spends all of it, and the deposit is sized to the swap's guaranteed output.
+
+- **`minSharesOut`** · `string` · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `24.9`
+
+  Slippage floor in share units. Required exactly when the selected strategy's `depositSlippage` is non-null. Derive it from `POST /v1/earn/vault-deposit-previews`, never from the deposit amount.
+
+- **`sourceTokenMint`** · `string` · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
+
+  Fund the deposit in a different supported stablecoin (USDC, USDG, PYUSD or USDT on the environment's cluster): a Jupiter swap to the vault's own token is prepended inside the same transaction, so both legs land atomically or not at all. Equal to the strategy's deposit mint it is a no-op, so pickers may always send their selection.
+
+- **`swapSlippageBps`** · `integer` · min 1 · max 500 · example `2`
+
+  Swap slippage tolerance in basis points (default 2, accepted 1-500). Valid only with `sourceTokenMint`. The deposit is sized to the swap's worst-case output, so a wider tolerance can leave more of the deposit token in the customer's account instead of failing the transaction.
+
+## Responses
+
+- **`200`** Unsigned deposit transaction
+
+  - **`data`** · `object` · required
+
+    Any of:
+
+    - **object**
+
+      - **`transaction`** · `object` · required
+
+        The built deposit transaction plus the strategy it targets.
+
+        - **`transactionId`** · `string` · required · example `earn_external_wallet_transaction_e7a88258-1d19-48f3-8d0e-81fefa4bf3b3`
+
+        - **`transaction`** · `string` · required
+
+          Base64 wire bytes of the unsigned transaction. Add every required signature without changing the message, then submit through SDP. The blockhash bounds when the network can first accept it; retain the original signed bytes for recovery.
+
+        - **`lastValidBlockHeight`** · `string` · required · example `361186610`
+
+          Last block height at which the network can first accept this transaction. This is a block height, not a slot or timestamp.
+
+        - **`sponsored`** · `boolean` · required · example `false`
+
+          Always false: SDP does not pay an external wallet's fees. The customer's wallet pays, or the `feePayer` you name.
+
+        - **`ownerAddress`** · `string` · required · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+
+          The customer's wallet address.
+
+        - **`feePayer`** · `string` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
+
+          The `feePayer` your build request named. When present, the transaction needs the fee payer's signature as well as the customer's: co-sign on your backend before you submit, or the submit refuses it. When absent or null, the customer signs alone and pays the fee.
+
+        - **`provider`** · `string` · required · example `kamino`
+
+        - **`providerReference`** · `string` · required · example `7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx`
+
+          The strategy's onchain address at the provider. It identifies the instrument; never send funds to it.
+
+        - **`tokenMint`** · `string` · required · example `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
+
+        - **`shareMint`** · `string` · required · example `hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2`
+
+        - **`amount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+          Positive decimal string with at least one non-zero digit; never a float.
+
+        - **`minSharesOut`** · `string | null` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+          Positive decimal string with at least one non-zero digit; never a float.
+
+        - **`swap`** · `object`
+
+          Present when the build was swap-funded: the swap is prepended inside this same transaction and `amount` equals `swap.depositAmount`.
+
+          - **`sourceTokenMint`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
+
+            Mint the owner pays with.
+
+          - **`sourceAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+            What the swap spends, in source-token units.
+
+          - **`depositAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+            The deposit amount the transaction encodes, in deposit-token units: the swap's guaranteed minimum output. Any output above it stays in the customer's token account.
+
+          - **`quotedAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+            The swap's quoted output at the live rate, in deposit-token units.
+
+          - **`slippageBps`** · `integer` · required · example `2`
+
+          - **`priceImpactPct`** · `string` · required · example `0.0001`
+
+            Quoted price impact as a decimal ratio string.
+
+          - **`routeLabels`** · `string[]` · required
+
+            Venue labels along the quoted route.
+
+        - **`strategy`** · `object` · required
+
+          - **`id`** · `string` · required · example `earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e`
+
+          - **`name`** · `string` · required · example `Allez USDC`
+
+          - **`provider`** · `string` · required · example `kamino`
+
+          - **`providerReference`** · `string` · required · example `7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx`
+
+          - **`hostCluster`** · `string` · required · example `devnet`
+
+    - **Returned instead of a built transaction when the swap and the deposit cannot fit in one Solana transaction (1,232 bytes), even on a compact route. SDP saves no build or movement for it.**
+
+      - **`requiresSeparateSwap`** · `boolean` · required · always `true`
+
+        Discriminates from the atomic answer, which carries `transaction`.
+
+      - **`sponsored`** · `boolean` · required · always `false`
+
+        Split swap transactions are never sponsored by SDP.
+
+      - **`swap`** · `object` · required
+
+        The Jupiter swap leg attached to (or split out of) a swap-funded deposit.
+
+        - **`sourceTokenMint`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
+
+          Mint the owner pays with.
+
+        - **`sourceAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+          What the swap spends, in source-token units.
+
+        - **`depositAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+          The deposit amount the transaction encodes, in deposit-token units: the swap's guaranteed minimum output. Any output above it stays in the customer's token account.
+
+        - **`quotedAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+          The swap's quoted output at the live rate, in deposit-token units.
+
+        - **`slippageBps`** · `integer` · required · example `2`
+
+        - **`priceImpactPct`** · `string` · required · example `0.0001`
+
+          Quoted price impact as a decimal ratio string.
+
+        - **`routeLabels`** · `string[]` · required
+
+          Venue labels along the quoted route.
+
+        - **`transaction`** · `string` · required
+
+          Base64 wire bytes of the unsigned swap-only transaction. The fee payer is the customer, or your request's `feePayer`, which then co-signs it too. You broadcast it yourself: it moves only the customer's own funds, so SDP records nothing for it.
+
+        - **`lastValidBlockHeight`** · `string` · required · example `361186610`
+
+      - **`followUp`** · `object` · required
+
+        The ordinary (unswapped) deposit build to request once the swap is confirmed.
+
+        - **`strategyId`** · `string` · required · example `earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e`
+
+        - **`amount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+          Positive decimal string with at least one non-zero digit; never a float.
+
+        - **`minSharesOut`** · `string` · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
+
+          The original request's share floor, carried through so the follow-up build keeps the protection the caller asked for. Absent only when the original request carried none.
+
+        - **`feePayer`** · `string` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
+
+          The original request's fee payer, carried through so the follow-up build does not silently bill the customer's wallet. Absent when none was named.
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `earn.execute` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`429`** Too Many Requests
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`501`** The provider does not support this operation.
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
+<ApiPanel>
+
+## Example request
+
+```bash tab="cURL"
+curl -X POST 'https://api.solana.com/v1/earn/external-wallet/deposit-transactions' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
+    "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    "amount": "25"
+  }'
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/earn/external-wallet/deposit-transactions", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
+    "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    "amount": "25"
+  })
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.post("https://api.solana.com/v1/earn/external-wallet/deposit-transactions",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
+  json={
+    "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
+    "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    "amount": "25"
+  })
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "transaction": {
+      "transactionId": "earn_external_wallet_transaction_e7a88258-1d19-48f3-8d0e-81fefa4bf3b3",
+      "transaction": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "lastValidBlockHeight": "361186610",
+      "sponsored": false,
+      "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+      "provider": "kamino",
+      "providerReference": "C7N2fqV2GvhFghDf5PJSwstyjedjLNCY1cm2Ak7TeU83",
+      "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+      "shareMint": "CeirL1mAehaM6g2EccgMUQwohNfnuyicskVQ4r9ekXk6",
+      "amount": "25",
+      "minSharesOut": null,
+      "strategy": {
+        "id": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
+        "name": "Kamino Vault USDC",
+        "provider": "kamino",
+        "providerReference": "C7N2fqV2GvhFghDf5PJSwstyjedjLNCY1cm2Ak7TeU83",
+        "hostCluster": "devnet"
+      }
+    }
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: earn.execute",
+    "details": {
+      "action": "earn.execute"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+</ApiPanel>
+
+</ApiOperation>

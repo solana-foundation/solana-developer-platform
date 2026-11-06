@@ -7,13 +7,22 @@ import { z } from "zod";
 import { DOCS_SKILL_NAME } from "@/lib/agent-setup";
 import { expandDocsBlocks, stripMdxEsm } from "@/lib/docs-blocks";
 import { DOCS_MODULES } from "@/lib/docs-catalog";
+import { isEarnDocsPreview } from "@/lib/earn-docs-preview.mjs";
 import {
   frontmatterOf,
   isModulePublished,
   isPageSourcePublished,
   pageGateOf,
 } from "@/lib/release-channel";
-import { canonicalSite, docsPageSlugOf, isDocsFolderGroup } from "@/lib/site";
+import { canonicalSite, discoverySite, docsPageSlugOf } from "@/lib/site";
+import {
+  buildSections,
+  type DocsMeta,
+  type DocsPage,
+  type DocsSection,
+  EARN_KEY_PAGE_SLUGS,
+  selectKeyPages,
+} from "./lib/ai-resource-pages.js";
 
 const {
   aiGuideUrl,
@@ -24,7 +33,7 @@ const {
   docsUrl,
   getDocsMarkdownUrl,
   getDocsPageUrl,
-} = canonicalSite;
+} = discoverySite;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -41,26 +50,6 @@ const skillPaths = [
   path.resolve(publicDir, "SKILL.md"),
   path.resolve(__dirname, `../../../skills/${DOCS_SKILL_NAME}/SKILL.md`),
 ];
-
-type DocsMeta = {
-  title?: string;
-  pages?: string[];
-};
-
-type DocsPage = {
-  slug: string;
-  title: string;
-  description: string;
-  url: string;
-  content: string;
-  /** No `module` or `rampProvider` gate: every release channel publishes it. */
-  shared: boolean;
-};
-
-type Section = {
-  title: string;
-  pages: DocsPage[];
-};
 
 // The llms files describe only what this build's release channel publishes.
 
@@ -199,103 +188,6 @@ async function loadFolderMetas(): Promise<Map<string, DocsMeta>> {
   return result;
 }
 
-function buildSections(
-  meta: DocsMeta,
-  pages: Map<string, DocsPage>,
-  folderMetas: Map<string, DocsMeta>
-): Section[] {
-  const sections: Section[] = [];
-  const emitted = new Set<string>();
-  let currentSection: Section = { title: "Docs", pages: [] };
-
-  const flush = () => {
-    if (currentSection.pages.length > 0) {
-      sections.push(currentSection);
-    }
-  };
-
-  const isSeparator = (entry: string): boolean => entry.startsWith("---") && entry.endsWith("---");
-
-  const visit = (entry: string, slugPrefix: string, parentLabel: string | null): void => {
-    if (isSeparator(entry)) {
-      flush();
-      const label = entry.replace(/---/g, "").trim();
-      currentSection = {
-        title: parentLabel ? `${parentLabel} — ${label}` : label,
-        pages: [],
-      };
-      return;
-    }
-
-    // The entry's path, `(name)` folders included, and the slug its page would have.
-    const fullSlug = slugPrefix ? `${slugPrefix}/${entry}` : entry;
-    const pageSlug = docsPageSlugOf(fullSlug);
-
-    const page = pages.get(pageSlug);
-    if (page) {
-      if (!emitted.has(pageSlug)) {
-        currentSection.pages.push(page);
-        emitted.add(pageSlug);
-      }
-      return;
-    }
-
-    if (excludedSlugs.has(pageSlug)) {
-      return;
-    }
-
-    const folderMeta = folderMetas.get(fullSlug);
-    if (!folderMeta) {
-      console.warn(`generate-ai-resources: no page or folder for entry "${fullSlug}" — skipping`);
-      return;
-    }
-
-    flush();
-    // A `(name)` folder groups its parent's pages (an API family's operations), so its section
-    // names the parent too, and it has no index of its own.
-    const group = isDocsFolderGroup(entry);
-    const sectionTitle =
-      group && parentLabel
-        ? `${parentLabel}: ${folderMeta.title || entry}`
-        : folderMeta.title || entry;
-    currentSection = { title: sectionTitle, pages: [] };
-    // A folder's index is the folder's own page even where its meta lists only the rest, as an
-    // API family lists its operations.
-    const folderIndex = group ? undefined : pages.get(docsPageSlugOf(`${fullSlug}/index`));
-    if (
-      folderIndex &&
-      !(folderMeta.pages ?? []).includes("index") &&
-      !emitted.has(folderIndex.slug)
-    ) {
-      currentSection.pages.push(folderIndex);
-      emitted.add(folderIndex.slug);
-    }
-    for (const subEntry of folderMeta.pages || []) {
-      visit(subEntry, fullSlug, sectionTitle);
-    }
-    flush();
-    currentSection = { title: "Docs", pages: [] };
-  };
-
-  // The full AI corpus keeps the overview even though the sidebar links to it
-  // only from the home page.
-  visit("introduction", "", null);
-  for (const entry of meta.pages || []) {
-    visit(entry, "", null);
-  }
-
-  // Sidebar navigation is intentionally short. Include every published page
-  // from the folder trees in the AI corpus, even when its folder is unlisted.
-  const rootFolders = [...folderMetas.keys()].filter((folder) => !folder.includes("/"));
-  const navRoots = (meta.pages || []).map((entry) => entry.split("/")[0]).filter(Boolean);
-  for (const folder of new Set([...navRoots, ...rootFolders])) {
-    if (folderMetas.has(folder)) visit(folder, "", null);
-  }
-
-  flush();
-  return sections;
-}
-
 /**
  * The API reference pages `generate:api` wrote for this release channel, in its
  * order. They come from the channel's public OpenAPI document, so no module gate
@@ -322,13 +214,8 @@ function buildKeyPages(
   folderMetas: Map<string, DocsMeta>
 ): DocsPage[] {
   const guides = KEY_PAGE_SLUGS.filter((slug) => !excludedSlugs.has(slug));
-  return [...guides, ...apiReferenceSlugs(folderMetas)].map((slug) => {
-    const page = pages.get(slug);
-    if (!page) {
-      throw new Error(`Missing required key docs page "${slug}" for llms.txt generation`);
-    }
-    return page;
-  });
+  // Drafts outside content/docs never become required build inputs.
+  return selectKeyPages(pages, [...guides, ...apiReferenceSlugs(folderMetas)], EARN_KEY_PAGE_SLUGS);
 }
 
 async function loadAiDiscoveryDocument() {
@@ -344,12 +231,20 @@ function renderPageFull(page: DocsPage): string {
   return parts.join("\n");
 }
 
-function renderSectionFull(section: Section): string {
+/** The shared renderer stays canonical; this branch preview links its own artifacts. */
+function previewDiscoveryLinks(source: string): string {
+  if (!isEarnDocsPreview()) return source;
+  return source
+    .replaceAll(canonicalSite.docsOrigin, discoverySite.docsOrigin)
+    .replaceAll(canonicalSite.apiOpenApiUrl, discoverySite.apiOpenApiUrl);
+}
+
+function renderSectionFull(section: DocsSection): string {
   const pages = section.pages.map(renderPageFull).join("\n\n---\n\n");
   return `## ${section.title}\n\n${pages}`;
 }
 
-function renderLlmsFull(sections: Section[]): string {
+function renderLlmsFull(sections: DocsSection[]): string {
   return [
     "# Solana Developer Platform",
     "",
@@ -442,7 +337,7 @@ async function run(): Promise<void> {
     loadFolderMetas(),
     loadAiDiscoveryDocument(),
   ]);
-  const sections = buildSections(meta, pages, folderMetas);
+  const sections = buildSections(meta, pages, folderMetas, excludedSlugs);
   const keyPages = buildKeyPages(pages, folderMetas);
 
   const skill = renderSkill(pages);
@@ -456,12 +351,14 @@ async function run(): Promise<void> {
   await Promise.all([
     writeFileIfChanged(
       llmsPath,
-      renderLlmsTxt({
-        audience: "docs",
-        document,
-        supportedSurfaces: FEATURE_SUMMARY,
-        startHere: keyPages,
-      })
+      previewDiscoveryLinks(
+        renderLlmsTxt({
+          audience: "docs",
+          document,
+          supportedSurfaces: FEATURE_SUMMARY,
+          startHere: keyPages,
+        })
+      )
     ),
     writeFileIfChanged(llmsFullPath, renderLlmsFull(sections)),
     ...skillPaths.map((skillPath) => writeFileIfChanged(skillPath, skill)),

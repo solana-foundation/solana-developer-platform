@@ -14,6 +14,7 @@ import {
   type ApiSchemaType,
   type ApiVariant,
 } from "@sdp/api-catalog/reference";
+import { SdpEarnError, type SdpEarnErrorCode } from "@sdp/earn/errors";
 import { ACTIONS, type Action } from "@sdp/types/actions";
 import type {
   OpenAPIObject,
@@ -387,7 +388,8 @@ function sampleRequest(
 }
 
 /**
- * The code an error status answers with in the reference's examples. A 422 is
+ * The code an error status answers with in the reference's examples. Earn's 501
+ * is the SDK's NOT_IMPLEMENTED. A 422 is
  * IDEMPOTENCY_KEY_REUSED where the route takes an Idempotency-Key and SIGNING_REJECTED elsewhere,
  * the two codes the API answers 422 with. `reference.test.ts` checks each code's status.
  */
@@ -395,7 +397,7 @@ export function exampleErrorCode(
   status: string,
   takesIdempotencyKey: boolean,
   where: string
-): ErrorCode {
+): ErrorCode | SdpEarnErrorCode {
   switch (status) {
     case "400":
       return "BAD_REQUEST";
@@ -413,6 +415,8 @@ export function exampleErrorCode(
       return "RATE_LIMITED";
     case "500":
       return "INTERNAL_ERROR";
+    case "501":
+      return "NOT_IMPLEMENTED";
     case "502":
       return "SOLANA_RPC_ERROR";
     case "503":
@@ -472,15 +476,25 @@ function errorExample(
 ): Json {
   const codes = envelopeCodes(schema, document);
   if (codes === null) return jsonValueSchema.parse(sampleFromSchema(schema, document));
+  const code = exampleErrorCode(status, takesIdempotencyKey, where);
   const error =
     status === "403" && action !== null
       ? missingAction(action)
-      : new AppError(exampleErrorCode(status, takesIdempotencyKey, where));
+      : code === "NOT_IMPLEMENTED"
+        ? new SdpEarnError(code)
+        : new AppError(code);
   if (String(error.statusCode) !== status || !codes.has(error.code)) {
     throw new Error(`${where}: ${error.code} is not an answer the document allows for a ${status}`);
   }
   const envelope = errorEnvelopeSampleSchema.parse(sampleFromSchema(schema, document));
-  return { ...envelope, error: jsonValueSchema.parse(error.toResponse().error) };
+  return {
+    ...envelope,
+    error: jsonValueSchema.parse(
+      error instanceof AppError
+        ? error.toResponse().error
+        : { code: error.code, message: error.message }
+    ),
+  };
 }
 
 function toApiResponses(

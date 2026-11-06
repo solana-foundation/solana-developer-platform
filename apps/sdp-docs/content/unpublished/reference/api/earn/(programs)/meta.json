@@ -1,0 +1,14 @@
+{
+  "title": "Programs",
+  "pages": [
+    "list-earn-programs",
+    "create-earn-program",
+    "get-earn-program",
+    "retarget-earn-program",
+    "list-earn-program-deposits",
+    "preview-earn-program-withdrawal",
+    "create-earn-program-withdrawal",
+    "list-earn-program-withdrawals",
+    "get-earn-program-withdrawal"
+  ]
+}

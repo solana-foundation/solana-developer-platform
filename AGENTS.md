@@ -2,6 +2,9 @@
 
 This file is the canonical agent guide for this repository.
 
+PR screenshots belong directly in the PR body as GitHub attachments. Never
+commit PR screenshots or create a repository folder for them.
+
 ## Repo layout
 
 - `apps/sdp-api`: Node.js API deployed to Cloud Run, OpenAPI source, route handlers, Postgres/Redis integrations
