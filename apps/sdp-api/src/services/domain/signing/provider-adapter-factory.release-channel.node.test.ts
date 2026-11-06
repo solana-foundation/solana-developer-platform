@@ -1,7 +1,14 @@
 import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapter";
-import type { SigningPort } from "@sdp/custody/signing";
+import { type FullSigningPort, isFullSigningPort, type SigningPort } from "@sdp/custody/signing";
 import type { CustodyMode } from "@sdp/types/custody";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SignerErrorCode } from "@solana/keychain-core";
+import {
+  createSignableMessage,
+  getBase64Decoder,
+  isMessagePartialSigner,
+  signBytes,
+} from "@solana/kit";
+import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import * as events from "@/runtime/money-path-events";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
 import type { CustodyCipher } from "@/services/custody-cipher/cipher-router";
@@ -14,6 +21,7 @@ import {
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { inSandboxScope } from "@/test/helpers/cluster-rpc";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
+import { TEST_MOCK_FEE_PAYER, TEST_MOCK_FEE_PAYER_KEY_PAIR } from "@/test/helpers/sponsor-signing";
 import type { Env } from "@/types/env";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
@@ -71,6 +79,36 @@ function createObservedCredential(read: () => void): PrivyCredentialAdapterInput
     },
     requestDelayMs: 0,
   };
+}
+
+const PRIVY_WALLET_ID = "privy-wallet-factory-release-channel";
+const SIGNED_CONTENT = new Uint8Array([1, 2, 3]);
+const BYOK_PRIVY_SIGN_MESSAGES_CALL = {
+  event: "sdp_api_vendor_call",
+  vendor: "privy",
+  operation: "signMessages",
+  boundary: "adapter_operation",
+  custody_mode: "byok",
+  cluster: "devnet",
+} as const;
+
+function createByokPrivyPort(): FullSigningPort {
+  vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+    Response.json({ address: TEST_MOCK_FEE_PAYER, chain_type: "solana" })
+  );
+  const port = inSandboxScope(() =>
+    createPrivyAdapterFromCredential(createEnv(), createObservedCredential(vi.fn()))
+  );
+  assert(isFullSigningPort(port));
+  return port;
+}
+
+async function signMessageWithByokPrivy(signResponse: Response) {
+  const port = createByokPrivyPort();
+  vi.mocked(globalThis.fetch).mockResolvedValueOnce(signResponse);
+  const signer = await port.getTransactionSigner(PRIVY_WALLET_ID);
+  assert(isMessagePartialSigner(signer));
+  return signer.signMessages([createSignableMessage(SIGNED_CONTENT)]);
 }
 
 describe("custody adapter factories and the release channel", () => {
@@ -196,5 +234,49 @@ describe("custody adapter factories and the release channel", () => {
         cluster: "devnet",
       })
     );
+  });
+
+  it("logs a BYOK Privy signer's signMessages with its custody mode and cluster", async () => {
+    const signature = await signBytes(TEST_MOCK_FEE_PAYER_KEY_PAIR.privateKey, SIGNED_CONTENT);
+    const logEvent = vi.spyOn(events, "logEvent");
+
+    await expect(
+      signMessageWithByokPrivy(
+        Response.json({ data: { signature: getBase64Decoder().decode(signature) } })
+      )
+    ).resolves.toEqual([{ [TEST_MOCK_FEE_PAYER]: signature }]);
+    expect(logEvent).toHaveBeenCalledWith(
+      "info",
+      expect.objectContaining({ ...BYOK_PRIVY_SIGN_MESSAGES_CALL, outcome: "succeeded" })
+    );
+  });
+
+  it("logs a BYOK Privy signer's failed signMessages and rejects with the provider error", async () => {
+    const logEvent = vi.spyOn(events, "logEvent");
+
+    await expect(
+      signMessageWithByokPrivy(new Response("unavailable", { status: 503 }))
+    ).rejects.toMatchObject({
+      name: "SignerError",
+      code: SignerErrorCode.REMOTE_API_ERROR,
+      context: expect.objectContaining({ status: 503 }),
+    });
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        ...BYOK_PRIVY_SIGN_MESSAGES_CALL,
+        outcome: "failed",
+        error_name: "SignerError",
+        error_code: SignerErrorCode.REMOTE_API_ERROR,
+      })
+    );
+  });
+
+  it("hands out one instrumented signer per BYOK Privy wallet", async () => {
+    const port = createByokPrivyPort();
+
+    const signer = await port.getTransactionSigner(PRIVY_WALLET_ID);
+
+    expect(await port.getTransactionSigner(PRIVY_WALLET_ID)).toBe(signer);
   });
 });
