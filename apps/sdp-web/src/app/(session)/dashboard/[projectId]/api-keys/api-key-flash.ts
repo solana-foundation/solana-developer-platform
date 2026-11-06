@@ -5,24 +5,15 @@ export const API_KEYS_PAGE_PATH = "/dashboard/api-keys";
 export const API_KEYS_FLASH_PATH = "/dashboard/api-keys/flash";
 
 /**
- * A flash carrying a freshly generated key secret only needs to survive the
- * redirect back to the API keys page; keep the window tight. Plain notices
- * get a little longer.
+ * The flash only needs to survive the navigation to the new key's page; keep
+ * the window tight.
  */
-export const API_KEY_FLASH_SECRET_MAX_AGE_SECONDS = 120;
-export const API_KEY_FLASH_NOTICE_MAX_AGE_SECONDS = 300;
+export const API_KEY_FLASH_MAX_AGE_SECONDS = 120;
 
-type FlashLevel = "success" | "error";
-
+/** A freshly generated secret, shown once on the page of the key it belongs to. */
 export interface ApiKeyFlash {
-  level: FlashLevel;
-  message: string;
-  key?: string;
-  keyPrefix?: string;
-}
-
-export function apiKeyFlashMaxAgeSeconds(flash: ApiKeyFlash): number {
-  return flash.key ? API_KEY_FLASH_SECRET_MAX_AGE_SECONDS : API_KEY_FLASH_NOTICE_MAX_AGE_SECONDS;
+  keyId: string;
+  key: string;
 }
 
 /**

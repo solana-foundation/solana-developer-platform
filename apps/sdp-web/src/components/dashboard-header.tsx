@@ -915,24 +915,39 @@ function getAccessControlPageConfig(
   if (pathname === "/dashboard/api-keys") {
     return {
       title: t("Shared.dashboardShell.apiKeys"),
-      contentWidthClass: "max-w-none",
+      titlePosition: "left",
+      contentWidthClass: PAGE_WIDTH,
+      headerAction: {
+        label: t("Shared.dashboardShell.createApiKey"),
+        capability: "canManageApiKeys",
+        href: "/dashboard/api-keys/new",
+        icon: "plus",
+        variant: "primary",
+      },
     };
   }
   if (pathname === "/dashboard/api-keys/new") {
-    return actionPageConfig({
+    // A flow: the way back over the title in the form's column; the footer band spans the page.
+    return {
       title: t("Shared.dashboardShell.newApiKey"),
-      backHref: "/dashboard/api-keys",
-      backLabel: t("Shared.dashboardShell.backToApiKeys"),
       contentWidthClass: "max-w-none",
-    });
+      headerWidthClass: "max-w-flow",
+      backAction: {
+        href: "/dashboard/api-keys",
+        label: t("Shared.dashboardShell.apiKeys"),
+      },
+    };
   }
-  if (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) {
-    return actionPageConfig({
-      title: t("Shared.dashboardShell.editApiKey"),
-      backHref: "/dashboard/api-keys",
-      backLabel: t("Shared.dashboardShell.backToApiKeys"),
-      contentWidthClass: "max-w-none",
-    });
+  if (pathname.startsWith("/dashboard/api-keys/")) {
+    // The page titles itself with the key's name; "API key" holds the place until it does.
+    return {
+      title: t("Shared.dashboardShell.apiKey"),
+      contentWidthClass: PAGE_WIDTH,
+      backAction: {
+        href: "/dashboard/api-keys",
+        label: t("Shared.dashboardShell.apiKeys"),
+      },
+    };
   }
   return null;
 }

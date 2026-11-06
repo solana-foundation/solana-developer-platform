@@ -50,7 +50,7 @@ export function ApiKeyGrantPicker({
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="max-w-xl text-xs text-secondary">
+        <p className="max-w-xl text-meta text-secondary">
           {t("DashboardCustody.apiKeyGrantsEverythingHelper")}
         </p>
         <div className="flex gap-2">
@@ -72,7 +72,7 @@ export function ApiKeyGrantPicker({
           </Button>
         </div>
       </div>
-      <div className="mt-4 overflow-hidden rounded-lg border border-border-default">
+      <div className="mt-3 overflow-hidden rounded-card border border-border-default bg-surface-tile">
         {rows.map(({ module, actions }) => {
           const label = grantModuleLabel(module, t);
           const held = actions.some((action) => grantToggleState(grants, action) !== "off");
@@ -83,8 +83,8 @@ export function ApiKeyGrantPicker({
             >
               <legend className="sr-only">{label}</legend>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-primary">{label}</p>
-                <p className="mt-0.5 text-xs text-secondary">
+                <p className="text-field text-primary">{label}</p>
+                <p className="mt-0.5 text-meta text-secondary">
                   {grantModuleDescription(module, t, offered)}
                 </p>
               </div>
@@ -101,7 +101,7 @@ export function ApiKeyGrantPicker({
                           : grantVerbDescription(verb, t)
                       }
                       className={cn(
-                        "flex items-center gap-2 text-sm",
+                        "flex items-center gap-2 text-body",
                         state === "implied" ? "text-tertiary" : "text-primary"
                       )}
                     >
@@ -117,7 +117,7 @@ export function ApiKeyGrantPicker({
                       />
                       {grantVerbLabel(verb, t)}
                       {state === "implied" ? (
-                        <span className="text-xs text-muted">
+                        <span className="text-meta text-tertiary">
                           ({t("DashboardCustody.apiKeyGrantsImplied")})
                         </span>
                       ) : null}
@@ -126,7 +126,7 @@ export function ApiKeyGrantPicker({
                 })}
                 <button
                   type="button"
-                  className={cn("text-xs text-secondary underline", held ? "" : "invisible")}
+                  className={cn("text-meta text-secondary underline", held ? "" : "invisible")}
                   onClick={() => onChange(clearModuleGrants(grants, module))}
                   aria-hidden={!held}
                   tabIndex={held ? 0 : -1}
@@ -139,13 +139,13 @@ export function ApiKeyGrantPicker({
         })}
       </div>
       {notOffered.length > 0 ? (
-        <div className="mt-4 rounded-lg border border-border-default px-4 py-3">
-          <p className="text-xs text-secondary">{t("DashboardCustody.apiKeyGrantsNotOffered")}</p>
+        <div className="mt-3 rounded-card border border-border-default px-4 py-3">
+          <p className="text-meta text-secondary">{t("DashboardCustody.apiKeyGrantsNotOffered")}</p>
           <ul className="mt-2 flex flex-wrap gap-2">
             {notOffered.map((action) => (
               <li
                 key={action}
-                className="flex items-center gap-2 rounded-md bg-fill-subtle px-2 py-1 font-mono text-xs text-primary"
+                className="flex items-center gap-2 rounded-md bg-fill-subtle px-2 py-1 font-mono text-meta text-primary"
               >
                 {action}
                 <button
@@ -162,14 +162,12 @@ export function ApiKeyGrantPicker({
         </div>
       ) : null}
       {touched && grants.length === 0 ? (
-        <p className="mt-2 text-xs text-destructive">
-          {t("DashboardCustody.apiKeyGrantsRequired")}
-        </p>
+        <p className="mt-2 text-meta text-error">{t("DashboardCustody.apiKeyGrantsRequired")}</p>
       ) : null}
-      <div className="mt-4 flex items-start gap-3 rounded-lg bg-fill-subtle p-3">
-        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-tertiary" />
-        <p className="text-xs text-secondary">{t("DashboardCustody.apiKeyGrantsNotGrantable")}</p>
-      </div>
+      <p className="mt-2 flex items-center gap-1.5 text-meta text-tertiary">
+        <ShieldCheck aria-hidden className="size-3.5 shrink-0" />
+        {t("DashboardCustody.apiKeyGrantsNotGrantable")}
+      </p>
     </div>
   );
 }

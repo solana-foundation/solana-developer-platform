@@ -10,49 +10,8 @@ import {
   isActionInReleaseChannel,
   normalizeGrants,
 } from "@sdp/types/actions";
-import type { ApiKeyEnvironment, ApiKeyWalletScope } from "@sdp/types/api-keys";
+import type { ApiKeyWalletScope } from "@sdp/types/api-keys";
 import type { SdpModule } from "@sdp/types/release-channels";
-
-export const API_KEY_AUTHORING_STEPS = ["details", "permissions", "wallets", "review"] as const;
-
-export type ApiKeyAuthoringStep = (typeof API_KEY_AUTHORING_STEPS)[number];
-export type ApiKeyAuthoringMode = "create" | "edit";
-
-export interface ApiKeyAuthoringDraft {
-  name: string;
-  expiresAt: string;
-  walletScope: ApiKeyWalletScope;
-  /** Custody wallet ids (`custody_wallets.id`) a selected key may sign with. */
-  selectedWalletIds: string[];
-  /** The key's explicit grants, in registry order. */
-  grants: Action[];
-  /** The key's IP allowlist as typed: one address or CIDR range per line. */
-  allowedIps: string;
-}
-
-export interface ApiKeyAuthoringExistingKey {
-  id: string;
-  name: string;
-  environment: ApiKeyEnvironment;
-  grants: Action[];
-  expiresAt: string | null;
-  walletScope: ApiKeyWalletScope;
-  /** Custody wallet ids a selected key lists. */
-  walletIds: string[];
-  /** Null: the key may be used from any address. */
-  allowedIps: string[] | null;
-}
-
-export function createApiKeyAuthoringDraft(): ApiKeyAuthoringDraft {
-  return {
-    name: "",
-    expiresAt: "",
-    walletScope: "all",
-    selectedWalletIds: [],
-    grants: [],
-    allowedIps: "",
-  };
-}
 
 /**
  * The actions this deployment lets a key be granted: every grantable action
@@ -212,30 +171,12 @@ export type EndpointWalletPayload =
   | { walletScope: "selected"; walletIds: string[] };
 
 /** The API's wallet fields: the scope, and for a selected key its custody wallet ids. */
-export function buildEndpointWalletPayload(draft: ApiKeyAuthoringDraft): EndpointWalletPayload {
-  if (draft.walletScope === "all") {
+export function buildEndpointWalletPayload(
+  walletScope: ApiKeyWalletScope,
+  walletIds: readonly string[]
+): EndpointWalletPayload {
+  if (walletScope === "all") {
     return { walletScope: "all" };
   }
-  return { walletScope: "selected", walletIds: Array.from(new Set(draft.selectedWalletIds)) };
-}
-
-/** Whether the draft has what a step needs before the next one opens. */
-export function isAuthoringStepComplete(
-  step: ApiKeyAuthoringStep,
-  draft: ApiKeyAuthoringDraft
-): boolean {
-  switch (step) {
-    case "details":
-      return draft.name.trim().length > 0;
-    case "permissions":
-      return draft.grants.length > 0;
-    case "wallets":
-      return draft.walletScope === "all" || draft.selectedWalletIds.length > 0;
-    case "review":
-      return true;
-    default: {
-      const unknownStep: never = step;
-      throw new Error(`Unknown API-key authoring step: ${String(unknownStep)}`);
-    }
-  }
+  return { walletScope: "selected", walletIds: Array.from(new Set(walletIds)) };
 }

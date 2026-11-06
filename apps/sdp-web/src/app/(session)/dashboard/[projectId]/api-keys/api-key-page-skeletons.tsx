@@ -1,157 +1,120 @@
 import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 
-const API_KEY_ROW_IDS = [
-  "api-key-row-1",
-  "api-key-row-2",
-  "api-key-row-3",
-  "api-key-row-4",
-  "api-key-row-5",
-];
+const LIST_ROW_KEYS = ["first", "second", "third", "fourth", "fifth"];
+const ACCESS_ROW_KEYS = ["first", "second", "third", "fourth", "fifth", "sixth"];
+const DETAIL_ROW_KEYS = ["prefix", "id", "expires", "created", "ips", "note"];
+const WALLET_ROW_KEYS = ["first", "second"];
 
-const API_KEY_STEP_IDS = ["api-key-step-1", "api-key-step-2", "api-key-step-3", "api-key-step-4"];
-
-const API_KEY_SUMMARY_ROW_IDS = [
-  "api-key-summary-row-1",
-  "api-key-summary-row-2",
-  "api-key-summary-row-3",
-  "api-key-summary-row-4",
-  "api-key-summary-row-5",
-  "api-key-summary-row-6",
-  "api-key-summary-row-7",
-  "api-key-summary-row-8",
-];
-
+/** The keys list: the toolbar, the header row and two-line rows, as the page draws them. */
 export function ApiKeysListSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel
-      className="flex flex-col gap-6"
+      className="flex flex-col gap-5"
       data-loading-layout="api-keys-list"
       aria-busy="true"
     >
-      <section className="flex flex-1 flex-col gap-6 rounded-[var(--sdp-surface-radius)] bg-surface-raised py-6 shadow-sm ring-1 ring-border-default">
-        <header className="grid auto-rows-min grid-rows-[auto_auto] items-start gap-2 px-6 sm:grid-cols-[1fr_auto]">
-          <SkeletonBlock className="h-6 w-48" />
-          <SkeletonBlock className="h-4 w-full max-w-md sm:col-start-1" />
-          <SkeletonBlock className="row-span-2 row-start-1 hidden h-10 w-28 rounded-[10px] sm:col-start-2 sm:block" />
-        </header>
-
-        <div className="px-6">
-          <SkeletonBlock className="mb-4 h-10 w-full rounded-[10px]" />
-          <div className="@container/api-keys-table" data-loading-api-key-table>
-            <div className="grid grid-cols-[24fr_48fr_18fr] gap-4 border-b border-border-default px-4 py-3 @4xl/api-keys-table:grid-cols-[17fr_10fr_27fr_14fr] @5xl/api-keys-table:grid-cols-[17fr_10fr_27fr_8fr_14fr] @6xl/api-keys-table:grid-cols-[17fr_10fr_27fr_8fr_9fr_14fr] @7xl/api-keys-table:grid-cols-[17fr_10fr_27fr_8fr_9fr_9fr_9fr_11fr]">
-              <SkeletonBlock className="h-3 w-12" />
-              <SkeletonBlock className="hidden h-3 w-12 @4xl/api-keys-table:block" />
-              <SkeletonBlock className="h-3 w-16" />
-              <SkeletonBlock className="hidden h-3 w-12 @5xl/api-keys-table:block" />
-              <SkeletonBlock className="hidden h-3 w-14 @6xl/api-keys-table:block" />
-              <SkeletonBlock className="hidden h-3 w-14 @7xl/api-keys-table:block" />
-              <SkeletonBlock className="hidden h-3 w-14 @7xl/api-keys-table:block" />
-              <SkeletonBlock className="h-3 w-14" />
-            </div>
-            <div className="divide-y divide-border-default">
-              {API_KEY_ROW_IDS.map((id) => (
-                <div
-                  key={id}
-                  className="grid min-h-16 grid-cols-[24fr_48fr_18fr] items-center gap-4 px-4 py-3 @4xl/api-keys-table:grid-cols-[17fr_10fr_27fr_14fr] @5xl/api-keys-table:grid-cols-[17fr_10fr_27fr_8fr_14fr] @6xl/api-keys-table:grid-cols-[17fr_10fr_27fr_8fr_9fr_14fr] @7xl/api-keys-table:grid-cols-[17fr_10fr_27fr_8fr_9fr_9fr_9fr_11fr]"
-                  data-loading-table-row
-                >
-                  <div className="space-y-2">
-                    <SkeletonBlock className="h-4 w-full max-w-28" />
-                    <SkeletonBlock className="h-3 w-2/3" />
-                  </div>
-                  <SkeletonBlock className="hidden h-4 w-16 @4xl/api-keys-table:block" />
-                  <div className="min-w-0 space-y-2">
-                    <SkeletonBlock className="h-4 w-full max-w-36" />
-                    <SkeletonBlock className="h-3 w-4/5" />
-                  </div>
-                  <SkeletonBlock className="hidden h-5 w-14 rounded-full @5xl/api-keys-table:block" />
-                  <SkeletonBlock className="hidden h-4 w-16 @6xl/api-keys-table:block" />
-                  <SkeletonBlock className="hidden h-4 w-16 @7xl/api-keys-table:block" />
-                  <SkeletonBlock className="hidden h-4 w-16 @7xl/api-keys-table:block" />
-                  <SkeletonBlock className="ml-auto size-8 rounded-[10px]" />
-                </div>
-              ))}
-            </div>
-          </div>
+      <div className="flex items-center justify-between gap-3">
+        <SkeletonBlock className="h-9 w-24 rounded-[10px]" />
+        <SkeletonBlock className="h-9 w-56 rounded-[10px]" />
+      </div>
+      <div>
+        <div className="flex h-10 items-center justify-between border-b border-border-subtle">
+          <SkeletonBlock className="h-3.5 w-12" />
+          <SkeletonBlock className="h-3.5 w-40" />
         </div>
-      </section>
+        {LIST_ROW_KEYS.map((key) => (
+          <div key={key} className="flex items-center gap-6 border-b border-border-subtle py-3">
+            <div className="flex-1 space-y-1.5">
+              <SkeletonBlock className="h-4 w-48" />
+              <SkeletonBlock className="h-3.5 w-36" />
+            </div>
+            <SkeletonBlock className="h-3.5 w-16" />
+            <SkeletonBlock className="h-3.5 w-24" />
+          </div>
+        ))}
+      </div>
     </DashboardWorkspaceOverviewPanel>
   );
 }
 
-export function ApiKeyAuthoringSkeleton({ route }: { route: "api-key-new" | "api-key-edit" }) {
+/** The create form's fields in the flow column. */
+export function ApiKeyNewSkeleton() {
   return (
-    <div className="flex h-full min-h-0 flex-col" data-loading-layout={route} aria-busy="true">
-      <div className="shrink-0 px-4 pt-2 pb-5 md:px-6">
-        <div className="mx-auto w-full max-w-6xl">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5">
-              <SkeletonBlock className="h-1.5 w-4 rounded-full" />
-              <SkeletonBlock className="h-1.5 w-1.5 rounded-full" />
-              <SkeletonBlock className="h-1.5 w-1.5 rounded-full" />
-              <SkeletonBlock className="h-1.5 w-1.5 rounded-full" />
+    <div
+      className="mx-auto flex w-full max-w-flow flex-col gap-8 pt-6"
+      data-loading-layout="api-key-new"
+      aria-busy="true"
+    >
+      <div className="space-y-2">
+        <SkeletonBlock className="h-3.5 w-12" />
+        <SkeletonBlock className="h-10 w-full rounded-[10px]" />
+      </div>
+      <div className="space-y-2">
+        <SkeletonBlock className="h-3.5 w-16" />
+        <SkeletonBlock className="h-80 w-full rounded-card" />
+      </div>
+      <div className="space-y-2">
+        <SkeletonBlock className="h-3.5 w-16" />
+        <SkeletonBlock className="h-24 w-full rounded-card" />
+      </div>
+      <div className="space-y-2">
+        <SkeletonBlock className="h-3.5 w-14" />
+        <SkeletonBlock className="h-10 w-56 rounded-[10px]" />
+      </div>
+    </div>
+  );
+}
+
+function RecordRowsSkeleton({ keys }: { keys: string[] }) {
+  return (
+    <div>
+      {keys.map((key) => (
+        <div
+          key={key}
+          className="flex h-10 items-center justify-between border-b border-border-subtle last:border-b-0"
+        >
+          <SkeletonBlock className="h-3.5 w-20" />
+          <SkeletonBlock className="h-4 w-36" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** A key's page: its facts line, then access, wallets and details, spaced as the record stack. */
+export function ApiKeyDetailSkeleton() {
+  return (
+    <div
+      className="flex w-full flex-col gap-12 pt-6 md:gap-20 md:pt-10"
+      data-loading-layout="api-key-detail"
+      aria-busy="true"
+    >
+      <SkeletonBlock className="h-4 w-72" />
+      <div className="flex flex-col gap-4">
+        <SkeletonBlock className="h-6 w-20" />
+        <RecordRowsSkeleton keys={ACCESS_ROW_KEYS} />
+      </div>
+      <div className="flex flex-col gap-4">
+        <SkeletonBlock className="h-6 w-20" />
+        <div>
+          {WALLET_ROW_KEYS.map((key) => (
+            <div
+              key={key}
+              className="flex items-center gap-3 border-b border-border-subtle py-3 last:border-b-0"
+            >
+              <SkeletonBlock className="size-8 rounded-full" />
+              <div className="flex-1 space-y-1.5">
+                <SkeletonBlock className="h-4 w-40" />
+                <SkeletonBlock className="h-4 w-24" />
+              </div>
             </div>
-            <SkeletonBlock className="h-3 w-20" />
-          </div>
-          <div className="mt-5 grid grid-cols-4 gap-4 border-b border-border-default pb-2">
-            {API_KEY_STEP_IDS.map((id) => (
-              <SkeletonBlock key={id} className="mx-auto h-4 w-full max-w-24" />
-            ))}
-          </div>
+          ))}
         </div>
       </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 md:px-6">
-        <div className="mx-auto grid w-full max-w-6xl gap-8 pb-8 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="min-w-0">
-            <SkeletonBlock className="h-7 w-52" />
-            <SkeletonBlock className="mt-2 h-4 w-full max-w-md" />
-            <section className="mt-5 rounded-lg border border-border-default bg-surface-raised p-5">
-              <SkeletonBlock className="h-5 w-36" />
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2 sm:col-span-2">
-                  <SkeletonBlock className="h-4 w-20" />
-                  <SkeletonBlock className="h-10 w-full rounded-lg" />
-                </div>
-                <div className="space-y-2">
-                  <SkeletonBlock className="h-4 w-24" />
-                  <SkeletonBlock className="h-10 w-full rounded-lg" />
-                </div>
-                <div className="space-y-2">
-                  <SkeletonBlock className="h-4 w-28" />
-                  <SkeletonBlock className="h-10 w-full rounded-lg" />
-                </div>
-              </div>
-            </section>
-          </div>
-
-          <aside className="lg:sticky lg:top-4" data-loading-summary-rail>
-            <div className="rounded-lg border border-border-default bg-surface-raised p-5">
-              <SkeletonBlock className="h-5 w-36" />
-              <div className="mt-3 divide-y divide-border-subtle">
-                {API_KEY_SUMMARY_ROW_IDS.map((id) => (
-                  <div key={id} className="flex items-start gap-2.5 py-2.5">
-                    <SkeletonBlock className="size-4 shrink-0" />
-                    <SkeletonBlock className="h-4 w-24" />
-                    <SkeletonBlock className="ml-auto h-4 w-24" />
-                  </div>
-                ))}
-              </div>
-              <SkeletonBlock className="mt-4 h-14 w-full rounded-lg" />
-            </div>
-          </aside>
-        </div>
-      </div>
-
-      <div
-        className="shrink-0 border-t border-border-default bg-surface-raised px-4 py-4 md:px-6"
-        data-loading-action-bar
-      >
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3">
-          <SkeletonBlock className="h-10 w-24 rounded-[10px]" />
-          <SkeletonBlock className="h-10 w-24 rounded-[10px]" />
-        </div>
+      <div className="flex flex-col gap-4">
+        <SkeletonBlock className="h-6 w-20" />
+        <RecordRowsSkeleton keys={DETAIL_ROW_KEYS} />
       </div>
     </div>
   );

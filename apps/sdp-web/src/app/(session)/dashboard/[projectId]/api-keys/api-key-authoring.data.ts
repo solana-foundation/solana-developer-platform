@@ -1,7 +1,7 @@
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { fetchPaymentsWallets } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
 import type { SdpApiClient } from "@/lib/sdp-api";
-import type { ApiKeyAuthoringExistingKey } from "./api-key-authoring";
+import type { ApiKeyDetails } from "./api-key-presentation";
 
 /** The wallets an API key can be bound to. */
 export async function fetchApiKeyAuthoringWallets(
@@ -14,10 +14,10 @@ export async function fetchApiKeyAuthoringWallets(
   return result.data ?? [];
 }
 
-export async function fetchApiKeyForAuthoring(
+export async function fetchApiKeyDetails(
   client: SdpApiClient,
   keyId: string
-): Promise<ApiKeyAuthoringExistingKey | null> {
+): Promise<ApiKeyDetails | null> {
   const response = await client.request(`/v1/api-keys/${encodeURIComponent(keyId)}`);
   if (response.status === 404) {
     return null;
@@ -25,6 +25,6 @@ export async function fetchApiKeyForAuthoring(
   if (!response.ok) {
     throw new Error(`Unable to load API key (${response.status})`);
   }
-  const body = (await response.json()) as { data?: ApiKeyAuthoringExistingKey };
+  const body = (await response.json()) as { data?: ApiKeyDetails };
   return body.data ?? null;
 }

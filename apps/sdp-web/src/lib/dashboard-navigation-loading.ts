@@ -66,7 +66,7 @@ export type DashboardLoadingRoute =
   | "recurring-payment-detail"
   | "api-keys-list"
   | "api-key-new"
-  | "api-key-edit"
+  | "api-key-detail"
   | "settings"
   | "account"
   | "integrations"
@@ -116,7 +116,7 @@ function resolveMarketsLoadingRoute(pathname: string): DashboardLoadingRoute | n
 function resolveOperationsLoadingRoute(pathname: string): DashboardLoadingRoute | null {
   if (pathname === "/dashboard/api-keys") return "api-keys-list";
   if (pathname === "/dashboard/api-keys/new") return "api-key-new";
-  if (/^\/dashboard\/api-keys\/[^/]+\/edit$/.test(pathname)) return "api-key-edit";
+  if (/^\/dashboard\/api-keys\/[^/]+$/.test(pathname)) return "api-key-detail";
   if (pathname === "/dashboard/settings") return "settings";
   if (pathname === DASHBOARD_ACCOUNT_HREF) return "account";
   return null;

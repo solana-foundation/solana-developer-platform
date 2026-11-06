@@ -360,8 +360,7 @@ function usesWorkspaceViewport(pathname: string): boolean {
     pathname === "/dashboard/issuance/create" ||
     /^\/dashboard\/issuance\/[^/]+\/?$/.test(pathname) ||
     pathname === "/dashboard/api-keys" ||
-    pathname === "/dashboard/api-keys/new" ||
-    (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) ||
+    pathname.startsWith("/dashboard/api-keys/") ||
     pathname.startsWith("/dashboard/payments") ||
     pathname.startsWith("/dashboard/markets") ||
     pathname === "/dashboard/wallets" ||

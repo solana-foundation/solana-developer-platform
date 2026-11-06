@@ -1,171 +1,222 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
+import type { Action } from "@sdp/types/actions";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
-import { getRequestLocale, getRequestTimeZone, getTranslations } from "@/i18n/server";
-import { parseAllowedIps } from "@/lib/ip-allowlist-input";
+import { getTranslations } from "@/i18n/server";
 import { createSdpApiClient, requestProjectHref, requestProjectId } from "@/lib/sdp-api";
-import {
-  type ApiKeyAuthoringDraft,
-  type ApiKeyAuthoringMode,
-  buildEndpointWalletPayload,
-} from "./api-key-authoring";
+import type { EndpointWalletPayload } from "./api-key-authoring";
 import {
   API_KEY_FLASH_COOKIE,
+  API_KEY_FLASH_MAX_AGE_SECONDS,
   API_KEYS_PAGE_PATH,
   type ApiKeyFlash,
   apiKeyFlashCookieOptions,
-  apiKeyFlashMaxAgeSeconds,
 } from "./api-key-flash";
 import { sealApiKeyFlash } from "./api-key-flash-seal";
+import { API_KEY_ROTATION_GRACE_HOURS } from "./api-key-presentation";
 
-function parsePositiveInt(value: FormDataEntryValue | null, fallback: number): number {
-  if (typeof value !== "string" || value.trim() === "") return fallback;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
+export type ApiKeyActionResult = { ok: true } | { ok: false; message: string };
+export type ApiKeyIssueResult = { ok: true; keyId: string } | { ok: false; message: string };
 
 async function setFlash(flash: ApiKeyFlash) {
-  // The flash can carry a freshly generated API key secret, so it is sealed
-  // (encrypted) and bound to the Clerk session that created it. Without an
-  // authenticated session there is nobody to deliver it to — fail closed
-  // rather than write anything readable to the browser.
+  // The flash carries a freshly generated secret, so it is sealed (encrypted)
+  // and bound to the Clerk session that created it. Without an authenticated
+  // session there is nobody to deliver it to: fail closed rather than write
+  // anything readable to the browser.
   const { sessionId, userId } = await auth();
   if (!sessionId || !userId) {
     return;
   }
-
-  const maxAge = apiKeyFlashMaxAgeSeconds(flash);
-  const sealed = await sealApiKeyFlash(flash, { sessionId, userId }, maxAge);
+  const sealed = await sealApiKeyFlash(flash, { sessionId, userId }, API_KEY_FLASH_MAX_AGE_SECONDS);
   if (!sealed) {
     return;
   }
-
   const jar = await cookies();
-  jar.set(API_KEY_FLASH_COOKIE, sealed, apiKeyFlashCookieOptions(await requestProjectId(), maxAge));
+  jar.set(
+    API_KEY_FLASH_COOKIE,
+    sealed,
+    apiKeyFlashCookieOptions(await requestProjectId(), API_KEY_FLASH_MAX_AGE_SECONDS)
+  );
 }
 
-function extractErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return "Unknown error";
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Unknown error";
 }
 
-export interface SaveApiKeyAuthoringInput {
-  mode: ApiKeyAuthoringMode;
-  keyId?: string;
-  draft: ApiKeyAuthoringDraft;
-  /**
-   * Edit only: whether the user changed the permissions step. An untouched key keeps
-   * its stored grants, so a grant this deployment does not offer is never dropped.
-   */
-  grantsTouched?: boolean;
+function keyPath(keyId: string): string {
+  return `${API_KEYS_PAGE_PATH}/${encodeURIComponent(keyId)}`;
 }
 
-export type SaveApiKeyAuthoringResult =
-  | { ok: true; message: string }
-  | { ok: false; message: string };
-
-function parseOptionalExpiration(value: string): string | null {
-  if (!value.trim()) {
-    return null;
+async function revalidateKeyPages(keyIds: readonly string[]) {
+  revalidatePath(await requestProjectHref(API_KEYS_PAGE_PATH), "page");
+  for (const keyId of keyIds) {
+    revalidatePath(await requestProjectHref(keyPath(keyId)), "page");
   }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    throw new Error("invalid_expiration");
-  }
-  return parsed.toISOString();
 }
 
-function validateAuthoringDraft(draft: ApiKeyAuthoringDraft): "name" | "wallet" | "grants" | null {
-  if (!draft.name.trim()) {
-    return "name";
-  }
-  if (draft.walletScope === "selected" && draft.selectedWalletIds.length === 0) {
-    return "wallet";
-  }
-  if (draft.grants.length === 0) {
-    return "grants";
-  }
-  return null;
+function isIsoDate(value: string): boolean {
+  return !Number.isNaN(new Date(value).getTime());
 }
 
-function normalizeDeactivateApiKeyInput(input: {
-  keyId: string;
-  keyName: string;
-  confirmation: string;
-}): {
-  keyId: string;
-  keyName: string;
-  confirmation: string;
-} {
-  return {
-    keyId: input.keyId.trim(),
-    keyName: input.keyName.trim(),
-    confirmation: input.confirmation.trim(),
-  };
+export interface CreateApiKeyInput {
+  name: string;
+  grants: Action[];
+  wallets: EndpointWalletPayload;
+  /** Null: the key never expires. */
+  expiresAt: string | null;
 }
 
-async function deactivateApiKeyRequest(input: {
-  keyId: string;
-  keyName: string;
-  confirmation: string;
-  cancelRecurringPayments?: boolean;
-}): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
+export async function createApiKeyAction(input: CreateApiKeyInput): Promise<ApiKeyIssueResult> {
   const t = await getTranslations();
-  const { keyId, keyName, confirmation } = normalizeDeactivateApiKeyInput(input);
-
-  if (!keyId) {
-    return {
-      ok: false,
-      message: t("DashboardCustody.missingApiKeyIdForDeletion"),
-    };
+  const name = input.name.trim();
+  if (!name) {
+    return { ok: false, message: t("DashboardCustody.apiKeyNameRequired") };
   }
-
-  if (!keyName) {
-    return {
-      ok: false,
-      message: t("DashboardCustody.missingApiKeyNameForDeletion"),
-    };
+  if (input.grants.length === 0) {
+    return { ok: false, message: t("DashboardCustody.apiKeyGrantsRequired") };
   }
-
-  if (!confirmation) {
-    return {
-      ok: false,
-      message: t("DashboardCustody.confirmApiKeyDeletion"),
-    };
+  if (input.wallets.walletScope === "selected" && input.wallets.walletIds.length === 0) {
+    return { ok: false, message: t("DashboardCustody.apiKeyWalletRequired") };
   }
-
-  if (confirmation !== keyName) {
-    return {
-      ok: false,
-      message: t("DashboardCustody.apiKeyConfirmationMismatch"),
-    };
+  if (input.expiresAt !== null && !isIsoDate(input.expiresAt)) {
+    return { ok: false, message: t("DashboardCustody.invalidExpirationDate") };
   }
 
   try {
     const client = await createSdpApiClient();
-    const cancelRecurringPayments = input.cancelRecurringPayments === true;
+    const created = await client.fetch<{ apiKey: { id: string; key: string } }>("/v1/api-keys", {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        grants: input.grants,
+        ...input.wallets,
+        // JSON drops an undefined field: no expiry is sent as none.
+        expiresAt: input.expiresAt ?? undefined,
+      }),
+    });
+    await setFlash({ keyId: created.apiKey.id, key: created.apiKey.key });
+    await revalidateKeyPages([]);
+    return { ok: true, keyId: created.apiKey.id };
+  } catch (error) {
+    return {
+      ok: false,
+      message: t("DashboardCustody.apiKeySaveFailed", { error: errorMessage(error) }),
+    };
+  }
+}
+
+/** One section's edit: only the fields it names are sent, so the key keeps the rest. */
+export interface UpdateApiKeyInput {
+  name?: string;
+  description?: string | null;
+  expiresAt?: string | null;
+  allowedIps?: string[] | null;
+  grants?: Action[];
+  wallets?: EndpointWalletPayload;
+}
+
+export async function updateApiKeyAction(
+  keyId: string,
+  input: UpdateApiKeyInput
+): Promise<ApiKeyActionResult> {
+  const t = await getTranslations();
+  if (input.name !== undefined && !input.name.trim()) {
+    return { ok: false, message: t("DashboardCustody.apiKeyNameRequired") };
+  }
+  if (input.grants !== undefined && input.grants.length === 0) {
+    return { ok: false, message: t("DashboardCustody.apiKeyGrantsRequired") };
+  }
+  if (input.wallets?.walletScope === "selected" && input.wallets.walletIds.length === 0) {
+    return { ok: false, message: t("DashboardCustody.apiKeyWalletRequired") };
+  }
+  if (input.expiresAt && !isIsoDate(input.expiresAt)) {
+    return { ok: false, message: t("DashboardCustody.invalidExpirationDate") };
+  }
+
+  try {
+    const client = await createSdpApiClient();
+    await client.fetch(`/v1/api-keys/${encodeURIComponent(keyId)}`, {
+      method: "PATCH",
+      // `walletScope: "all"` alone resets the key to every wallet: the API refuses it next to
+      // any wallet field, null included. Fields left undefined drop out of the JSON.
+      body: JSON.stringify({
+        name: input.name?.trim(),
+        description: input.description,
+        expiresAt: input.expiresAt,
+        allowedIps: input.allowedIps,
+        grants: input.grants,
+        ...input.wallets,
+      }),
+    });
+    await revalidateKeyPages([keyId]);
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      message: t("DashboardCustody.apiKeySaveFailed", { error: errorMessage(error) }),
+    };
+  }
+}
+
+export async function rotateApiKeyAction(
+  keyId: string,
+  gracePeriodHours: number
+): Promise<ApiKeyIssueResult> {
+  const t = await getTranslations();
+  if (!API_KEY_ROTATION_GRACE_HOURS.some((hours) => hours === gracePeriodHours)) {
+    return {
+      ok: false,
+      message: t("DashboardCustody.apiKeyRotateFailed", { error: "grace period" }),
+    };
+  }
+  try {
+    const client = await createSdpApiClient();
+    const response = await client.fetch<{ apiKey: { id: string; key: string } }>(
+      `/v1/api-keys/${encodeURIComponent(keyId)}/rotate`,
+      { method: "POST", body: JSON.stringify({ gracePeriodHours }) }
+    );
+    await setFlash({ keyId: response.apiKey.id, key: response.apiKey.key });
+    await revalidateKeyPages([keyId]);
+    return { ok: true, keyId: response.apiKey.id };
+  } catch (error) {
+    return {
+      ok: false,
+      message: t("DashboardCustody.apiKeyRotateFailed", { error: errorMessage(error) }),
+    };
+  }
+}
+
+export async function revokeApiKeyAction(input: {
+  keyId: string;
+  keyName: string;
+  cancelRecurringPayments: boolean;
+}): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
+  const t = await getTranslations();
+  try {
+    const client = await createSdpApiClient();
+    // The hold on the revoke button is the confirmation; the API still checks the name.
     const response = await client.fetch<{
       recurringPayments: { canceled: string[]; failed: string[] } | null;
-    }>(`/v1/api-keys/${encodeURIComponent(keyId)}`, {
+    }>(`/v1/api-keys/${encodeURIComponent(input.keyId)}`, {
       method: "DELETE",
-      body: JSON.stringify({ confirmation, cancelRecurringPayments }),
+      body: JSON.stringify({
+        confirmation: input.keyName,
+        cancelRecurringPayments: input.cancelRecurringPayments,
+      }),
     });
-
-    const deactivated = t("DashboardCustody.apiKeyDeactivated", { name: keyName });
+    await revalidateKeyPages([input.keyId]);
+    const revoked = t("DashboardCustody.apiKeyDeactivated", { name: input.keyName });
     const recurring = response.recurringPayments;
-    if (!cancelRecurringPayments || !recurring) {
-      return { ok: true, message: deactivated };
+    if (!input.cancelRecurringPayments || !recurring) {
+      return { ok: true, message: revoked };
     }
     // The key is revoked either way; a payment that could not be canceled is
     // reported so it can be canceled on its own.
     return {
       ok: true,
-      message: `${deactivated} ${t("DashboardCustody.apiKeyRecurringCanceled", {
+      message: `${revoked} ${t("DashboardCustody.apiKeyRecurringCanceled", {
         canceled: recurring.canceled.length,
         failed: recurring.failed.length,
       })}`,
@@ -173,174 +224,7 @@ async function deactivateApiKeyRequest(input: {
   } catch (error) {
     return {
       ok: false,
-      message: t("DashboardCustody.apiKeyDeleteFailed", { error: extractErrorMessage(error) }),
+      message: t("DashboardCustody.apiKeyDeleteFailed", { error: errorMessage(error) }),
     };
   }
-}
-
-export async function saveApiKeyAuthoringAction(
-  input: SaveApiKeyAuthoringInput
-): Promise<SaveApiKeyAuthoringResult> {
-  const t = await getTranslations();
-  const validationError = validateAuthoringDraft(input.draft);
-  if (validationError === "name") {
-    return { ok: false, message: t("DashboardCustody.apiKeyNameRequired") };
-  }
-  if (validationError === "wallet") {
-    return { ok: false, message: t("DashboardCustody.apiKeyWalletRequired") };
-  }
-  if (validationError === "grants") {
-    return { ok: false, message: t("DashboardCustody.apiKeyGrantsRequired") };
-  }
-
-  let expiresAt: string | null;
-  try {
-    expiresAt = parseOptionalExpiration(input.draft.expiresAt);
-  } catch {
-    return { ok: false, message: t("DashboardCustody.invalidExpirationDate") };
-  }
-
-  const walletPayload = buildEndpointWalletPayload(input.draft);
-  const allowedIps = parseAllowedIps(input.draft.allowedIps);
-
-  try {
-    const client = await createSdpApiClient();
-
-    if (input.mode === "create") {
-      const created = await client.fetch<{
-        apiKey: { id: string; name: string; key: string; keyPrefix: string };
-      }>("/v1/api-keys", {
-        method: "POST",
-        body: JSON.stringify({
-          name: input.draft.name.trim(),
-          grants: input.draft.grants,
-          ...walletPayload,
-          // JSON drops an undefined field: no expiry or allowlist is sent as none.
-          expiresAt: expiresAt ?? undefined,
-          allowedIps: allowedIps.length > 0 ? allowedIps : undefined,
-        }),
-      });
-
-      await setFlash({
-        level: "success",
-        message: t("DashboardCustody.apiKeyCreated", { name: created.apiKey.name }),
-        key: created.apiKey.key,
-        keyPrefix: created.apiKey.keyPrefix,
-      });
-      revalidatePath(await requestProjectHref(API_KEYS_PAGE_PATH), "page");
-      return {
-        ok: true,
-        message: t("DashboardCustody.apiKeyCreated", { name: created.apiKey.name }),
-      };
-    }
-
-    const keyId = input.keyId?.trim();
-    if (!keyId) {
-      return { ok: false, message: t("DashboardCustody.apiKeyEditMissingId") };
-    }
-
-    await client.fetch(`/v1/api-keys/${encodeURIComponent(keyId)}`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        name: input.draft.name.trim(),
-        expiresAt,
-        // An empty allowlist clears it: the key may be used from any address.
-        allowedIps: allowedIps.length > 0 ? allowedIps : null,
-        // `walletScope: "all"` alone resets the key to every wallet. The API refuses it
-        // next to any wallet field, null included.
-        ...walletPayload,
-        // Untouched grants are left out (JSON drops undefined), so the key keeps them.
-        grants: input.grantsTouched ? input.draft.grants : undefined,
-      }),
-    });
-
-    await setFlash({
-      level: "success",
-      message: t("DashboardCustody.apiKeyUpdated", { name: input.draft.name.trim() }),
-    });
-    revalidatePath(await requestProjectHref(API_KEYS_PAGE_PATH), "page");
-    revalidatePath(
-      await requestProjectHref(`${API_KEYS_PAGE_PATH}/${encodeURIComponent(keyId)}/edit`),
-      "page"
-    );
-    return {
-      ok: true,
-      message: t("DashboardCustody.apiKeyUpdated", { name: input.draft.name.trim() }),
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      message: t("DashboardCustody.apiKeySaveFailed", { error: extractErrorMessage(error) }),
-    };
-  }
-}
-
-export async function rotateApiKeyAction(formData: FormData) {
-  const [t, locale, timeZone] = await Promise.all([
-    getTranslations(),
-    getRequestLocale(),
-    getRequestTimeZone(),
-  ]);
-  const keyId = String(formData.get("keyId") ?? "").trim();
-  const gracePeriodHours = Math.min(168, Math.max(0, parsePositiveInt(formData.get("grace"), 24)));
-
-  if (!keyId) {
-    await setFlash({
-      level: "error",
-      message: t("DashboardCustody.missingApiKeyIdForRotation"),
-    });
-    redirect(await requestProjectHref(API_KEYS_PAGE_PATH));
-  }
-
-  try {
-    const client = await createSdpApiClient();
-    const response = await client.fetch<{
-      apiKey: {
-        id: string;
-        name: string;
-        key: string;
-        keyPrefix: string;
-      };
-      previousKey: {
-        id: string;
-        rotationDeadline: string;
-      };
-    }>(`/v1/api-keys/${encodeURIComponent(keyId)}/rotate`, {
-      method: "POST",
-      body: JSON.stringify({ gracePeriodHours }),
-    });
-
-    await setFlash({
-      level: "success",
-      message: t("DashboardCustody.apiKeyRotated", {
-        deadline: new Date(response.previousKey.rotationDeadline).toLocaleString(locale, {
-          timeZone,
-        }),
-      }),
-      key: response.apiKey.key,
-      keyPrefix: response.apiKey.keyPrefix,
-    });
-  } catch (error) {
-    await setFlash({
-      level: "error",
-      message: t("DashboardCustody.apiKeyRotateFailed", { error: extractErrorMessage(error) }),
-    });
-  }
-
-  revalidatePath(await requestProjectHref(API_KEYS_PAGE_PATH), "page");
-  redirect(await requestProjectHref(API_KEYS_PAGE_PATH));
-}
-
-export async function deactivateApiKeyInlineAction(input: {
-  keyId: string;
-  keyName: string;
-  confirmation: string;
-  cancelRecurringPayments?: boolean;
-}): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
-  const result = await deactivateApiKeyRequest(input);
-  if (result.ok) {
-    revalidatePath(await requestProjectHref(API_KEYS_PAGE_PATH), "page");
-  }
-
-  return result;
 }
