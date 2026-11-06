@@ -19,7 +19,7 @@ import {
   ChevronsUpDownIcon,
   LogOutIcon,
   type LucideIcon,
-  MessageSquarePlusIcon,
+  MessageSquareIcon,
   MonitorIcon,
   MoonIcon,
   SunIcon,
@@ -40,17 +40,10 @@ import { userDisplayName } from "@/lib/user-display-name";
 
 // The sidebar footer: one profile row that carries the signed-in identity and
 // opens the account menu — account settings, the colour theme, API docs,
-// feedback, the API debug-log switch, and sign out. The caller names the side
-// the popover opens on, because it knows its own geometry: the desktop sidebar has room to the
-// right, while the mobile More sheet spans the viewport and only has room above
-// (Radix can only mirror a side, so it cannot recover from "right" on its own).
-export function SidebarUserMenu({
-  collapsed,
-  menuSide,
-}: {
-  collapsed: boolean;
-  menuSide: "right" | "top";
-}) {
+// feedback, the API debug-log switch, and sign out.
+const MENU_ITEM_CLASS = "gap-2.5 font-normal";
+
+export function SidebarUserMenu({ collapsed }: { collapsed: boolean }) {
   const t = useTranslations();
   const projectHref = useProjectHref();
   const { user, isLoaded } = useUser();
@@ -114,20 +107,20 @@ export function SidebarUserMenu({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        align={menuSide === "right" ? "end" : "start"}
-        side={menuSide}
+        align="start"
+        side="top"
         sideOffset={6}
-        className="w-72"
+        className="w-72 bg-surface-sunken"
       >
         <div className="flex items-center gap-2.5 px-2.5 py-2">
           <UserAvatar name={name} imageUrl={user.imageUrl} />
           <span className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate text-sm font-medium text-primary">{name}</span>
-            {email ? <span className="truncate text-xs text-tertiary">{email}</span> : null}
+            <span className="truncate text-field font-medium text-primary">{name}</span>
+            {email ? <span className="truncate text-meta text-secondary">{email}</span> : null}
           </span>
         </div>
         <DropdownMenuSeparator />
-        <DropdownMenuItem asChild className="gap-2.5">
+        <DropdownMenuItem asChild className={MENU_ITEM_CLASS}>
           <Link href={projectHref(DASHBOARD_ACCOUNT_HREF)}>
             <UserRoundIcon className="size-4 shrink-0 text-secondary" />
             {t("Shared.dashboardShell.accountSettings")}
@@ -135,18 +128,18 @@ export function SidebarUserMenu({
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <ThemeMenuItem />
-        <DropdownMenuItem asChild className="gap-2.5">
+        <FeedbackMenuItem />
+        <DropdownMenuItem asChild className={MENU_ITEM_CLASS}>
           <a href={docsHref} target="_blank" rel="noopener noreferrer">
             <BookOpenIcon className="size-4 shrink-0 text-secondary" />
             <span className="min-w-0 flex-1">{t("Shared.dashboardShell.apiDocs")}</span>
             <ArrowUpRightIcon className="size-4 shrink-0 text-tertiary" />
           </a>
         </DropdownMenuItem>
-        <FeedbackMenuItem />
         <NetworkDebugMenuItem />
         <DropdownMenuSeparator />
         <DropdownMenuItem
-          className="gap-2.5"
+          className={MENU_ITEM_CLASS}
           onSelect={() => {
             void signOut();
           }}
@@ -174,8 +167,8 @@ function FeedbackMenuItem() {
   }, []);
 
   return (
-    <DropdownMenuItem ref={ref} className="gap-2.5">
-      <MessageSquarePlusIcon className="size-4 shrink-0 text-secondary" />
+    <DropdownMenuItem ref={ref} className={MENU_ITEM_CLASS}>
+      <MessageSquareIcon className="size-4 shrink-0 text-secondary" />
       {t("Feedback.label")}
     </DropdownMenuItem>
   );
@@ -197,7 +190,7 @@ function ThemeMenuItem() {
 
   return (
     <DropdownMenuItem
-      className="gap-2.5"
+      className={MENU_ITEM_CLASS}
       onSelect={(event) => {
         event.preventDefault();
         const next =
@@ -207,7 +200,7 @@ function ThemeMenuItem() {
     >
       <SunMoonIcon className="size-4 shrink-0 text-secondary" />
       <span className="min-w-0 flex-1">{t("Shared.dashboardShell.theme")}</span>
-      <span className="flex shrink-0 items-center gap-0.5 rounded-lg bg-fill-subtle p-0.5">
+      <span className="flex shrink-0 items-center rounded-lg bg-fill-subtle">
         {THEME_PREFERENCES.map((option) => {
           const { icon: Icon, labelKey } = THEME_PREFERENCE_PRESENTATIONS[option];
           const isSelected = preference === option;
@@ -226,13 +219,13 @@ function ThemeMenuItem() {
                 setPreference(option);
               }}
               className={cn(
-                "flex size-6 items-center justify-center rounded-md transition-colors motion-reduce:transition-none",
+                "flex h-6 w-9 items-center justify-center rounded-md transition-colors motion-reduce:transition-none",
                 isSelected
-                  ? "bg-surface-raised text-primary shadow-sm ring-1 ring-border-default"
-                  : "text-tertiary hover:text-primary"
+                  ? "bg-fill text-primary ring-1 ring-border-default"
+                  : "text-secondary hover:text-primary"
               )}
             >
-              <Icon className="size-3.5" />
+              <Icon className="size-4" />
             </button>
           );
         })}
@@ -255,7 +248,7 @@ function NetworkDebugMenuItem() {
     <DropdownMenuItem
       role="menuitemcheckbox"
       aria-checked={enabled}
-      className="gap-2.5"
+      className={MENU_ITEM_CLASS}
       onSelect={(event) => {
         event.preventDefault();
         setEnabled(!enabled);
