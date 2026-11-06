@@ -138,6 +138,10 @@ plain Markdown. Every variant and closed helper remains in Copy page, `.md`
 and AI output. `EarnFlow` and `GuideCards` have equivalent Markdown too. Keep
 copyable source in MDX; do not depend on evaluated JSX to supply agent content.
 
+Earn guides say "choose a strategy" without recommending a provider. Filter
+examples by live availability and required capabilities, never provider name.
+Name a provider only to explain its specific behavior or show an API value.
+
 ### CSS classes (for custom elements within pages)
 
 | Class                       | Element                                                                                                                                                  |

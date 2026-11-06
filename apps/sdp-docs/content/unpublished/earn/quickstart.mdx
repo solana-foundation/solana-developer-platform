@@ -4,8 +4,8 @@ title: Quickstart
 description: Make your first sandbox deposit with the Earn API or Embedded Yield.
 ---
 
-Make a sandbox deposit into a Kamino devnet strategy. Choose your integration
-below; both paths keep signing in your wallet.
+Make a sandbox deposit into a strategy. Choose your integration below; both
+paths keep signing in your wallet.
 
 | Before you start | What you need |
 | --- | --- |
@@ -22,8 +22,9 @@ Use REST requests directly, with your own integration code.
 
 1. Copy the helper below into your server-only `earn-api.ts` file. Set
    `SDP_API_KEY` on your backend to your sandbox key.
-2. [Choose a strategy](/docs/earn/deposit-api#1-choose-a-strategy) and fund your
-   wallet with its deposit token.
+2. [Choose a strategy](/docs/earn/deposit-api#1-choose-a-strategy) with
+   `depositSlippage: null` for this example. Fund your wallet with its deposit
+   token.
 3. Replace `strategyId` and `ownerAddress` below with your strategy ID and wallet
    public key. `amount` is in deposit tokens.
 

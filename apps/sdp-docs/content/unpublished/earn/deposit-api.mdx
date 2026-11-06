@@ -4,8 +4,8 @@ title: Deposit with the API
 description: Follow each API request to build, sign, and track a sandbox deposit.
 ---
 
-Deposit into a Kamino devnet strategy, then see your position. This example uses
-the strategy's native token; your wallet pays the transaction fees.
+Deposit into a strategy, then see your position. This example uses the
+strategy's native token; your wallet pays the transaction fees.
 
 ## Before you start
 
@@ -33,7 +33,7 @@ curl --fail-with-body -sS "$SDP_API_URL/v1/earn/strategies?pageSize=100" \
   > strategies.json
 
 jq '.data.strategies[] | select(
-  .provider == "kamino" and .hostCluster == "devnet" and
+  .hostCluster == "devnet" and
   .fundable and .status == "active" and .depositSlippage == null
 ) | {id, name, depositMint: .depositMints[0]}' strategies.json
 ```
@@ -47,7 +47,6 @@ import { earnRequest } from "./earn-api";
 type Strategy = {
   id: string;
   name: string;
-  provider: string;
   hostCluster: string;
   fundable: boolean;
   status: string;
@@ -57,7 +56,7 @@ type Strategy = {
 const catalogue = await earnRequest("/v1/earn/strategies?pageSize=100");
 const strategies: Strategy[] = catalogue.data.strategies;
 console.table(strategies.filter((strategy) =>
-  strategy.provider === "kamino" && strategy.hostCluster === "devnet" &&
+  strategy.hostCluster === "devnet" &&
   strategy.fundable && strategy.status === "active" && strategy.depositSlippage === null
 ).map(({ id, name, depositMints }) => ({ id, name, depositMint: depositMints[0] })));
 ```
@@ -121,8 +120,8 @@ console.log({ sharesOut: preview.sharesOut, shareDecimals: preview.shareDecimals
 </Tab>
 </Tabs>
 
-This Kamino devnet strategy has `depositSlippage: null` and accepts no `minSharesOut`.
-For other strategies, follow their live
+This example selects strategies with `depositSlippage: null` and omits
+`minSharesOut`. For strategies that require a share floor, follow their live
 [quote-protection policy](/docs/earn/integration-details#quote-protection).
 
 </Tab>
