@@ -1,8 +1,5 @@
 import { SETTINGS_TABS } from "@/app/(session)/dashboard/[projectId]/settings/settings-tabs";
-import {
-  DASHBOARD_INTEGRATIONS_SUBNAV_HREFS,
-  DASHBOARD_SIDE_NAV_HREFS,
-} from "@/lib/dashboard-navigation-loading";
+import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 
 const PLAYGROUND_TAB = ["playground"];
 
@@ -13,8 +10,10 @@ const PLAYGROUND_TAB = ["playground"];
 const ROUTE_TABS = new Map<string, readonly string[]>([
   ["/dashboard/issuance", PLAYGROUND_TAB],
   ["/dashboard/payments", PLAYGROUND_TAB],
-  // The Integrations sidebar submenu links to the hub with a family tab.
-  [DASHBOARD_SIDE_NAV_HREFS.integrations, Object.keys(DASHBOARD_INTEGRATIONS_SUBNAV_HREFS)],
+  [
+    DASHBOARD_SIDE_NAV_HREFS.integrations,
+    ["custody", "rpc", "ramps", "compliance", "private_channels"],
+  ],
   // Organization settings serves General, Members and Security as ?tab= tabs of one page.
   ["/dashboard/settings", SETTINGS_TABS.map((settingsTab) => settingsTab.id)],
 ]);

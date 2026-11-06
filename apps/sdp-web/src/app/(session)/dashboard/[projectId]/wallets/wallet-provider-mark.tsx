@@ -78,7 +78,7 @@ const MARK_SIZES = {
   xs: { box: "h-6 w-6 rounded-md", image: "24px", icon: 14, padding: null },
   sm: { box: "h-7 w-7 rounded-md", image: "28px", icon: 16, padding: null },
   row: { box: "size-8 rounded-full", image: "32px", icon: 16, padding: "p-1.5" },
-  list: { box: "size-10 rounded-full", image: "40px", icon: 18, padding: "p-3" },
+  list: { box: "size-10 rounded-full", image: "24px", icon: 18, padding: "p-2" },
   md: { box: "h-12 w-12 rounded-2xl", image: "48px", icon: 22, padding: null },
   page: { box: "size-12 rounded-full", image: "48px", icon: 22, padding: "p-2.5" },
 } as const;

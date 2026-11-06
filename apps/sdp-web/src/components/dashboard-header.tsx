@@ -1,5 +1,7 @@
 "use client";
 
+import type { ProjectIntegrationFamily } from "@sdp/types/integrations";
+
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { SkeletonBlock } from "@sdp/ui/skeleton-block";
@@ -13,6 +15,7 @@ import {
   integrationProviderIdentity,
 } from "@/app/(session)/dashboard/[projectId]/integrations/integration-detail";
 import { IntegrationProviderMark } from "@/app/(session)/dashboard/[projectId]/integrations/integration-provider-mark";
+import { INTEGRATION_FAMILY_COPY_KEYS } from "@/app/(session)/dashboard/[projectId]/integrations/integration-sections";
 import { privateChannelsInstancePath } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { SETTINGS_TABS } from "@/app/(session)/dashboard/[projectId]/settings/settings-tabs";
 import {
@@ -627,6 +630,14 @@ function refreshFlowPageConfig(config: {
 /** Width of the overview and list pages: the design's 900px column. */
 const PAGE_WIDTH = "max-w-page";
 
+const ALL_INTEGRATION_FAMILIES: readonly ProjectIntegrationFamily[] = [
+  "custody",
+  "rpc",
+  "ramps",
+  "compliance",
+  "private_channels",
+];
+
 function actionPageConfig(config: {
   title: string;
   backHref: string;
@@ -1001,7 +1012,8 @@ const INTEGRATION_FAMILY_TITLE_KEYS = {
 
 function getIntegrationsPageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
+  integrationFamilies: readonly ProjectIntegrationFamily[]
 ): DashboardPageConfig | null {
   const providerPageId = /^\/dashboard\/integrations\/([^/]+)$/.exec(pathname)?.[1];
   if (providerPageId) {
@@ -1062,12 +1074,24 @@ function getIntegrationsPageConfig(
       },
     };
   }
-  if (pathname.startsWith("/dashboard/integrations")) {
+  if (pathname === "/dashboard/integrations") {
     return {
       title: t("Shared.dashboardShell.integrations"),
-      titlePosition: "left",
       contentWidthClass: PAGE_WIDTH,
+      headerTabs: {
+        tabs: [
+          { id: "all", label: t("Shared.integrations.tabAll") },
+          ...integrationFamilies.map((family) => ({
+            id: family,
+            label: t(INTEGRATION_FAMILY_COPY_KEYS[family].title),
+          })),
+        ],
+        hideOnMobile: false,
+      },
     };
+  }
+  if (pathname.startsWith("/dashboard/integrations")) {
+    return { title: t("Shared.dashboardShell.integrations"), contentWidthClass: PAGE_WIDTH };
   }
   return null;
 }
@@ -1272,7 +1296,8 @@ export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
   paymentsEnabled = true,
-  rampsEnabled = false
+  rampsEnabled = false,
+  integrationFamilies: readonly ProjectIntegrationFamily[] = ALL_INTEGRATION_FAMILIES
 ): DashboardPageConfig {
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
@@ -1339,7 +1364,7 @@ export function getDashboardPageConfig(
       },
     };
   }
-  const integrationsConfig = getIntegrationsPageConfig(pathname, t);
+  const integrationsConfig = getIntegrationsPageConfig(pathname, t, integrationFamilies);
   if (integrationsConfig) {
     return integrationsConfig;
   }

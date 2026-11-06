@@ -1,14 +1,23 @@
 "use client";
 
-import type { IntegrationState, ProjectIntegrations } from "@sdp/types/integrations";
+import type {
+  IntegrationState,
+  ProjectIntegrationFamily,
+  ProjectIntegrations,
+} from "@sdp/types/integrations";
+import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { InfoHint } from "@sdp/ui/info-hint";
+import { SearchInput } from "@sdp/ui/search-input";
 import { ChevronRightIcon, CircleCheckIcon } from "lucide-react";
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { DashboardHeaderTabsTrailing } from "@/components/dashboard-header-tabs";
 import { useTranslations } from "@/i18n/provider";
+import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
+  INTEGRATION_FAMILY_COPY_KEYS,
   type IntegrationRow,
   type IntegrationSection,
   integrationSections,
@@ -16,6 +25,14 @@ import {
 } from "./integration-sections";
 
 type Translate = ReturnType<typeof useTranslations>;
+
+// Mark, name, category, state, chevron: one grid so every row's columns line up.
+const ROW_COLUMNS =
+  "grid grid-cols-[44px_minmax(0,1fr)_auto_16px] items-center gap-x-3 md:grid-cols-[44px_minmax(0,1fr)_176px_160px_16px]";
+
+function isProjectIntegrationFamily(value: string): value is ProjectIntegrationFamily {
+  return Object.hasOwn(INTEGRATION_FAMILY_COPY_KEYS, value);
+}
 
 function StateLabel({ state, t }: { state: IntegrationState; t: Translate }) {
   switch (state.status) {
@@ -37,20 +54,13 @@ function StateLabel({ state, t }: { state: IntegrationState; t: Translate }) {
   }
 }
 
-function IntegrationRowItem({
-  row,
-  showCategory,
-  t,
-}: {
-  row: IntegrationRow;
-  showCategory: boolean;
-  t: Translate;
-}) {
+function IntegrationRowItem({ row, t }: { row: IntegrationRow; t: Translate }) {
   const href = useProjectHref();
   return (
     <li
       className={cn(
-        "group relative isolate flex items-center gap-4 py-4",
+        ROW_COLUMNS,
+        "group relative isolate py-3",
         row.href !== null &&
           "before:absolute before:inset-y-0 before:-inset-x-3 before:-z-10 before:rounded-lg before:bg-fill-subtle before:opacity-0 before:transition-opacity before:content-[''] hover:before:opacity-100 has-[:focus-visible]:before:opacity-100 has-[:focus-visible]:before:ring-2 has-[:focus-visible]:before:ring-primary motion-reduce:before:transition-none"
       )}
@@ -58,27 +68,24 @@ function IntegrationRowItem({
       data-integration-status={row.state.status}
     >
       {row.icon}
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        {/* Stretched link: the name anchors it and the overlay makes the whole row the target. */}
+      <div className="flex min-w-0 flex-col">
         {row.href === null ? (
-          <span className="truncate text-base font-medium text-primary">{row.label}</span>
+          <span className="truncate text-sm leading-5 font-medium text-primary">{row.label}</span>
         ) : (
           <Link
             href={href(row.href)}
-            className="truncate text-base font-medium text-primary after:absolute after:inset-y-0 after:-inset-x-3 after:content-[''] focus-visible:outline-none"
+            className="truncate text-sm leading-5 font-medium text-primary after:absolute after:inset-y-0 after:-inset-x-3 after:content-[''] focus-visible:outline-none"
           >
             {row.label}
           </Link>
         )}
-        <p className="truncate text-sm text-tertiary">{row.description}</p>
+        <p className="truncate text-xs leading-4 text-secondary">{row.description}</p>
       </div>
-      {showCategory ? (
-        <span className="hidden w-36 shrink-0 text-sm text-secondary md:block">{row.category}</span>
-      ) : null}
-      <span className="flex w-40 shrink-0 justify-end text-sm">
+      <span className="hidden truncate text-xs text-secondary md:block">{row.category}</span>
+      <span className="flex justify-end text-xs">
         <StateLabel state={row.state} t={t} />
       </span>
-      <span className="flex w-4 shrink-0 justify-end">
+      <span className="flex justify-end">
         {row.href === null ? null : (
           <ChevronRightIcon
             aria-hidden
@@ -113,7 +120,6 @@ function SectionSummary({ section, t }: { section: IntegrationSection; t: Transl
 }
 
 function IntegrationSectionBlock({ section, t }: { section: IntegrationSection; t: Translate }) {
-  const showCategory = section.rows.some((row) => row.category !== null);
   return (
     <section className="space-y-2" data-integration-section={section.family}>
       <div className="flex items-center justify-between gap-4">
@@ -125,22 +131,64 @@ function IntegrationSectionBlock({ section, t }: { section: IntegrationSection; 
       </div>
       <ul className="divide-y divide-border-subtle">
         {section.rows.map((row) => (
-          <IntegrationRowItem key={row.key} row={row} showCategory={showCategory} t={t} />
+          <IntegrationRowItem key={row.key} row={row} t={t} />
         ))}
       </ul>
     </section>
   );
 }
 
+function matchesQuery(row: IntegrationRow, query: string): boolean {
+  return row.label.toLowerCase().includes(query) || row.provider.toLowerCase().includes(query);
+}
+
 export function IntegrationsCatalog({ integrations }: { integrations: ProjectIntegrations }) {
   const t = useTranslations();
+  const urlTab = useDashboardTab();
+  const [query, setQuery] = useState("");
   const sections = useMemo(() => integrationSections(integrations, t), [integrations, t]);
 
+  // The header shows a tab for every family the deployment runs; one this
+  // project has no provider in still selects, and says so.
+  const tabFamily = urlTab !== null && isProjectIntegrationFamily(urlTab) ? urlTab : null;
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleSections = sections
+    .filter((section) => tabFamily === null || section.family === tabFamily)
+    .map((section) => ({
+      ...section,
+      rows: section.rows.filter((row) => matchesQuery(row, normalizedQuery)),
+    }))
+    .filter((section) => section.rows.length > 0);
+
   return (
-    <div className="w-full space-y-10">
-      {sections.map((section) => (
+    <div className="w-full space-y-10" data-integrations-catalog="true">
+      <DashboardHeaderTabsTrailing>
+        <div className="w-56 max-w-full">
+          <SearchInput
+            value={query}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+            placeholder={t("Shared.integrations.searchPlaceholder")}
+          />
+        </div>
+      </DashboardHeaderTabsTrailing>
+      {visibleSections.map((section) => (
         <IntegrationSectionBlock key={section.family} section={section} t={t} />
       ))}
+      {visibleSections.length === 0 && normalizedQuery.length > 0 ? (
+        <div className="py-10 text-center" data-integrations-empty="search">
+          <p className="text-base font-medium text-primary">
+            {t("Shared.integrations.emptyTitle")}
+          </p>
+          <Button variant="secondary" className="mt-4" onClick={() => setQuery("")}>
+            {t("Shared.integrations.clearSearch")}
+          </Button>
+        </div>
+      ) : null}
+      {visibleSections.length === 0 && normalizedQuery.length === 0 ? (
+        <p className="py-10 text-center text-sm text-tertiary" data-integrations-empty="family">
+          {t("Shared.integrations.familyEmpty")}
+        </p>
+      ) : null}
     </div>
   );
 }

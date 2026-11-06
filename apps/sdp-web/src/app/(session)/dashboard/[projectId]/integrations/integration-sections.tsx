@@ -12,6 +12,7 @@ import type { ReactNode } from "react";
 import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { getCustodyProviderEntry } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
+import type { DashboardFlags } from "@/flags/dashboard";
 import type { MessageKey } from "@/i18n/messages";
 import type { useTranslations } from "@/i18n/provider";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
@@ -44,7 +45,7 @@ export interface IntegrationSection {
   rows: IntegrationRow[];
 }
 
-const FAMILY_COPY_KEYS = {
+export const INTEGRATION_FAMILY_COPY_KEYS = {
   custody: {
     title: "Shared.integrations.custodyTitle",
     description: "Shared.integrations.custodyDescription",
@@ -86,10 +87,10 @@ function LogoMark({ src }: { src: string }) {
   return (
     <span
       aria-hidden
-      className="relative inline-flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border-subtle bg-[white] p-3"
+      className="relative inline-flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border-subtle bg-[white] p-2"
     >
       <span className="relative size-full">
-        <Image src={src} alt="" fill sizes="40px" className="object-contain" />
+        <Image src={src} alt="" fill sizes="24px" className="object-contain" />
       </span>
     </span>
   );
@@ -182,8 +183,21 @@ export function integrationSections(
 ): IntegrationSection[] {
   return integrations.families.map((family) => ({
     family: family.family,
-    title: t(FAMILY_COPY_KEYS[family.family].title),
-    description: t(FAMILY_COPY_KEYS[family.family].description),
+    title: t(INTEGRATION_FAMILY_COPY_KEYS[family.family].title),
+    description: t(INTEGRATION_FAMILY_COPY_KEYS[family.family].description),
     rows: familyRows(family, t),
   }));
+}
+
+/** The families this deployment runs, in the read's order; RPC runs everywhere. */
+export function integrationTabFamilies(
+  flags: Pick<DashboardFlags, "custody" | "ramps" | "compliance" | "privateChannels">
+): ProjectIntegrationFamily[] {
+  return [
+    ...(flags.custody ? (["custody"] as const) : []),
+    "rpc",
+    ...(flags.ramps ? (["ramps"] as const) : []),
+    ...(flags.compliance ? (["compliance"] as const) : []),
+    ...(flags.privateChannels ? (["private_channels"] as const) : []),
+  ];
 }

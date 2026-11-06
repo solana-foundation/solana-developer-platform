@@ -7,6 +7,7 @@ import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucid
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
+import { integrationTabFamilies } from "@/app/(session)/dashboard/[projectId]/integrations/integration-sections";
 import { isKnownCustodyProvider } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
 import {
@@ -436,7 +437,13 @@ export function DashboardShell({
   // The design's sidebar is 280px (17.5rem) including its rule.
   const sidebarExpandedWidth = 280;
   const sidebarCollapsedWidth = 64;
-  const pageConfig = getDashboardPageConfig(pathname, t, paymentsEnabled, rampsEnabled);
+  const pageConfig = getDashboardPageConfig(
+    pathname,
+    t,
+    paymentsEnabled,
+    rampsEnabled,
+    integrationTabFamilies(flags)
+  );
   const { favorites: walletFavorites } = useWalletFavorites();
   const walletFavoriteItems: SubNavItem[] = walletFavorites.map((favorite) => ({
     label: favorite.name,
