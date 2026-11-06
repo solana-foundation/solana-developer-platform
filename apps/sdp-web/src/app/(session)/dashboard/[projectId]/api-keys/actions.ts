@@ -50,9 +50,11 @@ function keyPath(keyId: string): string {
 }
 
 async function revalidateKeyPages(keyIds: readonly string[]) {
-  revalidatePath(await requestProjectHref(API_KEYS_PAGE_PATH), "page");
-  for (const keyId of keyIds) {
-    revalidatePath(await requestProjectHref(keyPath(keyId)), "page");
+  const hrefs = await Promise.all(
+    [API_KEYS_PAGE_PATH, ...keyIds.map(keyPath)].map((path) => requestProjectHref(path))
+  );
+  for (const href of hrefs) {
+    revalidatePath(href, "page");
   }
 }
 

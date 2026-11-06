@@ -34,12 +34,13 @@ export default async function ApiKeysPage() {
     throw error;
   }
 
+  const renderedAt = Date.now();
   return (
     <DashboardWorkspaceOverviewPanel className="flex flex-col gap-5">
       {canManageApiKeys ? null : (
         <Callout variant="neutral">{t("DashboardCustody.apiKeysViewOnly")}</Callout>
       )}
-      <ApiKeysList apiKeys={apiKeys} canManageApiKeys={canManageApiKeys} now={Date.now()} />
+      <ApiKeysList apiKeys={apiKeys} canManageApiKeys={canManageApiKeys} now={renderedAt} />
     </DashboardWorkspaceOverviewPanel>
   );
 }

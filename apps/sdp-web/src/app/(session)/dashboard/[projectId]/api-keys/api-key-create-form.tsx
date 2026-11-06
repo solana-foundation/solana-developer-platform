@@ -16,15 +16,15 @@ import { formatDate } from "@/lib/date-format";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { createApiKeyAction } from "./actions";
 import { buildEndpointWalletPayload, defaultWalletScopeForGrants } from "./api-key-authoring";
+import { ApiKeyExpiryField, ApiKeyField, ApiKeyWalletPicker } from "./api-key-form-parts";
+import { ApiKeyGrantPicker } from "./api-key-grant-picker";
 import {
   type ApiKeyExpiryChoice,
-  ApiKeyExpiryField,
-  ApiKeyField,
-  ApiKeyWalletPicker,
+  apiKeyEnvironmentLabel,
+  apiKeyReach,
   resolveExpiryChoice,
-} from "./api-key-form-parts";
-import { ApiKeyGrantPicker } from "./api-key-grant-picker";
-import { apiKeyEnvironmentLabel, apiKeyReach, walletCountLabel } from "./api-key-presentation";
+  walletCountLabel,
+} from "./api-key-presentation";
 
 /**
  * A new key on one page: its name, what it may do, which wallets it signs with and how long it

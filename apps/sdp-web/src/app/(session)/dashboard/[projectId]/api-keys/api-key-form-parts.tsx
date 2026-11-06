@@ -11,7 +11,11 @@ import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallet
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
 import { formatDateTime } from "@/lib/date-format";
-import { API_KEY_EXPIRY_DAYS, type ApiKeyExpiryDays, expiryFromDays } from "./api-key-presentation";
+import {
+  API_KEY_EXPIRY_DAYS,
+  type ApiKeyExpiryChoice,
+  resolveExpiryChoice,
+} from "./api-key-presentation";
 
 /** A form field's 13px label with an optional (i), 8px over its control. */
 export function ApiKeyField({
@@ -124,6 +128,7 @@ export function ApiKeyWalletPicker({
 }) {
   const t = useTranslations();
   const signable = wallets.filter((wallet) => wallet.isRuntimeExecutionAllowed).length;
+  const selectedWalletIds = new Set(walletIds);
   const scopes: { scope: ApiKeyWalletScope; title: string; trailing?: string }[] = [
     {
       scope: "all",
@@ -181,7 +186,7 @@ export function ApiKeyWalletPicker({
               <WalletCheckRow
                 key={wallet.id}
                 wallet={wallet}
-                checked={walletIds.includes(wallet.id)}
+                checked={selectedWalletIds.has(wallet.id)}
                 onToggle={() => toggle(wallet.id)}
               />
             ))}
@@ -197,9 +202,6 @@ export function ApiKeyWalletPicker({
   );
 }
 
-/** "keep" holds an edited key's current expiry; a number of days or null sets a new one. */
-export type ApiKeyExpiryChoice = "keep" | ApiKeyExpiryDays;
-
 function expiryChoiceValue(choice: ApiKeyExpiryChoice): string {
   return choice === null ? "never" : String(choice);
 }
@@ -208,15 +210,6 @@ function parseExpiryChoice(value: string | null): ApiKeyExpiryChoice {
   if (value === "keep") return "keep";
   if (value === "never") return null;
   return API_KEY_EXPIRY_DAYS.find((days) => days !== null && String(days) === value) ?? null;
-}
-
-export function resolveExpiryChoice(
-  choice: ApiKeyExpiryChoice,
-  current: string | null,
-  now: number
-): string | null {
-  if (choice === "keep") return current;
-  return choice === null ? null : expiryFromDays(choice, now);
 }
 
 /**

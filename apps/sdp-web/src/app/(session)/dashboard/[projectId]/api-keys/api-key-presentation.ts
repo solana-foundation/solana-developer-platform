@@ -204,3 +204,15 @@ export type ApiKeyExpiryDays = (typeof API_KEY_EXPIRY_DAYS)[number];
 export function expiryFromDays(days: number, now: number): string {
   return new Date(now + days * DAY_MS).toISOString();
 }
+
+/** "keep" holds an edited key's current expiry; a number of days or null sets a new one. */
+export type ApiKeyExpiryChoice = "keep" | ApiKeyExpiryDays;
+
+export function resolveExpiryChoice(
+  choice: ApiKeyExpiryChoice,
+  current: string | null,
+  now: number
+): string | null {
+  if (choice === "keep") return current;
+  return choice === null ? null : expiryFromDays(choice, now);
+}

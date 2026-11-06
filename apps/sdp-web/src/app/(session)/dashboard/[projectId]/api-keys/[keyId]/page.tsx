@@ -29,6 +29,7 @@ export default async function ApiKeyPage({ params }: { params: Promise<{ keyId: 
     notFound();
   }
 
+  const renderedAt = Date.now();
   return (
     <ApiKeyDetailView
       apiKey={apiKey}
@@ -39,7 +40,7 @@ export default async function ApiKeyPage({ params }: { params: Promise<{ keyId: 
         NEXT_PUBLIC_SDP_API_BASE_URL: process.env.NEXT_PUBLIC_SDP_API_BASE_URL,
         NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL,
       })}
-      now={Date.now()}
+      now={renderedAt}
     />
   );
 }

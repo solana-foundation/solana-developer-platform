@@ -20,11 +20,12 @@ export default async function NewApiKeyPage() {
 
   const client = await createSdpApiClient();
   const wallets = await fetchApiKeyAuthoringWallets(client);
+  const renderedAt = Date.now();
   return (
     <ApiKeyCreateForm
       wallets={wallets}
       offered={grantableActionsInChannel(isModuleInDeploymentReleaseChannel)}
-      now={Date.now()}
+      now={renderedAt}
     />
   );
 }

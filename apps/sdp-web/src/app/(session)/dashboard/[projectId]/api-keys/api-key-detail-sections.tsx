@@ -22,15 +22,13 @@ import { useProjectHref } from "@/lib/use-dashboard-project";
 import { type UpdateApiKeyInput, updateApiKeyAction } from "./actions";
 import { ApiKeyAccessMatrix } from "./api-key-access-matrix";
 import { buildEndpointWalletPayload } from "./api-key-authoring";
-import {
-  type ApiKeyExpiryChoice,
-  ApiKeyExpiryField,
-  ApiKeyField,
-  ApiKeyWalletPicker,
-  resolveExpiryChoice,
-} from "./api-key-form-parts";
+import { ApiKeyExpiryField, ApiKeyField, ApiKeyWalletPicker } from "./api-key-form-parts";
 import { ApiKeyGrantPicker } from "./api-key-grant-picker";
-import type { ApiKeyDetails } from "./api-key-presentation";
+import {
+  type ApiKeyDetails,
+  type ApiKeyExpiryChoice,
+  resolveExpiryChoice,
+} from "./api-key-presentation";
 
 /** Saves one section's fields, refreshes the record and closes the section's editor. */
 function useSectionSave(keyId: string, onSaved: () => void) {
@@ -231,10 +229,11 @@ export function ApiKeyWalletsSection({
   const [walletScope, setWalletScope] = useState<ApiKeyWalletScope>(apiKey.walletScope);
   const [walletIds, setWalletIds] = useState<string[]>(apiKey.walletIds);
   const section = useSectionSave(apiKey.id, () => setEditing(false));
+  const listedWalletIds = new Set(apiKey.walletIds);
   const signing =
     apiKey.walletScope === "all"
       ? wallets
-      : wallets.filter((wallet) => apiKey.walletIds.includes(wallet.id));
+      : wallets.filter((wallet) => listedWalletIds.has(wallet.id));
   const discard = () => {
     setWalletScope(apiKey.walletScope);
     setWalletIds(apiKey.walletIds);
@@ -303,7 +302,7 @@ export function ApiKeyDetailsSection({
   const [name, setName] = useState(apiKey.name);
   const [expiry, setExpiry] = useState<ApiKeyExpiryChoice>("keep");
   const [note, setNote] = useState(apiKey.description ?? "");
-  const [allowedIps, setAllowedIps] = useState((apiKey.allowedIps ?? []).join("\n"));
+  const [allowedIps, setAllowedIps] = useState(() => (apiKey.allowedIps ?? []).join("\n"));
   const section = useSectionSave(apiKey.id, () => setEditing(false));
   const discard = () => {
     setName(apiKey.name);
