@@ -35,6 +35,7 @@ import { registerCustodyPaths } from "./paths/custody";
 import { registerDvpPaths } from "./paths/dvp";
 import { registerEarnPaths, registerPublicEarnPaths } from "./paths/earn";
 import { registerHealthPaths } from "./paths/health";
+import { registerIntegrationPaths } from "./paths/integrations";
 import { registerIssuancePaths } from "./paths/issuance";
 import { registerMemberPaths } from "./paths/members";
 import { registerOnboardingPaths } from "./paths/onboarding";
@@ -236,6 +237,7 @@ function registerPublicPaths(registry: OpenAPIRegistry, publishEarn: boolean) {
     registerPublicEarnPaths(registry);
   }
   registerProjectPaths(registry, publishEarn);
+  registerIntegrationPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
   registerTransactionsPaths(registry);
@@ -253,6 +255,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerEarnPaths(registry);
   registerDvpPaths(registry);
   registerProjectPaths(registry, true);
+  registerIntegrationPaths(registry);
   registerProjectAdministrationPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
