@@ -38,7 +38,7 @@ export function LanguagePicker() {
           <LanguagesIcon className="h-4 w-4 shrink-0" strokeWidth={1.9} />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" side="bottom" sideOffset={8} className="w-64 p-2">
+      <DropdownMenuContent align="end" side="bottom" sideOffset={8} className="w-64">
         <DropdownMenuLabel className="px-2 py-1">
           {t("Shared.dashboardShell.chooseLanguage")}
         </DropdownMenuLabel>

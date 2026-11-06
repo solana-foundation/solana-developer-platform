@@ -32,7 +32,7 @@ A failed request returns an error status and this body. The health checks are th
 | `422` | The request is well formed but can't go ahead: its idempotency key was used for a different request, the transaction fee sponsor rejected the transaction, or the wallet's policy at its custody provider refused to sign it. | `IDEMPOTENCY_KEY_REUSED`, `SIGNING_REJECTED`, `CUSTODY_POLICY_REFUSED` |
 | `429` | Too many requests. See [Rate limits](/docs/reference/conventions/rate-limits). | `RATE_LIMITED` |
 | `500` | Something failed inside SDP. | `INTERNAL_ERROR` |
-| `502` | Solana RPC or a provider answered, but with something SDP couldn't use. | `SOLANA_RPC_ERROR`, `PROVIDER_RESPONSE_INVALID` |
+| `502` | Solana RPC or a provider answered, but with something SDP couldn't use, or the custody provider failed or timed out while signing. | `SOLANA_RPC_ERROR`, `PROVIDER_RESPONSE_INVALID`, `CUSTODY_ERROR` |
 | `503` | SDP, or a provider it depends on, is unavailable for now, or a provider isn't configured for the project's environment. | `SERVICE_UNAVAILABLE`, `PROVIDER_UNAVAILABLE`, `PROVIDER_NOT_CONFIGURED`, `RPC_UNAVAILABLE` |
 
 Each operation's page lists its statuses and shows a success example. The OpenAPI spec carries every response schema.
@@ -45,6 +45,7 @@ Each operation's page lists its statuses and shows a success example. The OpenAP
 - `409 IDEMPOTENCY_KEY_IN_FLIGHT` and `429`: wait for `Retry-After`, then retry with the same `Idempotency-Key`.
 - `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`: final for that key. Read the resource with `GET` to see whether the request ran, then send it again with a new key.
 - `503 RPC_UNAVAILABLE`: `details.reason` says why Solana RPC was unavailable. `upstream_unavailable` is temporary: wait for `Retry-After`, then retry as the `5xx` rule below says. `not_configured` and `cluster_mismatch` are SDP configuration problems that a retry won't fix. Quote `meta.requestId` when you report one.
+- `503 PROVIDER_NOT_CONFIGURED`: a provider the request needs, such as the custody provider that signs for the wallet, isn't configured for the project's environment. A retry won't fix it until that changes. Check the provider's configuration, or quote `meta.requestId` when you report it.
 - `5xx`: most routes store the error and return it again to a same-key retry. Read the resource with `GET` to see whether the request took effect, then retry with a new key. On the routes that move money, a same-key retry runs again and never acts twice.
 
 [Idempotency](/docs/developing-with-sdp/idempotency) covers what each retry returns.
