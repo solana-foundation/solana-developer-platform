@@ -1,6 +1,6 @@
 "use client";
 
-import { type Action, type ActionVerb, actionVerbOf, grantsCoverAction } from "@sdp/types/actions";
+import { type Action, actionVerbOf, grantsCoverAction } from "@sdp/types/actions";
 import { CheckIcon } from "lucide-react";
 import { useTranslations } from "@/i18n/provider";
 import { grantModuleRows, heldGrantsNotOffered } from "./api-key-authoring";
@@ -20,7 +20,7 @@ export function ApiKeyAccessMatrix({
 }) {
   const t = useTranslations();
   const rows = grantModuleRows([...offered, ...heldGrantsNotOffered(grants, offered)]);
-  const verbs = [...new Set(rows.flatMap((row) => row.actions.map(actionVerbOf)))] as ActionVerb[];
+  const verbs = [...new Set(rows.flatMap((row) => row.actions.map(actionVerbOf)))];
 
   return (
     <table className="w-full table-fixed text-body">

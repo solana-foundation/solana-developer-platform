@@ -40,19 +40,19 @@ export function ApiKeyField({
 }
 
 /** The visible radio or checkbox: a ring, filled to a thick ink ring (or a tick box) when on. */
-function ChoiceMark({ checked, shape }: { checked: boolean; shape: "radio" | "checkbox" }) {
+function ChoiceMark({ checked, control }: { checked: boolean; control: "radio" | "checkbox" }) {
   return (
     <span
       aria-hidden
       className={cn(
         "flex size-4 shrink-0 items-center justify-center border border-border-strong transition-[border-width] motion-reduce:transition-none",
-        shape === "radio" ? "rounded-full" : "rounded-[4px]",
+        control === "radio" ? "rounded-full" : "rounded-[4px]",
         checked &&
-          (shape === "radio" ? "border-[5px] border-primary" : "border-primary bg-primary"),
+          (control === "radio" ? "border-[5px] border-primary" : "border-primary bg-primary"),
         "peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary"
       )}
     >
-      {checked && shape === "checkbox" ? (
+      {checked && control === "checkbox" ? (
         <svg viewBox="0 0 12 12" className="size-3 text-on-primary" fill="none" aria-hidden>
           <path d="M2.5 6.2 5 8.5l4.5-5" stroke="currentColor" strokeWidth="1.6" />
         </svg>
@@ -85,7 +85,7 @@ function WalletCheckRow({
         onChange={onToggle}
         aria-label={t("DashboardCustody.apiKeySelectWallet", { wallet: name })}
       />
-      <ChoiceMark checked={checked} shape="checkbox" />
+      <ChoiceMark checked={checked} control="checkbox" />
       {wallet.provider ? <WalletProviderMark provider={wallet.provider} size="row" /> : null}
       <span className="min-w-0 flex-1">
         <span className="block truncate text-field text-primary">{name}</span>
@@ -166,7 +166,7 @@ export function ApiKeyWalletPicker({
               checked={walletScope === scope}
               onChange={() => onChange(scope, [...walletIds])}
             />
-            <ChoiceMark checked={walletScope === scope} shape="radio" />
+            <ChoiceMark checked={walletScope === scope} control="radio" />
             <span className="min-w-0 flex-1 text-field text-primary">{title}</span>
             {trailing ? (
               <span className="shrink-0 text-meta text-secondary">{trailing}</span>

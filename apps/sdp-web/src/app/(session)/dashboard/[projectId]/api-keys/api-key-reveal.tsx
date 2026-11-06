@@ -40,11 +40,7 @@ function useCopied(): [boolean, (text: string) => void] {
  * Holds the page while the secret is unsaved: closing the tab asks the browser's question, and
  * a link inside the dashboard asks ours, since the secret cannot be shown again.
  */
-function useLeaveGuard(active: boolean): {
-  pendingHref: string | null;
-  stay: () => void;
-  leave: () => void;
-} {
+function useLeaveGuard(active: boolean) {
   const router = useRouter();
   const [pendingHref, setPendingHref] = useState<string | null>(null);
 

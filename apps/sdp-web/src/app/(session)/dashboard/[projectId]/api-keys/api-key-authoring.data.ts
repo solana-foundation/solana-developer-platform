@@ -25,6 +25,7 @@ export async function fetchApiKeyDetails(
   if (!response.ok) {
     throw new Error(`Unable to load API key (${response.status})`);
   }
+  // SAFETY: a 2xx from GET /v1/api-keys/:id is the API's success envelope around the key's details.
   const body = (await response.json()) as { data?: ApiKeyDetails };
   return body.data ?? null;
 }
