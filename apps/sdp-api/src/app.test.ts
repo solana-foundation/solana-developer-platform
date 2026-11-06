@@ -518,8 +518,11 @@ describe("createApp onError", () => {
 
     const res = await app.request(SECRET_SIGNING_ERROR_PATH, {}, baseEnv);
 
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { message: string } };
+    expect(res.status).toBe(503);
+    const body = z
+      .object({ error: z.object({ code: z.string(), message: z.string() }) })
+      .parse(await res.json());
+    expect(body.error.code).toBe("PROVIDER_NOT_CONFIGURED");
     expect(body.error.message).toBe(
       "The signing provider is not configured. Check provider configuration and try again."
     );
@@ -568,11 +571,8 @@ function codesOf<Code extends string>(codes: Record<Code, true>): Code[] {
   return Object.keys(codes).filter((code): code is Code => Object.hasOwn(codes, code));
 }
 
-/**
- * The status an answer must carry: its code's own (`AppError`'s), a known exception, or none
- * checked.
- */
-type ExpectedStatus = "own" | "unchecked" | number;
+/** The status an answer must carry: its code's own (`AppError`'s), or none checked. */
+type ExpectedStatus = "own" | "unchecked";
 
 type HandledError = [label: string, thrown: () => Error, status: ExpectedStatus];
 
@@ -593,8 +593,7 @@ const HANDLED_ERRORS: HandledError[] = [
     (code): HandledError => [
       `SigningError ${code}`,
       () => new SigningError("test failure", code),
-      // The handler's long-standing 400, below the 503 the code itself carries.
-      code === "PROVIDER_NOT_CONFIGURED" ? 400 : "own",
+      "own",
     ]
   ),
   ...codesOf<FeePaymentErrorCode>({
@@ -701,8 +700,8 @@ describe("createApp onError error codes", () => {
       const { code } = errorCodeBody.parse(await res.json()).error;
       // ERROR_CODES is exactly what the OpenAPI error envelope lists (spec.test.ts).
       assert(isErrorCode(code), `${label} answered ${code}, which ERROR_CODES does not list`);
-      if (status !== "unchecked") {
-        expect(res.status).toBe(status === "own" ? new AppError(code).statusCode : status);
+      if (status === "own") {
+        expect(res.status).toBe(new AppError(code).statusCode);
       }
     }
   );

@@ -24,7 +24,6 @@ import { HTTPException } from "hono/http-exception";
 import { prettyJSON } from "hono/pretty-json";
 import { routePath } from "hono/route";
 import { secureHeaders } from "hono/secure-headers";
-import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { DatabaseUnavailableError } from "@/db/client";
 import {
   AppError,
@@ -130,23 +129,23 @@ const MAX_API_BODY_BYTES = 1024 * 1024;
 const MAX_PAY_BODY_BYTES = 4 * 1024;
 
 /**
- * What a custody signing failure that reaches the handler answers: an `ErrorCode`, never the
- * custody package's own code, at that code's status. `PROVIDER_NOT_CONFIGURED` keeps the 400 this
- * handler has always answered, below the 503 `ERROR_STATUS_CODES` gives it. The signer waist
- * (`admittedSigner`) turns a policy refusal into `CUSTODY_POLICY_REFUSED` naming the provider;
- * that row here covers one that arrives any other way.
+ * The `ErrorCode` a custody signing failure that reaches the handler answers, never the custody
+ * package's own code. It answers at that code's own status, so a signing error and an `AppError`
+ * with the same code never disagree. The signer waist (`admittedSigner`) turns a policy refusal
+ * into `CUSTODY_POLICY_REFUSED` naming the provider; that row here covers one that arrives any
+ * other way.
  */
-const SIGNING_ERROR_RESPONSES = {
-  PROVIDER_NOT_CONFIGURED: { status: 400, code: "PROVIDER_NOT_CONFIGURED" },
-  WALLET_NOT_FOUND: { status: 404, code: "NOT_FOUND" },
-  NOT_FOUND: { status: 404, code: "NOT_FOUND" },
-  INVALID_REQUEST: { status: 400, code: "BAD_REQUEST" },
-  PROVIDER_CREDENTIAL_INVALID: { status: 400, code: "BAD_REQUEST" },
-  ALREADY_INITIALIZED: { status: 409, code: "CONFLICT" },
-  CONFLICT: { status: 409, code: "CONFLICT" },
-  POLICY_REFUSED: { status: 422, code: "CUSTODY_POLICY_REFUSED" },
-  NETWORK_ERROR: { status: 502, code: "CUSTODY_ERROR" },
-} as const satisfies Record<SigningErrorCode, { status: ContentfulStatusCode; code: ErrorCode }>;
+const SIGNING_ERROR_CODES = {
+  PROVIDER_NOT_CONFIGURED: "PROVIDER_NOT_CONFIGURED",
+  WALLET_NOT_FOUND: "NOT_FOUND",
+  NOT_FOUND: "NOT_FOUND",
+  INVALID_REQUEST: "BAD_REQUEST",
+  PROVIDER_CREDENTIAL_INVALID: "BAD_REQUEST",
+  ALREADY_INITIALIZED: "CONFLICT",
+  CONFLICT: "CONFLICT",
+  POLICY_REFUSED: "CUSTODY_POLICY_REFUSED",
+  NETWORK_ERROR: "CUSTODY_ERROR",
+} as const satisfies Record<SigningErrorCode, ErrorCode>;
 
 function getSafeSigningErrorMessage(err: SigningError): string {
   switch (err.code) {
@@ -494,10 +493,13 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     if (sdkResponse !== null) return sdkResponse;
 
     if (err instanceof SigningError) {
-      const { status, code } = SIGNING_ERROR_RESPONSES[err.code];
+      const signingError = new AppError(
+        SIGNING_ERROR_CODES[err.code],
+        getSafeSigningErrorMessage(err)
+      );
       // The custody package's own code, which the response no longer names.
-      logVendorError("signing", err.code, status);
-      return errorResponse(c, status, { code, message: getSafeSigningErrorMessage(err) });
+      logVendorError("signing", err.code, signingError.statusCode);
+      return appErrorResponse(c, signingError);
     }
 
     if (err instanceof FeePaymentError) {

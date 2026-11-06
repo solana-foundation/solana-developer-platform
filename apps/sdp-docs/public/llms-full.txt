@@ -15750,6 +15750,10 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 
   Same fields as `400`.
 
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
 - **`503`** Service Unavailable
 
   Same fields as `400`.
@@ -16331,6 +16335,10 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -17790,6 +17798,14 @@ Create a custody-executed outbound transfer batch.
 
   Same fields as `400`.
 
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -18740,6 +18756,14 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -19801,6 +19825,10 @@ Creates an SDP-custody outbound recurring payment intent. Activation and collect
 
   Same fields as `400`.
 
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -20514,6 +20542,14 @@ Updates a recurring payment. Pending payments are edited directly. Active metada
 
   Same fields as `400`.
 
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -21205,6 +21241,14 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
   Same fields as `400`.
 
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -21541,6 +21585,14 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -22239,6 +22291,14 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
   Same fields as `400`.
 
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -22659,6 +22719,14 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`502`** Bad Gateway
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -23254,6 +23322,10 @@ Create payment request payload.
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -24224,6 +24296,10 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `paymen
 
   Same fields as `400`.
 
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -24516,6 +24592,10 @@ Creates an SDP subscription plan record. Prepare the on-chain Solana subscriptio
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -25077,6 +25157,10 @@ Optional overrides used when preparing the Solana subscriptions create-plan tran
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -26448,6 +26532,10 @@ Inputs for preparing the subscriber-signed Solana subscription authorization tra
 
   Same fields as `400`.
 
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -26735,6 +26823,10 @@ Empty request body for preparing subscriber-signed subscription lifecycle transa
 
   Same fields as `400`.
 
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
 ## Example request
 
 ```bash tab="cURL"
@@ -27009,6 +27101,10 @@ Empty request body for preparing subscriber-signed subscription lifecycle transa
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -27400,6 +27496,10 @@ Inputs for preparing the collector-signed Solana subscriptions transfer transact
   Same fields as `400`.
 
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -39524,6 +39624,7 @@ Each operation's page lists its statuses and shows a success example. The OpenAP
 - `409 IDEMPOTENCY_KEY_IN_FLIGHT` and `429`: wait for `Retry-After`, then retry with the same `Idempotency-Key`.
 - `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`: final for that key. Read the resource with `GET` to see whether the request ran, then send it again with a new key.
 - `503 RPC_UNAVAILABLE`: `details.reason` says why Solana RPC was unavailable. `upstream_unavailable` is temporary: wait for `Retry-After`, then retry as the `5xx` rule below says. `not_configured` and `cluster_mismatch` are SDP configuration problems that a retry won't fix. Quote `meta.requestId` when you report one.
+- `503 PROVIDER_NOT_CONFIGURED`: a provider the request needs, such as the custody provider that signs for the wallet, isn't configured for the project's environment. A retry won't fix it until that changes. Check the provider's configuration, or quote `meta.requestId` when you report it.
 - `5xx`: most routes store the error and return it again to a same-key retry. Read the resource with `GET` to see whether the request took effect, then retry with a new key. On the routes that move money, a same-key retry runs again and never acts twice.
 
 [Idempotency](/docs/developing-with-sdp/idempotency) covers what each retry returns.
