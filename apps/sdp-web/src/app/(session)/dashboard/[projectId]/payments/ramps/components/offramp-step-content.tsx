@@ -6,9 +6,7 @@ import type { OfframpWizard } from "@/app/(session)/dashboard/[projectId]/paymen
 import { getRampTransferState } from "@/app/(session)/dashboard/[projectId]/payments/ramps/ramp-transfer-state";
 import { walletComboboxOptions } from "@/app/(session)/dashboard/[projectId]/payments/ramps/wallet-options";
 import { useTranslations } from "@/i18n/provider";
-import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
-import { DemoProviderCheckout } from "./demo-provider-checkout";
 import { MemoStepContent } from "./memo-step-content";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { OfframpOutcome, OfframpSendError } from "./offramp-final-step";
@@ -16,7 +14,6 @@ import { RampCompleteScreen } from "./ramp-complete-screen";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampQuoteError } from "./ramp-quote-error";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
-import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
 import { WalletAssetBreakdown } from "./wallet-asset-breakdown";
 
@@ -128,7 +125,6 @@ function OfframpRequirementsStep({ wizard }: { wizard: OfframpWizard }) {
 
 function OfframpCompleteStep({ wizard }: { wizard: OfframpWizard }) {
   const t = useTranslations();
-  const demo = usePaymentsDemo();
   const { quote, transferStatus, quoteCreationError, quoteCreationRetrying, retryQuoteCreation } =
     wizard;
 
@@ -152,22 +148,6 @@ function OfframpCompleteStep({ wizard }: { wizard: OfframpWizard }) {
   // A sale that ended another way has nothing left to do in the provider's window.
   if (transferStatus && getRampTransferState(transferStatus.status).terminal) {
     return <OfframpOutcome wizard={wizard} />;
-  }
-
-  // A provider's own page or widget can't open on sample data; the demo stands in for it.
-  if (demo) {
-    return (
-      <div className="space-y-6">
-        <DemoProviderCheckout
-          direction="offramp"
-          provider={quote.provider}
-          transfer={transferStatus}
-        />
-        <div className="border-t border-border-default pt-5">
-          <RampStatusPanel direction="offramp" transfer={transferStatus} />
-        </div>
-      </div>
-    );
   }
 
   if (quote.deliveryMode === "hosted") {

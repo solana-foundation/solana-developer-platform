@@ -42,20 +42,35 @@ test("multiselect default values are a subset of options", () => {
   }
 });
 
-test("Kora mainnet fields show only once a mainnet RPC endpoint is set", () => {
-  const koraMainnetFields = FIELDS.filter((f) => f.key.startsWith("KORA_MAINNET_"));
-  const kora = { ...defaultValues(), FEE_PAYMENT_PROVIDER: "kora" };
-  const withMainnetRpc = {
-    ...kora,
-    SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL: "https://mainnet.rpc.example.test",
-  };
+test("each cluster's Kora fields show only once that cluster is chosen", () => {
+  const visibleKoraKeys = (clusters: string) =>
+    FIELDS.filter(
+      (f) =>
+        f.key.startsWith("KORA_") &&
+        isFieldVisible(f, { ...defaultValues(), FEE_SPONSOR_CLUSTERS: clusters })
+    ).map((f) => f.key);
 
-  assert.deepEqual(
-    koraMainnetFields.map((f) => isFieldVisible(f, kora)),
-    [false, false]
-  );
-  assert.deepEqual(
-    koraMainnetFields.map((f) => isFieldVisible(f, withMainnetRpc)),
-    [true, true]
-  );
+  assert.deepEqual(visibleKoraKeys(""), []);
+  assert.deepEqual(visibleKoraKeys("devnet"), [
+    "KORA_DEVNET_URL",
+    "KORA_DEVNET_RPC_URL",
+    "KORA_DEVNET_API_KEY",
+    "KORA_DEVNET_CLOUD_RUN_AUDIENCE",
+  ]);
+  assert.deepEqual(visibleKoraKeys("mainnet"), [
+    "KORA_MAINNET_URL",
+    "KORA_MAINNET_RPC_URL",
+    "KORA_MAINNET_API_KEY",
+    "KORA_MAINNET_CLOUD_RUN_AUDIENCE",
+  ]);
+});
+
+test("a chosen cluster requires both its Kora URL and its RPC URL, and nothing else", () => {
+  for (const cluster of ["DEVNET", "MAINNET"]) {
+    const required = FIELDS.filter((f) => f.key.startsWith(`KORA_${cluster}_`) && f.required);
+    assert.deepEqual(
+      required.map((f) => f.key),
+      [`KORA_${cluster}_URL`, `KORA_${cluster}_RPC_URL`]
+    );
+  }
 });

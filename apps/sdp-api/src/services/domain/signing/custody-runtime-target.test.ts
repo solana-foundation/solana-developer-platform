@@ -94,7 +94,6 @@ describe("CustodyRuntimeTargets", () => {
     appId: env.PRIVY_APP_ID,
     appSecret: env.PRIVY_APP_SECRET,
     apiBaseUrl: env.PRIVY_API_BASE_URL,
-    requestDelayMs: env.PRIVY_REQUEST_DELAY_MS,
   };
 
   it("leaves managed Fireblocks wallets on the existing signing path", async () => {
@@ -119,7 +118,6 @@ describe("CustodyRuntimeTargets", () => {
     env.PRIVY_APP_ID = undefined;
     env.PRIVY_APP_SECRET = undefined;
     env.PRIVY_API_BASE_URL = "https://privy.runtime-targets.test/v1";
-    env.PRIVY_REQUEST_DELAY_MS = "250";
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(
@@ -139,7 +137,6 @@ describe("CustodyRuntimeTargets", () => {
     env.PRIVY_APP_ID = original.appId;
     env.PRIVY_APP_SECRET = original.appSecret;
     env.PRIVY_API_BASE_URL = original.apiBaseUrl;
-    env.PRIVY_REQUEST_DELAY_MS = original.requestDelayMs;
   });
 
   it("admits an exact active Config wallet without constructing a signer", async () => {
@@ -1210,9 +1207,9 @@ describe("CustodyRuntimeTargets", () => {
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
   });
 
-  it("passes the Connection request delay, else the environment delay, to the Privy signer", async () => {
+  it("passes the Connection request delay to the Privy signer", async () => {
     const connection = await seedConnection(DEFAULT_CONNECTION);
-    await getDb(env).execute("UPDATE custody_connections SET request_delay_ms = 0 WHERE id = ?", [
+    await getDb(env).execute("UPDATE custody_connections SET request_delay_ms = 175 WHERE id = ?", [
       connection.id,
     ]);
     mockStoredCredentialRead();
@@ -1228,22 +1225,7 @@ describe("CustodyRuntimeTargets", () => {
         getConfigAdapter
       )
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
-    expect(lastPrivyAdapter(getPrivySigner).requestDelayMs).toBe(0);
-
-    await getDb(env).execute(
-      "UPDATE custody_connections SET request_delay_ms = NULL WHERE id = ?",
-      [connection.id]
-    );
-    await expect(
-      new CustodyRuntimeTargets(getDb(env), env, new Map()).getTransactionSignerForWalletRecord(
-        ORGANIZATION_ID,
-        PROJECT_ID,
-        `cwlt_${connection.id}`,
-        "payments.transfer",
-        getConfigAdapter
-      )
-    ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
-    expect(lastPrivyAdapter(getPrivySigner).requestDelayMs).toBe(250);
+    expect(lastPrivyAdapter(getPrivySigner).requestDelayMs).toBe(175);
   });
 
   it.each([

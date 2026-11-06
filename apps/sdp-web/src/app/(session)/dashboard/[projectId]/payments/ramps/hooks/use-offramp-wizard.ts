@@ -36,8 +36,6 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
-import { demoRampPairs } from "@/lib/payments-demo/demo-ramp-assets";
-import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { offrampPairs } from "@/lib/ramps";
 import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./use-ramp-wizard";
 
@@ -79,7 +77,6 @@ function getOfframpRequirementsStep(t: Translate): RampWizardStep<OfframpStepId>
 
 export function useOfframpWizard(props: UseRampWizardProps) {
   const { sdpEnvironment } = useDashboardWorkspace();
-  const demo = usePaymentsDemo();
   const t = useTranslations();
   const locale = useLocale();
   const {
@@ -96,7 +93,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
   );
 
   const wizard = useRampWizard<OfframpStepId>(props, {
-    pairs: demoRampPairs(offrampPairs(sdpEnvironment, props.enabledRampProviders), demo),
+    pairs: offrampPairs(sdpEnvironment, props.enabledRampProviders),
     steps: getOfframpSteps(t),
     stepSchemas: { WALLET: sourceWalletSchema, WITHDRAW: withdrawAmountSchema },
     quoteStepId: "MEMO",

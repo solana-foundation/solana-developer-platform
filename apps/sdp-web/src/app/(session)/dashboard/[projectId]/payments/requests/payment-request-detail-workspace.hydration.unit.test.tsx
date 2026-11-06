@@ -12,7 +12,6 @@ import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
-import { PaymentsDemoProvider } from "@/lib/payments-demo/payments-demo-context";
 import { resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { PaymentRequestDetailWorkspace } from "./payment-request-detail-workspace";
 import * as requestsData from "./payment-requests-page.data";
@@ -48,9 +47,7 @@ function page() {
   return (
     <SWRConfig value={{ ...DASHBOARD_SWR_CONFIG, provider: () => new Map() }}>
       <I18nProvider locale="en" messages={getMessages("en")}>
-        <PaymentsDemoProvider value={false}>
-          <PaymentRequestDetailWorkspace request={request} publicToken={null} walletName={null} />
-        </PaymentsDemoProvider>
+        <PaymentRequestDetailWorkspace request={request} publicToken={null} walletName={null} />
       </I18nProvider>
     </SWRConfig>
   );

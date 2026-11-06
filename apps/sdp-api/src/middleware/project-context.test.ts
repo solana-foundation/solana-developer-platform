@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { AppError } from "@/lib/errors";
+import { appErrorResponse } from "@/lib/response";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
@@ -38,6 +39,26 @@ function buildApp() {
       return c.json(error.toResponse(), error.statusCode as 400 | 401 | 403);
     }
     // Like the real app: anything unexpected is a 500.
+    return c.json({ error: { code: "INTERNAL_ERROR" } }, 500);
+  });
+  return app;
+}
+
+function buildPathApp() {
+  const app = new Hono<{ Bindings: Env }>();
+  app.use("*", kvStoreMiddleware());
+  app.use("*", unifiedAuthMiddleware());
+  app.use("/projects/:projectId", projectContextMiddleware({ projectIdParam: "projectId" }));
+  app.get("/projects/:projectId", (c) =>
+    c.json({
+      projectId: c.get("projectId"),
+      projectEnvironment: c.get("projectEnvironment"),
+    })
+  );
+  app.onError((error, c) => {
+    if (error instanceof AppError) {
+      return appErrorResponse(c, error);
+    }
     return c.json({ error: { code: "INTERNAL_ERROR" } }, 500);
   });
   return app;
@@ -288,6 +309,68 @@ describe("projectContextMiddleware", () => {
         env
       );
       expect(res.status).toBe(200);
+    });
+  });
+
+  describe("path project scope", () => {
+    it("resolves a project the Clerk user is a member of", async () => {
+      const res = await buildPathApp().request(
+        `/projects/${TEST_PROJECT.id}`,
+        { headers: clerkHeadersWithoutProject(actor.token) },
+        env
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        projectId: TEST_PROJECT.id,
+        projectEnvironment: "sandbox",
+      });
+    });
+
+    it("hides a project in the organization the user has no membership row for", async () => {
+      await getDb(env)
+        .prepare("DELETE FROM project_members WHERE project_id = ? AND user_id = ?")
+        .bind(TEST_PROJECT.id, TEST_USER.id)
+        .run();
+      const res = await buildPathApp().request(
+        `/projects/${TEST_PROJECT.id}`,
+        { headers: clerkHeadersWithoutProject(actor.token) },
+        env
+      );
+      expect(res.status).toBe(404);
+    });
+
+    it("hides an archived project", async () => {
+      await getDb(env)
+        .prepare("UPDATE projects SET status = 'archived' WHERE id = ?")
+        .bind(TEST_PROJECT.id)
+        .run();
+      const res = await buildPathApp().request(
+        `/projects/${TEST_PROJECT.id}`,
+        { headers: clerkHeadersWithoutProject(actor.token) },
+        env
+      );
+      expect(res.status).toBe(404);
+    });
+
+    it("hides another organization's project", async () => {
+      await getDb(env)
+        .prepare(
+          "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+        )
+        .bind("org_test_path_other", "Other Organization", "test-path-other")
+        .run();
+      await seedDefaultProjects(getDb(env), {
+        organizationId: "org_test_path_other",
+        createdBy: TEST_USER.id,
+        members: [TEST_USER.id],
+        ids: { sandbox: "prj_test_path_other", production: "prj_test_path_other_production" },
+      });
+      const res = await buildPathApp().request(
+        "/projects/prj_test_path_other",
+        { headers: clerkHeadersWithoutProject(actor.token) },
+        env
+      );
+      expect(res.status).toBe(404);
     });
   });
 });

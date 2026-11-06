@@ -1061,7 +1061,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create on-ramp quote",
     operationId: "createPaymentOnrampQuote",
     description:
-      "Creates a provider-specific on-ramp quote. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.",
+      "Creates an on-ramp quote with the provider you name, and the transfer that follows it. `quote.deliveryMode` says how to hand the customer to the provider: `hosted` returns a provider-hosted URL, and `session_widget` a provider session to mount.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -1086,7 +1086,8 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Simulate sandbox transfer",
     operationId: "simulateSandboxTransfer",
     description:
-      "Sandbox-only. Simulates the fiat pay-in for an on-ramp transfer awaiting payment, at most once per transfer.",
+      "Sandbox-only, and unavailable for every ramp provider SDP integrates: none offers a simulated pay-in, so a transfer that passes the checks below gets `400`. To complete a sandbox on-ramp, pay in the provider's own hosted page or session with its test payment details.\n\n" +
+      "After the action check (`403`) and body validation (`400`), the checks run in order: a project outside Sandbox gets `403`, an unknown transfer `404`, a transfer that isn't an on-ramp `400`, one that isn't `awaiting_payment` `409`, and one whose provider the project can't use `403` or `503`.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -1096,8 +1097,12 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       },
     },
     responses: {
-      204: { description: "Sandbox pay-in requested from the provider" },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 409, 500, 503]),
+      400: {
+        description:
+          "An invalid body, a transfer that isn't an on-ramp, or one that passes every check: no ramp provider SDP integrates offers a simulated pay-in.",
+        content: jsonContent(errorResponseSchema),
+      },
     },
   });
 }

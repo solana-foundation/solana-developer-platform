@@ -8,10 +8,8 @@ import {
   MOVEMENT_POLL_INTERVAL_MS,
   MOVEMENT_READ_PATHS,
   resetMovementWatchesForTests,
-  setTabShowsDemo,
 } from "./dashboard-fetch";
 import { resetIdempotencyKeyStoresForTests, setIdempotencyKeyScope } from "./idempotency-key-store";
-import { TAB_DEMO_HEADER_NAME } from "./payments-demo/demo-cookie";
 
 function noContentFetchMock() {
   return vi.fn(
@@ -631,27 +629,6 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  // Greptile (#2252): a live submit must never join a demo request of the same
-  // body, or it would receive the demo's canned answer.
-  it("keeps demo and live submits of the same body apart", async () => {
-    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
-    const fetchMock = statusFetchMock(201, 201);
-    vi.stubGlobal("fetch", fetchMock);
-
-    setTabShowsDemo(true);
-    const demo = submit();
-    setTabShowsDemo(false);
-    const live = submit();
-    await Promise.all([demo, live]);
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const demoHeaders = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
-    const liveHeaders = new Headers(fetchMock.mock.calls[1]?.[1]?.headers);
-    expect(demoHeaders.get(TAB_DEMO_HEADER_NAME)).toBe("1");
-    expect(liveHeaders.get(TAB_DEMO_HEADER_NAME)).toBeNull();
-    expect(keyOfCall(fetchMock, 0)).not.toBe(keyOfCall(fetchMock, 1));
-  });
-
   it("gives a different action its own key", async () => {
     openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const fetchMock = statusFetchMock(502, 502);
@@ -683,26 +660,20 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
 
   // They fire as the user types; keyed, each would leave an unanswered key
   // behind that never expires.
-  it("leaves read-like POSTs (estimates, simulations, other quotes) unkeyed", async () => {
+  it("leaves read-like POSTs (estimates, other quotes) unkeyed", async () => {
     openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments`);
-    const fetchMock = statusFetchMock(200, 200, 200, 200);
+    const fetchMock = statusFetchMock(200, 200, 200);
     vi.stubGlobal("fetch", fetchMock);
 
     for (const path of [
       "/api/dashboard/payments/transfers/batch/estimate",
       "/api/dashboard/payments/ramps/offramp/estimate?draft=1",
-      "/api/dashboard/payments/ramps/sandbox/simulate",
       "/api/test/quote",
     ]) {
       await dashboardRequest(path, { method: "POST", body: "{}" });
     }
 
-    expect([0, 1, 2, 3].map((index) => keyOfCall(fetchMock, index))).toEqual([
-      null,
-      null,
-      null,
-      null,
-    ]);
+    expect([0, 1, 2].map((index) => keyOfCall(fetchMock, index))).toEqual([null, null, null]);
   });
 
   // APE-689: a ramp quote creates the transfer (and a Stripe session), so the

@@ -275,20 +275,20 @@ describe("summarizeProviderConnections", () => {
     isRuntimeExecutionAllowed: false,
   });
 
-  it("pauses signing only when every active connection is paused", () => {
+  it("pauses signing only when no active connection can sign", () => {
     expect(
       summarizeProviderConnections({
         connections: [paused("conn-a"), paused("conn-b")],
         complete: true,
-      }).signingPaused
-    ).toBe(true);
+      })
+    ).toEqual({ signingPaused: true, signingCount: 0, complete: true });
 
     expect(
       summarizeProviderConnections({
-        connections: [paused("conn-a"), connection("conn-live")],
+        connections: [paused("conn-a"), connection("conn-live"), connection("conn-live-2")],
         complete: true,
-      }).signingPaused
-    ).toBe(false);
+      })
+    ).toEqual({ signingPaused: false, signingCount: 2, complete: true });
   });
 
   it("ignores connections that are not active", () => {
@@ -300,7 +300,7 @@ describe("summarizeProviderConnections", () => {
       complete: true,
     });
 
-    expect(summary).toEqual({ signingPaused: false, complete: true });
+    expect(summary).toEqual({ signingPaused: false, signingCount: 0, complete: true });
   });
 
   it("carries the incompleteness through, so callers can stay quiet", () => {

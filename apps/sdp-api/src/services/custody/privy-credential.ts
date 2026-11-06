@@ -1,7 +1,15 @@
 import { hashString } from "@sdp/payments/hash";
+import { z } from "zod";
+import { badRequest } from "@/lib/errors";
 import type { Env } from "@/types/env";
 
 const PRIVY_CHECK_TIMEOUT_MS = 10_000;
+const PRIVY_INVALID_CREDENTIALS_CODE = "missing_or_invalid_privy_app_id";
+const privyErrorBodySchema = z.object({ code: z.string() });
+const PRIVY_CREDENTIALS_REJECTED_MESSAGE =
+  "The provider rejected these credentials. Check the credential fields, then connect again.";
+const PRIVY_CREDENTIALS_UNCONFIRMED_MESSAGE =
+  "Privy did not confirm these credentials, so nothing was saved. Try again.";
 
 export interface PrivyCredentialAuthentication {
   appId: string;
@@ -30,11 +38,31 @@ export async function checkPrivyCredential(
       signal: AbortSignal.timeout(PRIVY_CHECK_TIMEOUT_MS),
     });
     if (response.status === 401) return "failed";
+    // Privy answers a wrong secret or an unknown app ID with this 400, never with 401.
+    if (response.status === 400) {
+      const body = privyErrorBodySchema.safeParse(await response.json());
+      return body.success && body.data.code === PRIVY_INVALID_CREDENTIALS_CODE
+        ? "failed"
+        : "retry_unknown";
+    }
     if (response.status !== 200) return "retry_unknown";
     const body = await response.json().catch(() => null);
     return isWalletListResponse(body) ? "success" : "retry_unknown";
   } catch {
     return "retry_unknown";
+  }
+}
+
+export async function assertPrivyCredentialAccepted(
+  env: Pick<Env, "PRIVY_API_BASE_URL">,
+  credential: PrivyCredentialAuthentication
+): Promise<void> {
+  const result = await checkPrivyCredential(env, credential);
+  if (result === "failed") {
+    throw badRequest(PRIVY_CREDENTIALS_REJECTED_MESSAGE, { reason: "invalid_credentials" });
+  }
+  if (result === "retry_unknown") {
+    throw badRequest(PRIVY_CREDENTIALS_UNCONFIRMED_MESSAGE, { reason: "provider_unconfirmed" });
   }
 }
 

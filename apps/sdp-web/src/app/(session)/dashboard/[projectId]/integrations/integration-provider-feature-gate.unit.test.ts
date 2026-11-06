@@ -25,7 +25,6 @@ vi.mock("@/flags/release-channel", () => ({
   },
 }));
 vi.mock("@/flags/ramps", () => ({ getOfferedRampProviders: mocks.rampProviders }));
-vi.mock("@/flags", () => ({ paymentsDemoMode: async () => false }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/lib/provider-availability.server", () => ({
   fetchProjectProviderAvailability: mocks.fetchProjectProviderAvailability,
@@ -39,7 +38,7 @@ vi.mock("@/lib/sdp-api", async (importOriginal) => ({
   requestMemberRole: mocks.requestMemberRole,
 }));
 
-import IntegrationDetailPage from "./[provider]/page";
+import IntegrationDetailPage from "./[provider]/(detail)/page";
 
 describe("integration provider route feature gates", () => {
   beforeEach(() => {

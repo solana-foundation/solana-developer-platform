@@ -318,6 +318,7 @@ describe("BYOK Privy outside the release channel", () => {
 
   it("replays an identical earlier submission and refuses a new key", async () => {
     custodyReleaseChannel.outOfChannelMode = null;
+    providerFetch.mockResolvedValueOnce(Response.json({ data: [] }));
     const first = await submit("byok-out-replay");
     expect(first.status).toBe(201);
     const firstBody = (await first.json()) as { data: Record<string, unknown> };
@@ -336,7 +337,7 @@ describe("BYOK Privy outside the release channel", () => {
       error: CHANNEL_REFUSAL,
       meta: { requestId: expect.any(String) },
     });
-    expect(providerFetch).not.toHaveBeenCalled();
+    expect(providerFetch).toHaveBeenCalledOnce();
     expect(await domainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
   });
 

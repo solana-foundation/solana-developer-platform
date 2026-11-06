@@ -33,8 +33,6 @@ import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
 import { isMovementInFlight } from "@/lib/idempotency";
-import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
-import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useZodForm } from "@/lib/use-zod-form";
 import { useFireblocksPaymentAdvisory } from "./use-fireblocks-payment-advisory";
@@ -292,12 +290,11 @@ export function useOnchainSendWizard({
   const cluster = CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment];
   const steps = getOnchainSendSteps(t);
   const [stepIndex, setStepIndex] = useState(0);
-  const demo = usePaymentsDemo();
   const { values: fields, setField } = useZodForm(onchainSendSchema, {
     accountId: "",
     walletId: "",
     asset: "",
-    amount: demo ? DEMO_PREFILL_AMOUNTS.send : "",
+    amount: "",
     memo: "",
   });
   const [addAccountOpen, setAddAccountOpen] = useState(false);

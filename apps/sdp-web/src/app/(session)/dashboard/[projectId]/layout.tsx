@@ -1,4 +1,4 @@
-import { cookies, headers } from "next/headers";
+import { headers } from "next/headers";
 import type { ReactNode } from "react";
 import { DashboardScopeLoadingScreen } from "@/components/dashboard-loading-screen";
 import { DashboardShell } from "@/components/dashboard-shell";
@@ -9,7 +9,6 @@ import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { parseDashboardPathname, projectHref } from "@/lib/dashboard-project-path";
 import { resolveProjectFromList } from "@/lib/dashboard-project-selection";
-import { PAYMENTS_DEMO_COOKIE_NAME } from "@/lib/payments-demo/demo-cookie";
 import { loadQuickStartStatus } from "@/lib/quick-start-server";
 import { listSdpProjects, requestMemberRole } from "@/lib/sdp-api";
 import { getSdpAuth } from "@/lib/sdp-auth";
@@ -36,13 +35,12 @@ export default async function ProjectLayout({
   children: ReactNode;
   params: Promise<{ projectId: string }>;
 }) {
-  const [{ projectId }, projects, { orgId, userId }, flags, cookieStore, initialQuickStartStatus] =
+  const [{ projectId }, projects, { orgId, userId }, flags, initialQuickStartStatus] =
     await Promise.all([
       params,
       listSdpProjects(),
       getSdpAuth(),
       getDashboardFlags(),
-      cookies(),
       loadQuickStartStatus(),
     ]);
   if (!orgId || !userId) {
@@ -62,14 +60,7 @@ export default async function ProjectLayout({
         projects={projects}
       >
         <NetworkDebugProvider>
-          <DashboardShell
-            flags={flags}
-            paymentsDemo={{
-              demoProjectId: cookieStore.get(PAYMENTS_DEMO_COOKIE_NAME)?.value ?? null,
-            }}
-          >
-            {children}
-          </DashboardShell>
+          <DashboardShell flags={flags}>{children}</DashboardShell>
         </NetworkDebugProvider>
       </DashboardWorkspaceProvider>
     );

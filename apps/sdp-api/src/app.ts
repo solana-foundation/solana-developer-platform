@@ -416,8 +416,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/onboarding", onboarding);
   v1.route("/payments", payments);
   v1.route("/transactions", transactions);
-  // A module outside the release channel answers with the shared refusal before its
-  // own feature gate, which then speaks only for a deployment that turned the flag off.
+  // The release channel alone decides Earn and DvP; a module outside it gets the shared refusal.
   v1.use("/earn/*", requireModule("earn"));
   v1.route("/earn", earn);
   v1.use("/dvp/*", requireModule("dvp"));
