@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import { after, before, describe, it } from "node:test";
 import { CodeBlockTabsList, CodeBlockTabsTrigger } from "fumadocs-ui/components/codeblock";
-import { SearchParamsContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime.js";
 import { createElement as h, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -38,25 +37,6 @@ function copyCount(html: string): number {
 
 function ServerCode(props: { "data-language": string; className: string; children?: ReactNode }) {
   return h(components.CodeExample, props);
-}
-
-function queriedIntegration(search: string): { html: string; activePanel?: string } {
-  const html = renderToStaticMarkup(
-    h(
-      SearchParamsContext.Provider,
-      { value: new URLSearchParams(search) },
-      h(
-        components.DocsTabs,
-        { items: ["Earn API", "Embedded Yield"], queryParam: "integration" },
-        h(components.DocsTab, { value: "Earn API" }, h("h2", null, "API step")),
-        h(components.DocsTab, { value: "Embedded Yield" }, h("h2", null, "Embedded step"))
-      )
-    )
-  );
-  const activePanel = html
-    .match(/<div[^>]*role="tabpanel"[^>]*>/g)
-    ?.find((panel) => panel.includes('data-state="active"'));
-  return { html, activePanel };
 }
 
 describe("shared docs code examples", () => {
@@ -184,23 +164,6 @@ describe("shared docs code examples", () => {
     assert.equal(copyCount(html), 4);
     for (const body of ["curl first", "curl second", "await first()", "await second()"]) {
       assert.ok(html.includes(body));
-    }
-  });
-
-  it("selects a queried workflow while keeping both paths available for hashes and search", () => {
-    const embedded = queriedIntegration("integration=embedded-yield");
-    assert.ok(embedded.activePanel?.includes("-content-embedded-yield"));
-    assert.match(embedded.html, /API step/);
-    assert.match(embedded.html, /Embedded step/);
-    assert.doesNotMatch(embedded.html, /queryParam=/);
-
-    const api = queriedIntegration("integration=earn-api");
-    assert.ok(api.activePanel?.includes("-content-earn-api"));
-  });
-
-  it("uses the first workflow for missing, empty, or invalid query values", () => {
-    for (const search of ["", "integration=", "integration=unknown"]) {
-      assert.ok(queriedIntegration(search).activePanel?.includes("-content-earn-api"));
     }
   });
 });

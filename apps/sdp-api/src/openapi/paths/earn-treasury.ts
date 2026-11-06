@@ -113,15 +113,16 @@ export function registerEarnTreasuryPaths(
     "get",
     "movements",
     "listEarnMovements",
-    "List all scoped Earn movements",
+    "List all movements",
     envelope({ movements: z.array(earnMovementSchema), ...pageFields }),
     {
       query: requests.earnMovementsQuerySchema,
       description:
-        "Returns one keyset page of recorded custody-wallet and provider-program movements, " +
-        "newest first. Amounts use each row's denomination; do not sum different tokens or " +
-        "USD together. External-wallet movements use their own per-owner endpoint. This " +
-        "history remains available when a provider is disabled.",
+        "Lists recorded custody-wallet and provider-program movements, newest " +
+        "first, one page at a time. Amounts use each row's denomination, so " +
+        "never sum different tokens or mix them with USD. Customer-wallet " +
+        "movements have their own per-wallet endpoint. History stays available " +
+        "after a provider is disabled.",
     }
   );
   route(
@@ -161,7 +162,7 @@ export function registerEarnTreasuryPaths(
     "get",
     "vault-deposits/{movementId}",
     "getEarnVaultDeposit",
-    "Read one custody deposit",
+    "Get a custody deposit",
     depositRecord,
     {
       params: requests.earnVaultDepositParamsSchema,
@@ -176,7 +177,7 @@ export function registerEarnTreasuryPaths(
     "get",
     "vault-positions",
     "listEarnVaultPositions",
-    "List live custody positions",
+    "List custody positions",
     envelope({
       positions: z.array(earnVaultPositionSchema),
       balanceReadContext: earnBalanceReadContextSchema.optional(),
@@ -229,16 +230,17 @@ export function registerEarnTreasuryPaths(
     "get",
     "vault-withdrawals/{movementId}",
     "getEarnVaultWithdrawal",
-    "Read one custody withdrawal",
+    "Get a custody withdrawal",
     withdrawal,
     {
       params: requests.earnVaultWithdrawalParamsSchema,
       description:
-        "Returns one recorded custody withdrawal and refreshes its chain observation when " +
-        "available. Atomic withdrawals may show Done at confirmed; provider-order " +
-        "withdrawals remain pending until authenticated provider completion. shares is the " +
-        "requested share quantity, not a deposit-token payout; the movement feed reports " +
-        "tokenAmount once a finalized payout has been observed.",
+        "Gets one recorded custody withdrawal and refreshes its onchain status " +
+        "when it can. An atomic withdrawal can show as done at `confirmed`; a " +
+        "provider-order withdrawal stays pending until the provider completes " +
+        "it. `shares` is the requested share quantity, not the payout; the " +
+        "movements feed reports `tokenAmount` once SDP observes a finalized " +
+        "payout.",
     }
   );
   route(
@@ -260,7 +262,7 @@ export function registerEarnTreasuryPaths(
     "post",
     "vault-withdrawal-options",
     "getEarnVaultWithdrawalOptions",
-    "Discover custody withdrawal routes",
+    "List custody withdrawal options",
     earnVaultWithdrawalOptionsResponse,
     {
       body: requests.earnVaultWithdrawalOptionsSchema,
@@ -274,7 +276,7 @@ export function registerEarnTreasuryPaths(
     "post",
     "vault-queued-withdrawal-previews",
     "createEarnVaultQueuedWithdrawalPreview",
-    "Preview an asynchronous custody withdrawal",
+    "Preview a custody withdrawal request",
     earnVaultQueuedWithdrawalPreviewResponse,
     {
       body: requests.earnVaultQueuedWithdrawalPreviewSchema,
@@ -288,7 +290,7 @@ export function registerEarnTreasuryPaths(
     "post",
     "vault-withdrawal-requests",
     "createEarnVaultWithdrawalRequest",
-    "Request an asynchronous custody withdrawal",
+    "Create a custody withdrawal request",
     earnExternalWalletWithdrawalRequestResponse,
     {
       body: z
@@ -317,16 +319,17 @@ export function registerEarnTreasuryPaths(
     {
       query: requests.earnVaultWithdrawalRequestsQuerySchema,
       description:
-        "Returns one keyset page of asynchronous withdrawal requests for authorized custody " +
-        "positions. Restore open requests with settled=false and page until hasMore is false. " +
-        "closedOrUnknown remains open until provider-authenticated evidence resolves it.",
+        "Lists withdrawal requests for the custody positions your key can " +
+        "access, one page at a time. Restore open requests with `settled=false` " +
+        "and page until `hasMore` is false. A `closedOrUnknown` request stays " +
+        "open until provider evidence resolves it.",
     }
   );
   route(
     "get",
     "vault-withdrawal-requests/{withdrawalRequestId}",
     "getEarnVaultWithdrawalRequest",
-    "Read a custody withdrawal request",
+    "Get a custody withdrawal request",
     earnExternalWalletWithdrawalRequestResponse,
     {
       params: requests.earnVaultWithdrawalRequestParamsSchema,
@@ -340,7 +343,7 @@ export function registerEarnTreasuryPaths(
     "post",
     "vault-withdrawal-requests/{withdrawalRequestId}/cancel",
     "cancelEarnVaultWithdrawalRequest",
-    "Recover a cancelable withdrawal request",
+    "Cancel a custody withdrawal request",
     earnExternalWalletWithdrawalRequestResponse,
     {
       params: requests.earnVaultWithdrawalRequestParamsSchema,
@@ -358,7 +361,7 @@ export function registerEarnTreasuryPaths(
     "get",
     "programs",
     "listEarnPrograms",
-    "List provider-managed programs",
+    "List programs",
     envelope({ programs: z.array(earnProgramSchema), ...listFields }),
     {
       query: requests.earnProgramsListQuerySchema,
@@ -368,7 +371,7 @@ export function registerEarnTreasuryPaths(
         "silently dropped. Use the provider filter to isolate one provider.",
     }
   );
-  route("post", "programs", "createEarnProgram", "Create a provider-managed program", program, {
+  route("post", "programs", "createEarnProgram", "Create a program", program, {
     body: requests.earnProgramCreateSchema,
     idempotency: "either",
     created: true,
@@ -378,20 +381,13 @@ export function registerEarnTreasuryPaths(
       "currently requires one allocation at 100 percent. Returns 201 for a new program and " +
       "200 for an idempotent replay.",
   });
-  route(
-    "get",
-    "programs/{programId}",
-    "getEarnProgram",
-    "Read a provider-managed program",
-    program,
-    {
-      params: requests.earnProgramParamsSchema,
-      description:
-        "Reads a linked program's balances, allocations and yield directly from its " +
-        "provider. The program remains readable when new deposits are disabled, provided " +
-        "the provider capability and credentials remain available.",
-    }
-  );
+  route("get", "programs/{programId}", "getEarnProgram", "Get a program", program, {
+    params: requests.earnProgramParamsSchema,
+    description:
+      "Reads a linked program's balances, allocations and yield directly from its " +
+      "provider. The program remains readable when new deposits are disabled, provided " +
+      "the provider capability and credentials remain available.",
+  });
   route(
     "put",
     "programs/{programId}",
@@ -429,7 +425,7 @@ export function registerEarnTreasuryPaths(
     "post",
     "programs/{programId}/withdrawal-preview",
     "previewEarnProgramWithdrawal",
-    "Preview a program withdrawal or read liquidity",
+    "Preview a program withdrawal",
     envelope({ preview: earnProgramWithdrawalPreviewSchema }),
     {
       params: requests.earnProgramParamsSchema,
@@ -444,7 +440,7 @@ export function registerEarnTreasuryPaths(
     "post",
     "programs/{programId}/withdrawals",
     "createEarnProgramWithdrawal",
-    "Withdraw from a provider-managed program",
+    "Withdraw from a program",
     programWithdrawal,
     {
       params: requests.earnProgramParamsSchema,
@@ -462,7 +458,7 @@ export function registerEarnTreasuryPaths(
     "get",
     "programs/{programId}/withdrawals",
     "listEarnProgramWithdrawals",
-    "List recorded program withdrawals",
+    "List program withdrawals",
     envelope({ withdrawals: z.array(earnProgramWithdrawalRecordSchema), ...listFields }),
     {
       params: requests.earnProgramParamsSchema,
@@ -477,7 +473,7 @@ export function registerEarnTreasuryPaths(
     "get",
     "programs/{programId}/withdrawals/{withdrawalRef}",
     "getEarnProgramWithdrawal",
-    "Read a program withdrawal",
+    "Get a program withdrawal",
     programWithdrawal,
     {
       params: requests.earnProgramWithdrawalParamsSchema,

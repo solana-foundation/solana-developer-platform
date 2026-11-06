@@ -1,6 +1,6 @@
 ---
 module: earn
-title: Reconcile custody vault shares against recorded positions
+title: Reconcile custody shares
 description: "Report-only comparison of each scoped custody wallet's on-chain share balances against the recorded claim set, both directions: share balances of catalogued vaults with no recorded position (for example, shares acquired by signing outside SDP), and recorded open positions whose wallet holds none of their shares."
 icon: method:GET
 apiReference: true
@@ -32,7 +32,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
     - **`unrecordedHoldings`** · `object[]` · required
 
-      Share balances the custody wallet holds for catalogued vaults with no recorded open position behind them (for example, shares acquired by signing outside SDP).
+      Share balances the custody wallet holds for cataloged vaults with no recorded open position behind them, such as shares acquired by signing outside SDP.
 
       - **`custodyWalletId`** · `string` · required · example `cwlt_example`
 
@@ -40,13 +40,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       - **`provider`** · `string` · required · example `kamino`
 
-      - **`strategyId`** · `string` · required · example `earn_strategy_example`
+      - **`strategyId`** · `string` · required · example `earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e`
 
       - **`strategyName`** · `string` · required · example `USDC Prime Vault`
 
       - **`vaultAddress`** · `string` · required
 
-        The catalogued vault the held share mint attributes to.
+        The cataloged vault the held share mint belongs to.
 
       - **`shareMint`** · `string` · required
 
@@ -60,13 +60,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       - **`ambiguousAttribution`** · `boolean` · required
 
-        True when more than one catalogued vault identity claims this share mint, so the attribution is the best candidate rather than the only one.
+        True when more than one cataloged vault claims this share mint, so the match is the best candidate rather than the only one.
 
     - **`unbackedPositions`** · `object[]` · required
 
       Recorded open positions whose wallet holds none of their shares. Positions with an unsettled movement are excluded: the ledger already explains that disagreement. So is a position provably backed by the intermediate token its cancelled operator redemption left in place of its shares; one whose backing the report cannot decide carries `ambiguousBacking`. Positions with an open queued withdrawal request are listed in `queuedWithdrawalPositions` instead.
 
-      - **`positionId`** · `string` · required · example `earn_position_example`
+      - **`positionId`** · `string` · required · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
 
       - **`custodyWalletId`** · `string` · required · example `cwlt_example`
 
@@ -88,7 +88,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       Recorded open positions whose wallet holds none of their shares while queued withdrawal requests are open. The requests escrowed or burned shares ahead of the payout, but only the shares they cover, so these positions are listed with their requests rather than judged. A position provably backed by its cancelled operator redemption's intermediate token is omitted from both lists.
 
-      - **`positionId`** · `string` · required · example `earn_position_example`
+      - **`positionId`** · `string` · required · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
 
       - **`custodyWalletId`** · `string` · required · example `cwlt_example`
 
@@ -205,7 +205,7 @@ r = requests.get("https://api.solana.com/v1/earn/vault-share-reconciliation",
         "custodyWalletId": "cwlt_example",
         "walletAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
         "provider": "kamino",
-        "strategyId": "earn_strategy_example",
+        "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
         "strategyName": "USDC Prime Vault",
         "vaultAddress": "11111111111111111111111111111111",
         "shareMint": "example",
@@ -217,7 +217,7 @@ r = requests.get("https://api.solana.com/v1/earn/vault-share-reconciliation",
     ],
     "unbackedPositions": [
       {
-        "positionId": "earn_position_example",
+        "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
         "custodyWalletId": "cwlt_example",
         "walletAddress": "11111111111111111111111111111111",
         "provider": "kamino",
@@ -229,7 +229,7 @@ r = requests.get("https://api.solana.com/v1/earn/vault-share-reconciliation",
     ],
     "queuedWithdrawalPositions": [
       {
-        "positionId": "earn_position_example",
+        "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
         "custodyWalletId": "cwlt_example",
         "walletAddress": "11111111111111111111111111111111",
         "provider": "veda",
@@ -238,7 +238,7 @@ r = requests.get("https://api.solana.com/v1/earn/vault-share-reconciliation",
         "label": "example",
         "ambiguousBacking": false,
         "withdrawalRequestIds": [
-          "earn_vault_withdrawal_request_example"
+          "earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9"
         ]
       }
     ],

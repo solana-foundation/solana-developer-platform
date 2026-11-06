@@ -2262,57 +2262,6 @@ a.rounded-lg.border.p-4 > p.truncate {
   display: none;
 }
 
-/* Integration choices switch the guide itself, without framing its code twice. */
-.sdp-docs-shell .launch-guide-paths {
-  overflow: visible;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
-.sdp-docs-shell .launch-guide-paths > [role="tablist"] {
-  align-self: flex-start;
-  max-width: 100%;
-  overflow: visible;
-  gap: 4px;
-  border: 0;
-  border-radius: var(--corner-control);
-  padding: 4px;
-  background: var(--wash);
-}
-
-.sdp-docs-shell .launch-guide-paths > [role="tablist"] > [role="tab"] {
-  min-height: var(--control-height-md);
-  justify-content: center;
-  border: 0;
-  border-radius: var(--corner-control-inner);
-  padding: 6px 14px;
-  color: var(--ink-secondary);
-  font-weight: 500;
-}
-
-.sdp-docs-shell .launch-guide-paths > [role="tablist"] > [role="tab"]:hover {
-  color: var(--ink);
-}
-
-.sdp-docs-shell .launch-guide-paths > [role="tablist"] > [role="tab"][data-state="active"] {
-  background: var(--chip);
-  box-shadow: var(--chip-ring);
-  color: var(--ink);
-}
-
-.sdp-docs-shell .launch-guide-paths > [role="tablist"] > [role="tab"]:focus-visible {
-  outline: 2px solid var(--ink);
-  outline-offset: 2px;
-}
-
-.sdp-docs-shell .launch-guide-paths > [role="tabpanel"] {
-  border: 0;
-  border-radius: 0;
-  padding: 24px 0 0;
-  background: transparent;
-}
-
 /* ── Tab panels: white card on beige background (matches dashboard cards). Scoped to the page,
    so a tab panel in a portaled popover (the Agent setup menu) keeps its own surface. A panel
    holding only a code block (```lang tab="…"```) is not a card: the tab card around it is the
@@ -2325,7 +2274,7 @@ a.rounded-lg.border.p-4 > p.truncate {
   margin-bottom: 0;
 }
 
-.sdp-docs-shell :not(.launch-guide-paths) > [role="tabpanel"]:not(:has(> figure.shiki:only-child)) {
+.sdp-docs-shell :not([role="tablist"]) > [role="tabpanel"]:not(:has(> figure.shiki:only-child)) {
   background-color: var(--color-fd-card);
   color: var(--color-fd-card-foreground);
   border: 1px solid var(--color-fd-border);

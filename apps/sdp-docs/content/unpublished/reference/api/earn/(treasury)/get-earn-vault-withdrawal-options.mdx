@@ -1,6 +1,6 @@
 ---
 module: earn
-title: Discover custody withdrawal routes
+title: List custody withdrawal options
 description: Discovers atomic, provider-order, solver-queue and operator-redemption routes from live provider state.
 icon: method:POST
 apiReference: true
@@ -40,19 +40,19 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
     - **`instant`** · `boolean` · required
 
-      Whether an atomic withdrawal is independently available.
+      Whether the withdrawal endpoints build an instant withdrawal for this position. Never true together with `providerOrder`.
 
     - **`providerOrder`** · `boolean` · required
 
-      Whether a provider-managed delayed order is independently available.
+      Whether the withdrawal endpoints build a provider order that pays out later. Never true together with `instant`.
 
     - **`queued`** · `boolean` · required
 
-      Whether the cancellable on-chain queue is currently available. Never infer this from liquidityTerm alone.
+      Whether a solver queue accepts requests now. Never infer it from `liquidityTerm`.
 
     - **`withdrawAuthority`** · `string | null` · required
 
-      The vault's configured withdrawal authority, or null without a queue.
+      The withdrawal authority the queue's vault reports, or null without a queue. Informational: no request takes it.
 
     - **`queueState`** · `string | null` · required
 
@@ -72,7 +72,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       - **`secondsToMaturity`** · `integer` · required · min 0 · example `86400`
 
-        Delay after request creation before a solver may fulfil it.
+        Seconds after the request is created, by the cluster clock, before a solver may fulfill it.
 
       - **`minimumSecondsToDeadline`** · `integer` · required · min 0 · example `3600`
 
@@ -94,7 +94,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
     - **`parRedemption`** · `object | null` · required
 
-      Live issuer/operator redemption terms. Null when this strategy has no operator-completed par route.
+      Live operator redemption terms. Null when this strategy offers no operator redemption.
 
       - **`intermediateMint`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
 
@@ -106,7 +106,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       - **`minimumShares`** · `string | null` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `1`
 
-        Smallest share-sourced operator-redemption request, in position-share units. Null while the provider's rate is unavailable, which also blocks share-sourced requests.
+        Smallest operator redemption request funded by shares, in position-share units. Null while the provider's rate is unavailable, which also blocks share-funded requests.
 
       - **`minimumIntermediateAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `0.000001`
 

@@ -1,7 +1,7 @@
 ---
 module: earn
-title: Get one external-wallet movement
-description: Returns a recorded movement and refreshes its chain status when available.
+title: Get a movement
+description: Gets one deposit or withdrawal and refreshes its onchain status when it can.
 icon: method:GET
 apiReference: true
 ---
@@ -10,13 +10,15 @@ apiReference: true
 
 <ApiEndpoint method="GET" path="/v1/earn/external-wallet/movements/{movementId}" />
 
-Use it to recover a submit whose response was lost. When the chain read fails, the last durable status is returned and background reconciliation continues. Atomic movements may show Done at `confirmed`; keep tracking `finalized` or `failed` for terminal state. For `settlement: provider_order`, chain confirmation is not payout: wait for authenticated provider fulfillment.
+Use it to track a movement after submit, or to recover a submit whose response was lost. If the chain read fails, you get the last recorded status while SDP keeps reconciling in the background. An atomic movement can show as done at `confirmed`, but only `finalized` and `failed` are final. For `settlement: provider_order`, chain confirmation is not payout: the provider still has to complete the order.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
 ## Path parameters
 
-- **`movementId`** · `string` · required · min length 1 · max length 128
+- **`movementId`** · `string` · required · min length 1 · max length 128 · example `earn_movement_a6aed3f5-4f89-4dc6-9d4b-0864021bd80d`
+
+  The `movementId` a submit returned.
 
 ## Headers
 
@@ -34,9 +36,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       One recorded external-wallet vault movement.
 
-      - **`movementId`** · `string` · required · example `earn_movement_example`
+      - **`movementId`** · `string` · required · example `earn_movement_a6aed3f5-4f89-4dc6-9d4b-0864021bd80d`
 
-      - **`positionId`** · `string` · required · example `earn_position_example`
+      - **`positionId`** · `string` · required · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
 
       - **`provider`** · `string` · required · example `kamino`
 
@@ -46,19 +48,19 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       - **`status`** · `string` · required · one of `requested`, `submitted`, `confirmed`, `finalized`, `failed`
 
-        Ledger vocabulary. `requested` means SDP recorded the signed transaction but has not yet confirmed it reached the network. `confirmed` is optimistic and can still be dropped by a fork; only `finalized` and `failed` are terminal.
+        The movement's status. `requested` means SDP recorded the signed transaction but has not yet seen it on the network. `confirmed` is optimistic and can still be rolled back; only `finalized` and `failed` are final.
 
       - **`settlement`** · `string` · required · one of `atomic`, `provider_order`
 
-        Atomic transfers may show Done at confirmed while SDP tracks finality. Provider orders remain pending until fulfillment; chain confirmation alone is not payout. Older servers may omit this field; treat absent settlement semantics as unknown.
+        How the movement settles. `atomic` completes in one transaction, so you may show it as done at `confirmed` while SDP tracks finality. `provider_order` pays out later through the provider, so chain confirmation alone is not payout: the movement stays `confirmed` until the provider completes it, and only `finalized` means it is done.
 
       - **`signature`** · `string` · required
 
         The transaction signature, for explorers.
 
-      - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+      - **`ownerAddress`** · `string` · required · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
 
-        The external wallet: the customer's own Solana address. It signs and owns the shares; SDP holds no key for it. It also pays the network fee unless an authenticated build names a `feePayer`. The pattern is necessary but not sufficient — the string must additionally decode to a 32-byte public key, which no pattern can express, so a well-shaped base58 string that does not decode still answers 400.
+        The customer's wallet address.
 
       - **`amount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
 
@@ -70,7 +72,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       - **`tokenMint`** · `string` · required · example `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
 
-        The position's deposit-token mint. Render `tokenAmount` in these units; `amount`/`denomination` is the on-chain quantity (shares on a withdrawal).
+        The position's deposit-token mint. Show `tokenAmount` in these units; `amount` and `denomination` carry the onchain quantity, which is shares on a withdrawal.
 
       - **`tokenAmount`** · `string | null` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
 
@@ -161,12 +163,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/earn/external-wallet/movements/movement_example' \
+curl 'https://api.solana.com/v1/earn/external-wallet/movements/earn_movement_a6aed3f5-4f89-4dc6-9d4b-0864021bd80d' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/movements/movement_example", {
+const res = await fetch("https://api.solana.com/v1/earn/external-wallet/movements/earn_movement_a6aed3f5-4f89-4dc6-9d4b-0864021bd80d", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -177,7 +179,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/movement
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/earn/external-wallet/movements/movement_example",
+r = requests.get("https://api.solana.com/v1/earn/external-wallet/movements/earn_movement_a6aed3f5-4f89-4dc6-9d4b-0864021bd80d",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -187,23 +189,23 @@ r = requests.get("https://api.solana.com/v1/earn/external-wallet/movements/movem
 {
   "data": {
     "movement": {
-      "movementId": "earn_movement_example",
-      "positionId": "earn_position_example",
+      "movementId": "earn_movement_a6aed3f5-4f89-4dc6-9d4b-0864021bd80d",
+      "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
       "provider": "kamino",
-      "providerReference": "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+      "providerReference": "C7N2fqV2GvhFghDf5PJSwstyjedjLNCY1cm2Ak7TeU83",
       "direction": "deposit",
-      "status": "requested",
       "settlement": "atomic",
-      "signature": "example",
+      "signature": "3dhkSPLiQZQPXL96fWzMdWJtdbtAffkBKXw2xhsYbV3VNSnYrVAcdx1czsnLsE1ou4SvLecGdSYe4QpAuZdfjJAf",
       "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
       "amount": "25",
       "denomination": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
       "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+      "failureReason": null,
+      "createdAt": "2026-11-06T17:57:30.817Z",
+      "status": "finalized",
       "tokenAmount": "25",
-      "failureReason": "example",
-      "createdAt": "2025-01-01T00:00:00.000Z",
-      "confirmedAt": "2025-01-01T00:00:00.000Z",
-      "settledAt": "2025-01-01T00:00:00.000Z"
+      "confirmedAt": "2026-11-06T17:57:32.517Z",
+      "settledAt": "2026-11-06T17:57:35.623Z"
     }
   },
   "meta": {

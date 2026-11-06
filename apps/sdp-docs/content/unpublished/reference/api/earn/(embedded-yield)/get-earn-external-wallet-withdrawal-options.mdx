@@ -1,7 +1,7 @@
 ---
 module: earn
-title: Discover external-wallet withdrawal routes
-description: Reads atomic, provider-order, solver-queue and operator-redemption routes independently from live provider state.
+title: List withdrawal options
+description: "Lists the withdrawal routes a position supports right now: instant, provider order, solver queue and operator redemption, each read from live provider state."
 icon: method:POST
 apiReference: true
 ---
@@ -10,7 +10,7 @@ apiReference: true
 
 <ApiEndpoint method="POST" path="/v1/earn/external-wallet/withdrawal-options" />
 
-Call this when the customer starts an exit and let them choose when more than one route is available. Never infer a route from the strategy's liquidity term. The request names its tenant position.
+A position offers instant or provider order, never both; the withdrawal endpoints build whichever it offers. Call this when the customer starts a withdrawal, and let them choose when more than one route is available. Never infer a route from the strategy's `liquidityTerm`.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
@@ -24,37 +24,37 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
 `application/json` · required
 
-Discover each available exit route for the caller's tenant position at action time.
+List the withdrawal routes a position supports right now.
 
-- **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_example`
+- **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
 
-  The caller's tenant-scoped external-wallet position.
+  The position's ID, from the positions list or the deposit submit response.
 
 ## Responses
 
-- **`200`** Live withdrawal routes and asynchronous-exit limits
+- **`200`** Withdrawal options and their live terms
 
   - **`data`** · `object` · required
 
-    - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_example`
+    - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
 
-      The caller's tenant-scoped external-wallet position.
+      The position's ID, from the positions list or the deposit submit response.
 
     - **`instant`** · `boolean` · required
 
-      Whether an atomic withdrawal is independently available.
+      Whether the withdrawal endpoints build an instant withdrawal for this position. Never true together with `providerOrder`.
 
     - **`providerOrder`** · `boolean` · required
 
-      Whether a provider-managed delayed order is independently available.
+      Whether the withdrawal endpoints build a provider order that pays out later. Never true together with `instant`.
 
     - **`queued`** · `boolean` · required
 
-      Whether the cancellable on-chain queue is currently available. Never infer this from liquidityTerm alone.
+      Whether a solver queue accepts requests now. Never infer it from `liquidityTerm`.
 
     - **`withdrawAuthority`** · `string | null` · required
 
-      The vault's configured withdrawal authority, or null without a queue.
+      The withdrawal authority the queue's vault reports, or null without a queue. Informational: no request takes it.
 
     - **`queueState`** · `string | null` · required
 
@@ -74,7 +74,7 @@ Discover each available exit route for the caller's tenant position at action ti
 
       - **`secondsToMaturity`** · `integer` · required · min 0 · example `86400`
 
-        Delay after request creation before a solver may fulfil it.
+        Seconds after the request is created, by the cluster clock, before a solver may fulfill it.
 
       - **`minimumSecondsToDeadline`** · `integer` · required · min 0 · example `3600`
 
@@ -96,7 +96,7 @@ Discover each available exit route for the caller's tenant position at action ti
 
     - **`parRedemption`** · `object | null` · required
 
-      Live issuer/operator redemption terms. Null when this strategy has no operator-completed par route.
+      Live operator redemption terms. Null when this strategy offers no operator redemption.
 
       - **`intermediateMint`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
 
@@ -108,7 +108,7 @@ Discover each available exit route for the caller's tenant position at action ti
 
       - **`minimumShares`** · `string | null` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `1`
 
-        Smallest share-sourced operator-redemption request, in position-share units. Null while the provider's rate is unavailable, which also blocks share-sourced requests.
+        Smallest operator redemption request funded by shares, in position-share units. Null while the provider's rate is unavailable, which also blocks share-funded requests.
 
       - **`minimumIntermediateAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `0.000001`
 
@@ -221,7 +221,7 @@ curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-options'
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "positionId": "earn_position_example"
+    "positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc"
   }'
 ```
 
@@ -233,7 +233,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdraw
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    "positionId": "earn_position_example"
+    "positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc"
   })
 });
 ```
@@ -244,7 +244,7 @@ import os, requests
 r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawal-options",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
-    "positionId": "earn_position_example"
+    "positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc"
   })
 ```
 
@@ -253,33 +253,24 @@ r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawal-opt
 ```json tab="200"
 {
   "data": {
-    "positionId": "earn_position_example",
-    "instant": false,
+    "positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc",
+    "instant": true,
     "providerOrder": false,
-    "queued": false,
-    "withdrawAuthority": "example",
-    "queueState": "example",
+    "queued": true,
+    "withdrawAuthority": "11111111111111111111111111111111",
+    "queueState": "7XbSKzG8Kf1qsprNV1XE9YHNNpSV7jZBWLx1n4B6tSDf",
     "queueAsset": {
-      "assetMint": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
-      "allowWithdrawals": false,
-      "secondsToMaturity": 86400,
-      "minimumSecondsToDeadline": 3600,
+      "assetMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+      "allowWithdrawals": true,
+      "secondsToMaturity": 3600,
+      "minimumSecondsToDeadline": 60,
       "maximumSecondsToDeadline": 7776000,
       "minimumDiscountBps": 0,
-      "maximumDiscountBps": 500,
-      "minimumShares": "1",
+      "maximumDiscountBps": 100,
+      "minimumShares": "0.000001",
       "shareDecimals": 6
     },
-    "parRedemption": {
-      "intermediateMint": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
-      "assetMint": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
-      "minimumShares": "1",
-      "minimumIntermediateAmount": "0.000001",
-      "shareDecimals": 6,
-      "assetDecimals": 6,
-      "cancelable": false,
-      "operatorSettled": true
-    }
+    "parRedemption": null
   },
   "meta": {
     "requestId": "req_example",

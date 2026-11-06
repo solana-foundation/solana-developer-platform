@@ -1,7 +1,7 @@
 ---
 module: earn
-title: Build an unsigned external-wallet exit transaction
-description: Builds one unsigned external-wallet exit for a tenant position and persists a submit-capable build.
+title: Build a withdrawal transaction
+description: Builds an unsigned withdrawal transaction for a position, for the customer's wallet to sign.
 icon: method:POST
 apiReference: true
 ---
@@ -10,7 +10,7 @@ apiReference: true
 
 <ApiEndpoint method="POST" path="/v1/earn/external-wallet/withdrawal-transactions" />
 
-ADR 0002 exit safety applies, so the exit works while the provider is disabled for new deposits. A strategy with a withdrawal slippage policy requires a quote-derived `minAmountOut`. When `withdrawalSlippage` is null, omit the floor; a provider-order route may not support a preview at all. That route submits an order for later payout, not an atomic redemption.
+Withdrawals keep working after a provider stops taking deposits. Send `minAmountOut` when the strategy's `withdrawalSlippage` is not null, and omit it when null. A provider-order route may not support a preview: it places an order that pays out later, not an instant redemption.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
 
@@ -24,35 +24,35 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
 `application/json` · required
 
-Build one unsigned exit transaction for the caller's tenant position, which carries the trusted vault and mint metadata.
+Build one unsigned withdrawal transaction for a position. SDP reads the strategy and mints from the position.
 
-- **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_example`
+- **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
 
-  The caller's tenant-scoped external-wallet position.
+  The position's ID, from the positions list or the deposit submit response.
 
 - **`shares`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `10`
 
   Shares to redeem, decimal string in share units.
 
-- **`minAmountOut`** · `string` · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `24.9`
+- **`minAmountOut`** · `string` · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `19.98`
 
-  Exit slippage floor: the minimum deposit-token amount to accept, decimal string in the token's own units. Derive it from the withdrawal preview's `assetsOut` minus a chosen tolerance. Providers whose builder refuses an implicit tolerance (see the strategy's `withdrawalSlippage`) answer its absence with a 400.
+  Withdrawal slippage floor: the minimum deposit-token amount to accept, as a decimal string. Derive it from the withdrawal preview's `assetsOut` minus your tolerance. Required when the strategy's `withdrawalSlippage` is not null; refused with 400 when it is null, because the transaction cannot enforce it.
 
 - **`feePayer`** · `string` · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
 
-  Authenticated builds only: pay for this transaction from your own wallet instead of the customer's. The named address becomes the transaction's fee payer. It pays the network fee, funds any share-account rent, and must sign alongside the owner. Co-sign server-side with the fee payer's key before submitting. Simulation refuses the build with a 400 naming the fee payer when it cannot pay. Sending the owner's own address uses the default: the owner pays and signs alone.
+  Pay for this transaction from a wallet your backend controls instead of the customer's. The named address becomes the fee payer: it pays the network fee, funds any share-account rent, and must sign alongside the customer. Co-sign on your backend before you submit. The build returns 400, naming the fee payer, when it cannot pay. Sending the customer's own address keeps the default: the customer pays and signs alone.
 
 ## Responses
 
-- **`200`** Unsigned exit transaction
+- **`200`** Unsigned withdrawal transaction
 
   - **`data`** · `object` · required
 
     - **`transaction`** · `object` · required
 
-      The common fields of one built exit transaction.
+      The common fields of one built withdrawal transaction.
 
-      - **`transactionId`** · `string` · required · example `earn_external_wallet_transaction_example`
+      - **`transactionId`** · `string` · required · example `earn_external_wallet_transaction_e7a88258-1d19-48f3-8d0e-81fefa4bf3b3`
 
       - **`transaction`** · `string` · required
 
@@ -64,21 +64,21 @@ Build one unsigned exit transaction for the caller's tenant position, which carr
 
       - **`sponsored`** · `boolean` · required · example `false`
 
-        Whether SDP supplied and signed the fee payer. A partner-controlled feePayer leaves this false.
+        Always false: SDP does not pay an external wallet's fees. The customer's wallet pays, or the `feePayer` you name.
 
-      - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+      - **`ownerAddress`** · `string` · required · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
 
-        The external wallet: the customer's own Solana address. It signs and owns the shares; SDP holds no key for it. It also pays the network fee unless an authenticated build names a `feePayer`. The pattern is necessary but not sufficient — the string must additionally decode to a 32-byte public key, which no pattern can express, so a well-shaped base58 string that does not decode still answers 400.
+        The customer's wallet address.
 
       - **`feePayer`** · `string` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
 
-        Echo of an authenticated build request's `feePayer`. Present, this transaction requires the fee payer's signature IN ADDITION to the owner's — co-sign server-side before submitting; the submit refuses a missing or invalid fee-payer signature. Absent, the owner signs alone and pays the fee.
+        The `feePayer` your build request named. When present, the transaction needs the fee payer's signature as well as the customer's: co-sign on your backend before you submit, or the submit refuses it. When absent or null, the customer signs alone and pays the fee.
 
       - **`provider`** · `string` · required · example `kamino`
 
       - **`providerReference`** · `string` · required · example `7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx`
 
-        The vault's on-chain address — the instrument.
+        The strategy's onchain address at the provider. It identifies the instrument; never send funds to it.
 
       - **`tokenMint`** · `string` · required · example `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
 
@@ -92,7 +92,7 @@ Build one unsigned exit transaction for the caller's tenant position, which carr
 
         The floor encoded in the transaction, or null when the request carried none.
 
-      - **`positionId`** · `string` · required · example `earn_position_example`
+      - **`positionId`** · `string` · required · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
 
   - **`meta`** · `object` · required
 
@@ -189,10 +189,8 @@ curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-transact
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "positionId": "earn_position_example",
-    "shares": "10",
-    "minAmountOut": "24.9",
-    "feePayer": "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF"
+    "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
+    "shares": "10"
   }'
 ```
 
@@ -204,10 +202,8 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdraw
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    "positionId": "earn_position_example",
-    "shares": "10",
-    "minAmountOut": "24.9",
-    "feePayer": "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF"
+    "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
+    "shares": "10"
   })
 });
 ```
@@ -218,10 +214,8 @@ import os, requests
 r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawal-transactions",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
-    "positionId": "earn_position_example",
-    "shares": "10",
-    "minAmountOut": "24.9",
-    "feePayer": "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF"
+    "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
+    "shares": "10"
   })
 ```
 
@@ -231,19 +225,18 @@ r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawal-tra
 {
   "data": {
     "transaction": {
-      "transactionId": "earn_external_wallet_transaction_example",
-      "transaction": "example",
-      "lastValidBlockHeight": "361186610",
+      "transactionId": "earn_external_wallet_transaction_0ebe7320-4b8e-4d1a-a5f0-6c2d9e8b1f47",
+      "transaction": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "lastValidBlockHeight": "361186972",
       "sponsored": false,
       "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
-      "feePayer": "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF",
       "provider": "kamino",
-      "providerReference": "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+      "providerReference": "C7N2fqV2GvhFghDf5PJSwstyjedjLNCY1cm2Ak7TeU83",
       "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-      "shareMint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
-      "shares": "25",
-      "minAmountOut": "25",
-      "positionId": "earn_position_example"
+      "shareMint": "CeirL1mAehaM6g2EccgMUQwohNfnuyicskVQ4r9ekXk6",
+      "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
+      "shares": "10",
+      "minAmountOut": null
     }
   },
   "meta": {

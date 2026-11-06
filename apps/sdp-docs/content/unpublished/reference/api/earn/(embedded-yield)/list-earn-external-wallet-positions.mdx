@@ -1,7 +1,7 @@
 ---
 module: earn
-title: List one external wallet's positions
-description: Returns one strict keyset page of live positions for an end-user wallet in the active partner project.
+title: List positions
+description: Lists one customer wallet's live positions, one page at a time.
 icon: method:GET
 apiReference: true
 ---
@@ -10,17 +10,23 @@ apiReference: true
 
 <ApiEndpoint method="GET" path="/v1/earn/external-wallet/positions" />
 
-`ownerAddress` is required, the same query addressing every per-owner read on this surface uses. A wallet with no positions in the project's scope (never deposited, fully exited, or held under another organization) answers 200 with an empty `positions` list, never 404. Live fields are absent when provider hydration is unavailable, never replaced with zero.
+`ownerAddress` is required. A wallet with no positions in your project (never deposited, fully withdrawn, or held under another organization) returns an empty `positions` list, not 404. Live fields are left out, never set to zero, when the provider read is unavailable.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
 ## Query parameters
 
-- **`ownerAddress`** · `string` · required
+- **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+
+  The customer's wallet address: an external wallet, so SDP holds no key for it. It signs, owns the shares, and pays the network fee unless the build names a `feePayer`. It must decode to a 32-byte public key; a base58 string that matches the pattern but does not decode returns 400.
 
 - **`limit`** · `integer` · min 1 · max 100 · default `20`
 
+  Page size, from 1 to 100. Defaults to 20.
+
 - **`before`** · `string` · min length 1
+
+  The previous page's `nextCursor`. Omit it for the first page.
 
 ## Headers
 
@@ -30,27 +36,27 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
 ## Responses
 
-- **`200`** External-wallet position page
+- **`200`** One page of positions
 
   - **`data`** · `object` · required
 
-    - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+    - **`ownerAddress`** · `string` · required · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
 
-      The external wallet: the customer's own Solana address. It signs and owns the shares; SDP holds no key for it. It also pays the network fee unless an authenticated build names a `feePayer`. The pattern is necessary but not sufficient — the string must additionally decode to a 32-byte public key, which no pattern can express, so a well-shaped base58 string that does not decode still answers 400.
+      The customer's wallet address.
 
     - **`positions`** · `object[]` · required
 
-      - **`id`** · `string` · required · example `earn_position_example`
+      - **`id`** · `string` · required · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
 
-      - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+      - **`ownerAddress`** · `string` · required · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
 
-        The external wallet: the customer's own Solana address. It signs and owns the shares; SDP holds no key for it. It also pays the network fee unless an authenticated build names a `feePayer`. The pattern is necessary but not sufficient — the string must additionally decode to a 32-byte public key, which no pattern can express, so a well-shaped base58 string that does not decode still answers 400.
+        The customer's wallet address.
 
       - **`provider`** · `string` · required · example `kamino`
 
       - **`providerReference`** · `string` · required · example `7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx`
 
-        The vault's on-chain address.
+        The strategy's onchain address.
 
       - **`label`** · `string` · required · example `Allez USDC`
 
@@ -68,23 +74,23 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       - **`shares`** · `string` · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
 
-        Live share balance. Absent when hydration is unavailable; never coerced to zero.
+        Live share balance. Absent when the live read is unavailable; never zero-filled.
 
       - **`withdrawableShares`** · `string` · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
 
-        Live immediately redeemable shares. Absent when hydration is unavailable.
+        Shares you can withdraw right now. Absent when the live read is unavailable.
 
       - **`unlockTimestamp`** · `string | null` · pattern `^\d+$` · example `1789722000`
 
-        Unix epoch seconds when provider-locked shares become eligible to exit. Null when no lock applies; absent when live hydration is unavailable.
+        Unix time, in seconds, when locked shares become withdrawable. Null or absent when no lock applies. To tell an unavailable read apart, check `shares`.
 
       - **`tokenValue`** · `string` · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
 
-        Live value of the position in the deposit token (`tokenMint`), as the provider reports it: shares × rate for rate-based vaults, an exit quote for the whole position for quote-based providers (Veda, Ondo), so spread and price impact are already inside it and it does not scale to other share amounts. A deposit-token amount, not a share count and not a USD conversion; every Earn deposit token is a USD stablecoin, so at par this is a dollar figure. Absent when hydration is unavailable.
+        Live value of the position in the deposit token (`tokenMint`), as the provider reports it: shares times the rate for rate-based strategies, or a withdrawal quote for the whole position for quote-based providers such as Veda and Ondo. A quote already includes spread and price impact, so it does not scale to other share amounts. It is a deposit-token amount, not a share count or a USD conversion; every Earn deposit token is a USD stablecoin, so at par it reads as dollars. Absent when the live read is unavailable.
 
       - **`parIntermediate`** · `object`
 
-        The par-redemption route's intermediate token the owner holds outside any open request, such as Hastra wYLDS after a cancelled par redemption. It belongs to this position and is not included in `tokenValue`. Present only while non-zero.
+        The operator redemption's intermediate token the wallet holds outside any open request, such as Hastra wYLDS after a canceled operator redemption. It belongs to this position and is not included in `tokenValue`. Present only while non-zero.
 
         - **`mint`** · `string` · required · example `8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih`
 
@@ -167,12 +173,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/earn/external-wallet/positions?ownerAddress=11111111111111111111111111111111' \
+curl 'https://api.solana.com/v1/earn/external-wallet/positions?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/positions?ownerAddress=11111111111111111111111111111111", {
+const res = await fetch("https://api.solana.com/v1/earn/external-wallet/positions?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -183,7 +189,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/position
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/earn/external-wallet/positions?ownerAddress=11111111111111111111111111111111",
+r = requests.get("https://api.solana.com/v1/earn/external-wallet/positions?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -195,29 +201,22 @@ r = requests.get("https://api.solana.com/v1/earn/external-wallet/positions?owner
     "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
     "positions": [
       {
-        "id": "earn_position_example",
+        "id": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
         "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
         "provider": "kamino",
-        "providerReference": "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
-        "label": "Allez USDC",
+        "providerReference": "C7N2fqV2GvhFghDf5PJSwstyjedjLNCY1cm2Ak7TeU83",
+        "label": "Kamino Vault USDC",
         "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-        "shareMint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
-        "createdAt": "2025-01-01T00:00:00.000Z",
-        "closedAt": "2025-01-01T00:00:00.000Z",
-        "shares": "25.42",
-        "withdrawableShares": "25.42",
-        "unlockTimestamp": "1789722000",
-        "tokenValue": "25.42",
-        "parIntermediate": {
-          "mint": "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih",
-          "amount": "25.42",
-          "withdrawableAmount": "25.42",
-          "tokenValue": "25.42"
-        }
+        "shareMint": "CeirL1mAehaM6g2EccgMUQwohNfnuyicskVQ4r9ekXk6",
+        "createdAt": "2026-11-06T17:57:30.817Z",
+        "closedAt": null,
+        "shares": "24.975",
+        "withdrawableShares": "24.975",
+        "tokenValue": "25.031"
       }
     ],
     "hasMore": false,
-    "nextCursor": "example"
+    "nextCursor": null
   },
   "meta": {
     "requestId": "req_example",

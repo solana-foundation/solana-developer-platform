@@ -1,67 +1,59 @@
 ---
 module: earn
 title: Earn
-description: One API for stablecoin yield across DeFi and real-world assets.
+description: Offer stablecoin yield in your app, from your customers' own wallets, through one API.
 ---
 
-Offer stablecoin yield inside your app. Earn connects strategy discovery,
-deposits, withdrawals, and reporting through one API, with customer wallet signing.
+Earn lets your customers earn yield on stablecoins without handing over their
+keys. Your backend builds each deposit and withdrawal through SDP, your
+customer's wallet signs it, and SDP broadcasts it and tracks it to settlement.
 
 <ActionLinks>
 
-[Make your first deposit](/docs/earn/quickstart)
+[Start the quickstart](/docs/earn/quickstart)
+
+[API reference](/docs/reference/api/earn)
 
 </ActionLinks>
 
 ## What you can build
 
-| Feature | What Earn provides |
+| Capability | What Earn gives you |
 | --- | --- |
-| [Strategy discovery](/docs/earn/providers) | Providers, deposit assets, rates, eligibility, and exit options. |
-| [Deposits and withdrawals](/docs/earn/deposit-api) | Previews, transaction builds, submission, and settlement tracking. |
-| [Balances and earnings](/docs/earn/reporting) | Live positions, recorded movements, and available return calculations. |
-| [Customer signing](/docs/earn/concepts#who-signs) | Your customer's wallet signs; its private key stays out of SDP. |
+| [Strategies](/docs/earn/strategies) | A catalog of DeFi and real-world-asset strategies with live rates, deposit tokens, and withdrawal terms. |
+| [Deposits](/docs/earn/deposits) | Live quotes, unsigned transactions for your customer's wallet, and tracking from submit to finality. |
+| [Balances and earnings](/docs/earn/balances) | Live positions, recorded movements, and exact earnings for each customer wallet. |
+| [Withdrawals](/docs/earn/withdrawals) | Instant withdrawals, plus provider orders, solver queues, and operator redemptions that pay out later. |
 
-Returns, losses, fees, and withdrawal availability depend on the strategy.
+Returns, losses, fees, and withdrawal timing depend on the strategy. An APY is
+a rate, not a promise.
 
-## Flow of funds
+## How it works
 
 <EarnFlow>
 
-- **Owner's wallet**
+- **Customer's wallet**
 
-  Sends the strategy's supported stablecoin.
+  Signs a deposit of the strategy's deposit token.
 
-- **Protocol or asset**
+- **Strategy**
 
-  Funds buy shares or yield-bearing tokens for the owner's wallet.
+  Issues shares or a yield-bearing token to the customer's wallet.
 
-- **Owner's wallet**
+- **Customer's wallet**
 
-  Receives the payout when the withdrawal settles.
+  Receives the payout when a withdrawal settles.
 
 </EarnFlow>
 
-<Callout type="info">
-Funds move through the strategy's protocol, trading route, or provider. SDP
-does not pool them in an SDP-owned account. Provider custody and withdrawal
-escrow risks still apply.
-</Callout>
+SDP never holds your customer's keys or pools their funds in an SDP account.
+Funds sit with the strategy's protocol or provider, whose custody and
+withdrawal risks still apply. [How Earn works](/docs/earn/concepts) explains
+shares, signing, and settlement.
 
-[How Earn works](/docs/earn/concepts) explains shares, signing, and settlement.
+## Start building
 
-## Choose your integration
-
-<GuideCards>
-
-- [Earn API](/docs/earn/quickstart?integration=earn-api)
-
-  Call the REST API directly with your own integration code.
-
-- [Embedded Yield](/docs/earn/quickstart?integration=embedded-yield)
-
-  Add yield to your app with a generated backend module and customer signing.
-
-</GuideCards>
-
-Find request fields and responses in the [Earn API reference](/docs/reference/api/earn).
+Run the [Quickstart](/docs/earn/quickstart) to make your first sandbox deposit
+through the Earn API, then follow [Embedded Yield](/docs/guides/embedded-yield)
+to ship the full integration. Every request field and response is in the
+[Earn API reference](/docs/reference/api/earn).

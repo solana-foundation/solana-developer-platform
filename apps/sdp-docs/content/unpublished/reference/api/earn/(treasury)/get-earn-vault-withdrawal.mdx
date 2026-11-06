@@ -1,7 +1,7 @@
 ---
 module: earn
-title: Read one custody withdrawal
-description: Returns one recorded custody withdrawal and refreshes its chain observation when available.
+title: Get a custody withdrawal
+description: Gets one recorded custody withdrawal and refreshes its onchain status when it can.
 icon: method:GET
 apiReference: true
 ---
@@ -14,7 +14,7 @@ This operation is internal. It is not part of the partner-facing Earn API.
 
 <ApiEndpoint method="GET" path="/v1/earn/vault-withdrawals/{movementId}" />
 
-Atomic withdrawals may show Done at confirmed; provider-order withdrawals remain pending until authenticated provider completion. shares is the requested share quantity, not a deposit-token payout; the movement feed reports tokenAmount once a finalized payout has been observed.
+An atomic withdrawal can show as done at `confirmed`; a provider-order withdrawal stays pending until the provider completes it. `shares` is the requested share quantity, not the payout; the movements feed reports `tokenAmount` once SDP observes a finalized payout.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 

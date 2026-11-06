@@ -1,11 +1,11 @@
 {
   "title": "Earn",
   "pages": [
-    "concepts",
     "quickstart",
-    "providers",
-    "deposit-api",
-    "reporting",
+    "concepts",
+    "strategies",
+    "deposits",
+    "balances",
     "withdrawals",
     "---Integrate---",
     "../guides/embedded-yield",

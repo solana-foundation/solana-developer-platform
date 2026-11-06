@@ -1,7 +1,7 @@
 ---
 module: earn
-title: Preview an external-wallet exit
-description: Quotes what redeeming the shares would pay right now, from the vault's live accounting — the read a truthful minAmountOut floor is derived from (assetsOut minus your chosen tolerance, quantized to assetDecimals).
+title: Preview a withdrawal
+description: Quotes what withdrawing these shares would pay right now, from the strategy's live accounting.
 icon: method:POST
 apiReference: true
 ---
@@ -10,7 +10,7 @@ apiReference: true
 
 <ApiEndpoint method="POST" path="/v1/earn/external-wallet/withdrawal-previews" />
 
-Read-only, no idempotency key, and it takes the exit's own gates: a delisted strategy or a provider disabled for new deposits stays quotable. The request names its tenant position. POST because the parameters are a body; 501 when the provider cannot quote exits.
+When the strategy's `withdrawalSlippage` is not null, set `minAmountOut` from this quote: take your tolerance off `assetsOut`, rounded down to `assetDecimals`. The preview is read-only, takes no Idempotency-Key, and still works after a strategy is deprecated or its provider stops taking deposits. It does not check the wallet's balance, so keep `shares` within the position's `withdrawableShares`. It returns 501 when the provider cannot quote withdrawals.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
@@ -24,25 +24,25 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
 `application/json` · required
 
-Quote one exit of the caller's tenant position against the vault's live accounting. Read-only: nothing is built and nothing is persisted.
+Quote one withdrawal from a position against the strategy's live accounting. Read-only: nothing is built or saved.
 
-- **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_example`
+- **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
 
-  The caller's tenant-scoped external-wallet position.
+  The position's ID, from the positions list or the deposit submit response.
 
 - **`shares`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `10`
 
-  Shares the exit would redeem, decimal string in share units.
+  Shares to withdraw, as a decimal string in share units. Keep it within the position's `withdrawableShares`: the preview does not check the balance.
 
 ## Responses
 
-- **`200`** Live exit quote
+- **`200`** Live withdrawal quote
 
   - **`data`** · `object` · required
 
-    - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_example`
+    - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
 
-      The caller's tenant-scoped external-wallet position.
+      The position's ID, from the positions list or the deposit submit response.
 
     - **`assetsOut`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25.02`
 
@@ -54,7 +54,7 @@ Quote one exit of the caller's tenant position against the vault's live accounti
 
     - **`blockingIssues`** · `object[]` · required
 
-      Conditions the provider reports would block this exit; empty when none.
+      Conditions the provider reports would block this withdrawal; empty when none.
 
       - **`code`** · `string` · required · example `SHARE_LOCKED`
 
@@ -155,7 +155,7 @@ curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-previews
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "positionId": "earn_position_example",
+    "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
     "shares": "10"
   }'
 ```
@@ -168,7 +168,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdraw
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    "positionId": "earn_position_example",
+    "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
     "shares": "10"
   })
 });
@@ -180,7 +180,7 @@ import os, requests
 r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawal-previews",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
-    "positionId": "earn_position_example",
+    "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
     "shares": "10"
   })
 ```
@@ -190,15 +190,10 @@ r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawal-pre
 ```json tab="200"
 {
   "data": {
-    "positionId": "earn_position_example",
-    "assetsOut": "25.02",
+    "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
+    "assetsOut": "10.0224",
     "assetDecimals": 6,
-    "blockingIssues": [
-      {
-        "code": "SHARE_LOCKED",
-        "message": "example"
-      }
-    ]
+    "blockingIssues": []
   },
   "meta": {
     "requestId": "req_example",

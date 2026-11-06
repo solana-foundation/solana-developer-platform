@@ -6,16 +6,16 @@ they do not enter search, the sitemap, Markdown routes, Postman, or AI resources
 
 ## Review
 
-- `earn/index.mdx`: overview and guide entry point.
-- `earn/quickstart.mdx`: direct API and generated Embedded Yield sandbox paths.
-- `earn/deposit-api.mdx`: complete sandbox deposit requests in cURL and TypeScript.
-- `earn/concepts.mdx`: strategies, shares, value, and withdrawal availability.
-- `earn/integration-details.mdx`: exact quotes, sponsorship, swaps, and retries.
-- `earn/treasury.mdx`: organization custody wallet flow.
-- `guides/embedded-yield.mdx`: backend integration and customer signing.
-- `earn/providers.mdx`: availability, eligibility, and flow of funds.
-- `earn/withdrawals.mdx`: direct, solver, and operator exits.
-- `earn/reporting.mdx`: live holdings, observed settlement, earnings limits.
+- `earn/index.mdx`: overview and the two ways to build.
+- `earn/quickstart.mdx`: a sandbox deposit with API requests or the backend module.
+- `earn/concepts.mdx`: key terms, shares, signing, and how movements settle.
+- `earn/strategies.mdx`: the catalog, availability, quote policies, and eligibility.
+- `earn/deposits.mdx`: every deposit request and response, in cURL and TypeScript.
+- `earn/balances.mdx`: positions, movements, earnings, and pagination.
+- `earn/withdrawals.mdx`: instant withdrawals, provider orders, and withdrawal requests.
+- `guides/embedded-yield.mdx`: the full integration, module map, and go-live checklist.
+- `earn/treasury.mdx`: the internal custody wallet flow.
+- `earn/integration-details.mdx`: quote floors, sponsorship, swaps, retries, and errors.
 - `reference/api/earn`: generated reference for all implemented Earn routes.
 
 Regenerate the reference with:
@@ -36,10 +36,8 @@ and reference page must preserve its text, code, and code labels, include Earn's
 development notice, and remove presentation markup. Tabbed steps become ordered
 text sections; internal-operation notices remain explicit.
 
-Quickstart accepts `?integration=earn-api` or `?integration=embedded-yield`.
-Missing or unsupported values select Earn API. Its expandable HTTP helper stays
-fully present in Markdown, search, and AI resources. The page outline follows
-the visible path; a heading fragment can still open the other path.
+The Quickstart has one path: the Earn API through a small request helper. The
+dashboard's generated module is documented in the Embedded Yield guide.
 
 ## Vercel branch preview
 
@@ -78,8 +76,17 @@ exists and is independently verified.
 
 ## Verification limits
 
-The examples were checked against schemas and current implementation. They
-have not been run with a funded wallet or live provider credentials. A complete
-sandbox deposit and exit, customer wallet signing, sponsor co-signing, and
-asynchronous recovery remain release checks. Audit findings and focused test
-results are recorded in `docs/architecture/earn-docs-audit.md` at the repo root.
+On 2026-11-06 the guides ran end to end against a local API on the `beta`
+channel, a fresh local database, and a Surfpool devnet fork: Quickstart (both
+paths), the cURL and TypeScript deposit flows, balances and pagination, Veda
+deposits with floors, sponsored deposits, instant withdrawals, and solver
+queue requests. Every TypeScript block typechecks under strict mode with
+`@solana/kit` 8.6. Blind agents followed only the `.md` output.
+
+Not covered: Kamino withdrawal builds fail on a Surfpool fork (its
+`jsonParsed` decodes klend accounts that real RPCs return as base64), solver
+fulfillment and cancellation (the fork's clock barely advances, so no request
+reached `expiredCancelable`), operator redemptions, provider orders, mainnet
+swaps, and the browser wallet signer, which typechecks but did not run.
+Audit findings are in
+`docs/architecture/earn-docs-audit.md` at the repo root.

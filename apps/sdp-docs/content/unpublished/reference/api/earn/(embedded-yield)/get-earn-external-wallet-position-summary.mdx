@@ -1,7 +1,7 @@
 ---
 module: earn
-title: Get external-wallet position totals
-description: Returns a complete live aggregate across the active partner project's end-user wallets, grouped by strategy and token.
+title: Get position totals
+description: Gets live position totals across every customer wallet in your project, grouped by strategy and token.
 icon: method:GET
 apiReference: true
 ---
@@ -10,7 +10,7 @@ apiReference: true
 
 <ApiEndpoint method="GET" path="/v1/earn/external-wallet/positions/summary" />
 
-The service pages every stored claim before hydration. Owner addresses are omitted by default; pass `includeOwnerAddresses=true` to receive them, and add `includePositions=true` when a UI needs the already hydrated per-customer positions, which avoids a separate paid chain read for every owner. A total is omitted when any contributing live value is unavailable, never reported as zero or partial.
+Wallet addresses are left out unless you pass `includeOwnerAddresses=true`; add `includePositions=true` to also receive each wallet's positions, which saves one read per wallet. A total that depends on an unavailable live value is left out, never reported as zero or partial.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
@@ -28,7 +28,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
 ## Responses
 
-- **`200`** Complete external-wallet position aggregate
+- **`200`** Position totals
 
   - **`data`** · `object` · required
 
@@ -50,23 +50,23 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
         - **`ownerAddresses`** · `string[]` · each min length 32 · each max length 44 · each pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · each example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
 
-          The exact project-scoped owners contributing to this strategy total. Absent by default; present only when the request passes `includeOwnerAddresses=true`. This list is the project's end-user address book, so only a surface that has to render per-customer detail should opt in.
+          The customer wallets behind this total. Absent unless the request passes `includeOwnerAddresses=true`. The list is personal data about your customers, so opt in only where you show per-customer detail.
 
         - **`positions`** · `object[]`
 
           Complete live positions contributing to this strategy total. Present only when the request passes `includePositions=true` together with `includeOwnerAddresses=true`; use this single drill-down instead of one live request per owner.
 
-          - **`id`** · `string` · required · example `earn_position_example`
+          - **`id`** · `string` · required · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
 
-          - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+          - **`ownerAddress`** · `string` · required · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
 
-            The external wallet: the customer's own Solana address. It signs and owns the shares; SDP holds no key for it. It also pays the network fee unless an authenticated build names a `feePayer`. The pattern is necessary but not sufficient — the string must additionally decode to a 32-byte public key, which no pattern can express, so a well-shaped base58 string that does not decode still answers 400.
+            The customer's wallet address.
 
           - **`provider`** · `string` · required · example `kamino`
 
           - **`providerReference`** · `string` · required · example `7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx`
 
-            The vault's on-chain address.
+            The strategy's onchain address.
 
           - **`label`** · `string` · required · example `Allez USDC`
 
@@ -84,23 +84,23 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
           - **`shares`** · `string` · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
 
-            Live share balance. Absent when hydration is unavailable; never coerced to zero.
+            Live share balance. Absent when the live read is unavailable; never zero-filled.
 
           - **`withdrawableShares`** · `string` · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
 
-            Live immediately redeemable shares. Absent when hydration is unavailable.
+            Shares you can withdraw right now. Absent when the live read is unavailable.
 
           - **`unlockTimestamp`** · `string | null` · pattern `^\d+$` · example `1789722000`
 
-            Unix epoch seconds when provider-locked shares become eligible to exit. Null when no lock applies; absent when live hydration is unavailable.
+            Unix time, in seconds, when locked shares become withdrawable. Null or absent when no lock applies. To tell an unavailable read apart, check `shares`.
 
           - **`tokenValue`** · `string` · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
 
-            Live value of the position in the deposit token (`tokenMint`), as the provider reports it: shares × rate for rate-based vaults, an exit quote for the whole position for quote-based providers (Veda, Ondo), so spread and price impact are already inside it and it does not scale to other share amounts. A deposit-token amount, not a share count and not a USD conversion; every Earn deposit token is a USD stablecoin, so at par this is a dollar figure. Absent when hydration is unavailable.
+            Live value of the position in the deposit token (`tokenMint`), as the provider reports it: shares times the rate for rate-based strategies, or a withdrawal quote for the whole position for quote-based providers such as Veda and Ondo. A quote already includes spread and price impact, so it does not scale to other share amounts. It is a deposit-token amount, not a share count or a USD conversion; every Earn deposit token is a USD stablecoin, so at par it reads as dollars. Absent when the live read is unavailable.
 
           - **`parIntermediate`** · `object`
 
-            The par-redemption route's intermediate token the owner holds outside any open request, such as Hastra wYLDS after a cancelled par redemption. It belongs to this position and is not included in `tokenValue`. Present only while non-zero.
+            The operator redemption's intermediate token the wallet holds outside any open request, such as Hastra wYLDS after a canceled operator redemption. It belongs to this position and is not included in `tokenValue`. Present only while non-zero.
 
             - **`mint`** · `string` · required · example `8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih`
 
@@ -237,49 +237,23 @@ r = requests.get("https://api.solana.com/v1/earn/external-wallet/positions/summa
 {
   "data": {
     "summary": {
-      "walletCount": 1,
-      "positionCount": 1,
-      "unavailablePositionCount": 1,
+      "walletCount": 2,
+      "positionCount": 2,
+      "unavailablePositionCount": 0,
       "totalsByStrategy": [
         {
           "provider": "kamino",
-          "providerReference": "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
-          "label": "Allez USDC",
-          "ownerAddresses": [
-            "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
-          ],
-          "positions": [
-            {
-              "id": "earn_position_example",
-              "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
-              "provider": "kamino",
-              "providerReference": "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
-              "label": "Allez USDC",
-              "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-              "shareMint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
-              "createdAt": "2025-01-01T00:00:00.000Z",
-              "closedAt": "2025-01-01T00:00:00.000Z",
-              "shares": "25.42",
-              "withdrawableShares": "25.42",
-              "unlockTimestamp": "1789722000",
-              "tokenValue": "25.42",
-              "parIntermediate": {
-                "mint": "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih",
-                "amount": "25.42",
-                "withdrawableAmount": "25.42",
-                "tokenValue": "25.42"
-              }
-            }
-          ],
-          "walletCount": 1,
-          "positionCount": 1,
+          "providerReference": "C7N2fqV2GvhFghDf5PJSwstyjedjLNCY1cm2Ak7TeU83",
+          "label": "Kamino Vault USDC",
+          "walletCount": 2,
+          "positionCount": 2,
           "totalsByToken": [
             {
               "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-              "walletCount": 1,
-              "positionCount": 1,
-              "unavailablePositionCount": 1,
-              "tokenValue": "25.42"
+              "walletCount": 2,
+              "positionCount": 2,
+              "unavailablePositionCount": 0,
+              "tokenValue": "50.062"
             }
           ]
         }
@@ -287,10 +261,10 @@ r = requests.get("https://api.solana.com/v1/earn/external-wallet/positions/summa
       "totalsByToken": [
         {
           "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-          "walletCount": 1,
-          "positionCount": 1,
-          "unavailablePositionCount": 1,
-          "tokenValue": "25.42"
+          "walletCount": 2,
+          "positionCount": 2,
+          "unavailablePositionCount": 0,
+          "tokenValue": "50.062"
         }
       ]
     }

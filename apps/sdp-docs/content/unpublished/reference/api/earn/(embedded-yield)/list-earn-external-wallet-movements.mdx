@@ -1,7 +1,7 @@
 ---
 module: earn
-title: List one external wallet's activity
-description: Returns one keyset page of the wallet's recorded deposits and withdrawals, newest first, in ledger vocabulary (requested, submitted, confirmed, finalized, failed; only finalized and failed are terminal).
+title: List movements
+description: Lists one customer wallet's deposits and withdrawals, newest first, one page at a time.
 icon: method:GET
 apiReference: true
 ---
@@ -10,21 +10,29 @@ apiReference: true
 
 <ApiEndpoint method="GET" path="/v1/earn/external-wallet/movements" />
 
-`ownerAddress` is required; a wallet with no recorded movements in the active partner project answers 200 with an empty `movements` list, never 404. Each movement carries `tokenAmount` in `tokenMint` units for display (a withdrawal's observed payout once finalized) alongside the on-chain `amount`/`denomination`. Reports on money that already moved, so no provider gate applies.
+Movement statuses are `requested`, `submitted`, `confirmed`, `finalized` and `failed`; only `finalized` and `failed` are final. `ownerAddress` is required, and a wallet with no movements returns an empty `movements` list, not 404. Show `tokenAmount` in `tokenMint` units: on a withdrawal it is the observed payout once finalized, while `amount` and `denomination` carry the onchain quantity, which is shares. Reads keep working after a provider stops taking deposits.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
 ## Query parameters
 
-- **`ownerAddress`** · `string` · required
+- **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+
+  The customer's wallet address: an external wallet, so SDP holds no key for it. It signs, owns the shares, and pays the network fee unless the build names a `feePayer`. It must decode to a 32-byte public key; a base58 string that matches the pattern but does not decode returns 400.
 
 - **`direction`** · `string` · one of `deposit`, `withdrawal`
 
 - **`status`** · `string` · min length 1 · max length 64
 
+  Return only movements in this status, such as `finalized`. Takes one value; an unknown value matches nothing.
+
 - **`limit`** · `integer` · min 1 · max 100 · default `20`
 
+  Page size, from 1 to 100. Defaults to 20.
+
 - **`before`** · `string` · min length 1
+
+  The previous page's `nextCursor`. Omit it for the first page.
 
 ## Headers
 
@@ -34,21 +42,21 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
 ## Responses
 
-- **`200`** External-wallet movement page
+- **`200`** One page of movements
 
   - **`data`** · `object` · required
 
-    - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+    - **`ownerAddress`** · `string` · required · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
 
-      The external wallet: the customer's own Solana address. It signs and owns the shares; SDP holds no key for it. It also pays the network fee unless an authenticated build names a `feePayer`. The pattern is necessary but not sufficient — the string must additionally decode to a 32-byte public key, which no pattern can express, so a well-shaped base58 string that does not decode still answers 400.
+      The customer's wallet address.
 
     - **`movements`** · `object[]` · required
 
-      The wallet's recorded movements, newest first, in ledger vocabulary.
+      The wallet's recorded movements, newest first.
 
-      - **`movementId`** · `string` · required · example `earn_movement_example`
+      - **`movementId`** · `string` · required · example `earn_movement_a6aed3f5-4f89-4dc6-9d4b-0864021bd80d`
 
-      - **`positionId`** · `string` · required · example `earn_position_example`
+      - **`positionId`** · `string` · required · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
 
       - **`provider`** · `string` · required · example `kamino`
 
@@ -58,19 +66,19 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       - **`status`** · `string` · required · one of `requested`, `submitted`, `confirmed`, `finalized`, `failed`
 
-        Ledger vocabulary. `requested` means SDP recorded the signed transaction but has not yet confirmed it reached the network. `confirmed` is optimistic and can still be dropped by a fork; only `finalized` and `failed` are terminal.
+        The movement's status. `requested` means SDP recorded the signed transaction but has not yet seen it on the network. `confirmed` is optimistic and can still be rolled back; only `finalized` and `failed` are final.
 
       - **`settlement`** · `string` · required · one of `atomic`, `provider_order`
 
-        Atomic transfers may show Done at confirmed while SDP tracks finality. Provider orders remain pending until fulfillment; chain confirmation alone is not payout. Older servers may omit this field; treat absent settlement semantics as unknown.
+        How the movement settles. `atomic` completes in one transaction, so you may show it as done at `confirmed` while SDP tracks finality. `provider_order` pays out later through the provider, so chain confirmation alone is not payout: the movement stays `confirmed` until the provider completes it, and only `finalized` means it is done.
 
       - **`signature`** · `string` · required
 
         The transaction signature, for explorers.
 
-      - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+      - **`ownerAddress`** · `string` · required · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
 
-        The external wallet: the customer's own Solana address. It signs and owns the shares; SDP holds no key for it. It also pays the network fee unless an authenticated build names a `feePayer`. The pattern is necessary but not sufficient — the string must additionally decode to a 32-byte public key, which no pattern can express, so a well-shaped base58 string that does not decode still answers 400.
+        The customer's wallet address.
 
       - **`amount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
 
@@ -82,7 +90,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       - **`tokenMint`** · `string` · required · example `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
 
-        The position's deposit-token mint. Render `tokenAmount` in these units; `amount`/`denomination` is the on-chain quantity (shares on a withdrawal).
+        The position's deposit-token mint. Show `tokenAmount` in these units; `amount` and `denomination` carry the onchain quantity, which is shares on a withdrawal.
 
       - **`tokenAmount`** · `string | null` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
 
@@ -173,12 +181,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/earn/external-wallet/movements?ownerAddress=11111111111111111111111111111111' \
+curl 'https://api.solana.com/v1/earn/external-wallet/movements?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/movements?ownerAddress=11111111111111111111111111111111", {
+const res = await fetch("https://api.solana.com/v1/earn/external-wallet/movements?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -189,7 +197,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/movement
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/earn/external-wallet/movements?ownerAddress=11111111111111111111111111111111",
+r = requests.get("https://api.solana.com/v1/earn/external-wallet/movements?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -201,27 +209,27 @@ r = requests.get("https://api.solana.com/v1/earn/external-wallet/movements?owner
     "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
     "movements": [
       {
-        "movementId": "earn_movement_example",
-        "positionId": "earn_position_example",
+        "movementId": "earn_movement_a6aed3f5-4f89-4dc6-9d4b-0864021bd80d",
+        "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
         "provider": "kamino",
-        "providerReference": "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+        "providerReference": "C7N2fqV2GvhFghDf5PJSwstyjedjLNCY1cm2Ak7TeU83",
         "direction": "deposit",
-        "status": "requested",
         "settlement": "atomic",
-        "signature": "example",
+        "signature": "3dhkSPLiQZQPXL96fWzMdWJtdbtAffkBKXw2xhsYbV3VNSnYrVAcdx1czsnLsE1ou4SvLecGdSYe4QpAuZdfjJAf",
         "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
         "amount": "25",
         "denomination": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
         "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "failureReason": null,
+        "createdAt": "2026-11-06T17:57:30.817Z",
+        "status": "finalized",
         "tokenAmount": "25",
-        "failureReason": "example",
-        "createdAt": "2025-01-01T00:00:00.000Z",
-        "confirmedAt": "2025-01-01T00:00:00.000Z",
-        "settledAt": "2025-01-01T00:00:00.000Z"
+        "confirmedAt": "2026-11-06T17:57:32.517Z",
+        "settledAt": "2026-11-06T17:57:35.623Z"
       }
     ],
     "hasMore": false,
-    "nextCursor": "example"
+    "nextCursor": null
   },
   "meta": {
     "requestId": "req_example",

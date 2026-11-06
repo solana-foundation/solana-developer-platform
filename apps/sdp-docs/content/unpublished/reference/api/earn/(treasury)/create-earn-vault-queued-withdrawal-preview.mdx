@@ -1,6 +1,6 @@
 ---
 module: earn
-title: Preview an asynchronous custody withdrawal
+title: Preview a custody withdrawal request
 description: Quotes the selected solver queue's payout and timing, or an operator redemption's intermediate-token conversion and expected par payout.
 icon: method:POST
 apiReference: true
@@ -82,7 +82,7 @@ Any of:
 
       - **`assets`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `9.975`
 
-        Expected payout after the selected discount, in asset units.
+        Expected payout after the discount, in `assetMint` units.
 
       - **`assetDecimals`** · `integer` · required · min 0 · max 38
 
@@ -90,11 +90,11 @@ Any of:
 
       - **`maturityTimestamp`** · `string` · required · pattern `^\d+$` · example `1789722000`
 
-        Expected Unix time when solver fulfilment may begin.
+        Unix time, in seconds, when a solver may start fulfilling the request.
 
       - **`deadlineTimestamp`** · `string` · required · pattern `^\d+$` · example `1789808400`
 
-        Expected Unix deadline. Fulfilment is allowed through this instant; cancellation is allowed only after it.
+        Unix time, in seconds, of the request's deadline. A solver may fulfill it until this time; cancellation is allowed only after it.
 
       - **`blockingIssues`** · `object[]` · required
 

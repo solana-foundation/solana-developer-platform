@@ -126,13 +126,6 @@ components identify server-rendered code through that metadata and its Shiki
 class. Language choices synchronize across matching groups; optional browser
 storage must never be required for the controls to work.
 
-Integration paths use `className="launch-guide-paths"`: a raised segmented
-selector, space below it, and borderless panels. A workflow card resets the
-first and last child's margins so its top and bottom padding match. Set
-`queryParam="integration"` on the Quickstart tabs to accept `earn-api` and
-`embedded-yield`; missing or invalid values select Earn API. Query-driven tabs
-ignore remembered workflow choices, and heading fragments can still open a path.
-
 `expandDocsBlocks` unwraps `Tabs`, `Tab`, `Callout`, `details` and `summary` into
 plain Markdown. Every variant and closed helper remains in Copy page, `.md`
 and AI output. `EarnFlow` and `GuideCards` have equivalent Markdown too. Keep

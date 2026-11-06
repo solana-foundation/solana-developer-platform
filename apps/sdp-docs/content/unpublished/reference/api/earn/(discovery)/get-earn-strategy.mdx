@@ -1,7 +1,7 @@
 ---
 module: earn
-title: Get one yield strategy
-description: Returns one catalogue row by id, whatever its cluster; fundable still answers whether the instrument exists on the caller's own cluster.
+title: Get a strategy
+description: Gets one strategy by ID, on either cluster.
 icon: method:GET
 apiReference: true
 ---
@@ -10,11 +10,15 @@ apiReference: true
 
 <ApiEndpoint method="GET" path="/v1/earn/strategies/{strategyId}" />
 
+`fundable` still reports whether the strategy exists on your project's cluster.
+
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
 ## Path parameters
 
-- **`strategyId`** · `string` · required · min length 1
+- **`strategyId`** · `string` · required · min length 1 · example `earn_strategy_8d1f0c52-6a3e-4b7e-9f21-3c5d7a9e4b10`
+
+  The strategy's `id` from the catalog.
 
 ## Headers
 
@@ -24,17 +28,17 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
 ## Responses
 
-- **`200`** One strategy-catalogue row
+- **`200`** The strategy
 
   - **`data`** · `object` · required
 
     - **`strategy`** · `object` · required
 
-      One synced strategy-catalogue row.
+      One strategy in the catalog.
 
-      - **`id`** · `string` · required · example `earn_strategy_example`
+      - **`id`** · `string` · required · example `earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e`
 
-        Catalogue id — the `strategyId` the deposit build takes.
+        The strategy's ID. Pass it as `strategyId` to preview or build a deposit.
 
       - **`provider`** · `string` · required · example `kamino`
 
@@ -42,13 +46,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       - **`providerReference`** · `string` · required · example `7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx`
 
-        The instrument's identity at the provider — the vault's on-chain address.
+        The strategy's onchain address at the provider, such as a vault. It identifies the instrument; never send funds to it.
 
       - **`name`** · `string` · required · example `Allez USDC`
 
       - **`sourceKind`** · `string` · required · one of `defi`, `rwa`
 
-        Where the yield comes from: on-chain DeFi or real-world assets.
+        Where the yield comes from: onchain DeFi or real-world assets.
 
       - **`underlyingSource`** · `string` · example `kamino`
 
@@ -56,11 +60,11 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       - **`depositMints`** · `string[]` · required
 
-        Mints the instrument accepts directly; the FIRST is the deposit token.
+        Mints the strategy accepts directly. The first is the deposit token.
 
       - **`shareMint`** · `string` · example `hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2`
 
-        The share token a vault-direct deposit mints, when the instrument has one.
+        The share token a deposit mints, when the strategy has one.
 
       - **`apyType`** · `string` · required · one of `variable`, `fixed`
 
@@ -88,11 +92,11 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       - **`status`** · `string` · required · one of `active`, `paused`, `deprecated`
 
-        Catalogue lifecycle. Only `active` strategies accept new deposits.
+        The strategy's lifecycle. Only `active` strategies accept new deposits.
 
       - **`depositSlippage`** · `object | null` · required
 
-        Non-null when a deposit build for this strategy, in your environment, refuses to run without an explicit `minSharesOut`. Quote the deposit first and derive the floor from the live figure minus a chosen tolerance. Most production strategies are non-null; a next-NAV subscription may be null when no on-chain instruction can enforce a floor. Answered per request, like `fundable`.
+        Not null when a deposit build for this strategy, in your environment, requires `minSharesOut`. Preview the deposit first and derive the floor from `sharesOut` minus your tolerance. Most production strategies are not null; a strategy priced later, such as a provider order, may be null because no onchain instruction can enforce a floor. Answered per request, like `fundable`.
 
         - **`quoteRequired`** · `boolean` · required · always `true`
 
@@ -100,7 +104,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
         - **`defaultToleranceBps`** · `integer` · required · example `50`
 
-          Suggested starting tolerance in basis points; the customer may choose another accepted value.
+          Suggested tolerance in basis points, to take off a preview's quote when you compute the floor. Your customer may choose another.
 
       - **`withdrawalSlippage`** · `object | null` · required
 
@@ -112,19 +116,19 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
         - **`defaultToleranceBps`** · `integer` · required · example `50`
 
-          Suggested starting tolerance in basis points; the customer may choose another accepted value.
+          Suggested tolerance in basis points, to take off a preview's quote when you compute the floor. Your customer may choose another.
 
       - **`hostCluster`** · `string` · required · one of `devnet`, `mainnet-beta`
 
-        The cluster the INSTRUMENT lives on — a stored fact about the vault.
+        The cluster the strategy runs on.
 
       - **`fundable`** · `boolean` · required
 
-        Whether the instrument exists on the caller's own cluster. `false` is definitive: a deposit can never work here. `true` is necessary but NOT sufficient — the strategy must also be `active`, and an authenticated organization must be entitled to the provider, so branch on it rather than assuming a listed strategy takes deposits.
+        Whether the strategy exists on your project's cluster. `false` means a deposit can never work from this project. `true` is necessary but not sufficient: the strategy must also be `active`, and your organization must be activated for the provider.
 
       - **`feeSponsored`** · `boolean` · required
 
-        Whether SDP's treasury vault flow would use its configured paymaster for a movement on this strategy from your environment: the same gate execution applies, derived per request. Read it for fee copy instead of the deposit preview's flag: providers with no quote-derived floor never need a preview. Always `false` when not `fundable`. A swap-funded deposit is wallet-pays regardless.
+        Whether SDP pays network fees for Treasury movements on this strategy from your environment. It never applies to a customer's wallet: to sponsor an Embedded Yield transaction, pass `feePayer` when you build it. Always `false` when the strategy is not `fundable`, and a swap-funded deposit is never sponsored.
 
       - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
@@ -201,12 +205,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/earn/strategies/strategy_example' \
+curl 'https://api.solana.com/v1/earn/strategies/earn_strategy_8d1f0c52-6a3e-4b7e-9f21-3c5d7a9e4b10' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/strategies/strategy_example", {
+const res = await fetch("https://api.solana.com/v1/earn/strategies/earn_strategy_8d1f0c52-6a3e-4b7e-9f21-3c5d7a9e4b10", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -217,7 +221,7 @@ const res = await fetch("https://api.solana.com/v1/earn/strategies/strategy_exam
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/earn/strategies/strategy_example",
+r = requests.get("https://api.solana.com/v1/earn/strategies/earn_strategy_8d1f0c52-6a3e-4b7e-9f21-3c5d7a9e4b10",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -227,37 +231,34 @@ r = requests.get("https://api.solana.com/v1/earn/strategies/strategy_example",
 {
   "data": {
     "strategy": {
-      "id": "earn_strategy_example",
+      "id": "earn_strategy_8d1f0c52-6a3e-4b7e-9f21-3c5d7a9e4b10",
       "provider": "kamino",
-      "providerReference": "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
-      "name": "Allez USDC",
+      "providerReference": "BEEfo7xwgK2ZP13Pxo7qqTPzAteKJmXjVWtMWcXSvbn2",
+      "name": "Steakhouse High Yield USDC",
       "sourceKind": "defi",
-      "underlyingSource": "kamino",
+      "underlyingSource": "klend",
       "depositMints": [
-        "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
       ],
-      "shareMint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+      "shareMint": "FU2tGk7tFHEhZiZ516TKgpPqPwXYXHTeRHqvuDwa56UV",
       "apyType": "variable",
-      "currentApy": "0.062",
+      "currentApy": "0.045113",
       "liquidityTerm": "instant",
-      "redemptionDelayDays": 2,
       "riskMetadata": {
-        "curator": "allez"
+        "managementFeeBps": 0,
+        "performanceFeeBps": 500
       },
       "status": "active",
       "depositSlippage": {
         "quoteRequired": true,
-        "defaultToleranceBps": 50
+        "defaultToleranceBps": 10
       },
-      "withdrawalSlippage": {
-        "quoteRequired": true,
-        "defaultToleranceBps": 50
-      },
-      "hostCluster": "devnet",
-      "fundable": false,
+      "withdrawalSlippage": null,
+      "hostCluster": "mainnet-beta",
+      "fundable": true,
       "feeSponsored": false,
-      "createdAt": "2025-01-01T00:00:00.000Z",
-      "updatedAt": "2025-01-01T00:00:00.000Z"
+      "createdAt": "2026-11-04T00:17:15.491Z",
+      "updatedAt": "2026-11-06T17:52:10.042Z"
     }
   },
   "meta": {

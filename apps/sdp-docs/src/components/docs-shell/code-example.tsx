@@ -16,7 +16,6 @@ import {
 } from "fumadocs-ui/components/ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "fumadocs-ui/components/ui/tabs";
 import { Check, ChevronDown } from "lucide-react";
-import { useSearchParams } from "next/navigation";
 import {
   Children,
   type ComponentProps,
@@ -24,7 +23,6 @@ import {
   isValidElement,
   type ReactNode,
   type RefObject,
-  Suspense,
   useCallback,
   useContext,
   useRef,
@@ -393,34 +391,8 @@ export function DocsCodeBlockTab({ className, ...props }: ComponentProps<typeof 
   );
 }
 
-type DocsTabsProps = ComponentProps<typeof FumadocsTabs> & {
-  /** Select an initial normalized item value from the URL, without remembered preferences. */
-  queryParam?: string;
-};
-
-function QueriedDocsTabs({ queryParam, ...props }: DocsTabsProps & { queryParam: string }) {
-  const requested = useSearchParams()?.get(queryParam) ?? null;
-  const selected = props.items?.find((item) => item.toLowerCase().replace(/\s/, "-") === requested);
-  return (
-    <DocsTabsRoot
-      {...props}
-      key={JSON.stringify([queryParam, requested])}
-      defaultValue={selected?.toLowerCase().replace(/\s/, "-") ?? props.defaultValue}
-      groupId={undefined}
-      persist={false}
-    />
-  );
-}
-
 /** Authored language alternatives share the shell; workflow and UI/API tabs stay regular. */
-export function DocsTabs({ queryParam, ...props }: DocsTabsProps) {
-  if (queryParam !== undefined) {
-    return (
-      <Suspense fallback={<DocsTabsRoot {...props} groupId={undefined} persist={false} />}>
-        <QueriedDocsTabs {...props} queryParam={queryParam} />
-      </Suspense>
-    );
-  }
+export function DocsTabs(props: ComponentProps<typeof FumadocsTabs>) {
   return <DocsTabsRoot {...props} />;
 }
 

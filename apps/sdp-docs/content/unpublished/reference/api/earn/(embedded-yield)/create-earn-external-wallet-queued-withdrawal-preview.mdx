@@ -1,7 +1,7 @@
 ---
 module: earn
-title: Preview an asynchronous external-wallet withdrawal
-description: Quotes either a solver queue's discounted payout and timing or an operator redemption's intermediate-token conversion and par payout.
+title: Preview a withdrawal request
+description: "Previews a withdrawal request: a solver queue's discounted payout and timing, or an operator redemption's intermediate-token conversion and payout."
 icon: method:POST
 apiReference: true
 ---
@@ -10,7 +10,7 @@ apiReference: true
 
 <ApiEndpoint method="POST" path="/v1/earn/external-wallet/queued-withdrawal-previews" />
 
-Validate the selected mechanism against withdrawal-options first, then refuse any blockingIssues before asking the customer to confirm. Read-only and safe to retry.
+Check the mechanism against the position's withdrawal options first, and resolve every `blockingIssues` entry before the customer confirms. The preview is read-only and safe to retry. It does not check the wallet's balance, so keep `shares` within the position's `withdrawableShares`.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
@@ -30,17 +30,17 @@ Any of:
 
 - **object**
 
-  - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_example`
+  - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
 
-    The caller's tenant-scoped external-wallet position.
+    The position's ID, from the positions list or the deposit submit response.
 
   - **`shares`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `10`
 
-    Shares to place into the selected asynchronous exit, in share units.
+    Shares to place in the withdrawal request, in share units.
 
   - **`mechanism`** · `string` · always `solverQueue`
 
-    Selects the solver queue. May be omitted for backwards compatibility; operator redemptions must be explicit.
+    Selects the solver queue, which is also the default when omitted. Operator redemptions must set `mechanism` explicitly.
 
   - **`discountBps`** · `integer` · required · min 0 · max 10000 · example `25`
 
@@ -52,23 +52,23 @@ Any of:
 
 - **object**
 
-  - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_example`
+  - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
 
-    The caller's tenant-scoped external-wallet position.
+    The position's ID, from the positions list or the deposit submit response.
 
   - **`shares`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `10`
 
-    Shares to place into the selected asynchronous exit, in share units.
+    Shares to place in the withdrawal request, in share units.
 
   - **`mechanism`** · `string` · required · always `operatorRedemption`
 
-    Selects an issuer/operator-completed par redemption with no solver discount or deadline.
+    Selects an operator redemption, which takes no solver discount or deadline.
 
 - **object**
 
-  - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_example`
+  - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
 
-    The caller's tenant-scoped external-wallet position.
+    The position's ID, from the positions list or the deposit submit response.
 
   - **`intermediateAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `2000`
 
@@ -76,11 +76,11 @@ Any of:
 
   - **`mechanism`** · `string` · required · always `operatorRedemption`
 
-    Selects an issuer/operator-completed par redemption with no solver discount or deadline.
+    Selects an operator redemption, which takes no solver discount or deadline.
 
 ## Responses
 
-- **`200`** Expected asynchronous-withdrawal terms
+- **`200`** Expected request terms
 
   - **`data`** · `object` · required
 
@@ -88,9 +88,9 @@ Any of:
 
     - **object**
 
-      - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_example`
+      - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
 
-        The caller's tenant-scoped external-wallet position.
+        The position's ID, from the positions list or the deposit submit response.
 
       - **`assetMint`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
 
@@ -104,7 +104,7 @@ Any of:
 
       - **`assets`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `9.975`
 
-        Expected payout after the selected discount, in asset units.
+        Expected payout after the discount, in `assetMint` units.
 
       - **`assetDecimals`** · `integer` · required · min 0 · max 38
 
@@ -112,11 +112,11 @@ Any of:
 
       - **`maturityTimestamp`** · `string` · required · pattern `^\d+$` · example `1789722000`
 
-        Expected Unix time when solver fulfilment may begin.
+        Unix time, in seconds, when a solver may start fulfilling the request.
 
       - **`deadlineTimestamp`** · `string` · required · pattern `^\d+$` · example `1789808400`
 
-        Expected Unix deadline. Fulfilment is allowed through this instant; cancellation is allowed only after it.
+        Unix time, in seconds, of the request's deadline. A solver may fulfill it until this time; cancellation is allowed only after it.
 
       - **`blockingIssues`** · `object[]` · required
 
@@ -126,9 +126,9 @@ Any of:
 
     - **object**
 
-      - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_example`
+      - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
 
-        The caller's tenant-scoped external-wallet position.
+        The position's ID, from the positions list or the deposit submit response.
 
       - **`mechanism`** · `string` · required · always `operatorRedemption`
 
@@ -257,11 +257,11 @@ curl -X POST 'https://api.solana.com/v1/earn/external-wallet/queued-withdrawal-p
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "positionId": "earn_position_example",
-    "shares": "10",
+    "positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc",
     "mechanism": "solverQueue",
-    "discountBps": 25,
-    "deadlineSeconds": 86400
+    "shares": "15",
+    "discountBps": 10,
+    "deadlineSeconds": 60
   }'
 ```
 
@@ -273,11 +273,11 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/queued-w
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    "positionId": "earn_position_example",
-    "shares": "10",
+    "positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc",
     "mechanism": "solverQueue",
-    "discountBps": 25,
-    "deadlineSeconds": 86400
+    "shares": "15",
+    "discountBps": 10,
+    "deadlineSeconds": 60
   })
 });
 ```
@@ -288,11 +288,11 @@ import os, requests
 r = requests.post("https://api.solana.com/v1/earn/external-wallet/queued-withdrawal-previews",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
-    "positionId": "earn_position_example",
-    "shares": "10",
+    "positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc",
     "mechanism": "solverQueue",
-    "discountBps": 25,
-    "deadlineSeconds": 86400
+    "shares": "15",
+    "discountBps": 10,
+    "deadlineSeconds": 60
   })
 ```
 
@@ -301,21 +301,16 @@ r = requests.post("https://api.solana.com/v1/earn/external-wallet/queued-withdra
 ```json tab="200"
 {
   "data": {
-    "positionId": "earn_position_example",
-    "assetMint": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
-    "shares": "25",
-    "shareDecimals": 1,
-    "assets": "9.975",
-    "assetDecimals": 1,
-    "discountBps": 1,
-    "maturityTimestamp": "1789722000",
-    "deadlineTimestamp": "1789808400",
-    "blockingIssues": [
-      {
-        "code": "SHARE_LOCKED",
-        "message": "example"
-      }
-    ]
+    "positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc",
+    "assetMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+    "shares": "15",
+    "shareDecimals": 6,
+    "assets": "14.985",
+    "assetDecimals": 6,
+    "discountBps": 10,
+    "maturityTimestamp": "1793991049",
+    "deadlineTimestamp": "1793991109",
+    "blockingIssues": []
   },
   "meta": {
     "requestId": "req_example",

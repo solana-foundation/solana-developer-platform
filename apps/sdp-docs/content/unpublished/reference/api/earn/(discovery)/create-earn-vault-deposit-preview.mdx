@@ -1,7 +1,7 @@
 ---
 module: earn
-title: Preview a direct vault deposit
-description: Quotes how many shares a direct vault deposit would mint from the provider's live accounting.
+title: Preview a deposit
+description: Quotes how many shares a deposit would receive right now, from the provider's live accounting.
 icon: method:POST
 apiReference: true
 ---
@@ -10,7 +10,7 @@ apiReference: true
 
 <ApiEndpoint method="POST" path="/v1/earn/vault-deposit-previews" />
 
-Use it when the strategy's `depositSlippage.quoteRequired` is true, then derive `minSharesOut` from `sharesOut` minus the chosen tolerance. Read-only, no idempotency key, and 501 when the provider cannot quote deposits. Takes the deposit's own gates in the caller's project environment, provider entitlement included.
+When the strategy's `depositSlippage` is not null, set `minSharesOut` from this quote: take your tolerance off `sharesOut`. Resolve every `blockingIssues` entry before you build. The preview is read-only, takes no Idempotency-Key, and applies a deposit's access checks, provider activation included. It returns 501 when the provider cannot quote deposits.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
@@ -26,11 +26,11 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
 Quote one direct vault deposit against the provider's live accounting. Read-only: nothing is built and nothing is persisted.
 
-- **`strategyId`** · `string` · required · min length 1 · example `earn_strategy_example`
+- **`strategyId`** · `string` · required · min length 1 · example `earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e`
 
 - **`amount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
 
-  Deposit amount in the vault token's units.
+  Deposit amount in deposit-token units.
 
 ## Responses
 
@@ -38,7 +38,7 @@ Quote one direct vault deposit against the provider's live accounting. Read-only
 
   - **`data`** · `object` · required
 
-    - **`strategyId`** · `string` · required · example `earn_strategy_example`
+    - **`strategyId`** · `string` · required · example `earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e`
 
     - **`sharesOut`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `24.98`
 
@@ -58,7 +58,7 @@ Quote one direct vault deposit against the provider's live accounting. Read-only
 
     - **`feeSponsored`** · `boolean` · required
 
-      Whether SDP's treasury vault flow would use its configured paymaster on this cluster. Embedded Yield partners sponsor their external-wallet flow separately by passing `feePayer` to the transaction build.
+      Whether SDP pays network fees for Treasury movements on this cluster. It does not apply to customer wallets: to sponsor an Embedded Yield transaction, pass `feePayer` when you build it.
 
   - **`meta`** · `object` · required
 
@@ -155,7 +155,7 @@ curl -X POST 'https://api.solana.com/v1/earn/vault-deposit-previews' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "strategyId": "earn_strategy_example",
+    "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
     "amount": "25"
   }'
 ```
@@ -168,7 +168,7 @@ const res = await fetch("https://api.solana.com/v1/earn/vault-deposit-previews",
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    "strategyId": "earn_strategy_example",
+    "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
     "amount": "25"
   })
 });
@@ -180,7 +180,7 @@ import os, requests
 r = requests.post("https://api.solana.com/v1/earn/vault-deposit-previews",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
-    "strategyId": "earn_strategy_example",
+    "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
     "amount": "25"
   })
 ```
@@ -190,15 +190,10 @@ r = requests.post("https://api.solana.com/v1/earn/vault-deposit-previews",
 ```json tab="200"
 {
   "data": {
-    "strategyId": "earn_strategy_example",
-    "sharesOut": "24.98",
+    "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
+    "sharesOut": "24.975",
     "shareDecimals": 6,
-    "blockingIssues": [
-      {
-        "code": "SHARE_LOCKED",
-        "message": "example"
-      }
-    ],
+    "blockingIssues": [],
     "feeSponsored": false
   },
   "meta": {

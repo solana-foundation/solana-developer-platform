@@ -1,0 +1,131 @@
+---
+module: earn
+title: Strategies
+description: Find a strategy your project can deposit into, then check its slippage policy, rate, eligibility, and withdrawal terms.
+---
+
+Every deposit names a strategy. List the catalog, keep the strategies your
+project can fund, and check each one's terms before you offer it to
+customers.
+
+## List the catalog
+
+[`GET /v1/earn/strategies`](/docs/reference/api/earn/list-earn-strategies)
+returns the strategies your project can see, largest first. It defaults to
+your project's cluster: devnet for sandbox, mainnet for production.
+
+```bash title="Terminal"
+curl --fail-with-body -sS "https://api.solana.com/v1/earn/strategies?pageSize=100" \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
+```json title="Response (trimmed)"
+{
+  "data": {
+    "strategies": [
+      {
+        "id": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
+        "provider": "kamino",
+        "providerReference": "C7N2fqV2GvhFghDf5PJSwstyjedjLNCY1cm2Ak7TeU83",
+        "name": "Kamino Vault USDC",
+        "sourceKind": "defi",
+        "depositMints": ["4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"],
+        "shareMint": "CeirL1mAehaM6g2EccgMUQwohNfnuyicskVQ4r9ekXk6",
+        "apyType": "variable",
+        "liquidityTerm": "instant",
+        "status": "active",
+        "depositSlippage": null,
+        "withdrawalSlippage": null,
+        "hostCluster": "devnet",
+        "fundable": true
+      }
+    ],
+    "total": 6,
+    "page": 1,
+    "pageSize": 100
+  }
+}
+```
+
+The catalog pages with `page` and `pageSize` (default 20, up to 100). Keep
+reading pages until you have `total` strategies. Narrow the list with
+`sourceKind`, `apyType`, or `liquidityTerm`.
+
+## Check that it takes deposits
+
+| Check | Pass when |
+| --- | --- |
+| `status` | `"active"`. Paused and deprecated strategies take no new deposits. |
+| `fundable` | `true`. The strategy exists on your project's cluster. |
+| `hostCluster` | Matches your project: `devnet` in sandbox, `mainnet-beta` in production. |
+| Deposit token | `depositMints[0]` is the token a deposit takes. Fund the wallet with it. |
+| Preview | A [deposit preview](/docs/reference/api/earn/create-earn-vault-deposit-preview) returns an empty `blockingIssues`. |
+
+In sandbox, `?cluster=mainnet-beta` lists mainnet strategies for browsing.
+They stay `fundable: false`: a sandbox project cannot deposit into them.
+
+Your organization also needs each provider activated, once for all its
+projects. Until it is, previews and builds return `403` with `FORBIDDEN` and
+`details.reason` set to `provider_not_entitled`:
+
+```json title="Response"
+{
+  "error": {
+    "code": "FORBIDDEN",
+    "message": "Kamino requires manual activation for this organization.",
+    "details": { "reason": "provider_not_entitled" }
+  }
+}
+```
+
+Ask your SDP contact to activate the provider for your organization.
+
+## Read the slippage policy
+
+`depositSlippage` and `withdrawalSlippage` say whether a transaction needs a
+floor derived from a live quote:
+
+| Policy | Deposit | Withdrawal |
+| --- | --- | --- |
+| `null` | Omit `minSharesOut`. | Omit `minAmountOut`. |
+| `{ "quoteRequired": true, "defaultToleranceBps": 10 }` | Preview, then send `minSharesOut`. | Preview, then send `minAmountOut`. |
+
+[Slippage floors](/docs/earn/integration-details#slippage-floors) shows how
+to compute a floor exactly.
+
+## Show rates and terms
+
+| Field | How to show it |
+| --- | --- |
+| `currentApy` | A decimal rate: `"0.062"` is 6.2%. When absent, show "Unavailable", never 0%. |
+| `apyType` | A `variable` rate moves with the strategy's returns; a `fixed` rate does not. |
+| `liquidityTerm` | A label, not a promise. Read live [withdrawal options](/docs/earn/withdrawals#1-choose-a-route) before you offer a withdrawal route. |
+| `redemptionDelayDays` | Expected timing, not a guaranteed deadline. |
+| `riskMetadata` | Provider fees and risk facts, when the provider reports them. |
+
+An APY describes a rate, not a guaranteed return. Holding a token in the
+customer's own wallet does not guarantee principal, backing, or liquidity.
+
+## Confirm eligibility
+
+SDP access authorizes API calls, not investment. For restricted products,
+confirm investor, jurisdiction, wallet, subscription, and redemption
+requirements with the provider, for each customer and for the wallet that
+will hold the position. One usable strategy does not make a provider
+permissionless.
+
+## Follow the funds
+
+| Strategy shape | Money in | Money out |
+| --- | --- | --- |
+| Vault or lending market | One transaction exchanges the deposit token for shares. | Shares redeem under the provider's liquidity and withdrawal rules. |
+| Yield-bearing token | One transaction acquires the token in the customer's wallet. | A sale depends on market liquidity; a redemption may need provider approval. |
+| Provider order | A transaction pays into the provider's order. | The provider completes the order later. |
+
+## Paused and deprecated strategies
+
+Pausing or deprecating a strategy stops new deposits only. Existing positions
+stay visible and withdrawable, subject to the provider's liquidity. See
+[Withdraw funds](/docs/earn/withdrawals).
+
+Next, [make your first deposit](/docs/earn/quickstart).

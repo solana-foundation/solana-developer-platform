@@ -113,14 +113,36 @@ deposits reuse the position. Use the latest deposit movement timestamp or
 rename the column. Evidence: `embedded-yield-dashboard.tsx` in the dashboard's
 `markets/earn` directory and `earn-movements.repository.ts` position upsert.
 
-### Generated movement polling accumulates abort listeners
+### Earn submits answer their own idempotency codes
 
-`waitForEarnMovement` adds an abort listener during each delay and does not
-remove it when the delay completes. Reuse the cleanup pattern already present
-in the queued-request poller. Evidence: `earn-integration-snippets.ts` in the
-dashboard's `markets/earn` directory.
+The four external-wallet submits and the Treasury deposit handle their own
+keys. A reused key for a different build (Treasury: a different body)
+answers `409 CONFLICT`, not the shared `422 IDEMPOTENCY_KEY_REUSED`, while
+the same key and `transactionId` with different signed bytes replays the
+original; a deposit submit without a key answers `400 BAD_REQUEST`; a replay
+returns the movement's current state with `replayed: true` and no
+`Idempotent-Replayed` header. The Earn guides document this behavior. Aligning
+it with the shared contract is a product decision for the stable promotion.
 
-No money-path implementation was changed to resolve these findings. No Linear
+The four external-wallet submits no longer declare `422` in OpenAPI. No
+paymaster co-signs an external-wallet transaction (the customer's wallet or
+the caller's own fee payer signs), so `SIGNING_REJECTED` cannot occur on them
+until SDP sponsors them (PRO-1744); `spec.test.ts` records why they are absent
+from its sponsored-submit list.
+
+### Kamino withdrawal builds fail on a Surfpool fork
+
+Surfpool's `jsonParsed` returns klend Reserve accounts IDL-decoded, where
+devnet returns base64. The batched withdrawal read refuses the decoded form
+(`VAULT_UNREADABLE`, answered as `503 PROVIDER_UNAVAILABLE`), so neither the
+API nor `sdk.smoke.test.ts` can build a Kamino withdrawal on a fork. Real
+devnet is unaffected. Evidence: `loadStateOnlyReserves` in
+`packages/sdp-kamino/src/sdk.ts` and a `getMultipleAccounts` probe of reserve
+`6jrwyGApj9dGXJArBCfFbUeRMMMv5M5oApyxChvt7986` on both RPCs.
+
+The generated module's abort-listener leak in `waitForEarnMovement`, listed
+here earlier, is fixed with the queued poller's cleanup pattern. No
+money-path implementation was changed to resolve these findings. No Linear
 issues or external comments were created by this audit.
 
 ## Publication gates

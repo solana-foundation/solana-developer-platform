@@ -1,93 +1,205 @@
 ---
 module: earn
 title: Integration details
-description: Quote protection, fees, sponsorship, and recovery for Embedded Yield.
+description: Slippage floors, fees and sponsorship, swap-funded deposits, retries, errors, and polling for a production Earn integration.
 ---
 
-Use these rules with the [Embedded Yield flow](/docs/guides/embedded-yield).
+These rules apply to every Earn integration. Read them before you take real
+deposits.
 
-## Quote protection
+## Slippage floors
 
-Read the strategy's policies and resolve the preview's `blockingIssues`
-before building.
+A floor is the least a transaction may return: `minSharesOut` on a deposit,
+`minAmountOut` on a withdrawal. A strategy's `depositSlippage` and
+`withdrawalSlippage` say whether it takes one, as
+[Read the slippage policy](/docs/earn/strategies#read-the-slippage-policy)
+shows. When a policy is not null, preview first and send the floor: the build
+refuses the transaction without it.
 
-| Policy | When non-null | When null |
-| --- | --- | --- |
-| `depositSlippage` | Derive and send `minSharesOut` from live `sharesOut`. | Omit the share floor. |
-| `withdrawalSlippage` | Derive and send `minAmountOut` from live `assetsOut`. | Omit the token floor. |
+A null policy means the transaction cannot enforce a floor: a provider order
+is priced later, and some sandbox vaults lack the floor instruction. Omit the
+floor then, because a build refuses one it cannot enforce. In production,
+nearly every deposit takes a floor. A preview quotes the rate; it does not
+reserve it.
 
-A null policy can mean the instruction cannot enforce a floor, including
-later-priced provider orders. Do not invent one or promise unsupported price
-protection. Previews estimate an outcome; they do not reserve an exchange rate.
+Compute the floor in integer base units, never with a JavaScript `number`:
 
-Calculate the floor with integer base units:
+```typescript title="floor.ts"
+/** Takes `toleranceBps` off a decimal quote, rounding down to the mint's scale. */
+export function floorForTolerance(quote: string, decimals: number, toleranceBps: number): string {
+  if (!Number.isInteger(toleranceBps) || toleranceBps < 1 || toleranceBps > 1_000) {
+    throw new Error("Tolerance must be 1 to 1,000 basis points");
+  }
+  const [whole = "", fraction = ""] = quote.split(".");
+  const significant = fraction.replace(/0+$/, "");
+  if (!/^\d+$/.test(whole) || !/^\d*$/.test(fraction) || significant.length > decimals) {
+    throw new Error("The quote is not a decimal at the mint's scale");
+  }
+  const units = BigInt(whole + significant.padEnd(decimals, "0"));
+  if (units === 0n) throw new Error("The quote is zero");
+  const floored = (units * BigInt(10_000 - toleranceBps)) / 10_000n || 1n;
+  const digits = floored.toString().padStart(decimals + 1, "0");
+  if (decimals === 0) return digits;
+  const fractionPart = digits.slice(-decimals).replace(/0+$/, "");
+  return fractionPart ? `${digits.slice(0, -decimals)}.${fractionPart}` : digits.slice(0, -decimals);
+}
 
-1. Parse a positive quote at `shareDecimals` for deposits or `assetDecimals`
-   for withdrawals. Reject significant precision beyond that scale.
-2. Multiply by `(10_000 - toleranceBps)`, divide by `10_000`, and round down.
-   Keep at least one base unit.
-3. Convert back to a decimal string. Never round-trip amounts through a
-   JavaScript `number`.
+// floorForTolerance("50", 6, 10) returns "49.95": a 10 bps floor on 50 shares.
+```
 
+Use the preview's `shareDecimals` for a deposit floor and `assetDecimals` for
+a withdrawal floor. Start from the policy's `defaultToleranceBps`, and let
+your customer choose another; this helper accepts 1 to 1,000 basis points.
 The [backend module](/docs/guides/embedded-yield#get-the-backend-module)
-includes `floorForTolerance` when the selected strategy requires a floor.
+ships the same function whenever its strategy needs a floor.
 
 ## Fees and sponsorship
 
-Customers pay network fees and account rent in SOL by default, including on
-a first stablecoin deposit that creates an account. Rent is separate from
-principal and yield.
+By default the customer's wallet pays each transaction's network fee and the
+rent for any account it creates:
 
-To sponsor a customer's transaction:
+| Transaction | Accounts it can create |
+| --- | --- |
+| A first deposit into a strategy | The share account, about 0.002 SOL. Some providers also create an account for the wallet, for up to about 0.0035 SOL in all. |
+| A withdrawal request | The request's own accounts, about 0.0027 SOL. |
 
-1. Set your backend-controlled `feePayer` when building.
-2. Have the customer sign first.
-3. Verify the unchanged message and expected payer, then co-sign the same
-   transaction. Submit both signatures.
+Rent is separate from the deposit and its yield, and it is not part of
+`earned`. To pay these costs for your customer, sponsor the transaction:
 
-Changing the payer requires a new build and signatures. The
-[backend module](/docs/guides/embedded-yield#get-the-backend-module) provides
-`signEarnTransaction` to check message equality and `createSponsorSigner` to
-verify the payer.
+1. Set `feePayer` to a wallet your backend controls when you build.
+2. Have the customer's wallet sign first.
+3. Check that the message is unchanged and that its fee payer is your wallet,
+   then add your signature to the same transaction.
+4. Submit the transaction with both signatures.
 
-- Only sign SDP builds initiated for an authenticated customer.
-- Bound the signer's SOL float, rate-limit sponsorship, and monitor spend.
-- Store signing credentials in your secret manager.
+With raw requests, run step 3 on your backend with your fee payer's key pair:
 
-The catalogue's `feeSponsored` does not apply to customer-wallet transactions.
-Use your own `feePayer` to sponsor them.
+```typescript title="sponsor.ts"
+import {
+  getAddressFromPublicKey,
+  getBase64EncodedWireTransaction,
+  getBase64Encoder,
+  getCompiledTransactionMessageDecoder,
+  getTransactionDecoder,
+  partiallySignTransaction,
+} from "@solana/kit";
 
-Full Kamino exits leave the share account open. Rent recovery requires a
-separate owner-authorized close. Do not promise customers or sponsors an
+const decode = (base64: string) =>
+  getTransactionDecoder().decode(getBase64Encoder().encode(base64));
+
+/** Adds your fee payer's signature to a transaction the customer's wallet signed. */
+export async function cosignAsFeePayer(
+  unsignedBase64: string,
+  customerSignedBase64: string,
+  feePayer: CryptoKeyPair,
+): Promise<string> {
+  const unsigned = decode(unsignedBase64);
+  const signed = decode(customerSignedBase64);
+  const unchanged =
+    signed.messageBytes.length === unsigned.messageBytes.length &&
+    signed.messageBytes.every((byte, index) => byte === unsigned.messageBytes[index]);
+  if (!unchanged) throw new Error("The wallet changed the transaction; build a new one");
+
+  // The fee payer is the message's first account.
+  const { staticAccounts } = getCompiledTransactionMessageDecoder().decode(signed.messageBytes);
+  if (staticAccounts[0] !== (await getAddressFromPublicKey(feePayer.publicKey))) {
+    throw new Error("This build's fee payer is not your wallet");
+  }
+  return getBase64EncodedWireTransaction(await partiallySignTransaction([feePayer], signed));
+}
+```
+
+Pass it the build's `transaction` and the customer's signed transaction, then
+submit what it returns. A missing sponsor signature fails the submit with
+`400`, and changing the fee payer means a new build and new signatures. The
+build's `sponsored` field stays `false`: it reports whether SDP paid, and SDP
+never pays for an external wallet. In the
+[backend module](/docs/guides/embedded-yield#get-the-backend-module),
+`signEarnTransaction` runs steps 2 and 3, and `createSponsorSigner` checks
+the fee payer before it signs.
+
+- Sponsor only builds your backend started for an authenticated customer.
+- Keep your sponsor's SOL balance small, rate-limit sponsored requests, and
+  watch the spend.
+- Store the sponsor's key in your secret manager.
+
+The catalog's `feeSponsored` describes deposits and withdrawals from a Treasury custody
+wallet. It never applies to a customer's wallet.
+
+A full withdrawal from a Kamino strategy leaves the empty share account open.
+The customer's wallet can close it to recover the rent; do not promise an
 automatic refund.
 
 ## Swap-funded deposits
 
-Set `sourceTokenMint` to fund a different deposit token through Jupiter using
-a supported source stablecoin. Routes require mainnet and cannot be tested
-in sandbox. Normally, swap and deposit share one transaction.
+Set `sourceTokenMint` to fund a deposit with a different supported
+stablecoin. SDP adds a Jupiter swap to the deposit's deposit token in the
+same transaction, so both happen or neither does. Swap routes need mainnet,
+so you cannot test them in sandbox.
 
-If `requiresSeparateSwap: true`, the response supplies `swap` and `followUp`:
+When the two do not fit in one transaction, the build returns
+`requiresSeparateSwap: true` with a `swap` and a `followUp` instead of
+`transaction`:
 
-1. Save the swap's signed bytes, signature, and follow-up body durably.
-2. Broadcast the standalone swap yourself and confirm it.
+1. Save the swap's signed bytes, its signature, and the follow-up body.
+2. Broadcast the swap yourself and confirm it.
 3. Build the follow-up deposit with its original floor and fee payer.
 
-SDP does not record the standalone swap as an Earn movement. Your app owns
-its recovery. Reconcile an unresolved swap before starting another.
+SDP does not record the standalone swap as a movement, so your app owns its
+recovery. Resolve an unfinished swap before you start another.
 
 ## Retry safely
 
-| Situation | Action |
-| --- | --- |
-| An unsigned build expires. | Build again before requesting a signature. |
-| Submit times out or returns an uncertain server error. | Retry the exact signed body and original key. |
-| A signed direct deposit or withdrawal reaches SDP after expiry. | Submit the original intent and track it; expiry cannot prove it never landed. |
-| A key or build was consumed with different terms. | Find the original action before creating a replacement. |
-| Preview has blocking issues. | Resolve them and preview again. |
+Every Earn submit takes an `Idempotency-Key`. Use a new random UUID for each
+new deposit, withdrawal, request, or cancellation, and save it with the
+signed transaction before the first send. Never put customer data in an
+idempotency key.
 
-- Submit queued requests and cancellations promptly through SDP.
-- If a wallet broadcasts one itself, submitting after the build expires may
-  fail to restore tracking.
-- Keep unresolved operations visible and escalate a missing request. Do not
-  assume no funds moved.
+| Situation | What SDP does | What you do |
+| --- | --- | --- |
+| A submit times out or returns `5xx`. | Nothing twice. | Retry with the same idempotency key and body. |
+| You retry with the same idempotency key and `transactionId`. | Returns the original movement in its current state, with `replayed: true`, even if the signed bytes differ. | Track it as usual. |
+| You reuse an idempotency key for a different build. | `409 CONFLICT`. Nothing runs. | Retry the original build, or use a new idempotency key for a new action. |
+| You submit the same build under a new idempotency key. | `409 CONFLICT`. | Find the original action and its idempotency key. |
+| The blockhash expired before you submitted. | Records the original signed bytes, which may already have landed. If they never did, the movement ends `failed` with `Transaction blockhash expired before confirmation`. | Submit the original and track it. Do not rebuild until it fails. |
+| An unsigned build expired. | Nothing has moved. | Build again before asking for a signature. |
+| The preview has blocking issues. | Nothing has moved. | Resolve them and preview again. |
+
+Earn's submits keep their own idempotency rules, which replace the shared
+[Idempotency](/docs/developing-with-sdp/idempotency) page's. A submit without
+a key returns `400 BAD_REQUEST`, and a misused key returns `409 CONFLICT`,
+never `422`. A key stays bound to its movement for good, with no 24-hour
+window, so never reuse one for a new action.
+
+Submit withdrawal requests and cancellations through SDP promptly. If a
+wallet broadcasts one itself and SDP first sees it after its build expires,
+SDP may be unable to track it. Keep unresolved actions visible, and never
+assume no funds moved.
+
+## Errors
+
+Every error has the shape `{ "error": { "code", "message", "details" } }`.
+The codes Earn integrations meet most:
+
+| Status | Code | Meaning | What to do |
+| --- | --- | --- | --- |
+| `400` | `BAD_REQUEST` | A field is invalid, the `Idempotency-Key` is missing, or the signed transaction differs from the build. | Read `message` and `details`, fix the request, and build again when the transaction changed. |
+| `403` | `INSUFFICIENT_PERMISSIONS` | The API key lacks the grant in `details.action`. | Add the grant to the API key. |
+| `403` | `FORBIDDEN` | `details.reason` is `provider_not_entitled`: your organization is not activated for the provider. With `provider_not_offered`, SDP takes no new deposits for it. | Ask your SDP contact to activate it. Withdrawals still work either way. |
+| `404` | `NOT_FOUND` | No such strategy, position, movement, build, or request in your project. | Check the ID and the project. |
+| `409` | `CONFLICT` | An idempotency key or a signed transaction was already used differently, or a withdrawal request cannot be canceled yet. | See [Retry safely](#retry-safely). For a cancellation, wait for `expiredCancelable`. |
+| `429` | `RATE_LIMITED` | You are over your rate limit. | Wait for `Retry-After`, then retry. |
+| `501` | `NOT_IMPLEMENTED` | The provider cannot quote this operation. | Continue without the preview when the floor policy is null. |
+| `503` | `PROVIDER_UNAVAILABLE` | SDP could not read the provider's live state or reach a dependency. | Retry with backoff, and show the action as unavailable meanwhile. Retry a submit with the same idempotency key and body. |
+
+See [Errors](/docs/reference/conventions/errors) for the shared error model.
+
+## Poll politely
+
+Track a movement by polling its `GET` route about once a second for the
+first minute, then every five seconds. Stop at `finalized` or `failed`, and
+treat `429` as a signal to slow down. Withdrawal requests can take hours or
+days, so poll them every minute or two, and restore them on startup instead
+of holding a loop open. The backend module's wait functions follow this
+schedule. See
+[Rate limits](/docs/reference/conventions/rate-limits).

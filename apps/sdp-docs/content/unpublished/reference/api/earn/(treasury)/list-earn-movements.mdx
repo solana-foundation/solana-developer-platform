@@ -1,7 +1,7 @@
 ---
 module: earn
-title: List all scoped Earn movements
-description: Returns one keyset page of recorded custody-wallet and provider-program movements, newest first.
+title: List all movements
+description: Lists recorded custody-wallet and provider-program movements, newest first, one page at a time.
 icon: method:GET
 apiReference: true
 ---
@@ -14,7 +14,7 @@ This operation is internal. It is not part of the partner-facing Earn API.
 
 <ApiEndpoint method="GET" path="/v1/earn/movements" />
 
-Amounts use each row's denomination; do not sum different tokens or USD together. External-wallet movements use their own per-owner endpoint. This history remains available when a provider is disabled.
+Amounts use each row's denomination, so never sum different tokens or mix them with USD. Customer-wallet movements have their own per-wallet endpoint. History stays available after a provider is disabled.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 

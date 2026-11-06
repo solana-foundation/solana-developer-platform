@@ -1,7 +1,7 @@
 ---
 module: earn
-title: Get one external wallet's balance and earnings
-description: "Returns live balance and total earned per deposit token for the required ownerAddress: earned is live value plus observed withdrawal payouts (totalWithdrawn) minus finalized SDP deposits (totalDeposited), stated only when exact."
+title: Get earnings
+description: Gets one customer wallet's live balance and earnings per deposit token.
 icon: method:GET
 apiReference: true
 ---
@@ -10,13 +10,15 @@ apiReference: true
 
 <ApiEndpoint method="GET" path="/v1/earn/external-wallet/earnings" />
 
-When it cannot be stated (live value unavailable, movements still settling, or a finalized withdrawal whose payout was not observed) the figure is absent with a named reason, never zero. A wallet with no positions in the project's scope answers 200 with `positionCount: 0` and empty `totalsByToken`, never 404. Figures cover currently held positions: a fully exited position's history drops out (it stays on the movements list). Live value reads the owner's whole vault balance, so shares acquired outside SDP inflate it.
+`earned` is live value plus observed withdrawal payouts (`totalWithdrawn`) minus finalized deposits (`totalDeposited`), and appears only when it is exact. Otherwise it is left out with an `earnedUnavailableReason`, such as a live value that is unavailable, movements that are still settling, or a withdrawal payout SDP did not observe; never show it as zero. A wallet with no positions returns `positionCount: 0` and an empty `totalsByToken`, not 404. Totals cover the positions the wallet holds now: a fully withdrawn position drops out here but stays in the movements list. Live value reads the wallet's whole balance in the strategy, so shares acquired outside SDP raise it.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
 ## Query parameters
 
-- **`ownerAddress`** · `string` · required
+- **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+
+  The customer's wallet address: an external wallet, so SDP holds no key for it. It signs, owns the shares, and pays the network fee unless the build names a `feePayer`. It must decode to a 32-byte public key; a base58 string that matches the pattern but does not decode returns 400.
 
 ## Headers
 
@@ -26,15 +28,15 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
 ## Responses
 
-- **`200`** External-wallet earnings
+- **`200`** Earnings per deposit token
 
   - **`data`** · `object` · required
 
     - **`earnings`** · `object` · required
 
-      - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+      - **`ownerAddress`** · `string` · required · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
 
-        The external wallet: the customer's own Solana address. It signs and owns the shares; SDP holds no key for it. It also pays the network fee unless an authenticated build names a `feePayer`. The pattern is necessary but not sufficient — the string must additionally decode to a 32-byte public key, which no pattern can express, so a well-shaped base58 string that does not decode still answers 400.
+        The customer's wallet address.
 
       - **`positionCount`** · `integer` · required · min 0
 
@@ -48,7 +50,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
         - **`unavailablePositionCount`** · `integer` · required · min 0
 
-          Positions whose live value could not hydrate.
+          Positions whose live value could not be read.
 
         - **`currentValue`** · `string` · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
 
@@ -60,15 +62,15 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
         - **`totalWithdrawn`** · `string` · required · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
 
-          Sum of the observed token payouts of finalized withdrawals, a ledger fact, always present. Excludes withdrawals whose payout was not observed (see `withdrawals_not_valued`).
+          Sum of the observed payouts of finalized withdrawals. Always present. Excludes withdrawals whose payout SDP did not observe (see `withdrawals_not_valued`).
 
         - **`earned`** · `string` · max length 129 · pattern `^-?\d+(\.\d+)?$` · example `5.2`
 
-          `currentValue + totalWithdrawn − totalDeposited`, stated only when exact and never coerced to zero. Live hydration reads the owner's whole vault balance, so shares acquired outside SDP inflate this figure (a documented property of non-custodial reads).
+          `currentValue + totalWithdrawn - totalDeposited`, present only when exact and never zero-filled. The live value reads the wallet's whole balance in the strategy, so shares acquired outside SDP raise this figure.
 
         - **`earnedUnavailableReason`** · `string` · one of `live_value_unavailable`, `movements_pending`, `withdrawals_pending`, `deposits_not_valued`, `withdrawals_not_valued`
 
-          Why `earned` is absent: live value failed to hydrate; a movement is still settling; a held position has an open queued withdrawal request, whose shares leave the wallet before its payout (this can last days); or a held position has an unobserved finalized deposit or withdrawal, leaving `totalDeposited` or `totalWithdrawn` incomplete.
+          Why `earned` is absent: `live_value_unavailable` (a live value could not be read), `movements_pending` (a movement is still settling), `withdrawals_pending` (a held position has an open withdrawal request, whose shares leave the wallet before its payout, which can take days), or `deposits_not_valued` and `withdrawals_not_valued` (SDP did not observe a finalized deposit or withdrawal, so `totalDeposited` or `totalWithdrawn` is incomplete).
 
   - **`meta`** · `object` · required
 
@@ -133,12 +135,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/earn/external-wallet/earnings?ownerAddress=11111111111111111111111111111111' \
+curl 'https://api.solana.com/v1/earn/external-wallet/earnings?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/earnings?ownerAddress=11111111111111111111111111111111", {
+const res = await fetch("https://api.solana.com/v1/earn/external-wallet/earnings?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -149,7 +151,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/earnings
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/earn/external-wallet/earnings?ownerAddress=11111111111111111111111111111111",
+r = requests.get("https://api.solana.com/v1/earn/external-wallet/earnings?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -161,17 +163,16 @@ r = requests.get("https://api.solana.com/v1/earn/external-wallet/earnings?ownerA
     "earnings": {
       "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
       "positionCount": 1,
-      "unavailablePositionCount": 1,
+      "unavailablePositionCount": 0,
       "totalsByToken": [
         {
           "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
           "positionCount": 1,
-          "unavailablePositionCount": 1,
-          "currentValue": "25.42",
-          "totalDeposited": "25.42",
-          "totalWithdrawn": "25.42",
-          "earned": "5.2",
-          "earnedUnavailableReason": "live_value_unavailable"
+          "unavailablePositionCount": 0,
+          "currentValue": "25.031",
+          "totalDeposited": "25",
+          "totalWithdrawn": "0",
+          "earned": "0.031"
         }
       ]
     }

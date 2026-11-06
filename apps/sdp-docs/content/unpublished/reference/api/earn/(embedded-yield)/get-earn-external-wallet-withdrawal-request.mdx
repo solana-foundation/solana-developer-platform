@@ -1,7 +1,7 @@
 ---
 module: earn
-title: Get one asynchronous-withdrawal request
-description: Returns the last durable lifecycle observation.
+title: Get a withdrawal request
+description: Gets one withdrawal request with its latest recorded status.
 icon: method:GET
 apiReference: true
 ---
@@ -10,13 +10,15 @@ apiReference: true
 
 <ApiEndpoint method="GET" path="/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}" />
 
-Request creation is share escrow or an intermediate-token conversion, not payout. Only fulfilled, cancelled and failed are terminal. Keep polling closedOrUnknown because SDP has not yet authenticated whether the closed request paid assets or recovered the owner's token claim.
+Creating a request escrows shares or converts them to an intermediate token; it does not pay out. Only `fulfilled`, `cancelled` and `failed` are final. Keep polling a `closedOrUnknown` request: SDP has not yet confirmed whether it paid out or returned the customer's tokens.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
 ## Path parameters
 
-- **`withdrawalRequestId`** · `string` · required · min length 1 · max length 128
+- **`withdrawalRequestId`** · `string` · required · min length 1 · max length 128 · example `earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9`
+
+  The `withdrawalRequestId` a request submit returned.
 
 ## Headers
 
@@ -26,7 +28,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
 ## Responses
 
-- **`200`** Durable asynchronous-withdrawal request
+- **`200`** The withdrawal request
 
   - **`data`** · `object` · required
 
@@ -36,19 +38,19 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       - **mechanism: "solverQueue"**
 
-        - **`withdrawalRequestId`** · `string` · required · example `earn_vault_withdrawal_request_example`
+        - **`withdrawalRequestId`** · `string` · required · example `earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9`
 
-        - **`positionId`** · `string` · required · example `earn_position_example`
+        - **`positionId`** · `string` · required · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
 
         - **`provider`** · `string` · required · example `veda`
 
         - **`providerReference`** · `string` · required
 
-          The vault's on-chain address.
+          The strategy's onchain address.
 
-        - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+        - **`ownerAddress`** · `string` · required · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
 
-          The external wallet: the customer's own Solana address. It signs and owns the shares; SDP holds no key for it. It also pays the network fee unless an authenticated build names a `feePayer`. The pattern is necessary but not sufficient — the string must additionally decode to a 32-byte public key, which no pattern can express, so a well-shaped base58 string that does not decode still answers 400.
+          The customer's wallet address.
 
         - **`requestAddress`** · `string` · required
 
@@ -56,7 +58,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
         - **`status`** · `string` · required · one of `creating`, `pending`, `fulfillable`, `expiredCancelable`, `cancelling`, `fulfilled`, `cancelled`, `closedOrUnknown`, `failed`
 
-          Durable request status. Only fulfilled, cancelled and failed are terminal. closedOrUnknown remains retryable until a finalized close event proves payout or recovery.
+          The request's status. Only `fulfilled`, `cancelled` and `failed` are final. Keep tracking every other status, `closedOrUnknown` included: SDP resolves it from a finalized close event.
 
         - **`assetMint`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
 
@@ -72,7 +74,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
         - **`quotedAssets`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
 
-          Expected payout at request creation, in asset units. Not a settled amount.
+          Expected payout at request creation, in `assetMint` units. Not a settled amount.
 
         - **`shareDecimals`** · `integer` · required · min 0 · max 38
 
@@ -84,11 +86,11 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
         - **`creationSignature`** · `string | null` · required
 
-          Request-creation transaction. Confirmation does not prove asset payout.
+          The request-creation transaction. Its confirmation does not prove a payout.
 
         - **`cancelSignature`** · `string | null` · required
 
-          Cancellation transaction, when recovery was submitted.
+          The cancellation transaction, once one is submitted.
 
         - **`closingSignature`** · `string | null` · required
 
@@ -96,7 +98,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
         - **`assetsPaid`** · `string | null` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
 
-          Observed fulfillment payout in asset units, or null before it is known.
+          The payout SDP observed at fulfillment, in `assetMint` units; null until then.
 
         - **`failureReason`** · `string | null` · required
 
@@ -132,19 +134,19 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       - **mechanism: "operatorRedemption"**
 
-        - **`withdrawalRequestId`** · `string` · required · example `earn_vault_withdrawal_request_example`
+        - **`withdrawalRequestId`** · `string` · required · example `earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9`
 
-        - **`positionId`** · `string` · required · example `earn_position_example`
+        - **`positionId`** · `string` · required · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
 
         - **`provider`** · `string` · required · example `veda`
 
         - **`providerReference`** · `string` · required
 
-          The vault's on-chain address.
+          The strategy's onchain address.
 
-        - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
+        - **`ownerAddress`** · `string` · required · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
 
-          The external wallet: the customer's own Solana address. It signs and owns the shares; SDP holds no key for it. It also pays the network fee unless an authenticated build names a `feePayer`. The pattern is necessary but not sufficient — the string must additionally decode to a 32-byte public key, which no pattern can express, so a well-shaped base58 string that does not decode still answers 400.
+          The customer's wallet address.
 
         - **`requestAddress`** · `string` · required
 
@@ -152,7 +154,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
         - **`status`** · `string` · required · one of `creating`, `pending`, `fulfillable`, `expiredCancelable`, `cancelling`, `fulfilled`, `cancelled`, `closedOrUnknown`, `failed`
 
-          Durable request status. Only fulfilled, cancelled and failed are terminal. closedOrUnknown remains retryable until a finalized close event proves payout or recovery.
+          The request's status. Only `fulfilled`, `cancelled` and `failed` are final. Keep tracking every other status, `closedOrUnknown` included: SDP resolves it from a finalized close event.
 
         - **`assetMint`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
 
@@ -168,7 +170,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
         - **`quotedAssets`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
 
-          Expected payout at request creation, in asset units. Not a settled amount.
+          Expected payout at request creation, in `assetMint` units. Not a settled amount.
 
         - **`shareDecimals`** · `integer` · required · min 0 · max 38
 
@@ -180,11 +182,11 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
         - **`creationSignature`** · `string | null` · required
 
-          Request-creation transaction. Confirmation does not prove asset payout.
+          The request-creation transaction. Its confirmation does not prove a payout.
 
         - **`cancelSignature`** · `string | null` · required
 
-          Cancellation transaction, when recovery was submitted.
+          The cancellation transaction, once one is submitted.
 
         - **`closingSignature`** · `string | null` · required
 
@@ -192,7 +194,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
         - **`assetsPaid`** · `string | null` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
 
-          Observed fulfillment payout in asset units, or null before it is known.
+          The payout SDP observed at fulfillment, in `assetMint` units; null until then.
 
         - **`failureReason`** · `string | null` · required
 
@@ -297,12 +299,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/earn/external-wallet/withdrawal-requests/withdrawalrequest_example' \
+curl 'https://api.solana.com/v1/earn/external-wallet/withdrawal-requests/earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdrawal-requests/withdrawalrequest_example", {
+const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdrawal-requests/earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -313,7 +315,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdraw
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/earn/external-wallet/withdrawal-requests/withdrawalrequest_example",
+r = requests.get("https://api.solana.com/v1/earn/external-wallet/withdrawal-requests/earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -323,36 +325,36 @@ r = requests.get("https://api.solana.com/v1/earn/external-wallet/withdrawal-requ
 {
   "data": {
     "withdrawalRequest": {
-      "withdrawalRequestId": "earn_vault_withdrawal_request_example",
-      "positionId": "earn_position_example",
+      "withdrawalRequestId": "earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9",
+      "positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc",
       "provider": "veda",
-      "providerReference": "example",
+      "providerReference": "3wbKP5UGLT7gAZBAsLjvPC1NbfnWKtT3Dq7cniMWkzfU",
       "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
-      "requestAddress": "11111111111111111111111111111111",
-      "status": "creating",
-      "assetMint": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
-      "shareMint": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
-      "shares": "25",
-      "quotedAssets": "25",
-      "shareDecimals": 1,
-      "assetDecimals": 1,
-      "nonce": "example",
-      "creationTimestamp": "example",
-      "creationSignature": "example",
-      "cancelSignature": "example",
-      "closingSignature": "example",
-      "assetsPaid": "25",
-      "failureReason": "example",
-      "fulfilledAt": "2025-01-01T00:00:00.000Z",
-      "cancelledAt": "2025-01-01T00:00:00.000Z",
-      "createdAt": "2025-01-01T00:00:00.000Z",
-      "updatedAt": "2025-01-01T00:00:00.000Z",
+      "requestAddress": "DKw4pYcvXNLs91RssedGFznWRpbvPttp2AAwNCG7fQRz",
+      "status": "pending",
       "mechanism": "solverQueue",
-      "intermediateMint": "example",
-      "intermediateAmount": "example",
-      "discountBps": 1,
-      "maturityTimestamp": "example",
-      "deadlineTimestamp": "example"
+      "assetMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+      "shareMint": "CdV7pjj6WANsdasKsBvdKAn7qJL7cQ2Q3CJMBEe13WAV",
+      "intermediateMint": null,
+      "intermediateAmount": null,
+      "shares": "15",
+      "quotedAssets": "14.985",
+      "shareDecimals": 6,
+      "assetDecimals": 6,
+      "discountBps": 10,
+      "nonce": "0",
+      "creationTimestamp": "1793987449",
+      "maturityTimestamp": "1793991049",
+      "deadlineTimestamp": "1793991109",
+      "creationSignature": "3dhkSPLiQZQPXL96fWzMdWJtdbtAffkBKXw2xhsYbV3VNSnYrVAcdx1czsnLsE1ou4SvLecGdSYe4QpAuZdfjJAf",
+      "cancelSignature": null,
+      "closingSignature": null,
+      "assetsPaid": null,
+      "failureReason": null,
+      "fulfilledAt": null,
+      "cancelledAt": null,
+      "createdAt": "2026-11-06T18:10:18.900Z",
+      "updatedAt": "2026-11-06T18:26:00.379Z"
     }
   },
   "meta": {
