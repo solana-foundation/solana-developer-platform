@@ -10,8 +10,8 @@ export const DashboardHeaderTabsTrailingContext = createContext<HTMLElement | nu
 
 /**
  * Hides some of the route's header tabs, for a page whose data leaves them empty; null outside
- * the shell. `useHiddenHeaderTabs` sets it and clears it on unmount.
+ * the shell. `useHiddenHeaderTabs` sets it and clears it (null: not yet said) on unmount.
  */
 export const DashboardHeaderTabsHideContext = createContext<
-  ((tabIds: readonly string[]) => void) | null
+  ((tabIds: readonly string[] | null) => void) | null
 >(null);

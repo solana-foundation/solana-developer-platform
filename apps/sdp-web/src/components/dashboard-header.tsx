@@ -1087,6 +1087,7 @@ function getIntegrationsPageConfig(
           })),
         ],
         hideOnMobile: false,
+        filteredByPage: true,
       },
     };
   }

@@ -3,6 +3,7 @@
 import { useAuth } from "@clerk/nextjs";
 import { Badge } from "@sdp/ui/badge";
 import { cn } from "@sdp/ui/cn";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -335,7 +336,7 @@ function DashboardShellPageContexts({
 }: {
   setPageTitle: (override: DashboardPageTitleOverride | null) => void;
   headerTabsTrailingSlot: HTMLElement | null;
-  setHiddenHeaderTabIds: (tabIds: readonly string[]) => void;
+  setHiddenHeaderTabIds: (tabIds: readonly string[] | null) => void;
   children: ReactNode;
 }) {
   return (
@@ -428,7 +429,7 @@ export function DashboardShell({
   );
   // Set once the header tab row's trailing slot mounts, so a page's controls portal into it.
   const [headerTabsTrailingSlot, setHeaderTabsTrailingSlot] = useState<HTMLElement | null>(null);
-  const [hiddenHeaderTabIds, setHiddenHeaderTabIds] = useState<readonly string[]>([]);
+  const [hiddenHeaderTabIds, setHiddenHeaderTabIds] = useState<readonly string[] | null>(null);
   const [openSubnavs, setOpenSubnavs] = useState<Record<DashboardSubnavKey, boolean>>(() => {
     const initial = {} as Record<DashboardSubnavKey, boolean>;
     for (const [key, group] of Object.entries(DASHBOARD_SUBNAV_GROUPS)) {
@@ -492,7 +493,7 @@ export function DashboardShell({
     tabs: pageConfig.headerTabs.tabs.filter(
       (tab) =>
         (!tab.capability || dashboardAccess.capabilities[tab.capability]) &&
-        !hiddenHeaderTabIds.includes(tab.id)
+        !hiddenHeaderTabIds?.includes(tab.id)
     ),
   };
   const routeTabs = pageConfig.routeTabs;
@@ -800,7 +801,19 @@ export function DashboardShell({
                     {headerTabs ? (
                       <div className="flex items-end gap-4">
                         <div className="sdp-quiet-scroll flex min-w-0 items-end overflow-x-auto">
-                          <DashboardHeaderTabs {...headerTabs} />
+                          {headerTabs.filteredByPage && hiddenHeaderTabIds === null ? (
+                            <div
+                              aria-hidden
+                              className="flex h-9 items-center gap-6.5"
+                              data-header-tabs-placeholder="true"
+                            >
+                              <SkeletonBlock className="h-4 w-6 rounded" />
+                              <SkeletonBlock className="h-4 w-14 rounded" />
+                              <SkeletonBlock className="h-4 w-8 rounded" />
+                            </div>
+                          ) : (
+                            <DashboardHeaderTabs {...headerTabs} />
+                          )}
                         </div>
                         {/* A page's own controls for the tab row (DashboardHeaderTabsTrailing). */}
                         <div

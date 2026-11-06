@@ -26,6 +26,11 @@ export interface DashboardHeaderTabsConfig {
    * unavailable on small screens; content tab sets keep their tabs visible.
    */
   hideOnMobile: boolean;
+  /**
+   * The page narrows the tabs to the ones it has content for (`useHiddenHeaderTabs`); the
+   * shell shows a placeholder strip until the page has said, so no tab flashes and leaves.
+   */
+  filteredByPage?: boolean;
 }
 
 /**
@@ -119,6 +124,6 @@ export function useHiddenHeaderTabs(tabIds: readonly string[]) {
   useEffect(() => {
     if (setHiddenTabIds === null) return;
     setHiddenTabIds(hiddenKey === "" ? [] : hiddenKey.split(" "));
-    return () => setHiddenTabIds([]);
+    return () => setHiddenTabIds(null);
   }, [setHiddenTabIds, hiddenKey]);
 }

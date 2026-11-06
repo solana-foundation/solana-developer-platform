@@ -124,7 +124,7 @@ describe("IntegrationsCatalog", () => {
 describe("IntegrationsCatalog tabs and search", () => {
   const catalogUrl = `/dashboard/${SANDBOX_PROJECT.id}/integrations`;
   let slot: HTMLDivElement;
-  const hideTabs = vi.fn<(tabIds: readonly string[]) => void>();
+  const hideTabs = vi.fn<(tabIds: readonly string[] | null) => void>();
 
   function openCatalog(search: string): void {
     window.history.replaceState(null, "", `${catalogUrl}${search}`);
@@ -165,7 +165,7 @@ describe("IntegrationsCatalog tabs and search", () => {
     expect(hideTabs).toHaveBeenLastCalledWith(["compliance"]);
 
     cleanup();
-    expect(hideTabs).toHaveBeenLastCalledWith([]);
+    expect(hideTabs).toHaveBeenLastCalledWith(null);
   });
 
   it("lands on All when a family tab names a family with nothing for the project", () => {
