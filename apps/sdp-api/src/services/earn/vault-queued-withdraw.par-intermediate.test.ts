@@ -324,4 +324,45 @@ describe("a par request over held intermediate", () => {
     ).resolves.toMatchObject({ consumed_action_id: null, intermediate_amount: "2000" });
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
   });
+
+  it("retries the original signed intent after a recovery RPC outage", async () => {
+    buildParRedemptionRequest.mockResolvedValue(heldIntermediatePlan(EXTERNAL_REQUEST));
+    const actor = { organizationId: ORG, projectId: PROJECT, userId: USER };
+    const built = await buildExternalQueuedWithdrawalRequest(env, {
+      actor,
+      position: position(EXTERNAL_POSITION, EXTERNAL_OWNER, null),
+      terms,
+    });
+    const input = {
+      actor,
+      transactionId: built.id,
+      signedTransaction: "CQk=",
+      clientRequestId: "par-intermediate-outage-key",
+      action: "request",
+    } as const;
+    clusterRpc.respond("getTransaction", () => ({
+      error: { code: -32603, message: "Private RPC endpoint is unavailable" },
+    }));
+
+    await expect(submitExternalQueuedWithdrawalAction(env, input)).rejects.toMatchObject({
+      code: "PROVIDER_UNAVAILABLE",
+      statusCode: 503,
+    });
+    const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
+    await expect(
+      repository.getExternalWalletTransaction({ organizationId: ORG, transactionId: built.id })
+    ).resolves.toMatchObject({ consumed_action_id: null });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+
+    clusterRpc.respond("getTransaction", () => ({ result: null }));
+    const submitted = await submitExternalQueuedWithdrawalAction(env, input);
+    expect(submitted.request).toMatchObject({
+      client_request_id: input.clientRequestId,
+      creation_signature: "sig_par_intermediate_external",
+    });
+    await expect(
+      repository.getExternalWalletTransaction({ organizationId: ORG, transactionId: built.id })
+    ).resolves.toMatchObject({ consumed_action_id: submitted.action.id });
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+  });
 });

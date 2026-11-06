@@ -138,6 +138,59 @@ function parRequest(
   });
 }
 
+function signedRequestInput(
+  current: EarnVaultWithdrawalRequestRow
+): CreateSignedQueuedWithdrawalRequestInput {
+  return {
+    requestId: current.id,
+    actionId: action().id,
+    organizationId: current.organization_id,
+    projectId: "prj_test",
+    environment: current.environment,
+    provider: current.provider,
+    positionId: current.position_id,
+    ownerAddress: current.owner_address,
+    vaultAddress: current.vault_address,
+    tokenMint: current.token_mint,
+    shareMint: current.share_mint,
+    requestAddress: current.request_address,
+    mechanism: current.mechanism,
+    shares: current.shares,
+    quotedAssets: current.quoted_assets,
+    shareDecimals: current.share_decimals,
+    assetDecimals: current.asset_decimals,
+    intermediateMint: current.intermediate_mint,
+    intermediateAmount: current.intermediate_amount,
+    discountBps: current.discount_bps,
+    maturityTimestamp: current.maturity_timestamp,
+    deadlineTimestamp: current.deadline_timestamp,
+    signature: "request-signature",
+    signedTransaction: "AQ==",
+    lastValidBlockHeight: "1",
+    clientRequestId: current.client_request_id,
+    idempotencyFingerprint: current.idempotency_fingerprint,
+    pdaLeaseToken: "external-build",
+    externalWalletTransactionId: "external-build",
+  };
+}
+
+function historicalTransaction(blockTime = 1_700_000_000, err: string | null = null) {
+  return {
+    slot: 123,
+    blockTime,
+    transaction: { message: { accountKeys: [], instructions: [] }, signatures: [] },
+    meta: {
+      err,
+      logMessages: ["authenticated provider log"],
+      fee: 5_000,
+      preBalances: [],
+      postBalances: [],
+      preTokenBalances: [],
+      postTokenBalances: [],
+    },
+  };
+}
+
 function fakeLedger(current: EarnVaultWithdrawalRequestRow) {
   return {
     getById: vi.fn().mockResolvedValue(current),
@@ -180,57 +233,19 @@ describe("queued withdrawal reconciliation", () => {
       "checks finalized closing history %s before claiming a reusable PDA",
       async (closedAt) => {
         const current = parRequest();
-        const input = {
-          requestId: current.id,
-          actionId: action().id,
-          organizationId: current.organization_id,
-          projectId: "prj_test",
-          environment: "sandbox",
-          provider: "hastra",
-          positionId: current.position_id,
-          ownerAddress: current.owner_address,
-          vaultAddress: current.vault_address,
-          tokenMint: TOKEN_MINT,
-          shareMint: SHARE_MINT,
-          requestAddress: PAR_REQUEST_ADDRESS,
-          mechanism: "operator_redemption",
-          shares: "10",
-          quotedAssets: "10.25",
-          shareDecimals: 6,
-          assetDecimals: 6,
-          intermediateMint: INTERMEDIATE_MINT,
-          intermediateAmount: "10.25",
-          signature: "request-signature",
-          signedTransaction: "AQ==",
-          lastValidBlockHeight: "1",
-          clientRequestId: "request-key",
-          idempotencyFingerprint: "request-fingerprint",
-          pdaLeaseToken: "external-build",
-          externalWalletTransactionId: "external-build",
-        } satisfies CreateSignedQueuedWithdrawalRequestInput;
+        const input = signedRequestInput(current);
         const write = vi
           .fn<EarnVaultWithdrawalRequestsRepository["createSignedRequest"]>()
           .mockResolvedValue({ request: current, action: action(), replayed: false });
         if (!leaseHeld) write.mockRejectedValueOnce(new QueuedWithdrawalLeaseConflictError());
-        const historical = (blockTime: number) => ({
-          slot: 123,
-          blockTime,
-          transaction: { message: { accountKeys: [], instructions: [] }, signatures: [] },
-          meta: {
-            err: closedAt === "failed" ? "AccountNotFound" : null,
-            logMessages: ["authenticated provider log"],
-            fee: 5_000,
-            preBalances: [],
-            postBalances: [],
-            preTokenBalances: [],
-            postTokenBalances: [],
-          },
-        });
         clusterRpc.respond("getTransaction", ({ params }) => ({
           result:
             closedAt === "not_landed" || closedAt === "expired_unknown"
               ? null
-              : historical(params[0] === "closing" ? Number(closedAt) : 1_700_000_000),
+              : historicalTransaction(
+                  params[0] === "closing" ? Number(closedAt) : 1_700_000_000,
+                  closedAt === "failed" ? "AccountNotFound" : null
+                ),
         }));
         clusterRpc.answer("getBlockHeight", closedAt === "expired_unknown" ? 2 : 1);
         let history: Array<{ signature: string; err: null }>;
@@ -322,6 +337,98 @@ describe("queued withdrawal reconciliation", () => {
           transactionReads
         );
       }
+    );
+  });
+
+  it.each([
+    { name: "missing", result: null, code: "CONFLICT", statusCode: 409 },
+    {
+      name: "unknown execution",
+      result: { ...historicalTransaction(), meta: null },
+      code: "CONFLICT",
+      statusCode: 409,
+    },
+    {
+      name: "finalized failure",
+      result: historicalTransaction(1_700_000_000, "AccountNotFound"),
+      code: "TRANSACTION_FAILED",
+      statusCode: 400,
+    },
+    { name: "finalized success", result: historicalTransaction(), code: null, statusCode: 200 },
+  ])("classifies $name before reclaiming a queue build", async ({ result, code, statusCode }) => {
+    const current = request();
+    const input = signedRequestInput(current);
+    const write = vi
+      .fn<EarnVaultWithdrawalRequestsRepository["createSignedRequest"]>()
+      .mockRejectedValueOnce(new QueuedWithdrawalLeaseConflictError())
+      .mockResolvedValue({ request: current, action: action(), replayed: false });
+    clusterRpc.respond("getTransaction", () => ({ result }));
+
+    const pending = inSandboxScope(() =>
+      recordSignedExternalQueuedRequest(env, { createSignedRequest: write }, input)
+    );
+    if (code !== null) {
+      await expect(pending).rejects.toMatchObject({ code, statusCode });
+      expect(write).toHaveBeenCalledTimes(1);
+    } else {
+      await expect(pending).resolves.toMatchObject({ alreadyFinalized: true });
+      expect(write).toHaveBeenCalledTimes(2);
+      expect(write).toHaveBeenLastCalledWith({ ...input, recoverFinalizedExternalBuild: true });
+    }
+    expect(clusterRpc.requests.filter((call) => call.method === "getTransaction")).toHaveLength(1);
+  });
+
+  it.each([
+    "par_creation",
+    "queue_creation",
+    "par_history",
+    "par_closing_transaction",
+    "par_height",
+  ] as const)("sanitizes a %s RPC outage without reclaiming the build", async (stage) => {
+    const current = stage === "queue_creation" ? request() : parRequest();
+    const input = signedRequestInput(current);
+    const write = vi
+      .fn<EarnVaultWithdrawalRequestsRepository["createSignedRequest"]>()
+      .mockResolvedValue({ request: current, action: action(), replayed: false });
+    if (stage === "queue_creation") {
+      write.mockRejectedValueOnce(new QueuedWithdrawalLeaseConflictError());
+    }
+    const unavailable = { error: { code: -32603, message: "Private RPC endpoint is unavailable" } };
+    clusterRpc.respond("getTransaction", ({ params }) => {
+      switch (stage) {
+        case "par_creation":
+        case "queue_creation":
+          return unavailable;
+        case "par_height":
+          return { result: null };
+        case "par_history":
+          return { result: historicalTransaction() };
+        case "par_closing_transaction":
+          return params[0] === "closing" ? unavailable : { result: historicalTransaction() };
+        default: {
+          const exhaustive: never = stage;
+          throw new Error(`Unexpected recovery stage ${exhaustive}`);
+        }
+      }
+    });
+    clusterRpc.respond("getSignaturesForAddress", () =>
+      stage === "par_history" ? unavailable : { result: [{ signature: "closing", err: null }] }
+    );
+    clusterRpc.respond("getBlockHeight", () => unavailable);
+    parProvider.client = { decodeParRedemptionLifecycleEvents: vi.fn().mockResolvedValue([]) };
+
+    await expect(
+      inSandboxScope(() =>
+        recordSignedExternalQueuedRequest(env, { createSignedRequest: write }, input)
+      )
+    ).rejects.toMatchObject({
+      code: "PROVIDER_UNAVAILABLE",
+      statusCode: 503,
+      message: "Earn provider is temporarily unavailable. Try again.",
+    });
+    expect(write).toHaveBeenCalledTimes(stage === "queue_creation" ? 1 : 0);
+    expect(write).not.toHaveBeenCalledWith(
+      expect.objectContaining({ recoverFinalizedExternalBuild: true })
     );
   });
 

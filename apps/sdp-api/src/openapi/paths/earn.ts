@@ -587,7 +587,8 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
       "transaction. Until that proof is visible, retry the same bytes and key after a 409 CONFLICT. " +
       "A par redemption whose original cycle already closed is refused for operator history " +
       "reconciliation, so a late receipt cannot claim a newer request at the reused address. " +
-      "Finalized failed par transactions return 400 TRANSACTION_FAILED. An unresolved " +
+      "Finalized failed transactions found during recovery return 400 TRANSACTION_FAILED. " +
+      "Recovery RPC outages return 503 PROVIDER_UNAVAILABLE; retry the original bytes and key. An unresolved " +
       "16-signature online history window returns 503 and requires support reconciliation. " +
       "Expired par builds with unavailable creation history return 503; retain and retry " +
       "the original signed intent rather than signing a replacement.",

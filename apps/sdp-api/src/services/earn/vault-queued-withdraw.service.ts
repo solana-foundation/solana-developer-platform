@@ -1182,27 +1182,31 @@ export async function recordSignedExternalQueuedRequest(
 ): Promise<QueuedWithdrawalMutationResult & { alreadyFinalized: boolean }> {
   let parTransaction: ParsedTransaction | null = null;
   if (input.mechanism === "operator_redemption") {
-    const rpc = createClusterRpc();
-    // SAFETY: submit verified the signature against the retained unsigned build.
-    parTransaction = await getTransaction(rpc, input.signature as Signature, "finalized");
-    if (parTransaction !== null) {
-      if (!parTransaction.executionResultKnown) {
-        throw internalError(
-          "Finalized redemption execution is unavailable; retry the original signed intent"
-        );
-      }
-      if (parTransaction.err !== null) {
+    try {
+      const rpc = createClusterRpc();
+      // SAFETY: submit verified the signature against the retained unsigned build.
+      parTransaction = await getTransaction(rpc, input.signature as Signature, "finalized");
+      if (parTransaction !== null) {
+        if (!parTransaction.executionResultKnown) {
+          throw internalError(
+            "Finalized redemption execution is unavailable; retry the original signed intent"
+          );
+        }
+        if (parTransaction.err !== null) {
+          throw new AppError(
+            "TRANSACTION_FAILED",
+            "This signed redemption failed on chain. Build a new transaction."
+          );
+        }
+        await assertParCreationNotClosed(env, input, parTransaction);
+      } else if ((await readConfirmedBlockHeight()) > BigInt(input.lastValidBlockHeight)) {
         throw new AppError(
-          "TRANSACTION_FAILED",
-          "This signed redemption failed on chain. Build a new transaction."
+          "SERVICE_UNAVAILABLE",
+          "Creation history is unavailable for this expired redemption. Retry the original signed intent; do not build a replacement."
         );
       }
-      await assertParCreationNotClosed(env, input, parTransaction);
-    } else if ((await readConfirmedBlockHeight()) > BigInt(input.lastValidBlockHeight)) {
-      throw new AppError(
-        "SERVICE_UNAVAILABLE",
-        "Creation history is unavailable for this expired redemption. Retry the original signed intent; do not build a replacement."
-      );
+    } catch (error) {
+      rethrowVaultProviderFailure(error);
     }
   }
   try {
@@ -1212,14 +1216,28 @@ export async function recordSignedExternalQueuedRequest(
     };
   } catch (error) {
     if (!(error instanceof QueuedWithdrawalLeaseConflictError)) throw error;
-    // SAFETY: submit verified this signature and every byte against the stored
-    // unsigned build before constructing the persistence input.
-    const transaction =
-      input.mechanism === "operator_redemption"
-        ? parTransaction
-        : await getTransaction(createClusterRpc(), input.signature as Signature, "finalized");
-    if (transaction === null || !transaction.executionResultKnown || transaction.err !== null) {
+    let transaction = parTransaction;
+    if (input.mechanism === "solver_queue") {
+      try {
+        // SAFETY: submit verified this signature and every byte against the stored
+        // unsigned build before constructing the persistence input.
+        transaction = await getTransaction(
+          createClusterRpc(),
+          input.signature as Signature,
+          "finalized"
+        );
+      } catch (readError) {
+        rethrowVaultProviderFailure(readError);
+      }
+    }
+    if (transaction === null || !transaction.executionResultKnown) {
       throw error;
+    }
+    if (transaction.err !== null) {
+      throw new AppError(
+        "TRANSACTION_FAILED",
+        "This signed withdrawal request failed on chain. Build a new transaction."
+      );
     }
     const recorded = await repository.createSignedRequest({
       ...input,

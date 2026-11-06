@@ -224,7 +224,11 @@ unresolved full page defers to operator recovery rather than scanning more.
 A same-or-later close refuses adoption of that historical cycle, even while
 its old lease remains. Consumed builds replay directly from the ledger
 without RPC.
-Finalized failed par transactions are refused before claiming a request PDA.
+Known finalized failures return `400 TRANSACTION_FAILED` during late recovery
+for both mechanisms. Unknown execution retains the original intent.
+Recovery RPC outages use `vault-refusals.ts` and return a sanitized
+`503 PROVIDER_UNAVAILABLE`, preserving the original intent. This error mapping
+adds no RPC calls or retries.
 Absent-create recovery adds one transaction read after provider history, reused
 for lifecycle projection if found. Hastra rent routing adds no RPC.
 

@@ -419,11 +419,15 @@ signed bytes and key while that proof becomes visible. It cannot replace
 another recorded request. If a par redemption already closed on chain, its
 late receipt returns `409 CONFLICT` and needs support to reconcile the history;
 it cannot claim a newer cycle at the reused address.
-Finalized failed par transactions return `400 TRANSACTION_FAILED`; build a new
-transaction. An unresolved 16-signature history window returns `503` and needs
-support reconciliation rather than an unbounded search during submission.
+
+Finalized failed transactions found during recovery return
+`400 TRANSACTION_FAILED`; build a new transaction. An unresolved 16-signature
+history window returns `503` and needs support reconciliation rather than an
+unbounded search during submission.
+
 An expired par build whose creation history is unavailable also returns
 `503`; keep and retry the original signed intent.
+
 An expired create becomes `failed` only after
 repeated checks find no finalized transaction, provider request or close event;
 unknown or incomplete history stays recoverable.
@@ -461,7 +465,7 @@ Recovery across that split is yours: persist the swap signature and the `followU
 | `400` | The request or the current vault state must change. | Fix the request or show the message; do not retry unchanged. |
 | `409 CONFLICT` | A key or build was reused, another request occupies the provider address, or a released asynchronous reservation needs finalized execution proof. | Look up the existing intent. For a late signed submission, retry its exact bytes and key while finality becomes visible; do not rebuild blindly. |
 | `422 SIGNING_REJECTED` | A fee sponsor refused the transaction by policy. | The same transaction will be refused again; change it. |
-| `503 PROVIDER_UNAVAILABLE` | Live provider or RPC state could not be read. | Retry the read-only preview or build with bounded backoff. |
+| `503 PROVIDER_UNAVAILABLE` | Live provider or RPC state could not be read. | Retry previews or builds with bounded backoff. For a submit, retain and retry its original signed bytes and key. |
 | Timeout or 5xx on a submit | Outcome uncertain. | Retry the exact signed bytes with the same `Idempotency-Key`. |
 
 ## Before production

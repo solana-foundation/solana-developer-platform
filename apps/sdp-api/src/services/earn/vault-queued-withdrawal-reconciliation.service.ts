@@ -1099,6 +1099,7 @@ export function nextQueuedWithdrawalCheckAt(
   const maturitySeconds = BigInt(maturityTimestamp);
   const maximumNextSeconds = nowSeconds + BigInt(PENDING_REQUEST_MAX_POLL_MS / 1_000);
   const usefulNextSeconds =
+    // biome-ignore lint/complexity/useMathMinMax: Math.min rejects bigint operands.
     maturitySeconds < maximumNextSeconds ? maturitySeconds : maximumNextSeconds;
   const usefulNextMs = Number(usefulNextSeconds) * 1_000;
   return new Date(Math.max(minimumNextMs, usefulNextMs)).toISOString();
