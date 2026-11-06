@@ -54,6 +54,11 @@ correct itself, so a date a first-time visitor reads (the public pay page's
 expiry) renders in a client component. `suppressHydrationWarning` is no fix:
 React keeps the server's text and never corrects it.
 
+A catalog value is a plain `{name}` template: `translate` renders no ICU, and
+`src/i18n/messages.unit.test.ts` rejects `plural` or `select` in any catalog. A
+count takes a singular key beside its plural one (`entriesOne` beside
+`entries`), picked with `count === 1`, in `messages/en` only.
+
 Dashboard pages live under `app/(session)/dashboard/[projectId]/`, and the Project comes from the URL alone:
 
 - Server code (pages, server actions, route handlers) calls `createSdpApiClient()`, `requestProjectId()` and `requestProjectHref(path)` from `@/lib/sdp-api`; they read the request's `x-project-id`, which `proxy.ts` sets from the URL. Keep signatures Project-free: no `projectId` parameters, no reads of the selection cookie.
