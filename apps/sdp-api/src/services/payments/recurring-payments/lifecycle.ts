@@ -50,7 +50,7 @@ import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
 } from "@/db/repositories/repository-factory";
-import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
+import { AppError, badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
@@ -72,6 +72,7 @@ import {
   parseNullableStoredSignature,
   ResumedStepUnsettledError,
   readRecurringPaymentStep,
+  recipientUnavailable,
   recurringPaymentErrorMessage,
   recurringPaymentLease,
   refuseWhileSubscriptionAuthorityRevokes,
@@ -1059,13 +1060,20 @@ export async function resumeRecurringPayment(input: {
     throw conflict("Recurring payment is missing subscription records");
   }
 
-  await resolveSolanaCounterpartyAccount({
-    env: input.env,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    counterpartyId: recurringPayment.counterparty_id,
-    counterpartyAccountId: recurringPayment.counterparty_account_id,
-  });
+  // An archived recipient never comes back on this schedule: say what to do
+  // rather than 404 on the counterparty the caller never named (HOO-2634).
+  try {
+    await resolveSolanaCounterpartyAccount({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      counterpartyId: recurringPayment.counterparty_id,
+      counterpartyAccountId: recurringPayment.counterparty_account_id,
+    });
+  } catch (error) {
+    if (error instanceof AppError && error.code === "NOT_FOUND") throw recipientUnavailable();
+    throw error;
+  }
   await assertRecurringPaymentTerms({
     token: recurringPayment.token,
     amount: recurringPayment.amount,

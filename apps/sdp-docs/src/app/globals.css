@@ -7,7 +7,7 @@
 /* next-themes puts .dark on <html>, so dark: utilities follow the theme switch, not the OS. */
 @custom-variant dark (&:is(.dark *));
 
-/* Fumadocs reads --color-fd-*. They point at the refresh palette from @sdp/design-tokens, which
+/* Fumadocs reads --color-fd-*. They point at the palette from @sdp/design-tokens, which
    switches with the .dark class on <html>, so one block covers light and dark. */
 :root {
   --color-fd-background: var(--paper);
@@ -46,7 +46,7 @@ body {
 }
 
 /* Tailwind's preflight resets every border to currentColor after Fumadocs' base layer has set it,
-   so put the refresh rule colour back. Focus outlines are the ink ring at half strength, like the
+   so put the rule colour back. Focus outlines are the ink ring at half strength, like the
    dashboard's ring-primary/50. */
 @layer base {
   * {
@@ -307,6 +307,12 @@ body {
 
 .launch-docs-status-future {
   color: var(--ink-tertiary);
+  text-decoration: none;
+  transition: color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-docs-status-future:hover {
+  color: var(--ink);
 }
 
 .launch-docs-status-dot {
@@ -1107,131 +1113,11 @@ body {
   color: var(--ink);
 }
 
-.page-feedback {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  margin-top: 3rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--rule);
-}
-
-.page-feedback--col {
-  flex-direction: column;
-  align-items: flex-start;
-}
-
-.page-feedback-row {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
-.page-feedback-label {
-  font-family: var(--font-sans);
-  font-size: 0.875rem;
-  color: var(--ink-tertiary);
-  white-space: nowrap;
-}
-
-.page-feedback-thanks {
-  color: var(--ink-secondary);
-}
-
-.page-feedback-actions {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.page-feedback-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 50%;
-  border: 1px solid var(--rule);
-  background: transparent;
-  color: var(--ink-tertiary);
-  cursor: pointer;
-  transition:
-    border-color var(--motion-duration-fast),
-    color var(--motion-duration-fast),
-    background var(--motion-duration-fast);
-}
-
-.page-feedback-btn:hover {
-  border-color: var(--rule-strong);
-  color: var(--ink-secondary);
-}
-
-.page-feedback-btn.is-active {
-  border-color: var(--ink);
-  color: var(--ink);
-  background: var(--wash-strongest);
-}
-
-.page-feedback-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  width: 100%;
-}
-
-.page-feedback-textarea {
-  width: 100%;
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--rule);
-  border-radius: 10px;
-  background: var(--wash);
-  color: var(--ink);
-  font-family: var(--font-sans);
-  font-size: 0.875rem;
-  line-height: 1.6;
-  resize: vertical;
-  outline: none;
-  transition: border-color var(--motion-duration-fast);
-  box-sizing: border-box;
-}
-
-.page-feedback-textarea::placeholder {
-  color: var(--ink-tertiary);
-}
-
-.page-feedback-textarea:focus {
-  border-color: var(--rule-strong);
-}
-
-.page-feedback-submit {
-  align-self: flex-start;
-  padding: 0.4rem 1rem;
-  border: 1px solid var(--rule);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--ink-secondary);
-  font-family: var(--font-sans);
-  font-size: 0.875rem;
-  cursor: pointer;
-  transition:
-    border-color var(--motion-duration-fast),
-    color var(--motion-duration-fast);
-}
-
-.page-feedback-submit:hover:not(:disabled) {
-  border-color: var(--rule-strong);
-  color: var(--ink);
-}
-
-.page-feedback-submit:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .page-nav {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.75rem;
-  margin-top: 1.5rem;
+  margin-top: 3rem;
 }
 
 .page-nav-prev,
@@ -1849,6 +1735,14 @@ body {
   box-shadow: inset 0 0 0 1px var(--critical-rule);
 }
 
+/* The method cell's badge (`remarkDocsBlocks`), set like the one atop the operation's page. */
+.launch-api-operation-table .launch-api-method {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-meta);
+}
+
 .is-api-reference .launch-mdx-unordered-list {
   gap: 0;
   margin: 4px 0 20px;
@@ -1905,6 +1799,13 @@ body {
 /* The dot between two facts, with room on either side (`remarkDocsBlocks` sets it apart). */
 .launch-api-separator {
   margin: 0 0.3em;
+}
+
+/* A fact's chip moves to the next line whole instead of splitting at a hyphen or dot
+   (`2025-01-01T00:00:00.000Z`); only a chip wider than the line wraps inside itself. */
+.is-api-reference .launch-mdx-list-item > .launch-mdx-paragraph:first-child code {
+  display: inline-block;
+  max-width: 100%;
 }
 
 /* The field or status name, set apart from the inline code chips beside it. */
@@ -2046,6 +1947,16 @@ body {
 
 .launch-home-cta-secondary:hover {
   color: var(--ink);
+}
+
+/* The missing page's actions (`app/docs/not-found.tsx`): the primary one is a button. */
+.launch-docs-not-found-actions {
+  margin-top: 28px;
+}
+
+.launch-docs-not-found-actions button {
+  border: 0;
+  cursor: pointer;
 }
 
 .launch-home-system {
@@ -2216,11 +2127,13 @@ body {
   font-weight: 500;
 }
 
+/* Logos keep their own widths with one gap between them, so a narrow wordmark leaves no wider
+   gap than a long one. */
 .launch-home-partner-logos {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
-  gap: 16px 24px;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  gap: 16px 32px;
 }
 
 .launch-home-partner-logo {
@@ -2232,8 +2145,9 @@ body {
 
 .launch-home-partner-logos img {
   display: block;
-  width: min(100%, 132px);
-  height: 28px;
+  width: auto;
+  max-width: 132px;
+  height: 24px;
   object-fit: contain;
   object-position: left center;
   filter: brightness(0);
@@ -2347,13 +2261,40 @@ a.rounded-lg.border.p-4 > p.truncate {
 }
 
 /* ── Tab panels: white card on beige background (matches dashboard cards). Scoped to the page,
-   so a tab panel in a portaled popover (the Agent setup menu) keeps its own surface. ── */
-.sdp-docs-shell [role="tabpanel"] {
+   so a tab panel in a portaled popover (the Agent setup menu) keeps its own surface. A panel
+   holding only a code block (```lang tab="…"```) is not a card: the tab card around it is the
+   one frame. ── */
+.sdp-docs-shell [role="tabpanel"]:not(:has(> figure.shiki:only-child)) {
   background-color: var(--color-fd-card);
   color: var(--color-fd-card-foreground);
   border: 1px solid var(--color-fd-border);
   border-radius: 0.75rem;
   padding: 1.5rem;
+}
+
+/* A lone code block's copy button sits at the end of its tab row, never over the code. Only a
+   panel's only child moves: a guide tab's several blocks would stack their buttons there. */
+.sdp-docs-shell :has(> [role="tabpanel"] > figure.shiki:only-child) {
+  position: relative;
+}
+
+.sdp-docs-shell :has(> [role="tabpanel"] > figure.shiki:only-child) > [role="tablist"] {
+  padding-right: 44px;
+}
+
+.sdp-docs-shell [role="tabpanel"] > figure.shiki:only-child {
+  position: static;
+}
+
+.sdp-docs-shell [role="tabpanel"] > figure.shiki:only-child > div:not([role="region"]) {
+  top: 3px;
+  right: 6px;
+  backdrop-filter: none;
+}
+
+/* With the button out of the code, a line keeps the left padding on its right too. */
+.sdp-docs-shell [role="tabpanel"] > figure.shiki:only-child pre {
+  --padding-right: var(--padding-left);
 }
 
 /* ── HowItWorks step layout ── */

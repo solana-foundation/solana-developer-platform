@@ -1,28 +1,5 @@
 {
   "DashboardPayments": {
-    "demo": {
-      "label": "Demo",
-      "turnOn": "Try Payments with sample data. Payments, contacts and provider steps are simulated: nothing is saved to your project or sent to a payment provider. Address searches still use the real address lookup. Your demo changes reset when you reload the page.",
-      "turnOff": "Turn off demo mode",
-      "sandboxOnly": "Demo mode runs on sandbox projects. Switch to your sandbox project to try it.",
-      "noPayLink": "Demo requests have no pay link to share. Turn off demo mode to create a real one.",
-      "notice": {
-        "state": "Demo mode",
-        "body": "Sample data for presentation. Every action is simulated."
-      },
-      "checkout": {
-        "title": "{provider} checkout",
-        "onrampBody": "In demo mode, {provider}'s checkout doesn't open. Use Simulate deposit below to see the deposit arrive.",
-        "offrampBody": "In demo mode, {provider}'s page doesn't open. Send the funds with the button below to finish the payout.",
-        "settling": "Payment received. {provider} is delivering the funds to the wallet."
-      },
-      "verification": {
-        "simulate": "Simulate verification",
-        "simulating": "Simulating verification",
-        "body": "In demo mode, {provider}'s verification page doesn't open. Use Simulate verification below to approve the contact.",
-        "failed": "Couldn't simulate the verification. Try again."
-      }
-    },
     "signingUnavailable": "Signing is disabled for this wallet.",
     "restricted": "Restricted",
     "page": {
@@ -1041,6 +1018,7 @@
       "interval": "Interval",
       "nextPayment": "Next payment",
       "counterpartyUnavailable": "Counterparty unavailable",
+      "counterpartyArchived": "Archived counterparty",
       "payment": "Recurring payment",
       "receivingWallet": "Receiving wallet",
       "starts": "Starts",
@@ -1427,9 +1405,6 @@
       "anAmount": "an amount",
       "aWallet": "a wallet",
       "createAndCopyLink": "Create and copy link",
-      "requestCreated": "Request created",
-      "linkOnClipboard": "The link is on your clipboard.",
-      "copyLinkFromRequest": "Copy the link from the request.",
       "noWalletTitle": "There is no wallet to be paid into",
       "noWalletDescription": "A request names the wallet the payment lands in, and this project holds none. Create one and the link has somewhere to go.",
       "openWallets": "Open Wallets",
@@ -1448,8 +1423,7 @@
       "address": "Solana address",
       "provider": "Card or bank through a provider",
       "noProvider": "No card or bank provider is enabled for this project yet.",
-      "manageProviders": "Manage providers in Integrations",
-      "contactHint": "Who is paying the provider. Their details go to the provider you pick."
+      "manageProviders": "Manage providers in Integrations"
     },
     "activityKind": {
       "pay": "Pay",
@@ -1470,7 +1444,6 @@
     "back": "Back",
     "payForm": {
       "contact": "Contact",
-      "contactHint": "The person or business you are paying. Manage them in the Contact list.",
       "selectContact": "Select a contact",
       "searchContacts": "Search contacts",
       "destination": "Destination",
@@ -1576,8 +1549,6 @@
     },
     "requestDetail": {
       "paymentLink": "Payment link",
-      "linkCopied": "Link copied",
-      "linkCopiedDescription": "The link for {amount} is on your clipboard.",
       "share": "Share…",
       "shareTitle": "Payment request for {amount}",
       "downloadQrCode": "Download QR code",
@@ -1595,11 +1566,17 @@
       "dangerZone": "Danger zone",
       "cancelEffect": "The link stops accepting payments. Cannot be undone.",
       "cancelRequestEllipsis": "Cancel request…",
+      "canceledByApiKey": "The API key “{name}”",
+      "canceledByUnnamedApiKey": "An API key",
+      "canceledByUnnamedMember": "A member",
       "why": {
         "paid": "Settled to the destination wallet. Nothing further to do.",
         "awaiting": "The link is live and nobody has paid it yet. It does not expire.",
         "awaitingUntil": "The link is live and nobody has paid it yet. It stops working on {date}.",
         "canceled": "Canceled before anyone paid it. The link is dead and cannot be reopened.",
+        "canceledBy": "{actor} canceled it before anyone paid. The link is dead and cannot be reopened.",
+        "canceledOn": "Canceled on {date}, before anyone paid. The link is dead and cannot be reopened.",
+        "canceledByOn": "{actor} canceled it on {date}, before anyone paid. The link is dead and cannot be reopened.",
         "expired": "The link ran past its window before anyone paid. Send a new one."
       }
     },

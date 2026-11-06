@@ -1,19 +1,19 @@
 ---
 title: Authentication
-description: Authenticate API requests with project-scoped API keys, layered with grants, wallet bindings, and network controls.
+description: Authenticate requests with a project-scoped API key, limited by its grants, wallet scope, and IP allowlist.
 ---
 
-SDP layers independent controls onto a single API key — grants, wallet bindings, and IP allowlist — so a key grants exactly the access its integration needs, and no more.
-
-Authenticated API requests carry an API key in the `Authorization` header. The example reads it from `SDP_API_KEY`:
+Send your API key in the `Authorization` header. The example reads it from `SDP_API_KEY`:
 
 <ApiExample operation="list-wallets" />
 
-The `Bearer` prefix is optional — a raw key in the `Authorization` header is also accepted.
+The `Bearer` prefix is optional; the header also accepts the bare key.
+
+Each key carries three independent controls: grants, a wallet scope, and an IP allowlist. Together they give the key exactly the access its integration needs.
 
 ## Key scope
 
-Keys are issued per **project** and inherit that project's environment: a key from a sandbox project reaches devnet, one from a production project mainnet-beta. The key itself does not name its environment; the dashboard shows it next to each key. A key can only reach the wallets, tokens, and payments of the project it was issued for; there is no cross-project or organization-wide key.
+A key belongs to one **project** and inherits that project's environment: a key from a sandbox project reaches devnet, one from a production project mainnet-beta. The key itself doesn't name its environment; the dashboard shows it next to each key. A key reaches only its own project's resources. There is no cross-project or organization-wide key.
 
 ## Authorization layers
 
@@ -22,18 +22,19 @@ A request must clear every layer that is configured on its key:
 | Layer | What it controls |
 | --- | --- |
 | **Grants** | The actions (`module.verb`) the key may perform. Each route needs exactly one; see [Grants by module](/docs/developing-with-sdp/manage-api-keys#grants-by-module) |
-| **Wallet bindings** | Restrict which custody wallets the key can operate, each binding with its own permission list |
-| **IP allowlist** | Optional IPv4/IPv6/CIDR ranges the key may be used from, set on the key; an organization-wide list under **Settings** applies to every key on top. Neither restricts signed-in dashboard members |
+| **Wallet scope** | Which custody wallets SDP may sign with for the key: `all` in its project, or only the `selected` wallets in `walletIds`; see [Wallet access](/docs/developing-with-sdp/manage-api-keys#wallet-access) |
+| **IP allowlist** | Optional IPv4 or IPv6 addresses and CIDR ranges the key may be used from. An organization-wide list under **Settings** > **API key access** applies to every key on top. Neither restricts signed-in dashboard members |
 
 ## Errors
 
-Authentication and authorization failures are always machine-distinguishable: the code says what kind of refusal it is, and a 403 names what it is missing in `error.details`.
+Authentication and authorization failures are always machine-distinguishable: the code says what kind of refusal it is, and a `403` names what is missing in `error.details`.
 
 | Condition | Status | Code | `error.details` |
 | --- | --- | --- | --- |
 | No API key on a keyed-only request | 401 | `UNAUTHORIZED` | |
 | Malformed or unknown key | 401 | `INVALID_API_KEY` | |
-| Key has been revoked, its organization was deleted or suspended, or its project was archived | 401 | `REVOKED_API_KEY` | |
+| Key has been revoked, its organization was deleted, or its project was archived | 401 | `REVOKED_API_KEY` | |
+| Key is live but its organization is suspended; the key works again once SDP resumes it | 403 | `FORBIDDEN` | `reason: "organization_suspended"` |
 | Key past its expiry or rotation deadline | 401 | `EXPIRED_API_KEY` | |
 | Request origin not in the key's or the organization's IP allowlist | 403 | `FORBIDDEN` | `reason: "ip_not_allowed"` |
 | Route only a signed-in dashboard member may use, such as managing keys, members or the organization | 403 | `FORBIDDEN` | `reason: "human_session_required"` |
@@ -48,15 +49,16 @@ SDP decides again each time it signs on a key's behalf, so a change to the key o
 | `reason` | Why |
 | --- | --- |
 | `wallet_out_of_scope` | The custody wallet is outside the key's wallet scope |
-| `wallet_purpose` | The custody wallet's purpose may not send payments: only a `transfer` wallet can be the source of a transfer, batch, recurring payment or offramp |
+| `wallet_purpose` | The custody wallet's purpose may not send payments: only a `transfer` wallet can be the source of a transfer, transfer batch, or recurring payment |
 | `principal_not_live` | The key was revoked, expired, or passed its rotation deadline during the request |
 | `organization_inactive` | The organization is suspended or deleted |
 | `production_not_enabled` | The project is a production project and the organization does not have production access |
 | `project_not_found` | The project no longer exists |
 | `principal_missing` | No credential is attached to the movement |
+| `movement_disabled` | SDP has disabled this kind of money movement for the project |
 
 A key without the action a signature needs is refused with `INSUFFICIENT_PERMISSIONS` and `error.details.action`, exactly as at the route.
 
-Requests are rate limited per key; the standard tier allows 100 requests per minute.
+Each key is rate limited by its tier. [Rate limits](/docs/reference/conventions/rate-limits) lists the limits.
 
 See [Manage API Keys](/docs/developing-with-sdp/manage-api-keys) for creating, rotating, and revoking keys.

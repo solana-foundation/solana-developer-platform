@@ -506,7 +506,7 @@ function RecentActivity({
         <p className="mt-4 text-body text-tertiary">{emptyMessage}</p>
       ) : (
         <TooltipProvider>
-          <Table className="mt-3 min-w-0 rounded-none border-0 refresh:-mx-3 [&_table]:table-fixed">
+          <Table className="mt-3 min-w-0 rounded-none border-0 -mx-3 [&_table]:table-fixed">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[15%]">{t("Shared.homeWorkspace.time")}</TableHead>
@@ -739,8 +739,8 @@ export function HomeWorkspace({
   ];
 
   return (
-    // 64px under the last section, as the refresh panels leave: the shell pads nothing at the
-    // foot of a refresh page, so Recent activity would otherwise end on the window's edge.
+    // 64px under the last section, as the other panels leave: the shell pads nothing at the
+    // foot of a page, so Recent activity would otherwise end on the window's edge.
     <div className="flex w-full min-w-0 flex-col gap-16 pb-16" data-overview>
       <DashboardQuickStart variant="overview" />
       <div className="grid min-w-0 gap-10 lg:grid-cols-2 lg:gap-12">

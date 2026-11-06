@@ -38,14 +38,17 @@ function OrganizationMark({ name, imageUrl }: { name: string; imageUrl?: string 
 const ENTRY_ROW_CLASS =
   "flex min-h-12 w-full items-center gap-3 rounded-control bg-fill px-3 py-2 text-body text-primary transition-colors hover:bg-fill-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50";
 
-type EntryState = "no-access" | "create" | "select";
+/** Why SDP refused the session's organization, as the dashboard layout read it. */
+export type OrganizationRefusal = "no-access" | "invitation-expired" | "organization-suspended";
+
+type EntryState = OrganizationRefusal | "create" | "select";
 
 function resolveEntryState(params: {
-  noAccess: boolean;
+  refusal: OrganizationRefusal | null;
   isLoaded: boolean;
   hasChoices: boolean;
 }): EntryState {
-  if (params.noAccess) return "no-access";
+  if (params.refusal) return params.refusal;
   if (params.isLoaded && !params.hasChoices) return "create";
   return "select";
 }
@@ -55,6 +58,16 @@ function entryCopy(
   t: ReturnType<typeof useTranslations>
 ): { title: string; description: string } {
   switch (state) {
+    case "invitation-expired":
+      return {
+        title: t("Shared.SharedComponents.invitationExpiredTitle"),
+        description: t("Shared.SharedComponents.invitationExpiredDescription"),
+      };
+    case "organization-suspended":
+      return {
+        title: t("Shared.SharedComponents.organizationSuspendedTitle"),
+        description: t("Shared.SharedComponents.organizationSuspendedDescription"),
+      };
     case "no-access":
       return {
         title: t("Shared.SharedComponents.noOrganizationAccessTitle"),
@@ -81,12 +94,16 @@ function entryCopy(
  * Entry state for a signed-in person with no organization selected for the
  * session: their organizations to pick from, their pending invitations to
  * accept, or, with neither, the step that creates their organization in SDP
- * (ADR 0012). With `noAccess`, the session's organization is one SDP refused,
+ * (ADR 0012). With a `refusal`, the session's organization is one SDP refused,
  * so the same choices are offered under that explanation.
  *
- * @param props.noAccess - Whether SDP refused the session's organization.
+ * @param props.refusal - Why SDP refused the session's organization, or null.
  */
-export function SelectExistingOrganizationPanel({ noAccess }: { noAccess: boolean }) {
+export function SelectExistingOrganizationPanel({
+  refusal,
+}: {
+  refusal: OrganizationRefusal | null;
+}) {
   const t = useTranslations();
   const router = useRouter();
   const { userMemberships, userInvitations, setActive, isLoaded } = useOrganizationList({
@@ -97,12 +114,12 @@ export function SelectExistingOrganizationPanel({ noAccess }: { noAccess: boolea
   const { organization: activeOrganization } = useOrganization();
   // The organization SDP refused is no way forward, so it is not offered again.
   const memberships = (userMemberships.data ?? []).filter(
-    (membership) => !noAccess || membership.organization.id !== activeOrganization?.id
+    (membership) => refusal === null || membership.organization.id !== activeOrganization?.id
   );
   const invitations = userInvitations.data ?? [];
   const copy = entryCopy(
     resolveEntryState({
-      noAccess,
+      refusal,
       isLoaded,
       hasChoices: memberships.length > 0 || invitations.length > 0,
     }),

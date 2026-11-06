@@ -2,9 +2,12 @@ import { cookies, headers } from "next/headers";
 import {
   type AppLocale,
   defaultLocale,
+  defaultTimeZone,
   isAppLocale,
+  isTimeZone,
   localeCookieName,
   supportedLocales,
+  timeZoneCookieName,
 } from "@/i18n/config";
 import { loadMessages, type MessageKey } from "@/i18n/messages";
 import { type TranslationValues, translate } from "@/i18n/translate";
@@ -30,6 +33,17 @@ export async function getRequestLocale(): Promise<AppLocale> {
   if (isAppLocale(cookieLocale)) return cookieLocale;
 
   return localeFromAcceptLanguage((await headers()).get("accept-language")) ?? defaultLocale;
+}
+
+/**
+ * The viewer's time zone, from the cookie the browser stores (`TimeZoneProvider`), or UTC
+ * before it has stored one.
+ *
+ * @returns The IANA zone to format the request's dates in.
+ */
+export async function getRequestTimeZone(): Promise<string> {
+  const cookieTimeZone = (await cookies()).get(timeZoneCookieName)?.value;
+  return isTimeZone(cookieTimeZone) ? cookieTimeZone : defaultTimeZone;
 }
 
 export async function getI18nRequest() {

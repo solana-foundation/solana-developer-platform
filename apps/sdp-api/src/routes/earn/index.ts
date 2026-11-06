@@ -1,7 +1,6 @@
 import { type Context, Hono, type Next } from "hono";
 import { presentsApiKey } from "@/lib/api-key-format";
 import { AppError } from "@/lib/errors";
-import { isEarnEnabled } from "@/lib/feature-flags";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
@@ -98,19 +97,6 @@ import {
 
 export const earnRoutes = new Hono<{ Bindings: Env }>();
 const earn = new Hono<{ Bindings: Env }>();
-
-// Gate the whole family behind the Earn feature flag until it is ready for
-// prime time. Off by default; enable per-environment with EARN_ENABLED plus its
-// parent MARKETS_ENABLED — isEarnEnabled owns that hierarchy, so no separate
-// markets check belongs here.
-async function requireEarnFeature(c: Context<{ Bindings: Env }>, next: Next) {
-  if (!isEarnEnabled(c.env)) {
-    throw new AppError("FORBIDDEN", "Earn is not enabled for this environment");
-  }
-  await next();
-}
-
-earnRoutes.use("*", requireEarnFeature);
 
 const earnProjectContextOptions = {
   allowUnentitledProduction: (c: Context<{ Bindings: Env }>) =>
@@ -445,7 +431,7 @@ earn.post(
 );
 earn.post(
   "/external-wallet/withdrawal-request-cancellations",
-  requireAction("earn.execute"),
+  requireAction("earn.manage"),
   validateBody(earnExternalWalletSubmitSchema),
   createEarnExternalWalletWithdrawalRequestCancellation
 );

@@ -40,7 +40,7 @@ async function closeAccountMenu(page: Page) {
   await expect(page.getByRole("menu")).toHaveCount(0);
 }
 
-/** One of the three icon segments on the menu's Color theme row. */
+/** One of the three icon segments on the menu's Theme row. */
 function themeSegment(page: Page, preference: ThemePreference) {
   return page.getByRole("menu").getByRole("button", { name: preference, exact: true });
 }
@@ -116,10 +116,10 @@ test.describe("dashboard theme e2e", () => {
     await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 
     // Nothing theme-shaped in the page chrome until the account menu opens.
-    await expect(page.getByText("Color theme")).toHaveCount(0);
+    await expect(page.getByText("Theme", { exact: true })).toHaveCount(0);
 
     const menu = await openAccountMenu(page);
-    await expect(menu.getByText("Color theme")).toBeVisible();
+    await expect(menu.getByText("Theme", { exact: true })).toBeVisible();
     for (const preference of ["System", "Light", "Dark"] as const) {
       await expect(themeSegment(page, preference)).toBeVisible();
     }
@@ -127,7 +127,7 @@ test.describe("dashboard theme e2e", () => {
 
     // The settings card it used to live on is gone.
     await page.goto(projectHref(projectId, "/dashboard/settings"));
-    await expect(page.getByRole("group", { name: "Color theme" })).toHaveCount(0);
+    await expect(page.getByRole("group", { name: "Theme", exact: true })).toHaveCount(0);
   });
 
   test("defaults to system without a stored preference, and renders no hydration errors", async ({

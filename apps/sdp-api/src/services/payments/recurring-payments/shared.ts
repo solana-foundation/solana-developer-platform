@@ -67,6 +67,7 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { parseGrantsColumn } from "@/services/api-key.service";
+import { callerInsufficientFundsError } from "@/services/fee-payment-errors";
 import {
   isNativePaymentToken,
   normalizePaymentToken,
@@ -327,13 +328,19 @@ export async function sendSubscriptionInstructions(input: {
   );
   const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
   const txBytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
-  return submitSponsoredTransaction({
-    feePayment,
-    rpc,
-    transaction: txBytes,
-    lastValidBlockHeight,
-    store: input.submissionStore,
-  });
+  try {
+    return await submitSponsoredTransaction({
+      feePayment,
+      rpc,
+      transaction: txBytes,
+      lastValidBlockHeight,
+      store: input.submissionStore,
+    });
+  } catch (error) {
+    // A source wallet short of funds is recorded with the reason the caller
+    // can act on, not "An internal error occurred" (HOO-2621).
+    throw callerInsufficientFundsError(error, input.instructions) ?? error;
+  }
 }
 
 /** A row holding one of a step's saved signatures. */
@@ -988,4 +995,29 @@ export async function refuseIfSubscriptionAuthorityRevokedSince(
       }
     }
   });
+}
+
+/**
+ * The 409 for a start on a schedule whose counterparty or account is archived
+ * or no longer in the project (HOO-2634): the recipient cannot come back on
+ * this schedule, so collect and resume both say what to do instead.
+ */
+export function recipientUnavailable(): AppError {
+  return conflict(
+    "Recurring payment recipient is unavailable; cancel this schedule and create a new one"
+  );
+}
+
+/**
+ * The 409 for a collection on a schedule that is not active: the recipient
+ * guidance for one paused because its recipient is unavailable, else the
+ * generic refusal.
+ */
+export function notCollectable(
+  row: Pick<PaymentRecurringPaymentRow, "status" | "paused_reason">
+): AppError {
+  if (row.status === "paused" && row.paused_reason === "destination_unavailable") {
+    return recipientUnavailable();
+  }
+  return conflict("Recurring payment must be active before collection");
 }

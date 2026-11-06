@@ -4,31 +4,49 @@ import type { CustodyProvider, CustodyWalletSummary } from "@sdp/types/custody";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
 import { PlusIcon } from "lucide-react";
-import { useState } from "react";
-import { AddConnectionModal } from "@/app/(session)/dashboard/[projectId]/custody/connections/add-connection-modal";
+import Link from "next/link";
 import type {
   ConnectionsFilters,
   ConnectionsPageResult,
   ConnectionsProjectSummary,
-} from "@/app/(session)/dashboard/[projectId]/custody/connections/connections.data";
-import { ConnectionsList } from "@/app/(session)/dashboard/[projectId]/custody/connections/connections-list";
-import { useSelectedProjectName } from "@/app/(session)/dashboard/[projectId]/custody/connections/use-selected-project-name";
+} from "@/app/(session)/dashboard/[projectId]/wallets/connections/connections.data";
+import { ConnectionsList } from "@/app/(session)/dashboard/[projectId]/wallets/connections/connections-list";
+import { useSelectedProjectName } from "@/app/(session)/dashboard/[projectId]/wallets/connections/use-selected-project-name";
+import { formatCustodyProviderName } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
+import { RecordBlock } from "@/components/refresh-record";
 import { useTranslations } from "@/i18n/provider";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 
 /**
- * "4 connections in Acme Payments", for the provider header.
+ * "2 of 4 connections can sign in Acme Payments", under the provider's state.
  *
  * A client component only because the project's display name lives in the
- * workspace the shell resolved; the count itself comes from the server read.
+ * workspace the shell resolved; the counts come from the server read. A summary
+ * that could not see every connection cannot say how many sign, so it gives the
+ * count alone.
  */
-export function CustodyConnectionCount({ count }: { count: number }) {
+export function CustodyConnectionsSigningLine({
+  total,
+  summary,
+}: {
+  total: number;
+  summary: ConnectionsProjectSummary;
+}) {
   const t = useTranslations();
-  const projectName = useSelectedProjectName();
+  const project = useSelectedProjectName();
+  if (total === 0) {
+    return <>{t("DashboardCustody.connectionsEmptyInProject", { project })}</>;
+  }
+  if (!summary.complete) {
+    return <>{t("DashboardCustody.connectionCountInProject", { count: total, project })}</>;
+  }
   return (
     <>
-      {projectName
-        ? t("DashboardCustody.connectionCountInProject", { count, project: projectName })
-        : t("DashboardCustody.connectionCount", { count })}
+      {t("DashboardCustody.connectionsSigningInProject", {
+        signing: summary.signingCount,
+        count: total,
+        project,
+      })}
     </>
   );
 }
@@ -36,7 +54,7 @@ export function CustodyConnectionCount({ count }: { count: number }) {
 /**
  * The project's custody connections, on the provider page that owns them.
  *
- * Two banners can appear above the table, and they answer two different
+ * Two banners can appear above the list, and they answer two different
  * questions:
  *
  * - Signing paused: the organization is not permitted to sign through its own
@@ -68,53 +86,48 @@ export function CustodyConnectionsSection({
   provider: CustodyProvider;
 }) {
   const t = useTranslations();
+  const href = useProjectHref();
   const projectName = useSelectedProjectName();
-  const [addOpen, setAddOpen] = useState(false);
 
   // A summary that could not see every connection does not support the banner:
   // it is a statement about all of them, and silence beats a false alarm.
   const signingPaused = summary.complete && summary.signingPaused;
 
   const addConnectionButton = canManageCustody ? (
-    <Button size="sm" onClick={() => setAddOpen(true)} iconLeft={<PlusIcon className="size-4" />}>
-      {t("DashboardCustody.addConnection")}
+    <Button asChild size="sm" iconLeft={<PlusIcon className="size-4" />}>
+      <Link href={href(`/dashboard/integrations/${provider}/connections/new`)}>
+        {t("DashboardCustody.addConnection")}
+      </Link>
     </Button>
   ) : null;
 
   return (
-    <section className="rounded-2xl border border-border-default bg-surface-raised p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-base font-medium text-primary">
-          {t("DashboardCustody.connectionsTitle")}
-        </h2>
-        {addConnectionButton}
-      </div>
+    <RecordBlock
+      title={t("DashboardCustody.connectionsTitle")}
+      hint={t("DashboardCustody.connectionsHint", {
+        provider: formatCustodyProviderName(provider),
+      })}
+      aside={result.connections.length > 0 ? addConnectionButton : null}
+    >
+      {!canManageCustody ? (
+        <Callout variant="neutral">{t("DashboardCustody.readOnlyViewer")}</Callout>
+      ) : null}
 
-      <div className="mt-4 space-y-3">
-        {!canManageCustody ? (
-          <Callout variant="neutral">{t("DashboardCustody.readOnlyViewer")}</Callout>
-        ) : null}
+      {signingPaused ? (
+        <Callout variant="warning" title={t("DashboardCustody.signingPausedTitle")}>
+          {t("DashboardCustody.signingPausedBody")}
+        </Callout>
+      ) : null}
 
-        {signingPaused ? (
-          <Callout variant="warning" title={t("DashboardCustody.signingPausedTitle")}>
-            {t("DashboardCustody.signingPausedBody")}
-          </Callout>
-        ) : null}
-
-        <div className="overflow-hidden rounded-xl border border-border-default">
-          <ConnectionsList
-            result={result}
-            filters={filters}
-            walletsByConnection={walletsByConnection}
-            walletsUnavailable={walletsUnavailable}
-            provider={provider}
-            projectName={projectName}
-            emptyStateAction={addConnectionButton}
-          />
-        </div>
-      </div>
-
-      <AddConnectionModal isOpen={addOpen} onClose={() => setAddOpen(false)} provider={provider} />
-    </section>
+      <ConnectionsList
+        result={result}
+        filters={filters}
+        walletsByConnection={walletsByConnection}
+        walletsUnavailable={walletsUnavailable}
+        provider={provider}
+        projectName={projectName}
+        emptyStateAction={addConnectionButton}
+      />
+    </RecordBlock>
   );
 }

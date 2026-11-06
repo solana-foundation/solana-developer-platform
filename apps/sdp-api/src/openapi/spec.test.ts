@@ -1,13 +1,25 @@
 import { readFileSync } from "node:fs";
 import {
+  CUSTODY_PROVIDER_CATALOG_BY_ID,
+  CUSTODY_PROVIDERS,
+  PROVIDER_MODES,
+} from "@sdp/types/custody";
+import {
   IDEMPOTENCY_REQUIRED_ROUTES,
   INTERNAL_IDEMPOTENCY_REQUIRED_ROUTES,
 } from "@sdp/types/idempotency-required-routes";
 import { RAMP_ONLY_TRANSFER_STATUSES } from "@sdp/types/payments";
 import { COMPLIANCE_PROVIDERS } from "@sdp/types/provider-access";
 import { SDP_RELEASE_CHANNEL_NAMES, SDP_RELEASE_CHANNELS } from "@sdp/types/release-channels";
+import type {
+  OpenAPIObject,
+  PathItemObject,
+  ReferenceObject,
+  ResponseObject,
+} from "openapi3-ts/oas30";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { ERROR_CODES } from "@/lib/errors";
 import { declaredIdempotency, declaredIdempotencyRecovery } from "@/middleware/idempotency";
 import {
   ANONYMOUS_MAX_REQUESTS,
@@ -71,6 +83,83 @@ function literalEarnPaths(source: string): string[] {
 
 function getWalletListItemSchema(value: unknown): TestJsonSchema {
   return getJsonSchema(value).properties?.data?.properties?.wallets?.items ?? {};
+}
+
+const OPERATION_METHODS = ["get", "put", "post", "delete", "patch"] as const;
+
+const integrationStatesDocumentSchema = z.object({
+  get: z.object({
+    responses: z.object({
+      200: z.object({
+        content: z.object({
+          "application/json": z.object({
+            schema: z.object({
+              properties: z.object({
+                data: z.object({
+                  properties: z.object({
+                    families: z.object({
+                      items: z.object({
+                        oneOf: z.array(
+                          z.object({
+                            properties: z.object({
+                              integrations: z.object({
+                                items: z.object({
+                                  properties: z.object({
+                                    state: z.object({
+                                      oneOf: z.array(
+                                        z.object({
+                                          properties: z.object({
+                                            status: z.object({ enum: z.array(z.string()) }),
+                                            modes: z.unknown().optional(),
+                                          }),
+                                        })
+                                      ),
+                                    }),
+                                  }),
+                                }),
+                              }),
+                            }),
+                          })
+                        ),
+                      }),
+                    }),
+                  }),
+                }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    }),
+  }),
+});
+
+const errorEnvelopeResponseSchema = z.object({
+  content: z.object({
+    "application/json": z.object({
+      schema: z.object({
+        properties: z.object({
+          error: z.object({
+            properties: z.object({ code: z.object({ enum: z.array(z.string()).optional() }) }),
+          }),
+        }),
+      }),
+    }),
+  }),
+});
+
+/** The codes each operation's error envelope allows, one entry per error response. */
+function errorEnvelopeCodes(doc: OpenAPIObject): (string[] | undefined)[] {
+  return Object.values(doc.paths)
+    .flatMap((pathItem: PathItemObject) => OPERATION_METHODS.map((method) => pathItem[method]))
+    .filter((operation) => operation !== undefined)
+    .flatMap((operation) => Object.values<ResponseObject | ReferenceObject>(operation.responses))
+    .flatMap((response) => {
+      const envelope = errorEnvelopeResponseSchema.safeParse(response);
+      return envelope.success
+        ? [envelope.data.content["application/json"].schema.properties.error.properties.code.enum]
+        : [];
+    });
 }
 
 describe("OpenAPI spec", () => {
@@ -759,6 +848,23 @@ describe("OpenAPI spec", () => {
     });
   }
 
+  // Error codes name no module, so no channel prunes them: an envelope that lists fewer codes
+  // than the API answers with fails a client that checks the enum.
+  it("lists every ErrorCode in each error envelope of every document", () => {
+    const documents = [
+      createOpenApiDocument(),
+      ...SDP_RELEASE_CHANNEL_NAMES.map((releaseChannel) =>
+        createPublicOpenApiDocument({ releaseChannel })
+      ),
+    ];
+    for (const doc of documents) {
+      const lists = errorEnvelopeCodes(doc);
+      expect(lists.length).toBeGreaterThan(0);
+      const distinct = [...new Map(lists.map((codes) => [JSON.stringify(codes), codes])).values()];
+      expect(distinct).toEqual([ERROR_CODES]);
+    }
+  });
+
   it.each(["stable", "beta"] as const)(
     "%s hides ramp-only transfer fields and prose",
     (releaseChannel) => {
@@ -812,6 +918,82 @@ describe("OpenAPI spec", () => {
         "`onramp.read` or `offramp.read` for a ramp transfer"
       );
     }
+  });
+
+  // A custody provider publishes where the channel offers it in either mode, and
+  // local signing (self-hosted only) never does. Pinned so a promotion is a visible change.
+  it("names only Privy as a custody provider on stable, every one but local on experimental", () => {
+    const stable = createPublicOpenApiDocument({ releaseChannel: "stable" });
+    const serialized = JSON.stringify(stable);
+    expect(CUSTODY_PROVIDERS.filter((provider) => serialized.includes(`"${provider}"`))).toEqual([
+      "privy",
+    ]);
+    // Prose too: no description names a provider stable does not offer.
+    const unpublishedLabels = CUSTODY_PROVIDERS.filter((provider) => provider !== "privy").map(
+      (provider) => CUSTODY_PROVIDER_CATALOG_BY_ID[provider].label
+    );
+    expect(unpublishedLabels.filter((label) => serialized.includes(label))).toEqual([]);
+    expect(serialized).not.toMatch(/fireblocks|coinbase/i);
+    expect(createPublicSurfaceManifest("stable").custodyProviders).toEqual(["privy"]);
+
+    const paths = stable.paths;
+    expect(paths).toBeDefined();
+    const createBody = getJsonSchema(paths?.["/v1/wallets"]?.post?.requestBody);
+    const managedOwner = z
+      .object({ properties: z.object({ provider: z.object({ enum: z.array(z.string()) }) }) })
+      .parse(z.object({ anyOf: z.array(z.unknown()) }).parse(createBody).anyOf[0]);
+    expect(managedOwner.properties.provider.enum).toEqual(["privy"]);
+    const initialize = z
+      .object({ oneOf: z.array(z.unknown()) })
+      .parse(getJsonSchema(paths?.["/v1/wallets/initialize"]?.post?.requestBody));
+    expect(initialize.oneOf).toHaveLength(1);
+    expect(JSON.stringify(initialize)).toContain('"privy"');
+
+    for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
+      expect(JSON.stringify(createPublicOpenApiDocument({ releaseChannel }))).not.toContain(
+        '"local"'
+      );
+    }
+    expect(JSON.stringify(createOpenApiDocument())).toContain('"local"');
+
+    const experimentalCreate = getJsonSchema(
+      createPublicOpenApiDocument(EXPERIMENTAL).paths?.["/v1/wallets"]?.post?.requestBody
+    );
+    expect(JSON.stringify(experimentalCreate)).toContain(
+      JSON.stringify(CUSTODY_PROVIDERS.filter((provider) => provider !== "local"))
+    );
+  });
+
+  it("publishes every family's not configured modes as one or more, with no upper bound", () => {
+    const document = createPublicOpenApiDocument(EXPERIMENTAL);
+    const families = integrationStatesDocumentSchema.parse(document.paths["/v1/integrations"]).get
+      .responses[200].content["application/json"].schema.properties.data.properties.families.items
+      .oneOf;
+    const notConfiguredModes = families
+      .flatMap((family) => family.properties.integrations.items.properties.state.oneOf)
+      .filter((state) => state.properties.status.enum.includes("not_configured"))
+      .map((state) => state.properties.modes);
+    const oneOrMoreModes = {
+      type: "array",
+      items: { type: "string", enum: [...PROVIDER_MODES] },
+      minItems: 1,
+    };
+
+    expect(notConfiguredModes).toEqual(families.map(() => oneOrMoreModes));
+  });
+
+  it("drops a custody provider's own transfer fields where the channel does not publish it", () => {
+    const transfer = (releaseChannel: "stable" | "experimental") =>
+      JSON.stringify(
+        getJsonSchema(
+          createPublicOpenApiDocument({ releaseChannel }).paths?.[
+            "/v1/payments/transfers/{transferId}"
+          ]?.get?.responses?.["200"]
+        )
+      );
+    expect(transfer("stable")).not.toMatch(/fireblocks/i);
+    expect(transfer("experimental")).toContain('"fireblocks"');
+    expect(transfer("experimental")).not.toContain("x-sdp-custody-provider");
   });
 
   // Provider availability lists every family in one response, so a channel
@@ -917,10 +1099,6 @@ describe("OpenAPI spec", () => {
     expect(JSON.stringify(stable)).not.toMatch(/\/v1\/earn/);
   });
 
-  // DvP is documented internally and deliberately withheld from the public
-  // document: the swap program is devnet-only and the family is flag-gated off,
-  // so every environment a customer can reach answers 403. Publishing it would
-  // document an endpoint nobody can call. Promoting it is a product decision.
   it("documents the DvP trade routes on the internal document only", () => {
     const internal = createOpenApiDocument();
     const publicDocument = createPublicOpenApiDocument(EXPERIMENTAL);
@@ -982,7 +1160,6 @@ function operationFor(document: ReturnType<typeof createOpenApiDocument>, route:
 describe("OpenAPI Idempotency-Key headers", () => {
   // Declared routes with no public operation yet; adding one is deliberate.
   const UNDOCUMENTED: readonly string[] = [
-    "POST /v1/payments/requests",
     // Dashboard-only CSR registration must not be promoted to a public API.
     ...INTERNAL_IDEMPOTENCY_REQUIRED_ROUTES,
   ];

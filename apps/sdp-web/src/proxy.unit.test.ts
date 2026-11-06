@@ -2,7 +2,14 @@ import { NextFetchEvent } from "next/dist/server/web/spec-extension/fetch-event"
 import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
 
-const clerk = vi.hoisted(() => ({ protect: vi.fn(async () => undefined) }));
+const clerk = vi.hoisted(() => {
+  const protect = vi.fn(async () => undefined);
+  const auth = Object.assign(
+    vi.fn(async () => ({ userId: null as string | null })),
+    { protect }
+  );
+  return { protect, auth };
+});
 
 vi.mock("@clerk/nextjs/server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@clerk/nextjs/server")>();
@@ -10,19 +17,15 @@ vi.mock("@clerk/nextjs/server", async (importOriginal) => {
     ...actual,
     clerkMiddleware:
       (
-        handler: (
-          auth: { protect: typeof clerk.protect },
-          request: NextRequest,
-          event: NextFetchEvent
-        ) => unknown
+        handler: (auth: typeof clerk.auth, request: NextRequest, event: NextFetchEvent) => unknown
       ) =>
       (request: NextRequest, event: NextFetchEvent) =>
-        handler({ protect: clerk.protect }, request, event),
+        handler(clerk.auth, request, event),
   };
 });
 
 import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
-import { demoSessionCookiesToDrop, isPublicRoute, proxy, rejectCrossSiteWrite } from "./proxy";
+import { isPublicRoute, proxy, rejectCrossSiteWrite } from "./proxy";
 
 describe("public web routes", () => {
   it("keeps the workspace loading transition available during bootstrap", () => {
@@ -239,7 +242,7 @@ describe("proxy request project", () => {
   });
 
   it("drops a browser-sent project on a page outside any project", async () => {
-    for (const path of ["/dashboard", "/dashboard//evil.com", "/settings"]) {
+    for (const path of ["/dashboard", "/dashboard/payments", "/dashboard//evil.com", "/settings"]) {
       const response = await runProxy(
         dashboardRequest(path, { method: "GET", headers: { "x-project-id": SANDBOX_PROJECT.id } })
       );
@@ -261,18 +264,6 @@ describe("proxy request project", () => {
     expect(response.headers.get("location")).toBeNull();
     expect(forwardedProjectId(response)).toBe(SANDBOX_PROJECT.id);
     expect(overriddenRequestHeaderNames(response)).toContain("x-project-id");
-  });
-
-  it("sends a project-less dashboard page to the landing with its path and query", async () => {
-    const response = await runProxy(
-      dashboardRequest("/dashboard/payments/transactions?tab=x", { method: "GET", headers: {} })
-    );
-
-    expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe(
-      `https://dashboard.example.com/dashboard?return_to=${encodeURIComponent("/dashboard/payments/transactions?tab=x")}`
-    );
-    expect(lastUsedCookies(response)).toEqual([]);
   });
 
   it("records a project-scoped page as the last-used project", async () => {
@@ -300,22 +291,27 @@ describe("proxy request project", () => {
   });
 });
 
-describe("demoSessionCookiesToDrop", () => {
-  const cookie = "__session=jwt; sdp-demo-session.0=abc; sdp-demo-session.1=def; other=1";
+describe("signed-out workspace hints", () => {
+  it("sends a signed-out page to sign-in with its path and query to come back to", async () => {
+    const request = new NextRequest(
+      `https://dashboard.example.com/dashboard/${SANDBOX_PROJECT.id}/payments?tab=x`
+    );
+    await proxy(request, new NextFetchEvent({ page: "/", request, context: undefined }));
 
-  it("forgets the demo session on a full page load", () => {
-    const request = new NextRequest("https://dashboard.example.com/dashboard/payments", {
-      headers: { cookie, "sec-fetch-dest": "document" },
+    expect(clerk.protect).toHaveBeenLastCalledWith({
+      unauthenticatedUrl: `https://dashboard.example.com/sign-in?redirect_url=%2Fdashboard%2F${SANDBOX_PROJECT.id}%2Fpayments%3Ftab%3Dx`,
     });
-    expect(demoSessionCookiesToDrop(request)).toEqual(["sdp-demo-session.0", "sdp-demo-session.1"]);
   });
 
-  it("keeps it across the app's own navigations and fetches", () => {
-    for (const dest of ["empty", null]) {
-      const request = new NextRequest("https://dashboard.example.com/dashboard/payments", {
-        headers: dest === null ? { cookie } : { cookie, "sec-fetch-dest": dest },
-      });
-      expect(demoSessionCookiesToDrop(request)).toEqual([]);
-    }
+  it("expires the last-selected project on the sign-in page", async () => {
+    const request = new NextRequest("https://dashboard.example.com/sign-in", {
+      headers: { cookie: `sdp_selected_project_id=${PRODUCTION_PROJECT.id}` },
+    });
+    const response = await proxy(
+      request,
+      new NextFetchEvent({ page: "/sign-in", request, context: undefined })
+    );
+    expect(response?.headers.get("set-cookie")).toContain("sdp_selected_project_id=;");
+    expect(response?.headers.get("set-cookie")).toContain("Max-Age=0");
   });
 });

@@ -1,10 +1,18 @@
 import { resolveRampProviderClient } from "@sdp/payments/ramps";
 import { isRampTransferType, type PaymentTransferType } from "@sdp/types/payments";
-import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
+import type {
+  PersistedRampProviderId,
+  ProjectProviderAvailabilityEntry,
+  RampProviderId,
+} from "@sdp/types/provider-access";
 import type { SdpModule, SdpRampProviderMaturity } from "@sdp/types/release-channels";
 import type { Context, Next } from "hono";
 import { forbidden, internalError } from "@/lib/errors";
-import { isModuleAvailable, isRampProviderAvailable } from "@/lib/feature-flags";
+import {
+  isCustodyProviderOffered,
+  isModuleAvailable,
+  isRampProviderAvailable,
+} from "@/lib/feature-flags";
 import { rampProviderSchema } from "@/routes/payments/ramps/schemas";
 import type { Env } from "@/types/env";
 
@@ -36,6 +44,22 @@ export function assertRampProviderInChannel(
 /** Whether the deployment's release channel includes `module`. */
 export function isModuleInChannel(c: ReleaseChannelContext, module: SdpModule): boolean {
   return isModuleAvailable(c.env, module, rampProviderMaturity(c));
+}
+
+/**
+ * Whether the release channel runs a project availability entry's provider:
+ * ramp providers by their own stage, custody providers when offered in some
+ * custody mode, every other family by its module.
+ */
+export function isProjectProviderEntryInChannel(
+  c: ReleaseChannelContext,
+  entry: ProjectProviderAvailabilityEntry
+): boolean {
+  if (entry.family === "ramps") return isRampProviderInChannel(c, entry.provider);
+  if (entry.family === "custody" && !isCustodyProviderOffered(c.env, entry.provider)) {
+    return false;
+  }
+  return isModuleInChannel(c, entry.family);
 }
 
 /** Refuses a request that names a module the release channel leaves out. */

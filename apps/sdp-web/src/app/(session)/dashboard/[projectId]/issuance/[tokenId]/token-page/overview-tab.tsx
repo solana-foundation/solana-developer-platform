@@ -6,7 +6,6 @@ import { InfoHint } from "@sdp/ui/info-hint";
 import { StatusText } from "@sdp/ui/status-text";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/custody/wallet-address-copy-button";
 import { TokenDisabledActionTooltip } from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/token-disabled-action-tooltip";
 import type { PermissionRowId } from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.types";
 import { deployNetworkName } from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.utils";
@@ -20,6 +19,7 @@ import {
 } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-token-state";
 import { formatDecimalAmount } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
 import { RecordAmount } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
+import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
 import {
   RecordBlock,
   RecordColumns,
@@ -30,6 +30,7 @@ import {
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   activityActorType,
@@ -476,6 +477,7 @@ function IdentityBlock({
 }: Pick<TokenTabProps, "token" | "ops" | "form" | "state"> & { signingWalletName: string }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const onChain = isOnChain(state);
   const heldAuthorities = ops.permissionRows.filter((row) => row.value || !onChain);
   return (
@@ -520,11 +522,11 @@ function IdentityBlock({
           </RecordRow>
           {onChain && token.deployedAt ? (
             <RecordRow label={t("DashboardIssuance.newDesign.overview.deployed")}>
-              {formatTokenDay(token.deployedAt, locale)}
+              {formatTokenDay(token.deployedAt, locale, timeZone)}
             </RecordRow>
           ) : (
             <RecordRow label={t("DashboardIssuance.newDesign.overview.created")}>
-              {formatTokenDay(token.createdAt, locale)}
+              {formatTokenDay(token.createdAt, locale, timeZone)}
             </RecordRow>
           )}
         </dl>
@@ -536,6 +538,7 @@ function IdentityBlock({
 function RecentActivity({ tokenId, onViewAll }: { tokenId: string; onViewAll: () => void }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const { data, error } = useTokenActivity(tokenId, { page: 1, pageSize: 2 });
   const events = data?.events ?? [];
 
@@ -560,7 +563,7 @@ function RecentActivity({ tokenId, onViewAll }: { tokenId: string; onViewAll: ()
         <ul className="flex flex-col">
           {events.map((event) => {
             const status = activityStatus(event.status, t);
-            const moment = formatTokenMoment(event.createdAt, locale);
+            const moment = formatTokenMoment(event.createdAt, locale, timeZone);
             return (
               <li
                 key={event.id}

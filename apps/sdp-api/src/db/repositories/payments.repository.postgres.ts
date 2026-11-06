@@ -470,13 +470,14 @@ export function createPostgresPaymentsRepository(
              serialized_tx,
              signature,
              slot,
+             fee,
              initiated_by_key_id,
              idempotency_key,
              idempotency_fingerprint,
              confirmed_at,
              created_at,
              updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, CASE WHEN ?::boolean THEN sdp_iso_now() END, sdp_iso_now(), sdp_iso_now())
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ?::boolean THEN sdp_iso_now() END, sdp_iso_now(), sdp_iso_now())
            RETURNING *
            )
            SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
@@ -506,6 +507,7 @@ export function createPostgresPaymentsRepository(
           input.serializedTx,
           input.signature,
           input.slot,
+          input.fee ?? null,
           input.initiatedByKeyId,
           input.idempotencyKey ?? null,
           input.idempotencyFingerprint ?? null,

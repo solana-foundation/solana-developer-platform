@@ -9,14 +9,17 @@ import {
   denormalizeIbmHavenWalletId,
   normalizeIbmHavenWalletId,
 } from "@sdp/custody/provider-wallet-ids";
-import { describe, expect, it } from "vitest";
+import { aroundEach, describe, expect, it } from "vitest";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { createAdapterFromEncryptedConfig } from "@/services/domain/signing/provider-adapter-factory";
 import { createEncryptionService } from "@/services/encryption.service";
+import { inSandboxScope } from "@/test/helpers/cluster-rpc";
 import type { Env } from "@/types/env";
 
 const TEST_ORG_ID = "org_ibm_haven";
 const TEST_PROJECT_ID = "prj_ibm_haven";
+
+aroundEach((runTest) => inSandboxScope(runTest));
 
 describe("signing.service ibm_haven (IBM Digital Asset Haven)", () => {
   it("resolves the IBM Haven adapter with a distinct provider id", async () => {

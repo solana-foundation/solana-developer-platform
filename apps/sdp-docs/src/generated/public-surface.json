@@ -14,6 +14,17 @@
     "helius_rings"
   ],
   "rampProviders": ["moonpay", "stripe", "hercle"],
+  "custodyProviders": [
+    "fireblocks",
+    "privy",
+    "coinbase_cdp",
+    "para",
+    "turnkey",
+    "dfns",
+    "ibm_haven",
+    "anchorage",
+    "utila"
+  ],
   "grantableActions": [
     {
       "module": "transfers",

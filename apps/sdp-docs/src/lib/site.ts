@@ -34,6 +34,13 @@ export function getDocsPagePath(pageSlug: string): string {
   return normalized ? `/docs/${normalized}` : "/docs";
 }
 
+/**
+ * The search index the ⌘K dialog queries. It sits under `/docs` because platform.solana.com
+ * forwards only `/docs/*` (and a few root files) to this app; Fumadocs' default `/api/search`
+ * reaches the dashboard there instead.
+ */
+export const docsSearchApiPath = "/docs/api/search";
+
 /** The page's Markdown, as the `.md` route serves it: `/docs.md` for the home. */
 export function getDocsMarkdownPath(pageSlug: string): string {
   return `${getDocsPagePath(pageSlug)}.md`;

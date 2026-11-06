@@ -36,8 +36,6 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
-import { demoRampPairs } from "@/lib/payments-demo/demo-ramp-assets";
-import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { offersSandboxSettlement, onrampPairs } from "@/lib/ramps";
 import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./use-ramp-wizard";
 
@@ -84,7 +82,6 @@ interface SimulationContext {
   transferId: string | null;
   transferStatus: PaymentTransferSummary | undefined;
   succeeded: boolean;
-  demo: boolean;
   environment: SdpEnvironment;
   /** The providers the channel-capped flags offer on this request. */
   enabledRampProviders: readonly RampProviderId[];
@@ -99,8 +96,7 @@ function awaitsPayment(quote: PaymentRampQuote, status: PaymentTransferStatus): 
 
 /**
  * Whether a deposit can be marked paid: while it waits for its money, and as done until it finishes.
- * The demo offers it for any provider, standing in for checkouts that would open elsewhere.
- * Outside the demo, only a sandbox provider the API settles on request offers it, never a production deposit.
+ * Only a sandbox provider the API settles on request offers it, never a production deposit.
  */
 function simulationOffered(context: SimulationContext): context is SimulationContext & {
   quote: PaymentRampQuote;
@@ -110,22 +106,18 @@ function simulationOffered(context: SimulationContext): context is SimulationCon
   if (quote === null || transferId === null || transferStatus === undefined) return false;
   if (getRampTransferState(transferStatus.status).terminal) return false;
   if (!awaitsPayment(quote, transferStatus.status) && !context.succeeded) return false;
-  return (
-    context.demo ||
-    offersSandboxSettlement(quote.provider, context.environment, context.enabledRampProviders)
-  );
+  return offersSandboxSettlement(quote.provider, context.environment, context.enabledRampProviders);
 }
 
 export function useOnrampWizard(props: UseRampWizardProps) {
   const { sdpEnvironment } = useDashboardWorkspace();
-  const demo = usePaymentsDemo();
   const t = useTranslations();
   const locale = useLocale();
   const [quoteSimulationLoading, setQuoteSimulationLoading] = useState(false);
   const [quoteSimulationSucceeded, setQuoteSimulationSucceeded] = useState(false);
 
   const wizard = useRampWizard<OnrampStepId>(props, {
-    pairs: demoRampPairs(onrampPairs(sdpEnvironment, props.enabledRampProviders), demo),
+    pairs: onrampPairs(sdpEnvironment, props.enabledRampProviders),
     steps: getOnrampSteps(t),
     stepSchemas: { DEPOSIT: depositDetailsSchema },
     quoteStepId: "MEMO",
@@ -154,10 +146,6 @@ export function useOnrampWizard(props: UseRampWizardProps) {
         fiatAmount: fields.amount.trim(),
         rampsMemo,
       }) satisfies PaymentOnrampQuoteRequest,
-    onQuoteCreated: () => {
-      setQuoteSimulationLoading(false);
-      setQuoteSimulationSucceeded(false);
-    },
   });
 
   const amount = summaryAmount(wizard.fields.amount, locale);
@@ -207,7 +195,6 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     transferId: wizard.quoteTransferId,
     transferStatus,
     succeeded: quoteSimulationSucceeded,
-    demo,
     environment: sdpEnvironment,
     enabledRampProviders: props.enabledRampProviders,
   };

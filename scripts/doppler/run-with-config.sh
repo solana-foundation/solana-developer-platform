@@ -53,6 +53,8 @@ if [ "${1:-}" = "--overlay-env" ]; then
   if [ "${#env_files[@]}" -gt 0 ]; then
     load_env_files "${env_files[@]}"
   fi
+  # Doppler's values are plain env here; in CI, mask them before anything can print one.
+  "$root/scripts/doppler/mask-secret-env.sh"
   exec "$@"
 fi
 

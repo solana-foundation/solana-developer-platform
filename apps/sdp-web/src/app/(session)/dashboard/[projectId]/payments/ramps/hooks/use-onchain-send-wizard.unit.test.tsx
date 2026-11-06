@@ -12,6 +12,7 @@ import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-conte
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { stubClerkSession } from "@/test/clerk";
 import { useOnchainSendWizard } from "./use-onchain-send-wizard";
 
 const mocks = vi.hoisted(() => ({
@@ -20,9 +21,9 @@ const mocks = vi.hoisted(() => ({
   toastSuccess: vi.fn(),
 }));
 
-vi.mock("@clerk/nextjs", () => ({
-  useAuth: () => ({ orgId: "org-test", userId: "user-test" }),
-}));
+beforeEach(() => {
+  stubClerkSession({ orgId: "org-test", userId: "user-test" });
+});
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 vi.mock("sonner", () => ({

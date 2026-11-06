@@ -46,8 +46,9 @@ import {
   hasAccessControlList,
 } from "@/app/(session)/dashboard/[projectId]/issuance/access-control.utils";
 import { buildDraftDeployRequest } from "@/app/(session)/dashboard/[projectId]/issuance/draft-permissions";
+import { formatDecimalAmount } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerAddressUrl } from "@/lib/explorer";
 import { getTokenOperationPermissions } from "./token-operation-permissions";
 import { useTokenOperationData } from "./use-token-operation-data";
@@ -67,6 +68,7 @@ export function useTokenOperations({
   canManageTokenAdmin: boolean;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const { sdpEnvironment } = useDashboardWorkspace();
   const { isPending: isRefreshingSupply, runAction: refreshSupply } = useTokenActionRunner();
 
@@ -183,6 +185,11 @@ export function useTokenOperations({
     });
 
   const tokenBasePath = `/api/dashboard/issuance/tokens/${token.id}`;
+  // A confirmation shows the amount as the form's button does ("1,000,000.00 ACME"), not as typed.
+  const amountDetail = (amount: string) => ({
+    label: t("DashboardIssuance.forms.amount"),
+    value: `${formatDecimalAmount(amount, locale)} ${token.symbol}`,
+  });
   const explorerHref = token.mintAddress
     ? explorerAddressUrl(token.mintAddress, CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment])
     : null;
@@ -460,7 +467,7 @@ export function useTokenOperations({
         confirmationTitle: t("DashboardIssuance.management.mintConfirmationTitle"),
         confirmationDescription: t("DashboardIssuance.management.mintConfirmationDescription"),
         confirmationDetails: [
-          { label: t("DashboardIssuance.forms.amount"), value: `${amount} ${token.symbol}` },
+          amountDetail(amount),
           { label: t("DashboardIssuance.forms.destination"), value: destination },
           ...(token.requiresAllowlist
             ? [
@@ -522,7 +529,7 @@ export function useTokenOperations({
         confirmationTitle: t("DashboardIssuance.management.burnConfirmationTitle"),
         confirmationDescription: t("DashboardIssuance.management.burnConfirmationDescription"),
         confirmationDetails: [
-          { label: t("DashboardIssuance.forms.amount"), value: `${amount} ${token.symbol}` },
+          amountDetail(amount),
           { label: t("DashboardIssuance.forms.source"), value: source },
           {
             label: t("DashboardIssuance.draftForm.network"),
@@ -581,7 +588,7 @@ export function useTokenOperations({
         confirmationDescription: t("DashboardIssuance.management.seizeConfirmationDescription"),
         confirmationWarning: t("DashboardIssuance.management.seizeConfirmationDescription"),
         confirmationDetails: [
-          { label: t("DashboardIssuance.forms.amount"), value: `${amount} ${token.symbol}` },
+          amountDetail(amount),
           { label: t("DashboardIssuance.forms.source"), value: source },
           { label: t("DashboardIssuance.forms.destination"), value: destination },
           {
@@ -639,7 +646,7 @@ export function useTokenOperations({
         confirmationDescription: t("DashboardIssuance.management.forceBurnConfirmationDescription"),
         confirmationWarning: t("DashboardIssuance.management.forceBurnConfirmationDescription"),
         confirmationDetails: [
-          { label: t("DashboardIssuance.forms.amount"), value: `${amount} ${token.symbol}` },
+          amountDetail(amount),
           { label: t("DashboardIssuance.forms.source"), value: source },
           {
             label: t("DashboardIssuance.draftForm.network"),

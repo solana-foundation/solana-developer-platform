@@ -3,13 +3,13 @@ import localFont from "next/font/local";
 import { AppToaster } from "@/components/app-toaster";
 import { ThemeProvider } from "@/contexts/theme-context";
 import { I18nProvider } from "@/i18n/provider";
-import { getI18nRequest, getTranslations } from "@/i18n/server";
+import { getI18nRequest, getRequestTimeZone, getTranslations } from "@/i18n/server";
+import { TimeZoneProvider } from "@/i18n/time-zone";
 import "./globals.css";
 import Script from "next/script";
 
-// The refresh design's faces, from the design-tokens package so a Storybook loads the same
-// files. tokens.css reads the two variables inside [data-sdp-theme="refresh"], and sdp-theme.css
-// on every dashboard page; pages outside the dashboard keep the base stack.
+// The design's faces, from the design-tokens package so a Storybook loads the same files.
+// tokens.css reads the two variables on :root, so every page sets its text in them.
 const seasonSans = localFont({
   src: [
     {
@@ -70,7 +70,10 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const { locale, messages } = await getI18nRequest();
+  const [{ locale, messages }, timeZone] = await Promise.all([
+    getI18nRequest(),
+    getRequestTimeZone(),
+  ]);
 
   return (
     <html
@@ -96,8 +99,10 @@ export default async function RootLayout({
       <body>
         <ThemeProvider>
           <I18nProvider locale={locale} messages={messages}>
-            {children}
-            <AppToaster />
+            <TimeZoneProvider timeZone={timeZone}>
+              {children}
+              <AppToaster />
+            </TimeZoneProvider>
           </I18nProvider>
         </ThemeProvider>
       </body>

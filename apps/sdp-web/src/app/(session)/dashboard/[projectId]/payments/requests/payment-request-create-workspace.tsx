@@ -22,13 +22,14 @@ import { WizardFrame } from "@/components/wizard-frame";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { useTimeZone } from "@/i18n/time-zone";
+import { copyPendingText } from "@/lib/copy-pending-text";
+import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch";
 import { fetchResultAnswer } from "@/lib/idempotency";
-import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
-import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { PAYMENT_REQUESTS_HREF, paymentRequestHref } from "@/lib/payments-routes";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
+import { noteCreatedRequestLink } from "./created-request-link";
 import { expiresAtForAction, settleExpiresAt } from "./payment-request-expiry";
 import { deriveTokenOptions, type PaymentRequestTokenOption } from "./payment-requests-page.data";
 
@@ -63,13 +64,13 @@ function isValidAmount(value: string): boolean {
   return /^\d+(\.\d+)?$/.test(trimmed) && Number(trimmed) > 0;
 }
 
-async function copyToClipboard(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
+/** The pay link a create answered with. A refused create, or one with no request, has none. */
+function createdPayLink(res: DashboardFetchResult<{ data: CreatedPaymentRequest }>): string {
+  const created = res.ok ? res.data?.data : undefined;
+  if (created === undefined) {
+    throw new Error("The create named no request, so it has no link to copy.");
   }
+  return `${window.location.origin}/pay/${created.publicToken}`;
 }
 
 /**
@@ -186,7 +187,7 @@ function CreateFooter({
         variant={complete ? "default" : "outline"}
         disabled={!complete}
         loading={busy}
-        className={cn(!complete && "opacity-100 text-tertiary refresh:bg-fill")}
+        className={cn(!complete && "opacity-100 text-tertiary bg-fill")}
         onClick={onCreate}
       >
         {t("DashboardPayments.requests.createAndCopyLink")}
@@ -222,6 +223,7 @@ function AmountField({ amount, onChange }: { amount: string; onChange: (next: st
 function ExpiryField({ expiry, onChange }: { expiry: string; onChange: (next: string) => void }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const expiresAt = resolveExpiryDate(expiry);
   return (
     <div className="flex flex-col gap-1.5">
@@ -238,7 +240,7 @@ function ExpiryField({ expiry, onChange }: { expiry: string; onChange: (next: st
       <FieldHint>
         {expiresAt
           ? t("DashboardPayments.requests.linkStopsWorking", {
-              date: formatDateTime(expiresAt.toISOString(), locale) ?? "",
+              date: formatDateTime(expiresAt.toISOString(), locale, timeZone) ?? "",
             })
           : t("DashboardPayments.requests.linkStaysLive")}
       </FieldHint>
@@ -283,8 +285,7 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
     [sdpEnvironment]
   );
 
-  const demo = usePaymentsDemo();
-  const [amount, setAmount] = useState(demo ? DEMO_PREFILL_AMOUNTS.request : "");
+  const [amount, setAmount] = useState("");
   const [pickedToken, setPickedToken] = useState("");
   const [pickedWallet, setPickedWallet] = useState("");
   const [expiry, setExpiry] = useState<string>("none");
@@ -310,6 +311,7 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
     }
     setSubmitting(true);
     let created: CreatedPaymentRequest | undefined;
+    let linkCopied: Promise<boolean> | null = null;
     try {
       const input = JSON.stringify([wallet.walletId, token.mintAddress, amount.trim(), expiry]);
       // Read from the clock once per action, so a retry resends the same body
@@ -321,7 +323,7 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
         router.push(projectHref(PAYMENT_REQUESTS_HREF));
         return;
       }
-      const res = await dashboardFetch<{ data: CreatedPaymentRequest }>(
+      const sent = dashboardFetch<{ data: CreatedPaymentRequest }>(
         "/api/dashboard/payments/requests",
         {
           method: "POST",
@@ -333,6 +335,9 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
           },
         }
       );
+      // The copy starts inside the press, before the answer that names the link.
+      linkCopied = copyPendingText(sent.then(createdPayLink));
+      const res = await sent;
       settleExpiresAt(input, expiresAt, res);
       if (!res.ok) {
         // The earlier attempt may have created it: show the list to check.
@@ -348,19 +353,11 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
     } finally {
       setSubmitting(false);
     }
-    // A demo request lives in this browser only, so the public pay page can't open its link.
-    const copied =
-      !demo && created?.publicToken
-        ? await copyToClipboard(`${window.location.origin}/pay/${created.publicToken}`)
-        : false;
-    toast.success(t("DashboardPayments.requests.requestCreated"), {
-      id: "payment-request-created",
-      description: demo
-        ? t("DashboardPayments.demo.noPayLink")
-        : copied
-          ? t("DashboardPayments.requests.linkOnClipboard")
-          : t("DashboardPayments.requests.copyLinkFromRequest"),
-    });
+    // The request's page says how the copy went, under the link: a toast would outlive this
+    // form and land on that page's own actions.
+    if (created !== undefined && linkCopied !== null) {
+      noteCreatedRequestLink(created.id, await linkCopied);
+    }
     router.push(projectHref(created?.id ? paymentRequestHref(created.id) : PAYMENT_REQUESTS_HREF));
   }
 

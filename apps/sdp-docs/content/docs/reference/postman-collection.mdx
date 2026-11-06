@@ -1,25 +1,23 @@
 ---
 title: Postman Collection
 breadcrumbParent: /docs/reference/api
-description: Download the public SDP API Postman collection generated from the OpenAPI contract.
+description: Download the public SDP API as a Postman collection, generated from the OpenAPI contract.
 ---
 
-The Postman collection is generated from the same public OpenAPI contract that
-powers the [API reference](/docs/reference/api). It includes every
-end-user-facing family published there.
-
-Internal-only endpoint families such as `rpc`, `admin`, `onboarding`, `auth`, `organizations`, and `members` are intentionally excluded.
+The collection is generated from the same public OpenAPI contract as the [API reference](/docs/reference/api), and holds every family published there. Internal families, such as `admin`, `onboarding`, `organizations`, `members`, and `api-keys`, are left out.
 
 <ActionLinks>
   <a href="/docs/postman/collection.json" download>Download Postman collection</a>
   <a href="/docs/postman/collection.json">Open raw JSON</a>
 </ActionLinks>
 
-When you import the collection into Postman, set:
+After you import it, set two collection variables:
 
-- `baseUrl` to the SDP API environment you want to target
-- `sdpApiKey` to your bearer API key
+- `baseUrl`: the API host to call. It defaults to `https://api.solana.com`.
+- `sdpApiKey`: your API key (`sf_...`), sent as a bearer token.
 
-Required routes use a saved key in the `idempotencyKey.<operationId>` collection variable. Postman creates it when empty and clears it only after a final-payment `2xx`, a replayed refusal, or a `422` other than `IDEMPOTENCY_KEY_REUSED`.
+## Idempotency keys
 
-If the payment remains `pending` or `processing`, poll with `GET` and keep the key until final. Timeouts, `5xx`, `409`, `429`, `400`, `401`, `403`, and `422 IDEMPOTENCY_KEY_REUSED` also keep it for the next attempt. See [Idempotency](/docs/developing-with-sdp/idempotency#the-dashboard-and-the-postman-collection).
+Each route that requires an `Idempotency-Key` sends the one saved in its `idempotencyKey.<operationId>` collection variable. Postman creates the key when the variable is empty. It clears the key only after a final `2xx`, a replayed refusal, or a `422` other than `IDEMPOTENCY_KEY_REUSED`.
+
+Every other answer keeps the key for the next send. That covers a transfer, batch, or schedule still `pending` or `processing` (poll it with `GET` until it's final), a timeout, a `5xx`, a `409` or `429`, a `400`, `401`, or `403` refusal, and `422 IDEMPOTENCY_KEY_REUSED`. See [Idempotency](/docs/developing-with-sdp/idempotency#the-dashboard-and-the-postman-collection).

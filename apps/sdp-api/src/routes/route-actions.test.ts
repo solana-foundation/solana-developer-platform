@@ -159,8 +159,6 @@ const ALL_MODULES_ENV = {
   ...env,
   PRIVATE_CHANNELS_ENABLED: "true",
   HELIUS_RINGS_ENABLED: "true",
-  MARKETS_ENABLED: "true",
-  EARN_ENABLED: "true",
 };
 
 /** A request to a route as the test key, with a body for non-GET methods. */

@@ -5,16 +5,16 @@
     "families": {
       "Health": 2,
       "Wallets": 10,
-      "Projects": 4,
+      "Projects": 5,
       "Issuance": 37,
-      "Payments": 37,
+      "Payments": 41,
       "Compliance": 1,
       "Counterparties": 13,
       "Asset Profiles": 7
     },
     "modules": {
       "wallets": 10,
-      "payments": 37,
+      "payments": 41,
       "counterparties": 13,
       "issuance": 37
     }
@@ -35,7 +35,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"local\"\n}",
+            "defaultValue": "{\n  \"provider\": \"fireblocks\"\n}",
             "required": true
           }
         ],
@@ -68,14 +68,14 @@
         "expectedResponse": {
           "data": {
             "wallet": {
-              "id": "cw_example",
+              "id": "cwlt_example",
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
-              "label": "Root Signing Wallet",
-              "purpose": "root",
+              "label": "Treasury wallet",
+              "purpose": "transfer",
               "status": "active",
               "createdAt": "2025-01-01T00:00:00.000Z"
             }
@@ -102,13 +102,13 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"anchorage\",\n  \"walletId\": \"anchorage_wallet_123\"\n}",
+            "defaultValue": "{\n  \"provider\": \"privy\",\n  \"walletId\": \"privy_wallet_123\"\n}",
             "required": true
           }
         ],
         "expectedResponse": {
           "data": {
-            "walletId": "anchorage_wallet_123",
+            "walletId": "privy_wallet_123",
             "deleted": true
           },
           "meta": {
@@ -134,10 +134,6 @@
             "required": false,
             "kind": "select",
             "options": [
-              {
-                "label": "local",
-                "value": "local"
-              },
               {
                 "label": "fireblocks",
                 "value": "fireblocks"
@@ -211,14 +207,14 @@
           "data": {
             "wallets": [
               {
-                "id": "cw_example",
+                "id": "cwlt_example",
                 "custodyConfigId": "cfg_example",
                 "provider": "privy",
                 "isRuntimeExecutionAllowed": true,
                 "walletId": "privy_wallet_123",
                 "publicKey": "So11111111111111111111111111111111111111112",
-                "label": "Root Signing Wallet",
-                "purpose": "root",
+                "label": "Treasury wallet",
+                "purpose": "transfer",
                 "status": "active",
                 "createdAt": "2025-01-01T00:00:00.000Z"
               }
@@ -276,10 +272,6 @@
             "required": false,
             "kind": "select",
             "options": [
-              {
-                "label": "local",
-                "value": "local"
-              },
               {
                 "label": "fireblocks",
                 "value": "fireblocks"
@@ -440,14 +432,14 @@
         "expectedResponse": {
           "data": {
             "wallet": {
-              "id": "cw_example",
+              "id": "cwlt_example",
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
-              "label": "Root Signing Wallet",
-              "purpose": "root",
+              "label": "Treasury wallet",
+              "purpose": "transfer",
               "status": "active",
               "createdAt": "2025-01-01T00:00:00.000Z"
             }
@@ -489,14 +481,14 @@
         "expectedResponse": {
           "data": {
             "wallet": {
-              "id": "cw_example",
+              "id": "cwlt_example",
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
-              "label": "Root Signing Wallet",
-              "purpose": "root",
+              "label": "Treasury wallet",
+              "purpose": "transfer",
               "status": "active",
               "createdAt": "2025-01-01T00:00:00.000Z"
             }
@@ -602,7 +594,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -894,7 +886,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -997,7 +989,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -1179,7 +1171,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -1423,7 +1415,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -1557,7 +1549,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -2096,6 +2088,236 @@
         "shadowedBy": []
       },
       {
+        "id": "create-payment-request",
+        "operationId": "createPaymentRequest",
+        "title": "Create payment request",
+        "method": "POST",
+        "path": "/v1/payments/requests",
+        "pathFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"walletId\": \"privy_wallet_123\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"10.00\",\n  \"expiresAt\": null\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "id": "preq_example",
+            "organizationId": "organization_example",
+            "projectId": "project_example",
+            "walletId": "wallet_example",
+            "destinationAddress": "So11111111111111111111111111111111111111112",
+            "token": "example",
+            "amount": "100.00",
+            "reference": "So11111111111111111111111111111111111111112",
+            "status": "canceled",
+            "expiresAt": "2025-01-01T00:00:00.000Z",
+            "fulfilledByTransferId": "fulfilledbytransfer_example",
+            "paidLate": false,
+            "lastCheckedAt": "2025-01-01T00:00:00.000Z",
+            "canceledByApiKeyId": "canceledbyapikey_example",
+            "canceledByUserId": "canceledbyuser_example",
+            "canceledAt": "2025-01-01T00:00:00.000Z",
+            "lifecycle": [
+              {
+                "status": "canceled",
+                "at": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "createdBy": "example",
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "updatedAt": "2025-01-01T00:00:00.000Z",
+            "publicToken": "example-public-token"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "releaseModule": "payments",
+        "shadowedBy": []
+      },
+      {
+        "id": "list-payment-requests",
+        "operationId": "listPaymentRequests",
+        "title": "List payment requests",
+        "method": "GET",
+        "path": "/v1/payments/requests?page={page}&pageSize={pageSize}&status={status}",
+        "pathFields": [
+          {
+            "key": "page",
+            "label": "page",
+            "description": "Page number, starting at 1.",
+            "defaultValue": "1",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "pageSize",
+            "label": "pageSize",
+            "description": "Results per page, 1 to 100.",
+            "defaultValue": "20",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "status",
+            "label": "status",
+            "description": "Payment request status. `awaiting_payment` is open; `paid` was settled by an on-chain payment; `canceled` and `expired` closed without one.",
+            "defaultValue": "canceled",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "awaiting_payment",
+                "value": "awaiting_payment"
+              },
+              {
+                "label": "paid",
+                "value": "paid"
+              },
+              {
+                "label": "canceled",
+                "value": "canceled"
+              },
+              {
+                "label": "expired",
+                "value": "expired"
+              }
+            ]
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "paymentRequests": [
+              {
+                "id": "preq_example",
+                "organizationId": "organization_example",
+                "projectId": "project_example",
+                "walletId": "wallet_example",
+                "destinationAddress": "So11111111111111111111111111111111111111112",
+                "token": "example",
+                "amount": "100.00",
+                "reference": "So11111111111111111111111111111111111111112",
+                "status": "canceled",
+                "expiresAt": "2025-01-01T00:00:00.000Z",
+                "fulfilledByTransferId": "fulfilledbytransfer_example",
+                "paidLate": false,
+                "lastCheckedAt": "2025-01-01T00:00:00.000Z",
+                "canceledByApiKeyId": "canceledbyapikey_example",
+                "canceledByUserId": "canceledbyuser_example",
+                "canceledAt": "2025-01-01T00:00:00.000Z",
+                "lifecycle": [
+                  {
+                    "status": "canceled",
+                    "at": "2025-01-01T00:00:00.000Z"
+                  }
+                ],
+                "createdBy": "example",
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "total": 1,
+            "page": 1,
+            "pageSize": 1
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "releaseModule": "payments",
+        "shadowedBy": []
+      },
+      {
+        "id": "get-payment-request",
+        "operationId": "getPaymentRequest",
+        "title": "Get payment request",
+        "method": "GET",
+        "path": "/v1/payments/requests/{paymentRequestId}",
+        "pathFields": [
+          {
+            "key": "paymentRequestId",
+            "label": "{paymentRequestId}",
+            "description": "SDP payment request ID.",
+            "defaultValue": "preq_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "id": "preq_example",
+            "organizationId": "organization_example",
+            "projectId": "project_example",
+            "walletId": "wallet_example",
+            "destinationAddress": "So11111111111111111111111111111111111111112",
+            "token": "example",
+            "amount": "100.00",
+            "reference": "So11111111111111111111111111111111111111112",
+            "status": "canceled",
+            "expiresAt": "2025-01-01T00:00:00.000Z",
+            "fulfilledByTransferId": "fulfilledbytransfer_example",
+            "paidLate": false,
+            "lastCheckedAt": "2025-01-01T00:00:00.000Z",
+            "canceledByApiKeyId": "canceledbyapikey_example",
+            "canceledByUserId": "canceledbyuser_example",
+            "canceledAt": "2025-01-01T00:00:00.000Z",
+            "lifecycle": [
+              {
+                "status": "canceled",
+                "at": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "createdBy": "example",
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "releaseModule": "payments",
+        "shadowedBy": []
+      },
+      {
+        "id": "get-payment-request-link",
+        "operationId": "getPaymentRequestLink",
+        "title": "Get payment request link",
+        "method": "GET",
+        "path": "/v1/payments/requests/{paymentRequestId}/link",
+        "pathFields": [
+          {
+            "key": "paymentRequestId",
+            "label": "{paymentRequestId}",
+            "description": "SDP payment request ID.",
+            "defaultValue": "preq_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "id": "preq_example",
+            "publicToken": "example-public-token"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "releaseModule": "payments",
+        "shadowedBy": []
+      },
+      {
         "id": "cancel-payment-request",
         "operationId": "cancelPaymentRequest",
         "title": "Cancel payment request",
@@ -2208,7 +2430,7 @@
               "attemptedAt": "2025-01-01T00:00:00.000Z",
               "status": "pending",
               "signature": "example",
-              "error": "example",
+              "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
               "metadata": {
                 "recurringPaymentId": "recurringpayment_example",
                 "initiatedByKeyId": "initiatedbykey_example",
@@ -2237,7 +2459,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -2442,7 +2664,7 @@
                 "attemptedAt": "2025-01-01T00:00:00.000Z",
                 "status": "pending",
                 "signature": "example",
-                "error": "example",
+                "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
                 "metadata": {
                   "recurringPaymentId": "recurringpayment_example",
                   "initiatedByKeyId": "initiatedbykey_example",
@@ -3176,7 +3398,7 @@
               "attemptedAt": "2025-01-01T00:00:00.000Z",
               "status": "pending",
               "signature": "example",
-              "error": "example",
+              "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
               "metadata": {
                 "recurringPaymentId": "recurringpayment_example",
                 "initiatedByKeyId": "initiatedbykey_example",
@@ -3316,7 +3538,7 @@
                 "attemptedAt": "2025-01-01T00:00:00.000Z",
                 "status": "pending",
                 "signature": "example",
-                "error": "example",
+                "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
                 "metadata": {
                   "recurringPaymentId": "recurringpayment_example",
                   "initiatedByKeyId": "initiatedbykey_example",
@@ -8602,6 +8824,36 @@
     },
     "bvnk": {
       "module": "ramps"
+    },
+    "local": {
+      "custodyProvider": "local"
+    },
+    "fireblocks": {
+      "custodyProvider": "fireblocks"
+    },
+    "privy": {
+      "custodyProvider": "privy"
+    },
+    "coinbase_cdp": {
+      "custodyProvider": "coinbase_cdp"
+    },
+    "para": {
+      "custodyProvider": "para"
+    },
+    "turnkey": {
+      "custodyProvider": "turnkey"
+    },
+    "dfns": {
+      "custodyProvider": "dfns"
+    },
+    "ibm_haven": {
+      "custodyProvider": "ibm_haven"
+    },
+    "anchorage": {
+      "custodyProvider": "anchorage"
+    },
+    "utila": {
+      "custodyProvider": "utila"
     }
   },
   "channelOverrides": {
@@ -8647,7 +8899,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -8869,7 +9121,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -8936,7 +9188,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -9035,7 +9287,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -9133,7 +9385,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -9231,7 +9483,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -9319,7 +9571,7 @@
               "attemptedAt": "2025-01-01T00:00:00.000Z",
               "status": "pending",
               "signature": "example",
-              "error": "example",
+              "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
               "metadata": {
                 "recurringPaymentId": "recurringpayment_example",
                 "initiatedByKeyId": "initiatedbykey_example",
@@ -9348,7 +9600,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -9494,6 +9746,151 @@
       }
     },
     "stable": {
+      "POST /v1/wallets/initialize": {
+        "id": "initialize-wallet-signing",
+        "operationId": "initializeWalletSigning",
+        "title": "Initialize wallet signing",
+        "method": "POST",
+        "path": "/v1/wallets/initialize",
+        "pathFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"provider\": \"privy\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "configId": "cfg_example",
+          "publicKey": "So11111111111111111111111111111111111111112",
+          "walletId": "privy_wallet_123"
+        }
+      },
+      "GET /v1/wallets": {
+        "id": "list-wallets",
+        "operationId": "listWallets",
+        "title": "List wallets",
+        "method": "GET",
+        "path": "/v1/wallets?provider={provider}&includeBalances={includeBalances}&view={view}",
+        "pathFields": [
+          {
+            "key": "provider",
+            "label": "provider",
+            "description": "Wallet signing provider.",
+            "defaultValue": "privy",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "privy",
+                "value": "privy"
+              }
+            ]
+          },
+          {
+            "key": "includeBalances",
+            "label": "includeBalances",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "true",
+                "value": "true"
+              },
+              {
+                "label": "false",
+                "value": "false"
+              }
+            ],
+            "valueType": "boolean"
+          },
+          {
+            "key": "view",
+            "label": "view",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "summary",
+                "value": "summary"
+              }
+            ]
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "wallets": [
+              {
+                "id": "cwlt_example",
+                "custodyConfigId": "cfg_example",
+                "provider": "privy",
+                "isRuntimeExecutionAllowed": true,
+                "walletId": "privy_wallet_123",
+                "publicKey": "So11111111111111111111111111111111111111112",
+                "label": "Treasury wallet",
+                "purpose": "transfer",
+                "status": "active",
+                "createdAt": "2025-01-01T00:00:00.000Z"
+              }
+            ]
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      "GET /v1/wallets/aggregate": {
+        "id": "aggregate-wallet-balances",
+        "operationId": "aggregateWalletBalances",
+        "title": "Aggregate wallet balances",
+        "method": "GET",
+        "path": "/v1/wallets/aggregate?provider={provider}",
+        "pathFields": [
+          {
+            "key": "provider",
+            "label": "provider",
+            "description": "Wallet signing provider.",
+            "defaultValue": "privy",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "privy",
+                "value": "privy"
+              }
+            ]
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "aggregate": {
+              "walletCount": 3,
+              "balances": [
+                {
+                  "token": "USDC",
+                  "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+                  "amount": "1250000",
+                  "uiAmount": "1.25",
+                  "decimals": 6,
+                  "usdPrice": 1,
+                  "usdValue": 125.5
+                }
+              ]
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
       "POST /v1/payments/transfers": {
         "id": "create-payment-transfer",
         "operationId": "createPaymentTransfer",
@@ -9515,11 +9912,6 @@
         "expectedResponse": {
           "data": {
             "transfer": {
-              "fireblocks": {
-                "transactionId": "transaction_example",
-                "status": "example",
-                "subStatus": "example"
-              },
               "id": "xfr_example",
               "organizationId": "org_example",
               "custodyWalletId": "cwlt_example",
@@ -9534,7 +9926,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -9737,11 +10129,6 @@
         "expectedResponse": {
           "data": [
             {
-              "fireblocks": {
-                "transactionId": "transaction_example",
-                "status": "example",
-                "subStatus": "example"
-              },
               "id": "xfr_example",
               "organizationId": "org_example",
               "custodyWalletId": "cwlt_example",
@@ -9756,7 +10143,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -9804,11 +10191,6 @@
         "expectedResponse": {
           "data": {
             "transfer": {
-              "fireblocks": {
-                "transactionId": "transaction_example",
-                "status": "example",
-                "subStatus": "example"
-              },
               "id": "xfr_example",
               "organizationId": "org_example",
               "custodyWalletId": "cwlt_example",
@@ -9823,7 +10205,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -9903,11 +10285,6 @@
             ],
             "transfers": [
               {
-                "fireblocks": {
-                  "transactionId": "transaction_example",
-                  "status": "example",
-                  "subStatus": "example"
-                },
                 "id": "xfr_example",
                 "organizationId": "org_example",
                 "custodyWalletId": "cwlt_example",
@@ -9922,7 +10299,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -10001,11 +10378,6 @@
             ],
             "transfers": [
               {
-                "fireblocks": {
-                  "transactionId": "transaction_example",
-                  "status": "example",
-                  "subStatus": "example"
-                },
                 "id": "xfr_example",
                 "organizationId": "org_example",
                 "custodyWalletId": "cwlt_example",
@@ -10020,7 +10392,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -10099,11 +10471,6 @@
             ],
             "transfers": [
               {
-                "fireblocks": {
-                  "transactionId": "transaction_example",
-                  "status": "example",
-                  "subStatus": "example"
-                },
                 "id": "xfr_example",
                 "organizationId": "org_example",
                 "custodyWalletId": "cwlt_example",
@@ -10118,7 +10485,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -10206,7 +10573,7 @@
               "attemptedAt": "2025-01-01T00:00:00.000Z",
               "status": "pending",
               "signature": "example",
-              "error": "example",
+              "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
               "metadata": {
                 "recurringPaymentId": "recurringpayment_example",
                 "initiatedByKeyId": "initiatedbykey_example",
@@ -10216,11 +10583,6 @@
               "updatedAt": "2025-01-01T00:00:00.000Z"
             },
             "transfer": {
-              "fireblocks": {
-                "transactionId": "transaction_example",
-                "status": "example",
-                "subStatus": "example"
-              },
               "id": "xfr_example",
               "organizationId": "org_example",
               "custodyWalletId": "cwlt_example",
@@ -10235,7 +10597,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"

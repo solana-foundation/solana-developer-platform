@@ -1,6 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import PublicPayLoading from "@/app/pay/[token]/loading";
 import DashboardLoading from "./(home)/loading";
 import CounterpartyDetailLoading from "./payments/counterparty/[counterpartyId]/loading";
 import CounterpartyCreateLoading from "./payments/counterparty/create/loading";
@@ -50,7 +49,6 @@ const EXPECTED_ROUTE_LAYOUTS = [
   "recurring-payments",
   "recurring-payment-create",
   "recurring-payment-detail",
-  "public-pay-checkout",
 ];
 
 function renderAuthenticatedLoadingStates(): string {
@@ -73,17 +71,13 @@ function renderAuthenticatedLoadingStates(): string {
   );
 }
 
-function renderScopedLoadingStates(): string {
-  return `${renderAuthenticatedLoadingStates()}${renderToStaticMarkup(<PublicPayLoading />)}`;
-}
-
 describe("home and payments route loading states", () => {
   afterEach(() => {
     navigationMock.tab = null;
   });
 
   it("gives every scoped route a geometry-specific loading boundary", () => {
-    const markup = renderScopedLoadingStates();
+    const markup = renderAuthenticatedLoadingStates();
 
     for (const layout of EXPECTED_ROUTE_LAYOUTS) {
       expect(markup).toContain(`data-loading-layout="${layout}"`);
@@ -91,17 +85,16 @@ describe("home and payments route loading states", () => {
   });
 
   it("preserves the responsive table, wizard, and detail geometry", () => {
-    const markup = renderScopedLoadingStates();
+    const markup = renderAuthenticatedLoadingStates();
 
-    // The four refresh Payments lists; the Overview loads its balance and charts, not a table.
+    // The four Payments lists; the Overview loads its balance and charts, not a table.
     expect(markup.match(/data-loading-table="true"/g)).toHaveLength(4);
     expect(markup.match(/data-loading-wizard/g)).toHaveLength(4);
     expect(markup.match(/data-loading-detail-rows/g)).toHaveLength(2);
     expect(markup).toContain("lg:grid-cols-2");
-    expect(markup).toContain("size-[208px]");
   });
 
-  it("draws the refresh lists as a toolbar over a scrolling table in the title's column", () => {
+  it("draws the Payments lists as a toolbar over a scrolling table in the title's column", () => {
     const listCases = [
       {
         layout: "payments-transactions",
@@ -143,8 +136,6 @@ describe("home and payments route loading states", () => {
   });
 
   it("loads Contacts and Requests as lists, whatever tab the URL carries", () => {
-    // Both pages redirect ?tab=playground to the Payments playground, so a leftover tab never
-    // swaps in a playground skeleton.
     navigationMock.tab = "playground";
     expect(renderToStaticMarkup(<CounterpartyLoading />)).toContain(
       'data-loading-layout="counterparty-directory"'
@@ -211,7 +202,7 @@ describe("home and payments route loading states", () => {
   it("keeps the recurring list loader contained at a 390px viewport", () => {
     const markup = renderToStaticMarkup(<RecurringPaymentsLoading />);
 
-    // The Schedules list scrolls sideways inside its column, like the other refresh lists.
+    // The Schedules list scrolls sideways inside its column, like the other Payments lists.
     expect(markup).toContain('data-loading-layout="recurring-payments"');
     expect(markup).toContain("overflow-x-auto");
     expect(markup).toContain("min-w-[47.5rem]");
@@ -222,15 +213,6 @@ describe("home and payments route loading states", () => {
 
     // A schedule's band loads on the tile surface; the rest draw on the page.
     expect(markup).toContain("bg-surface-tile");
-    expect(markup).not.toContain("bg-white");
-    expect(markup).not.toMatch(/\bbg-white\//);
-  });
-
-  it("keeps only the public checkout QR well pure white", () => {
-    const markup = renderToStaticMarkup(<PublicPayLoading />);
-
-    expect(markup).toContain("bg-surface-raised");
-    expect(markup.match(/bg-\[white\]/g)).toHaveLength(1);
     expect(markup).not.toContain("bg-white");
     expect(markup).not.toMatch(/\bbg-white\//);
   });

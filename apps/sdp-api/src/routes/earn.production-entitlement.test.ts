@@ -41,8 +41,6 @@ const CUSTODY_WALLET_ID = "cwlt_earn_prod_entitlement";
 
 let tenant: EarnAuthzTenant;
 let apiKeyRaw: string;
-let originalMarketsEnabled: string | undefined;
-let originalEarnEnabled: string | undefined;
 let originalEncryptionKey: string | undefined;
 
 type Actor = "api_key" | "clerk";
@@ -172,11 +170,7 @@ function movementRow(positionId: string, requestId: string): EarnMovementRow {
 }
 
 beforeEach(async () => {
-  originalMarketsEnabled = env.MARKETS_ENABLED;
-  originalEarnEnabled = env.EARN_ENABLED;
   originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
-  env.MARKETS_ENABLED = "true";
-  env.EARN_ENABLED = "true";
   env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 41).toString("base64");
   await seedTestDatabase(env);
   await clearKVStores(env);
@@ -201,8 +195,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  env.MARKETS_ENABLED = originalMarketsEnabled;
-  env.EARN_ENABLED = originalEarnEnabled;
   env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
   vi.restoreAllMocks();
 });
@@ -229,5 +221,35 @@ describe.each([
     expect(withdrawFromVault).toHaveBeenCalledTimes(1);
     expect(withdrawFromVault.mock.calls[0]?.[1]).toMatchObject({ positionId });
     expect(scopes).toEqual([expect.objectContaining({ environment: "production" })]);
+  });
+
+  it("allows cancellation through the production entitlement gate", async () => {
+    const res = await request(
+      actor,
+      "POST",
+      "/v1/earn/vault-withdrawal-requests/earn_vault_withdrawal_request_missing/cancel",
+      {}
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("preserves the organization suspension authentication lockout", async () => {
+    await getDb(env)
+      .prepare("UPDATE organizations SET status = 'suspended' WHERE id = ?")
+      .bind(tenant.org.id)
+      .run();
+    const res = await request(
+      actor,
+      "POST",
+      "/v1/earn/vault-withdrawal-requests/earn_vault_withdrawal_request_missing/cancel",
+      {}
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({
+      error: {
+        code: "FORBIDDEN",
+        details: { reason: "organization_suspended" },
+      },
+    });
   });
 });

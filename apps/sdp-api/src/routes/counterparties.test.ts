@@ -912,6 +912,115 @@ describe("Counterparties Routes", () => {
       expect(deleteRes.status).toBe(204);
     });
 
+    describe("one active account per address (HOO-2618)", () => {
+      const ADDRESS = "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ";
+      const OTHER_ADDRESS = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+
+      async function addAccount(counterpartyId: string, address: string) {
+        return app.request(
+          `/v1/counterparties/${counterpartyId}/accounts`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({
+              accountKind: "crypto_wallet",
+              details: { network: "solana", address },
+            }),
+          },
+          env
+        );
+      }
+
+      async function activeAccountIds(counterpartyId: string) {
+        const res = await app.request(
+          `/v1/counterparties/${counterpartyId}/accounts`,
+          { headers: { Authorization: authHeader } },
+          env
+        );
+        // SAFETY: the list route's response schema; a wrong shape fails the assertions below.
+        const { accounts } = (await res.json()).data as { accounts: { id: string }[] };
+        return accounts.map((account) => account.id);
+      }
+
+      it("refuses a second active account with the same address with 409", async () => {
+        const cp = (await (await createCounterparty({ externalId: "dup_address" })).json()).data
+          .counterparty;
+        const first = (await (await addAccount(cp.id, ADDRESS)).json()).data.account;
+
+        const res = await addAccount(cp.id, ADDRESS);
+
+        expect(res.status).toBe(409);
+        const body = await res.json();
+        expect(body.error.code).toBe("CONFLICT");
+        expect(body.error.message).toBe("This address is already on this counterparty");
+        expect(await activeAccountIds(cp.id)).toEqual([first.id]);
+      });
+
+      it("refuses concurrent creates for one address, leaving one account", async () => {
+        const cp = (await (await createCounterparty({ externalId: "dup_address_race" })).json())
+          .data.counterparty;
+
+        const responses = await Promise.all([
+          addAccount(cp.id, ADDRESS),
+          addAccount(cp.id, ADDRESS),
+        ]);
+
+        expect(responses.map((res) => res.status).sort()).toEqual([201, 409]);
+        expect(await activeAccountIds(cp.id)).toHaveLength(1);
+      });
+
+      it("allows the address on another counterparty", async () => {
+        const one = (await (await createCounterparty({ externalId: "dup_address_one" })).json())
+          .data.counterparty;
+        const two = (await (await createCounterparty({ externalId: "dup_address_two" })).json())
+          .data.counterparty;
+
+        expect((await addAccount(one.id, ADDRESS)).status).toBe(201);
+        expect((await addAccount(two.id, ADDRESS)).status).toBe(201);
+      });
+
+      it("re-adds an address whose account was archived", async () => {
+        const cp = (await (await createCounterparty({ externalId: "dup_address_archived" })).json())
+          .data.counterparty;
+        const first = (await (await addAccount(cp.id, ADDRESS)).json()).data.account;
+        const archive = await app.request(
+          `/v1/counterparties/${cp.id}/accounts/${first.id}`,
+          { method: "DELETE", headers: { Authorization: authHeader } },
+          env
+        );
+        expect(archive.status).toBe(204);
+
+        const res = await addAccount(cp.id, ADDRESS);
+
+        expect(res.status).toBe(201);
+        const readded = (await res.json()).data.account;
+        expect(readded.id).not.toBe(first.id);
+        expect(await activeAccountIds(cp.id)).toEqual([readded.id]);
+      });
+
+      it("refuses changing an account to an address another active account holds", async () => {
+        const cp = (await (await createCounterparty({ externalId: "dup_address_patch" })).json())
+          .data.counterparty;
+        await addAccount(cp.id, ADDRESS);
+        const other = (await (await addAccount(cp.id, OTHER_ADDRESS)).json()).data.account;
+
+        const res = await app.request(
+          `/v1/counterparties/${cp.id}/accounts/${other.id}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({ details: { network: "solana", address: ADDRESS } }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(409);
+        expect((await res.json()).error.message).toBe(
+          "This address is already on this counterparty"
+        );
+      });
+    });
+
     it("rejects crypto wallet accounts without a Solana wallet address", async () => {
       const created = await createCounterparty({ externalId: "account_parent_invalid" });
       const cp = (await created.json()).data.counterparty;

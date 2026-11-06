@@ -277,7 +277,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     summary: "Create counterparty account",
     operationId: "createCounterpartyAccount",
     description:
-      'Creates a payment account for a counterparty. For accountKind "crypto_wallet", details.network must be "solana" and details.address must be a Solana wallet address.',
+      'Creates a payment account for a counterparty. For accountKind "crypto_wallet", details.network must be "solana" and details.address must be a Solana wallet address. A counterparty holds one active account per network and address: an address already on one of its active accounts answers 409 `CONFLICT` ("This address is already on this counterparty"). An archived account does not count, so re-adding its address creates a new account.',
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyAcceptedHeaders,
@@ -327,7 +327,8 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     [DOCS_GROUP]: COUNTERPARTY_GROUPS.accounts,
     summary: "Update counterparty account",
     operationId: "updateCounterpartyAccount",
-    description: "Updates a counterparty payment account. At least one field must be provided.",
+    description:
+      "Updates a counterparty payment account. At least one field must be provided. Changing details to an address already on another of the counterparty's active accounts answers 409 `CONFLICT`.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyAcceptedHeaders,

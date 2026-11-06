@@ -140,6 +140,26 @@ describe("Clerk auth into a deleted organization", () => {
     expect(await provisionedRows()).toEqual({ memberships: 0, projectMembers: 0 });
   });
 
+  it("names a suspended organization to its member before provisioning anything (HOO-2009)", async () => {
+    await getDb(env)
+      .prepare("UPDATE organizations SET status = 'suspended' WHERE id = ?")
+      .bind(ORG_ID)
+      .run();
+    const { app, token } = await createApp();
+
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({
+      error: { code: "FORBIDDEN", details: { reason: "organization_suspended" } },
+    });
+    expect(await provisionedRows()).toEqual({ memberships: 0, projectMembers: 0 });
+  });
+
   it("refuses a membership re-activated after the deletion", async () => {
     // A Clerk membership webhook re-activates a removed row without looking
     // at the organization; the door must still refuse.

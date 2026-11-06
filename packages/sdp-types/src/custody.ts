@@ -16,13 +16,17 @@ export const CUSTODY_PROVIDERS = [
 export type CustodyProvider = (typeof CUSTODY_PROVIDERS)[number];
 export type ManagedCustodyProvider = Exclude<CustodyProvider, "local">;
 
+/** Whose provider account an integration runs under: the deployment's own (`managed`) or one the project supplied (`byok`). */
+export const PROVIDER_MODES = ["managed", "byok"] as const;
+export type ProviderMode = (typeof PROVIDER_MODES)[number];
+
 /**
  * Where a wallet's provider account comes from, fixed per wallet by its owner
  * row: a custody config is `managed` (the deployment's own provider account),
  * a custody connection is `byok` (a provider account the project supplied).
  */
-export const CUSTODY_MODES = ["managed", "byok"] as const;
-export type CustodyMode = (typeof CUSTODY_MODES)[number];
+export const CUSTODY_MODES = PROVIDER_MODES;
+export type CustodyMode = ProviderMode;
 
 /** Providers with a BYOK runtime: the only ones a custody connection can name. */
 export const BYOK_CUSTODY_PROVIDERS = [
@@ -525,6 +529,14 @@ export function isUnarchivedCustodyConfigStatus(status: CustodyConfigStatus): bo
 /** Config statuses a provider lookup may return; archived rows are skipped. */
 export const UNARCHIVED_CUSTODY_CONFIG_STATUSES: readonly CustodyConfigStatus[] =
   CUSTODY_CONFIG_STATUSES.filter(isUnarchivedCustodyConfigStatus);
+
+export type InactiveCustodyConfigStatus = Exclude<CustodyConfigStatus, "active">;
+
+/** Config statuses that leave the provider unconnected for the project. */
+export const INACTIVE_CUSTODY_CONFIG_STATUSES: readonly InactiveCustodyConfigStatus[] =
+  CUSTODY_CONFIG_STATUSES.filter(
+    (status): status is InactiveCustodyConfigStatus => status !== "active"
+  );
 export type CustodyWalletStatus = "active" | "inactive";
 
 export interface FireblocksCustodyOptions {
@@ -803,6 +815,14 @@ export const CUSTODY_CONNECTION_LIFECYCLES = [
   "deactivated",
 ] as const;
 export type CustodyConnectionLifecycle = (typeof CUSTODY_CONNECTION_LIFECYCLES)[number];
+
+export type InactiveCustodyConnectionLifecycle = Exclude<CustodyConnectionLifecycle, "active">;
+
+/** Lifecycles that leave the provider unconnected for the project. */
+export const INACTIVE_CUSTODY_CONNECTION_LIFECYCLES: readonly InactiveCustodyConnectionLifecycle[] =
+  CUSTODY_CONNECTION_LIFECYCLES.filter(
+    (lifecycle): lifecycle is InactiveCustodyConnectionLifecycle => lifecycle !== "active"
+  );
 
 /** Outcome of a single connection install check. */
 export const CUSTODY_CONNECTION_CHECK_STATUSES = [

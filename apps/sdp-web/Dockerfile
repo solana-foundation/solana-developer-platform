@@ -46,6 +46,7 @@ COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
 COPY packages/sdp-solana/package.json ./packages/sdp-solana/
 # The Sentry scrubbing hooks in all three sentry.*.config.ts files.
 COPY packages/sdp-redaction/package.json ./packages/sdp-redaction/
+COPY packages/sdp-ip/package.json ./packages/sdp-ip/
 # sdp-web imports @sdp/issuance/capabilities (advanced-settings catalog); pull the
 # package and its workspace deps (@sdp/fee-payment) into the frozen-install closure.
 COPY packages/sdp-issuance/package.json ./packages/sdp-issuance/
@@ -70,6 +71,7 @@ COPY packages/sdp-ui ./packages/sdp-ui
 COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-solana ./packages/sdp-solana
 COPY packages/sdp-redaction ./packages/sdp-redaction
+COPY packages/sdp-ip ./packages/sdp-ip
 COPY packages/sdp-issuance ./packages/sdp-issuance
 COPY packages/sdp-fee-payment ./packages/sdp-fee-payment
 COPY packages/sdp-private-channels ./packages/sdp-private-channels

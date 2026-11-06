@@ -51,7 +51,6 @@ export const {
   markets,
   dvp,
   earn,
-  paymentsDemoMode,
   rampProviderMoonpay,
   rampProviderStripe,
   rampProviderHercle,

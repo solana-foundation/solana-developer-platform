@@ -1,15 +1,11 @@
 import { cn } from "@sdp/ui/cn";
 import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { DashboardHeaderTabsTrailing } from "@/components/dashboard-header-tabs";
-import {
-  DashboardWorkspaceCard,
-  DashboardWorkspaceOverviewPanel,
-} from "@/components/dashboard-workspace-panel";
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 
 const TWO_ITEMS = ["one", "two"] as const;
 const THREE_ITEMS = ["one", "two", "three"] as const;
 const FOUR_ITEMS = ["one", "two", "three", "four"] as const;
-const FIVE_ITEMS = ["one", "two", "three", "four", "five"] as const;
 const CARD_FIELDS = ["address", "wallet-id"] as const;
 const RECORD_COLUMNS = ["left", "right"] as const;
 
@@ -250,29 +246,6 @@ export function WalletDetailSkeleton() {
         </section>
         <RecordTableSkeleton section="wallet-tokens" />
         <RecordTableSkeleton section="wallet-activity" />
-      </LoadingRegion>
-    </DashboardWorkspaceOverviewPanel>
-  );
-}
-
-export function WalletConnectionsListSkeleton() {
-  return (
-    <DashboardWorkspaceOverviewPanel className="flex flex-col">
-      <LoadingRegion layout="wallet-connections" className="flex w-full flex-1 flex-col">
-        <DashboardWorkspaceCard>
-          <div
-            className="flex flex-col gap-3 border-b border-border-default p-4 sm:flex-row sm:items-center sm:justify-between"
-            data-loading-connections-toolbar
-          >
-            <Pulse className="h-4 w-72 max-w-full" />
-            <Pulse className="h-9 w-full rounded-lg sm:w-40" />
-          </div>
-          <div className="flex-1 space-y-3 p-4" data-loading-connections-rows>
-            {FIVE_ITEMS.map((row) => (
-              <Pulse key={row} className="h-12 w-full rounded-lg" />
-            ))}
-          </div>
-        </DashboardWorkspaceCard>
       </LoadingRegion>
     </DashboardWorkspaceOverviewPanel>
   );

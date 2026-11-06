@@ -11,7 +11,9 @@ import { z } from "zod";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
+import { stubClipboard } from "@/test/clipboard";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { createdRequestLinkCopied, forgetCreatedRequestLink } from "./created-request-link";
 import { PaymentRequestCreateWorkspace } from "./payment-request-create-workspace";
 import { deriveTokenOptions } from "./payment-requests-page.data";
 
@@ -55,6 +57,7 @@ function readsAs(): string {
 beforeEach(() => {
   window.sessionStorage.clear();
   resetIdempotencyKeyStoresForTests();
+  forgetCreatedRequestLink();
 });
 
 afterEach(() => {
@@ -74,14 +77,20 @@ describe("New request page", () => {
     expect(screen.queryByRole("button", { name: "Create and copy link" })).toBeNull();
   });
 
-  it("creates the request, copies its link and opens it in the list", async () => {
+  it("creates the request, copies its link from inside the press and opens the request", async () => {
     const writes: unknown[] = [];
-    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
+    let answer: (response: Response) => void = () => {};
+    const send = vi.fn<typeof fetch>((_input, init) => {
       writes.push(JSON.parse(String(init?.body)));
-      return Response.json({ data: { id: "preq_1", publicToken: "tok_1" } });
+      return new Promise((resolve) => {
+        answer = resolve;
+      });
     });
+    vi.stubGlobal("fetch", send);
+    const success = vi.spyOn(toast, "success");
     render(<PaymentRequestCreateWorkspace wallets={[wallet]} walletsError={null} />, { wrapper });
     const user = userEvent.setup();
+    const clipboard = stubClipboard("writes");
     const create = () => screen.getByRole("button", { name: "Create and copy link" });
 
     expect(create().hasAttribute("disabled")).toBe(true);
@@ -96,6 +105,11 @@ describe("New request page", () => {
     await waitFor(() => expect(create().hasAttribute("disabled")).toBe(false));
     await user.click(create());
 
+    // Begun before the answer: Safari refuses a clipboard write that starts after an await.
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(clipboard.writes).toHaveLength(1);
+    answer(Response.json({ data: { id: "preq_1", publicToken: "tok_1" } }));
+
     await waitFor(() => expect(dashboardRouter.push).toHaveBeenCalledTimes(1));
     const usdc = deriveTokenOptions("devnet").find((token) => token.symbol === "USDC");
     expect(writes).toEqual([
@@ -106,13 +120,48 @@ describe("New request page", () => {
         expiresAt: null,
       },
     ]);
-    expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/pay/tok_1`);
+    const [copied] = clipboard.writes;
+    await expect(copied?.then((blob) => blob.text())).resolves.toBe(
+      `${window.location.origin}/pay/tok_1`
+    );
     expect(dashboardRouter.push).toHaveBeenCalledWith(
       "/dashboard/prj_test_sandbox/payments/requests/preq_1"
     );
+    // The request's page says the link was copied; no toast follows the form there.
+    expect(createdRequestLinkCopied("preq_1")).toBe(true);
+    expect(success).not.toHaveBeenCalled();
     // On its way to the request, the form stays busy so a second press makes no second link.
     const creating = screen.getByRole("button", { name: /^Create and copy link/ });
     expect(creating.getAttribute("aria-busy")).toBe("true");
+  });
+
+  it("tells the request's page the link was not copied when the browser refuses", async () => {
+    const sends = recordSends(201);
+    const user = userEvent.setup();
+    const clipboard = stubClipboard("refuses");
+    await fillRequest(user, "25");
+    await createLater(user, sends, 0);
+
+    await waitFor(() =>
+      expect(dashboardRouter.push).toHaveBeenCalledWith(
+        "/dashboard/prj_test_sandbox/payments/requests/preq_1"
+      )
+    );
+    expect(clipboard.writes).toHaveLength(1);
+    expect(createdRequestLinkCopied("preq_1")).toBe(false);
+  });
+
+  it("copies nothing and opens nothing when the create is refused", async () => {
+    const sends = recordSends(422);
+    const user = userEvent.setup();
+    const clipboard = stubClipboard("writes");
+    await fillRequest(user, "25");
+    await createLater(user, sends, 0);
+
+    const [pending] = clipboard.writes;
+    await expect(pending).rejects.toThrow("The create named no request");
+    expect(createdRequestLinkCopied("preq_1")).toBeNull();
+    expect(dashboardRouter.push).not.toHaveBeenCalled();
   });
 
   // The expiry comes from the clock. Read again on the retry, it would be a new

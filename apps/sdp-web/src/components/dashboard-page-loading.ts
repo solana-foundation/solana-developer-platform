@@ -26,7 +26,10 @@ import {
   MarketsLandingFlagsSkeleton,
   TreasurySolutionsSkeleton,
 } from "@/app/(session)/dashboard/[projectId]/markets/markets-route-skeletons";
-import { SettingsPageSkeleton } from "@/app/(session)/dashboard/[projectId]/operations-card-page-skeletons";
+import {
+  AccountPageSkeleton,
+  SettingsPageSkeleton,
+} from "@/app/(session)/dashboard/[projectId]/operations-card-page-skeletons";
 import CounterpartyDirectoryLoading from "@/app/(session)/dashboard/[projectId]/payments/counterparty/loading";
 import { PaymentsPageSkeleton } from "@/app/(session)/dashboard/[projectId]/payments/payments-page-skeleton";
 import {
@@ -45,7 +48,6 @@ import {
 import PaymentRequestsLoading from "@/app/(session)/dashboard/[projectId]/payments/requests/loading";
 import TokenHoldingsLoading from "@/app/(session)/dashboard/[projectId]/tokens/loading";
 import {
-  WalletConnectionsListSkeleton,
   WalletDetailSkeleton,
   WalletSetupSkeleton,
   WalletsOverviewSkeleton,
@@ -83,8 +85,6 @@ function resolveCurrentPageLoadingComponent(
       return WalletsOverviewSkeleton;
     case "wallet-setup":
       return WalletSetupSkeleton;
-    case "wallet-connections":
-      return WalletConnectionsListSkeleton;
     case "wallet-detail":
       return WalletDetailSkeleton;
     case "issuance-overview":
@@ -102,8 +102,6 @@ function resolveCurrentPageLoadingComponent(
     case "embedded-yield-portfolio":
       return EmbeddedYieldPortfolioSkeleton;
     case "embedded-yield-configure":
-      return EarnIntegrationGuideSkeleton;
-    case "embedded-yield-integrate":
       return EarnIntegrationGuideSkeleton;
     case "dvp-trades":
       return DvpTradesSkeleton;
@@ -145,6 +143,8 @@ function resolveCurrentPageLoadingComponent(
       return ApiKeyEditLoading;
     case "settings":
       return SettingsPageSkeleton;
+    case "account":
+      return AccountPageSkeleton;
     case "helius-rings":
       return HeliusRingsSkeleton;
     case "allowlist":

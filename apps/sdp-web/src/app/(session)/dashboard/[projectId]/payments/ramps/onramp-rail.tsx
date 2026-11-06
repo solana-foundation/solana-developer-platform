@@ -19,7 +19,7 @@ import { preStepSummaryDetails } from "./wizard-summary";
 
 /**
  * Whether the footer's primary button simulates the deposit's pay-in: on the provider step of a
- * sandbox (or demo) deposit still waiting for its money, when no verification is due first.
+ * sandbox deposit still waiting for its money, when no verification is due first.
  */
 function simulatesDeposit(wizard: OnrampWizard, verificationUrl: string | undefined): boolean {
   return (

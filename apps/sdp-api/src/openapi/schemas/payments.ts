@@ -2,6 +2,7 @@ import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
 import { OFFRAMP_CRYPTO_RAILS, ONRAMP_CRYPTO_RAILS } from "@sdp/types/payment-rails";
 import {
   PAYMENT_REQUEST_STATUSES,
+  type PaymentRampQuote,
   paymentSubscriptionCollectionAttemptMetadataSchema,
   paymentTransferBatchEstimateWarningSchema,
   RAMP_DELIVERY_MISMATCH_REASONS,
@@ -12,9 +13,18 @@ import {
 } from "@sdp/types/payments";
 import { PERSISTED_RAMP_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { UNIFIED_TRANSACTION_MODULE_CONTRACTS } from "@sdp/types/unified-transactions";
+import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
-import { MODULE_GATE, TRANSFER_STATUS_GATE } from "@/openapi/release-channel-values";
-import { paymentRequestParamsSchema as paymentRequestParamsSchemaBase } from "@/routes/payments/payment-requests/schemas";
+import {
+  CUSTODY_PROVIDER_GATE,
+  MODULE_GATE,
+  TRANSFER_STATUS_GATE,
+} from "@/openapi/release-channel-values";
+import {
+  createPaymentRequestSchema as createPaymentRequestSchemaBase,
+  listPaymentRequestsQuerySchema as listPaymentRequestsQuerySchemaBase,
+  paymentRequestParamsSchema as paymentRequestParamsSchemaBase,
+} from "@/routes/payments/payment-requests/schemas";
 import { listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase } from "@/routes/payments/ramps/offramp/schemas";
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
@@ -324,6 +334,7 @@ export const transferSchema = z
       })
       .optional()
       .openapi({
+        [CUSTODY_PROVIDER_GATE]: "fireblocks",
         description:
           "Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.",
       }),
@@ -368,11 +379,11 @@ export const transferSchema = z
       description: "When SDP confirmed the transfer on chain.",
       example: "2025-01-01T00:00:00.000Z",
     }),
-    fee: z
-      .number()
-      .int()
-      .nullable()
-      .openapi({ description: "Transaction fee in lamports.", example: 5000 }),
+    fee: z.number().int().nullable().openapi({
+      description:
+        "Network fee the source wallet paid, in lamports: 0 when SDP sponsored the transaction, null when not known.",
+      example: 0,
+    }),
     error: z.string().nullable().openapi({
       description: "Error message if the transaction failed.",
       example: "Signature failed",
@@ -428,7 +439,7 @@ export const transferSchema = z
       .openapi({
         [MODULE_GATE]: "ramps",
         description:
-          "Ramp delivery mode. Hosted flows require the customer to complete a provider-hosted UI; manual instructions require the customer to fund displayed instructions; session widgets use a provider SDK session.",
+          "How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `manual_instructions` by funding the instructions its quote returned, `session_widget` in a provider SDK session.",
         example: "session_widget",
       }),
     fiatCurrency: z
@@ -592,7 +603,8 @@ const transferBatchRecipientSchema = z
     amount: tokenAmountSchema,
     status: paymentTransferBatchRecipientStatusSchema,
     error: z.string().nullable().openapi({
-      description: "Recipient-level failure reason, when available.",
+      description:
+        'Recipient-level failure reason, when available. A recipient the source wallet could not fund reads "The wallet used for this payment does not have enough funds. Add funds and try again."',
     }),
     createdAt: isoDateTimeSchema,
     updatedAt: isoDateTimeSchema,
@@ -775,6 +787,79 @@ export const paymentRequestSchema = z
   .openapi({
     description: "A payment request. Reads never carry its link token.",
   });
+
+const USDC_MAINNET_MINT = wellKnownMint("USDC", "mainnet-beta");
+
+export const createPaymentRequestRequestSchema = createPaymentRequestSchemaBase
+  .extend({
+    walletId: withOpenApi(createPaymentRequestSchemaBase.shape.walletId, {
+      description: `Receiving custody wallet in the caller's project. Provider wallet ID: ${WALLET_ID_INPUT_NOTE} An SDP Wallet ID (\`cwlt_...\`) returns 404.`,
+      example: "privy_wallet_123",
+    }),
+    token: withOpenApi(createPaymentRequestSchemaBase.shape.token, {
+      description: `Mint address of the token to request. Symbols are not accepted; for native SOL, pass \`${SOL_MINT}\`.`,
+      example: USDC_MAINNET_MINT,
+    }),
+    amount: withOpenApi(createPaymentRequestSchemaBase.shape.amount, {
+      description:
+        "Amount to request in UI units, as a decimal string greater than zero with no more decimal places than the mint has.",
+      example: "10.00",
+    }),
+    expiresAt: withOpenApi(createPaymentRequestSchemaBase.shape.expiresAt, {
+      description:
+        "When the request stops accepting payment, as an ISO 8601 timestamp. Null or omitted: it never expires.",
+      example: "2026-12-01T00:00:00.000Z",
+    }),
+  })
+  .openapi({
+    description: "Create payment request payload.",
+    example: {
+      walletId: "privy_wallet_123",
+      token: USDC_MAINNET_MINT,
+      amount: "10.00",
+      expiresAt: null,
+    },
+  });
+
+export const paymentListRequestsQuerySchema = listPaymentRequestsQuerySchemaBase
+  .extend({
+    page: withOpenApi(listPaymentRequestsQuerySchemaBase.shape.page, {
+      description: "Page number, starting at 1.",
+      example: 1,
+    }),
+    pageSize: withOpenApi(listPaymentRequestsQuerySchemaBase.shape.pageSize, {
+      description: "Results per page, 1 to 100.",
+      example: 20,
+    }),
+    status: paymentRequestStatusSchema.optional(),
+  })
+  .openapi({ description: "Payment request list filters." });
+
+const paymentRequestPublicTokenSchema = z.string().openapi({
+  description:
+    "Token behind the request's hosted payment link, `/pay/{publicToken}`. Anyone holding it can build the request's fee-sponsored payment transaction, so share it only with the payer. Reads never return it; get it again with `GET /v1/payments/requests/{paymentRequestId}/link`.",
+  example: "example-public-token",
+});
+
+export const createdPaymentRequestSchema = paymentRequestSchema
+  .extend({ publicToken: paymentRequestPublicTokenSchema })
+  .openapi({ description: "A new payment request, with its link token." });
+
+export const paymentRequestLinkSchema = z
+  .object({
+    id: z.string().openapi({ description: "SDP payment request ID.", example: "preq_example" }),
+    publicToken: paymentRequestPublicTokenSchema,
+  })
+  .openapi({ description: "A payment request's link token." });
+
+export const paymentRequestListResponseSchema = z
+  .object({
+    paymentRequests: z.array(paymentRequestSchema),
+    total: z.number().int(),
+    page: z.number().int(),
+    pageSize: z.number().int(),
+  })
+  .openapi({ description: "Payment request list response payload." });
 
 export const paymentSubscriptionPlanIdParamsSchema = subscriptionPlanIdParamsSchemaBase
   .extend({
@@ -1357,7 +1442,12 @@ const paymentSubscriptionCollectionAttemptSchema = z
     attemptedAt: isoDateTimeSchema.nullable(),
     status: paymentSubscriptionCollectionAttemptStatusSchema,
     signature: z.string().nullable().openapi({ description: "Solana transaction signature." }),
-    error: z.string().nullable().openapi({ description: "Collection error, if any." }),
+    error: z.string().nullable().openapi({
+      description:
+        "Why the collection failed, if it did. A source wallet that cannot cover the amount records the same text the collect request returned with `400 TRANSACTION_FAILED`.",
+      example:
+        "The wallet used for this payment does not have enough funds. Add funds and try again.",
+    }),
     metadata: paymentSubscriptionCollectionAttemptMetadataSchema.describe(
       "Provider/job metadata for the attempt."
     ),
@@ -1403,7 +1493,7 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
   .extend({
     provider: withOpenApi(createOnrampQuoteSchemaBase.shape.provider, {
       description:
-        "Ramp provider identifier. Hosted providers return a URL, manual providers return funding instructions, and Stripe returns a session widget secret.",
+        "Ramp provider to quote with. The response's `quote.deliveryMode` says how that provider hands off: a hosted URL, funding instructions or a session widget.",
       example: "moonpay",
     }),
     counterpartyId: withOpenApi(createOnrampQuoteSchemaBase.shape.counterpartyId, {
@@ -1438,7 +1528,7 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
   })
   .openapi({
     description:
-      "Create an on-ramp quote. The response uses `deliveryMode` to indicate whether the client should display manual instructions, open a hosted provider flow, or mount a provider session widget.",
+      "Create an on-ramp quote. The response's `quote.deliveryMode` says whether to open a provider-hosted page (`hosted`), show funding instructions (`manual_instructions`) or mount a provider session widget (`session_widget`).",
     example: {
       provider: "moonpay",
       counterpartyId: "cpty_example",
@@ -1452,14 +1542,12 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
 export const simulateSandboxTransferRequestSchema = simulateSandboxTransferSchemaBase
   .extend({
     transferId: withOpenApi(simulateSandboxTransferSchemaBase.shape.transferId, {
-      description:
-        "ID of an on-ramp transfer that is awaiting payment. The provider, quote reference, counterparty, and fiat amount are read from the transfer; each transfer can be simulated once.",
+      description: "ID of a sandbox on-ramp transfer that is awaiting payment.",
       example: "xfr_example",
     }),
   })
   .openapi({
-    description:
-      "Sandbox-only helper that simulates the fiat pay-in for a persisted on-ramp quote. Only the transfer ID is accepted; every provider-specific value is derived from the transfer.",
+    description: "Names the sandbox on-ramp transfer. Only the transfer ID is accepted.",
   });
 
 export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
@@ -1617,14 +1705,17 @@ const onrampQuoteSchema = z
       description: "Provider that created the quote.",
       example: "moonpay",
     }),
-    status: z
-      .enum(["pending", "processing", "completed", "failed"])
-      .openapi({ description: "Quote status.", example: "pending" }),
+    // `satisfies` keeps each documented value to the ones a provider's quote can carry.
+    status: z.literal("pending").openapi({
+      description:
+        "Always `pending`: a quote opens its transfer before the customer pays, and SDP never updates the quote. Follow the transfer for progress.",
+      example: "pending",
+    }) satisfies z.ZodType<PaymentRampQuote["status"]>,
     deliveryMode: z.enum(["manual_instructions", "hosted", "session_widget"]).openapi({
       description:
         "`hosted` means open `hostedUrl`; `manual_instructions` means display `paymentInstructions`; `session_widget` means mount the provider SDK session.",
       example: "hosted",
-    }),
+    }) satisfies z.ZodType<PaymentRampQuote["deliveryMode"]>,
     hostedUrl: z
       .string()
       .url()

@@ -14,7 +14,6 @@ import { readApiErrorMessage } from "./api-error";
 import { projectHref } from "./dashboard-project-path";
 import { dashboardJson, dashboardResponseHeaders } from "./dashboard-response";
 import { type ApiAnswer, apiErrorCode, IDEMPOTENCY_KEY_HEADER } from "./idempotency";
-import { paymentsDemoResponse } from "./payments-demo/demo-mode";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 import {
   createTimedTrace,
@@ -153,12 +152,6 @@ function createSdpApiRequest(
       }
     };
 
-    // Payments demo mode answers payment reads and writes itself; nothing about them goes out.
-    const demoResponse = await paymentsDemoResponse(method, path, projectId, options.body, send);
-    if (demoResponse) {
-      return demoResponse;
-    }
-
     return send();
   };
 }
@@ -295,6 +288,18 @@ const getRequestProjects = cache(
 
 export function listSdpProjects(): Promise<Project[]> {
   return getRequestProjects();
+}
+
+/**
+ * The Projects of the organization a session token names, for a token the
+ * browser minted for one of the user's other organizations (`getToken({ organizationId })`).
+ * Everything else lists the request's own organization through `listSdpProjects`.
+ *
+ * @param token - A Clerk session token naming an organization.
+ * @returns That organization's Projects; sdp-api refuses a token it does not admit.
+ */
+export function listSdpProjectsForToken(token: string): Promise<Project[]> {
+  return fetchRequestProjects(token);
 }
 
 const currentMemberSchema = z.object({ role: z.enum(ORGANIZATION_ROLES) });

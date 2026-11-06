@@ -1,20 +1,22 @@
 // @vitest-environment jsdom
 
-import { ThemeScopeProvider } from "@sdp/ui/theme-scope-provider";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { stubClerkSession } from "@/test/clerk";
 import type { OnchainSendWizard } from "./hooks/use-onchain-send-wizard";
 import { OnchainSendRail } from "./onchain-send-rail";
 import type { RailProps } from "./ramp-action-page";
 
 const mocks = vi.hoisted(() => ({ wizard: null as OnchainSendWizard | null }));
 
-vi.mock("@clerk/nextjs", () => ({ useAuth: () => ({ orgId: "org_test", userId: "user_test" }) }));
+beforeEach(() => {
+  stubClerkSession();
+});
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("./hooks/use-onchain-send-wizard", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./hooks/use-onchain-send-wizard")>()),
@@ -171,14 +173,7 @@ describe("OnchainSendRail heading", () => {
 
 describe("OnchainSendRail while sending", () => {
   it("keeps the send label on a spinning button and says what it is waiting on", () => {
-    // The footer's waiting line is the refresh design's, where Pay runs.
-    mocks.wizard = { ...reviewWizard, submitting: true };
-    render(
-      <ThemeScopeProvider scope="refresh">
-        <OnchainSendRail {...railProps} />
-      </ThemeScopeProvider>,
-      { wrapper }
-    );
+    renderRail({ ...reviewWizard, submitting: true });
 
     // The spinner joins the button's name, so match the label inside it.
     const send = screen.getByRole("button", { name: /Send transfer/ });

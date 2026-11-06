@@ -1,7 +1,9 @@
 import { normalizePrivyWalletId } from "@sdp/custody/provider-wallet-ids";
 import type { ProvisionPrivyResult } from "@sdp/custody/provisioning";
 import { SigningError } from "@sdp/custody/signing";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { ByokCustodyProvider } from "@sdp/types/custody";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { Context } from "hono";
 import { type DatabaseClient, getDb } from "@/db/client";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
@@ -15,6 +17,7 @@ import {
   providerUnavailable,
 } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
+import { logEvent } from "@/runtime/money-path-events";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import {
@@ -304,6 +307,7 @@ export async function completeProviderCredentialInstallation(
   c: Context<{ Bindings: Env }>,
   connectionId: string
 ): Promise<ProviderCredentialCompletionResult> {
+  const { cluster } = currentClusterScope();
   const context = createInstallationContext(c);
   const loaded = await loadInstallation(context, connectionId);
   if (loaded.decisions.complete.kind === "replay") {
@@ -384,7 +388,7 @@ export async function completeProviderCredentialInstallation(
           : await persistFailure(context, loaded.target, leaseToken, outcome.code);
     if (replay) {
       if (replay.target.last_check_at === leaseToken) {
-        await completeInstallationAudit(context, auditIntent, outcome);
+        await completeInstallationAudit(context, auditIntent, outcome, loaded.target, cluster);
       } else {
         await completeInstallationCriticalNoop(
           context,
@@ -397,7 +401,7 @@ export async function completeProviderCredentialInstallation(
     }
 
     const completed = await loadInstallation(context, connectionId);
-    await completeInstallationAudit(context, auditIntent, outcome);
+    await completeInstallationAudit(context, auditIntent, outcome, loaded.target, cluster);
     completionPersistencePending = false;
 
     if (outcome.kind === "failed") {
@@ -1021,7 +1025,9 @@ async function resolveCompletionRace(
 async function completeInstallationAudit(
   context: InstallationContext,
   intent: AuditIntent,
-  outcome: Exclude<ProviderOutcome, { kind: "replay" }>
+  outcome: Exclude<ProviderOutcome, { kind: "replay" }>,
+  target: InstallationConnectionState,
+  cluster: SolanaCluster
 ): Promise<void> {
   const failureCode =
     outcome.kind === "failed"
@@ -1029,6 +1035,18 @@ async function completeInstallationAudit(
       : outcome.kind === "retry_unknown"
         ? "provider_response_unknown"
         : undefined;
+  logEvent(outcome.kind === "success" ? "info" : "warn", {
+    event: "sdp_api_provider_credential_installation_completed",
+    provider: target.provider,
+    cluster,
+    outcome: outcome.kind,
+    failure_code: failureCode,
+    organization_id: context.organizationId,
+    project_id: context.projectId,
+    provider_credential_id: target.provider_credential_id,
+    connection_id: target.id,
+    request_id: context.c.get("requestId"),
+  });
   await context.audit.completeCritical(context.c, intent, {
     status: outcome.kind === "success" ? "success" : "failure",
     metadata: {

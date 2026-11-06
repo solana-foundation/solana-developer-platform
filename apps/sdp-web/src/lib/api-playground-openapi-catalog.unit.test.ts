@@ -1,10 +1,9 @@
 import { ONCHAIN_TRANSFER_STATUSES } from "@sdp/types/payments";
 import { describe, expect, it } from "vitest";
-
-import { buildWalletsPlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/custody/wallets-playground-config";
 import { buildIssuancePlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-playground-config";
 import { buildCounterpartyPlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-playground-config";
 import { buildPaymentsPlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/payments/payments-playground-config";
+import { buildWalletsPlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/wallets/wallets-playground-config";
 import type { ApiPlaygroundEndpointConfig } from "@/components/api-playground-shell";
 import { getMessages } from "@/i18n/messages";
 import { translate } from "@/i18n/translate";
@@ -130,6 +129,20 @@ describe("API playground release channel", () => {
     expect(JSON.parse(body)).toMatchObject({ provider: expect.any(String) });
   });
 
+  it("offers only the custody providers the channel publishes", () => {
+    const providersIn = (releaseChannel: "stable" | "experimental") =>
+      filterPlaygroundEndpointsToReleaseChannel(
+        getOpenApiPlaygroundEndpoints("wallets"),
+        releaseChannel
+      )
+        .find((endpoint) => endpoint.id === "list-wallets")
+        ?.pathFields.find((field) => field.key === "provider")
+        ?.options?.map((option) => option.value);
+    expect(providersIn("stable")).toEqual(["privy"]);
+    expect(providersIn("experimental")).toContain("fireblocks");
+    expect(providersIn("experimental")).not.toContain("local");
+  });
+
   it("uses the channel's generated transfer fields and response examples", () => {
     const endpoints = filterPlaygroundEndpointsToReleaseChannel(
       getOpenApiPlaygroundEndpoints("payments"),
@@ -227,7 +240,7 @@ describe("API playground allowlist", () => {
   it("refuses what the catalog does not publish on the channel", () => {
     expect(findPublishedPlaygroundOperation("GET", "/v1/api-keys", "experimental")).toBeUndefined();
     expect(
-      findPublishedPlaygroundOperation("POST", "/v1/payments/requests", "experimental")
+      findPublishedPlaygroundOperation("POST", "/v1/places/autocomplete", "experimental")
     ).toBeUndefined();
     expect(
       findPublishedPlaygroundOperation("GET", "/v1/payments/transfers/", "experimental")

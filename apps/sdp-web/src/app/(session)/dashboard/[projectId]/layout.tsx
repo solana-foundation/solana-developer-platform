@@ -1,5 +1,4 @@
-import { cookies, headers } from "next/headers";
-import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import type { ReactNode } from "react";
 import { DashboardScopeLoadingScreen } from "@/components/dashboard-loading-screen";
 import { DashboardShell } from "@/components/dashboard-shell";
@@ -10,23 +9,24 @@ import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { parseDashboardPathname, projectHref } from "@/lib/dashboard-project-path";
 import { resolveProjectFromList } from "@/lib/dashboard-project-selection";
-import { PAYMENTS_DEMO_COOKIE_NAME } from "@/lib/payments-demo/demo-cookie";
 import { loadQuickStartStatus } from "@/lib/quick-start-server";
 import { listSdpProjects, requestMemberRole } from "@/lib/sdp-api";
 import { getSdpAuth } from "@/lib/sdp-auth";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
+import { ProjectOrganizationSwitch } from "./project-organization-switch";
 
 /**
  * Renders the dashboard shell and workspace for a Project-scoped URL, admitting
- * it only when its Project is one this user can list;
- * a Project id the user cannot reach goes to the Sandbox Project, keeping the
- * page it asked for. Project-less URLs never get here: proxy.ts sends
- * them to the bare `/dashboard` landing. This is navigation only: sdp-api
- * authorizes every request on its own.
+ * it only when its Project is one the session's organization lists. For any
+ * other Project id the URL decides the organization: the browser makes active
+ * the user's organization that lists it, or, when none does, goes to the session
+ * organization's Sandbox Project, keeping the page it asked for (HOO-2622).
+ * Project-less URLs never get here: proxy.ts sends them to the bare `/dashboard`
+ * landing. This is navigation only: sdp-api authorizes every request on its own.
  *
  * @param props.children - The Project-scoped page.
  * @param props.params - Route params carrying the URL's Project id.
- * @returns The page inside the dashboard shell, or a redirect.
+ * @returns The page inside the dashboard shell, or the organization switch for an unlisted Project.
  */
 export default async function ProjectLayout({
   children,
@@ -35,19 +35,18 @@ export default async function ProjectLayout({
   children: ReactNode;
   params: Promise<{ projectId: string }>;
 }) {
-  const [{ projectId }, projects, { orgId, userId }, flags, cookieStore, initialQuickStartStatus] =
+  const [{ projectId }, projects, { orgId, userId }, flags, initialQuickStartStatus] =
     await Promise.all([
       params,
       listSdpProjects(),
       getSdpAuth(),
       getDashboardFlags(),
-      cookies(),
       loadQuickStartStatus(),
     ]);
+  if (!orgId || !userId) {
+    throw new Error("The dashboard layout admits only signed-in members of an organization");
+  }
   if (projects.some((project) => project.id === projectId)) {
-    if (!orgId || !userId) {
-      throw new Error("The dashboard layout admits only signed-in members of an organization");
-    }
     const dashboardCacheScope = { orgId, userId } satisfies DashboardCacheScope;
     const dashboardAccess = resolveDashboardAccess(await requestMemberRole());
     return (
@@ -61,14 +60,7 @@ export default async function ProjectLayout({
         projects={projects}
       >
         <NetworkDebugProvider>
-          <DashboardShell
-            flags={flags}
-            paymentsDemo={{
-              demoProjectId: cookieStore.get(PAYMENTS_DEMO_COOKIE_NAME)?.value ?? null,
-            }}
-          >
-            {children}
-          </DashboardShell>
+          <DashboardShell flags={flags}>{children}</DashboardShell>
         </NetworkDebugProvider>
       </DashboardWorkspaceProvider>
     );
@@ -78,9 +70,18 @@ export default async function ProjectLayout({
   if (pathname === null) {
     throw new Error("x-sdp-pathname is set by proxy.ts on every dashboard request");
   }
+  const dashboardPath = parseDashboardPathname(pathname).dashboardPath;
   const sandboxProject = resolveProjectFromList(projects, null);
-  if (sandboxProject === null) {
-    redirect(`${WORKSPACE_LOADING_PATH}?return_to=${encodeURIComponent("/dashboard")}`);
-  }
-  redirect(projectHref(sandboxProject.id, parseDashboardPathname(pathname).dashboardPath));
+  return (
+    <ProjectOrganizationSwitch
+      projectId={projectId}
+      sessionOrganizationId={orgId}
+      fallbackHref={
+        sandboxProject === null
+          ? WORKSPACE_LOADING_PATH
+          : projectHref(sandboxProject.id, dashboardPath)
+      }
+      flags={flags}
+    />
+  );
 }

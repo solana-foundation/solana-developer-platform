@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { fetchCounterparty } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
+import { lookupCounterparty } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
 import { fetchIssuedTokenSymbolsWhenIssuanceEnabled } from "@/app/(session)/dashboard/[projectId]/payments/issued-tokens.server";
 import { fetchPaymentsWallets } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
 import { getTranslations } from "@/i18n/server";
@@ -8,6 +8,7 @@ import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import {
   fetchRecurringPayments,
   parseRecurringPaymentsListParams,
+  recurringPaymentCounterpartyViews,
 } from "./recurring-payments.data";
 import { RecurringPaymentsWorkspace } from "./recurring-payments-workspace";
 
@@ -50,14 +51,18 @@ export default async function RecurringPaymentsPage({ searchParams }: RecurringP
       const counterpartyIds = [
         ...new Set(recurringPayments.recurringPayments.map((payment) => payment.counterpartyId)),
       ];
-      const counterparties = await trace.step("fetch_recurring_payment_counterparties", () =>
+      const lookups = await trace.step("fetch_recurring_payment_counterparties", () =>
         Promise.all(
-          counterpartyIds.map((counterpartyId) =>
-            fetchCounterparty(apiClient.request, counterpartyId)
-          )
+          counterpartyIds.map(async (id) => ({
+            id,
+            lookup: await lookupCounterparty(apiClient.request, id),
+          }))
         )
       );
-      const resolvedCounterparties = counterparties.filter((counterparty) => counterparty !== null);
+      const counterparties = recurringPaymentCounterpartyViews(
+        lookups,
+        t("DashboardPayments.recurring.counterpartyArchived")
+      );
 
       trace.log({
         ok: recurringPaymentsResult.ok,
@@ -65,8 +70,8 @@ export default async function RecurringPaymentsPage({ searchParams }: RecurringP
         recurringPaymentTotal: recurringPayments.total,
         walletsOk: walletsResult.ok,
         walletCount: walletsResult.data?.length ?? 0,
-        counterpartiesOk: resolvedCounterparties.length === counterpartyIds.length,
-        counterpartyCount: resolvedCounterparties.length,
+        counterpartiesOk: counterparties.failed === 0,
+        counterpartyCount: counterparties.counterparties.length,
       });
 
       return (
@@ -78,18 +83,13 @@ export default async function RecurringPaymentsPage({ searchParams }: RecurringP
             issuedTokensByMint={issuedTokensByMint}
             initialError={undefined}
             wallets={walletsResult.data ?? []}
-            counterparties={resolvedCounterparties.map((counterparty) => ({
-              id: counterparty.id,
-              displayName: counterparty.displayName,
-            }))}
+            counterparties={counterparties.counterparties}
             lookupError={
-              walletsResult.ok && resolvedCounterparties.length === counterpartyIds.length
+              walletsResult.ok && counterparties.failed === 0
                 ? undefined
                 : [
                     walletsResult.ok ? null : (walletsResult.error ?? "Unable to load wallets"),
-                    resolvedCounterparties.length === counterpartyIds.length
-                      ? null
-                      : "Unable to load some counterparties",
+                    counterparties.failed === 0 ? null : "Unable to load some counterparties",
                   ]
                     .filter(Boolean)
                     .join(" ")

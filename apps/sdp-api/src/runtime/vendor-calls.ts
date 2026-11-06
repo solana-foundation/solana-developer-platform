@@ -1,10 +1,17 @@
+import type { CustodyMode } from "@sdp/types/custody";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { describeError, logEvent } from "./money-path-events";
 
 export const VENDOR_CALL_EVENT = "sdp_api_vendor_call";
 
 type AdapterCallSource = "network" | "shared" | "cache" | "pinned";
 
-export interface VendorCallDetails {
+export interface VendorCallContext {
+  readonly cluster: SolanaCluster;
+  readonly custody_mode?: CustodyMode;
+}
+
+export interface VendorCallDetails extends Partial<VendorCallContext> {
   readonly boundary?: "call_site" | "adapter_operation" | "upstream_http";
   readonly call_source?: AdapterCallSource;
   readonly http_status?: number;
@@ -73,7 +80,8 @@ export async function withVendorCall<T>(
 export function instrumentVendorPort<T extends object>(
   vendor: string,
   port: T,
-  sourceForCall?: (operation: string) => AdapterCallSource | undefined
+  sourceForCall?: (operation: string) => AdapterCallSource | undefined,
+  context?: VendorCallContext
 ): T {
   return new Proxy(port, {
     get(target, prop, receiver) {
@@ -89,36 +97,29 @@ export function instrumentVendorPort<T extends object>(
         } catch {
           // Telemetry metadata must never change the adapter outcome.
         }
+        const details: VendorCallDetails = {
+          boundary: "adapter_operation",
+          call_source: callSource,
+          ...context,
+        };
         try {
           const result = value.apply(target, args);
           if (result instanceof Promise) {
             return result.then(
               (value: unknown) => {
-                logVendorCallSuccess(vendor, prop, startedAt, {
-                  boundary: "adapter_operation",
-                  call_source: callSource,
-                });
+                logVendorCallSuccess(vendor, prop, startedAt, details);
                 return value;
               },
               (error: unknown) => {
-                logVendorCallFailure(vendor, prop, error, startedAt, {
-                  boundary: "adapter_operation",
-                  call_source: callSource,
-                });
+                logVendorCallFailure(vendor, prop, error, startedAt, details);
                 throw error;
               }
             );
           }
-          logVendorCallSuccess(vendor, prop, startedAt, {
-            boundary: "adapter_operation",
-            call_source: callSource,
-          });
+          logVendorCallSuccess(vendor, prop, startedAt, details);
           return result;
         } catch (error) {
-          logVendorCallFailure(vendor, prop, error, startedAt, {
-            boundary: "adapter_operation",
-            call_source: callSource,
-          });
+          logVendorCallFailure(vendor, prop, error, startedAt, details);
           throw error;
         }
       };

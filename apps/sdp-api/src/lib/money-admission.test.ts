@@ -115,6 +115,7 @@ describe("MOVEMENTS exits", () => {
     expect(exits).toEqual([
       "dvp.cancel",
       "dvp.reclaim",
+      "earn.queued_withdraw_cancel",
       "earn.queued_withdraw_request",
       "earn.withdraw",
       "helius_rings.gateway_transaction",
@@ -591,7 +592,6 @@ describe("MOVEMENTS starts", () => {
       "dvp.fund": ["dvp.execute"],
       "dvp.settle": ["dvp.execute"],
       "earn.deposit": ["earn.execute"],
-      "earn.queued_withdraw_cancel": ["earn.manage"],
       "private_channels.session": ["private_channels.execute"],
       "private_channels.deposit": ["private_channels.execute"],
       "private_channels.transfer": ["private_channels.execute"],

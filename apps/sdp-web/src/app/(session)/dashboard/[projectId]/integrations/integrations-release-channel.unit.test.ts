@@ -1,21 +1,12 @@
-import { COMPLIANCE_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
-import {
-  isModuleInReleaseChannel,
-  SDP_RAMP_PROVIDER_MATURITY,
-  SDP_RELEASE_CHANNEL_NAMES,
-  type SdpReleaseChannel,
-} from "@sdp/types/release-channels";
+import { type ProjectIntegrations, projectIntegrationsSchema } from "@sdp/types/integrations";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import IntegrationDetailPage from "@/app/(session)/dashboard/[projectId]/integrations/[provider]/page";
-import { integrationsSkeletonLayout } from "@/app/(session)/dashboard/[projectId]/integrations/integration-feature-gates";
-import IntegrationsPage from "@/app/(session)/dashboard/[projectId]/integrations/page";
+import { z } from "zod";
+import IntegrationsPage from "@/app/(session)/dashboard/[projectId]/integrations/(catalog)/page";
 import * as flags from "@/flags";
 import * as ramps from "@/flags/ramps";
-import { rampProvidersInReleaseChannel } from "@/flags/release-channel";
 import * as sdpApi from "@/lib/sdp-api";
 import { SANDBOX_PROJECT } from "@/test/projects";
-import { projectProviderAvailability } from "@/test/provider-availability";
-import { dashboardFlagsAt } from "@/test/release-channel-flags";
 import { resetRequestProject, setPageRequest } from "@/test/request-project";
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -25,19 +16,40 @@ vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
 
-// The Project may use every provider, so the release channel is the only gate left.
-const AVAILABILITY = projectProviderAvailability({
-  project: SANDBOX_PROJECT,
-  custody: [{ provider: "privy", modes: ["managed"] }],
-  compliance: [...COMPLIANCE_PROVIDERS],
-  ramps: [...RAMP_PROVIDERS],
-  earn: [],
-});
+const INTEGRATIONS: ProjectIntegrations = {
+  projectId: SANDBOX_PROJECT.id,
+  environment: "sandbox",
+  families: [
+    {
+      family: "custody",
+      integrations: [
+        {
+          provider: "privy",
+          category: "server",
+          state: { status: "not_configured", modes: ["managed"] },
+        },
+      ],
+    },
+    {
+      family: "ramps",
+      integrations: [
+        { provider: "moonpay", state: { status: "not_configured", modes: ["managed"] } },
+        { provider: "stripe", state: { status: "not_configured", modes: ["managed"] } },
+      ],
+    },
+    {
+      family: "private_channels",
+      integrations: [
+        { provider: "private_channels", state: { status: "not_configured", modes: ["managed"] } },
+      ],
+    },
+  ],
+};
 
-/** Reads no answer covers; the pages swallow some read errors, so each test checks this. */
+/** Reads no answer covers; the page swallows some read errors, so each test checks this. */
 const unexpectedPaths: string[] = [];
 
-/** Answers the reads both pages make, and records any other so a new read is noticed. */
+/** Answers the reads the page makes, and records any other so a new read is noticed. */
 function apiClient(answers: Record<string, unknown>): sdpApi.SdpApiClient {
   const answer = (path: string) => {
     if (!(path in answers)) {
@@ -53,16 +65,6 @@ function apiClient(answers: Record<string, unknown>): sdpApi.SdpApiClient {
   };
 }
 
-function useChannel(releaseChannel: SdpReleaseChannel) {
-  // The page reads the channel itself; the flags it reads are capped at it.
-  vi.stubEnv("SDP_RELEASE_CHANNEL", releaseChannel);
-  const snapshot = dashboardFlagsAt(releaseChannel);
-  vi.spyOn(flags, "privateChannels").mockResolvedValue(snapshot.privateChannels);
-  vi.spyOn(ramps, "getOfferedRampProviders").mockResolvedValue(
-    snapshot.ramps ? rampProvidersInReleaseChannel(releaseChannel) : []
-  );
-}
-
 beforeEach(() => {
   unexpectedPaths.length = 0;
   resetRequestProject();
@@ -74,8 +76,7 @@ beforeEach(() => {
       "/v1/onboarding/status": { linked: true, organization: { id: "org_test" } },
     }),
     projectClient: apiClient({
-      [`/v1/projects/${SANDBOX_PROJECT.id}/provider-availability`]: AVAILABILITY,
-      "/v1/wallets/configs": { data: { configs: [] } },
+      "/v1/integrations": INTEGRATIONS,
       "/v1/private-channels/instance": { instance: { isActive: true } },
     }),
   }));
@@ -84,51 +85,30 @@ beforeEach(() => {
 afterEach(() => {
   expect(unexpectedPaths).toEqual([]);
   vi.restoreAllMocks();
-  vi.unstubAllEnvs();
 });
 
-describe("integrations catalog on each release channel", () => {
-  it.each(SDP_RELEASE_CHANNEL_NAMES)(
-    "lists only %s's families, as its skeleton reserves",
-    async (releaseChannel) => {
-      useChannel(releaseChannel);
-      const { families, rampCards } = integrationsSkeletonLayout(dashboardFlagsAt(releaseChannel));
+describe("integrations catalog page", () => {
+  it.each<[boolean, RampProviderId[], string[]]>([
+    [true, ["moonpay", "stripe"], ["privy", "moonpay", "stripe", "private_channels"]],
+    [false, ["moonpay", "stripe"], ["privy", "moonpay", "stripe"]],
+    [true, ["stripe"], ["privy", "stripe", "private_channels"]],
+    [true, [], ["privy", "private_channels"]],
+  ])(
+    "keeps only what the per-user flags allow (private channels %s, ramps %j)",
+    async (privateChannels, offeredRamps, shown) => {
+      vi.spyOn(flags, "privateChannels").mockResolvedValue(privateChannels);
+      vi.spyOn(ramps, "getOfferedRampProviders").mockResolvedValue(offeredRamps);
 
-      const { props } = await IntegrationsPage();
+      const page = await IntegrationsPage();
+      const { integrations } = z
+        .object({ integrations: projectIntegrationsSchema })
+        .parse(page.props);
 
-      expect(props.enabledFamilies).toEqual(families);
-      expect(props.ramps).toHaveLength(rampCards);
-      expect(props.compliance.length > 0).toBe(families.includes("compliance"));
-      expect(props.privacy.length > 0).toBe(families.includes("privacy"));
-    }
-  );
-});
-
-describe("integration detail deep links on each release channel", () => {
-  it.each(SDP_RELEASE_CHANNEL_NAMES)(
-    "opens a provider's page only where %s runs it",
-    async (releaseChannel) => {
-      useChannel(releaseChannel);
-      const offered = rampProvidersInReleaseChannel(releaseChannel);
-      const compliance = isModuleInReleaseChannel(
-        releaseChannel,
-        "compliance",
-        SDP_RAMP_PROVIDER_MATURITY
-      );
-      const expectations = [
-        ["privy", isModuleInReleaseChannel(releaseChannel, "custody", SDP_RAMP_PROVIDER_MATURITY)],
-        ...RAMP_PROVIDERS.map((provider) => [provider, offered.includes(provider)] as const),
-        ...COMPLIANCE_PROVIDERS.map((provider) => [provider, compliance] as const),
-      ] as const;
-
-      for (const [provider, opens] of expectations) {
-        const page = IntegrationDetailPage({ params: Promise.resolve({ provider }) });
-        if (opens) {
-          await expect(page, provider).resolves.toBeDefined();
-        } else {
-          await expect(page, provider).rejects.toThrow("NEXT_NOT_FOUND");
-        }
-      }
+      expect(
+        integrations.families.flatMap((family) =>
+          family.integrations.map((integration) => integration.provider)
+        )
+      ).toEqual(shown);
     }
   );
 });

@@ -29,6 +29,7 @@ const MODULE_METADATA = [
       "@sdp/helius-rings",
       "@sdp/helius-rings-sdk",
       "@sdp/hastra",
+      "@sdp/ip",
       "@sdp/issuance",
       "@sdp/kamino",
       "@sdp/jupiter-lend",
@@ -65,6 +66,7 @@ const MODULE_METADATA = [
     allowedDependencies: [
       "@sdp/api-catalog",
       "@sdp/design-tokens",
+      "@sdp/ip",
       "@sdp/issuance",
       "@sdp/private-channels",
       "@sdp/redaction",
@@ -152,6 +154,12 @@ const MODULE_METADATA = [
     // injected API-owned port, while provider identities live in @sdp/types so
     // the lightweight @sdp/earn catalogue never imports this execution code.
     allowedDependencies: ["@sdp/earn", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
+  },
+  {
+    name: "@sdp/ip",
+    directory: "packages/sdp-ip",
+    purpose: "IPv4 and IPv6 address and CIDR range parsing and canonical form.",
+    allowedDependencies: [],
   },
   {
     name: "@sdp/issuance",

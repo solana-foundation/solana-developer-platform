@@ -1,6 +1,7 @@
 "use client";
 
 import type { ComponentProps } from "react";
+import { integrationTabFamilies } from "@/app/(session)/dashboard/[projectId]/integrations/integration-sections";
 import { getDashboardPageConfig } from "@/components/dashboard-header";
 import { resolvePageLoadingComponent } from "@/components/dashboard-page-loading";
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
@@ -26,7 +27,13 @@ export function DashboardLoadingScreen({
   const path = pathname.split(/[?#]/)[0];
   const route = resolveDashboardLoadingRoute(path) ?? "home";
   const PageLoading = resolvePageLoadingComponent(route);
-  const config = getDashboardPageConfig(path, t, flags?.payments, flags?.ramps);
+  const config = getDashboardPageConfig(
+    path,
+    t,
+    flags ? integrationTabFamilies(flags) : [],
+    flags?.payments,
+    flags?.ramps
+  );
 
   return (
     <FullscreenLoadingIndicator

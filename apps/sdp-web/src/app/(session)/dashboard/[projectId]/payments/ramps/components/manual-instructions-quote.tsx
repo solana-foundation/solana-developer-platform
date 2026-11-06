@@ -11,6 +11,7 @@ import {
   formatDecimalAmount,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { getRampProviderLabel } from "@/lib/ramps";
 
 type ManualQuote = Extract<PaymentRampQuote, { deliveryMode: "manual_instructions" }>;
@@ -78,8 +79,9 @@ function FiatFundingInstruction({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const bank = instruction.bankAccount;
-  const deadline = formatDateTime(expiresAt, locale);
+  const deadline = formatDateTime(expiresAt, locale, timeZone);
   return (
     <div className="space-y-4">
       <DetailList>

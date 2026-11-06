@@ -87,12 +87,10 @@ async function tokenBalance(address: string): Promise<bigint> {
 }
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and funding", () => {
-  const originalMarketsEnabled = env.MARKETS_ENABLED;
   let localPartyWallet: ApiTestCustodyWallet | undefined;
   let custodyWallet: IntegrationCustodyWallet;
 
   beforeAll(async () => {
-    env.MARKETS_ENABLED = "true";
     const state = await initIntegrationSuite();
     custodyWallet = state.custodyWallet;
     if (INTEGRATION_CUSTODY_PROVIDER === "local") {
@@ -129,7 +127,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and 
   });
 
   afterAll(async () => {
-    env.MARKETS_ENABLED = originalMarketsEnabled;
     await cleanupIntegrationSuite();
   });
 
@@ -140,12 +137,19 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and 
     { timeout: 240_000 },
     async (side) => {
       const api = requestWithApiKey();
-      const signer = await createOrgSignerForCustodyWallet<"issuance">(
-        env as ApiTestEnv,
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        custodyWallet.id,
-        "issuance.authority"
+      const signer = await runInClusterScope(
+        {
+          projectId: TEST_PROJECT.id,
+          environment: SDP_ENVIRONMENT_BY_CLUSTER[testChainCluster],
+        },
+        () =>
+          createOrgSignerForCustodyWallet<"issuance">(
+            env as ApiTestEnv,
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            custodyWallet.id,
+            "issuance.authority"
+          )
       );
 
       const wallet =

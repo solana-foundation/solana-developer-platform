@@ -119,12 +119,7 @@ describe("refreshIfOutcomeUnknown", () => {
 
 describe("recurringPaymentReadFailureOutcome", () => {
   it("is not found when the API has no such schedule", () => {
-    expect(recurringPaymentReadFailureOutcome("prp_unknown", 404)).toBe("not_found");
-  });
-
-  it("goes back to the list for a demo schedule once demo mode is off", () => {
-    expect(recurringPaymentReadFailureOutcome("demo_rp_northwind_supply", 404)).toBe("list");
-    expect(recurringPaymentReadFailureOutcome("demo_new_rp_0123456789ab", 404)).toBe("list");
+    expect(recurringPaymentReadFailureOutcome(404)).toBe("not_found");
   });
 
   it.each([
@@ -132,7 +127,6 @@ describe("recurringPaymentReadFailureOutcome", () => {
     ["a rate limit", 429],
     ["a failed request", null],
   ])("keeps the error boundary for %s", (_case, status) => {
-    expect(recurringPaymentReadFailureOutcome("prp_unknown", status)).toBe("failed");
-    expect(recurringPaymentReadFailureOutcome("demo_rp_northwind_supply", status)).toBe("failed");
+    expect(recurringPaymentReadFailureOutcome(status)).toBe("failed");
   });
 });

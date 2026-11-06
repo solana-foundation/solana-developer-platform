@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { type Action, actionsInModule, grantsCoverAction } from "@sdp/types/actions";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { app } from "@/index";
 import { earnRoutes } from "@/routes/earn";
@@ -47,7 +47,7 @@ const EARN_ROUTE_ACTIONS = {
   "POST /external-wallet/withdrawal-request-cancel-transactions": "earn.manage",
   "POST /external-wallet/withdrawals": "earn.execute",
   "POST /external-wallet/withdrawal-requests": "earn.execute",
-  "POST /external-wallet/withdrawal-request-cancellations": "earn.execute",
+  "POST /external-wallet/withdrawal-request-cancellations": "earn.manage",
   "GET /external-wallet/withdrawal-requests": "earn.read",
   "GET /external-wallet/withdrawal-requests/:withdrawalRequestId": "earn.read",
   "GET /movements": "earn.read",
@@ -181,15 +181,7 @@ let tenant: EarnAuthzTenant;
 
 const rawKeyBySet = new Map<string, string>();
 
-let originalMarketsEnabled: string | undefined;
-
-let originalEarnEnabled: string | undefined;
-
 beforeEach(async () => {
-  originalMarketsEnabled = env.MARKETS_ENABLED;
-  originalEarnEnabled = env.EARN_ENABLED;
-  env.MARKETS_ENABLED = "true";
-  env.EARN_ENABLED = "true";
   await seedTestDatabase(env);
   await clearKVStores(env);
   tenant = await seedEarnAuthzTenant(env, "matrix", { environment: "sandbox" });
@@ -202,11 +194,6 @@ beforeEach(async () => {
     });
     rawKeyBySet.set(setId, key.raw);
   }
-});
-
-afterEach(() => {
-  env.MARKETS_ENABLED = originalMarketsEnabled;
-  env.EARN_ENABLED = originalEarnEnabled;
 });
 
 describe("earn route inventory", () => {
@@ -274,18 +261,6 @@ describe("Clerk callers are membership-checked, per route (EARN-027)", () => {
         body.error.message,
         `${route} answered the membership 403 for a project the user belongs to`
       ).not.toContain("not accessible");
-    }
-  });
-});
-
-describe("feature gate", () => {
-  it("EARN_ENABLED off darkens every route with 403", async () => {
-    env.EARN_ENABLED = "false";
-    const raw = rawKeyBySet.get(grantSetId(EARN_ACTIONS));
-    assert(raw, "Expected seeded API key");
-    for (const route of ROUTES) {
-      const res = await requestAsKey(route, raw, {});
-      expect(res.status, route).toBe(403);
     }
   });
 });
