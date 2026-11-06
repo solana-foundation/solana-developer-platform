@@ -1,37 +1,25 @@
 import type { CustodyIntegration, ProjectIntegrations } from "@sdp/types/integrations";
 import type { Project } from "@sdp/types/projects";
 import { prerender } from "react-dom/static";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import * as providerAvailability from "@/lib/provider-availability.server";
+import * as sdpApi from "@/lib/sdp-api";
 import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
 import { resetRequestProject, setPageRequest } from "@/test/request-project";
 import IntegrationDetailPage from "./page";
 
-const mocks = vi.hoisted(() => ({
-  auth: vi.fn(),
-  fetchProjectProviderAvailability: vi.fn(),
-  organizationFetch: vi.fn(),
-  projectFetch: vi.fn(),
-  projectRequest: vi.fn(),
-  requestMemberRole: vi.fn(),
-}));
+const auth = vi.hoisted(() => vi.fn());
 
-vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
+vi.mock("@clerk/nextjs/server", () => ({ auth }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
-vi.mock("@/lib/provider-availability.server", () => ({
-  fetchProjectProviderAvailability: mocks.fetchProjectProviderAvailability,
-}));
-vi.mock("@/lib/sdp-api", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
-  createRequestScopedSdpApiClients: async () => ({
-    organizationClient: { request: vi.fn(), fetch: mocks.organizationFetch },
-    projectClient: { request: mocks.projectRequest, fetch: mocks.projectFetch },
-  }),
-  requestMemberRole: mocks.requestMemberRole,
-}));
+
+const organizationFetch = vi.fn();
+const projectFetch = vi.fn();
+const projectRequest = vi.fn();
 
 const PRIVY_BYOK: CustodyIntegration = {
   provider: "privy",
@@ -78,14 +66,18 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetRequestProject();
   setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/integrations/privy`);
-  mocks.auth.mockResolvedValue({ orgId: "org_test" });
-  mocks.requestMemberRole.mockResolvedValue("viewer");
-  mocks.organizationFetch.mockResolvedValue({ linked: true, organization: { id: "org_test" } });
-  mocks.projectFetch.mockResolvedValue(
+  auth.mockResolvedValue({ orgId: "org_test" });
+  vi.spyOn(sdpApi, "requestMemberRole").mockResolvedValue("viewer");
+  vi.spyOn(sdpApi, "createRequestScopedSdpApiClients").mockImplementation(async () => ({
+    organizationClient: { request: vi.fn(), fetch: organizationFetch },
+    projectClient: { request: projectRequest, fetch: projectFetch },
+  }));
+  organizationFetch.mockResolvedValue({ linked: true, organization: { id: "org_test" } });
+  projectFetch.mockResolvedValue(
     projectIntegrations(PRODUCTION_PROJECT, [{ family: "custody", integrations: [PRIVY_BYOK] }])
   );
-  mocks.projectRequest.mockRejectedValue(new Error("Unexpected request"));
-  mocks.fetchProjectProviderAvailability.mockResolvedValue(
+  projectRequest.mockRejectedValue(new Error("Unexpected request"));
+  vi.spyOn(providerAvailability, "fetchProjectProviderAvailability").mockResolvedValue(
     projectProviderAvailability({
       project: PRODUCTION_PROJECT,
       custody: [
@@ -99,19 +91,23 @@ beforeEach(() => {
   );
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("IntegrationDetailPage", () => {
   it.each(["moonpay", "range"])(
     "404s %s, which has no provider page, before any read",
     async (provider) => {
       await expect(renderPage(provider)).rejects.toThrow("NEXT_NOT_FOUND");
-      expect(mocks.auth).not.toHaveBeenCalled();
+      expect(auth).not.toHaveBeenCalled();
     }
   );
 
   it.each(READS_WITHOUT_TURNKEY)(
     "404s a provider the availability offers when the integrations read has %s",
     async (_case, families) => {
-      mocks.projectFetch.mockResolvedValue(projectIntegrations(PRODUCTION_PROJECT, families));
+      projectFetch.mockResolvedValue(projectIntegrations(PRODUCTION_PROJECT, families));
 
       await expect(renderPage("turnkey")).rejects.toThrow("NEXT_NOT_FOUND");
     }
@@ -120,7 +116,7 @@ describe("IntegrationDetailPage", () => {
   it("renders the Connected band for a Production project whose Privy is connected in byok mode", async () => {
     const markup = await renderPage("privy");
 
-    expect(mocks.projectFetch.mock.calls).toEqual([["/v1/integrations"]]);
+    expect(projectFetch.mock.calls).toEqual([["/v1/integrations"]]);
     expect(markup).toContain('data-integration-detail="privy"');
     expect(markup).toContain('data-state-band="ok"');
     expect(markup).toContain("Connected");
@@ -128,8 +124,8 @@ describe("IntegrationDetailPage", () => {
 
   it("reads no connections for a custody provider whose modes leave out byok", async () => {
     setPageRequest(`/dashboard/${SANDBOX_PROJECT.id}/integrations/privy`);
-    mocks.requestMemberRole.mockResolvedValue("admin");
-    mocks.projectFetch.mockResolvedValue(
+    vi.spyOn(sdpApi, "requestMemberRole").mockResolvedValue("admin");
+    projectFetch.mockResolvedValue(
       projectIntegrations(SANDBOX_PROJECT, [
         {
           family: "custody",
@@ -137,7 +133,7 @@ describe("IntegrationDetailPage", () => {
         },
       ])
     );
-    mocks.fetchProjectProviderAvailability.mockResolvedValue(
+    vi.spyOn(providerAvailability, "fetchProjectProviderAvailability").mockResolvedValue(
       projectProviderAvailability({
         project: SANDBOX_PROJECT,
         custody: [{ provider: "privy", modes: ["managed"] }],
@@ -149,17 +145,17 @@ describe("IntegrationDetailPage", () => {
 
     await renderPage("privy");
 
-    expect(mocks.projectRequest).not.toHaveBeenCalled();
+    expect(projectRequest).not.toHaveBeenCalled();
   });
 
   it("throws when the integrations read fails instead of rendering without it", async () => {
-    mocks.projectFetch.mockRejectedValue(new Error("SDP API request failed (503): unavailable"));
+    projectFetch.mockRejectedValue(new Error("SDP API request failed (503): unavailable"));
 
     await expect(renderPage("privy")).rejects.toThrow("SDP API request failed (503): unavailable");
   });
 
   it("throws when the availability read fails instead of rendering without it", async () => {
-    mocks.fetchProjectProviderAvailability.mockRejectedValue(
+    vi.spyOn(providerAvailability, "fetchProjectProviderAvailability").mockRejectedValue(
       new Error("SDP API request failed (503): unavailable")
     );
 
