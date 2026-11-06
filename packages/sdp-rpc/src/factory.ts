@@ -1,4 +1,4 @@
-import type { OrganizationRpcProvider } from "@sdp/types/organizations";
+import type { ManagedRpcProvider } from "@sdp/types/rpc";
 import {
   GENESIS_HASH_BY_CLUSTER,
   SOLANA_CLUSTERS,
@@ -598,7 +598,7 @@ function isReservedHost(host: string): boolean {
  */
 function managedEndpointUrlProblem(
   cluster: SolanaCluster,
-  provider: OrganizationRpcProvider,
+  provider: ManagedRpcProvider,
   endpointUrl: string
 ): string | null {
   let url: URL;
@@ -640,7 +640,7 @@ function managedEndpointUrlProblem(
  */
 function assertManagedEndpointUrl(
   cluster: SolanaCluster,
-  provider: OrganizationRpcProvider,
+  provider: ManagedRpcProvider,
   envKey: string,
   endpointUrl: string
 ): void {

@@ -16,13 +16,17 @@ export const CUSTODY_PROVIDERS = [
 export type CustodyProvider = (typeof CUSTODY_PROVIDERS)[number];
 export type ManagedCustodyProvider = Exclude<CustodyProvider, "local">;
 
+/** Whose provider account an integration runs under: the deployment's own (`managed`) or one the project supplied (`byok`). */
+export const PROVIDER_MODES = ["managed", "byok"] as const;
+export type ProviderMode = (typeof PROVIDER_MODES)[number];
+
 /**
  * Where a wallet's provider account comes from, fixed per wallet by its owner
  * row: a custody config is `managed` (the deployment's own provider account),
  * a custody connection is `byok` (a provider account the project supplied).
  */
-export const CUSTODY_MODES = ["managed", "byok"] as const;
-export type CustodyMode = (typeof CUSTODY_MODES)[number];
+export const CUSTODY_MODES = PROVIDER_MODES;
+export type CustodyMode = ProviderMode;
 
 /** Providers with a BYOK runtime: the only ones a custody connection can name. */
 export const BYOK_CUSTODY_PROVIDERS = [
