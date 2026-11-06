@@ -237,10 +237,10 @@ async function promptField(
   if (field.key === "CUSTODY_PRIVATE_KEY" && current === "") {
     try {
       const keypair = await generateLocalSignerKeypair();
-      note(`${field.label}: generated local devnet signer ${keypair.publicKey}`);
+      note(`${field.label}: generated`);
       return keypair.privateKey;
     } catch {
-      note("Unable to generate a local signer in this runtime; enter a base58 Solana keypair.");
+      note("Unable to generate a keypair in this runtime; enter a base58 Solana keypair.");
     }
   }
   if (field.kind === "multiselect") return promptMultiSelect(field, current, ask, values);
