@@ -16,7 +16,7 @@ type ButtonProps = Omit<SolanaButtonProps, "size" | "variant"> & {
 };
 
 const slotBaseClassName =
-  "relative inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap font-medium no-underline transition duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--gray-50)] disabled:pointer-events-none disabled:opacity-40";
+  "relative inline-flex shrink-0 items-center justify-center whitespace-nowrap font-medium no-underline transition duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--gray-50)] disabled:pointer-events-none disabled:opacity-40";
 
 const variantClassNames: Record<ButtonVariant, string | undefined> = {
   default: undefined,

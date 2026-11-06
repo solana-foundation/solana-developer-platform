@@ -62,7 +62,10 @@ function projectIntegrations(
 }
 
 async function renderPage(provider: string): Promise<string> {
-  const page = await IntegrationDetailPage({ params: Promise.resolve({ provider }) });
+  const page = await IntegrationDetailPage({
+    params: Promise.resolve({ provider }),
+    searchParams: Promise.resolve({}),
+  });
   const { prelude } = await prerender(
     <I18nProvider locale="en" messages={getMessages("en")}>
       {page}

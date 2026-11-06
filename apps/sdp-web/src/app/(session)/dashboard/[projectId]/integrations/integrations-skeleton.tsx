@@ -7,7 +7,7 @@ import type { DashboardFlags } from "@/flags/dashboard";
 import { rampProvidersInReleaseChannel } from "@/flags/release-channel";
 import { INTEGRATION_ROW_COLUMNS, integrationTabFamilies } from "./integration-sections";
 
-export type IntegrationsSkeletonFlags = Pick<
+type IntegrationsSkeletonFlags = Pick<
   DashboardFlags,
   "compliance" | "custody" | "privateChannels" | "ramps" | "releaseChannel"
 >;
@@ -16,6 +16,9 @@ interface IntegrationsSkeletonSection {
   family: ProjectIntegrationFamily;
   rows: number;
 }
+
+const CUSTODY_ROWS = CUSTODY_PROVIDER_CATALOG.filter((entry) => entry.visible).length;
+const RPC_ROWS = MANAGED_RPC_PROVIDERS.filter((provider) => provider !== "default").length;
 
 /**
  * The most rows each family can list, from the same catalogues the read decides over, so the
@@ -27,9 +30,9 @@ function familyRowCount(
 ): number {
   switch (family) {
     case "custody":
-      return CUSTODY_PROVIDER_CATALOG.filter((entry) => entry.visible).length;
+      return CUSTODY_ROWS;
     case "rpc":
-      return MANAGED_RPC_PROVIDERS.filter((provider) => provider !== "default").length;
+      return RPC_ROWS;
     case "ramps":
       return rampProvidersInReleaseChannel(releaseChannel).length;
     case "compliance":
@@ -52,22 +55,20 @@ export function integrationsSkeletonSections(
   }));
 }
 
-/** Custody runs in every release channel, so it is the one family safe to draw unflagged. */
-const CUSTODY_ONLY_SECTIONS: IntegrationsSkeletonSection[] = [
-  {
-    family: "custody",
-    rows: CUSTODY_PROVIDER_CATALOG.filter((entry) => entry.visible).length,
-  },
+/** Custody and RPC run in every release channel, so they are the families safe to draw unflagged. */
+const UNFLAGGED_SECTIONS: IntegrationsSkeletonSection[] = [
+  { family: "custody", rows: CUSTODY_ROWS },
+  { family: "rpc", rows: RPC_ROWS },
 ];
 
 /**
  * The client loading path: the shell already holds the flag snapshot. Without one yet,
- * draws custody only rather than families the page may hide.
+ * draws custody and RPC only rather than families the page may hide.
  */
 export function IntegrationsFlagsSkeleton({ flags }: { flags?: DashboardFlags }) {
   return (
     <IntegrationsSkeleton
-      sections={flags ? integrationsSkeletonSections(flags) : CUSTODY_ONLY_SECTIONS}
+      sections={flags ? integrationsSkeletonSections(flags) : UNFLAGGED_SECTIONS}
     />
   );
 }

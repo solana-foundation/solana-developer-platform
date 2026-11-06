@@ -14,10 +14,6 @@ export function findCustodyIntegration(
   integrations: ProjectIntegrations,
   provider: KnownCustodyProvider
 ): CustodyIntegration | null {
-  for (const family of integrations.families) {
-    if (family.family === "custody") {
-      return family.integrations.find((integration) => integration.provider === provider) ?? null;
-    }
-  }
-  return null;
+  const custody = integrations.families.find((family) => family.family === "custody");
+  return custody?.integrations.find((integration) => integration.provider === provider) ?? null;
 }

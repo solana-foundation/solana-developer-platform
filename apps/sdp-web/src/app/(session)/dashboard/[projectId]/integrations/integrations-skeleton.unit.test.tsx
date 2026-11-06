@@ -18,6 +18,9 @@ import {
 const SECTION = /class="space-y-2"/g;
 const ROW = /<li\b/g;
 const VISIBLE_CUSTODY_PROVIDERS = CUSTODY_PROVIDER_CATALOG.filter((entry) => entry.visible).length;
+const VISIBLE_RPC_PROVIDERS = MANAGED_RPC_PROVIDERS.filter(
+  (provider) => provider !== "default"
+).length;
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -35,10 +38,7 @@ describe("integrations catalog skeleton", () => {
   it("reserves a row for every provider each family can list, in the catalog's family order", () => {
     expect(integrationsSkeletonSections(dashboardFlagsAt("experimental"))).toEqual([
       { family: "custody", rows: VISIBLE_CUSTODY_PROVIDERS },
-      {
-        family: "rpc",
-        rows: MANAGED_RPC_PROVIDERS.filter((provider) => provider !== "default").length,
-      },
+      { family: "rpc", rows: VISIBLE_RPC_PROVIDERS },
       { family: "ramps", rows: rampProvidersInReleaseChannel("experimental").length },
       { family: "compliance", rows: COMPLIANCE_PROVIDERS.length },
       { family: "private_channels", rows: 1 },
@@ -55,11 +55,11 @@ describe("integrations catalog skeleton", () => {
     expect(sections.map((section) => section.family)).toEqual(["custody", "rpc", "compliance"]);
   });
 
-  it("draws custody alone on the client path before flags arrive", () => {
+  it("draws custody and RPC on the client path before flags arrive", () => {
     const markup = renderToStaticMarkup(<IntegrationsFlagsSkeleton />);
 
-    expect(markup.match(SECTION)).toHaveLength(1);
-    expect(markup.match(ROW)).toHaveLength(VISIBLE_CUSTODY_PROVIDERS);
+    expect(markup.match(SECTION)).toHaveLength(2);
+    expect(markup.match(ROW)).toHaveLength(VISIBLE_CUSTODY_PROVIDERS + VISIBLE_RPC_PROVIDERS);
   });
 
   it.each(["experimental", "stable"] as const)(

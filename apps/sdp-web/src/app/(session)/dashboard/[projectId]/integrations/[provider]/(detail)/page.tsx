@@ -52,9 +52,8 @@ async function getCustodyConnectionsSummary(
 /**
  * The project's custody connections for this provider, plus their wallets.
  *
- * Returns `null` when the section does not apply (not a custody provider, or
- * the project's modes for it leave out `byok`) and `"restricted"` when the viewer may not read them — the
- * internal routes are `custody:admin` for reads as well as writes, so asking on
+ * Returns `null` when the connections page read fails and `"restricted"` when
+ * the viewer may not read them — the internal routes are `custody:admin` for reads as well as writes, so asking on
  * a member's behalf returns 403 every time. Not permitted is its own answer,
  * not a failed request.
  *
@@ -152,21 +151,13 @@ async function resolveRequestContext() {
  * One custody provider's detail page. 404s for any provider the project's
  * integrations read does not list under custody, so the page never states
  * what the catalog row contradicts.
- *
- * @param props - The route props.
- * @param props.params - The route params carrying the provider id.
- * @param props.searchParams - The query, read by the custody connections table.
- * @returns The rendered detail view.
  */
 export default async function IntegrationDetailPage({
   params,
   searchParams,
 }: {
   params: Promise<{ provider: string }>;
-  // Optional so the page stays callable without it: only the connections
-  // table's `?page=` reads it, and every other caller — the feature-gate tests
-  // included — has no query to pass.
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { provider } = await params;
   if (!isKnownCustodyProvider(provider)) {
@@ -174,7 +165,7 @@ export default async function IntegrationDetailPage({
   }
 
   const { dashboardAccess, projectClient } = await resolveRequestContext();
-  const resolvedSearchParams = (await searchParams) ?? {};
+  const resolvedSearchParams = await searchParams;
 
   const [integrations, availability] = await Promise.all([
     fetchProjectIntegrations(projectClient),

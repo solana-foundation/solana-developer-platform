@@ -1,12 +1,12 @@
-import type { CustodyWalletSummary } from "@sdp/types/custody";
+import type { CustodyProviderUseCase, CustodyWalletSummary } from "@sdp/types/custody";
 import type { CustodyIntegration, IntegrationState } from "@sdp/types/integrations";
+import type { SdpModule } from "@sdp/types/release-channels";
 import { Button } from "@sdp/ui/button";
 import Link from "next/link";
 import {
   CustodyConnectionsSection,
   CustodyConnectionsSigningLine,
 } from "@/app/(session)/dashboard/[projectId]/integrations/custody-connections-section";
-import { custodyUseCasesInDeploymentReleaseChannel } from "@/app/(session)/dashboard/[projectId]/integrations/integration-feature-gates";
 import type {
   ConnectionsFilters,
   ConnectionsPageResult,
@@ -25,10 +25,33 @@ import {
   StateBand,
   type StateBandTone,
 } from "@/components/refresh-record";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getTranslations } from "@/i18n/server";
 import { requestProjectHref } from "@/lib/sdp-api";
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
+
+/** The module that delivers each custody use case. Transfers are custody wallets' own. */
+const CUSTODY_USE_CASE_MODULES = {
+  issuance: "issuance",
+  transfers: "custody",
+  compliance: "compliance",
+} as const satisfies Record<CustodyProviderUseCase, SdpModule>;
+
+/**
+ * A custody provider's use cases the deployment's release channel runs, so its Capabilities
+ * never advertise a module the deployment refuses (Issuance on `stable`).
+ *
+ * @param useCases - The provider's use cases.
+ * @returns The use cases whose module the channel runs, in their given order.
+ */
+function custodyUseCasesInDeploymentReleaseChannel(
+  useCases: readonly CustodyProviderUseCase[]
+): CustodyProviderUseCase[] {
+  return useCases.filter((useCase) =>
+    isModuleInDeploymentReleaseChannel(CUSTODY_USE_CASE_MODULES[useCase])
+  );
+}
 
 const STATE_BANDS = {
   connected: { tone: "ok", key: "Shared.integrations.stateConnected" },
@@ -79,8 +102,9 @@ function setUpBy(entry: CustodyProviderCatalogEntry, t: Translate) {
 }
 
 /**
- * The band's one action, if the provider's state offers one. An active
- * provider with a connections list needs none: the list is where it is managed.
+ * The band's one action, if the provider's state offers one. A provider with a
+ * connections section, readable or restricted, needs none: the section is where
+ * it is managed.
  */
 async function resolveBandAction(
   integration: CustodyIntegration,
