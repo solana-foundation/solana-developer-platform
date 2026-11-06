@@ -1,6 +1,7 @@
 "use client";
 
 import type { Action } from "@sdp/types/actions";
+import { API_KEY_ENDED_STATUSES } from "@sdp/types/api-keys";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { Badge } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
@@ -280,7 +281,7 @@ export function ApiKeyDetailView({
         });
 
   const lifetimeKind = lifetime.kind;
-  const revoked = apiKey.status === "revoked" || apiKey.status === "deactivated";
+  const revoked = API_KEY_ENDED_STATUSES.some((status) => status === apiKey.status);
   const badge = useMemo(() => statusBadge(lifetimeKind, revoked, t), [lifetimeKind, revoked, t]);
   const actions = useMemo(
     () =>

@@ -248,7 +248,7 @@
     "organizationNotLinked": "This Clerk organization is not linked to an SDP organization yet.",
     "editingOrganization": "Editing organization: {name}",
     "saveFallback": "Save fallback",
-    "apiKeyDeactivated": "API key \"{name}\" has been deactivated.",
+    "apiKeyDeactivated": "API key \"{name}\" revoked.",
     "apiKeyDeleteFailed": "Delete failed: {error}",
     "apiKeyNameRequired": "API key name is required.",
     "apiKeyWalletScopeRequired": "Choose whether this key can access all wallets or selected wallets.",
