@@ -5,7 +5,7 @@ import { Button } from "@sdp/ui/button";
 import { Modal } from "@sdp/ui/modal";
 import { CopyIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RecordBlock } from "@/components/refresh-record";
 import { useTranslations } from "@/i18n/provider";
 
@@ -36,18 +36,30 @@ function useCopied(): [boolean, (text: string) => void] {
   ];
 }
 
+/** Where the person was headed when the guard stopped them: a dashboard link, or Back. */
+type LeaveAttempt = { kind: "link"; href: string } | { kind: "back" };
+
 /**
- * Holds the page while the secret is unsaved: closing the tab asks the browser's question, and
- * a link inside the dashboard asks ours, since the secret cannot be shown again.
+ * Holds the page while the secret is unsaved, since it cannot be shown again: closing the tab
+ * asks the browser's question, and a link inside the page or the browser's Back asks ours. The
+ * shell's own navigation is locked by the page. Back is caught by an extra history entry for
+ * this page, put back each time Back takes it, so leaving that way steps over it.
  */
 function useLeaveGuard(active: boolean) {
   const router = useRouter();
-  const [pendingHref, setPendingHref] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState<LeaveAttempt | null>(null);
+  const leaving = useRef(false);
 
   useEffect(() => {
     if (!active) return;
+    window.history.pushState(window.history.state, "", window.location.href);
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
+    };
+    const onPopState = () => {
+      if (leaving.current) return;
+      window.history.pushState(window.history.state, "", window.location.href);
+      setAttempt({ kind: "back" });
     };
     const onClick = (event: MouseEvent) => {
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey) return;
@@ -58,23 +70,32 @@ function useLeaveGuard(active: boolean) {
         return;
       event.preventDefault();
       event.stopPropagation();
-      setPendingHref(`${url.pathname}${url.search}${url.hash}`);
+      setAttempt({ kind: "link", href: `${url.pathname}${url.search}${url.hash}` });
     };
     window.addEventListener("beforeunload", onBeforeUnload);
+    window.addEventListener("popstate", onPopState);
     document.addEventListener("click", onClick, true);
     return () => {
       window.removeEventListener("beforeunload", onBeforeUnload);
+      window.removeEventListener("popstate", onPopState);
       document.removeEventListener("click", onClick, true);
     };
   }, [active]);
 
   return {
-    pendingHref,
-    stay: () => setPendingHref(null),
+    open: attempt !== null,
+    stay: () => setAttempt(null),
     leave: () => {
-      const target = pendingHref;
-      setPendingHref(null);
-      if (target) router.push(target);
+      const target = attempt;
+      setAttempt(null);
+      if (target === null) return;
+      if (target.kind === "link") {
+        router.push(target.href);
+        return;
+      }
+      // The guard's own entry, then the page's: two steps back to where Back was going.
+      leaving.current = true;
+      window.history.go(-2);
     },
   };
 }
@@ -161,7 +182,7 @@ export function ApiKeyReveal({
       ) : null}
 
       <Modal
-        isOpen={guard.pendingHref !== null}
+        isOpen={guard.open}
         onClose={guard.stay}
         size="sm"
         ariaLabel={t("DashboardCustody.apiKeyPage.leaveTitle")}

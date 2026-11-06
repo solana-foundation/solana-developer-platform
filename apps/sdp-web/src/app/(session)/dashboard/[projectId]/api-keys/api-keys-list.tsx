@@ -199,7 +199,7 @@ export function ApiKeysList({
         </p>
       ) : (
         <div className="-mx-3 overflow-x-auto">
-          <Table className="min-w-[560px] rounded-none border-0" data-api-keys-table>
+          <Table className="min-w-[35rem] rounded-none border-0" data-api-keys-table>
             <TableHeader>
               <TableRow>
                 <TableHead className={PAYMENTS_TABLE_HEAD}>

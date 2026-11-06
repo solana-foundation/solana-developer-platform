@@ -50,9 +50,9 @@ function ChoiceMark({ checked, control }: { checked: boolean; control: "radio" |
       aria-hidden
       className={cn(
         "flex size-4 shrink-0 items-center justify-center border border-border-strong transition-[border-width] motion-reduce:transition-none",
-        control === "radio" ? "rounded-full" : "rounded-[4px]",
+        control === "radio" ? "rounded-full" : "rounded-sm",
         checked &&
-          (control === "radio" ? "border-[5px] border-primary" : "border-primary bg-primary"),
+          (control === "radio" ? "border-[0.3125rem] border-primary" : "border-primary bg-primary"),
         "peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary"
       )}
     >

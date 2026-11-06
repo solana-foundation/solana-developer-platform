@@ -8,12 +8,14 @@ import { Input } from "@sdp/ui/input";
 import { KeyRoundIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { z } from "zod";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
 import { formatDate } from "@/lib/date-format";
 import { useProjectHref } from "@/lib/use-dashboard-project";
+import { useZodForm } from "@/lib/use-zod-form";
 import { createApiKeyAction } from "./actions";
 import { buildEndpointWalletPayload, defaultWalletScopeForGrants } from "./api-key-authoring";
 import { ApiKeyExpiryField, ApiKeyField, ApiKeyWalletPicker } from "./api-key-form-parts";
@@ -25,6 +27,16 @@ import {
   resolveExpiryChoice,
   walletCountLabel,
 } from "./api-key-presentation";
+
+/** The wallets picked, or null until the person picks: then the grants decide the default. */
+type WalletChoice = { scope: ApiKeyWalletScope; ids: string[] };
+
+const createFormSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  grants: z.array(z.custom<Action>()).min(1),
+  walletChoice: z.custom<WalletChoice | null>(),
+  expiry: z.custom<ApiKeyExpiryChoice>(),
+});
 
 /**
  * A new key on one page: its name, what it may do, which wallets it signs with and how long it
@@ -47,21 +59,19 @@ export function ApiKeyCreateForm({
   const timeZone = useTimeZone();
   const router = useRouter();
   const href = useProjectHref();
-  const [name, setName] = useState("");
-  const [grants, setGrants] = useState<Action[]>([]);
-  const [walletChoice, setWalletChoice] = useState<{
-    scope: ApiKeyWalletScope;
-    ids: string[];
-  } | null>(null);
-  const [expiry, setExpiry] = useState<ApiKeyExpiryChoice>(90);
+  const form = useZodForm(createFormSchema, {
+    name: "",
+    grants: [],
+    walletChoice: null,
+    expiry: 90,
+  });
+  const { name, grants, walletChoice, expiry } = form.values;
   const [attempted, setAttempted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creating, startCreating] = useTransition();
 
   const walletScope = walletChoice?.scope ?? defaultWalletScopeForGrants(grants);
   const walletIds = walletChoice?.ids ?? [];
-  const ready =
-    name.trim() !== "" && grants.length > 0 && (walletScope === "all" || walletIds.length > 0);
   const expiresAt = resolveExpiryChoice(expiry, null, now);
 
   const summary = t("DashboardCustody.apiKeyPage.createSummary", {
@@ -83,11 +93,12 @@ export function ApiKeyCreateForm({
 
   const submit = () => {
     setAttempted(true);
-    if (!ready) return;
+    const parsed = form.validate();
+    if (!parsed.ok || (walletScope === "selected" && walletIds.length === 0)) return;
     startCreating(async () => {
       const result = await createApiKeyAction({
-        name,
-        grants,
+        name: parsed.data.name,
+        grants: parsed.data.grants,
         wallets: buildEndpointWalletPayload(walletScope, walletIds),
         expiresAt: resolveExpiryChoice(expiry, null, Date.now()),
       });
@@ -138,9 +149,9 @@ export function ApiKeyCreateForm({
             maxLength={100}
             autoFocus
             placeholder={t("DashboardCustody.apiKeyPage.namePlaceholder")}
-            onChange={(event) => setName(event.target.value)}
+            onChange={(event) => form.setField("name", event.target.value)}
           />
-          {attempted && name.trim() === "" ? (
+          {form.errors.name ? (
             <p className="text-meta text-error">{t("DashboardCustody.apiKeyNameRequired")}</p>
           ) : null}
         </ApiKeyField>
@@ -152,7 +163,7 @@ export function ApiKeyCreateForm({
             offered={offered}
             grants={grants}
             touched={attempted}
-            onChange={setGrants}
+            onChange={(next) => form.setField("grants", next)}
           />
         </ApiKeyField>
         <ApiKeyField
@@ -164,7 +175,7 @@ export function ApiKeyCreateForm({
             walletScope={walletScope}
             walletIds={walletIds}
             showRequired={attempted}
-            onChange={(scope, ids) => setWalletChoice({ scope, ids })}
+            onChange={(scope, ids) => form.setField("walletChoice", { scope, ids })}
           />
         </ApiKeyField>
         <ApiKeyField
@@ -172,7 +183,12 @@ export function ApiKeyCreateForm({
           hint={t("DashboardCustody.apiKeyPage.expiresHint")}
           htmlFor="api-key-expiry"
         >
-          <ApiKeyExpiryField id="api-key-expiry" choice={expiry} now={now} onChange={setExpiry} />
+          <ApiKeyExpiryField
+            id="api-key-expiry"
+            choice={expiry}
+            now={now}
+            onChange={(choice) => form.setField("expiry", choice)}
+          />
         </ApiKeyField>
       </div>
     </WizardFrame>

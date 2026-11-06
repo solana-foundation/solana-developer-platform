@@ -9,7 +9,7 @@ import { HoldButton } from "@sdp/ui/hold-button";
 import { Select, SelectItem } from "@sdp/ui/select";
 import { RefreshCwIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { RecordBlock, RecordRow, RecordStack } from "@/components/refresh-record";
@@ -22,6 +22,7 @@ import {
   ApiKeyAccessSection,
   ApiKeyDetailsSection,
   ApiKeyWalletsSection,
+  type SectionFlow,
 } from "./api-key-detail-sections";
 import { useApiKeyFlashSecret } from "./api-key-flash-surface";
 import { ApiKeyLifetimeText } from "./api-key-lifetime-text";
@@ -84,10 +85,12 @@ function statusBadge(
 function RotatePanel({
   apiKey,
   now,
+  flow,
   onCancel,
 }: {
   apiKey: ApiKeyDetails;
   now: number;
+  flow: SectionFlow;
   onCancel: () => void;
 }) {
   const t = useTranslations();
@@ -98,6 +101,10 @@ function RotatePanel({
   const [grace, setGrace] = useState<ApiKeyRotationGraceHours>(24);
   const [rotating, startRotating] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const { onPendingChange } = flow;
+  useEffect(() => {
+    onPendingChange(rotating);
+  }, [onPendingChange, rotating]);
   const stopsAt = new Date(now + grace * 60 * 60 * 1000).toISOString();
 
   const rotate = () =>
@@ -128,6 +135,7 @@ function RotatePanel({
           <Select
             id="api-key-rotation-grace"
             value={String(grace)}
+            disabled={flow.busy}
             onValueChange={(value) => {
               const hours = API_KEY_ROTATION_GRACE_HOURS.find((option) => String(option) === value);
               if (hours !== undefined) setGrace(hours);
@@ -149,10 +157,10 @@ function RotatePanel({
       </div>
       {error ? <p className="text-meta text-error">{error}</p> : null}
       <div className="flex items-center justify-end gap-2">
-        <Button variant="ghost" onClick={onCancel} disabled={rotating}>
+        <Button variant="ghost" onClick={onCancel} disabled={flow.busy}>
           {t("DashboardCustody.cancel")}
         </Button>
-        <Button onClick={rotate} loading={rotating}>
+        <Button onClick={rotate} loading={rotating} disabled={flow.busy && !rotating}>
           {t("DashboardCustody.apiKeyPage.rotateKey")}
         </Button>
       </div>
@@ -165,12 +173,14 @@ function RevokePanel({
   apiKey,
   now,
   walletsLabel,
+  flow,
   onRotateInstead,
   onKeep,
 }: {
   apiKey: ApiKeyDetails;
   now: number;
   walletsLabel: string;
+  flow: SectionFlow;
   onRotateInstead: (() => void) | null;
   onKeep: () => void;
 }) {
@@ -182,6 +192,10 @@ function RevokePanel({
   const [cancelRecurringPayments, setCancelRecurringPayments] = useState(false);
   const [revoking, startRevoking] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const { onPendingChange } = flow;
+  useEffect(() => {
+    onPendingChange(revoking);
+  }, [onPendingChange, revoking]);
 
   const revoke = () =>
     startRevoking(async () => {
@@ -214,7 +228,7 @@ function RevokePanel({
           type="checkbox"
           className="mt-1"
           checked={cancelRecurringPayments}
-          disabled={revoking}
+          disabled={flow.busy}
           onChange={(event) => setCancelRecurringPayments(event.currentTarget.checked)}
         />
         <span>
@@ -228,19 +242,48 @@ function RevokePanel({
       {error ? <p className="text-meta text-error">{error}</p> : null}
       <div className="flex flex-wrap items-center justify-end gap-2">
         {onRotateInstead ? (
-          <Button variant="ghost" onClick={onRotateInstead} disabled={revoking}>
+          <Button variant="ghost" onClick={onRotateInstead} disabled={flow.busy}>
             {t("DashboardCustody.apiKeyPage.rotateInstead")}
           </Button>
         ) : null}
-        <Button variant="secondary" onClick={onKeep} disabled={revoking}>
+        <Button variant="secondary" onClick={onKeep} disabled={flow.busy}>
           {t("DashboardCustody.apiKeyPage.keepKey")}
         </Button>
-        <HoldButton onHoldComplete={revoke} disabled={revoking}>
+        <HoldButton onHoldComplete={revoke} disabled={flow.busy}>
           {t("DashboardCustody.apiKeyPage.holdToRevoke")}
         </HoldButton>
       </div>
     </div>
   );
+}
+
+type FlowSource = "rotate" | "revoke" | "access" | "wallets" | "details";
+
+/**
+ * The page's one in-flight value: any section or panel saving holds every other control that
+ * changes the key, so two requests never race on it.
+ */
+function usePageFlow(): { busy: boolean; flowFor: (source: FlowSource) => SectionFlow } {
+  const [pending, setPending] = useState<ReadonlySet<FlowSource>>(() => new Set());
+  const busy = pending.size > 0;
+  const reporters = useMemo(() => {
+    const report = (source: FlowSource) => (isPending: boolean) =>
+      setPending((current) => {
+        if (current.has(source) === isPending) return current;
+        const next = new Set(current);
+        if (isPending) next.add(source);
+        else next.delete(source);
+        return next;
+      });
+    return {
+      rotate: report("rotate"),
+      revoke: report("revoke"),
+      access: report("access"),
+      wallets: report("wallets"),
+      details: report("details"),
+    } satisfies Record<FlowSource, (isPending: boolean) => void>;
+  }, []);
+  return { busy, flowFor: (source) => ({ busy, onPendingChange: reporters[source] }) };
 }
 
 /**
@@ -269,6 +312,8 @@ export function ApiKeyDetailView({
   const secret = useApiKeyFlashSecret(apiKey.id);
   const [secretSaved, setSecretSaved] = useState(false);
   const [panel, setPanel] = useState<"rotate" | "revoke" | null>(null);
+  const { busy, flowFor } = usePageFlow();
+  const secretShowing = secret !== null && !secretSaved;
   const lifetime = apiKeyLifetime(apiKey, now);
   const canManage = canManageApiKeys && isApiKeyLive(lifetime);
   // A replaced key is already on its way out: its replacement is the one to rotate.
@@ -289,12 +334,13 @@ export function ApiKeyDetailView({
         <Button
           variant="outline"
           onClick={() => setPanel("rotate")}
+          disabled={busy}
           iconLeft={<RefreshCwIcon className="size-4" />}
         >
           {t("DashboardCustody.apiKeyPage.rotateKeyAction")}
         </Button>
       ) : undefined,
-    [canRotate, panel, t]
+    [busy, canRotate, panel, t]
   );
   const facts = [
     apiKey.keyPrefix,
@@ -306,7 +352,13 @@ export function ApiKeyDetailView({
 
   return (
     <div className="@container w-full" data-api-key={apiKey.id}>
-      <DashboardPageTitle title={apiKey.name} badge={badge} actions={actions} />
+      {/* While the new secret shows, the shell's own way out stays shut: the secret cannot be read again. */}
+      <DashboardPageTitle
+        title={apiKey.name}
+        badge={badge}
+        actions={actions}
+        navigationLocked={secretShowing ? true : undefined}
+      />
       <RecordStack spacing="loose">
         {/* The facts read as the title's second line, so they sit in the stack's top padding. */}
         <div className="-mt-4 flex flex-col gap-4 md:-mt-8">
@@ -320,11 +372,16 @@ export function ApiKeyDetailView({
             )}
           </p>
           {panel === "rotate" ? (
-            <RotatePanel apiKey={apiKey} now={now} onCancel={() => setPanel(null)} />
+            <RotatePanel
+              apiKey={apiKey}
+              now={now}
+              flow={flowFor("rotate")}
+              onCancel={() => setPanel(null)}
+            />
           ) : null}
         </div>
 
-        {secret !== null && !secretSaved ? (
+        {secretShowing && secret !== null ? (
           <ApiKeyReveal
             secret={secret}
             grants={apiKey.grants}
@@ -333,9 +390,24 @@ export function ApiKeyDetailView({
           />
         ) : null}
 
-        <ApiKeyAccessSection apiKey={apiKey} offered={offered} canEdit={canManage} />
-        <ApiKeyWalletsSection apiKey={apiKey} wallets={wallets} canEdit={canManage} />
-        <ApiKeyDetailsSection apiKey={apiKey} canEdit={canManage} now={now} />
+        <ApiKeyAccessSection
+          apiKey={apiKey}
+          offered={offered}
+          canEdit={canManage}
+          flow={flowFor("access")}
+        />
+        <ApiKeyWalletsSection
+          apiKey={apiKey}
+          wallets={wallets}
+          canEdit={canManage}
+          flow={flowFor("wallets")}
+        />
+        <ApiKeyDetailsSection
+          apiKey={apiKey}
+          canEdit={canManage}
+          flow={flowFor("details")}
+          now={now}
+        />
 
         {canManage ? (
           <RecordBlock title={t("DashboardCustody.dangerZoneTitle")}>
@@ -344,6 +416,7 @@ export function ApiKeyDetailView({
                 apiKey={apiKey}
                 now={now}
                 walletsLabel={walletsLabel}
+                flow={flowFor("revoke")}
                 onRotateInstead={canRotate ? () => setPanel("rotate") : null}
                 onKeep={() => setPanel(null)}
               />
@@ -357,7 +430,12 @@ export function ApiKeyDetailView({
                     {t("DashboardCustody.apiKeyPage.revokeRowBody")}
                   </p>
                 </div>
-                <Button variant="destructive" size="sm" onClick={() => setPanel("revoke")}>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setPanel("revoke")}
+                  disabled={busy}
+                >
                   {t("DashboardCustody.apiKeyPage.revokeKeyAction")}
                 </Button>
               </div>

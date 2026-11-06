@@ -56,10 +56,11 @@ export function apiKeyLifetime(key: ApiKeyListItem, now: number): ApiKeyLifetime
   }
   const expiresAt = key.expiresAt;
   const deadline = key.rotationDeadline;
-  if (deadline !== null && (expiresAt === null || timeOf(deadline) <= timeOf(expiresAt))) {
-    return timeOf(deadline) > now
-      ? { kind: "stopping", at: deadline }
-      : { kind: "ended", at: deadline };
+  // A deadline means the key was replaced, whichever of the two dates ends it first.
+  if (deadline !== null) {
+    const endsAt =
+      expiresAt !== null && timeOf(expiresAt) < timeOf(deadline) ? expiresAt : deadline;
+    return timeOf(endsAt) > now ? { kind: "stopping", at: endsAt } : { kind: "ended", at: endsAt };
   }
   if (expiresAt === null) {
     return { kind: "never" };

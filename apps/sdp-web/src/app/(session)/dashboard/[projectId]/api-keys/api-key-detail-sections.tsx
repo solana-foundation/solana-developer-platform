@@ -8,7 +8,8 @@ import { Input } from "@sdp/ui/input";
 import { Textarea } from "@sdp/ui/textarea";
 import { PencilIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useState, useTransition } from "react";
+import { type ReactNode, useEffect, useState, useTransition } from "react";
+import { z } from "zod";
 import { formatCustodyProviderName } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
 import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
@@ -19,6 +20,7 @@ import { useTimeZone } from "@/i18n/time-zone";
 import { formatDateTime } from "@/lib/date-format";
 import { parseAllowedIps } from "@/lib/ip-allowlist-input";
 import { useProjectHref } from "@/lib/use-dashboard-project";
+import { useZodForm } from "@/lib/use-zod-form";
 import { type UpdateApiKeyInput, updateApiKeyAction } from "./actions";
 import { ApiKeyAccessMatrix } from "./api-key-access-matrix";
 import { buildEndpointWalletPayload } from "./api-key-authoring";
@@ -30,11 +32,22 @@ import {
   resolveExpiryChoice,
 } from "./api-key-presentation";
 
+/** One section's part in the page's in-flight state: whether it is saving, told up to the page. */
+export interface SectionFlow {
+  /** A request anywhere on the page is in flight, so this section's controls wait. */
+  busy: boolean;
+  onPendingChange: (pending: boolean) => void;
+}
+
 /** Saves one section's fields, refreshes the record and closes the section's editor. */
-function useSectionSave(keyId: string, onSaved: () => void) {
+function useSectionSave(keyId: string, flow: SectionFlow, onSaved: () => void) {
   const router = useRouter();
   const [saving, startSaving] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const { onPendingChange } = flow;
+  useEffect(() => {
+    onPendingChange(saving);
+  }, [onPendingChange, saving]);
   return {
     saving,
     error,
@@ -58,6 +71,7 @@ function EditableBlock({
   title,
   hint,
   canEdit,
+  busy,
   editing,
   onEdit,
   view,
@@ -66,33 +80,34 @@ function EditableBlock({
   title: string;
   hint?: string;
   canEdit: boolean;
+  busy: boolean;
   editing: boolean;
   onEdit: () => void;
   view: ReactNode;
   form: ReactNode;
 }) {
   const t = useTranslations();
+  const aside = (() => {
+    if (editing) {
+      return (
+        <span className="text-meta text-secondary">{t("DashboardCustody.apiKeyPage.editing")}</span>
+      );
+    }
+    if (!canEdit) return null;
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={onEdit}
+        disabled={busy}
+        iconLeft={<PencilIcon className="size-4" />}
+      >
+        {t("DashboardCustody.apiKeyPage.edit")}
+      </Button>
+    );
+  })();
   return (
-    <RecordBlock
-      title={title}
-      hint={hint}
-      aside={
-        editing ? (
-          <span className="text-meta text-secondary">
-            {t("DashboardCustody.apiKeyPage.editing")}
-          </span>
-        ) : canEdit ? (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onEdit}
-            iconLeft={<PencilIcon className="size-4" />}
-          >
-            {t("DashboardCustody.apiKeyPage.edit")}
-          </Button>
-        ) : null
-      }
-    >
+    <RecordBlock title={title} hint={hint} aside={aside}>
       {editing ? form : view}
     </RecordBlock>
   );
@@ -101,6 +116,7 @@ function EditableBlock({
 function SectionActions({
   saveLabel,
   saving,
+  busy,
   disabled,
   error,
   onSave,
@@ -108,7 +124,9 @@ function SectionActions({
 }: {
   saveLabel: string;
   saving: boolean;
-  disabled?: boolean;
+  /** Another request on the page is in flight. */
+  busy: boolean;
+  disabled: boolean;
   error: string | null;
   onSave: () => void;
   onDiscard: () => void;
@@ -117,10 +135,15 @@ function SectionActions({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
-        <Button size="sm" onClick={onSave} loading={saving} disabled={disabled}>
+        <Button
+          size="sm"
+          onClick={onSave}
+          loading={saving}
+          disabled={disabled || (busy && !saving)}
+        >
           {saveLabel}
         </Button>
-        <Button size="sm" variant="ghost" onClick={onDiscard} disabled={saving}>
+        <Button size="sm" variant="ghost" onClick={onDiscard} disabled={busy}>
           {t("DashboardCustody.apiKeyPage.discard")}
         </Button>
       </div>
@@ -133,27 +156,31 @@ export function ApiKeyAccessSection({
   apiKey,
   offered,
   canEdit,
+  flow,
 }: {
   apiKey: ApiKeyDetails;
   offered: readonly Action[];
   canEdit: boolean;
+  flow: SectionFlow;
 }) {
   const t = useTranslations();
   const [editing, setEditing] = useState(false);
   const [grants, setGrants] = useState<Action[]>(apiKey.grants);
-  const section = useSectionSave(apiKey.id, () => setEditing(false));
-  const discard = () => {
+  const section = useSectionSave(apiKey.id, flow, () => setEditing(false));
+  // Each open starts from the key as saved, so an earlier edit never rides along.
+  const open = () => {
     setGrants(apiKey.grants);
     section.clearError();
-    setEditing(false);
+    setEditing(true);
   };
   return (
     <EditableBlock
       title={t("DashboardCustody.access")}
       hint={t("DashboardCustody.apiKeyPage.accessHint")}
       canEdit={canEdit}
+      busy={flow.busy}
       editing={editing}
-      onEdit={() => setEditing(true)}
+      onEdit={open}
       view={<ApiKeyAccessMatrix grants={apiKey.grants} offered={offered} />}
       form={
         <div className="flex flex-col gap-4">
@@ -161,10 +188,11 @@ export function ApiKeyAccessSection({
           <SectionActions
             saveLabel={t("DashboardCustody.apiKeyPage.saveAccess")}
             saving={section.saving}
+            busy={flow.busy}
             disabled={grants.length === 0}
             error={section.error}
             onSave={() => section.save({ grants })}
-            onDiscard={discard}
+            onDiscard={() => setEditing(false)}
           />
         </div>
       }
@@ -219,34 +247,37 @@ export function ApiKeyWalletsSection({
   apiKey,
   wallets,
   canEdit,
+  flow,
 }: {
   apiKey: ApiKeyDetails;
   wallets: PaymentsDashboardWallet[];
   canEdit: boolean;
+  flow: SectionFlow;
 }) {
   const t = useTranslations();
   const [editing, setEditing] = useState(false);
   const [walletScope, setWalletScope] = useState<ApiKeyWalletScope>(apiKey.walletScope);
   const [walletIds, setWalletIds] = useState<string[]>(apiKey.walletIds);
-  const section = useSectionSave(apiKey.id, () => setEditing(false));
+  const section = useSectionSave(apiKey.id, flow, () => setEditing(false));
   const listedWalletIds = new Set(apiKey.walletIds);
   const signing =
     apiKey.walletScope === "all"
       ? wallets
       : wallets.filter((wallet) => listedWalletIds.has(wallet.id));
-  const discard = () => {
+  const open = () => {
     setWalletScope(apiKey.walletScope);
     setWalletIds(apiKey.walletIds);
     section.clearError();
-    setEditing(false);
+    setEditing(true);
   };
   return (
     <EditableBlock
       title={t("DashboardCustody.wallets")}
       hint={t("DashboardCustody.apiKeyPage.walletsHint")}
       canEdit={canEdit}
+      busy={flow.busy}
       editing={editing}
-      onEdit={() => setEditing(true)}
+      onEdit={open}
       view={
         <div className="flex flex-col gap-2">
           {apiKey.walletScope === "all" ? (
@@ -272,12 +303,13 @@ export function ApiKeyWalletsSection({
           <SectionActions
             saveLabel={t("DashboardCustody.apiKeyPage.saveWallets")}
             saving={section.saving}
+            busy={flow.busy}
             disabled={walletScope === "selected" && walletIds.length === 0}
             error={section.error}
             onSave={() =>
               section.save({ wallets: buildEndpointWalletPayload(walletScope, walletIds) })
             }
-            onDiscard={discard}
+            onDiscard={() => setEditing(false)}
           />
         </div>
       }
@@ -285,13 +317,33 @@ export function ApiKeyWalletsSection({
   );
 }
 
+const detailsFormSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  expiry: z.custom<ApiKeyExpiryChoice>(),
+  note: z.string().trim().max(500),
+  allowedIps: z.string(),
+});
+
+type DetailsFormValues = z.input<typeof detailsFormSchema>;
+
+function detailsFromKey(apiKey: ApiKeyDetails): DetailsFormValues {
+  return {
+    name: apiKey.name,
+    expiry: "keep",
+    note: apiKey.description ?? "",
+    allowedIps: (apiKey.allowedIps ?? []).join("\n"),
+  };
+}
+
 export function ApiKeyDetailsSection({
   apiKey,
   canEdit,
+  flow,
   now,
 }: {
   apiKey: ApiKeyDetails;
   canEdit: boolean;
+  flow: SectionFlow;
   now: number;
 }) {
   const t = useTranslations();
@@ -299,24 +351,23 @@ export function ApiKeyDetailsSection({
   const timeZone = useTimeZone();
   const href = useProjectHref();
   const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(apiKey.name);
-  const [expiry, setExpiry] = useState<ApiKeyExpiryChoice>("keep");
-  const [note, setNote] = useState(apiKey.description ?? "");
-  const [allowedIps, setAllowedIps] = useState(() => (apiKey.allowedIps ?? []).join("\n"));
-  const section = useSectionSave(apiKey.id, () => setEditing(false));
-  const discard = () => {
-    setName(apiKey.name);
-    setExpiry("keep");
-    setNote(apiKey.description ?? "");
-    setAllowedIps((apiKey.allowedIps ?? []).join("\n"));
+  const form = useZodForm(detailsFormSchema, detailsFromKey(apiKey));
+  const section = useSectionSave(apiKey.id, flow, () => setEditing(false));
+  // Each open starts from the key as saved: a lifetime picked in an earlier edit would
+  // otherwise be measured again from the next save and move the expiry.
+  const open = () => {
+    form.setFields(detailsFromKey(apiKey));
     section.clearError();
-    setEditing(false);
+    setEditing(true);
   };
   const save = () => {
+    const parsed = form.validate();
+    if (!parsed.ok) return;
+    const { name, expiry, note, allowedIps } = parsed.data;
     const ips = parseAllowedIps(allowedIps);
     section.save({
-      name: name.trim(),
-      description: note.trim() === "" ? null : note.trim(),
+      name,
+      description: note === "" ? null : note,
       // An empty allowlist clears it: the key may be used from any address.
       allowedIps: ips.length > 0 ? ips : null,
       expiresAt:
@@ -329,8 +380,9 @@ export function ApiKeyDetailsSection({
     <EditableBlock
       title={t("DashboardCustody.apiKeyPage.details")}
       canEdit={canEdit}
+      busy={flow.busy}
       editing={editing}
-      onEdit={() => setEditing(true)}
+      onEdit={open}
       view={
         <dl>
           <RecordRow label={t("DashboardCustody.prefix")}>
@@ -378,28 +430,31 @@ export function ApiKeyDetailsSection({
           <ApiKeyField label={t("DashboardCustody.name")} htmlFor="api-key-name">
             <Input
               id="api-key-name"
-              value={name}
+              value={form.values.name}
               maxLength={100}
-              onChange={(event) => setName(event.target.value)}
+              onChange={(event) => form.setField("name", event.target.value)}
             />
+            {form.errors.name ? (
+              <p className="text-meta text-error">{t("DashboardCustody.apiKeyNameRequired")}</p>
+            ) : null}
           </ApiKeyField>
           <ApiKeyField label={t("DashboardCustody.expires")} htmlFor="api-key-expiry">
             <ApiKeyExpiryField
               id="api-key-expiry"
-              choice={expiry}
+              choice={form.values.expiry}
               current={apiKey.expiresAt}
               now={now}
-              onChange={setExpiry}
+              onChange={(choice) => form.setField("expiry", choice)}
             />
           </ApiKeyField>
           <ApiKeyField label={t("DashboardCustody.apiKeyPage.note")} htmlFor="api-key-note">
             <Textarea
               id="api-key-note"
-              value={note}
+              value={form.values.note}
               maxLength={500}
               rows={2}
               placeholder={t("DashboardCustody.apiKeyPage.notePlaceholder")}
-              onChange={(event) => setNote(event.target.value)}
+              onChange={(event) => form.setField("note", event.target.value)}
             />
           </ApiKeyField>
           <ApiKeyField
@@ -409,19 +464,20 @@ export function ApiKeyDetailsSection({
           >
             <Textarea
               id="api-key-allowed-ips"
-              value={allowedIps}
+              value={form.values.allowedIps}
               rows={3}
               className="font-mono"
-              onChange={(event) => setAllowedIps(event.target.value)}
+              onChange={(event) => form.setField("allowedIps", event.target.value)}
             />
           </ApiKeyField>
           <SectionActions
             saveLabel={t("DashboardCustody.apiKeyPage.saveChanges")}
             saving={section.saving}
-            disabled={name.trim() === ""}
+            busy={flow.busy}
+            disabled={false}
             error={section.error}
             onSave={save}
-            onDiscard={discard}
+            onDiscard={() => setEditing(false)}
           />
         </div>
       }
