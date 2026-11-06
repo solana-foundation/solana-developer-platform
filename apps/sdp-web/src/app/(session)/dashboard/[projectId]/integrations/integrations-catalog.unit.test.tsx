@@ -2,7 +2,10 @@
 
 import type { ProjectIntegrations } from "@sdp/types/integrations";
 import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
+import { DashboardHeaderTabsTrailingContext } from "@/components/dashboard-header-tabs-trailing-context";
 import { setDashboardUrl } from "@/test/dashboard-navigation";
 import { EnglishI18n } from "@/test/i18n";
 import { SANDBOX_PROJECT } from "@/test/projects";
@@ -52,6 +55,10 @@ function renderCatalog(): void {
   render(<IntegrationsCatalog integrations={INTEGRATIONS} />, { wrapper: EnglishI18n });
 }
 
+function sectionTitles(): (string | null)[] {
+  return screen.queryAllByRole("heading", { level: 2 }).map((heading) => heading.textContent);
+}
+
 function section(title: string): HTMLElement {
   const container = screen.getByRole("heading", { level: 2, name: title }).closest("section");
   assert(container !== null);
@@ -75,9 +82,7 @@ describe("IntegrationsCatalog", () => {
   });
 
   it("renders one section per family in the response, in its order", () => {
-    expect(
-      screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)
-    ).toEqual(["Custody", "RPC", "Ramps", "Privacy"]);
+    expect(sectionTitles()).toEqual(["Custody", "RPC", "Ramps", "Privacy"]);
   });
 
   it("labels each row with its state", () => {
@@ -115,5 +120,76 @@ describe("IntegrationsCatalog", () => {
         `/dashboard/${SANDBOX_PROJECT.id}/integrations/private-channels/overview`,
       ],
     ]);
+  });
+});
+
+describe("IntegrationsCatalog tabs and search", () => {
+  const catalogUrl = `/dashboard/${SANDBOX_PROJECT.id}/integrations`;
+  let slot: HTMLDivElement;
+
+  function openCatalog(search: string): void {
+    window.history.replaceState(null, "", `${catalogUrl}${search}`);
+    setDashboardUrl(`${catalogUrl}${search}`, {});
+    render(<IntegrationsCatalog integrations={INTEGRATIONS} />, {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <EnglishI18n>
+          <DashboardHeaderTabsTrailingContext.Provider value={slot}>
+            {children}
+          </DashboardHeaderTabsTrailingContext.Provider>
+        </EnglishI18n>
+      ),
+    });
+  }
+
+  beforeEach(() => {
+    slot = document.createElement("div");
+    document.body.append(slot);
+  });
+
+  afterEach(() => {
+    cleanup();
+    slot.remove();
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("shows only the section a family tab names", () => {
+    openCatalog("?tab=ramps");
+
+    expect(sectionTitles()).toEqual(["Ramps"]);
+  });
+
+  it("says a family tab with nothing for the project is empty", () => {
+    openCatalog("?tab=compliance");
+
+    expect(sectionTitles()).toEqual([]);
+    expect(screen.getByText("Nothing in this family for this project yet.")).toBeTruthy();
+  });
+
+  it("filters rows by provider name or id, hiding sections without a match", async () => {
+    const user = userEvent.setup();
+    openCatalog("");
+    const search = screen.getByRole("searchbox", { name: "Search integrations" });
+
+    await user.type(search, "fire");
+    expect(sectionTitles()).toEqual(["Custody"]);
+    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      expect.stringContaining("Fireblocks"),
+    ]);
+
+    await user.clear(search);
+    await user.type(search, "private_channels");
+    expect(sectionTitles()).toEqual(["Privacy"]);
+  });
+
+  it("offers to clear a search nothing matches, restoring every section", async () => {
+    const user = userEvent.setup();
+    openCatalog("");
+
+    await user.type(screen.getByRole("searchbox"), "no-such-provider");
+    expect(sectionTitles()).toEqual([]);
+    expect(screen.getByText("No integrations match")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Clear search" }));
+    expect(sectionTitles()).toEqual(["Custody", "RPC", "Ramps", "Privacy"]);
   });
 });

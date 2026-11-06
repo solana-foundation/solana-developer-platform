@@ -104,20 +104,23 @@ function runs(releaseChannel: SdpReleaseChannel, module: SdpModule): boolean {
  */
 const MODULE_LINKS: readonly (readonly [SdpModule, string])[] = [
   ["custody", `${PROJECT}/wallets`],
-  ["custody", `${PROJECT}/integrations?tab=custody`],
   ["payments", `${PROJECT}/payments`],
-  ["compliance", `${PROJECT}/integrations?tab=compliance`],
-  ["ramps", `${PROJECT}/integrations?tab=ramps`],
   ["issuance", `${PROJECT}/issuance`],
   ["markets", `${PROJECT}/markets`],
   ["earn", `${PROJECT}/markets/embedded-yield`],
   ["dvp", `${PROJECT}/markets/dvp`],
-  ["private_channels", `${PROJECT}/integrations?tab=privacy`],
   ["helius_rings", `${PROJECT}/helius-rings`],
 ];
 
+const INTEGRATION_FAMILY_TABS: readonly (readonly [SdpModule, string])[] = [
+  ["custody", "Custody"],
+  ["ramps", "Ramps"],
+  ["compliance", "Compliance"],
+  ["private_channels", "Privacy"],
+];
+
 // Each opens its own subnav, so the sidebar lists that section's children.
-const PATHS = [`${PROJECT}/integrations`, `${PROJECT}/markets/treasury-solutions`];
+const PATHS = [`${PROJECT}/markets/treasury-solutions`];
 
 function sidebarLinks(flags: DashboardFlags): Set<string> {
   const links = new Set<string>();
@@ -131,6 +134,15 @@ function sidebarLinks(flags: DashboardFlags): Set<string> {
   return links;
 }
 
+function integrationsHeaderTabs(flags: DashboardFlags): string[] {
+  setDashboardUrl(`${PROJECT}/integrations`, {});
+  const root = document.createElement("div");
+  root.innerHTML = renderToStaticMarkup(shell(flags));
+  return [...root.querySelectorAll('[role="tab"]')].map((tab) =>
+    required(tab.textContent, "tab label")
+  );
+}
+
 describe("dashboard navigation on each release channel", () => {
   it.each(SDP_RELEASE_CHANNEL_NAMES)("lists only %s's modules", (releaseChannel) => {
     const links = sidebarLinks(dashboardFlagsAt(releaseChannel));
@@ -139,4 +151,17 @@ describe("dashboard navigation on each release channel", () => {
       expect(links.has(href), `${module} ${href}`).toBe(runs(releaseChannel, module));
     }
   });
+
+  it.each(SDP_RELEASE_CHANNEL_NAMES)(
+    "offers an Integrations tab for each family %s runs, RPC always",
+    (releaseChannel) => {
+      const tabs = integrationsHeaderTabs(dashboardFlagsAt(releaseChannel));
+
+      expect(tabs).toContain("All");
+      expect(tabs).toContain("RPC");
+      for (const [module, label] of INTEGRATION_FAMILY_TABS) {
+        expect(tabs.includes(label), `${module} ${label}`).toBe(runs(releaseChannel, module));
+      }
+    }
+  );
 });

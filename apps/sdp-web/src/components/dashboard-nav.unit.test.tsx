@@ -170,53 +170,6 @@ describe("Payments navigation for a read-only member", () => {
   });
 });
 
-describe("Integrations dashboard navigation", () => {
-  const findIntegrationsItem = (options: ReturnType<typeof navOptions>) =>
-    findManageItem(options, "Shared.dashboardShell.integrations");
-
-  it("groups every enabled family under the Integrations submenu", () => {
-    const item = findIntegrationsItem(
-      navOptions({
-        complianceEnabled: true,
-        custodyEnabled: true,
-        paymentsEnabled: true,
-        privateChannelsEnabled: true,
-        rampsEnabled: true,
-      })
-    );
-
-    expect(item?.subnavKey).toBe("integrations");
-    expect(item?.children?.map((child) => child.href)).toEqual([
-      "/dashboard/integrations?tab=custody",
-      "/dashboard/integrations?tab=ramps",
-      "/dashboard/integrations?tab=compliance",
-      "/dashboard/integrations?tab=privacy",
-    ]);
-  });
-
-  it("lists no family when every owning module is disabled", () => {
-    const item = findIntegrationsItem(
-      navOptions({
-        complianceEnabled: false,
-        custodyEnabled: false,
-        paymentsEnabled: false,
-        privateChannelsEnabled: false,
-        rampsEnabled: false,
-      })
-    );
-
-    expect(item?.children).toEqual([]);
-  });
-
-  it("drops Ramps when no ramp provider is enabled, even with Payments on", () => {
-    const item = findIntegrationsItem(navOptions({ paymentsEnabled: true, rampsEnabled: false }));
-
-    expect(item?.children?.map((child) => child.href)).not.toContain(
-      "/dashboard/integrations?tab=ramps"
-    );
-  });
-});
-
 describe("module entries", () => {
   it.each([
     { options: { custodyEnabled: false }, label: "Shared.dashboardShell.wallets" },

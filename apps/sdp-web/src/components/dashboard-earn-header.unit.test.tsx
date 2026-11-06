@@ -98,14 +98,27 @@ describe("Settings header", () => {
 });
 
 describe("Integrations dashboard headers", () => {
-  it("keeps category navigation in the sidebar submenu", () => {
-    const config = getDashboardPageConfig("/dashboard/integrations", t, true);
+  it("tabs the catalog with All and each family passed, in order", () => {
+    const config = getDashboardPageConfig("/dashboard/integrations", t, true, false, [
+      "custody",
+      "rpc",
+    ]);
 
-    expect(config.headerTabs).toBeUndefined();
+    expect(config.headerTabs).toEqual({
+      tabs: [
+        { id: "all", label: "Shared.integrations.tabAll" },
+        { id: "custody", label: "Shared.integrations.custodyTitle" },
+        { id: "rpc", label: "Shared.integrations.rpcTitle" },
+      ],
+      hideOnMobile: false,
+    });
   });
 
-  it("does not recreate category tabs when modules are disabled", () => {
-    const config = getDashboardPageConfig("/dashboard/integrations", t, false);
+  it("gives a provider page no family tabs", () => {
+    const config = getDashboardPageConfig("/dashboard/integrations/privy", t, true, false, [
+      "custody",
+      "rpc",
+    ]);
 
     expect(config.headerTabs).toBeUndefined();
   });

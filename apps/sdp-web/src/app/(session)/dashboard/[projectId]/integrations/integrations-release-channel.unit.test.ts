@@ -1,3 +1,4 @@
+import { type ProjectIntegrations, projectIntegrationsSchema } from "@sdp/types/integrations";
 import { COMPLIANCE_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import {
   isModuleInReleaseChannel,
@@ -6,9 +7,9 @@ import {
   type SdpReleaseChannel,
 } from "@sdp/types/release-channels";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import IntegrationsPage from "@/app/(session)/dashboard/[projectId]/integrations/(catalog)/page";
 import IntegrationDetailPage from "@/app/(session)/dashboard/[projectId]/integrations/[provider]/(detail)/page";
-import { integrationsSkeletonLayout } from "@/app/(session)/dashboard/[projectId]/integrations/integration-feature-gates";
 import * as flags from "@/flags";
 import * as ramps from "@/flags/ramps";
 import { rampProvidersInReleaseChannel } from "@/flags/release-channel";
@@ -33,6 +34,29 @@ const AVAILABILITY = projectProviderAvailability({
   ramps: [...RAMP_PROVIDERS],
   earn: [],
 });
+
+const INTEGRATIONS: ProjectIntegrations = {
+  projectId: SANDBOX_PROJECT.id,
+  environment: "sandbox",
+  families: [
+    {
+      family: "custody",
+      integrations: [
+        {
+          provider: "privy",
+          category: "server",
+          state: { status: "not_configured", modes: ["managed"] },
+        },
+      ],
+    },
+    {
+      family: "private_channels",
+      integrations: [
+        { provider: "private_channels", state: { status: "not_configured", modes: ["managed"] } },
+      ],
+    },
+  ],
+};
 
 /** Reads no answer covers; the pages swallow some read errors, so each test checks this. */
 const unexpectedPaths: string[] = [];
@@ -74,6 +98,7 @@ beforeEach(() => {
       "/v1/onboarding/status": { linked: true, organization: { id: "org_test" } },
     }),
     projectClient: apiClient({
+      "/v1/integrations": INTEGRATIONS,
       [`/v1/projects/${SANDBOX_PROJECT.id}/provider-availability`]: AVAILABILITY,
       "/v1/wallets/configs": { data: { configs: [] } },
       "/v1/private-channels/instance": { instance: { isActive: true } },
@@ -87,19 +112,20 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("integrations catalog on each release channel", () => {
-  it.each(SDP_RELEASE_CHANNEL_NAMES)(
-    "lists only %s's families, as its skeleton reserves",
-    async (releaseChannel) => {
-      useChannel(releaseChannel);
-      const { families, rampCards } = integrationsSkeletonLayout(dashboardFlagsAt(releaseChannel));
+describe("integrations catalog page", () => {
+  it.each([true, false])(
+    "keeps the Private Channels family only while the per-user flag is on (%s)",
+    async (enabled) => {
+      vi.spyOn(flags, "privateChannels").mockResolvedValue(enabled);
 
-      const { props } = await IntegrationsPage();
+      const page = await IntegrationsPage();
+      const { integrations } = z
+        .object({ integrations: projectIntegrationsSchema })
+        .parse(page.props);
 
-      expect(props.enabledFamilies).toEqual(families);
-      expect(props.ramps).toHaveLength(rampCards);
-      expect(props.compliance.length > 0).toBe(families.includes("compliance"));
-      expect(props.privacy.length > 0).toBe(families.includes("privacy"));
+      expect(integrations.families.map((family) => family.family)).toEqual(
+        enabled ? ["custody", "private_channels"] : ["custody"]
+      );
     }
   );
 });
