@@ -2,24 +2,21 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { testApiKey } from "@/test/api-keys";
+import { stubClerkSession } from "@/test/clerk";
 import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navigation";
 import { HeaderHost } from "@/test/dashboard-page-title";
 import { EnglishI18n } from "@/test/i18n";
 import { SANDBOX_PROJECT } from "@/test/projects";
 
+vi.mock("next/cache", () => import("@/test/next-cache"));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
-vi.mock("./actions", () => ({
-  rotateApiKeyAction: vi.fn(),
-  revokeApiKeyAction: vi.fn(),
-  updateApiKeyAction: vi.fn(),
-}));
-vi.mock("./api-key-flash-surface", () => ({ useApiKeyFlashSecret: () => null }));
 
 import { ApiKeyDetailView } from "./api-key-detail-view";
 
 const NOW = Date.parse("2026-11-06T12:00:00.000Z");
 
 beforeEach(() => {
+  stubClerkSession({ userId: null });
   resetDashboardNavigation();
   setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/api-keys/key_test_1`, {
     keyId: "key_test_1",
@@ -28,6 +25,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
 });
 
 type KeyLifetime = Parameters<typeof testApiKey>[0];

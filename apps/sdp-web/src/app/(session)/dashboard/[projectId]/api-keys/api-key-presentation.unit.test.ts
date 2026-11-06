@@ -5,6 +5,7 @@ import { getMessages, type MessageKey } from "@/i18n/messages";
 import { type TranslationValues, translate } from "@/i18n/translate";
 import { testApiKey } from "@/test/api-keys";
 import {
+  type ApiKeyExpiryChoice,
   type ApiKeyLifetime,
   type ApiKeyReach,
   type ApiKeyStatusFilter,
@@ -12,6 +13,7 @@ import {
   apiKeyReach,
   apiKeyStatusFilter,
   formatLastUsed,
+  resolveExpiryChoice,
 } from "./api-key-presentation";
 
 const NOW = Date.parse("2026-11-06T12:00:00.000Z");
@@ -42,7 +44,13 @@ describe("apiKeyLifetime", () => {
       "was rotated, its expiry before its deadline",
       at(DAY_MS),
       at(30 * DAY_MS),
-      { kind: "soon", at: at(DAY_MS) },
+      { kind: "stopping", at: at(DAY_MS) },
+    ],
+    [
+      "was rotated and is past its expiry, its deadline still ahead",
+      at(-HOUR_MS),
+      at(30 * DAY_MS),
+      { kind: "ended", at: at(-HOUR_MS) },
     ],
     [
       "is past its rotation deadline",
@@ -103,5 +111,15 @@ describe("apiKeyReach", () => {
     [["recurring.manage", "transfers.execute"], "funds"],
   ])("ranks %o as %s", (grants, reach) => {
     expect(apiKeyReach(grants)).toBe(reach);
+  });
+});
+
+describe("resolveExpiryChoice", () => {
+  it.each<[ApiKeyExpiryChoice, string | null]>([
+    ["keep", at(5 * DAY_MS)],
+    [null, null],
+    [30, at(30 * DAY_MS)],
+  ])("resolves %s against a key expiring in 5 days to %s", (choice, expiresAt) => {
+    expect(resolveExpiryChoice(choice, at(5 * DAY_MS), NOW)).toBe(expiresAt);
   });
 });

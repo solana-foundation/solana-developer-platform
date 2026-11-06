@@ -264,7 +264,7 @@ describe("revokeApiKeyAction", () => {
       method: "DELETE",
       body: { confirmation: "Payouts worker", cancelRecurringPayments: false },
     });
-    expect(result).toEqual({ ok: true, message: 'API key "Payouts worker" has been deactivated.' });
+    expect(result).toEqual({ ok: true, message: 'API key "Payouts worker" revoked.' });
   });
 
   it("cancels the recurring payments the key started and reports both counts", async () => {
@@ -280,8 +280,7 @@ describe("revokeApiKeyAction", () => {
     });
     expect(result).toEqual({
       ok: true,
-      message:
-        'API key "Payouts worker" has been deactivated. Recurring payments canceled: 2. Not canceled: 1.',
+      message: 'API key "Payouts worker" revoked. Recurring payments canceled: 2. Not canceled: 1.',
     });
   });
 });
