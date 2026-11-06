@@ -1,5 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { ByokCustodyProvider } from "@sdp/types/custody";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { Context } from "hono";
 import { type DatabaseClient, getDb } from "@/db/client";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
@@ -9,6 +11,7 @@ import { normalizeForFingerprint, resolveIdempotencyReplay } from "@/lib/idempot
 import { requireEnv } from "@/lib/runtime-env";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import { getLogger } from "@/runtime/logger";
+import { logEvent } from "@/runtime/money-path-events";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import {
@@ -102,6 +105,7 @@ interface SubmissionContext {
   idempotencyKey: string;
   organizationId: string;
   projectId: string;
+  cluster: SolanaCluster;
   userId: string;
   db: DatabaseClient;
   store: ProviderCredentialStore;
@@ -237,6 +241,7 @@ function createSubmissionContext(
     idempotencyKey,
     organizationId,
     projectId,
+    cluster: currentClusterScope().cluster,
     userId,
     db,
     store,
@@ -417,6 +422,17 @@ async function persistPreparedSubmission(
     });
 
     if (transaction.kind === "committed") {
+      logEvent("info", {
+        event: "sdp_api_provider_credential_submitted",
+        provider: prepared.input.provider,
+        cluster: prepared.cluster,
+        setup: prepared.preflightPlan.kind,
+        organization_id: prepared.organizationId,
+        project_id: prepared.projectId,
+        provider_credential_id: transaction.result.providerCredential.id,
+        connection_id: transaction.result.connectionId,
+        request_id: prepared.c.get("requestId"),
+      });
       await prepared.audit.completeCritical(prepared.c, auditIntent, {
         metadata: {
           event: "provider_credential_submitted",
