@@ -95,4 +95,20 @@ describe("StackedDashboardTopBar", () => {
     expect(markup).toContain('<h1 class="sr-only">Home</h1>');
     expect(markup).not.toContain("row-start-3");
   });
+
+  it("sets the description under a marked title", () => {
+    const markup = renderToStaticMarkup(
+      <StackedDashboardTopBar
+        navigation={<button type="button">Menu</button>}
+        title="Privy"
+        mark={<span>Mark</span>}
+        description="Hosted wallet infrastructure for API signing."
+        trailingContent={<span>Language</span>}
+      />
+    );
+
+    expect(markup).toContain(
+      'Privy</h1><p class="mt-1 text-body text-secondary">Hosted wallet infrastructure for API signing.</p>'
+    );
+  });
 });
