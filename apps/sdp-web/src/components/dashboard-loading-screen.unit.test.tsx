@@ -37,7 +37,7 @@ function renderLoadingScreen(pathname: string): string {
 const identityTranslate = ((key: string) => key) as Parameters<typeof getDashboardPageConfig>[1];
 
 function settledContentWidthClassFor(pathname: string): string {
-  const config = getDashboardPageConfig(pathname, identityTranslate, true);
+  const config = getDashboardPageConfig(pathname, identityTranslate, [], true);
   return config.contentWidthClass ?? "max-w-5xl";
 }
 
@@ -97,10 +97,10 @@ describe("DashboardLoadingScreen", () => {
   it("titles Helius Rings and Settings instead of falling through to Home", () => {
     const t = identityTranslate;
 
-    expect(getDashboardPageConfig("/dashboard/helius-rings", t).title).toBe(
+    expect(getDashboardPageConfig("/dashboard/helius-rings", t, []).title).toBe(
       "Shared.dashboardShell.heliusRings"
     );
-    expect(getDashboardPageConfig("/dashboard/settings", t).title).toBe(
+    expect(getDashboardPageConfig("/dashboard/settings", t, []).title).toBe(
       "Shared.organizationSettings.title"
     );
   });

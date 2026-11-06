@@ -101,16 +101,6 @@ export function invitationHasExpired(
     (invitation.status === "pending" && new Date(invitation.expiresAt) <= now)
   );
 }
-export const ORGANIZATION_RPC_PROVIDERS = [
-  "alchemy",
-  "default",
-  "helius",
-  "nodit",
-  "quicknode",
-  "triton",
-  "validationcloud",
-] as const;
-export type OrganizationRpcProvider = (typeof ORGANIZATION_RPC_PROVIDERS)[number];
 
 export interface Organization {
   id: string; // org_xxxxxxxxxxxx

@@ -3,7 +3,10 @@
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
 import { type ReactNode, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { DashboardHeaderTabsTrailingContext } from "@/components/dashboard-header-tabs-trailing-context";
+import {
+  DashboardHeaderTabsHideContext,
+  DashboardHeaderTabsTrailingContext,
+} from "@/components/dashboard-header-tabs-trailing-context";
 import type { DashboardCapabilities } from "@/lib/dashboard-access";
 import {
   selectActiveDashboardTab,
@@ -23,6 +26,11 @@ export interface DashboardHeaderTabsConfig {
    * unavailable on small screens; content tab sets keep their tabs visible.
    */
   hideOnMobile: boolean;
+  /**
+   * The page narrows the tabs to the ones it has content for (`useHiddenHeaderTabs`); the
+   * shell shows a placeholder strip until the page has said, so no tab flashes and leaves.
+   */
+  filteredByPage?: boolean;
 }
 
 /**
@@ -107,4 +115,15 @@ export function DashboardHeaderTabs({ tabs, hideOnMobile }: DashboardHeaderTabsC
 export function DashboardHeaderTabsTrailing({ children }: { children: ReactNode }) {
   const slot = useContext(DashboardHeaderTabsTrailingContext);
   return slot ? createPortal(children, slot) : null;
+}
+
+/** Hides the named header tabs while the calling page is mounted. */
+export function useHiddenHeaderTabs(tabIds: readonly string[]) {
+  const setHiddenTabIds = useContext(DashboardHeaderTabsHideContext);
+  const hiddenKey = tabIds.join(" ");
+  useEffect(() => {
+    if (setHiddenTabIds === null) return;
+    setHiddenTabIds(hiddenKey === "" ? [] : hiddenKey.split(" "));
+    return () => setHiddenTabIds(null);
+  }, [setHiddenTabIds, hiddenKey]);
 }

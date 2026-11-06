@@ -1,60 +1,14 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyConfigSummary } from "@sdp/types/custody";
-import type { PrivateChannelInstanceEnvelope } from "@sdp/types/private-channels";
+import { type IntegrationFamily, projectIntegrationsSchema } from "@sdp/types/integrations";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import { redirect } from "next/navigation";
-import { isIntegrationFamilyEnabled } from "@/app/(session)/dashboard/[projectId]/integrations/integration-feature-gates";
 import { IntegrationsCatalog } from "@/app/(session)/dashboard/[projectId]/integrations/integrations-catalog";
-import {
-  resolveComplianceIntegrations,
-  resolveCustodyIntegrations,
-  resolvePrivacyIntegrations,
-  resolveRampIntegrations,
-} from "@/app/(session)/dashboard/[projectId]/integrations/integrations-status";
 import type { OnboardingStatusResponse } from "@/app/(session)/dashboard/[projectId]/onboarding-status";
-import { isKnownCustodyProvider } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import { privateChannels } from "@/flags";
 import { getOfferedRampProviders } from "@/flags/ramps";
-import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
-import { getTranslations } from "@/i18n/server";
-import {
-  availableComplianceProviders,
-  availableCustodyProviders,
-  availableRampProviders,
-} from "@/lib/provider-availability";
-import { fetchProjectProviderAvailability } from "@/lib/provider-availability.server";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createRequestScopedSdpApiClients, type SdpApiClient } from "@/lib/sdp-api";
+import { createRequestScopedSdpApiClients } from "@/lib/sdp-api";
 
-async function getConnectedCustodyProviders(request: SdpApiClient["request"]) {
-  const res = await request("/v1/wallets/configs");
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`SDP API request failed (${res.status}): ${body}`);
-  }
-  const json = (await res.json()) as { data: { configs: CustodyConfigSummary[] } };
-  return json.data.configs
-    .filter((config) => config.status === "active")
-    .map((config) => config.provider)
-    .filter(isKnownCustodyProvider);
-}
-
-async function getPrivateChannelsActive(client: SdpApiClient): Promise<boolean | null> {
-  try {
-    const response = await client.fetch<PrivateChannelInstanceEnvelope>(
-      "/v1/private-channels/instance"
-    );
-    return response.instance?.isActive === true;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The integrations catalog for the selected project, gated by the dashboard's
- * module flags and listing only the providers the project can use.
- *
- * @returns The rendered catalog.
- */
 export default async function IntegrationsPage() {
   const { orgId } = await auth();
   if (!orgId) {
@@ -74,71 +28,42 @@ export default async function IntegrationsPage() {
   if (!onboarding.linked || !onboarding.organization) {
     redirect("/dashboard");
   }
-  const [t, custodyEnabled, rampProviders, privateChannelsEnabled] = await Promise.all([
-    getTranslations(),
-    isModuleInDeploymentReleaseChannel("custody"),
-    getOfferedRampProviders(),
-    privateChannels(),
-  ]);
-  const complianceEnabled = isModuleInDeploymentReleaseChannel("compliance");
-  const integrationFlags = {
-    custody: custodyEnabled,
-    rampProviders,
-    compliance: complianceEnabled,
-    privateChannels: privateChannelsEnabled,
-  };
-  const [availability, connectedProviders, privateChannelsActive] = await Promise.all([
-    trace.step("fetch_provider_availability", () =>
-      fetchProjectProviderAvailability(projectClient)
+  const [integrations, privateChannelsEnabled, offeredRampProviders] = await Promise.all([
+    trace.step("fetch_integrations", async () =>
+      projectIntegrationsSchema.parse(await projectClient.fetch<unknown>("/v1/integrations"))
     ),
-    // null, not [] — an empty list claims nothing is connected and offers
-    // Configure for providers that are already active. Unknown must render as
-    // unknown, never as installable.
-    custodyEnabled
-      ? trace.step("fetch_custody_configs", () =>
-          getConnectedCustodyProviders(projectClient.request).catch(() => null)
-        )
-      : Promise.resolve([]),
-    privateChannelsEnabled
-      ? trace.step("fetch_private_channels_instance", () => getPrivateChannelsActive(projectClient))
-      : Promise.resolve(false),
+    privateChannels(),
+    getOfferedRampProviders(),
   ]);
 
   trace.log({ ok: true });
 
   return (
     <IntegrationsCatalog
-      custody={
-        !custodyEnabled
-          ? []
-          : connectedProviders === null
-            ? null
-            : resolveCustodyIntegrations({
-                connectedProviders,
-                custodyAvailability: availableCustodyProviders(availability),
-              })
-      }
-      ramps={
-        isIntegrationFamilyEnabled("ramps", integrationFlags)
-          ? resolveRampIntegrations(availableRampProviders(availability), rampProviders)
-          : []
-      }
-      compliance={
-        isIntegrationFamilyEnabled("compliance", integrationFlags)
-          ? resolveComplianceIntegrations(availableComplianceProviders(availability))
-          : []
-      }
-      privacy={resolvePrivacyIntegrations({
-        enabled: privateChannelsEnabled,
-        active: privateChannelsActive,
-        label: t("Shared.dashboardShell.privateChannels"),
-      })}
-      enabledFamilies={[
-        ...(custodyEnabled ? (["custody"] as const) : []),
-        ...(rampProviders.length > 0 ? (["ramps"] as const) : []),
-        ...(complianceEnabled ? (["compliance"] as const) : []),
-        ...(privateChannelsEnabled ? (["privacy"] as const) : []),
-      ]}
+      integrations={{
+        ...integrations,
+        families: integrations.families.flatMap((family) =>
+          familyForViewer(family, { privateChannelsEnabled, offeredRampProviders })
+        ),
+      }}
     />
   );
+}
+
+// Private Channels and each ramp provider also have per-user flag targeting the API
+// cannot see, so the page drops whatever those flags leave out for this viewer.
+function familyForViewer(
+  family: IntegrationFamily,
+  flags: { privateChannelsEnabled: boolean; offeredRampProviders: readonly RampProviderId[] }
+): IntegrationFamily[] {
+  if (family.family === "private_channels") {
+    return flags.privateChannelsEnabled ? [family] : [];
+  }
+  if (family.family === "ramps") {
+    const integrations = family.integrations.filter((integration) =>
+      flags.offeredRampProviders.includes(integration.provider)
+    );
+    return integrations.length > 0 ? [{ ...family, integrations }] : [];
+  }
+  return [family];
 }

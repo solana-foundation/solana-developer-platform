@@ -1,5 +1,7 @@
 "use client";
 
+import type { ProjectIntegrationFamily } from "@sdp/types/integrations";
+
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { SkeletonBlock } from "@sdp/ui/skeleton-block";
@@ -13,6 +15,7 @@ import {
   integrationProviderIdentity,
 } from "@/app/(session)/dashboard/[projectId]/integrations/integration-detail";
 import { IntegrationProviderMark } from "@/app/(session)/dashboard/[projectId]/integrations/integration-provider-mark";
+import { INTEGRATION_FAMILY_COPY_KEYS } from "@/app/(session)/dashboard/[projectId]/integrations/integration-sections";
 import { privateChannelsInstancePath } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { SETTINGS_TABS } from "@/app/(session)/dashboard/[projectId]/settings/settings-tabs";
 import {
@@ -971,7 +974,8 @@ const INTEGRATION_FAMILY_TITLE_KEYS = {
 
 function getIntegrationsPageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
+  integrationFamilies: readonly ProjectIntegrationFamily[]
 ): DashboardPageConfig | null {
   const providerPageId = /^\/dashboard\/integrations\/([^/]+)$/.exec(pathname)?.[1];
   if (providerPageId) {
@@ -1032,13 +1036,25 @@ function getIntegrationsPageConfig(
       },
     };
   }
-  if (pathname.startsWith("/dashboard/integrations")) {
-    // Card-grid page: fill the shell's wide container instead of stacking a
-    // second max-width inside the centered default and stranding gutters.
+  if (pathname === "/dashboard/integrations") {
     return {
       title: t("Shared.dashboardShell.integrations"),
-      contentWidthClass: "max-w-7xl",
+      contentWidthClass: PAGE_WIDTH,
+      headerTabs: {
+        tabs: [
+          { id: "all", label: t("Shared.integrations.tabAll") },
+          ...integrationFamilies.map((family) => ({
+            id: family,
+            label: t(INTEGRATION_FAMILY_COPY_KEYS[family].title),
+          })),
+        ],
+        hideOnMobile: false,
+        filteredByPage: true,
+      },
     };
+  }
+  if (pathname.startsWith("/dashboard/integrations")) {
+    return { title: t("Shared.dashboardShell.integrations"), contentWidthClass: PAGE_WIDTH };
   }
   return null;
 }
@@ -1242,6 +1258,7 @@ function getHomePageConfig(
 export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
+  integrationFamilies: readonly ProjectIntegrationFamily[],
   paymentsEnabled = true,
   rampsEnabled = false
 ): DashboardPageConfig {
@@ -1310,7 +1327,7 @@ export function getDashboardPageConfig(
       },
     };
   }
-  const integrationsConfig = getIntegrationsPageConfig(pathname, t);
+  const integrationsConfig = getIntegrationsPageConfig(pathname, t, integrationFamilies);
   if (integrationsConfig) {
     return integrationsConfig;
   }

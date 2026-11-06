@@ -1,4 +1,9 @@
-import { COMPLIANCE_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import { type ProjectIntegrations, projectIntegrationsSchema } from "@sdp/types/integrations";
+import {
+  COMPLIANCE_PROVIDERS,
+  RAMP_PROVIDERS,
+  type RampProviderId,
+} from "@sdp/types/provider-access";
 import {
   isModuleInReleaseChannel,
   SDP_RAMP_PROVIDER_MATURITY,
@@ -6,9 +11,9 @@ import {
   type SdpReleaseChannel,
 } from "@sdp/types/release-channels";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import IntegrationsPage from "@/app/(session)/dashboard/[projectId]/integrations/(catalog)/page";
 import IntegrationDetailPage from "@/app/(session)/dashboard/[projectId]/integrations/[provider]/(detail)/page";
-import { integrationsSkeletonLayout } from "@/app/(session)/dashboard/[projectId]/integrations/integration-feature-gates";
 import * as flags from "@/flags";
 import * as ramps from "@/flags/ramps";
 import { rampProvidersInReleaseChannel } from "@/flags/release-channel";
@@ -33,6 +38,36 @@ const AVAILABILITY = projectProviderAvailability({
   ramps: [...RAMP_PROVIDERS],
   earn: [],
 });
+
+const INTEGRATIONS: ProjectIntegrations = {
+  projectId: SANDBOX_PROJECT.id,
+  environment: "sandbox",
+  families: [
+    {
+      family: "custody",
+      integrations: [
+        {
+          provider: "privy",
+          category: "server",
+          state: { status: "not_configured", modes: ["managed"] },
+        },
+      ],
+    },
+    {
+      family: "ramps",
+      integrations: [
+        { provider: "moonpay", state: { status: "not_configured", modes: ["managed"] } },
+        { provider: "stripe", state: { status: "not_configured", modes: ["managed"] } },
+      ],
+    },
+    {
+      family: "private_channels",
+      integrations: [
+        { provider: "private_channels", state: { status: "not_configured", modes: ["managed"] } },
+      ],
+    },
+  ],
+};
 
 /** Reads no answer covers; the pages swallow some read errors, so each test checks this. */
 const unexpectedPaths: string[] = [];
@@ -74,6 +109,7 @@ beforeEach(() => {
       "/v1/onboarding/status": { linked: true, organization: { id: "org_test" } },
     }),
     projectClient: apiClient({
+      "/v1/integrations": INTEGRATIONS,
       [`/v1/projects/${SANDBOX_PROJECT.id}/provider-availability`]: AVAILABILITY,
       "/v1/wallets/configs": { data: { configs: [] } },
       "/v1/private-channels/instance": { instance: { isActive: true } },
@@ -87,19 +123,28 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("integrations catalog on each release channel", () => {
-  it.each(SDP_RELEASE_CHANNEL_NAMES)(
-    "lists only %s's families, as its skeleton reserves",
-    async (releaseChannel) => {
-      useChannel(releaseChannel);
-      const { families, rampCards } = integrationsSkeletonLayout(dashboardFlagsAt(releaseChannel));
+describe("integrations catalog page", () => {
+  it.each<[boolean, RampProviderId[], string[]]>([
+    [true, ["moonpay", "stripe"], ["privy", "moonpay", "stripe", "private_channels"]],
+    [false, ["moonpay", "stripe"], ["privy", "moonpay", "stripe"]],
+    [true, ["stripe"], ["privy", "stripe", "private_channels"]],
+    [true, [], ["privy", "private_channels"]],
+  ])(
+    "keeps only what the per-user flags allow (private channels %s, ramps %j)",
+    async (privateChannels, offeredRamps, shown) => {
+      vi.spyOn(flags, "privateChannels").mockResolvedValue(privateChannels);
+      vi.spyOn(ramps, "getOfferedRampProviders").mockResolvedValue(offeredRamps);
 
-      const { props } = await IntegrationsPage();
+      const page = await IntegrationsPage();
+      const { integrations } = z
+        .object({ integrations: projectIntegrationsSchema })
+        .parse(page.props);
 
-      expect(props.enabledFamilies).toEqual(families);
-      expect(props.ramps).toHaveLength(rampCards);
-      expect(props.compliance.length > 0).toBe(families.includes("compliance"));
-      expect(props.privacy.length > 0).toBe(families.includes("privacy"));
+      expect(
+        integrations.families.flatMap((family) =>
+          family.integrations.map((integration) => integration.provider)
+        )
+      ).toEqual(shown);
     }
   );
 });

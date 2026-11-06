@@ -1,26 +1,23 @@
-import Image from "next/image";
 import type { IntegrationProviderIdentity } from "@/app/(session)/dashboard/[projectId]/integrations/integration-detail";
-import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
-import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
-import { RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
+import { ProviderBrandMark } from "@/components/provider-brand-mark";
+import {
+  COMPLIANCE_BRAND_MARKS,
+  CUSTODY_BRAND_MARKS,
+  RAMP_BRAND_MARKS,
+} from "@/lib/provider-brand-marks";
 
 /** A provider's 48px mark, beside its name in the page header. */
 export function IntegrationProviderMark({ identity }: { identity: IntegrationProviderIdentity }) {
-  if (identity.family === "custody") {
-    return <WalletProviderMark provider={identity.provider} size="page" />;
+  switch (identity.family) {
+    case "custody":
+      return <ProviderBrandMark size="page" mark={CUSTODY_BRAND_MARKS[identity.provider]} />;
+    case "ramps":
+      return <ProviderBrandMark size="page" mark={RAMP_BRAND_MARKS[identity.provider]} />;
+    case "compliance":
+      return <ProviderBrandMark size="page" mark={COMPLIANCE_BRAND_MARKS[identity.provider]} />;
+    default: {
+      const exhaustive: never = identity;
+      throw new Error(`Unknown integration family: ${String(exhaustive)}`);
+    }
   }
-  const src =
-    identity.family === "ramps"
-      ? RAMP_PROVIDER_LOGOS[identity.provider]
-      : COMPLIANCE_PROVIDER_LOGOS[identity.provider];
-  return (
-    <span
-      aria-hidden
-      className="relative inline-flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white p-2.5"
-    >
-      <span className="relative h-full w-full">
-        <Image src={src} alt="" fill sizes="48px" className="object-contain" />
-      </span>
-    </span>
-  );
 }

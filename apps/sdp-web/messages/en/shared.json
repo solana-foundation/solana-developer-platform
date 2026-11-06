@@ -664,7 +664,16 @@
     "capabilitySigningHint": "SDP can sign transactions through this provider.",
     "capabilityAdditionalWalletsHint": "SDP can create more wallets after the first one.",
     "credentialWriteOnly": "Write-only, never shown again",
-    "credentialFromProvider": "From your {provider} dashboard"
+    "credentialFromProvider": "From your {provider} dashboard",
+    "stateConnected": "Connected",
+    "stateProvided": "Provided by SDP",
+    "stateNotConfigured": "Not configured",
+    "connectedCount": "{connected} of {total} connected",
+    "rpcTitle": "RPC",
+    "rpcDescription": "Solana RPC providers serving your project's cluster. SDP runs them for every project, so there is nothing to set up.",
+    "rpcProviderDescription": "Solana RPC for your project's cluster, provided by SDP.",
+    "tabAll": "All",
+    "clearSearch": "Clear search"
   },
   "idempotency": {
     "outcomeUnknownCheckList": "We couldn’t confirm whether this was created — check the list before trying again.",

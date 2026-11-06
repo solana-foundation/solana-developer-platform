@@ -57,8 +57,8 @@ describe("dashboard workspace tab URL state", () => {
     ).toBe(true);
   });
 
-  it.each(["custody", "ramps", "compliance", "privacy"])(
-    "keeps the %s tab an Integrations submenu link opens from another page",
+  it.each(["custody", "rpc", "ramps", "compliance", "private_channels"])(
+    "keeps the %s family tab a link to Integrations opens from another page",
     (tab) => {
       expect(
         shouldClearDashboardTabAfterPathnameChange({
