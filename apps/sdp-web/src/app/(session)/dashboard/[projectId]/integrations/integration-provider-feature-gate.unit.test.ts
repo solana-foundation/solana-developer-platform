@@ -25,7 +25,6 @@ vi.mock("@/flags/release-channel", () => ({
   },
 }));
 vi.mock("@/flags/ramps", () => ({ getOfferedRampProviders: mocks.rampProviders }));
-vi.mock("@/flags", () => ({ paymentsDemoMode: async () => false }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/lib/provider-availability.server", () => ({
   fetchProjectProviderAvailability: mocks.fetchProjectProviderAvailability,
