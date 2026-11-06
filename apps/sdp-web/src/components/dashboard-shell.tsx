@@ -308,12 +308,7 @@ function DashboardSidebarContent({
       </div>
       <div className="shrink-0 space-y-3 px-2 pb-2">
         {showQuickStart ? <DashboardQuickStart collapsed={isCollapsed} /> : null}
-        <SidebarUserMenu
-          collapsed={isCollapsed}
-          // The mobile slide-over is a 288px column, so the popover only has
-          // room above the trigger there.
-          menuSide={variant === "desktop" ? "right" : "top"}
-        />
+        <SidebarUserMenu collapsed={isCollapsed} />
       </div>
     </>
   );
