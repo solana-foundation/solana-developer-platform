@@ -45,10 +45,10 @@ the visible path; a heading fragment can still open the other path.
 
 The docs build includes Earn only when both Vercel system values match:
 
-| Setting | Required value |
-| --- | --- |
-| `VERCEL_ENV` | `preview` |
-| `VERCEL_GIT_COMMIT_REF` | `earn-docs` |
+| Setting                 | Required value |
+| ----------------------- | -------------- |
+| `VERCEL_ENV`            | `preview`      |
+| `VERCEL_GIT_COMMIT_REF` | `earn-docs`    |
 
 Production, other branches, and normal local builds keep Earn unpublished.
 The preview stages the nine partner guides and renders only the prospective
