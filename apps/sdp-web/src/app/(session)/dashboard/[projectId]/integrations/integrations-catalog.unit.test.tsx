@@ -5,7 +5,10 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
-import { DashboardHeaderTabsTrailingContext } from "@/components/dashboard-header-tabs-trailing-context";
+import {
+  DashboardHeaderTabsHideContext,
+  DashboardHeaderTabsTrailingContext,
+} from "@/components/dashboard-header-tabs-trailing-context";
 import { setDashboardUrl } from "@/test/dashboard-navigation";
 import { EnglishI18n } from "@/test/i18n";
 import { SANDBOX_PROJECT } from "@/test/projects";
@@ -121,6 +124,7 @@ describe("IntegrationsCatalog", () => {
 describe("IntegrationsCatalog tabs and search", () => {
   const catalogUrl = `/dashboard/${SANDBOX_PROJECT.id}/integrations`;
   let slot: HTMLDivElement;
+  const hideTabs = vi.fn<(tabIds: readonly string[]) => void>();
 
   function openCatalog(search: string): void {
     window.history.replaceState(null, "", `${catalogUrl}${search}`);
@@ -128,15 +132,18 @@ describe("IntegrationsCatalog tabs and search", () => {
     render(<IntegrationsCatalog integrations={INTEGRATIONS} />, {
       wrapper: ({ children }: { children: ReactNode }) => (
         <EnglishI18n>
-          <DashboardHeaderTabsTrailingContext.Provider value={slot}>
-            {children}
-          </DashboardHeaderTabsTrailingContext.Provider>
+          <DashboardHeaderTabsHideContext.Provider value={hideTabs}>
+            <DashboardHeaderTabsTrailingContext.Provider value={slot}>
+              {children}
+            </DashboardHeaderTabsTrailingContext.Provider>
+          </DashboardHeaderTabsHideContext.Provider>
         </EnglishI18n>
       ),
     });
   }
 
   beforeEach(() => {
+    hideTabs.mockClear();
     slot = document.createElement("div");
     document.body.append(slot);
   });
@@ -151,6 +158,14 @@ describe("IntegrationsCatalog tabs and search", () => {
     openCatalog("?tab=ramps");
 
     expect(sectionTitles()).toEqual(["Ramps"]);
+  });
+
+  it("hides the tab of every family with nothing for the project while it is mounted", () => {
+    openCatalog("");
+    expect(hideTabs).toHaveBeenLastCalledWith(["compliance"]);
+
+    cleanup();
+    expect(hideTabs).toHaveBeenLastCalledWith([]);
   });
 
   it("lands on All when a family tab names a family with nothing for the project", () => {
