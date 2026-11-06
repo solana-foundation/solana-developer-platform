@@ -179,4 +179,11 @@ describe("formatDecimalAmount", () => {
     expect(formatDecimalAmount("12.5", "en")).toBe("12.50");
     expect(formatDecimalAmount("abc", "en")).toBe("abc");
   });
+
+  it("keeps every digit of an amount typed with a bare leading or trailing point", () => {
+    expect(formatDecimalAmount(".000001", "en")).toBe("0.000001");
+    expect(formatDecimalAmount("-.5", "en")).toBe("-0.50");
+    expect(formatDecimalAmount("1000000.", "en")).toBe("1,000,000.00");
+    expect(formatDecimalAmount(".", "en")).toBe(".");
+  });
 });
