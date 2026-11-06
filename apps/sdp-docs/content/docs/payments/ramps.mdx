@@ -156,7 +156,7 @@ data = response.json()["data"]
 
 ### The response
 
-The response holds `quote` and `transferId`, the **Payment Transfer** the quote opened. Follow the ramp with [`GET /v1/payments/transfers/{transferId}`](/docs/reference/api/payments/get-payment-transfer). `quote.status` is a snapshot from when the quote was created, and SDP doesn't update it. There's no endpoint to read a quote again.
+The response holds `quote` and `transferId`, the **Payment Transfer** the quote opened. Follow the ramp with [`GET /v1/payments/transfers/{transferId}`](/docs/reference/api/payments/get-payment-transfer). `quote.status` is always `pending`: SDP never updates a quote, so the transfer is what moves. There's no endpoint to read a quote again.
 
 `quote.deliveryMode` says how to hand the customer to the provider:
 
