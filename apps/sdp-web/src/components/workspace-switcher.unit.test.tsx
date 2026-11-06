@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 
 import type { Project } from "@sdp/types/projects";
+import type { OrganizationRole } from "@sdp/types/roles";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as workspaceContext from "@/contexts/dashboard-workspace-context";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { setDashboardUrl } from "@/test/dashboard-navigation";
 import { EnglishI18n } from "@/test/i18n";
 import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
@@ -25,8 +27,10 @@ const mocks = vi.hoisted(() => {
     selectedProjectId: "",
     isProjectSwitching: false,
   };
+  const member: { role: OrganizationRole } = { role: "admin" };
   return {
     workspace,
+    member,
     organizationLoaded: true,
     selectProject: vi.fn(),
     setActive: vi.fn<(params: { organization: string }) => Promise<void>>(),
@@ -69,6 +73,7 @@ async function openSwitcher() {
 beforeEach(() => {
   mocks.workspace.sandboxProject = SANDBOX_PROJECT;
   mocks.workspace.productionProject = PRODUCTION_PROJECT;
+  mocks.member.role = "admin";
   mocks.organizationLoaded = true;
   mocks.selectProject.mockReset();
   mocks.switching.mockReset();
@@ -78,6 +83,7 @@ beforeEach(() => {
     partial: true,
   }).mockImplementation(() => ({
     ...mocks.workspace,
+    dashboardAccess: resolveDashboardAccess(mocks.member.role),
     selectProject: mocks.selectProject,
     // The provider's switch: it records the request, then asks Clerk.
     switchOrganization: (organization: string) => mocks.setActive({ organization }),
@@ -114,7 +120,7 @@ describe("WorkspaceSwitcher", () => {
     expect(mocks.selectProject).toHaveBeenCalledExactlyOnceWith(SANDBOX_PROJECT.id);
   });
 
-  it("lists only the environments the organization has", async () => {
+  it("links an admin from a locked Production to mainnet access while the organization has no production project", async () => {
     mocks.workspace.productionProject = null;
     showProject(SANDBOX_PROJECT);
     const { trigger } = await openSwitcher();
@@ -123,7 +129,25 @@ describe("WorkspaceSwitcher", () => {
     expect(screen.getByRole("menuitem", { name: /^Sandbox/ }).getAttribute("aria-current")).toBe(
       "true"
     );
-    expect(screen.queryByRole("menuitem", { name: /^Production/ })).toBeNull();
+    const production = screen.getByRole("menuitem", { name: /^Production/ });
+    expect(within(production).getByText("Mainnet · not enabled")).toBeDefined();
+    expect(within(production).getByText("Request access")).toBeDefined();
+    expect(production.getAttribute("href")).toBe(
+      `/dashboard/${SANDBOX_PROJECT.id}/settings#mainnet-access`
+    );
+  });
+
+  it("disables a locked Production for a member and says only an admin can request access", async () => {
+    mocks.workspace.productionProject = null;
+    mocks.member.role = "member";
+    showProject(SANDBOX_PROJECT);
+    await openSwitcher();
+
+    const production = screen.getByRole("menuitem", {
+      name: /^Production.*Only an admin can request mainnet access\.$/,
+    });
+    expect(production.getAttribute("aria-disabled")).toBe("true");
+    expect(production.getAttribute("href")).toBeNull();
   });
 
   it("links Organization settings inside the URL's Project", async () => {
