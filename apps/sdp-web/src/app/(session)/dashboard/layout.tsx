@@ -6,7 +6,7 @@ import {
   type OrganizationRefusal,
   SelectExistingOrganizationPanel,
 } from "@/components/select-existing-organization-panel";
-import { requestMemberRole, SdpApiResponseError } from "@/lib/sdp-api";
+import { requestMemberRole, requestOnboardingStatus, SdpApiResponseError } from "@/lib/sdp-api";
 import { getSdpAuth } from "@/lib/sdp-auth";
 
 const refusalBodySchema = z.object({
@@ -42,11 +42,12 @@ async function sdpAdmitsSession(): Promise<"admitted" | OrganizationRefusal> {
     if (error.status === 403 && reason === ORGANIZATION_SUSPENDED_REASON) {
       return "organization-suspended";
     }
-    if (error.status === 401) {
-      return reason === INVITATION_EXPIRED_REASON ? "invitation-expired" : "no-access";
-    }
-    throw error;
+    if (error.status !== 401) throw error;
+    if (reason === INVITATION_EXPIRED_REASON) return "invitation-expired";
   }
+  // One Clerk instance serves several deployments, so the session's organization may be
+  // one another deployment created, which SDP here answers `linked: false` for.
+  return (await requestOnboardingStatus()).linked ? "no-access" : "unlinked";
 }
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {

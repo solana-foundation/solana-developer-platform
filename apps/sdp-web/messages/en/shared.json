@@ -91,6 +91,7 @@
   },
   "authShell": {
     "productName": "Developer Platform",
+    "betaNotice": "Beta runs on devnet only, with its own organizations. Beta modules may change before they reach mainnet.",
     "requestAccess": "Request access",
     "emailPlaceholder": "jane@acme.com",
     "forgotPasswordTitle": "Forgot your password?"
@@ -255,7 +256,10 @@
     "createApiKey": "Create API key",
     "selectOrganization": "Select organization",
     "selectExistingOrganizationDescription": "Choose an existing organization to continue.",
+    "unlinkedOrganizationDescription": "The organization you last used is not on this deployment. Choose another organization to continue.",
     "organizations": "Organizations",
+    "betaBadge": "Beta",
+    "betaBadgeHint": "Devnet only. Beta modules may change before they reach mainnet.",
     "noOrganizations": "No organizations yet.",
     "locked": "Locked",
     "sandboxOnly": "Only sandbox mode is supported for now.",

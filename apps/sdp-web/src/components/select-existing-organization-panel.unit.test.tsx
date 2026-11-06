@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import * as unlinkedOrganizations from "@/lib/use-unlinked-organizations";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import {
   type OrganizationRefusal,
@@ -40,6 +41,7 @@ const mocks = vi.hoisted(() => {
     setActive: vi.fn(),
     revalidateMemberships: vi.fn(),
     revalidateInvitations: vi.fn(),
+    unlinked: { unlinkedIds: new Set<string>() as ReadonlySet<string>, isResolved: true },
   };
 });
 
@@ -93,7 +95,11 @@ describe("SelectExistingOrganizationPanel", () => {
     mocks.session.activeOrganization = null;
     mocks.revalidateMemberships.mockReset();
     mocks.revalidateInvitations.mockReset();
+    mocks.unlinked = { unlinkedIds: new Set(), isResolved: true };
     vi.restoreAllMocks();
+    vi.spyOn(unlinkedOrganizations, "useUnlinkedOrganizations").mockImplementation(
+      () => mocks.unlinked
+    );
   });
 
   it("offers existing memberships without an organization creation action", () => {
@@ -151,6 +157,53 @@ describe("SelectExistingOrganizationPanel", () => {
 
     expect(screen.getByRole("heading", { name: "No access to this organization" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Existing workspace" })).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Organization name" })).toBeTruthy();
+  });
+
+  it("never offers an organization this deployment does not link", () => {
+    mocks.memberships = [
+      ...mocks.memberships,
+      { organization: { id: "org_elsewhere", name: "Other deployment", imageUrl: "" } },
+    ];
+    mocks.unlinked = { unlinkedIds: new Set(["org_elsewhere"]), isResolved: true };
+    renderPanel(null);
+
+    expect(screen.getByRole("button", { name: "Existing workspace" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Other deployment" })).toBeNull();
+  });
+
+  it("waits for SDP's answers before offering any organization", () => {
+    mocks.unlinked = { unlinkedIds: new Set(), isResolved: false };
+    renderPanel(null);
+
+    expect(screen.getByText("Loading…")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Existing workspace" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Organization name" })).toBeNull();
+  });
+
+  it("with an organization this deployment does not know, offers the others to pick from", () => {
+    mocks.session.activeOrganization = { id: "org_elsewhere" };
+    mocks.memberships = [
+      ...mocks.memberships,
+      { organization: { id: "org_elsewhere", name: "Other deployment", imageUrl: "" } },
+    ];
+    renderPanel("unlinked");
+
+    expect(screen.getByRole("heading", { name: "Select organization" })).toBeTruthy();
+    expect(
+      screen.getByText(
+        "The organization you last used is not on this deployment. Choose another organization to continue."
+      )
+    ).toBeTruthy();
+    expect(screen.queryByText("No access to this organization")).toBeNull();
+    expect(screen.getByRole("button", { name: "Existing workspace" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Other deployment" })).toBeNull();
+  });
+
+  it("with an organization this deployment does not know and no other, offers to create one", () => {
+    mocks.session.activeOrganization = { id: "org_existing" };
+    renderPanel("unlinked");
+
     expect(screen.getByRole("textbox", { name: "Organization name" })).toBeTruthy();
   });
 

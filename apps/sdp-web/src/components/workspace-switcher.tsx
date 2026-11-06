@@ -2,6 +2,7 @@
 
 import { useOrganization, useOrganizationList } from "@clerk/nextjs";
 import type { Project, ProjectEnvironment } from "@sdp/types/projects";
+import { Badge } from "@sdp/ui/badge";
 import { cn } from "@sdp/ui/cn";
 import {
   DropdownMenu,
@@ -30,6 +31,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useProjectHref } from "@/lib/use-dashboard-project";
+import { useUnlinkedOrganizations } from "@/lib/use-unlinked-organizations";
 
 function OrgAvatar({ name, imageUrl }: { name: string; imageUrl: string | null }) {
   if (imageUrl) {
@@ -71,6 +73,7 @@ function SelectedCheck() {
   return <CheckIcon className="ml-auto size-4 shrink-0 text-primary" aria-hidden="true" />;
 }
 
+/** The user's organizations, one row each, or a note when they belong to none. */
 function OrganizationItems({
   memberships,
   activeOrganizationId,
@@ -212,6 +215,7 @@ export function WorkspaceSwitcher({
     userMemberships: { infinite: true },
   });
   const {
+    flags,
     sandboxProject,
     productionProject,
     sdpEnvironment,
@@ -222,8 +226,27 @@ export function WorkspaceSwitcher({
     dashboardAccess,
   } = useDashboardWorkspace();
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
+  // Each answer costs an API read per organization, so they are asked for only once the
+  // menu that lists them has opened, not on every page the switcher renders on.
+  const [hasOpened, setHasOpened] = useState(false);
 
-  const memberships = userMemberships.data ?? [];
+  const loadedMemberships = userMemberships.data ?? [];
+  // The dashboard renders only for an organization SDP admitted, so the active one is not asked about.
+  const { unlinkedIds, isResolved } = useUnlinkedOrganizations(
+    hasOpened
+      ? loadedMemberships
+          .map((membership) => membership.organization.id)
+          .filter((organizationId) => organizationId !== activeOrg?.id)
+      : []
+  );
+  // An organization this deployment does not link is another deployment's: switching to it
+  // only lands on the organization picker, so it is not offered. Until the answers are in,
+  // only the active organization is listed, so none is offered and then withdrawn.
+  const memberships = loadedMemberships.filter((membership) =>
+    isResolved
+      ? !unlinkedIds.has(membership.organization.id)
+      : membership.organization.id === activeOrg?.id
+  );
   const environmentProjects = [sandboxProject, productionProject].filter(
     (project): project is Project => project !== null
   );
@@ -267,7 +290,12 @@ export function WorkspaceSwitcher({
   }
 
   return (
-    <DropdownMenu modal={false}>
+    <DropdownMenu
+      modal={false}
+      onOpenChange={(open) => {
+        if (open) setHasOpened(true);
+      }}
+    >
       <DropdownMenuTrigger asChild>
         <button
           type="button"
@@ -282,8 +310,20 @@ export function WorkspaceSwitcher({
           {collapsed ? null : (
             <>
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate leading-tight text-primary text-field font-medium">
-                  {organizationName}
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate leading-tight text-primary text-field font-medium">
+                    {organizationName}
+                  </span>
+                  {/* Beta shares sign-in with production, so its switcher says which one this is. */}
+                  {flags.releaseChannel === "beta" ? (
+                    <Badge
+                      variant="info"
+                      className="shrink-0"
+                      title={t("Shared.SharedComponents.betaBadgeHint")}
+                    >
+                      {t("Shared.SharedComponents.betaBadge")}
+                    </Badge>
+                  ) : null}
                 </span>
                 <span className="truncate leading-tight text-meta text-secondary">
                   {t(ENVIRONMENT_PRESENTATIONS[sdpEnvironment].labelKey)}
@@ -301,10 +341,15 @@ export function WorkspaceSwitcher({
         <OrganizationItems
           memberships={memberships}
           activeOrganizationId={activeOrg?.id}
-          isLoaded={isLoaded}
+          isLoaded={isLoaded && isResolved}
           disabled={isSwitching}
           onSwitch={pickOrganization}
         />
+        {isResolved ? null : (
+          <p role="status" className="px-2.5 py-2 text-xs text-tertiary">
+            {t("Shared.SharedComponents.loading")}
+          </p>
+        )}
         {activeOrg && environmentProjects.length > 0 ? (
           <>
             <DropdownMenuSeparator />

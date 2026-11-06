@@ -9,6 +9,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { CreateOrganizationForm } from "@/components/create-organization-form";
 import { useTranslations } from "@/i18n/provider";
+import { useUnlinkedOrganizations } from "@/lib/use-unlinked-organizations";
 
 function OrganizationMark({ name, imageUrl }: { name: string; imageUrl?: string }) {
   if (imageUrl) {
@@ -38,18 +39,31 @@ function OrganizationMark({ name, imageUrl }: { name: string; imageUrl?: string 
 const ENTRY_ROW_CLASS =
   "flex min-h-12 w-full items-center gap-3 rounded-control bg-fill px-3 py-2 text-body text-primary transition-colors hover:bg-fill-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50";
 
-/** Why SDP refused the session's organization, as the dashboard layout read it. */
-export type OrganizationRefusal = "no-access" | "invitation-expired" | "organization-suspended";
+/**
+ * Why SDP refused the session's organization, as the dashboard layout read it.
+ * `unlinked` is an organization this deployment does not know (SDP answers
+ * `linked: false`, as for one another deployment created).
+ */
+export type OrganizationRefusal =
+  | "no-access"
+  | "invitation-expired"
+  | "organization-suspended"
+  | "unlinked";
 
-type EntryState = OrganizationRefusal | "create" | "select";
+type EntryState =
+  | Exclude<OrganizationRefusal, "unlinked">
+  | "create"
+  | "select"
+  | "select-unlinked";
 
 function resolveEntryState(params: {
   refusal: OrganizationRefusal | null;
   isLoaded: boolean;
   hasChoices: boolean;
 }): EntryState {
-  if (params.refusal) return params.refusal;
+  if (params.refusal !== null && params.refusal !== "unlinked") return params.refusal;
   if (params.isLoaded && !params.hasChoices) return "create";
+  if (params.refusal === "unlinked") return "select-unlinked";
   return "select";
 }
 
@@ -83,6 +97,11 @@ function entryCopy(
         title: t("Shared.SharedComponents.selectOrganization"),
         description: t("Shared.SharedComponents.selectExistingOrganizationDescription"),
       };
+    case "select-unlinked":
+      return {
+        title: t("Shared.SharedComponents.selectOrganization"),
+        description: t("Shared.SharedComponents.unlinkedOrganizationDescription"),
+      };
     default: {
       const exhaustive: never = state;
       throw new Error(`Unknown entry state: ${String(exhaustive)}`);
@@ -94,8 +113,9 @@ function entryCopy(
  * Entry state for a signed-in person with no organization selected for the
  * session: their organizations to pick from, their pending invitations to
  * accept, or, with neither, the step that creates their organization in SDP
- * (ADR 0012). With a `refusal`, the session's organization is one SDP refused,
- * so the same choices are offered under that explanation.
+ * (ADR 0012). With a `refusal`, the session's organization is one SDP refused
+ * or this deployment does not know, so the same choices are offered under that
+ * explanation. Organizations this deployment does not link are never offered.
  *
  * @param props.refusal - Why SDP refused the session's organization, or null.
  */
@@ -112,15 +132,24 @@ export function SelectExistingOrganizationPanel({
   });
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const { organization: activeOrganization } = useOrganization();
-  // The organization SDP refused is no way forward, so it is not offered again.
-  const memberships = (userMemberships.data ?? []).filter(
-    (membership) => refusal === null || membership.organization.id !== activeOrganization?.id
+  const loadedMemberships = userMemberships.data ?? [];
+  const { unlinkedIds, isResolved } = useUnlinkedOrganizations(
+    loadedMemberships.map((membership) => membership.organization.id)
+  );
+  // The organization SDP refused or does not know is no way forward, so it is not offered again.
+  const excludedActiveId = refusal === null ? undefined : activeOrganization?.id;
+  const memberships = loadedMemberships.filter(
+    (membership) =>
+      membership.organization.id !== excludedActiveId &&
+      !unlinkedIds.has(membership.organization.id)
   );
   const invitations = userInvitations.data ?? [];
+  // Rows wait for SDP's answers, so an organization is never offered and then withdrawn.
+  const isReady = isLoaded && isResolved;
   const copy = entryCopy(
     resolveEntryState({
       refusal,
-      isLoaded,
+      isLoaded: isReady,
       hasChoices: memberships.length > 0 || invitations.length > 0,
     }),
     t
@@ -135,20 +164,20 @@ export function SelectExistingOrganizationPanel({
 
       <div
         className="flex flex-col gap-2"
-        aria-busy={switchingTo !== null || !isLoaded || userMemberships.isFetching}
+        aria-busy={switchingTo !== null || !isReady || userMemberships.isFetching}
       >
-        {!isLoaded ? (
+        {!isReady ? (
           <div className="flex items-center gap-2 text-body text-secondary">
             <LoaderCircleIcon className="size-4 animate-spin" aria-hidden="true" />
             {t("Shared.SharedComponents.loading")}
           </div>
         ) : null}
 
-        {isLoaded && memberships.length === 0 && invitations.length === 0 ? (
+        {isReady && memberships.length === 0 && invitations.length === 0 ? (
           <CreateOrganizationForm />
         ) : null}
 
-        {invitations.map((invitation) => {
+        {(isReady ? invitations : []).map((invitation) => {
           const organization = invitation.publicOrganizationData;
           return (
             <button
@@ -196,7 +225,7 @@ export function SelectExistingOrganizationPanel({
           );
         })}
 
-        {memberships.map((membership) => {
+        {(isReady ? memberships : []).map((membership) => {
           const organization = membership.organization;
           const isSwitching = switchingTo === organization.id;
 
@@ -231,7 +260,7 @@ export function SelectExistingOrganizationPanel({
           );
         })}
 
-        {isLoaded && (userMemberships.hasNextPage || userInvitations.hasNextPage) ? (
+        {isReady && (userMemberships.hasNextPage || userInvitations.hasNextPage) ? (
           <button
             type="button"
             disabled={

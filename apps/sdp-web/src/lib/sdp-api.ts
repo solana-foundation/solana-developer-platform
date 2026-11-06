@@ -348,6 +348,30 @@ export function requestOnboardingStatus(): Promise<OnboardingStatusResponse> {
   return getRequestOnboardingStatus();
 }
 
+const organizationLinkSchema = z.object({ linked: z.boolean() });
+
+/**
+ * Whether this deployment knows the Clerk organization a session token names. One
+ * Clerk instance serves several deployments, so a person's Clerk organizations
+ * include ones another deployment created; the onboarding status answers
+ * `linked: false` for those (ADR 0012).
+ *
+ * @param token - A Clerk session token minted for the organization in question.
+ * @returns Whether SDP on this deployment links the token's organization.
+ */
+export async function readOrganizationLinked(token: string): Promise<boolean> {
+  const client = assembleSdpApiClient(
+    createSdpApiRequest(token, null, {
+      traceId: newWebTraceId(),
+      source: "dashboard.organizations.linked",
+    })
+  );
+  const status = organizationLinkSchema.parse(
+    await client.fetch<unknown>("/v1/onboarding/status", { signal: AbortSignal.timeout(10_000) })
+  );
+  return status.linked;
+}
+
 /**
  * An org-less SDP API client for a signed-in person with no active
  * organization: the only call it serves is creating their organization.

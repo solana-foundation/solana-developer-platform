@@ -1,7 +1,10 @@
+import { Badge } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { externalLinkProps } from "@/components/homepage/homepage-links";
+import { deploymentReleaseChannel } from "@/flags/release-channel";
 import { getTranslations } from "@/i18n/server";
 
 /** The SDP mark and name, as the auth pages and the public Terms of Use page head them. */
@@ -33,6 +36,9 @@ export async function AuthPageShell({
   children: ReactNode;
 }) {
   const t = await getTranslations();
+  // Beta shares sign-in with production, so its sign-in and onboarding pages say which one this is.
+  const isBeta = deploymentReleaseChannel() === "beta";
+
   return (
     <main className="flex min-h-dvh flex-col bg-surface px-6 pb-10">
       <div className="flex h-18 items-center justify-end">
@@ -46,7 +52,11 @@ export async function AuthPageShell({
       </div>
       <div className="flex flex-1 justify-center pt-20">
         <div className="flex w-full max-w-84 flex-col gap-10">
-          <SdpProductLockup productName={t("Shared.authShell.productName")} />
+          <div className="flex items-center gap-2.5">
+            <SdpProductLockup productName={t("Shared.authShell.productName")} />
+            {isBeta ? <Badge variant="info">{t("Shared.SharedComponents.betaBadge")}</Badge> : null}
+          </div>
+          {isBeta ? <Callout variant="info">{t("Shared.authShell.betaNotice")}</Callout> : null}
           {children}
         </div>
       </div>

@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as workspaceContext from "@/contexts/dashboard-workspace-context";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import * as unlinkedOrganizations from "@/lib/use-unlinked-organizations";
 import { setDashboardUrl } from "@/test/dashboard-navigation";
 import { EnglishI18n } from "@/test/i18n";
 import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
@@ -20,12 +21,14 @@ const mocks = vi.hoisted(() => {
     sdpEnvironment: Project["environment"];
     selectedProjectId: string;
     isProjectSwitching: boolean;
+    flags: { releaseChannel: string };
   } = {
     sandboxProject: null,
     productionProject: null,
     sdpEnvironment: "sandbox",
     selectedProjectId: "",
     isProjectSwitching: false,
+    flags: { releaseChannel: "stable" },
   };
   const member: { role: OrganizationRole } = { role: "admin" };
   return {
@@ -70,11 +73,19 @@ async function openSwitcher() {
   return { user, trigger };
 }
 
+function unlinkedState(unlinkedIds: ReadonlySet<string> = new Set()) {
+  vi.spyOn(unlinkedOrganizations, "useUnlinkedOrganizations").mockReturnValue({
+    unlinkedIds,
+    isResolved: true,
+  });
+}
+
 beforeEach(() => {
   mocks.workspace.sandboxProject = SANDBOX_PROJECT;
   mocks.workspace.productionProject = PRODUCTION_PROJECT;
   mocks.member.role = "admin";
   mocks.organizationLoaded = true;
+  mocks.workspace.flags = { releaseChannel: "stable" };
   mocks.selectProject.mockReset();
   mocks.switching.mockReset();
   mocks.setActive.mockReset();
@@ -83,11 +94,15 @@ beforeEach(() => {
     partial: true,
   }).mockImplementation(() => ({
     ...mocks.workspace,
+    flags: mocks.workspace.flags as ReturnType<
+      typeof workspaceContext.useDashboardWorkspace
+    >["flags"],
     dashboardAccess: resolveDashboardAccess(mocks.member.role),
     selectProject: mocks.selectProject,
     // The provider's switch: it records the request, then asks Clerk.
     switchOrganization: (organization: string) => mocks.setActive({ organization }),
   }));
+  unlinkedState();
 });
 
 afterEach(() => {
@@ -221,5 +236,59 @@ describe("WorkspaceSwitcher", () => {
     );
     expect(mocks.switching.mock.calls).toEqual([[true], [false]]);
     expect(trigger.getAttribute("aria-busy")).toBe("false");
+  });
+
+  it("does not list an organization this deployment does not link", async () => {
+    unlinkedState(new Set([mocks.globex.id]));
+    showProject(SANDBOX_PROJECT);
+    await openSwitcher();
+
+    expect(screen.getByRole("menuitem", { name: /Acme$/ })).toBeDefined();
+    expect(screen.queryByRole("menuitem", { name: /Globex$/ })).toBeNull();
+  });
+
+  it("asks about the other organizations only once the menu opens", async () => {
+    const asked = vi
+      .spyOn(unlinkedOrganizations, "useUnlinkedOrganizations")
+      .mockReturnValue({ unlinkedIds: new Set(), isResolved: true });
+    showProject(SANDBOX_PROJECT);
+    renderSwitcher();
+
+    expect(asked.mock.calls.every(([ids]) => ids.length === 0)).toBe(true);
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Acme" }));
+
+    expect(asked).toHaveBeenLastCalledWith([mocks.globex.id]);
+  });
+
+  it("lists only the active organization until the answers are in", async () => {
+    vi.spyOn(unlinkedOrganizations, "useUnlinkedOrganizations").mockReturnValue({
+      unlinkedIds: new Set(),
+      isResolved: false,
+    });
+    showProject(SANDBOX_PROJECT);
+    await openSwitcher();
+
+    expect(screen.getByRole("menuitem", { name: /Acme$/ })).toBeDefined();
+    expect(screen.queryByRole("menuitem", { name: /Globex$/ })).toBeNull();
+    expect(screen.getByText("Loading…")).toBeDefined();
+  });
+
+  it("marks the beta deployment beside the organization's name", () => {
+    mocks.workspace.flags = { releaseChannel: "beta" };
+    showProject(SANDBOX_PROJECT);
+    renderSwitcher();
+
+    const mark = within(screen.getByRole("button", { name: "Acme" })).getByText("Beta");
+    expect(mark.closest("[title]")?.getAttribute("title")).toBe(
+      "Devnet only. Beta modules may change before they reach mainnet."
+    );
+  });
+
+  it("shows no beta mark elsewhere", () => {
+    showProject(SANDBOX_PROJECT);
+    renderSwitcher();
+
+    expect(screen.queryByText("Beta")).toBeNull();
   });
 });
