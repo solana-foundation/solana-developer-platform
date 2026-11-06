@@ -1,9 +1,9 @@
+import { integrationsSkeletonLayout } from "@/app/(session)/dashboard/[projectId]/integrations/integration-feature-gates";
+import { IntegrationsSkeleton } from "@/app/(session)/dashboard/[projectId]/integrations/integrations-skeleton";
 import {
   deploymentReleaseChannel,
   isModuleInDeploymentReleaseChannel,
 } from "@/flags/release-channel";
-import { integrationsSkeletonLayout } from "./integration-feature-gates";
-import { IntegrationsSkeleton } from "./integrations-skeleton";
 
 /**
  * The hard-navigation path. Awaiting the Vercel flags here would hold the skeleton back,

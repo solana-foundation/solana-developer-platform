@@ -24,3 +24,19 @@ describe("refreshKeepingDashboardUrl", () => {
     expect(replaceState).not.toHaveBeenCalled();
   });
 });
+
+describe("replaceDashboardSearchParams", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("replaces with null state, so Next's patch records the URL as its own", () => {
+    window.history.replaceState({ __NA: true }, "", "/dashboard/issuance/tok_1");
+    const replaceState = vi.spyOn(window.history, "replaceState");
+
+    replaceDashboardSearchParams({ tab: "x" });
+
+    expect(replaceState.mock.calls).toEqual([[null, "", "/dashboard/issuance/tok_1?tab=x"]]);
+  });
+});

@@ -34,12 +34,7 @@ const {
 } = await import("./deposit-mint-guard");
 
 const env = { DATABASE_URL: "postgres://unit" } as Env;
-const earnEnabledEnv = {
-  ...env,
-  MARKETS_ENABLED: "true",
-  EARN_ENABLED: "true",
-  SDP_RELEASE_CHANNEL: "experimental",
-} as Env;
+const earnEnabledEnv: Env = { ...env, SDP_RELEASE_CHANNEL: "experimental" };
 const TOKEN_2022 = SPL_TOKEN_PROGRAMS["token-2022"];
 const PYUSD_MAINNET = "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo";
 const PAXOS = "2apBGMsS6ti9RyF5TwQTDswXBWskiJP2LD4cUEDqYJjk";
@@ -255,7 +250,7 @@ describe("guardDepositMints", () => {
 
   it.each([
     ["error", "enabled", earnEnabledEnv],
-    ["info", "disabled", { ...env, SDP_RELEASE_CHANNEL: "experimental" } as Env],
+    ["info", "disabled", { ...env, SDP_RELEASE_CHANNEL: "stable" }],
     ["error", "unreadable", env],
   ] as const)(
     "logs a skip at %s where Earn is %s when the cluster has no pool, never reading another",

@@ -655,14 +655,11 @@ browser pass on `/dashboard/markets/embedded-yield` and
 ## Rules
 
 - **Flags: declare in `src/flags/definitions.ts`, gate by segment.** `markets`
-  (`MARKETS_ENABLED`) and `earn` (`EARN_ENABLED`) are `flagDefault(..., false)`
-  declarations resolved in the dashboard layout and enforced by segment
+  and `earn` default on inside the release channel (the Vercel flag is the
+  only override) and are resolved in the dashboard layout and enforced by segment
   layouts: `markets()` in `../layout.tsx`, `earn()` in each Earn segment's (see
   "Routes"). A bespoke env helper, a `process.env` read, or a `NEXT_PUBLIC_*`
   twin is wrong.
-  These flags still control dashboard navigation and pages. The API's recovery
-  exemption preserves authenticated exit/history access without opening those
-  dashboard segments.
 - **i18n: English only.** Edit `messages/en/dashboard-earn.json` (this module's
   copy is the `DashboardMarkets.earnProgram.*` and `DashboardEarn.*` namespaces;
   `DashboardMarkets.treasury.*` in the same file belongs to Treasury Solutions

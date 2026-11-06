@@ -77,61 +77,31 @@ export function IntegrationsSkeleton({ layout }: { layout: IntegrationsSkeletonL
   );
 }
 
-/**
- * One loaded `Section`: a heading with a couple of lines under it.
- *
- * The outer height stays fixed so the placeholder reserves exactly what it did
- * before; only the inside gained shape. Flat bars stood in for sections that
- * all carry a heading, which made the skeleton read as a different page rather
- * than a dimmer one.
- */
-function SkeletonSection({ headingWidth = "w-40" }: { headingWidth?: string }) {
-  // Exactly two lines: p-6 (48) + heading (20) + mt-3 (12) + two 16px lines and
-  // an 8px gap fills the 120px box to the pixel. A third line overflowed the
-  // rounded border, which is only visible on the render, never in the markup.
-  return (
-    <div className="h-[120px] rounded-2xl border border-border-subtle bg-surface-raised p-6">
-      <div className={`h-5 rounded bg-fill-subtle ${headingWidth}`} />
-      <div className="mt-3 space-y-2">
-        <div className="h-4 w-2/3 rounded bg-fill-subtle" />
-        <div className="h-4 w-1/3 rounded bg-fill-subtle" />
-      </div>
-    </div>
-  );
-}
+const DETAIL_ROW_KEYS = ["family", "kind", "used-for", "signing", "wallets", "set-up"];
 
 export function IntegrationDetailSkeleton() {
+  // The header names the provider from the static catalog, so only the body waits: the state
+  // band, then the details rows on their 44px rules (the connections list, custody only, sits
+  // between them once it loads).
   return (
-    <div
-      className="w-full animate-pulse space-y-6 px-4 py-6 md:px-6"
-      data-loading-layout="integration-detail"
-    >
-      {/* The header is the one block that is not a section: a provider mark,
-          the name with its status beside it, and the primary action opposite.
-
-          Wraps and grows exactly as the loaded header does (`flex flex-wrap`,
-          no fixed height). A fixed 104px row could not wrap, so on a narrow
-          viewport the placeholders overflowed it and then the real header --
-          which does wrap -- landed taller, jumping the page it was supposed to
-          be holding still. `min-h` keeps the desktop height it reserves. */}
-      <div className="flex min-h-[104px] flex-wrap items-center justify-between gap-4 rounded-2xl border border-border-subtle bg-surface-raised p-6">
-        <div className="flex min-w-0 items-center gap-4">
-          <div className="h-12 w-12 shrink-0 rounded-full bg-fill-subtle" />
-          <div className="min-w-0 space-y-2">
-            <div className="h-5 w-44 max-w-full rounded bg-fill-subtle" />
-            <div className="h-4 w-28 max-w-full rounded bg-fill-subtle" />
+    <div className="w-full animate-pulse" data-loading-layout="integration-detail">
+      <div className="flex min-w-0 flex-col gap-12 pt-6 md:gap-20 md:pt-10">
+        <div className="h-16 rounded-card bg-fill-subtle" />
+        <div className="flex flex-col gap-4">
+          <div className="h-6 w-24 rounded bg-fill-subtle" />
+          <div>
+            {DETAIL_ROW_KEYS.map((key) => (
+              <div
+                key={key}
+                className="flex h-11 items-center gap-3 border-b border-border-subtle last:border-b-0"
+              >
+                <div className="h-4 w-24 shrink-0 rounded bg-fill-subtle" />
+                <div className="ml-9 h-4 w-40 rounded bg-fill-subtle" />
+              </div>
+            ))}
           </div>
         </div>
-        <div className="h-9 w-32 shrink-0 rounded-[10px] bg-fill-subtle" />
       </div>
-      {/* One shape stands in for every family, and they differ: ramps and
-          compliance settle at 4 blocks, custody at 5. Five matches custody, so
-          no family jumps more than one block. Measured by the test beside
-          this. */}
-      <SkeletonSection headingWidth="w-32" />
-      <SkeletonSection headingWidth="w-48" />
-      <SkeletonSection headingWidth="w-24" />
-      <SkeletonSection headingWidth="w-40" />
     </div>
   );
 }

@@ -367,6 +367,7 @@ function usesWorkspaceViewport(pathname: string): boolean {
     pathname === "/dashboard/wallets" ||
     isWalletSetupRoute ||
     pathname.startsWith("/dashboard/integrations/private-channels") ||
+    /^\/dashboard\/integrations\/[^/]+\/connections\/new$/.test(pathname) ||
     isWalletDetailRoute
   );
 }
@@ -481,8 +482,14 @@ export function DashboardShell({
   const hasHeaderTabs = Boolean(headerTabs || routeTabs);
   // An action page sets its way back over a left title, in the page's column, tabs or not (a
   // wallet's page has both), as the design does.
+  // A page holding work it cannot replay elsewhere locks every way off it, as a modal would.
+  const navigationLocked = activeTitleOverride?.navigationLocked === true;
   const backAction = pageConfig.backAction ? (
-    <HeaderBackAction href={pageConfig.backAction.href} label={pageConfig.backAction.label} />
+    <HeaderBackAction
+      href={pageConfig.backAction.href}
+      label={pageConfig.backAction.label}
+      locked={navigationLocked}
+    />
   ) : null;
   const shouldClipHorizontalOverflow = clipsDashboardHorizontalOverflow(pathname);
   const shouldLockViewportScroll = usesWorkspaceViewport(pathname);
@@ -642,6 +649,7 @@ export function DashboardShell({
             ].join(" ")}
           >
             <aside
+              inert={navigationLocked}
               style={{
                 width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth,
               }}
@@ -687,7 +695,10 @@ export function DashboardShell({
                   className="absolute inset-0 bg-primary/30"
                   onClick={() => setMobileSidebarOpen(false)}
                 />
-                <div className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-default bg-[var(--sdp-shell-bg)]">
+                <div
+                  inert={navigationLocked}
+                  className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-default bg-[var(--sdp-shell-bg)]"
+                >
                   <DashboardSidebarContent
                     navSections={navSections}
                     pathname={pathname}
@@ -760,6 +771,8 @@ export function DashboardShell({
                         action={headerAction}
                         above={backAction}
                         mark={activeTitleOverride ? activeTitleOverride.mark : pageConfig.titleMark}
+                        description={activeTitleOverride ? undefined : pageConfig.description}
+                        badge={activeTitleOverride?.badge}
                         utilities={
                           demoAvailable ? <PaymentsDemoToggle {...paymentsDemo} /> : undefined
                         }

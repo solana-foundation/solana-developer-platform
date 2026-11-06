@@ -8,6 +8,11 @@ import Link from "next/link";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { ACCOUNT_TABS } from "@/app/(session)/dashboard/[projectId]/account/account-tabs";
+import {
+  type IntegrationProviderIdentity,
+  integrationProviderIdentity,
+} from "@/app/(session)/dashboard/[projectId]/integrations/integration-detail";
+import { IntegrationProviderMark } from "@/app/(session)/dashboard/[projectId]/integrations/integration-provider-mark";
 import { privateChannelsInstancePath } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { SETTINGS_TABS } from "@/app/(session)/dashboard/[projectId]/settings/settings-tabs";
 import {
@@ -17,6 +22,7 @@ import {
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { DashboardCapabilities } from "@/lib/dashboard-access";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
@@ -65,6 +71,8 @@ type DashboardPageConfig = {
    * page names itself, so the header is its final height from the first frame.
    */
   titleMark?: ReactNode;
+  /** One line under a marked title saying what the page's subject is (a provider's purpose). */
+  description?: string;
 };
 
 export type DashboardHeaderActionConfig = {
@@ -216,24 +224,27 @@ type DashboardTopBarProps = {
   utilities?: ReactNode;
   /** Shown before the page's title, as a wallet's provider mark is. */
   mark?: ReactNode;
+  /** Set under a marked title. */
+  description?: string;
+  /** Set after the title on its line (a record's status). */
+  badge?: ReactNode;
 };
 
 export function HeaderBackAction({
   href,
   label,
   compactOnMobile = false,
+  locked = false,
 }: {
   href: string;
   label: string;
   compactOnMobile?: boolean;
+  /** Shown but not followable, while the page holds work that leaving would drop. */
+  locked?: boolean;
 }) {
   const projectHref = useProjectHref();
-  return (
-    <Link
-      href={projectHref(href)}
-      // The chevron's stroke sits on the column's edge (the 16px icon has 6px of air before it), 6px to its label.
-      className="inline-flex items-center rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary -ml-1.5 h-5 gap-1.5"
-    >
+  const content = (
+    <>
       <ChevronLeftIcon className="size-4 block" />
       <span
         className={[
@@ -243,6 +254,24 @@ export function HeaderBackAction({
       >
         {label}
       </span>
+    </>
+  );
+  // The chevron's stroke sits on the column's edge (the 16px icon has 6px of air before it), 6px to its label.
+  const className =
+    "inline-flex items-center rounded-[var(--button-radius-md)] -ml-1.5 h-5 gap-1.5";
+  if (locked) {
+    return (
+      <button type="button" disabled className={cn(className, "cursor-not-allowed text-tertiary")}>
+        {content}
+      </button>
+    );
+  }
+  return (
+    <Link
+      href={projectHref(href)}
+      className={cn(className, "text-secondary transition-colors hover:text-primary")}
+    >
+      {content}
     </Link>
   );
 }
@@ -267,6 +296,49 @@ function MobileNavButton({ onClick }: { onClick: () => void }) {
 }
 
 /**
+ * The page's h1 with what sits around it: a mark before it (and a description under it), or a
+ * status badge after it on its line.
+ */
+function PageTitleLine({
+  title,
+  mark,
+  description,
+  badge,
+}: {
+  title: string;
+  mark?: ReactNode;
+  description?: string;
+  badge?: ReactNode;
+}) {
+  const heading = (
+    <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
+      {title}
+    </h1>
+  );
+  if (mark) {
+    return (
+      <div className="flex min-w-0 items-center gap-4">
+        {/* A flex box, so an inline mark sits on no line box and the row is the mark's height. */}
+        <span className="flex shrink-0">{mark}</span>
+        <div className="min-w-0">
+          {heading}
+          {description ? <p className="mt-1 text-body text-secondary">{description}</p> : null}
+        </div>
+      </div>
+    );
+  }
+  if (badge) {
+    return (
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        {heading}
+        {badge}
+      </div>
+    );
+  }
+  return heading;
+}
+
+/**
  * The title block. On a phone it is the design's three rows: the navigation button, the
  * title 8px under it, then the page's action 16px under that. From md the button goes and the
  * action sits on the title's row. Any utilities (Payments' demo mode switch) sit at the far right
@@ -280,6 +352,8 @@ export function StackedDashboardTopBar({
   hideTitle = false,
   above,
   mark,
+  description,
+  badge,
 }: {
   navigation: ReactNode;
   title: string;
@@ -290,6 +364,10 @@ export function StackedDashboardTopBar({
   above?: ReactNode;
   /** Set before the title, 16px from it (a wallet's 48px provider mark). */
   mark?: ReactNode;
+  /** Set under the title beside the mark. */
+  description?: string;
+  /** Set after the title on its line. */
+  badge?: ReactNode;
 }) {
   return (
     <div
@@ -315,19 +393,7 @@ export function StackedDashboardTopBar({
               {above}
             </div>
           ) : null}
-          {mark ? (
-            <div className="flex min-w-0 items-center gap-4">
-              {/* A flex box, so an inline mark sits on no line box and the row is the mark's height. */}
-              <span className="flex shrink-0">{mark}</span>
-              <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
-                {title}
-              </h1>
-            </div>
-          ) : (
-            <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
-              {title}
-            </h1>
-          )}
+          <PageTitleLine title={title} mark={mark} description={description} badge={badge} />
         </div>
       )}
       {/* An empty state whose action repeats this one (New, Add) hides it: the shell's
@@ -457,6 +523,8 @@ export function DashboardTopBar({
   above,
   utilities,
   mark,
+  description,
+  badge,
 }: DashboardTopBarProps) {
   const utilityContent = utilities ?? null;
   const trailingContent = action ? (
@@ -480,6 +548,8 @@ export function DashboardTopBar({
         hideTitle={titleVisibility === "screen-reader-only"}
         above={above}
         mark={mark}
+        description={description}
+        badge={badge}
         action={action}
         trailingContent={utilityContent}
       />
@@ -923,38 +993,72 @@ function getIssuanceRoutePageConfig(
   };
 }
 
+const INTEGRATION_FAMILY_TITLE_KEYS = {
+  custody: "Shared.integrations.custodyTitle",
+  ramps: "Shared.integrations.rampsTitle",
+  compliance: "Shared.integrations.complianceTitle",
+} as const satisfies Record<IntegrationProviderIdentity["family"], MessageKey>;
+
 function getIntegrationsPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
-  if (/^\/dashboard\/integrations\/[^/]+$/.test(pathname)) {
+  const providerPageId = /^\/dashboard\/integrations\/([^/]+)$/.exec(pathname)?.[1];
+  if (providerPageId) {
+    const identity = integrationProviderIdentity(providerPageId);
+    if (!identity) {
+      return {
+        title: t("Shared.dashboardShell.integrations"),
+        contentWidthClass: PAGE_WIDTH,
+        backAction: {
+          href: "/dashboard/integrations",
+          label: t("Shared.integrations.backToIntegrations"),
+        },
+      };
+    }
+    // The provider names itself in the header from the static catalog, so the mark and the
+    // line under the title are there from the first frame.
     return {
-      title: t("Shared.dashboardShell.integrations"),
-      contentWidthClass: "max-w-5xl",
+      title: identity.label,
+      titleMark: <IntegrationProviderMark identity={identity} />,
+      description: t(identity.descriptionKey),
+      contentWidthClass: PAGE_WIDTH,
       backAction: {
         href: "/dashboard/integrations",
-        label: t("Shared.integrations.backToIntegrations"),
+        label: t(INTEGRATION_FAMILY_TITLE_KEYS[identity.family]),
+      },
+    };
+  }
+  // A new connection: a flow, so the way back over the title in the form's column and the
+  // footer band across the page. Checked before the connection route, which `new` also matches.
+  const newConnectionProvider = /^\/dashboard\/integrations\/([^/]+)\/connections\/new$/.exec(
+    pathname
+  )?.[1];
+  if (newConnectionProvider) {
+    const providerName = isKnownCustodyProvider(newConnectionProvider)
+      ? formatCustodyProviderName(newConnectionProvider)
+      : newConnectionProvider;
+    return {
+      title: t("DashboardCustody.newConnectionTitle", { provider: providerName }),
+      contentWidthClass: "max-w-none",
+      headerWidthClass: "max-w-flow",
+      backAction: {
+        href: `/dashboard/integrations/${newConnectionProvider}`,
+        label: providerName,
       },
     };
   }
   // One custody connection. Checked before the catch-all below, which would
   // otherwise title this "Integrations" and send Back to the catalogue rather
   // than to the provider that owns the connection.
-  const custodyConnection = /^\/dashboard\/integrations\/([^/]+)\/connections\/[^/]+$/.exec(
-    pathname
-  );
-  if (custodyConnection) {
-    const provider = custodyConnection[1] ?? "";
+  const provider = /^\/dashboard\/integrations\/([^/]+)\/connections\/[^/]+$/.exec(pathname)?.[1];
+  if (provider) {
     return {
       title: t("DashboardCustody.connectionPageTitle"),
-      contentWidthClass: "max-w-5xl",
+      contentWidthClass: PAGE_WIDTH,
       backAction: {
         href: `/dashboard/integrations/${provider}`,
-        label: t("DashboardCustody.backToProvider", {
-          provider: isKnownCustodyProvider(provider)
-            ? formatCustodyProviderName(provider)
-            : provider,
-        }),
+        label: isKnownCustodyProvider(provider) ? formatCustodyProviderName(provider) : provider,
       },
     };
   }

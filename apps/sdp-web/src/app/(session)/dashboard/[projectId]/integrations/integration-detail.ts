@@ -8,7 +8,14 @@ import {
 import type { CustodyProviderAvailability } from "@/app/(session)/dashboard/[projectId]/wallets/provider-display-status";
 import type { MessageKey } from "@/i18n/messages";
 import type { IntegrationFamily } from "./integrations-filter";
-import type { IntegrationEntry, IntegrationStatus } from "./integrations-status";
+import {
+  COMPLIANCE_DESCRIPTION_KEYS,
+  COMPLIANCE_PROVIDER_LABELS,
+  type IntegrationEntry,
+  type IntegrationStatus,
+  RAMP_DESCRIPTION_KEYS,
+  RAMP_PROVIDER_LABELS,
+} from "./integrations-status";
 
 /**
  * Everything a provider detail page can say, resolved from the same inputs the
@@ -33,6 +40,47 @@ const KNOWN_NON_CUSTODY_PROVIDERS: ReadonlySet<string> = new Set<string>([
   ...RAMP_PROVIDERS,
   ...COMPLIANCE_PROVIDERS,
 ]);
+
+/** What names a provider wherever it appears, whatever the project's state. */
+export type IntegrationProviderIdentity = { label: string; descriptionKey: MessageKey } & (
+  | { family: "custody"; provider: CustodyProviderCatalogEntry["id"] }
+  | { family: "ramps"; provider: RampProviderId }
+  | { family: "compliance"; provider: ComplianceProviderId }
+);
+
+const isRampProvider = (id: string): id is RampProviderId =>
+  Object.hasOwn(RAMP_PROVIDER_LABELS, id);
+const isComplianceProvider = (id: string): id is ComplianceProviderId =>
+  Object.hasOwn(COMPLIANCE_PROVIDER_LABELS, id);
+
+export function integrationProviderIdentity(id: string): IntegrationProviderIdentity | null {
+  const custody = CUSTODY_PROVIDER_CATALOG.find((entry) => entry.id === id);
+  if (custody) {
+    return {
+      family: "custody",
+      provider: custody.id,
+      label: custody.label,
+      descriptionKey: custody.descriptionKey,
+    };
+  }
+  if (isRampProvider(id)) {
+    return {
+      family: "ramps",
+      provider: id,
+      label: RAMP_PROVIDER_LABELS[id],
+      descriptionKey: RAMP_DESCRIPTION_KEYS[id],
+    };
+  }
+  if (isComplianceProvider(id)) {
+    return {
+      family: "compliance",
+      provider: id,
+      label: COMPLIANCE_PROVIDER_LABELS[id],
+      descriptionKey: COMPLIANCE_DESCRIPTION_KEYS[id],
+    };
+  }
+  return null;
+}
 
 export function isKnownIntegrationProvider(id: string): boolean {
   return (

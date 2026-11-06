@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import { type Action, actionsInModule, grantsCoverAction } from "@sdp/types/actions";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { app } from "@/index";
 import { earnRoutes } from "@/routes/earn";
-import { isEarnRecoveryRoute } from "@/routes/earn/exits";
 import { type EarnAuthzTenant, seedEarnApiKey, seedEarnAuthzTenant } from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -182,15 +181,7 @@ let tenant: EarnAuthzTenant;
 
 const rawKeyBySet = new Map<string, string>();
 
-let originalMarketsEnabled: string | undefined;
-
-let originalEarnEnabled: string | undefined;
-
 beforeEach(async () => {
-  originalMarketsEnabled = env.MARKETS_ENABLED;
-  originalEarnEnabled = env.EARN_ENABLED;
-  env.MARKETS_ENABLED = "true";
-  env.EARN_ENABLED = "true";
   await seedTestDatabase(env);
   await clearKVStores(env);
   tenant = await seedEarnAuthzTenant(env, "matrix", { environment: "sandbox" });
@@ -203,11 +194,6 @@ beforeEach(async () => {
     });
     rawKeyBySet.set(setId, key.raw);
   }
-});
-
-afterEach(() => {
-  env.MARKETS_ENABLED = originalMarketsEnabled;
-  env.EARN_ENABLED = originalEarnEnabled;
 });
 
 describe("earn route inventory", () => {
@@ -277,36 +263,4 @@ describe("Clerk callers are membership-checked, per route (EARN-027)", () => {
       ).not.toContain("not accessible");
     }
   });
-});
-
-describe("feature gate", () => {
-  it.each(["EARN_ENABLED", "MARKETS_ENABLED"] as const)(
-    "%s off gates entries while preserving authenticated recovery",
-    async (flag) => {
-      env[flag] = "false";
-      const raw = rawKeyBySet.get(grantSetId(EARN_ACTIONS));
-      assert(raw, "Expected seeded API key");
-      for (const route of ROUTES) {
-        const res = await requestAsKey(route, raw, {});
-        const { method, path } = requestPath(route);
-        if (!isEarnRecoveryRoute(method, path)) {
-          expect(res.status, route).toBe(403);
-          continue;
-        }
-        if (res.status === 403) {
-          const body = errorBodySchema.parse(await res.json());
-          expect(body.error.message, route).not.toContain("Earn is not enabled");
-        }
-        const anonymous = await app.request(
-          path,
-          {
-            method,
-            headers: { "x-forwarded-for": uniqueClientIp() },
-          },
-          env
-        );
-        expect(anonymous.status, route).toBe(401);
-      }
-    }
-  );
 });

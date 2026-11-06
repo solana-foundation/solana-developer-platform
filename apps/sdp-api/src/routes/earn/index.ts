@@ -1,7 +1,6 @@
 import { type Context, Hono, type Next } from "hono";
 import { presentsApiKey } from "@/lib/api-key-format";
 import { AppError } from "@/lib/errors";
-import { isEarnEnabled } from "@/lib/feature-flags";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
@@ -9,7 +8,7 @@ import { requestGate } from "@/middleware/request-gate";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
-import { isEarnExitOrRead, isEarnRecoveryRoute } from "./exits";
+import { isEarnExitOrRead } from "./exits";
 import {
   createEarnExternalWalletDeposit,
   createEarnExternalWalletDepositTransaction,
@@ -98,17 +97,6 @@ import {
 
 export const earnRoutes = new Hono<{ Bindings: Env }>();
 const earn = new Hono<{ Bindings: Env }>();
-
-// Disable new commitments without removing authenticated recovery for money
-// already deployed. isEarnEnabled owns the parent MARKETS_ENABLED hierarchy.
-async function requireEarnFeature(c: Context<{ Bindings: Env }>, next: Next) {
-  if (!isEarnEnabled(c.env) && !isEarnRecoveryRoute(c.req.method, c.req.path)) {
-    throw new AppError("FORBIDDEN", "Earn is not enabled for this environment");
-  }
-  await next();
-}
-
-earnRoutes.use("*", requireEarnFeature);
 
 const earnProjectContextOptions = {
   allowUnentitledProduction: (c: Context<{ Bindings: Env }>) =>

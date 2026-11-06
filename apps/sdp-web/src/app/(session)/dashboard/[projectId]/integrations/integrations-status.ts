@@ -33,24 +33,24 @@ export interface IntegrationEntry<TProvider extends string = string> {
   descriptionKey?: MessageKey;
 }
 
-const RAMP_DESCRIPTION_KEYS: Record<RampProviderId, MessageKey> = {
+export const RAMP_DESCRIPTION_KEYS: Record<RampProviderId, MessageKey> = {
   moonpay: "Shared.integrations.rampMoonpayDescription",
   stripe: "Shared.integrations.rampStripeDescription",
 };
 
-const COMPLIANCE_DESCRIPTION_KEYS: Record<ComplianceProviderId, MessageKey> = {
+export const COMPLIANCE_DESCRIPTION_KEYS: Record<ComplianceProviderId, MessageKey> = {
   range: "Shared.integrations.complianceRangeDescription",
   elliptic: "Shared.integrations.complianceEllipticDescription",
   trm: "Shared.integrations.complianceTrmDescription",
   chainalysis: "Shared.integrations.complianceChainalysisDescription",
 };
 
-const RAMP_PROVIDER_LABELS: Record<RampProviderId, string> = {
+export const RAMP_PROVIDER_LABELS: Record<RampProviderId, string> = {
   moonpay: "MoonPay",
   stripe: "Stripe",
 };
 
-const COMPLIANCE_PROVIDER_LABELS: Record<ComplianceProviderId, string> = {
+export const COMPLIANCE_PROVIDER_LABELS: Record<ComplianceProviderId, string> = {
   range: "Range",
   elliptic: "Elliptic",
   trm: "TRM Labs",

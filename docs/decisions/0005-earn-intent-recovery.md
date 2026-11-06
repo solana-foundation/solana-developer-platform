@@ -55,11 +55,10 @@ at these boundaries can duplicate transfers, strand tracking, or misstate balanc
   the account closes. Null legacy history remains protected unless the row is
   still creating; ambiguous older requests need operator recovery.
   Provider-proven requests never become failed by absence.
-- Earn and Markets feature flags stop new commitments and catalogue discovery.
-  Authenticated exit/history routes stay available. Cancellation releases an
-  obligation and is an exit requiring `earn.manage`, including after production
-  entitlement is removed or starts are disabled. Organization suspension still
-  blocks authentication; wallet, credential and tenant checks remain required.
+- Cancellation releases an obligation and is an exit requiring `earn.manage`,
+  including after production entitlement is removed or starts are disabled.
+  Organization suspension still blocks authentication; wallet, credential and
+  tenant checks remain required.
 - Hastra's fresh temporary-account rent refunds the current exit's payer.
   Historical share-account funding cannot redirect newly paid rent.
 - A processed or confirmed RPC error cannot fail a requested/submitted movement.

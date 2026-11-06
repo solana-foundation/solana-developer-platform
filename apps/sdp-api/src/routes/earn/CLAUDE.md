@@ -1588,14 +1588,10 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
 
 ## Gate asymmetry — DO NOT BREAK (ADR 0002 exit-safety)
 
-- **Earn/Markets disabled**: new commitments and catalogue reads are refused.
-  Authenticated existing-position reads, exit previews/builds/submits and
-  cancellations remain available. `isEarnRecoveryRoute` is fail-closed for
-  new routes. Key grants, tenant/project ownership and wallet scope still apply.
-  All cancellation routes require `earn.manage`; the movement is an exit,
-  including after production access is removed or starts are disabled. An
-  organization suspension still denies authentication under the organization
-  lifecycle policy; this route exception does not override that control.
+- **Cancellation**: all routes require `earn.manage`; the movement is an exit,
+  including after production access is removed or starts are disabled.
+  Organization suspension still denies authentication. Credential grants,
+  project ownership and wallet scope remain enforced.
 - **Money-in** (`POST /programs`, `PUT /programs/:programId`):
   `assertProviderAvailable` (entitlement + enablement + credentials).
 - **New positions only** (`POST /programs`, vault deposits): surfacing, the
@@ -1672,10 +1668,9 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   fails an Earn route or service that imports `resolveSdpEnvironment` or
   `CLUSTER_BY_SDP_ENVIRONMENT`. A production-project dashboard session
   therefore drives provider production.
-- `EARN_ENABLED` gates the whole family (index.ts), and Earn is a sub-module of
-  Markets — `isEarnEnabled` also requires the parent `MARKETS_ENABLED`, so
-  clearing that one flag darkens every Markets API surface. Both default off.
-  Never re-check Markets in a handler; the hierarchy lives in `isEarnEnabled`.
+- The release channel gates the whole family: `requireModule("earn")` in
+  `app.ts`. Background work outside a request asks `isEarnEnabled`, the same
+  check. Never add a second gate in a handler.
 - Zod schemas in schemas.ts; parse/paginate/envelope helpers in
   handlers/shared.ts — don't hand-roll either.
 - Capability gating: `supportsPortfolioWallets(client)` → NOT_IMPLEMENTED for

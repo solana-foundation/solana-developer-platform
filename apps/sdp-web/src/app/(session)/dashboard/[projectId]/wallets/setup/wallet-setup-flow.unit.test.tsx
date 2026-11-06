@@ -167,8 +167,8 @@ const ownAnswer = () => radio(/^Your own Privy account/);
 const accountList = () => document.querySelector("[data-wallet-account-list]");
 const createdWith = () => screen.getByRole("region", { name: "Created with" });
 const fillPrivyCredentials = () => {
-  fireEvent.change(screen.getByLabelText("Privy app ID"), { target: { value: "app_1" } });
-  fireEvent.change(screen.getByLabelText("Privy app secret"), { target: { value: "secret_1" } });
+  fireEvent.change(screen.getByLabelText("App ID"), { target: { value: "app_1" } });
+  fireEvent.change(screen.getByLabelText("App secret"), { target: { value: "secret_1" } });
 };
 
 /** The form an action received on its first call. */
@@ -292,7 +292,7 @@ describe("one screen", () => {
       environment: "production",
       initialProvider: "privy",
     });
-    fireEvent.input(screen.getByLabelText("Privy app ID"), { target: { value: "app_1" } });
+    fireEvent.input(screen.getByLabelText("App ID"), { target: { value: "app_1" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByRole("dialog", { name: "Leave without creating the wallet?" })).toBeTruthy();
@@ -548,7 +548,7 @@ describe("whose account", () => {
       credentialForm.compareDocumentPosition(detailsTitle) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
     // The flow's own label stands in for the form's, and submits with it.
-    expect(screen.queryByLabelText("Initial wallet label")).toBeNull();
+    expect(screen.queryByLabelText("First wallet name")).toBeNull();
     expect(labelInput().value).toBe("Ops");
     expect(new FormData(credentialForm).get("walletLabel")).toBe("Ops");
     expect(screen.queryByRole("button", { name: /^Create wallet/ })).toBeNull();

@@ -12,7 +12,11 @@ import {
 } from "@/lib/provider-availability";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
-import { isKnownIntegrationProvider, resolveIntegrationDetail } from "./integration-detail";
+import {
+  integrationProviderIdentity,
+  isKnownIntegrationProvider,
+  resolveIntegrationDetail,
+} from "./integration-detail";
 import {
   resolveComplianceIntegrations,
   resolveCustodyIntegrations,
@@ -90,4 +94,36 @@ describe("integration detail", () => {
     expect(isKnownIntegrationProvider("not-a-provider")).toBe(false);
     expect(resolveIntegrationDetail({ provider: "nope", ...INPUTS })).toBeNull();
   });
+});
+
+describe("integrationProviderIdentity", () => {
+  it.each([
+    {
+      family: "custody",
+      provider: "privy",
+      label: "Privy",
+      descriptionKey: "DashboardCustody.providerPrivyDescription",
+    },
+    {
+      family: "ramps",
+      provider: "moonpay",
+      label: "MoonPay",
+      descriptionKey: "Shared.integrations.rampMoonpayDescription",
+    },
+    {
+      family: "compliance",
+      provider: "range",
+      label: "Range",
+      descriptionKey: "Shared.integrations.complianceRangeDescription",
+    },
+  ])("names $provider from the $family catalog", (identity) => {
+    expect(integrationProviderIdentity(identity.provider)).toEqual(identity);
+  });
+
+  it.each(["not-a-provider", "toString", "hasOwnProperty"])(
+    "names no provider for %s",
+    (provider) => {
+      expect(integrationProviderIdentity(provider)).toBeNull();
+    }
+  );
 });
