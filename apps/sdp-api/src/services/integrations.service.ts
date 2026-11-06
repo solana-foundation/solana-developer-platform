@@ -12,10 +12,10 @@ import type {
   ProjectProviderAvailability,
   ProjectProviderAvailabilityEntry,
 } from "@sdp/types/provider-access";
-import type { SdpModule } from "@sdp/types/release-channels";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { asTransactionalClient, type DatabaseClient, type DatabaseExecutor } from "@/db/client";
 import { createPostgresPrivateChannelInstanceRepository } from "@/db/repositories/private-channel-instance.repository.postgres";
+import { isPrivateChannelsEnabled } from "@/lib/feature-flags";
 import {
   getProjectProviderAvailability,
   type ProjectProviderScope,
@@ -33,12 +33,6 @@ interface ProjectIntegrationFacts {
   privateChannelsActive: boolean | null;
 }
 
-/** What the deployment's release channel runs, as the request sees it. */
-export interface IntegrationReleaseChannel {
-  isProviderInChannel: (entry: ProjectProviderAvailabilityEntry) => boolean;
-  isModuleInChannel: (module: SdpModule) => boolean;
-}
-
 /**
  * A project's integrations, decided from one consistent snapshot of its
  * provider availability and setup records, so a setup that changes records
@@ -47,7 +41,7 @@ export interface IntegrationReleaseChannel {
  * @param env - Process environment naming the release channel and provider credentials.
  * @param db - Database client; the read runs in its own read-only transaction.
  * @param scope - The project the read is for.
- * @param channel - What the deployment's release channel runs.
+ * @param isProviderInChannel - Whether the deployment's release channel runs an availability entry's provider.
  * @returns The project's integrations by family; absent families have no usable provider.
  * @throws 404 when the project is not an active project of the organization.
  */
@@ -55,14 +49,14 @@ export async function getProjectIntegrations(
   env: Env,
   db: DatabaseClient,
   scope: ProjectProviderScope,
-  channel: IntegrationReleaseChannel
+  isProviderInChannel: (entry: ProjectProviderAvailabilityEntry) => boolean
 ): Promise<ProjectIntegrations> {
-  const privateChannelsInChannel = channel.isModuleInChannel("private_channels");
+  const privateChannelsEnabled = isPrivateChannelsEnabled(env);
   const facts = await db.transaction(async (tx): Promise<ProjectIntegrationFacts> => {
     await tx.queryMany("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
     const availability = await getProjectProviderAvailability(env, tx, scope);
     const activeCustodyModes = await loadActiveCustodyModes(tx, scope);
-    const privateChannelsActive = privateChannelsInChannel
+    const privateChannelsActive = privateChannelsEnabled
       ? (await createPostgresPrivateChannelInstanceRepository(
           asTransactionalClient(tx)
         ).getActiveByProject(scope)) !== null
@@ -71,13 +65,13 @@ export async function getProjectIntegrations(
   });
 
   const families: IntegrationFamily[] = [];
-  const custody = custodyIntegrations(facts, channel.isProviderInChannel);
+  const custody = custodyIntegrations(facts, isProviderInChannel);
   if (custody.length > 0) families.push({ family: "custody", integrations: custody });
   const rpc = rpcIntegrations(facts);
   if (rpc.length > 0) families.push({ family: "rpc", integrations: rpc });
-  const ramps = rampIntegrations(facts, channel.isProviderInChannel);
+  const ramps = rampIntegrations(facts, isProviderInChannel);
   if (ramps.length > 0) families.push({ family: "ramps", integrations: ramps });
-  const compliance = complianceIntegrations(facts, channel.isProviderInChannel);
+  const compliance = complianceIntegrations(facts, isProviderInChannel);
   if (compliance.length > 0) families.push({ family: "compliance", integrations: compliance });
   if (facts.privateChannelsActive !== null) {
     families.push({
