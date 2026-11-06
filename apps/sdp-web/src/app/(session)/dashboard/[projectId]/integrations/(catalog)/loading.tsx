@@ -1,5 +1,5 @@
-import { integrationsSkeletonLayout } from "@/app/(session)/dashboard/[projectId]/integrations/integration-feature-gates";
 import { IntegrationsSkeleton } from "@/app/(session)/dashboard/[projectId]/integrations/integrations-skeleton";
+import { integrationsSkeletonSections } from "@/app/(session)/dashboard/[projectId]/integrations/integrations-skeleton-sections";
 import {
   deploymentReleaseChannel,
   isModuleInDeploymentReleaseChannel,
@@ -11,7 +11,7 @@ import {
  * channel can only hide a family it draws.
  */
 export default function IntegrationsLoading() {
-  const layout = integrationsSkeletonLayout({
+  const sections = integrationsSkeletonSections({
     releaseChannel: deploymentReleaseChannel(),
     custody: isModuleInDeploymentReleaseChannel("custody"),
     ramps: isModuleInDeploymentReleaseChannel("ramps"),
@@ -20,7 +20,7 @@ export default function IntegrationsLoading() {
   });
   return (
     <div className="contents" data-loading-layout="integrations">
-      <IntegrationsSkeleton layout={layout} />
+      <IntegrationsSkeleton sections={sections} />
     </div>
   );
 }

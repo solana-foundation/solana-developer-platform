@@ -1,8 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
-import { type IntegrationFamily, projectIntegrationsSchema } from "@sdp/types/integrations";
+import type { IntegrationFamily } from "@sdp/types/integrations";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { redirect } from "next/navigation";
 import { IntegrationsCatalog } from "@/app/(session)/dashboard/[projectId]/integrations/integrations-catalog";
+import { fetchProjectIntegrations } from "@/app/(session)/dashboard/[projectId]/integrations/project-integrations.data";
 import type { OnboardingStatusResponse } from "@/app/(session)/dashboard/[projectId]/onboarding-status";
 import { privateChannels } from "@/flags";
 import { getOfferedRampProviders } from "@/flags/ramps";
@@ -29,9 +30,7 @@ export default async function IntegrationsPage() {
     redirect("/dashboard");
   }
   const [integrations, privateChannelsEnabled, offeredRampProviders] = await Promise.all([
-    trace.step("fetch_integrations", async () =>
-      projectIntegrationsSchema.parse(await projectClient.fetch<unknown>("/v1/integrations"))
-    ),
+    trace.step("fetch_integrations", () => fetchProjectIntegrations(projectClient)),
     privateChannels(),
     getOfferedRampProviders(),
   ]);

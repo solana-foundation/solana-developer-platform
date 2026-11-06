@@ -10,22 +10,18 @@ import Link from "next/link";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { ACCOUNT_TABS } from "@/app/(session)/dashboard/[projectId]/account/account-tabs";
-import {
-  type IntegrationProviderIdentity,
-  integrationProviderIdentity,
-} from "@/app/(session)/dashboard/[projectId]/integrations/integration-detail";
-import { IntegrationProviderMark } from "@/app/(session)/dashboard/[projectId]/integrations/integration-provider-mark";
 import { INTEGRATION_FAMILY_COPY_KEYS } from "@/app/(session)/dashboard/[projectId]/integrations/integration-sections";
 import { privateChannelsInstancePath } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { SETTINGS_TABS } from "@/app/(session)/dashboard/[projectId]/settings/settings-tabs";
 import {
   formatCustodyProviderName,
+  getCustodyProviderEntry,
   isKnownCustodyProvider,
 } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
-import type { MessageKey } from "@/i18n/messages";
+import { ProviderBrandMark } from "@/components/provider-brand-mark";
 import { useTranslations } from "@/i18n/provider";
 import type { DashboardCapabilities } from "@/lib/dashboard-access";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
@@ -38,6 +34,7 @@ import {
   PAYMENT_REQUESTS_HREF,
   PAYMENT_TRANSACTIONS_HREF,
 } from "@/lib/payments-routes";
+import { CUSTODY_BRAND_MARKS } from "@/lib/provider-brand-marks";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
 type DashboardPageConfig = {
@@ -966,12 +963,6 @@ function getIssuanceRoutePageConfig(
   };
 }
 
-const INTEGRATION_FAMILY_TITLE_KEYS = {
-  custody: "Shared.integrations.custodyTitle",
-  ramps: "Shared.integrations.rampsTitle",
-  compliance: "Shared.integrations.complianceTitle",
-} as const satisfies Record<IntegrationProviderIdentity["family"], MessageKey>;
-
 function getIntegrationsPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
@@ -979,8 +970,7 @@ function getIntegrationsPageConfig(
 ): DashboardPageConfig | null {
   const providerPageId = /^\/dashboard\/integrations\/([^/]+)$/.exec(pathname)?.[1];
   if (providerPageId) {
-    const identity = integrationProviderIdentity(providerPageId);
-    if (!identity) {
+    if (!isKnownCustodyProvider(providerPageId)) {
       return {
         title: t("Shared.dashboardShell.integrations"),
         contentWidthClass: PAGE_WIDTH,
@@ -992,14 +982,15 @@ function getIntegrationsPageConfig(
     }
     // The provider names itself in the header from the static catalog, so the mark and the
     // line under the title are there from the first frame.
+    const entry = getCustodyProviderEntry(providerPageId);
     return {
-      title: identity.label,
-      titleMark: <IntegrationProviderMark identity={identity} />,
-      description: t(identity.descriptionKey),
+      title: entry.label,
+      titleMark: <ProviderBrandMark size="page" mark={CUSTODY_BRAND_MARKS[providerPageId]} />,
+      description: t(entry.descriptionKey),
       contentWidthClass: PAGE_WIDTH,
       backAction: {
         href: "/dashboard/integrations",
-        label: t(INTEGRATION_FAMILY_TITLE_KEYS[identity.family]),
+        label: t("Shared.integrations.custodyTitle"),
       },
     };
   }

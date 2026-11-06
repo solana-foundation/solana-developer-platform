@@ -58,6 +58,7 @@ function walletsPart(
   return t("DashboardCustody.connectionNoWallets");
 }
 
+const COLUMN_LABEL = "text-xs leading-4 font-normal text-tertiary";
 /**
  * The line under a connection's name. An active connection reads as what it holds, and says so
  * when it cannot sign; any other state leads with the state, a dot in its tone before it.
@@ -74,7 +75,7 @@ function ConnectionSummary({
   const t = useTranslations();
   if (connection.status === "active") {
     return (
-      <span className="block truncate text-body text-secondary">
+      <span className="block truncate text-xs text-secondary">
         {walletsPart(connection, wallets, walletsUnavailable, t)}
         {connection.isRuntimeExecutionAllowed ? null : (
           <>
@@ -100,7 +101,7 @@ function ConnectionSummary({
   return (
     <StatusText
       tone={LIFECYCLE_TONES[connection.status]}
-      className="flex min-w-0 items-center gap-2 text-body"
+      className="flex min-w-0 items-center gap-2 text-xs"
     >
       <span
         aria-hidden
@@ -175,9 +176,11 @@ export function ConnectionsList({
       <Table className="-mx-3 min-w-0 rounded-none border-0 [&_table]:table-fixed">
         <TableHeader>
           <TableRow>
-            <TableHead>{t("DashboardCustody.connectionColumn")}</TableHead>
+            <TableHead>
+              <span className={COLUMN_LABEL}>{t("DashboardCustody.connectionColumn")}</span>
+            </TableHead>
             <TableHead className="hidden w-32 text-right sm:table-cell">
-              {t("DashboardCustody.created")}
+              <span className={COLUMN_LABEL}>{t("DashboardCustody.created")}</span>
             </TableHead>
             <TableHead className="w-10">
               <span className="sr-only">{t("DashboardCustody.openConnection")}</span>
@@ -196,12 +199,12 @@ export function ConnectionsList({
                 <span className="flex min-w-0 items-baseline gap-2">
                   <Link
                     href={connectionHref(connection.id)}
-                    className="truncate text-field font-medium text-primary hover:underline"
+                    className="truncate text-body font-medium text-primary hover:underline"
                     data-connection-link
                   >
                     {connection.label}
                   </Link>
-                  <span className="shrink-0 font-mono text-meta text-tertiary">
+                  <span className="shrink-0 font-mono text-xs text-secondary">
                     {`····${connection.id.slice(-4)}`}
                   </span>
                 </span>
@@ -213,7 +216,7 @@ export function ConnectionsList({
                   />
                 </span>
               </TableCell>
-              <TableCell className="hidden align-top py-3 text-right text-secondary tabular-nums sm:table-cell">
+              <TableCell className="hidden align-top py-3 text-right text-xs leading-5 text-secondary tabular-nums sm:table-cell">
                 {formatCreated(connection.createdAt, locale, timeZone)}
               </TableCell>
               <TableCell className="align-top py-3 text-right text-tertiary">

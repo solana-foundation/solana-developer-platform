@@ -22,16 +22,13 @@ import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   INTEGRATION_FAMILY_COPY_KEYS,
+  INTEGRATION_ROW_COLUMNS,
   type IntegrationRow,
   type IntegrationSection,
   integrationSections,
 } from "./integration-sections";
 
 type Translate = ReturnType<typeof useTranslations>;
-
-// Mark, name, category, state, chevron: one grid so every row's columns line up.
-const ROW_COLUMNS =
-  "grid grid-cols-[2.75rem_minmax(0,1fr)_auto_1rem] items-center gap-x-3 md:grid-cols-[2.75rem_minmax(0,1fr)_11rem_10rem_1rem]";
 
 function isProjectIntegrationFamily(value: string): value is ProjectIntegrationFamily {
   return Object.hasOwn(INTEGRATION_FAMILY_COPY_KEYS, value);
@@ -62,7 +59,7 @@ function IntegrationRowItem({ row, t }: { row: IntegrationRow; t: Translate }) {
   return (
     <li
       className={cn(
-        ROW_COLUMNS,
+        INTEGRATION_ROW_COLUMNS,
         "group relative isolate py-3",
         row.href !== null &&
           "before:absolute before:inset-y-0 before:-inset-x-3 before:-z-10 before:rounded-lg before:bg-fill-subtle before:opacity-0 before:transition-opacity before:content-[''] hover:before:opacity-100 has-[:focus-visible]:before:opacity-100 has-[:focus-visible]:before:ring-2 has-[:focus-visible]:before:ring-primary motion-reduce:before:transition-none"
@@ -120,7 +117,7 @@ function IntegrationSectionBlock({ section, t }: { section: IntegrationSection; 
     <section className="space-y-2" data-integration-section={section.family}>
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-medium tracking-tight text-primary">{section.title}</h2>
+          <h2 className="text-subheading font-medium text-primary">{section.title}</h2>
           <InfoHint text={section.description} />
         </div>
         <SectionSummary section={section} t={t} />

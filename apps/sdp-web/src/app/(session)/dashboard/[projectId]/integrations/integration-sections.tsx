@@ -1,10 +1,12 @@
 import { CUSTODY_PROVIDER_CATEGORY_DETAILS } from "@sdp/types/custody";
 import {
+  type ComplianceIntegration,
   type IntegrationFamily,
   type IntegrationState,
   isConfigurableIntegrationStatus,
   type ProjectIntegrationFamily,
   type ProjectIntegrations,
+  type RampIntegration,
   type RpcIntegration,
 } from "@sdp/types/integrations";
 import { VenetianMaskIcon } from "lucide-react";
@@ -21,12 +23,6 @@ import {
   RAMP_BRAND_MARKS,
   RPC_BRAND_MARKS,
 } from "@/lib/provider-brand-marks";
-import {
-  COMPLIANCE_DESCRIPTION_KEYS,
-  COMPLIANCE_PROVIDER_LABELS,
-  RAMP_DESCRIPTION_KEYS,
-  RAMP_PROVIDER_LABELS,
-} from "./integrations-status";
 
 type Translate = ReturnType<typeof useTranslations>;
 
@@ -80,6 +76,34 @@ const RPC_PROVIDER_LABELS = {
   triton: "Triton",
   validationcloud: "Validation Cloud",
 } as const satisfies Record<RpcIntegration["provider"], string>;
+
+// Mark, name, category, state, chevron: one grid so every row's columns line up.
+export const INTEGRATION_ROW_COLUMNS =
+  "grid grid-cols-[2.75rem_minmax(0,1fr)_auto_1rem] items-center gap-x-3 md:grid-cols-[2.75rem_minmax(0,1fr)_11rem_10rem_1rem]";
+
+const RAMP_PROVIDER_LABELS = {
+  moonpay: "MoonPay",
+  stripe: "Stripe",
+} as const satisfies Record<RampIntegration["provider"], string>;
+
+const RAMP_DESCRIPTION_KEYS = {
+  moonpay: "Shared.integrations.rampMoonpayDescription",
+  stripe: "Shared.integrations.rampStripeDescription",
+} as const satisfies Record<RampIntegration["provider"], MessageKey>;
+
+const COMPLIANCE_PROVIDER_LABELS = {
+  range: "Range",
+  elliptic: "Elliptic",
+  trm: "TRM Labs",
+  chainalysis: "Chainalysis",
+} as const satisfies Record<ComplianceIntegration["provider"], string>;
+
+const COMPLIANCE_DESCRIPTION_KEYS = {
+  range: "Shared.integrations.complianceRangeDescription",
+  elliptic: "Shared.integrations.complianceEllipticDescription",
+  trm: "Shared.integrations.complianceTrmDescription",
+  chainalysis: "Shared.integrations.complianceChainalysisDescription",
+} as const satisfies Record<ComplianceIntegration["provider"], MessageKey>;
 
 function hrefWhenConfigurable(state: IntegrationState, href: string): string | null {
   return isConfigurableIntegrationStatus(state.status) ? href : null;
