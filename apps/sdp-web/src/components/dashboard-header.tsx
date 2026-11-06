@@ -885,7 +885,7 @@ function getAccessControlPageConfig(
   if (pathname === "/dashboard/api-keys") {
     return {
       title: t("Shared.dashboardShell.apiKeys"),
-      contentWidthClass: "max-w-none",
+      contentWidthClass: PAGE_WIDTH,
     };
   }
   if (pathname === "/dashboard/api-keys/new") {
