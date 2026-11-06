@@ -17,7 +17,15 @@ import {
 } from "@sdp/custody/signing";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { CustodyMode, CustodyProvider } from "@sdp/types/custody";
-import type { Address, TransactionSigner } from "@solana/kit";
+import {
+  type Address,
+  isMessageModifyingSigner,
+  isMessagePartialSigner,
+  isTransactionModifyingSigner,
+  isTransactionPartialSigner,
+  isTransactionSendingSigner,
+  type TransactionSigner,
+} from "@solana/kit";
 import {
   instrumentVendorPort,
   logVendorCallFailure,
@@ -229,18 +237,6 @@ export async function createAdapterFromEncryptedConfig(
   );
 }
 
-const SIGNER_OPERATIONS = [
-  "signTransactions",
-  "signMessages",
-  "modifyAndSignTransactions",
-  "modifyAndSignMessages",
-  "signAndSendTransactions",
-] as const;
-
-type SignerOperations = Partial<
-  Record<(typeof SIGNER_OPERATIONS)[number], (...args: unknown[]) => Promise<unknown>>
->;
-
 // Adapters cache one signer per wallet and kit rejects two signer objects for
 // one address, so each signer keeps exactly one instrumented twin.
 const instrumentedSigners = new WeakMap<TransactionSigner, TransactionSigner>();
@@ -277,31 +273,75 @@ function instrumentSigner(
     return existing;
   }
   const details: VendorCallDetails = { boundary: "adapter_operation", ...context };
-  // SAFETY: every kit signer kind exposes its signing calls under these names
-  // as async methods; a kind that lacks one leaves it undefined.
-  const operations = signer as SignerOperations;
   const instrumented: TransactionSigner = Object.create(signer);
-  for (const operation of SIGNER_OPERATIONS) {
-    const method = operations[operation];
-    if (!method) {
-      continue;
-    }
-    Object.defineProperty(instrumented, operation, {
-      value: async (...args: unknown[]) => {
-        const startedAt = Date.now();
-        try {
-          const result = await method.apply(signer, args);
-          logVendorCallSuccess(provider, operation, startedAt, details);
-          return result;
-        } catch (error) {
-          logVendorCallFailure(provider, operation, error, startedAt, details);
-          throw error;
-        }
-      },
-    });
+  if (isTransactionPartialSigner(signer)) {
+    defineTimedCall(
+      instrumented,
+      provider,
+      "signTransactions",
+      details,
+      signer.signTransactions.bind(signer)
+    );
+  }
+  if (isTransactionModifyingSigner(signer)) {
+    defineTimedCall(
+      instrumented,
+      provider,
+      "modifyAndSignTransactions",
+      details,
+      signer.modifyAndSignTransactions.bind(signer)
+    );
+  }
+  if (isTransactionSendingSigner(signer)) {
+    defineTimedCall(
+      instrumented,
+      provider,
+      "signAndSendTransactions",
+      details,
+      signer.signAndSendTransactions.bind(signer)
+    );
+  }
+  if (isMessagePartialSigner(signer)) {
+    defineTimedCall(
+      instrumented,
+      provider,
+      "signMessages",
+      details,
+      signer.signMessages.bind(signer)
+    );
+  }
+  if (isMessageModifyingSigner(signer)) {
+    defineTimedCall(
+      instrumented,
+      provider,
+      "modifyAndSignMessages",
+      details,
+      signer.modifyAndSignMessages.bind(signer)
+    );
   }
   instrumentedSigners.set(signer, instrumented);
   return instrumented;
+}
+
+function defineTimedCall<TArgs extends unknown[], TResult>(
+  target: TransactionSigner,
+  provider: CustodyProvider,
+  operation: string,
+  details: VendorCallDetails,
+  call: (...args: TArgs) => Promise<TResult>
+): void {
+  const timed = async (...args: TArgs): Promise<TResult> => {
+    const startedAt = Date.now();
+    try {
+      const result = await call(...args);
+      logVendorCallSuccess(provider, operation, startedAt, details);
+      return result;
+    } catch (error) {
+      logVendorCallFailure(provider, operation, error, startedAt, details);
+      throw error;
+    }
+  };
+  Object.defineProperty(target, operation, { value: timed });
 }
 
 /**
