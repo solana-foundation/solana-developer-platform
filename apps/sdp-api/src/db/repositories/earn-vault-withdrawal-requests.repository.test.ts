@@ -887,10 +887,22 @@ describe("Earn queued withdrawal repository", () => {
     });
 
     it.each([
-      null,
-      historicalTransaction("AccountNotFound"),
-      { ...historicalTransaction(), meta: null },
-    ])("keeps an expired build recoverable without finalized success: %j", async (transaction) => {
+      {
+        name: "the transaction is missing",
+        transaction: null,
+        expectedError: { code: "CONFLICT", statusCode: 409 },
+      },
+      {
+        name: "finalized execution failed",
+        transaction: historicalTransaction("AccountNotFound"),
+        expectedError: { code: "TRANSACTION_FAILED", statusCode: 400 },
+      },
+      {
+        name: "execution metadata is missing",
+        transaction: { ...historicalTransaction(), meta: null },
+        expectedError: { code: "CONFLICT", statusCode: 409 },
+      },
+    ])("preserves an expired build when $name", async ({ transaction, expectedError }) => {
       const build = await expiredBuild();
       await repository.cleanupExpiredExternalBuilds({
         environment: "sandbox",
@@ -909,7 +921,7 @@ describe("Earn queued withdrawal repository", () => {
         runInEnvironmentClusterScope("sandbox", () =>
           recordSignedExternalQueuedRequest(env, repository, input)
         )
-      ).rejects.toThrow(/no longer owns/);
+      ).rejects.toMatchObject(expectedError);
       await expect(
         repository.getExternalWalletTransaction({ organizationId: ORG, transactionId: build.id })
       ).resolves.toMatchObject({ consumed_action_id: null });
