@@ -56,6 +56,7 @@ const DEPLOYMENT: Env = {
   PRIVY_APP_ID: "privy_hoo2662_app",
   PRIVY_APP_SECRET: "privy_hoo2662_secret",
   PARA_API_KEY: "para_hoo2662_key",
+  PRIVATE_CHANNELS_ENABLED: "true",
 };
 const SANDBOX_RAMP_AND_COMPLIANCE_CREDENTIALS = {
   MOONPAY_SANDBOX_API_KEY: "pk_test_hoo2662",
@@ -142,7 +143,7 @@ function privateChannelsFamily(state: IntegrationState): IntegrationFamily {
   return { family: "private_channels", integrations: [{ provider: "private_channels", state }] };
 }
 
-function apiKeyHeaders(environment: SdpEnvironment): Record<string, string> {
+function apiKeyHeaders(environment: SdpEnvironment) {
   return { Authorization: `Bearer ${API_KEYS[environment].raw}` };
 }
 
@@ -397,6 +398,39 @@ describe("GET /v1/integrations", () => {
     expect(await readFamilies("sandbox", DEPLOYMENT)).toEqual([
       SANDBOX_UNSET_CUSTODY,
       privateChannelsFamily({ status: "connected", mode: "managed" }),
+    ]);
+  });
+
+  it("omits Private Channels where the deployment leaves its routes switched off", async () => {
+    expect(
+      await readFamilies("sandbox", { ...DEPLOYMENT, PRIVATE_CHANNELS_ENABLED: "false" })
+    ).toEqual([SANDBOX_UNSET_CUSTODY]);
+  });
+
+  it("drops connected from an active managed config once the project may no longer use managed", async () => {
+    await seedSandboxPrivyConfig("active");
+
+    expect(
+      await readFamilies("sandbox", {
+        ...DEPLOYMENT,
+        PRIVY_APP_ID: undefined,
+        PRIVY_APP_SECRET: undefined,
+      })
+    ).toEqual([
+      custodyFamily([privyIn({ status: "not_configured", modes: ["byok"] })]),
+      PRIVATE_CHANNELS_NOT_CONFIGURED,
+    ]);
+  });
+
+  it("omits a provider with an active connection once the organization loses its entitlement", async () => {
+    await seedActivePrivyConnection("sandbox");
+    await setOrganizationProviderOverrides(getDb(env), ORGANIZATION_ID, {
+      custody: { privy: false },
+    });
+
+    expect(await readFamilies("sandbox", DEPLOYMENT)).toEqual([
+      custodyFamily([SANDBOX_PARA_NOT_CONFIGURED]),
+      PRIVATE_CHANNELS_NOT_CONFIGURED,
     ]);
   });
 
