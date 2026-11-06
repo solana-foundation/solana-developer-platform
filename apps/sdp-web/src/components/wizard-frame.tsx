@@ -2,10 +2,10 @@
 
 import { cn } from "@sdp/ui/cn";
 import { Modal } from "@sdp/ui/modal";
-import { useThemeScope } from "@sdp/ui/theme-scope";
 import { WizardStepProgress } from "@sdp/ui/wizard-step-progress";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { useTranslations } from "@/i18n/provider";
+import { useStepFade } from "@/lib/use-step-fade";
 
 interface WizardFrameProps {
   /** Persistent right-hand rail rendered beside the step content on large screens. */
@@ -16,12 +16,11 @@ interface WizardFrameProps {
   description?: ReactNode;
   footer?: ReactNode;
   header?: ReactNode;
-  maxWidthClassName?: string;
-  /** Refresh surfaces only: omit the step header, for a single-page form such as a settings page. */
+  /** Omit the step header, for a single-page form such as a settings page. */
   hideProgress?: boolean;
   /**
-   * Refresh surfaces only: let the content fill the column's height (a `flex-1` child then
-   * centres in it), for a state that stands alone in the frame.
+   * Let the content fill the column's height (a `flex-1` child then centres in it), for a state
+   * that stands alone in the frame.
    */
   fillHeight?: boolean;
   progressLabel: string;
@@ -89,7 +88,6 @@ function WizardStepHeading({
   header,
   showSummaryButton,
   summaryTrigger,
-  refresh,
   onOpenSummary,
 }: {
   title: string;
@@ -98,7 +96,6 @@ function WizardStepHeading({
   header?: ReactNode;
   showSummaryButton: boolean;
   summaryTrigger?: ReactNode;
-  refresh: boolean;
   onOpenSummary: () => void;
 }) {
   const hasTitleBadge = Boolean(titleBadge);
@@ -119,19 +116,10 @@ function WizardStepHeading({
     >
       <div className="min-w-0 space-y-1">
         <div className="flex items-center gap-2">
-          <h2
-            className={cn(
-              "text-2xl font-medium tracking-tight text-primary",
-              refresh && "text-heading"
-            )}
-          >
-            {title}
-          </h2>
+          <h2 className="text-heading font-medium tracking-tight text-primary">{title}</h2>
           {titleBadge}
         </div>
-        {description ? (
-          <div className="text-sm text-secondary refresh:text-body">{description}</div>
-        ) : null}
+        {description ? <div className="text-body text-secondary">{description}</div> : null}
       </div>
       <WizardHeadingActions
         header={header}
@@ -170,7 +158,6 @@ export function WizardFrame({
   description,
   footer,
   header,
-  maxWidthClassName = "max-w-3xl",
   hideProgress = false,
   fillHeight = false,
   progressLabel,
@@ -181,13 +168,13 @@ export function WizardFrame({
   toolbarActions,
 }: WizardFrameProps) {
   const t = useTranslations();
-  const refresh = useThemeScope() === "refresh";
   const [summaryOpen, setSummaryOpen] = useState(false);
   const scrollRegionRef = useRef<HTMLDivElement>(null);
   const lastStepRef = useRef(currentStep);
+  const stepRef = useStepFade<HTMLDivElement>(currentStep);
   // A new step opens at its top. The column keeps its own scroll offset otherwise, so a tall
   // step after a scrolled one would open mid-form with its heading out of view.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (lastStepRef.current === currentStep) return;
     lastStepRef.current = currentStep;
     // Assigning scrollTop works in every environment, jsdom included; scrollTo does not.
@@ -197,20 +184,22 @@ export function WizardFrame({
   const activeStep = steps[currentStep];
   const showSummaryButton = summary !== undefined && currentStep > 0;
 
+  // A fill-height step's `flex-1` content still sits in a flex column through this wrapper.
   const stepContent = (
-    <WizardStepBody aside={aside}>
-      <WizardStepHeading
-        title={currentStepTitle ?? activeStep.title}
-        titleBadge={titleBadge}
-        description={description}
-        header={header}
-        showSummaryButton={showSummaryButton}
-        summaryTrigger={summaryTrigger}
-        refresh={refresh}
-        onOpenSummary={() => setSummaryOpen(true)}
-      />
-      {children}
-    </WizardStepBody>
+    <div ref={stepRef} className={cn(fillHeight && "flex flex-1 flex-col")} data-wizard-step>
+      <WizardStepBody aside={aside}>
+        <WizardStepHeading
+          title={currentStepTitle ?? activeStep.title}
+          titleBadge={titleBadge}
+          description={description}
+          header={header}
+          showSummaryButton={showSummaryButton}
+          summaryTrigger={summaryTrigger}
+          onOpenSummary={() => setSummaryOpen(true)}
+        />
+        {children}
+      </WizardStepBody>
+    </div>
   );
 
   const summaryModal =
@@ -225,86 +214,43 @@ export function WizardFrame({
       </Modal>
     );
 
-  if (refresh) {
-    // The refresh flow is one column in the shell's gutter: 36px under the title or tabs, the
-    // step header, 48px, the content, then a footer band across the bottom of the page on the
-    // sidebar's paper (a step darker than the page in both themes, as the design draws it). The
-    // column scrolls on its own when a step outgrows the viewport; the band stays put. The shell
-    // section has no padding on a refresh route, so the band reaches the edges as it is.
-    return (
-      <div className="flex h-full min-h-0 w-full flex-col" data-wizard-frame>
-        <div
-          ref={scrollRegionRef}
-          // Scrolled content fades out under the title and tabs instead of being cut mid-line.
-          className="min-h-0 flex-1 overflow-y-auto px-4 pt-9 pb-10 [mask-image:linear-gradient(to_bottom,transparent,black_1.25rem)] md:px-6"
-          data-wizard-scroll-region
-        >
-          <div
-            className={cn("mx-auto w-full max-w-flow", fillHeight && "flex min-h-full flex-col")}
-          >
-            <div
-              className={cn("mb-12 flex items-start gap-3", hideProgress && "hidden")}
-              data-wizard-stepper
-            >
-              <WizardStepProgress
-                className="min-w-0 flex-1"
-                currentStep={currentStep}
-                progressLabel={progressLabel}
-                steps={steps.map((step) => step.label)}
-              />
-              {toolbarActions}
-            </div>
-            {stepContent}
-          </div>
-        </div>
-        {footer ? (
-          <footer
-            className="shrink-0 border-t border-border-subtle bg-surface px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6"
-            data-wizard-actions
-          >
-            <div className="mx-auto w-full max-w-flow">{footer}</div>
-          </footer>
-        ) : null}
-        {summaryModal}
-      </div>
-    );
-  }
-
+  // The flow is one column in the shell's gutter: 36px under the title or tabs, the step header,
+  // 48px, the content, then a footer band across the bottom of the page on the sidebar's paper (a
+  // step darker than the page in both themes, as the design draws it). The column scrolls on its
+  // own when a step outgrows the viewport; the band stays put. The shell section has no padding,
+  // so the band reaches the edges as it is.
   return (
     <div className="flex h-full min-h-0 w-full flex-col" data-wizard-frame>
-      <div className="shrink-0 px-4 pt-8 pb-6 md:px-6" data-wizard-stepper>
-        <div
-          className={cn(
-            "mx-auto flex w-full flex-wrap items-center justify-between gap-3",
-            maxWidthClassName
-          )}
-        >
-          <WizardStepProgress
-            currentStep={currentStep}
-            progressLabel={progressLabel}
-            steps={steps.map((step) => step.label)}
-          />
-          {toolbarActions}
-        </div>
-      </div>
-
       <div
         ref={scrollRegionRef}
-        className="min-h-0 flex-1 overflow-y-auto px-4 md:px-6"
+        // Scrolled content fades out under the title and tabs instead of being cut mid-line.
+        className="min-h-0 flex-1 overflow-y-auto px-4 pt-9 pb-10 [mask-image:linear-gradient(to_bottom,transparent,black_1.25rem)] md:px-6"
         data-wizard-scroll-region
       >
-        <div className={cn("mx-auto w-full pb-8", maxWidthClassName)}>{stepContent}</div>
+        <div className={cn("mx-auto w-full max-w-flow", fillHeight && "flex min-h-full flex-col")}>
+          <div
+            className={cn("mb-12 flex items-start gap-3", hideProgress && "hidden")}
+            data-wizard-stepper
+          >
+            <WizardStepProgress
+              className="min-w-0 flex-1"
+              currentStep={currentStep}
+              progressLabel={progressLabel}
+              steps={steps.map((step) => step.label)}
+            />
+            {toolbarActions}
+          </div>
+          {stepContent}
+        </div>
       </div>
-
       {footer ? (
         <footer
-          className="shrink-0 border-t border-border-default px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6"
+          className="shrink-0 border-t border-border-subtle bg-surface px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6"
           data-wizard-actions
         >
-          <div className={cn("mx-auto w-full", maxWidthClassName)}>{footer}</div>
+          <div className="mx-auto w-full max-w-flow">{footer}</div>
         </footer>
       ) : null}
-
       {summaryModal}
     </div>
   );

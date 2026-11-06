@@ -11,8 +11,6 @@ describe("dashboard loading route", () => {
     ["/dashboard/wallets", "wallets-overview"],
     ["/dashboard/wallets/setup", "wallet-setup"],
     ["/dashboard/wallets/wallet-1", "wallet-detail"],
-    ["/dashboard/custody", "wallets-overview"],
-    ["/dashboard/custody/wallet-1", "wallet-detail"],
     ["/dashboard/issuance", "issuance-overview"],
     ["/dashboard/issuance/create", "issuance-create"],
     ["/dashboard/issuance/token-1", "issuance-detail"],
@@ -32,13 +30,12 @@ describe("dashboard loading route", () => {
     ["/dashboard/markets/treasury-solutions", "treasury-solutions"],
     ["/dashboard/markets/embedded-yield", "embedded-yield-portfolio"],
     ["/dashboard/markets/embedded-yield/configure", "embedded-yield-configure"],
-    ["/dashboard/markets/embedded-yield/integrate", "embedded-yield-integrate"],
     ["/dashboard/tokens", "token-holdings"],
     ["/dashboard/api-keys", "api-keys-list"],
     ["/dashboard/api-keys/new", "api-key-new"],
     ["/dashboard/api-keys/key-1/edit", "api-key-edit"],
     ["/dashboard/settings", "settings"],
-    ["/dashboard/members", "settings"],
+    ["/dashboard/account", "account"],
     ["/dashboard/helius-rings", "helius-rings"],
     ["/dashboard/integrations", "integrations"],
     ["/dashboard/integrations/privy", "integration-detail"],
@@ -55,6 +52,8 @@ describe("dashboard loading route", () => {
     "/dashboard/api-keys/key-1",
     "/dashboard/unknown",
     "/dashboard/walletsmith",
+    "/dashboard/accounts",
+    "/dashboard/account/security",
     "/sign-in",
   ])("does not invent a fallback for unsupported route %s", (pathname) => {
     expect(resolveDashboardLoadingRoute(pathname)).toBeNull();
@@ -89,13 +88,12 @@ describe("integrations route", () => {
 });
 
 describe("dashboard navigation active state", () => {
-  it.each([
-    "/dashboard/markets/treasury-solutions",
-    "/dashboard/markets/embedded-yield",
-    "/dashboard/markets/embedded-yield/integrate",
-  ])("keeps Markets active at %s", (pathname) => {
-    expect(isDashboardNavItemActive(pathname, "/dashboard/markets")).toBe(true);
-  });
+  it.each(["/dashboard/markets/treasury-solutions", "/dashboard/markets/embedded-yield"])(
+    "keeps Markets active at %s",
+    (pathname) => {
+      expect(isDashboardNavItemActive(pathname, "/dashboard/markets")).toBe(true);
+    }
+  );
 
   it("keeps each Markets child active only on its own route", () => {
     expect(
@@ -134,7 +132,7 @@ describe("holdings route", () => {
 
 describe("project switch destination", () => {
   it.each([
-    ["/dashboard/custody/cwlt_test_1", "/dashboard/wallets"],
+    ["/dashboard/wallets/cwlt_test_1", "/dashboard/wallets"],
     ["/dashboard/wallets/setup", "/dashboard/wallets"],
     ["/dashboard/payments/transactions/tx_test_1", "/dashboard/payments/transactions"],
     ["/dashboard/payments", "/dashboard/payments"],

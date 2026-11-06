@@ -9,11 +9,11 @@ import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { cache } from "react";
 import { z } from "zod";
-import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
+import type { OnboardingStatusResponse } from "@/app/(session)/dashboard/[projectId]/onboarding-status";
 import { readApiErrorMessage } from "./api-error";
 import { projectHref } from "./dashboard-project-path";
+import { dashboardJson, dashboardResponseHeaders } from "./dashboard-response";
 import { type ApiAnswer, apiErrorCode, IDEMPOTENCY_KEY_HEADER } from "./idempotency";
-import { paymentsDemoResponse } from "./payments-demo/demo-mode";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 import {
   createTimedTrace,
@@ -152,12 +152,6 @@ function createSdpApiRequest(
       }
     };
 
-    // Payments demo mode answers payment reads and writes itself; nothing about them goes out.
-    const demoResponse = await paymentsDemoResponse(method, path, projectId, options.body, send);
-    if (demoResponse) {
-      return demoResponse;
-    }
-
     return send();
   };
 }
@@ -294,6 +288,18 @@ const getRequestProjects = cache(
 
 export function listSdpProjects(): Promise<Project[]> {
   return getRequestProjects();
+}
+
+/**
+ * The Projects of the organization a session token names, for a token the
+ * browser minted for one of the user's other organizations (`getToken({ organizationId })`).
+ * Everything else lists the request's own organization through `listSdpProjects`.
+ *
+ * @param token - A Clerk session token naming an organization.
+ * @returns That organization's Projects; sdp-api refuses a token it does not admit.
+ */
+export function listSdpProjectsForToken(token: string): Promise<Project[]> {
+  return fetchRequestProjects(token);
 }
 
 const currentMemberSchema = z.object({ role: z.enum(ORGANIZATION_ROLES) });
@@ -461,17 +467,7 @@ export function proxyFailure(
   message: string
 ): NextResponse {
   logRouteResult(trace, status, { error: message });
-  return NextResponse.json(
-    { error: { message } },
-    {
-      status,
-      headers: {
-        "Cache-Control": "private, no-store",
-        "X-SDP-Trace-ID": trace.traceId,
-        "Server-Timing": trace.serverTiming(),
-      },
-    }
-  );
+  return dashboardJson({ error: { message } }, { status, trace });
 }
 
 /**
@@ -563,14 +559,10 @@ export async function proxyToSdpApi({
 
     return new NextResponse(response.body, {
       status: response.status,
-      headers: {
+      headers: dashboardResponseHeaders(trace, {
         "Content-Type": response.headers.get("Content-Type") ?? "application/json",
-        // Per-org financial state: never storable by browsers or intermediaries.
-        "Cache-Control": "private, no-store",
-        "X-SDP-Trace-ID": trace.traceId,
-        "Server-Timing": trace.serverTiming(),
         ...idempotencyResponseHeaders(response),
-      },
+      }),
     });
   } catch (error) {
     return proxyFailure(

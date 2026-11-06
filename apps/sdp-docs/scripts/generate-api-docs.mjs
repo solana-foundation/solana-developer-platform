@@ -209,9 +209,11 @@ const run = async () => {
 
   await fs.writeFile(path.join(outputDir, "index.mdx"), indexContent, "utf8");
 
+  // The sidebar shows the reference as one folder: its index is the folder's own page (Fumadocs
+  // makes it a child instead when `pages` lists it), its families the folders inside.
   await writeJson(path.join(outputDir, "meta.json"), {
-    title: "API",
-    pages: ["index", ...tagPages.map((tagPage) => tagPage.slug)],
+    title: "API Reference",
+    pages: tagPages.map((tagPage) => tagPage.slug),
   });
 
   await validateGeneratedTagPages({ outputDir, families });

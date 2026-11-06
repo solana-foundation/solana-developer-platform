@@ -212,6 +212,7 @@ exports[`route actions > pins each route's action 1`] = `
   "private_channels.read GET /v1/private-channels/withdrawals/:id",
   "private_channels.read POST /v1/private-channels/probe",
   "projects.manage PATCH /v1/projects/:projectId",
+  "projects.read GET /v1/integrations",
   "projects.read GET /v1/projects",
   "projects.read GET /v1/projects/:projectId",
   "projects.read GET /v1/projects/:projectId/provider-availability",

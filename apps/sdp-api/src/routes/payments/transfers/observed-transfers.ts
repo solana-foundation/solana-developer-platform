@@ -471,8 +471,20 @@ async function fetchParsedTransaction(
  * @param parsedTransaction - The parsed transaction body.
  * @returns The fee in lamports, or null when the body carries no meta.
  */
-function observedFee(parsedTransaction: ParsedTransaction): number | null {
-  return parsedTransaction.meta?.fee === undefined ? null : Number(parsedTransaction.meta.fee);
+/**
+ * The network fee the transfer's source paid, in lamports: the transaction's fee when the source
+ * is its fee payer (the first account key), 0 when someone else paid it, such as a sponsor, and
+ * null when either is unknown. A row's `fee` is what its source wallet paid (HOO-2614).
+ */
+function observedFee(
+  parsedTransaction: ParsedTransaction,
+  sourceAddress: string,
+  feePayer: string | undefined
+): number | null {
+  if (parsedTransaction.meta?.fee === undefined || feePayer === undefined) {
+    return null;
+  }
+  return feePayer === sourceAddress ? Number(parsedTransaction.meta.fee) : 0;
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Parsed transaction synthesis intentionally handles both SOL and SPL transfers in one pass.
@@ -600,13 +612,14 @@ function buildObservedTransferRows(
         submission_started_at: null,
         slot,
         block_time: timestamp,
-        fee: observedFee(parsedTransaction),
+        fee: observedFee(parsedTransaction, sourceAddress, accountKeys[0]),
         error: null,
         initiated_by_key_id: null,
         idempotency_key: null,
         idempotency_fingerprint: null,
         confirmed_at: null,
         finalization_last_polled_at: null,
+        audit_intent_id: null,
         created_at: timestamp,
         updated_at: timestamp,
       });
@@ -690,13 +703,14 @@ function buildObservedTransferRows(
         submission_started_at: null,
         slot,
         block_time: timestamp,
-        fee: observedFee(parsedTransaction),
+        fee: observedFee(parsedTransaction, sourceAddress, accountKeys[0]),
         error: null,
         initiated_by_key_id: null,
         idempotency_key: null,
         idempotency_fingerprint: null,
         confirmed_at: null,
         finalization_last_polled_at: null,
+        audit_intent_id: null,
         created_at: timestamp,
         updated_at: timestamp,
       });
@@ -789,13 +803,14 @@ function buildObservedTransferRows(
       submission_started_at: null,
       slot,
       block_time: timestamp,
-      fee: observedFee(parsedTransaction),
+      fee: observedFee(parsedTransaction, sourceAddress, accountKeys[0]),
       error: null,
       initiated_by_key_id: null,
       idempotency_key: null,
       idempotency_fingerprint: null,
       confirmed_at: null,
       finalization_last_polled_at: null,
+      audit_intent_id: null,
       created_at: timestamp,
       updated_at: timestamp,
     });

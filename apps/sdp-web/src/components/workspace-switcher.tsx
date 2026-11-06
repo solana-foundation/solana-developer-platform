@@ -1,7 +1,7 @@
 "use client";
 
 import { useOrganization, useOrganizationList } from "@clerk/nextjs";
-import type { Project } from "@sdp/types/projects";
+import type { Project, ProjectEnvironment } from "@sdp/types/projects";
 import { cn } from "@sdp/ui/cn";
 import {
   DropdownMenu,
@@ -11,12 +11,23 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@sdp/ui/dropdown-menu";
-import { TooltipProvider } from "@sdp/ui/tooltip";
-import { CheckIcon, ChevronsUpDownIcon, CopyIcon } from "lucide-react";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
+import {
+  Building2Icon,
+  CheckIcon,
+  ChevronsUpDownIcon,
+  FlaskConicalIcon,
+  GlobeIcon,
+  type LucideIcon,
+} from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
+import { toast } from "sonner";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { useCopy } from "@/lib/use-copy";
+import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 
 function OrgAvatar({ name, imageUrl }: { name: string; imageUrl: string | null }) {
   if (imageUrl) {
@@ -25,62 +36,39 @@ function OrgAvatar({ name, imageUrl }: { name: string; imageUrl: string | null }
       <img
         src={imageUrl}
         alt=""
-        className="size-6 shrink-0 rounded-md object-cover refresh:size-8"
+        className="shrink-0 rounded-md object-cover size-8"
         aria-hidden="true"
       />
     );
   }
   const initials = name.trim().slice(0, 2).toUpperCase() || "?";
   return (
-    <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary text-[10px] font-semibold text-on-primary refresh:size-8 refresh:text-body refresh:font-medium">
+    <span className="flex shrink-0 items-center justify-center rounded-md bg-primary text-on-primary size-8 text-body font-medium">
       {initials}
     </span>
   );
 }
 
-/** An organization as the switcher lists it. */
-interface WorkspaceOrganization {
-  id: string;
-  name: string;
-  imageUrl: string | null;
+const ENVIRONMENT_PRESENTATIONS = {
+  sandbox: {
+    icon: FlaskConicalIcon,
+    labelKey: "Shared.SharedComponents.environmentSandbox",
+    detailKey: "Shared.SharedComponents.environmentSandboxDetail",
+  },
+  production: {
+    icon: GlobeIcon,
+    labelKey: "Shared.SharedComponents.environmentProduction",
+    detailKey: "Shared.SharedComponents.environmentProductionDetail",
+  },
+} as const satisfies Record<
+  ProjectEnvironment,
+  { icon: LucideIcon; labelKey: MessageKey; detailKey: MessageKey }
+>;
+
+function SelectedCheck() {
+  return <CheckIcon className="ml-auto size-4 shrink-0 text-primary" aria-hidden="true" />;
 }
 
-/** The pill that marks the organization or project already in use. */
-function CurrentBadge() {
-  const t = useTranslations();
-  return (
-    <span className="shrink-0 rounded-full bg-fill-subtle px-1.5 py-0.5 text-[10px] font-medium text-secondary">
-      {t("Shared.SharedComponents.current")}
-    </span>
-  );
-}
-
-/** The expanded trigger's text: the organization's name over the active project's. */
-function WorkspaceTriggerText({
-  organizationName,
-  activeProject,
-}: {
-  organizationName: string;
-  activeProject: Pick<Project, "name"> | null;
-}) {
-  return (
-    <>
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-sm font-semibold leading-tight text-primary refresh:text-field refresh:leading-tight refresh:font-medium">
-          {organizationName}
-        </span>
-        {activeProject ? (
-          <span className="truncate text-xs leading-tight text-tertiary refresh:text-meta refresh:leading-tight refresh:text-secondary">
-            {activeProject.name}
-          </span>
-        ) : null}
-      </span>
-      <ChevronsUpDownIcon className="size-4 shrink-0 text-tertiary" />
-    </>
-  );
-}
-
-/** The user's organizations, one row each, or a note when they belong to none. */
 function OrganizationItems({
   memberships,
   activeOrganizationId,
@@ -88,7 +76,7 @@ function OrganizationItems({
   disabled,
   onSwitch,
 }: {
-  memberships: readonly { organization: WorkspaceOrganization }[];
+  memberships: readonly { organization: { id: string; name: string; imageUrl: string | null } }[];
   activeOrganizationId: string | undefined;
   isLoaded: boolean;
   disabled: boolean;
@@ -97,20 +85,19 @@ function OrganizationItems({
   const t = useTranslations();
   return (
     <>
-      {memberships.map((membership) => {
-        const org = membership.organization;
-        const isActive = org.id === activeOrganizationId;
-
+      {memberships.map(({ organization }) => {
+        const isActive = organization.id === activeOrganizationId;
         return (
           <DropdownMenuItem
-            key={org.id}
+            key={organization.id}
             disabled={disabled}
-            onSelect={() => onSwitch(org.id)}
-            className="gap-2 text-xs"
+            aria-current={isActive ? "true" : undefined}
+            onSelect={() => onSwitch(organization.id)}
+            className="gap-2.5"
           >
-            <OrgAvatar name={org.name} imageUrl={org.imageUrl} />
-            <span className="min-w-0 flex-1 truncate">{org.name}</span>
-            {isActive ? <CurrentBadge /> : null}
+            <OrgAvatar name={organization.name} imageUrl={organization.imageUrl} />
+            <span className="min-w-0 flex-1 truncate">{organization.name}</span>
+            {isActive ? <SelectedCheck /> : null}
           </DropdownMenuItem>
         );
       })}
@@ -123,76 +110,33 @@ function OrganizationItems({
   );
 }
 
-/** The active organization's part of the menu: its projects, then its ID to copy. */
-function ActiveOrganizationSection({
-  organizationId,
-  projects,
-  selectedProjectId,
+function EnvironmentItem({
+  project,
+  isSelected,
   disabled,
-  onSelectProject,
-  copied,
-  copiedValue,
-  onCopy,
+  onSelect,
 }: {
-  organizationId: string;
-  projects: readonly Pick<Project, "id" | "name">[];
-  selectedProjectId: string | null;
+  project: Pick<Project, "id" | "environment">;
+  isSelected: boolean;
   disabled: boolean;
-  onSelectProject: (projectId: string) => void;
-  copied: boolean;
-  copiedValue: string | undefined;
-  onCopy: (value: string) => Promise<void>;
+  onSelect: (projectId: string) => void;
 }) {
   const t = useTranslations();
+  const { icon: Icon, labelKey, detailKey } = ENVIRONMENT_PRESENTATIONS[project.environment];
   return (
-    <>
-      <DropdownMenuSeparator />
-      <DropdownMenuLabel className="text-xs font-medium normal-case tracking-normal text-secondary">
-        {t("Shared.SharedComponents.projects")}
-      </DropdownMenuLabel>
-      {projects.length === 0 ? (
-        <p className="px-2.5 py-2 text-xs text-tertiary">
-          {t("Shared.SharedComponents.noProjects")}
-        </p>
-      ) : (
-        projects.map((project) => {
-          const isActive = project.id === selectedProjectId;
-          return (
-            <DropdownMenuItem
-              key={project.id}
-              disabled={disabled}
-              onSelect={() => onSelectProject(project.id)}
-              className="gap-2 text-xs"
-            >
-              <span className="min-w-0 flex-1 truncate">{project.name}</span>
-              {isActive ? <CurrentBadge /> : null}
-            </DropdownMenuItem>
-          );
-        })
-      )}
-      <DropdownMenuSeparator />
-      <DropdownMenuItem
-        onSelect={(event) => {
-          event.preventDefault();
-          void onCopy(organizationId);
-        }}
-        aria-label={t("Shared.SharedComponents.copyOrganizationId")}
-        title={organizationId}
-        className="group flex-col items-start gap-0.5"
-      >
-        <span className="text-[10px] font-medium text-secondary">
-          {t("Shared.SharedComponents.organizationId")}
-        </span>
-        <span className="flex w-full items-center gap-1.5 text-tertiary transition-colors group-hover:text-secondary group-focus:text-secondary">
-          <span className="min-w-0 flex-1 truncate font-mono text-[10px]">{organizationId}</span>
-          {copied && copiedValue === organizationId ? (
-            <CheckIcon className="size-3 shrink-0" />
-          ) : (
-            <CopyIcon className="size-3 shrink-0 opacity-0 transition-opacity group-focus:opacity-100 group-hover:opacity-100" />
-          )}
-        </span>
-      </DropdownMenuItem>
-    </>
+    <DropdownMenuItem
+      disabled={disabled}
+      aria-current={isSelected ? "true" : undefined}
+      onSelect={() => onSelect(project.id)}
+      className="gap-2.5"
+    >
+      <Icon className="size-4 shrink-0 text-secondary" aria-hidden="true" />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate">{t(labelKey)}</span>
+        <span className="truncate text-xs font-normal text-tertiary">{t(detailKey)}</span>
+      </span>
+      {isSelected ? <SelectedCheck /> : null}
+    </DropdownMenuItem>
   );
 }
 
@@ -204,33 +148,64 @@ export function WorkspaceSwitcher({
   onOrganizationSwitchingChange?: (isSwitching: boolean) => void;
 }) {
   const t = useTranslations();
-  const { organization: activeOrg } = useOrganization();
-  const { userMemberships, setActive, isLoaded } = useOrganizationList({
+  const projectHref = useProjectHref();
+  const { organization: activeOrg, isLoaded: isOrganizationLoaded } = useOrganization();
+  const { userMemberships, isLoaded } = useOrganizationList({
     userMemberships: { infinite: true },
   });
-  const { projects, selectedProjectId, selectProject, isProjectSwitching } =
-    useDashboardWorkspace();
+  const {
+    sandboxProject,
+    productionProject,
+    sdpEnvironment,
+    selectedProjectId,
+    selectProject,
+    switchOrganization,
+    isProjectSwitching,
+  } = useDashboardWorkspace();
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
-  const { copied, copy, value: copiedValue } = useCopy(1200);
 
   const memberships = userMemberships.data ?? [];
-  const activeProject = projects.find((project) => project.id === selectedProjectId) ?? null;
+  const environmentProjects = [sandboxProject, productionProject].filter(
+    (project): project is Project => project !== null
+  );
   const isSwitching = isOrganizationSwitching || isProjectSwitching;
   const organizationName = activeOrg?.name ?? t("Shared.SharedComponents.selectOrganization");
 
   /** Makes another organization active; picking the current one does nothing. */
-  const switchOrganization = (organizationId: string) => {
+  const pickOrganization = (organizationId: string) => {
     const isActive = organizationId === activeOrg?.id;
-    if (!isActive && setActive) {
+    if (!isSwitching && !isActive) {
       setOrganizationSwitching(true);
       onOrganizationSwitchingChange?.(true);
       const finishSwitch = () => {
         setOrganizationSwitching(false);
         onOrganizationSwitchingChange?.(false);
       };
-      void setActive({ organization: organizationId }).then(finishSwitch, finishSwitch);
+      void switchOrganization(organizationId).then(finishSwitch, () => {
+        toast.error(t("Shared.SharedComponents.changeOrganizationFailed"));
+        finishSwitch();
+      });
     }
   };
+
+  if (!isOrganizationLoaded) {
+    return (
+      <div
+        role="status"
+        aria-label={t("Shared.SharedComponents.loading")}
+        aria-busy="true"
+        className={cn("flex h-10 items-center", collapsed ? "w-10 justify-center" : "gap-3 px-2")}
+      >
+        <SkeletonBlock className="size-8 shrink-0 rounded-md" />
+        {collapsed ? null : (
+          <div className="flex flex-1 flex-col gap-1.5">
+            <SkeletonBlock className="h-3.5 w-24 rounded" />
+            <SkeletonBlock className="h-3 w-32 rounded" />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <DropdownMenu modal={false}>
@@ -240,45 +215,62 @@ export function WorkspaceSwitcher({
           aria-busy={isSwitching}
           aria-label={organizationName}
           className={cn(
-            "flex h-10 items-center rounded-[var(--button-radius-lg)] text-left transition-colors hover:bg-fill-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary refresh:h-10 refresh:hover:bg-fill",
-            collapsed ? "w-10 justify-center" : "w-full min-w-0 gap-2 px-2 refresh:gap-3"
+            "flex h-10 items-center rounded-[var(--button-radius-lg)] text-left transition-colors hover:bg-fill focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+            collapsed ? "w-10 justify-center" : "w-full min-w-0 px-2 gap-3"
           )}
         >
           <OrgAvatar name={activeOrg?.name ?? ""} imageUrl={activeOrg?.imageUrl ?? null} />
           {collapsed ? null : (
-            <WorkspaceTriggerText
-              organizationName={organizationName}
-              activeProject={activeProject}
-            />
+            <>
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate leading-tight text-primary text-field font-medium">
+                  {organizationName}
+                </span>
+                <span className="truncate leading-tight text-meta text-secondary">
+                  {t(ENVIRONMENT_PRESENTATIONS[sdpEnvironment].labelKey)}
+                </span>
+              </span>
+              <ChevronsUpDownIcon className="size-4 shrink-0 text-tertiary" />
+            </>
           )}
         </button>
       </DropdownMenuTrigger>
-      <TooltipProvider>
-        <DropdownMenuContent align="start" sideOffset={6} className="w-64">
-          <DropdownMenuLabel className="flex items-center justify-between text-xs font-medium normal-case tracking-normal text-secondary">
-            <span>{t("Shared.SharedComponents.organizations")}</span>
-          </DropdownMenuLabel>
-          <OrganizationItems
-            memberships={memberships}
-            activeOrganizationId={activeOrg?.id}
-            isLoaded={isLoaded}
-            disabled={isSwitching}
-            onSwitch={switchOrganization}
-          />
-          {activeOrg ? (
-            <ActiveOrganizationSection
-              organizationId={activeOrg.id}
-              projects={projects}
-              selectedProjectId={selectedProjectId}
-              disabled={isSwitching}
-              onSelectProject={selectProject}
-              copied={copied}
-              copiedValue={copiedValue}
-              onCopy={copy}
-            />
-          ) : null}
-        </DropdownMenuContent>
-      </TooltipProvider>
+      <DropdownMenuContent align="start" sideOffset={6} className="w-72">
+        <DropdownMenuLabel className="text-xs font-medium normal-case tracking-normal text-secondary">
+          {t("Shared.SharedComponents.organizations")}
+        </DropdownMenuLabel>
+        <OrganizationItems
+          memberships={memberships}
+          activeOrganizationId={activeOrg?.id}
+          isLoaded={isLoaded}
+          disabled={isSwitching}
+          onSwitch={pickOrganization}
+        />
+        {activeOrg && environmentProjects.length > 0 ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs font-medium normal-case tracking-normal text-secondary">
+              {t("Shared.SharedComponents.environmentsOf", { organization: activeOrg.name })}
+            </DropdownMenuLabel>
+            {environmentProjects.map((project) => (
+              <EnvironmentItem
+                key={project.id}
+                project={project}
+                isSelected={project.id === selectedProjectId}
+                disabled={isSwitching}
+                onSelect={selectProject}
+              />
+            ))}
+          </>
+        ) : null}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild className="gap-2.5" disabled={isSwitching}>
+          <Link href={projectHref(DASHBOARD_SIDE_NAV_HREFS.settings)}>
+            <Building2Icon className="size-4 shrink-0 text-secondary" aria-hidden="true" />
+            {t("Shared.SharedComponents.organizationSettings")}
+          </Link>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
     </DropdownMenu>
   );
 }

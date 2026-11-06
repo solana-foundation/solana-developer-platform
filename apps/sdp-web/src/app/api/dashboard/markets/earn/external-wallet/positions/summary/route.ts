@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
+import { dashboardJson } from "@/lib/dashboard-response";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 export async function GET(request: Request) {
   if (new URL(request.url).searchParams.size > 0) {
-    return NextResponse.json(
+    return dashboardJson(
       { error: { message: "External-wallet position summary does not accept query parameters" } },
       { status: 400 }
     );

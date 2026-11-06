@@ -62,18 +62,45 @@ export function memberStatusMayMoveMoney(status: string): boolean {
   return MEMBER_STATUSES_THAT_MAY_MOVE_MONEY.some((allowed) => allowed === status);
 }
 
-export const INVITATION_STATUSES = ["pending", "accepted", "expired", "revoked"] as const;
+/**
+ * `details.reason` on the 403 that refuses a credential of a suspended
+ * organization (HOO-2009), from an API key or a dashboard session alike, so
+ * neither blames the key nor tells a member they were never admitted. A
+ * suspension lifts; a deleted organization's keys stay REVOKED_API_KEY.
+ */
+export const ORGANIZATION_SUSPENDED_REASON = "organization_suspended";
+
+export const INVITATION_STATUSES = ["pending", "accepted", "expired", "revoked", "failed"] as const;
 export type InvitationStatus = (typeof INVITATION_STATUSES)[number];
-export const ORGANIZATION_RPC_PROVIDERS = [
-  "alchemy",
-  "default",
-  "helius",
-  "nodit",
-  "quicknode",
-  "triton",
-  "validationcloud",
-] as const;
-export type OrganizationRpcProvider = (typeof ORGANIZATION_RPC_PROVIDERS)[number];
+/**
+ * `details.reason` on the 401 that refuses a person whose newest invitation to
+ * the organization expired, so the dashboard can tell them to ask for a new one
+ * rather than that they were never invited.
+ */
+export const INVITATION_EXPIRED_REASON = "invitation_expired";
+/**
+ * `details.reason` on the 400 that refuses an invite to an address the identity
+ * provider does not let sign up, so the dashboard can say so.
+ */
+export const INVITEE_NOT_ALLOWED_REASON = "invitee_not_allowed";
+
+/**
+ * Whether an invitation no longer admits because it expired: marked expired,
+ * or still pending past its expiry, which nothing has marked yet.
+ *
+ * @param invitation.status - The stored status.
+ * @param invitation.expiresAt - The stored expiry, as an ISO timestamp.
+ * @param now - The time to judge the expiry against.
+ */
+export function invitationHasExpired(
+  invitation: { status: InvitationStatus; expiresAt: string },
+  now: Date
+): boolean {
+  return (
+    invitation.status === "expired" ||
+    (invitation.status === "pending" && new Date(invitation.expiresAt) <= now)
+  );
+}
 
 export interface Organization {
   id: string; // org_xxxxxxxxxxxx

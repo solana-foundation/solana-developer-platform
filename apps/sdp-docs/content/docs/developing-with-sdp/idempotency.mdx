@@ -31,11 +31,11 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 
 - Wallets: `POST /v1/wallets`, `POST /v1/wallets/initialize`, `POST /v1/wallets/signer-check`, `PATCH /v1/wallets/{walletId}`, `DELETE /v1/wallets`
 - Counterparties: `POST`, `PATCH` and `DELETE` on `/v1/counterparties` and on counterparty accounts
-- Compliance: `POST /v1/compliance/address-screenings`
+- Payment requests: `POST /v1/payments/requests` and `POST /v1/payments/requests/{paymentRequestId}/cancel`
 
 **Not used.** `POST /v1/payments/transfer-batches/estimate` moves and stores nothing, so it does not read the key.
 
-Modules with their own key handling say so on their pages.
+Modules with their own key handling say so on their pages, and each operation's API reference page lists the `Idempotency-Key` header when the route takes one.
 
 ## Choosing a key
 
@@ -98,15 +98,16 @@ Access is checked before the key on every request, so a retry passes exactly the
 | --- | --- |
 | Same key, same request, original finished | The original status and body, with the response header `Idempotent-Replayed: true`. |
 | Same key, original still running | `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. Wait, then retry with the same key. |
-| Same key, original never recorded its outcome (it crashed) | Until 15 minutes plus the route's lease have passed since the original was sent (about 16 minutes, or about 20 for transfer batches), `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`, as if it were still running. After that, transfers, transfer batches, recurring payments and `POST /v1/wallets` take over and answer from the record the original wrote. A batch whose original stopped before sending some recipients answers with those recipients `failed`: they were never sent, so send them again with `POST /v1/payments/transfer-batches/{batchId}/retry`. Every other route returns `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` with no `Retry-After`, to this and every later retry with the key: read the resource with `GET` to see whether it ran, then send again with a new key. |
+| Same key, original never recorded its outcome (it crashed) | Until 15 minutes plus the route's lease have passed since the original was sent (about 16 minutes, or about 20 for transfer batches), `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`, as if it were still running. After that, transfers, transfer batches, recurring payments and `POST /v1/wallets` take over and answer from the record the original wrote, and a payment request cancel runs again. A batch whose original stopped before sending some recipients answers with those recipients `failed`: they were never sent, so send them again with `POST /v1/payments/transfer-batches/{batchId}/retry`. Every other route returns `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` with no `Retry-After`, to this and every later retry with the key: read the resource with `GET` to see whether it ran, then send again with a new key. |
 | Same key, different request or different credential | `422 IDEMPOTENCY_KEY_REUSED`. Nothing runs. |
 | Same key, but the credential has since lost access to the wallet or resource | `403`. The stored response is not returned. |
 | Original was refused with `400`, `401`, `403`, `409` or `429` before it wrote anything | Nothing was stored. Fix the cause and retry with the same key; the request runs again. |
 | A transfer or transfer batch failed after writing its record (for example `400 TRANSACTION_FAILED`, or `409` for a signer mismatch) | Stored: the same error, with `Idempotent-Replayed: true`. After 24 hours the record answers with the same status and code. The key is spent: send the request again with a new key to try again. |
-| A recurring-payment action failed | An action refused before it sent anything leaves the schedule as it was. If a cancel sent its transaction and confirming it then failed, SDP keeps the attempt and the schedule stays `canceling` until the attempt is recovered; poll `GET /v1/payments/recurring-payments/{id}`. A `400`, `401`, `403`, `409` or `429` (such as `TRANSACTION_FAILED`) is not stored, and a `5xx` is not replayed, so a same-key retry runs the action again. Any other `4xx`, such as `422 SIGNING_REJECTED` or `404`, is stored and replayed with `Idempotent-Replayed: true` for 24 hours; send a new key to try again sooner. |
+| A recipient is archived before recurring-payment activation | A fresh activation returns `404` before writing an attempt or signing. A completed activation still replays its saved response. Recovery can confirm saved transactions, but refuses to sign a new step for an unavailable recipient. |
+| A recurring-payment action failed | An action refused before it sent anything leaves the schedule as it was, except that a collection with an unavailable counterparty or account pauses it with `pausedReason: "destination_unavailable"` and returns `409` without signing. If a cancel sent its transaction and confirming it then failed, SDP keeps the attempt and the schedule stays `canceling` until the attempt is recovered; poll `GET /v1/payments/recurring-payments/{id}`. A `400`, `401`, `403`, `409` or `429` (such as `TRANSACTION_FAILED`) is not stored, and a `5xx` is not replayed, so a same-key retry runs the action again. Any other `4xx`, such as `422 SIGNING_REJECTED` or `404`, is stored and replayed with `Idempotent-Replayed: true` for 24 hours; send a new key to try again sooner. |
 | A recurring-payment action meets another key's unfinished attempt on the schedule | Cancel and collect return `409` (already processing), not stored; read the schedule with `GET`. An interrupted collect finishes on its own from the transaction SDP saved before sending it. Resume sends nothing on chain and commits in one step, so it is never left half-done. An interrupted activate or cancel is resumed in the background from the last step SDP recorded; SDP first reads each step it may already have sent from the chain, and a step is not sent again when the chain shows it landed. An interrupted `PATCH` resumes only when that `PATCH` is retried with its key (see below). A `PATCH` may finish that attempt and then applies its own change. |
 | A keyed recurring-payment cancel, resume or `PATCH` changes nothing (such as canceling a canceled schedule) | It still records its attempt, so a same-key retry, even after 24 hours, is answered from it and never runs over a later change. |
-| Original returned a `5xx` | Stored and replayed: use a new key to try again. The routes that move money are the exception: a same-key retry runs again and answers from the record the first attempt wrote, so it never sends twice. That answer also carries `Idempotent-Replayed: true`. |
+| Original returned a `5xx` | Stored and replayed: use a new key to try again. The routes that move money are the exception: a same-key retry runs again and answers from the record the first attempt wrote, so it never sends twice. That answer also carries `Idempotent-Replayed: true`. A same-key retry of a payment request cancel also runs again. |
 
 "Same request" means the same path, query parameters, body and credential. Recipient order in a transfer batch, and `"1.0"` versus `"1"` for an amount, do not change the request.
 
@@ -128,7 +129,7 @@ Keys are kept for 24 hours after the original request. After that, a same-key re
 
 ## Creating wallets
 
-One `POST /v1/wallets` key maps to one recorded wallet. Same-key retries return it, even after 24 hours; a different request under that key returns `422`. Privy and Coinbase CDP also receive a provider request ID derived from the key, so they dedupe creation. A provider failure is stored as `503` for 24 hours. A new key is a new provider request.
+One `POST /v1/wallets` key maps to one recorded wallet. Same-key retries return it, even after 24 hours; a different request under that key returns `422`. A provider that accepts a request ID also receives one derived from the key, so it dedupes creation. A provider failure is stored as `503` for 24 hours. A new key is a new provider request.
 
 An ambiguous `503` may mean the provider created a wallet before SDP received the result. Other providers do not dedupe on the request ID. If SDP wrote no wallet row, a same-key retry after 24 hours can create another wallet. Before retrying with any key, check `GET /v1/wallets` and, if needed, the provider account.
 

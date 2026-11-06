@@ -363,6 +363,7 @@ describe("proxyToSdpApi", () => {
 
     expect(response.status).toBe(204);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(response.headers.get("Vary")).toBe("x-project-id");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const headers = headersOfCall(fetchMock, "/v1/earn/vault-deposits");
     expect(headers.get("x-project-id")).toBe(SANDBOX_PROJECT.id);
@@ -435,6 +436,7 @@ describe("proxyToSdpApi", () => {
       error: { message: "x-project-id header required" },
     });
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(response.headers.get("Vary")).toBe("x-project-id");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -451,6 +453,7 @@ describe("proxyToSdpApi", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(response.headers.get("Vary")).toBe("x-project-id");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

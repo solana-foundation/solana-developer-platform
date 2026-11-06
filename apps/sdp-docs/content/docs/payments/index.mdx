@@ -1,30 +1,28 @@
 ---
 title: Payments
-description: Build payments on Solana with SDP — concepts, sending, and accepting payments.
+description: Send, accept and reconcile Solana payments from your SDP custody wallets.
 ---
 
-SDP provides a Solana-native payments stack: stablecoin transfers, batched payouts, recurring payments, and reconciliation primitives. This section mirrors the structure of the [public Solana payments documentation](https://solana.com/docs/payments) and maps each workflow to the SDP APIs you call to ship it.
-
-If you have not yet provisioned a custody wallet, start with [Set Up Wallets](/docs/guides/setup-wallets).
+Send SOL and SPL tokens from your custody wallets, pay many recipients in one batch, schedule recurring payments, and match what moved to your own records. If you have no custody wallet yet, start with [Set Up Wallets](/docs/guides/setup-wallets).
 
 ## What's in this section
 
-- **[How payments work on SDP](/docs/payments/concepts)** — wallets, tokens, signing modes, fees, and the transfer data model.
-- **Send payments** — outbound flows.
-  - [Basic payment](/docs/payments/send-basic-payment) — a single transfer in either signing mode.
-  - [Payment with memo](/docs/payments/send-payment-with-memo) — attach order or customer references to a transfer.
-  - [Payouts and disbursements](/docs/payments/send-payouts) — batched outbound transfers and reconciliation.
-- **Accept payments** — inbound flows.
-  - [Accept overview](/docs/payments/accept-overview) — receiving-address convention and integration options.
-  - [Verifying a payment](/docs/payments/accept-verification) — transfer-status semantics and finality.
-  - [Indexing and reconciliation](/docs/payments/accept-indexing) — listing inbound transfers for your ledger.
+- **[How payments work on SDP](/docs/payments/concepts)**: wallets, tokens, fees and the transfer record.
+- **Send payments**
+  - [Basic payment](/docs/payments/send-basic-payment): one transfer, from the dashboard or the API.
+  - [Payment with memo](/docs/payments/send-payment-with-memo): tag a transfer with your order or invoice reference.
+  - [Payouts and disbursements](/docs/payments/send-payouts): pay many recipients and reconcile the run.
+- **Accept payments**
+  - [Accept overview](/docs/payments/accept-overview): payment links, shared addresses, and finding each payment.
+  - [Verifying a payment](/docs/payments/accept-verification): transfer statuses and when a payment is final.
+  - [Indexing and reconciliation](/docs/payments/accept-indexing): list transfers and match them to your ledger.
 
-Wallet-wide controls and balances are documented in [Wallet operations](/docs/wallet-operations).
+Wallet balances and controls are in [Wallet operations](/docs/wallet-operations).
 
 ## Underlying API
 
-Every page in this section links to specific endpoints in the auto-generated [Payments API reference](/docs/reference/api/payments). The Payments API surface is namespaced under `/v1/payments` and covers transfers, transfer batches, recurring payments, and `wallets/.../balances`.
+Payments endpoints live under `/v1/payments`: transfers, transfer batches, recurring payments and wallet balances. Each page here links the endpoints it uses, and the [Payments API reference](/docs/reference/api/payments) lists them all.
 
 ## Related
 
-- [End-to-end payment flow](/docs/tutorials/end-to-end-payment-flow) — high-level tutorial covering quote through settlement.
+- [End-to-end payment flow](/docs/tutorials/end-to-end-payment-flow): wallet setup through settlement and reconciliation.

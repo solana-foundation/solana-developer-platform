@@ -1,6 +1,6 @@
 import { KORA_ENV_KEYS } from "@sdp/fee-payment";
 import type { FeePaymentEnv } from "@sdp/fee-payment/port";
-import type { CustodyMode, CustodyProvider } from "@sdp/types/custody";
+import { CUSTODY_MODES, type CustodyMode, type CustodyProvider } from "@sdp/types/custody";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import {
   isCustodyProviderInReleaseChannel,
@@ -22,8 +22,9 @@ function isTruthyFlag(value: string | undefined): boolean {
 
 /**
  * Whether the deployment's release channel (`SDP_RELEASE_CHANNEL`, see `@sdp/types` release channels)
- * includes `module`. A release channel only caps: every flag below still has to be on,
- * and none of them can bring back a module the release channel leaves out.
+ * includes `module`. Where a module also has a flag below, the release channel only caps:
+ * the flag still has to be on, and it can never bring back a module the release channel
+ * leaves out.
  */
 export function isModuleAvailable(
   env: Pick<Env, "SDP_RELEASE_CHANNEL">,
@@ -58,6 +59,21 @@ export function isCustodyProviderAvailable(
     provider,
     mode
   );
+}
+
+/**
+ * Whether the deployment's release channel offers custody `provider` in at least one
+ * custody mode, which is when its public API document names the provider.
+ *
+ * @param env - Process environment naming the release channel.
+ * @param provider - The custody provider.
+ * @returns True when some (provider, mode) pair is in the release channel.
+ */
+export function isCustodyProviderOffered(
+  env: Pick<Env, "SDP_RELEASE_CHANNEL">,
+  provider: CustodyProvider
+): boolean {
+  return CUSTODY_MODES.some((mode) => isCustodyProviderAvailable(env, provider, mode));
 }
 
 /** Whether the deployment's release channel includes ramp `provider` (see `SDP_RAMP_PROVIDER_MATURITY`). */
@@ -120,32 +136,8 @@ export function isHeliusRingsEnabled(
   );
 }
 
-export function isMarketsEnabled(
-  env: Pick<Env, "MARKETS_ENABLED" | "SDP_RELEASE_CHANNEL">
-): boolean {
-  return (
-    isModuleAvailable(env, "markets", SDP_RAMP_PROVIDER_MATURITY) &&
-    isTruthyFlag(env.MARKETS_ENABLED)
-  );
-}
-
-// Earn is a sub-module of Markets, so the parent flag gates it: clearing
-// MARKETS_ENABLED disables every Markets API surface in one move. Callers must
-// not add a second markets check — this hierarchy is the single source of truth.
-export function isEarnEnabled(
-  env: Pick<Env, "MARKETS_ENABLED" | "EARN_ENABLED" | "SDP_RELEASE_CHANNEL">
-): boolean {
-  return (
-    isMarketsEnabled(env) &&
-    isModuleAvailable(env, "earn", SDP_RAMP_PROVIDER_MATURITY) &&
-    isTruthyFlag(env.EARN_ENABLED)
-  );
-}
-
-// DvP is the other Markets sub-module. It has no flag of its own on the API, so
-// Markets plus the release channel decide it.
-export function isDvpEnabled(env: Pick<Env, "MARKETS_ENABLED" | "SDP_RELEASE_CHANNEL">): boolean {
-  return isMarketsEnabled(env) && isModuleAvailable(env, "dvp", SDP_RAMP_PROVIDER_MATURITY);
+export function isEarnEnabled(env: Pick<Env, "SDP_RELEASE_CHANNEL">): boolean {
+  return isModuleAvailable(env, "earn", SDP_RAMP_PROVIDER_MATURITY);
 }
 
 /**

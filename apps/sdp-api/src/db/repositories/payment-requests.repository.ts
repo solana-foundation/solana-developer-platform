@@ -160,6 +160,8 @@ export interface ListPaymentRequestsResult {
 }
 
 interface SponsoredTransactionClaim {
+  /** The request's status as of this read: a claim is served only while it is awaiting payment. */
+  requestStatus: PaymentRequestStatus;
   account: string;
   unsignedTransaction: string;
   signedTransaction: string | null;

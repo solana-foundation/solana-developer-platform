@@ -1,0 +1,23 @@
+{
+  "name": "@sdp/ip",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./ip-range": {
+      "types": "./src/ip-range.ts",
+      "import": "./src/ip-range.ts",
+      "default": "./src/ip-range.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "lint": "biome check src/"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3"
+  }
+}

@@ -291,8 +291,6 @@ interface ReportBody {
 
 beforeEach(async () => {
   lastWithdrawalTimestamp = 0;
-  env.MARKETS_ENABLED = "true";
-  env.EARN_ENABLED = "true";
   await seedTestDatabase(env);
   await clearKVStores(env);
   await seedScope();

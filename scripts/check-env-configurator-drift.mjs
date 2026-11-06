@@ -14,6 +14,7 @@ const IGNORE = new Set([
   "CACHE_MODE",
   "SIGNING_PROVIDERS",
   "POSTGRES_PASSWORD_MODE",
+  "FEE_SPONSOR_CLUSTERS",
 ]);
 
 /** Keys declared in .env.example, including commented optionals (`# KEY=`). */

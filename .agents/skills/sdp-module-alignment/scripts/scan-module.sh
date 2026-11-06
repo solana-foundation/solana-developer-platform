@@ -2,14 +2,14 @@
 # First-pass drift scan of one SDP module against the current architecture
 # (docs/decisions/0005-release-channels.md, 0007-cluster-scope-ambient.md,
 # 0007-money-admission.md, 0009-idempotency-keys.md, 0011-cron-definitions.md,
-# docs/contributing/code-standards.md) and the 2026 refresh design.
+# docs/contributing/code-standards.md) and the 2026 design.
 #
 # It prints leads, not verdicts. Comment lines are skipped, but a hit can still
 # be a test helper or an allowed exception, so read every one in source before
 # it goes in the ledger. A clean section only means these patterns found
 # nothing: the manual checks in references/ still apply.
 #
-# Usage, from anywhere inside an SDP checkout (bash 4.3+, Node 24+). The script
+# Usage, from anywhere inside an SDP checkout (bash 4.3+). The script
 # can live anywhere (the repo's .agents/skills or ~/.claude/skills): it scans
 # the checkout of the current directory.
 #   <skill-dir>/scripts/scan-module.sh <module> [extra-path ...]
@@ -33,7 +33,7 @@ cd "$ROOT" || exit 1
 
 API=apps/sdp-api/src
 WEB=apps/sdp-web/src
-DASH="$WEB/app/dashboard/[projectId]"
+DASH="$WEB/app/(session)/dashboard/[projectId]"
 SNAKE="${MODULE//-/_}"
 UPPER="${SNAKE^^}"
 # Pure bash: BSD sed has no \U, so a sed conversion breaks on macOS.
@@ -264,36 +264,28 @@ note A14 "tables created: ${tables:-none found}"
 note A14 "without FORCE ROW LEVEL SECURITY: ${no_rls:-none}"
 note A15 "manual: each on-chain program the module calls is deployed, verified and IDL-published on every cluster its projects reach"
 
-section "Refresh design (redesign.md B1-B9)"
+section "Design (redesign.md B1-B8)"
 if [ "${#web_paths[@]}" -eq 0 ]; then
-  note B1 "no dashboard directory named $MODULE (pass its path as an extra argument)"
-else
-  pages="$(find "${web_paths[@]}" -name page.tsx 2>/dev/null | sort -u)"
-  urls="$(printf '%s\n' "$pages" | sed -E "s#^$WEB/app##; s#/\[projectId\]##; s#/\([^/]+\)##g; s#/page\.tsx\$##; s#\[[^]]+\]#x#g")"
-  printf '%s\n' "$urls" | grep . | node --no-warnings --input-type=module -e '
-    const { themeScopeForPath } = await import(process.argv[1]);
-    const lines = (await new Response(process.stdin).text()).split("\n").filter(Boolean);
-    for (const url of lines) console.log(`  B1   ${(themeScopeForPath(url) ?? "BASE").padEnd(8)} ${url}`);
-  ' "$ROOT/$WEB/lib/theme-scope-routes.ts" 2>/dev/null || note B1 "could not evaluate theme-scope-routes.ts (Node 24+ runs .ts natively)"
+  note B1-B8 "no dashboard directory named $MODULE (pass its path as an extra argument)"
 fi
-lead B2 "header config lines naming the module" "$MODULE|$SNAKE|$CAMEL" "$WEB/components/dashboard-header.tsx"
-lead B3 "legacy layout: fixed widths, px type, lifts, ad hoc lists" \
+lead B1 "header config lines naming the module" "$MODULE|$SNAKE|$CAMEL" "$WEB/components/dashboard-header.tsx"
+lead B2 "legacy layout: fixed widths, px type, lifts, ad hoc lists" \
   "max-w-\[[0-9.]+rem\]|minWidth|min-w-\[[0-9.]+rem\]|text-\[[0-9]+px\]|hover:-translate|hover:shadow|shadow-(md|lg|xl)|bg-white text-black|uppercase tracking|<dl\b|max-w-(4|5|6|7)xl" \
   "${web_paths[@]}"
-lead B3 "Card-wrapped sections" "<Card\b|CardContent|CardHeader" "${web_paths[@]}"
-lead B3 "design-system imports the refresh replaces" "from \"@solana/design-system[^\"]*\"" "${web_paths[@]}"
-signal B3 "refresh-only primitives in use" \
-  "refresh-record|ui/action-tile|@sdp/ui/(detail-list|status-text|callout)|refresh:" "${web_paths[@]}"
-lead B4 "hand-rolled overlays or steppers" "role=\"dialog\"|createPortal\(|fixed inset-0|\bStepper\b" "${web_paths[@]}"
-signal B4 "@sdp/ui modal, wizard progress (or WizardFrame), detail list" \
+lead B2 "Card-wrapped sections" "<Card\b|CardContent|CardHeader" "${web_paths[@]}"
+lead B2 "design-system imports the shared primitives replace" "from \"@solana/design-system[^\"]*\"" "${web_paths[@]}"
+signal B2 "the design's primitives in use" \
+  "refresh-record|ui/action-tile|@sdp/ui/(detail-list|status-text|callout)" "${web_paths[@]}"
+lead B3 "hand-rolled overlays or steppers" "role=\"dialog\"|createPortal\(|fixed inset-0|\bStepper\b" "${web_paths[@]}"
+signal B3 "@sdp/ui modal, wizard progress (or WizardFrame), detail list" \
   "@sdp/ui/(modal|wizard-step-progress|detail-list)|WizardFrame" "${web_paths[@]}"
-lead B5 "legacy design-switch remnants" "DesignSwitch|withLegacyDesign|useNewDesign|\.redesign\b" "${web_paths[@]}"
-note B6 "copy: run pnpm --filter sdp-web check:i18n; check promises in copy against the API"
+lead B4 "legacy design-switch remnants" "DesignSwitch|withLegacyDesign|useNewDesign|\.redesign\b" "${web_paths[@]}"
+note B5 "copy: run pnpm --filter sdp-web check:i18n; check promises in copy against the API"
 playground="$(grep -nE "type PlaygroundModule =" apps/sdp-api/scripts/generate-playground-catalog.ts || true)"
 if printf '%s' "$playground" | grep -qE "\"($SNAKE|$MODULE)\""; then
-  note B8 "API playground family: yes"
+  note B7 "API playground family: yes"
 else
-  note B8 "API playground family: no (${playground#*:})"
+  note B7 "API playground family: no (${playground#*:})"
 fi
 sections=""
 for p in "${web_paths[@]}"; do
@@ -304,7 +296,7 @@ for p in "${web_paths[@]}"; do
   sections+="$s "
   row="$(grep -E "^\| *$s *\|" docs/testing/ui-flow-matrix.md | head -1 || true)"
   [ -z "$row" ] && row="none (check:ui-flow-coverage fails)"
-  note B9 "ui-flow-matrix row for section $s: $row"
+  note B8 "ui-flow-matrix row for section $s: $row"
 done
 
 section "Dashboard data (dashboard-data.md C1-C4)"

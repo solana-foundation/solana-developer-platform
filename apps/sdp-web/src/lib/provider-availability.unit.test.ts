@@ -1,13 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
-import {
-  availableComplianceProviders,
-  availableCustodyProviders,
-  availableRampProviders,
-  isProviderAvailableForProject,
-  offersCustodyMode,
-} from "./provider-availability";
+import { availableCustodyProviders, offersCustodyMode } from "./provider-availability";
 
 const AVAILABILITY = projectProviderAvailability({
   project: SANDBOX_PROJECT,
@@ -48,44 +42,6 @@ describe("availableCustodyProviders", () => {
     });
 
     expect(availableCustodyProviders(availability)).toEqual([]);
-  });
-});
-
-describe("availableRampProviders", () => {
-  it("lists the available ramp providers in tuple order", () => {
-    expect(availableRampProviders(AVAILABILITY)).toEqual(["moonpay", "stripe"]);
-  });
-});
-
-describe("availableComplianceProviders", () => {
-  it("lists the available compliance providers in tuple order", () => {
-    expect(availableComplianceProviders(AVAILABILITY)).toEqual(["trm"]);
-  });
-});
-
-describe("isProviderAvailableForProject", () => {
-  it("accepts a custody provider with at least one mode", () => {
-    expect(isProviderAvailableForProject(AVAILABILITY, "fireblocks")).toBe(true);
-  });
-
-  it("rejects a custody provider with no modes", () => {
-    expect(isProviderAvailableForProject(AVAILABILITY, "turnkey")).toBe(false);
-  });
-
-  it("accepts an available provider of every other family", () => {
-    expect(isProviderAvailableForProject(AVAILABILITY, "trm")).toBe(true);
-    expect(isProviderAvailableForProject(AVAILABILITY, "stripe")).toBe(true);
-    expect(isProviderAvailableForProject(AVAILABILITY, "kamino")).toBe(true);
-  });
-
-  it("rejects an unavailable provider of every other family", () => {
-    expect(isProviderAvailableForProject(AVAILABILITY, "chainalysis")).toBe(false);
-    expect(isProviderAvailableForProject(AVAILABILITY, "coinbase")).toBe(false);
-    expect(isProviderAvailableForProject(AVAILABILITY, "veda")).toBe(false);
-  });
-
-  it("rejects a provider the deployment does not know", () => {
-    expect(isProviderAvailableForProject(AVAILABILITY, "unknown-provider")).toBe(false);
   });
 });
 

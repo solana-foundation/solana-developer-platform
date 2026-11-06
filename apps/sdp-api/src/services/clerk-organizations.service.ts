@@ -2,7 +2,17 @@ import { z } from "zod";
 import { AppError } from "@/lib/errors";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
-import { describeClerkFailure } from "./clerk-error";
+import { ClerkRequestError, describeClerkFailure } from "./clerk-error";
+
+/** Clerk's code for an invitation to an address already a member of the organization. */
+const CLERK_ALREADY_A_MEMBER = "already_a_member_in_organization";
+/** Clerk's code for an address its instance restrictions do not let sign up. */
+const CLERK_NOT_ALLOWED_ACCESS = "not_allowed_access";
+
+/** Clerk refused the invitation because its restrictions do not admit the address. */
+export function isClerkAccessRefusal(clerkError: ClerkRequestError): boolean {
+  return clerkError.clerkCode === CLERK_NOT_ALLOWED_ACCESS;
+}
 
 export interface ClerkOrganizationInvitation {
   id: string;
@@ -22,6 +32,14 @@ export interface ClerkOrganization {
   slug?: string | null;
   private_metadata?: Record<string, unknown> | null;
 }
+
+/** The SDP invitation id `createOrganizationInvitation` stores on each Clerk invitation. */
+const sdpTaggedInvitationsSchema = z.array(
+  z.object({
+    id: z.string(),
+    private_metadata: z.object({ sdpInvitationId: z.string().optional() }).nullable().optional(),
+  })
+);
 
 const clerkOrganizationSchema = z.object({
   id: z.string(),
@@ -75,10 +93,7 @@ export class ClerkOrganizationsService {
         new Error(describeClerkFailure(res.status, body)),
         startedAt
       );
-      throw new AppError("INTERNAL_ERROR", describeClerkFailure(res.status, body), {
-        status: res.status,
-        body,
-      });
+      throw new ClerkRequestError(res.status, body);
     }
 
     if (res.status === 204) {
@@ -100,6 +115,8 @@ export class ClerkOrganizationsService {
    * @param params.emailAddress - The address to invite.
    * @param params.expiresInDays - How long Clerk's link lives; matches the SDP invitation.
    * @param params.redirectUrl - Where Clerk's link lands: the dashboard's sign-in page.
+   * @param params.sdpInvitationId - The SDP invitation it delivers, stored on it so a call
+   *   that failed without returning its id can still find exactly this invitation.
    * @returns The Clerk invitation.
    */
   async createOrganizationInvitation(params: {
@@ -107,12 +124,14 @@ export class ClerkOrganizationsService {
     emailAddress: string;
     expiresInDays: number;
     redirectUrl: string;
+    sdpInvitationId: string;
   }): Promise<ClerkOrganizationInvitation> {
     const payload = {
       email_address: params.emailAddress,
       role: "org:member",
       expires_in_days: params.expiresInDays,
       redirect_url: params.redirectUrl,
+      private_metadata: { sdpInvitationId: params.sdpInvitationId },
     };
 
     return this.request<ClerkOrganizationInvitation>(
@@ -122,6 +141,27 @@ export class ClerkOrganizationsService {
         body: JSON.stringify(payload),
       }
     );
+  }
+
+  /**
+   * The same invitation, or null when Clerk refuses it because the address is
+   * already a member of the Clerk organization. The caller decides what that
+   * membership means; Clerk's refusal for it is the one this interprets.
+   *
+   * @param params - As for {@link createOrganizationInvitation}.
+   * @returns The Clerk invitation, or null for an address already a member.
+   */
+  async createOrganizationInvitationUnlessMember(
+    params: Parameters<ClerkOrganizationsService["createOrganizationInvitation"]>[0]
+  ): Promise<ClerkOrganizationInvitation | null> {
+    try {
+      return await this.createOrganizationInvitation(params);
+    } catch (error) {
+      if (error instanceof ClerkRequestError && error.clerkCode === CLERK_ALREADY_A_MEMBER) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   /**
@@ -153,6 +193,25 @@ export class ClerkOrganizationsService {
         return all;
       }
     }
+  }
+
+  /**
+   * Every pending invitation that carries the SDP invitation id
+   * `createOrganizationInvitation` stores on it, so a create whose answer never
+   * arrived can still be traced to its SDP invitation.
+   */
+  async listSdpTaggedPendingInvitations(
+    organizationId: string
+  ): Promise<Array<{ clerkInvitationId: string; sdpInvitationId: string }>> {
+    const pending = sdpTaggedInvitationsSchema.parse(
+      await this.listPendingOrganizationInvitations(organizationId)
+    );
+    return pending.flatMap((invitation) => {
+      const sdpInvitationId = invitation.private_metadata?.sdpInvitationId;
+      return sdpInvitationId === undefined
+        ? []
+        : [{ clerkInvitationId: invitation.id, sdpInvitationId }];
+    });
   }
 
   /**

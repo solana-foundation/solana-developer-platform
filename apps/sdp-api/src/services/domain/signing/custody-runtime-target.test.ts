@@ -94,7 +94,6 @@ describe("CustodyRuntimeTargets", () => {
     appId: env.PRIVY_APP_ID,
     appSecret: env.PRIVY_APP_SECRET,
     apiBaseUrl: env.PRIVY_API_BASE_URL,
-    requestDelayMs: env.PRIVY_REQUEST_DELAY_MS,
   };
 
   it("leaves managed Fireblocks wallets on the existing signing path", async () => {
@@ -119,7 +118,6 @@ describe("CustodyRuntimeTargets", () => {
     env.PRIVY_APP_ID = undefined;
     env.PRIVY_APP_SECRET = undefined;
     env.PRIVY_API_BASE_URL = "https://privy.runtime-targets.test/v1";
-    env.PRIVY_REQUEST_DELAY_MS = "250";
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(
@@ -139,7 +137,6 @@ describe("CustodyRuntimeTargets", () => {
     env.PRIVY_APP_ID = original.appId;
     env.PRIVY_APP_SECRET = original.appSecret;
     env.PRIVY_API_BASE_URL = original.apiBaseUrl;
-    env.PRIVY_REQUEST_DELAY_MS = original.requestDelayMs;
   });
 
   it("admits an exact active Config wallet without constructing a signer", async () => {
@@ -1053,6 +1050,122 @@ describe("CustodyRuntimeTargets", () => {
     expect(read).toHaveBeenCalledTimes(2);
   });
 
+  describe("BYOK credential fence at the custody signer", () => {
+    async function connectionSigner(custodyWalletId: string) {
+      vi.mocked(fetch).mockResolvedValue(
+        new Response(JSON.stringify({ address: CONNECTION_PUBLIC_KEY, chain_type: "solana" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+      mockStoredCredentialRead();
+      const signer = await new CustodyRuntimeTargets(
+        getDb(env),
+        env,
+        new Map()
+      ).getTransactionSignerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        custodyWalletId,
+        // An exit reads no admission facts, so the credential is the only gate.
+        "recurring.cancel",
+        createConfigAdapterFactory(CONFIG_PUBLIC_KEY)
+      );
+      // SAFETY: the Privy Connection signer is a partial signer.
+      return signer as TransactionPartialSigner;
+    }
+
+    const CREDENTIAL_CHANGED = {
+      code: "CONFLICT",
+      statusCode: 409,
+      message: "Custody Connection credential changed after the signer was resolved",
+      details: { reason: "runtime_execution_unavailable" },
+    };
+
+    it("keeps signing while the Connection's credential is unchanged", async () => {
+      const connection = await seedConnection(DEFAULT_CONNECTION);
+      const signer = await connectionSigner(`cwlt_${connection.id}`);
+
+      await expect(signer.signTransactions([])).resolves.toEqual([]);
+      await expect(signer.signTransactions([])).resolves.toEqual([]);
+    });
+
+    it("refuses to sign after the Connection rotates to a new credential", async () => {
+      const connection = await seedConnection(DEFAULT_CONNECTION);
+      const signer = await connectionSigner(`cwlt_${connection.id}`);
+      vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
+
+      const rotatedId = `${connection.credentialId}_rotated`;
+      await getDb(env).transaction(async (tx) => {
+        await insertTestStoredProviderCredential(tx, {
+          id: rotatedId,
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          provider: "privy",
+          label: "Privy rotated",
+          stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "ciphertext" },
+          displayMetadata: {},
+          status: "active",
+          credentialVersion: 2,
+          rotatedFromProviderCredentialId: connection.credentialId,
+          lastValidatedAt: null,
+          deactivatedAt: null,
+          createdBy: USER_ID,
+        });
+        await tx.execute("UPDATE custody_connections SET provider_credential_id = ? WHERE id = ?", [
+          rotatedId,
+          connection.id,
+        ]);
+      });
+
+      await expect(signer.signTransactions([])).rejects.toMatchObject(CREDENTIAL_CHANGED);
+      expect(getLogger().warn).toHaveBeenCalledWith(
+        expect.objectContaining({ connectionId: connection.id }),
+        "custody_signer_credential_changed"
+      );
+    });
+
+    it.each([
+      ["changes version", "UPDATE provider_credentials SET credential_version = 2 WHERE id = ?"],
+      [
+        "is deactivated",
+        "UPDATE provider_credentials SET status = 'deactivated', deactivated_at = sdp_iso_now() WHERE id = ?",
+      ],
+    ])("refuses to sign after the bound credential %s", async (_change, sql) => {
+      const connection = await seedConnection(DEFAULT_CONNECTION);
+      const signer = await connectionSigner(`cwlt_${connection.id}`);
+      vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
+
+      await getDb(env).prepare(sql).bind(connection.credentialId).run();
+
+      await expect(signer.signTransactions([])).rejects.toMatchObject(CREDENTIAL_CHANGED);
+    });
+
+    it("leaves a Config wallet's signer without a credential fence", async () => {
+      const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
+      const connection = await seedConnection(DEFAULT_CONNECTION);
+      // SAFETY: the config adapter factory's signer is a partial signer.
+      const signer = (await new CustodyRuntimeTargets(
+        getDb(env),
+        env,
+        new Map()
+      ).getTransactionSignerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        `cwlt_${config.id}`,
+        "recurring.cancel",
+        createConfigAdapterFactory(CONFIG_PUBLIC_KEY)
+      )) as TransactionPartialSigner;
+
+      await getDb(env)
+        .prepare("UPDATE provider_credentials SET credential_version = 2 WHERE id = ?")
+        .bind(connection.credentialId)
+        .run();
+
+      await expect(signer.signTransactions([])).resolves.toEqual([]);
+    });
+  });
+
   it("returns a redacted unavailable error when the Credential secret cannot be read", async () => {
     const connection = await seedConnection(DEFAULT_CONNECTION);
     const read = vi.fn().mockRejectedValue(new Error("raw secret backend error"));
@@ -1094,9 +1207,9 @@ describe("CustodyRuntimeTargets", () => {
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
   });
 
-  it("passes the Connection request delay, else the environment delay, to the Privy signer", async () => {
+  it("passes the Connection request delay to the Privy signer", async () => {
     const connection = await seedConnection(DEFAULT_CONNECTION);
-    await getDb(env).execute("UPDATE custody_connections SET request_delay_ms = 0 WHERE id = ?", [
+    await getDb(env).execute("UPDATE custody_connections SET request_delay_ms = 175 WHERE id = ?", [
       connection.id,
     ]);
     mockStoredCredentialRead();
@@ -1112,22 +1225,7 @@ describe("CustodyRuntimeTargets", () => {
         getConfigAdapter
       )
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
-    expect(lastPrivyAdapter(getPrivySigner).requestDelayMs).toBe(0);
-
-    await getDb(env).execute(
-      "UPDATE custody_connections SET request_delay_ms = NULL WHERE id = ?",
-      [connection.id]
-    );
-    await expect(
-      new CustodyRuntimeTargets(getDb(env), env, new Map()).getTransactionSignerForWalletRecord(
-        ORGANIZATION_ID,
-        PROJECT_ID,
-        `cwlt_${connection.id}`,
-        "payments.transfer",
-        getConfigAdapter
-      )
-    ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
-    expect(lastPrivyAdapter(getPrivySigner).requestDelayMs).toBe(250);
+    expect(lastPrivyAdapter(getPrivySigner).requestDelayMs).toBe(175);
   });
 
   it.each([

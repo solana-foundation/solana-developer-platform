@@ -3,37 +3,26 @@ title: Quickstart
 description: Install the self-hosted stack, generate a .env, and bring it up with Docker Compose.
 ---
 
-This guide takes you from an empty host to a running Solana Developer Platform.
-It assumes **Docker Engine** and **Docker Compose v2** are installed and the
-Docker daemon is running.
+Go from an empty host to a running Solana Developer Platform. You need Docker Engine and Docker Compose v2, with the Docker daemon running.
 
 ## 1. Install
 
-The install script downloads `compose.yml` and `.env.example` for the latest
-release into `~/sdp` and verifies them against the release checksums.
+Run the install script. It downloads the latest release's `compose.yml` and `.env.example` into `~/sdp` and checks them against the release's `SHA256SUMS`. When `cosign` is installed, it also verifies the signature on `SHA256SUMS`.
 
 ```bash title="Terminal"
 curl -fsSL https://github.com/solana-foundation/solana-developer-platform/releases/latest/download/install.sh | bash
 ```
 
-The script is open source — you can read it before running it, and verify the
-checksums and signature out of band. The commented header of `install.sh`
-documents the full verified-install flow and the environment variables you can
-override (`SDP_INSTALL_DIR`, `INSTALL_VERSION`, and others).
+The script is open source: read it before you run it. Its header shows how to verify the checksums and signature yourself, and lists the variables you can override, such as `SDP_INSTALL_DIR` and `INSTALL_VERSION` (a release tag to install instead of the latest).
 
-Prefer to do it by hand? Download `compose.yml` and `.env.example` from the
-[latest release](https://github.com/solana-foundation/solana-developer-platform/releases/latest)
-into a working directory instead.
+To install by hand, download `compose.yml` and `default.env.example` from the [latest release](https://github.com/solana-foundation/solana-developer-platform/releases/latest) into a working directory, and save the second file as `.env.example`.
 
 ## 2. Generate your `.env`
 
-The stack reads its configuration from a `.env` file next to `compose.yml`. The
-[configurator](/docs/self-hosting/configurator) fills it in for you, generates
-the app secrets, and validates your answers.
+The stack reads its configuration from a `.env` next to `compose.yml`. The [configurator](/docs/self-hosting/configurator) fills it in, generates the app secrets, and validates your answers.
 
-- **In your browser** — open the [configurator](/docs/self-hosting/configurator),
-  answer the prompts, and download the `.env` into `~/sdp`.
-- **In your terminal** — run the configurator from the API image:
+- **In your browser:** open the [configurator](/docs/self-hosting/configurator), answer the prompts, and save the `.env` into `~/sdp`.
+- **In your terminal:** run the configurator from the API image. Put the release tag you installed in place of `latest`, so the configurator matches your `compose.yml`. The install script prints this command with your tag filled in.
 
   ```bash title="Terminal"
   docker run --rm -it -v "$HOME/sdp:/out" \
@@ -41,11 +30,7 @@ the app secrets, and validates your answers.
     node configure.js --out /out/.env
   ```
 
-  Use the same release tag you installed in place of `latest` so the configurator
-  matches your `compose.yml`.
-
-See the [environment reference](/docs/self-hosting/env-reference) for what each
-variable means and which are required.
+The [environment reference](/docs/self-hosting/env-reference) explains each variable.
 
 ## 3. Bring up the stack
 
@@ -54,9 +39,7 @@ cd ~/sdp
 docker compose up -d
 ```
 
-On startup, `sdp-migrate` runs the database migrations once, then the API, web,
-and docs services start. The first run pulls the images, so it may take a few
-minutes.
+`sdp-migrate` applies the database migrations first. The API starts next, and the dashboard and docs follow once it's healthy. The first run pulls the images, so it can take a few minutes.
 
 ## 4. Verify
 
@@ -65,19 +48,12 @@ docker compose ps
 docker compose logs -f sdp-api
 ```
 
-When the services report healthy, the dashboard is at `http://localhost:3000`,
-the API at `http://localhost:8787`, and these docs at `http://localhost:3001`.
-The API exposes a [health endpoint](/docs/reference/api/health) you can poll from
-a load balancer or uptime check.
+Once the services report healthy, the dashboard is at `http://localhost:3000`, the API at `http://localhost:8787`, and these docs at `http://localhost:3001`. Point uptime checks at the API's [health endpoints](/docs/reference/api/health): `/health` says the API is up, and `/health/ready` also checks the database and Redis.
 
-If a service fails to start or a required variable is missing, see
-[Troubleshooting](/docs/self-hosting/troubleshooting).
+If a service fails to start or a required variable is missing, see [Troubleshooting](/docs/self-hosting/troubleshooting).
 
 ## Next steps
 
-- [First devnet deployment](/docs/self-hosting/first-devnet-deployment) — log
-  into the dashboard, initialize a local wallet, and verify API access.
-- [Upgrade & backup](/docs/self-hosting/upgrade-and-backup) — keep the stack
-  current and protect your data.
-- [Environment reference](/docs/self-hosting/env-reference) — tune ports, RPC,
-  signing, and authentication.
+- [First devnet deployment](/docs/self-hosting/first-devnet-deployment): sign in to the dashboard, create a local wallet, and call the API.
+- [Upgrade and backup](/docs/self-hosting/upgrade-and-backup): keep the stack current and protect your data.
+- [Environment reference](/docs/self-hosting/env-reference): tune ports, RPC, signing, and authentication.

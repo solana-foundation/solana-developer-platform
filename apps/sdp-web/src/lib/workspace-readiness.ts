@@ -1,5 +1,5 @@
 import type { ListProjectsResponse } from "@sdp/types/projects";
-import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
+import type { OnboardingStatusResponse } from "@/app/(session)/dashboard/[projectId]/onboarding-status";
 import { resolveProjectFromList } from "./dashboard-project-selection";
 
 export type WorkspaceReadiness =

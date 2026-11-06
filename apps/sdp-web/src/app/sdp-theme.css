@@ -1,37 +1,36 @@
 /* App-specific theme wiring over @sdp/design-tokens: Clerk's native variables, the
    @solana/design-system retheme, and native-control fixes. Tokens themselves live in
-   packages/sdp-design-tokens. */
+   packages/sdp-design-tokens. globals.css imports this after the design system's stylesheet, so
+   these :root rules win over its :root and .dark ones by source order. */
 
 :root {
   /* Clerk supports these native CSS variables, so its first paint follows the
-     pre-hydration .dark class without a theme-dependent React render. */
-  --clerk-color-primary: #1c1c1d;
-  --clerk-color-primary-foreground: #fcfcfa;
-  --clerk-color-foreground: #1c1c1d;
-  --clerk-color-muted-foreground: rgba(28, 28, 29, 0.64);
-  --clerk-color-neutral: #1c1c1d;
-  --clerk-color-background: #fcfcfa;
-  --clerk-color-input: #f0ede6;
-  --clerk-color-input-foreground: #1c1c1d;
+     pre-hydration .dark class without a theme-dependent React render. Clerk derives its shades
+     from them, so they are the palette's literal sRGB values. */
+  --clerk-color-primary: #0f0f13;
+  --clerk-color-primary-foreground: #fbfaf9;
+  --clerk-color-foreground: #0f0f13;
+  --clerk-color-muted-foreground: #4a4852;
+  --clerk-color-neutral: #0f0f13;
+  --clerk-color-background: #fbfaf9;
+  --clerk-color-input: #ffffff;
+  --clerk-color-input-foreground: #0f0f13;
   /* colorMuted must stay opaque: Clerk paints it as the sole background of the
      account-modal navbar, so any alpha lets the page bleed through. */
-  --clerk-color-muted: color-mix(in srgb, #fcfcfa, #1c1c1d 6%);
-  --clerk-color-border: rgba(28, 28, 29, 0.14);
-  --clerk-color-ring: rgba(28, 28, 29, 0.4);
-  --clerk-color-shimmer: rgba(28, 28, 29, 0.1);
+  --clerk-color-muted: color-mix(in srgb, #fbfaf9, #0f0f13 6%);
+  --clerk-color-border: rgba(15, 15, 19, 0.14);
+  --clerk-color-ring: rgba(15, 15, 19, 0.4);
+  --clerk-color-shimmer: rgba(15, 15, 19, 0.1);
   --clerk-color-danger: #b91c1c;
   --clerk-color-success: #007a4e;
   --clerk-color-warning: #854d0e;
   --sdp-clerk-provider-icon-filter: none;
 }
 
-/* Point design-system runtime tokens at SDP's product palette. Re-declared on the refresh
-   scope so var() re-resolves there: a custom property computed at :root would otherwise
-   carry the base palette into a refresh subtree. The :root form keeps a refresh <html> ahead of
-   the design system's .dark whatever the order of the stylesheets. */
-:root,
-[data-sdp-theme="refresh"],
-:root[data-sdp-theme="refresh"] {
+/* The design-system runtime and component tokens, pointed at SDP's palette and the 2026
+   design. The package derives its text and component tokens from its own gray ramp, so each one
+   the design touches is re-stated here against SDP's names. */
+:root {
   --sdp-shell-bg: var(--surface);
 
   --gray-1400: var(--emph-xh);
@@ -62,23 +61,15 @@
   --badge-info-bg: var(--blue-bg);
   --badge-info-text: var(--blue-tx);
   --badge-info-dot: var(--blue-tx);
-}
 
-/* Refresh scope: the design-system component tokens the 2026 Payments design changes. The
-   package derives its text and component tokens from its gray ramp at :root, so each one the
-   design touches is re-stated here to resolve against the scope's palette. The :root form
-   outranks the design system's .dark when the scope sits on a dark <html>, whatever the order of
-   the stylesheets. */
-[data-sdp-theme="refresh"],
-:root[data-sdp-theme="refresh"] {
   /* Season Sans ships Regular and Medium faces only. The design system's regular weight is 450,
-     which the browser matches to the Medium face, so every plain run came out heavy. The design's
-     body text is the Regular face, drawn antialiased. The derived weights are re-stated with the
-     design system's own formula (its dark multiplier included): computed at :root, they would
-     carry 450 into a nested scope. */
+     which the browser matches to the Medium face, so every plain run would come out heavy; body
+     text is the Regular face. */
   --font-weight-regular-base: 400;
-  --font-weight-regular: calc(var(--font-weight-regular-base) * var(--fw-mult));
-  --tab-weight-idle: var(--font-weight-regular);
+  /* Every tab is the Medium face, selected or not: the selected one changes ink only, so a
+     switch never changes a label's width. */
+  --tab-weight-idle: calc(var(--font-weight-medium-base) * var(--fw-mult));
+  --tab-weight-active: var(--tab-weight-idle);
 
   --text-extra-high: var(--emph-xh);
   --text-high: var(--emph-m);
@@ -100,8 +91,8 @@
   --text-button-lg: var(--font-size-body);
 
   /* Underline fields: no box, no fill, no ring; the bottom rule darkens on hover and focus.
-     The field components draw only the bottom edge (refresh: variants in components/ui). The
-     design has one form field height, 36px, so the xl field a wizard asks for is that. */
+     The field components draw only the bottom edge. The design has one form field height,
+     36px, so the xl field a wizard asks for is that. */
   --input-height-xl: 36px;
   --input-radius-xl: 0px;
   --input-radius-lg: 0px;
@@ -128,7 +119,7 @@
   --tab-padding-x-sm: 0px;
   --tab-padding-x-md: 0px;
   --tab-padding-y-md: 11px;
-  --tab-text-idle: var(--emph-m);
+  --tab-text-idle: var(--emph-l);
   --tab-text-hover: var(--emph-xh);
   --tab-text-active: var(--emph-xh);
   --tab-indicator-color: var(--emph-xh);
@@ -152,67 +143,68 @@
   --tooltip-radius: var(--corner-control);
 }
 
-/* The scope's own text weight and smoothing, in the base layer so a utility on the scope element
-   itself (font-bold, subpixel-antialiased) still wins; descendants inherit them as before. */
+/* The document's text weight and smoothing: the Regular face, drawn antialiased. A semibold or
+   bold request takes the Medium face as it is instead of a smeared synthetic bold. In the base
+   layer, so a utility on <html> itself still wins; descendants inherit them. */
 @layer base {
-  [data-sdp-theme="refresh"] {
+  :root {
     font-weight: var(--font-weight-regular);
+    font-synthesis-weight: none;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 }
 
-/* The design-system field label is medium weight with no class hook; refresh labels are
+/* The design-system field label is medium weight with no class hook; the design's labels are
    regular. Scoped to labels that head a design-system input. */
-[data-sdp-theme="refresh"] div:has(+ .group\/input) > label {
+div:has(+ .group\/input) > label {
   font-weight: 400;
 }
 
-/* A refresh table's edge cells take 12px, so a hovered row's tint has an inset; the table's
-   wrapper reaches the same 12px past the column (`refresh:-mx-3`), so its text still lines up
-   with the title. A table inside a card stays inside it, on the card's 16px inset. */
-[data-sdp-theme="refresh"] [data-slot="card"] {
+/* A table's edge cells take 12px, so a hovered row's tint has an inset; the table's wrapper
+   reaches the same 12px past the column (`-mx-3`), so its text still lines up with the title.
+   A table inside a card stays inside it, on the card's 16px inset. */
+[data-slot="card"] {
   --table-cell-padding-x-edge: 16px;
 }
 
-/* The refresh sidebar scrolls without a track eating its width: a thin bar, invisible until the
+/* The sidebar scrolls without a track eating its width: a thin bar, invisible until the
    pointer is over the list. Standard properties only, which Chrome 121+, Firefox and Safari 18.2+
    honour; older engines keep their default bar. */
-[data-sdp-theme="refresh"] .sdp-quiet-scroll {
+.sdp-quiet-scroll {
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
 }
 
-[data-sdp-theme="refresh"] .sdp-quiet-scroll:hover {
+.sdp-quiet-scroll:hover {
   scrollbar-color: var(--t12) transparent;
 }
 
 /* Base UI 1.8 marks the active tab `data-active`; the design-system tab still styles
-   `data-selected`, so without this the active tab keeps the idle ink and weight and only the
-   underline tells it apart. The design sets it in full ink, medium. */
-[data-sdp-theme="refresh"] [role="tab"][data-active] {
+   `data-selected`, so without this the active tab keeps the idle ink and only the underline
+   tells it apart. The design sets it in full ink. */
+[role="tab"][data-active] {
   color: var(--tab-text-active);
-  font-weight: var(--tab-weight-active);
 }
 
 :root.dark {
   color-scheme: dark;
 
-  --clerk-color-primary: #fcfcfa;
-  --clerk-color-primary-foreground: #1c1c1d;
-  --clerk-color-foreground: #fcfcfa;
-  --clerk-color-muted-foreground: rgba(252, 252, 250, 0.72);
-  --clerk-color-neutral: #fcfcfa;
-  --clerk-color-background: #343435;
-  --clerk-color-input: #1c1c1d;
-  --clerk-color-input-foreground: #fcfcfa;
-  --clerk-color-muted: color-mix(in srgb, #343435, #fcfcfa 8%);
-  --clerk-color-border: rgba(252, 252, 250, 0.16);
-  --clerk-color-ring: rgba(252, 252, 250, 0.56);
-  --clerk-color-shimmer: rgba(252, 252, 250, 0.1);
-  --clerk-color-danger: #fda4af;
-  --clerk-color-success: #6ee7b7;
-  --clerk-color-warning: #fcd34d;
+  --clerk-color-primary: #fbfaf9;
+  --clerk-color-primary-foreground: #08080a;
+  --clerk-color-foreground: #fbfaf9;
+  --clerk-color-muted-foreground: #b4b0be;
+  --clerk-color-neutral: #fbfaf9;
+  --clerk-color-background: #08080a;
+  --clerk-color-input: #0e0e11;
+  --clerk-color-input-foreground: #fbfaf9;
+  --clerk-color-muted: color-mix(in srgb, #08080a, #fbfaf9 8%);
+  --clerk-color-border: rgba(251, 250, 249, 0.16);
+  --clerk-color-ring: rgba(251, 250, 249, 0.56);
+  --clerk-color-shimmer: rgba(251, 250, 249, 0.1);
+  --clerk-color-danger: #d8584d;
+  --clerk-color-success: #4b9b73;
+  --clerk-color-warning: #a77446;
   --sdp-clerk-provider-icon-filter: grayscale(1) brightness(0) invert(1);
 }
 
@@ -258,115 +250,4 @@ input[type="week"]::-webkit-calendar-picker-indicator:hover {
   input[type="week"]::-webkit-calendar-picker-indicator {
     transition: none;
   }
-}
-
-/* The 2026 palette, faces and body type on every dashboard route and the sign-in and sign-up
-   pages, not only inside the refresh scope. The dashboard shell marks its <main> with
-   data-sdp-dashboard-shell and the auth pages with data-sdp-auth-shell; :has lifts that to the
-   root, so menus, dialogs and toasts portaled to <body> follow, and other pages keep the base
-   palette. Component shapes and page layout stay with the
-   refresh scope. Same re-points as the refresh scope in @sdp/design-tokens' tokens.css. */
-:root:has(main:is([data-sdp-dashboard-shell], [data-sdp-auth-shell])) {
-  --surface: var(--paper-side);
-  --surface-sunken: var(--paper-card);
-  --surface-raised: var(--paper);
-  --surface-tile: var(--paper-tile);
-
-  --emph-xh: var(--ink);
-  --emph-m: var(--ink-secondary);
-  --emph-l: var(--ink-tertiary);
-  --emph-xl: var(--ink-disabled);
-  --on-primary: var(--paper);
-
-  --t4: var(--wash);
-  --t8: var(--wash-strong);
-  --t12: var(--wash-strongest);
-
-  --border-xl: var(--rule-faint);
-  --border-l: var(--rule);
-  --border-m: var(--rule-strong);
-
-  --green-tx: var(--positive);
-  --green-bg: var(--positive-wash);
-  --green-brd: var(--positive-rule);
-  --blue-tx: var(--progress);
-  --blue-bg: var(--progress-wash);
-  --blue-brd: var(--progress-rule);
-  --amber-tx: var(--attention);
-  --amber-bg: var(--attention-wash);
-  --amber-brd: var(--attention-rule);
-  --red-tx: var(--critical);
-  --red-bg: var(--critical-wash);
-  --red-brd: var(--critical-rule);
-  --crimson: var(--critical);
-  --crimson-strong: var(--critical-strong);
-  --crimson-strongest: var(--critical-strongest);
-  --crimson-bg: var(--critical-wash);
-  --crimson-brd: var(--critical-rule);
-
-  --font-sans: var(--font-brand-sans);
-  --font-mono: var(--font-brand-mono);
-  font-family: var(--font-sans);
-
-  /* Every page title at the design's heading size, as on a refresh route. */
-  --page-title-size: var(--font-size-heading);
-  --page-title-line-height: var(--line-height-heading);
-  --page-title-letter-spacing: var(--letter-spacing-heading);
-
-  /* Season Sans ships Regular and Medium faces only. The design system's regular weight is 450,
-     which the browser matches to the Medium face, so every plain run came out heavy; body text is
-     the Regular face, drawn antialiased. A semibold or bold request takes the Medium face as it
-     is instead of a smeared synthetic bold. */
-  --font-weight-regular-base: 400;
-  font-weight: var(--font-weight-regular);
-  font-synthesis-weight: none;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-
-  /* The design-system tokens the package derives from its own gray ramp, re-stated against
-     SDP's names. */
-  --text-extra-high: var(--emph-xh);
-  --text-high: var(--emph-m);
-  --text-medium: var(--emph-m);
-  --text-low: var(--emph-l);
-  --text-extra-low: var(--emph-xl);
-  --border-light: var(--border-l);
-
-  --button-primary-bg: var(--emph-xh);
-  --button-primary-bg-hover: var(--emph-xh);
-  --button-secondary-bg: var(--t8);
-  --button-secondary-bg-hover: var(--t12);
-  --button-secondary-text: var(--emph-xh);
-
-  /* Clerk derives its shades from these, so they are the palette's literal sRGB values. */
-  --clerk-color-primary: #0f0f13;
-  --clerk-color-primary-foreground: #fbfaf9;
-  --clerk-color-foreground: #0f0f13;
-  --clerk-color-muted-foreground: #4a4852;
-  --clerk-color-neutral: #0f0f13;
-  --clerk-color-background: #fbfaf9;
-  --clerk-color-input: #ffffff;
-  --clerk-color-input-foreground: #0f0f13;
-  --clerk-color-muted: color-mix(in srgb, #fbfaf9, #0f0f13 6%);
-  --clerk-color-border: rgba(15, 15, 19, 0.14);
-  --clerk-color-ring: rgba(15, 15, 19, 0.4);
-  --clerk-color-shimmer: rgba(15, 15, 19, 0.1);
-}
-
-:root.dark:has(main:is([data-sdp-dashboard-shell], [data-sdp-auth-shell])) {
-  --clerk-color-primary: #fbfaf9;
-  --clerk-color-primary-foreground: #08080a;
-  --clerk-color-foreground: #fbfaf9;
-  --clerk-color-muted-foreground: #b4b0be;
-  --clerk-color-neutral: #fbfaf9;
-  --clerk-color-background: #08080a;
-  --clerk-color-input: #0e0e11;
-  --clerk-color-input-foreground: #fbfaf9;
-  --clerk-color-muted: color-mix(in srgb, #08080a, #fbfaf9 8%);
-  --clerk-color-border: rgba(251, 250, 249, 0.16);
-  --clerk-color-ring: rgba(251, 250, 249, 0.56);
-  --clerk-color-shimmer: rgba(251, 250, 249, 0.1);
-  --clerk-color-danger: #d8584d;
-  --clerk-color-success: #4b9b73;
-  --clerk-color-warning: #a77446;
 }

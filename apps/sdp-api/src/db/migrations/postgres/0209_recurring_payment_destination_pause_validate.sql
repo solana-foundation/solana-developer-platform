@@ -1,0 +1,2 @@
+ALTER TABLE payment_recurring_payments
+    VALIDATE CONSTRAINT payment_recurring_payments_paused_reason_check;

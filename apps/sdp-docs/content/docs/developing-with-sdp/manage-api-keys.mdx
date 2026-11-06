@@ -3,11 +3,11 @@ title: Manage API Keys
 description: Create, rotate, and revoke API keys with explicit grants by module, a signing wallet scope, and zero-downtime rotation.
 ---
 
-Create, rotate, and revoke the API keys that authenticate SDP API requests. Each key belongs to a project, inherits its environment, and holds an explicit list of grants plus optional controls — see [Authentication](/docs/developing-with-sdp/authentication) for how those layers are enforced.
+API keys authenticate SDP API requests. Each key belongs to a project, inherits its environment, and holds an explicit list of grants plus optional controls. [Authentication](/docs/developing-with-sdp/authentication) covers how SDP enforces them.
 
-Keys are credentials, not administrators: they are created, changed, rotated, and revoked only by a signed-in member of your organization in the dashboard. An API key cannot manage keys, the organization, its members, or project members, whatever it is granted; it is refused with `403 FORBIDDEN` and `error.details.reason` set to `human_session_required`.
+Keys are credentials, not administrators. Only a signed-in organization admin creates, changes, rotates, or revokes a key, in the dashboard. An API key can't manage keys, the organization, its members, or project members, whatever it's granted: it's refused with `403 FORBIDDEN` and `error.details.reason` set to `human_session_required`.
 
-The full secret is returned exactly once — at creation and at rotation. SDP stores only a keyed hash of the secret and the key ID; a lost key cannot be recovered, only rotated or replaced. Every key tracks `lastUsedAt` so you can identify stale credentials before revoking them.
+SDP returns the full secret once, at creation and at rotation, and stores only a keyed hash of it. A lost key can't be recovered, only rotated or replaced. Every key records `lastUsedAt`, so you can find stale keys before you revoke them.
 
 ## Key format
 
@@ -19,7 +19,7 @@ Keys use the shared Solana Foundation format, `sf_<key id>_<secret><checksum>`:
 | `<secret>` | 43 base62 characters (256 random bits) |
 | `<checksum>` | 6 base62 characters, so a mistyped key is refused at once and secret scanners can match a leaked one |
 
-The format does not name an environment: a key reaches the network of the project it was created in (sandbox: devnet, production: mainnet-beta). Keys created before this format, prefixed `sk_test_` or `sk_live_`, keep working until they are revoked.
+The format doesn't name an environment: a key reaches the network of the project it was created in (sandbox: devnet, production: mainnet-beta). Keys created before this format, prefixed `sk_test_` or `sk_live_`, keep working until they are revoked.
 
 ## Grants by module
 
@@ -28,20 +28,18 @@ Every API route performs exactly one **action**, named `module.verb`, and a key 
 | Verb | What it allows |
 | --- | --- |
 | `read` | View the module's records |
-| `manage` | Create and edit records reversibly: drafts, pausing, cancelling |
-| `execute` | Anything irreversible or that leaves SDP: on-chain transactions, provider calls, moving money, and changing where money goes, such as a payout destination or a recurring amount |
-| `enforce` | Token enforcement: freeze, pause, seize, force-burn, allowlist |
-| `authority` | Transferring or revoking a token's authorities |
+| `manage` | Create and edit records reversibly: drafts, pausing, canceling |
+| `execute` | Anything irreversible or that leaves SDP: onchain transactions, provider calls, moving money, and changing where money goes, such as a payout destination or a recurring amount |
 
-`manage` and `execute` each include the same module's `read`. Nothing else implies another action: `execute` does not include `manage`, and a grant on one module gives nothing on another. These are the actions a key can be granted on this deployment:
+`manage` and `execute` each include the same module's `read`. Nothing else implies another action: `execute` doesn't include `manage`, and a grant on one module gives nothing on another. Some modules add verbs of their own. These are the actions a key can be granted on this deployment:
 
 <ApiKeyGrantsTable />
 
-Some actions are never granted to a key, because keys are credentials, not administrators: key, member, organization and project administration, and every provider, credential or connection setup (`configure`). A create or update naming one is refused with `400`. So is a grant on a module this deployment does not run; a key that already holds one keeps it when an update sends it back.
+Some actions are never granted to a key, because keys are credentials, not administrators: key, member, organization, and project administration, and every provider, credential, or connection setup (`configure`). A create or update naming one is refused with `400`. So is a grant on a module this deployment doesn't run; a key that already holds one keeps it when an update sends it back.
 
 A request without the route's action is refused with `403 INSUFFICIENT_PERMISSIONS`, and `error.details.action` names the missing action. Nothing runs or is recorded on refusal. Grants are read on every request, so a change applies to the key's next request.
 
-When you create a key you can grant only actions you hold yourself. **Everything** in the dashboard writes out every action available when the key is created; an action added to SDP later is not granted to existing keys.
+You can grant a key only actions you hold yourself. **Everything** in the dashboard writes out every action available when the key is created; an action added to SDP later isn't granted to existing keys.
 
 ## Wallet access
 
@@ -52,61 +50,61 @@ A key's wallet scope decides which custody wallets SDP may sign with on its beha
 | `all` | Every custody wallet in the key's project |
 | `selected` | Only the wallets listed in `walletIds`. With none listed, the key signs with no custody wallet; SDP's fee sponsor is outside wallet scope |
 
-`walletIds` are custody wallet ids, the `id` (`cwlt_…`) that `GET /v1/wallets` returns, not a provider's wallet id. A key keeps the exact wallets you listed: a wallet created later, even one reusing a provider id, is never added.
+`walletIds` are custody wallet IDs, the `id` (`cwlt_…`) that `GET /v1/wallets` returns, not a provider's wallet ID. A key keeps the exact wallets you listed: a wallet created later, even one reusing a provider ID, is never added.
 
-SDP checks the scope each time it signs, together with the key's grants and whether it is still active, so a narrowed scope or a revoked key stops the next signature, including one later in the same request. A signature outside the scope is refused with `403 FORBIDDEN` and `error.details.reason` set to `wallet_out_of_scope`; nothing is signed or sent.
+SDP checks the scope each time it signs, together with the key's grants and whether it's still active. A narrowed scope or a revoked key stops the next signature, including one later in the same request. A signature outside the scope is refused with `403 FORBIDDEN` and `error.details.reason` set to `wallet_out_of_scope`; nothing is signed or sent.
 
-The scope narrows what a key may sign with, not what it may read. A `selected` key's wallet list (`GET /v1/wallets`) and wallet detail reads show only its wallets; every other read, such as transfers, batches and recurring payments, covers the whole project. Give a separate project to an integration that must not see another's records.
+The scope narrows what a key may sign with, not what it may read. A `selected` key's wallet list (`GET /v1/wallets`) and wallet detail reads show only its wallets; every other read, such as transfers, batches, and recurring payments, covers the whole project. Give a separate project to an integration that must not see another's records.
 
-For recurring payments the scope also bounds writes that sign nothing. A `selected` key may create, change, cancel, activate, collect or resume only a recurring payment whose source wallet it lists, and may move one only to another listed wallet, because whoever activates a pending payment signs the terms it was last given. Anything else is refused with `wallet_out_of_scope` before it is recorded. Reading and listing recurring payments still cover the whole project.
+For recurring payments the scope also bounds writes that sign nothing. A `selected` key may create, change, cancel, activate, collect, or resume only a recurring payment whose source wallet it lists, and may move one only to another listed wallet, because whoever activates a pending payment signs the terms it was last given. Anything else is refused with `wallet_out_of_scope` before it is recorded. Reading and listing recurring payments still cover the whole project.
 
-The dashboard starts a key that holds any `execute` action on **Selected wallets**, so it can sign with nothing you did not give it; choose **All wallets** to widen it.
+The dashboard starts a key that holds any `execute` action on **Selected wallets**, so it can sign with nothing you didn't give it. Choose **All wallets** to widen it.
 
 ## Recurring payments outlive the key
 
-A recurring payment is collected on schedule as its own mandate, not as the key or member that activated it. SDP still checks that the payment is active, that it pays from its own source wallet, and that the organization may move money. Revoking or narrowing the key that activated it does not stop it, so rotating a key never interrupts a customer's schedule.
+A recurring payment is collected on schedule as its own mandate, not as the key or member that activated it. SDP checks that the payment is active, that it pays from its own source wallet, that its counterparty and account are active in the project, and that the organization may move money. Revoking or narrowing the key that activated it doesn't stop it, so rotating a key never interrupts a customer's schedule.
+
+Archiving the counterparty archives its active accounts too, and new transfers and batches can't use them. Before the next new collection, an unavailable counterparty or account pauses the recurring payment with `pausedReason: "destination_unavailable"`. Work already in flight still recovers, and earlier requests still replay their recorded outcomes. The dashboard shows the pause reason and offers Cancel. Paused schedules can't be edited, so cancel the schedule and create a new one with an active recipient.
 
 ## Create a key
 
-1. Navigate to **API keys** in the sidebar. You start with an empty list.
+1. Open **API keys** in the sidebar. You start with an empty list.
 
    ![API keys page with no keys yet](/images/getting-started/api-keys-empty.png)
 
-2. Click **New API key** in the top right, then fill in the key details:
-   - **Name** — a descriptive label (e.g., "CI deploy key")
-   - **Permissions** — a checkbox per verb for each module (Read, Manage, Execute); ticking Manage or Execute includes Read. **Everything** ticks every offered action
-   - **Wallet access** — All wallets or Selected wallets
-   - **Expiration (optional)** — date/time picker
-   - **Allowed IP addresses (optional)** — one IPv4 or IPv6 address or CIDR range per line; empty allows any address. Edit the key to change or clear it
+2. Click **Create new API key**. Once the project has keys, the button reads **New API key**. Fill in each step, then click **Continue**:
+   - **Details**: a **Name** (for example, "CI deploy key"), an optional **Expiration**, and optional **Allowed IP addresses**, one IPv4 or IPv6 address or CIDR range per line. An empty list allows any address. The **Environment** is the project's.
+   - **Permissions**: a checkbox per verb for each module (Read, Manage, Execute); ticking Manage or Execute includes Read. **Everything** ticks every offered action, and **Clear all** clears them. Grant at least one.
+   - **Access**: **All wallets**, or **Selected wallets** with at least one wallet picked.
 
-   ![Create API key modal](/images/getting-started/api-key-create.png)
+   ![Key details step of the new API key page](/images/getting-started/api-key-create.png)
 
-3. Click **Continue**, review the summary, and click **Create key**.
+3. On **Review API key**, check the summary and click **Create key**.
 
-   ![Review API key modal](/images/getting-started/api-key-review.png)
+   ![Review API key step](/images/getting-started/api-key-review.png)
 
-4. Click **Copy** on the **API key generated** modal and save the key — it will not be shown again.
+4. In the **API key generated** dialog, click **Copy** and save the key. It isn't shown again.
 
-   ![API key generated modal, full key redacted](/images/getting-started/api-key-generated.png)
+   <img src="/docs/images/getting-started/api-key-generated.png" alt="API key generated dialog with the full key redacted" width="512" height="313" style={{ display: "block", maxWidth: "100%", height: "auto" }} />
 
-5. Dismiss the modal. The key now appears in the table with its prefix, grants, environment, and status.
+5. Click **Dismiss**. The key appears in the table with its prefix, permissions, wallet access, environment, and status.
 
    ![API keys list with one active key](/images/getting-started/api-keys-list.png)
 
-The key belongs to the project you create it in and inherits that project's environment.
+To change a key's details, permissions, or wallets later, open its **Actions** menu and click **Edit API key**.
 
 ## Rotate a key
 
-Rotation replaces the secret without an availability gap: the new key is a fresh record that clones the old key's grants, IP allowlist, and wallet scope, while the old key keeps working until its grace deadline. During the grace period both keys are valid; after it, the old key fails with `EXPIRED_API_KEY`.
+Rotation replaces the secret without downtime. The new key is a fresh record with the old key's grants, IP allowlist, wallet scope, and expiry. The old key keeps working until its grace deadline, 24 hours after a dashboard rotation; after that, it fails with `EXPIRED_API_KEY`.
 
-1. In the API keys table, open the **Actions** dropdown next to the key and click **Rotate key (24h grace)**.
+1. In the API keys table, open the key's **Actions** menu, click **Rotate key (24h grace)**, then confirm with **Rotate key**.
 
-   ![Actions dropdown showing Rotate key and Delete key options](/images/getting-started/api-key-rotate.png)
+   ![Actions menu with Edit API key, Rotate key (24h grace) and Delete key](/images/getting-started/api-key-rotate.png)
 
-2. Copy the new key value from the generated key modal — it is shown once.
+2. Copy the new key from the **API key generated** dialog. It's shown once.
 
 ## Revoke a key
 
-Open the **Actions** dropdown next to the key and click **Delete key**. The key stops working on its next request and cannot be restored. Deleting a rotated key during its grace period ends the overlap early: the replacement keeps working.
+Open the key's **Actions** menu and click **Delete key**. Type the key's name to confirm, then click **Delete key**. The key stops working on its next request and can't be restored. Deleting a rotated key during its grace period ends the overlap early: the replacement keeps working.
 
-If the key may be compromised, send `"cancelRecurringPayments": true` with the revocation. The response lists canceled schedules and any you must cancel individually. A recurring payment answers to the key that activated or last resumed it, or last changed its source wallet, recipient, token, amount, or period. Metadata and next collection date changes do not change that control.
+If the key may be compromised, tick **Also cancel recurring payments this key started** (`"cancelRecurringPayments": true` in the API). Otherwise its recurring payments keep collecting. The response lists canceled schedules and any you must cancel individually. A recurring payment answers to the key that activated or last resumed it, or last changed its source wallet, recipient, token, amount, or period. Metadata and next collection date changes don't change that control.
