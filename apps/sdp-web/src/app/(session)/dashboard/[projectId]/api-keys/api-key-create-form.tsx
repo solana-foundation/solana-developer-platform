@@ -24,12 +24,7 @@ import {
   resolveExpiryChoice,
 } from "./api-key-form-parts";
 import { ApiKeyGrantPicker } from "./api-key-grant-picker";
-import {
-  apiKeyEnvironmentLabel,
-  apiKeyReach,
-  apiKeyReachLabel,
-  walletCountLabel,
-} from "./api-key-presentation";
+import { apiKeyEnvironmentLabel, apiKeyReach, walletCountLabel } from "./api-key-presentation";
 
 /**
  * A new key on one page: its name, what it may do, which wallets it signs with and how long it
@@ -73,17 +68,17 @@ export function ApiKeyCreateForm({
     environment: apiKeyEnvironmentLabel(environment, t),
     reach:
       grants.length === 0
-        ? t("DashboardCustody.apiKeyGrantsNone")
-        : apiKeyReachLabel(apiKeyReach(grants), t),
+        ? t("DashboardCustody.apiKeyPage.summaryNoAccess")
+        : t(`DashboardCustody.apiKeyPage.summaryReach.${apiKeyReach(grants)}`),
     wallets:
       walletScope === "all"
-        ? t("DashboardCustody.allWallets")
+        ? t("DashboardCustody.apiKeyPage.summaryEveryWallet")
         : walletCountLabel(walletIds.length, t),
     expiry: expiresAt
       ? t("DashboardCustody.apiKeyPage.untilDate", {
           date: formatDate(locale, timeZone, expiresAt) ?? expiresAt,
         })
-      : t("DashboardCustody.apiKeyPage.noExpiry"),
+      : t("DashboardCustody.apiKeyPage.summaryNoExpiry"),
   });
 
   const submit = () => {

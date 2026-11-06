@@ -865,7 +865,15 @@
       "namePlaceholder": "For example, CI deploy pipeline",
       "createSummary": "Creates a key for {environment}: {reach}, {wallets}, {expiry}.",
       "untilDate": "until {date}",
-      "revoked": "Revoked"
+      "revoked": "Revoked",
+      "summaryReach": {
+        "read": "read only",
+        "write": "reads and writes",
+        "funds": "can move funds"
+      },
+      "summaryNoExpiry": "with no expiry",
+      "summaryNoAccess": "no access yet",
+      "summaryEveryWallet": "every wallet"
     }
   }
 }

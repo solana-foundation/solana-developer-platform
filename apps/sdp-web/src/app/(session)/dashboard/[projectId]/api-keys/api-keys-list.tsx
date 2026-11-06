@@ -66,7 +66,7 @@ function ApiKeyRow({ apiKey, now }: { apiKey: ApiKeyListItem; now: number }) {
           >
             {apiKey.name}
           </Link>
-          <span className="shrink-0 font-mono text-meta text-tertiary">{apiKey.keyPrefix}</span>
+          <span className="shrink-0 text-meta text-tertiary">{apiKey.keyPrefix}</span>
         </span>
         <span className="mt-0.5 block truncate text-meta text-secondary">{facts.join(" · ")}</span>
       </TableCell>

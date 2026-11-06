@@ -308,7 +308,8 @@ export function ApiKeyDetailView({
     <div className="@container w-full" data-api-key={apiKey.id}>
       <DashboardPageTitle title={apiKey.name} badge={badge} actions={actions} />
       <RecordStack spacing="loose">
-        <div className="flex flex-col gap-4">
+        {/* The facts read as the title's second line, so they sit in the stack's top padding. */}
+        <div className="-mt-4 flex flex-col gap-4 md:-mt-8">
           <p className="flex flex-wrap items-center gap-x-1.5 text-body text-secondary">
             <span>{facts.join(" · ")}</span>
             {lifetime.kind === "never" || lifetime.kind === "until" ? null : (
