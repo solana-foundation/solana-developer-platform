@@ -15,7 +15,7 @@ const app = createApp({
 const next = `${JSON.stringify(servedPaths(app), null, 2)}\n`;
 
 if (process.argv.includes("--check")) {
-  const current = await readFile(outputPath, "utf8").catch(() => "");
+  const current = await readFile(outputPath, "utf8");
   if (current !== next) {
     console.error(`${outputPath} is stale. Run: pnpm -C apps/sdp-api served-paths:generate`);
     process.exit(1);

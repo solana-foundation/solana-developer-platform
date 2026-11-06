@@ -52,5 +52,5 @@ export function servedPaths(app: Hono<{ Bindings: Env }>): Record<string, Served
       matches.set(familyPrefixOf(path), "prefix");
     }
   }
-  return Object.fromEntries([...matches].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  return Object.fromEntries([...matches].sort(([a], [b]) => (a < b ? -1 : 1)));
 }
