@@ -3703,6 +3703,12 @@ A provider is listed only when the project can use it, decided by the same rule 
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `projects.read` action.
 
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
 ## Responses
 
 - **`200`** Project integrations
@@ -3737,7 +3743,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `projec
 
               - **`status`** · `string` · required · always `not_configured`
 
-              - **`modes`** · `string[]` · required · min items 1 · max items 1 · each one of `managed`, `byok`
+              - **`modes`** · `string[]` · required · min items 1 · each one of `managed`, `byok`
 
             - **status: "provided"**
 
@@ -3767,7 +3773,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `projec
 
               - **`status`** · `string` · required · always `not_configured`
 
-              - **`modes`** · `string[]` · required · min items 1 · max items 1 · each one of `managed`, `byok`
+              - **`modes`** · `string[]` · required · min items 1 · each one of `managed`, `byok`
 
             - **status: "provided"**
 
@@ -3797,7 +3803,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `projec
 
               - **`status`** · `string` · required · always `not_configured`
 
-              - **`modes`** · `string[]` · required · min items 1 · max items 1 · each one of `managed`, `byok`
+              - **`modes`** · `string[]` · required · min items 1 · each one of `managed`, `byok`
 
             - **status: "provided"**
 
@@ -3827,7 +3833,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `projec
 
               - **`status`** · `string` · required · always `not_configured`
 
-              - **`modes`** · `string[]` · required · min items 1 · max items 1 · each one of `managed`, `byok`
+              - **`modes`** · `string[]` · required · min items 1 · each one of `managed`, `byok`
 
             - **status: "provided"**
 
@@ -3857,7 +3863,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `projec
 
               - **`status`** · `string` · required · always `not_configured`
 
-              - **`modes`** · `string[]` · required · min items 1 · max items 1 · each one of `managed`, `byok`
+              - **`modes`** · `string[]` · required · min items 1 · each one of `managed`, `byok`
 
             - **status: "provided"**
 
@@ -3883,7 +3889,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `projec
 
       ISO 8601 timestamp.
 
-- **`401`** Unauthorized
+- **`400`** Bad Request
 
   - **`error`** · `object` · required
 
@@ -3909,17 +3915,25 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `projec
 
       Request identifier for tracing.
 
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
 - **`403`** Forbidden. Requires the `projects.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
 
-  Same fields as `401`.
+  Same fields as `400`.
 
 - **`404`** Not Found
 
-  Same fields as `401`.
+  Same fields as `400`.
 
 - **`500`** Internal Server Error
 
-  Same fields as `401`.
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
 
 ## Example request
 

@@ -4,6 +4,8 @@ import type {
   ComplianceIntegration,
   CustodyIntegration,
   IntegrationFamily,
+  IntegrationState,
+  PrivateChannelsIntegration,
   ProjectIntegrations,
   RampIntegration,
   RpcIntegration,
@@ -36,13 +38,10 @@ interface ProjectIntegrationFacts {
 /**
  * A project's integrations, decided from one consistent snapshot of its
  * provider availability and setup records, so a setup that changes records
- * mid-read is never reported as neither.
+ * mid-read is never reported as neither. Every state follows the rule that
+ * admits the provider's use, so a listed integration is never refused for
+ * availability at its entry point.
  *
- * @param env - Process environment naming the release channel and provider credentials.
- * @param db - Database client; the read runs in its own read-only transaction.
- * @param scope - The project the read is for.
- * @param isProviderInChannel - Whether the deployment's release channel runs an availability entry's provider.
- * @returns The project's integrations by family; absent families have no usable provider.
  * @throws 404 when the project is not an active project of the organization.
  */
 export async function getProjectIntegrations(
@@ -64,33 +63,18 @@ export async function getProjectIntegrations(
     return { availability, activeCustodyModes, privateChannelsActive };
   });
 
-  const families: IntegrationFamily[] = [];
-  const custody = custodyIntegrations(facts, isProviderInChannel);
-  if (custody.length > 0) families.push({ family: "custody", integrations: custody });
-  const rpc = rpcIntegrations(facts);
-  if (rpc.length > 0) families.push({ family: "rpc", integrations: rpc });
-  const ramps = rampIntegrations(facts, isProviderInChannel);
-  if (ramps.length > 0) families.push({ family: "ramps", integrations: ramps });
-  const compliance = complianceIntegrations(facts, isProviderInChannel);
-  if (compliance.length > 0) families.push({ family: "compliance", integrations: compliance });
-  if (facts.privateChannelsActive !== null) {
-    families.push({
-      family: "private_channels",
-      integrations: [
-        {
-          provider: "private_channels",
-          state: facts.privateChannelsActive
-            ? { status: "connected", mode: "managed" }
-            : { status: "not_configured", modes: ["managed"] },
-        },
-      ],
-    });
-  }
+  const families: IntegrationFamily[] = [
+    { family: "custody", integrations: custodyIntegrations(facts, isProviderInChannel) },
+    { family: "rpc", integrations: rpcIntegrations(facts) },
+    { family: "ramps", integrations: rampIntegrations(facts, isProviderInChannel) },
+    { family: "compliance", integrations: complianceIntegrations(facts, isProviderInChannel) },
+    { family: "private_channels", integrations: privateChannelsIntegrations(facts) },
+  ];
 
   return {
     projectId: facts.availability.projectId,
     environment: facts.availability.environment,
-    families,
+    families: families.filter((family) => family.integrations.length > 0),
   };
 }
 
@@ -133,37 +117,39 @@ function custodyIntegrations(
   return CUSTODY_PROVIDER_CATALOG.flatMap((catalogEntry): CustodyIntegration[] => {
     const entry = entries.get(catalogEntry.id);
     if (!catalogEntry.visible || entry === undefined) return [];
-    const activeModes = facts.activeCustodyModes.get(catalogEntry.id);
-    // A project's own account is the stronger statement of setup, so BYOK wins
-    // when the project holds both records.
-    if (activeModes?.has("byok")) {
-      return [
-        {
-          provider: catalogEntry.id,
-          category: catalogEntry.category,
-          state: { status: "connected", mode: "byok" },
-        },
-      ];
-    }
-    if (activeModes?.has("managed")) {
-      return [
-        {
-          provider: catalogEntry.id,
-          category: catalogEntry.category,
-          state: { status: "connected", mode: "managed" },
-        },
-      ];
-    }
-    const [firstMode, ...otherModes] = entry.modes;
-    if (firstMode === undefined) return [];
-    return [
-      {
-        provider: catalogEntry.id,
-        category: catalogEntry.category,
-        state: { status: "not_configured", modes: [firstMode, ...otherModes] },
-      },
-    ];
+    const state = custodyState(entry.modes, facts.activeCustodyModes.get(catalogEntry.id));
+    return state === null
+      ? []
+      : [{ provider: catalogEntry.id, category: catalogEntry.category, state }];
   });
+}
+
+/**
+ * Connected only while the project may still use the mode its record runs in;
+ * a project's own account is the stronger statement of setup, so BYOK wins when
+ * the project holds both records.
+ */
+function custodyState(
+  admittedModes: readonly ProviderMode[],
+  activeModes: ReadonlySet<ProviderMode> | undefined
+): IntegrationState | null {
+  const connectedMode = (["byok", "managed"] as const).find(
+    (mode) => activeModes?.has(mode) && admittedModes.includes(mode)
+  );
+  if (connectedMode !== undefined) return { status: "connected", mode: connectedMode };
+  return admittedModes.length > 0 ? { status: "not_configured", modes: [...admittedModes] } : null;
+}
+
+function privateChannelsIntegrations(facts: ProjectIntegrationFacts): PrivateChannelsIntegration[] {
+  if (facts.privateChannelsActive === null) return [];
+  return [
+    {
+      provider: "private_channels",
+      state: facts.privateChannelsActive
+        ? { status: "connected", mode: "managed" }
+        : { status: "not_configured", modes: ["managed"] },
+    },
+  ];
 }
 
 function rpcIntegrations(facts: ProjectIntegrationFacts): RpcIntegration[] {

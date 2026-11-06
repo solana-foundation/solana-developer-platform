@@ -4,23 +4,10 @@ import { CUSTODY_PROVIDER_CATEGORIES, CUSTODY_PROVIDERS, PROVIDER_MODES } from "
 import { COMPLIANCE_PROVIDERS, RAMP_PROVIDERS } from "./provider-access";
 import { MANAGED_RPC_PROVIDERS } from "./rpc";
 
-/** The integration families a project can have, in the order the read returns them. */
-export const PROJECT_INTEGRATION_FAMILIES = [
-  "custody",
-  "rpc",
-  "ramps",
-  "compliance",
-  "private_channels",
-] as const;
-export type ProjectIntegrationFamily = (typeof PROJECT_INTEGRATION_FAMILIES)[number];
-
 const providerModeSchema = z.enum(PROVIDER_MODES);
 
-export const integrationStateSchema = z.discriminatedUnion("status", [
-  z.object({
-    status: z.literal("not_configured"),
-    modes: z.tuple([providerModeSchema]).rest(providerModeSchema),
-  }),
+const integrationStateSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("not_configured"), modes: z.array(providerModeSchema).min(1) }),
   z.object({ status: z.literal("provided"), modes: z.array(providerModeSchema) }),
   z.object({ status: z.literal("connected"), mode: providerModeSchema }),
 ]);
@@ -52,7 +39,7 @@ const privateChannelsIntegrationSchema = z.object({
   state: integrationStateSchema,
 });
 
-export const integrationFamilySchema = z.discriminatedUnion("family", [
+const integrationFamilySchema = z.discriminatedUnion("family", [
   z.object({
     family: z.literal("custody"),
     integrations: z.array(custodyIntegrationSchema).min(1),
@@ -69,6 +56,7 @@ export const integrationFamilySchema = z.discriminatedUnion("family", [
   }),
 ]);
 export type IntegrationFamily = z.infer<typeof integrationFamilySchema>;
+export type ProjectIntegrationFamily = IntegrationFamily["family"];
 export type CustodyIntegration = z.infer<typeof custodyIntegrationSchema>;
 export type RpcIntegration = z.infer<typeof rpcIntegrationSchema>;
 export type RampIntegration = z.infer<typeof rampIntegrationSchema>;
@@ -77,8 +65,8 @@ export type PrivateChannelsIntegration = z.infer<typeof privateChannelsIntegrati
 
 /**
  * A project's integrations. A family the deployment does not run, or with no
- * provider the project can use, is absent; families follow
- * `PROJECT_INTEGRATION_FAMILIES` order.
+ * provider the project can use, is absent; families keep a fixed order
+ * (custody, rpc, ramps, compliance, private_channels).
  */
 export const projectIntegrationsSchema = z.object({
   projectId: z.string(),

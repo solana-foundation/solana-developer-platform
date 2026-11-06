@@ -52,7 +52,7 @@ function IntegrationRowItem({
       className={cn(
         "group relative isolate flex items-center gap-4 py-4",
         row.href !== null &&
-          "before:absolute before:inset-y-0 before:-inset-x-3 before:-z-10 before:rounded-lg before:bg-fill-subtle before:opacity-0 before:transition-opacity before:content-[''] hover:before:opacity-100 has-[:focus-visible]:before:opacity-100 motion-reduce:before:transition-none"
+          "before:absolute before:inset-y-0 before:-inset-x-3 before:-z-10 before:rounded-lg before:bg-fill-subtle before:opacity-0 before:transition-opacity before:content-[''] hover:before:opacity-100 has-[:focus-visible]:before:opacity-100 has-[:focus-visible]:before:ring-2 has-[:focus-visible]:before:ring-primary motion-reduce:before:transition-none"
       )}
       data-integration-row={row.key}
       data-integration-status={row.state.status}
@@ -65,7 +65,7 @@ function IntegrationRowItem({
         ) : (
           <Link
             href={href(row.href)}
-            className="truncate text-base font-medium text-primary after:absolute after:inset-0 after:content-[''] focus-visible:outline-none"
+            className="truncate text-base font-medium text-primary after:absolute after:inset-y-0 after:-inset-x-3 after:content-[''] focus-visible:outline-none"
           >
             {row.label}
           </Link>
