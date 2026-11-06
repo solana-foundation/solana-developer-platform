@@ -241,7 +241,7 @@ export async function IntegrationDetailView({
 
   return (
     <div className="@container w-full" data-integration-detail={detail.provider}>
-      <RecordStack spacing="loose">
+      <RecordStack spacing="compact">
         <StateBand
           tone={band.tone}
           state={t(band.key)}

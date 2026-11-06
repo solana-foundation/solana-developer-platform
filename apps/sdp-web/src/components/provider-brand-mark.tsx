@@ -23,7 +23,7 @@ export function ProviderBrandMark({
 }) {
   const { box, logo } = BRAND_MARK_SIZES[size];
   const markClass = cn(
-    "relative inline-flex shrink-0 items-center justify-center rounded-full",
+    "relative inline-flex shrink-0 items-center justify-center rounded-full ring-1 ring-border-default ring-inset",
     box
   );
   if (mark === null) {
@@ -36,7 +36,7 @@ export function ProviderBrandMark({
   return (
     <span
       aria-hidden
-      className={cn(markClass, mark.ringed && "ring-1 ring-border-subtle ring-inset")}
+      className={markClass}
       style={{ backgroundColor: mark.background }}
     >
       <Image src={mark.logo} alt="" width={logo} height={logo} className="object-contain" />
