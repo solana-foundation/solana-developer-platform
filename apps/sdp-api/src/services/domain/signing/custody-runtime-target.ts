@@ -749,7 +749,13 @@ export class CustodyRuntimeTargets {
       async () =>
         decideMovement(
           movement,
-          await readMovementFactsWith(this.db, { organizationId, projectId }, movement, subject),
+          await readMovementFactsWith(
+            this.db,
+            this.env,
+            { organizationId, projectId },
+            movement,
+            subject
+          ),
           subject
         ),
       {

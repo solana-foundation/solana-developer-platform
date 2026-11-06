@@ -38,6 +38,7 @@ function facts(overrides: Partial<MoneyAdmissionFacts> = {}): MoneyAdmissionFact
     organizationStatus: "active",
     projectEnvironment: "production",
     rawSettings: ENTITLED,
+    productionProjectsAllowed: true,
     disabledMovements: [],
     principal: LIVE_KEY_PRINCIPAL_FACTS,
     readAt: Date.now(),
@@ -67,6 +68,16 @@ describe("decideMoneyStart", () => {
       admitted: false,
       reason: "production_not_enabled",
     });
+  });
+
+  it("refuses an entitled production project on a deployment that admits none, and still admits its sandbox", () => {
+    expect(decideMoneyStart(facts({ productionProjectsAllowed: false }))).toEqual({
+      admitted: false,
+      reason: "production_not_enabled",
+    });
+    expect(
+      decideMoneyStart(facts({ productionProjectsAllowed: false, projectEnvironment: "sandbox" }))
+    ).toEqual({ admitted: true });
   });
 
   it.each(

@@ -39,6 +39,27 @@ const FIRST_SIGN_IN: ClerkBackendAnswer = {
 const CLERK_ORGANIZATION: ClerkBackendAnswer = { status: 200, body: { id: CLERK_ORG_ID } };
 const MEMBERSHIP_CREATED: ClerkBackendAnswer = { status: 200, body: { id: "orgmem_creator" } };
 
+const SLUG_TAKEN: ClerkBackendAnswer = {
+  status: 422,
+  body: {
+    errors: [
+      {
+        code: "form_identifier_exists",
+        message: "That slug is taken. Please try another.",
+        meta: { param_name: "slug" },
+      },
+    ],
+  },
+};
+
+/** What SDP writes into a Clerk organization it creates: its id and the creating deployment. */
+function clerkPrivateMetadata(organizationId: string) {
+  return {
+    sdpOrganizationId: organizationId,
+    sdpDeployment: { releaseChannel: "experimental", service: "local" },
+  };
+}
+
 function membershipsPage(count: number): ClerkBackendAnswer {
   return { status: 200, body: { data: [], total_count: count } };
 }
@@ -141,6 +162,7 @@ describe("POST /v1/organizations", () => {
     await clearKVStores(env);
     env.CLERK_API_URL = undefined;
     env.CLERK_SECRET_KEY = undefined;
+    env.SDP_ALLOW_PRODUCTION_PROJECTS = undefined;
   });
 
   it("creates a new person's organization in Clerk with no creator, then their admin membership and both projects, audited", async () => {
@@ -153,7 +175,7 @@ describe("POST /v1/organizations", () => {
       {
         method: "POST",
         path: "/organizations",
-        body: { name: NAME, private_metadata: { sdpOrganizationId: created.id } },
+        body: { name: NAME, private_metadata: clerkPrivateMetadata(created.id) },
       },
       { method: "GET", path: `${MEMBERSHIPS_PATH}?user_id=${CLERK_USER_ID}`, body: null },
       {
@@ -163,6 +185,76 @@ describe("POST /v1/organizations", () => {
       },
     ]);
     expect(await storedState(created.id)).toEqual(activeState(created));
+  });
+
+  it("retries a slug another deployment on the Clerk instance holds with a suffixed slug of SDP's own", async () => {
+    clerk.answer(
+      FIRST_SIGN_IN,
+      SLUG_TAKEN,
+      CLERK_ORGANIZATION,
+      membershipsPage(0),
+      MEMBERSHIP_CREATED
+    );
+
+    const response = await postOrganization(await signupHeaders(), NAME);
+    const created = await createdRow();
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual(createdResponse(created.id));
+    const creations = clerk.requests.filter(
+      (request) => request.method === "POST" && request.path === "/organizations"
+    );
+    expect(creations).toEqual([
+      {
+        method: "POST",
+        path: "/organizations",
+        body: { name: NAME, private_metadata: clerkPrivateMetadata(created.id) },
+      },
+      {
+        method: "POST",
+        path: "/organizations",
+        body: {
+          name: NAME,
+          slug: expect.stringMatching(/^acme-labs-[0-9a-f]{6}$/),
+          private_metadata: clerkPrivateMetadata(created.id),
+        },
+      },
+    ]);
+    expect(await storedState(created.id)).toEqual(activeState(created));
+  });
+
+  it("refuses with a conflict once every slug attempt is taken, and a retry finishes the organization", async () => {
+    clerk.answer(FIRST_SIGN_IN, SLUG_TAKEN, SLUG_TAKEN, SLUG_TAKEN);
+
+    const refused = await postOrganization(await signupHeaders(), NAME);
+    const created = await createdRow();
+
+    expect(refused.status).toBe(409);
+    expect(await storedState(created.id)).toMatchObject({ mappings: [], memberships: [] });
+
+    clerk.answer(CLERK_ORGANIZATION, membershipsPage(0), MEMBERSHIP_CREATED);
+    const retried = await postOrganization(await signupHeaders(), NAME);
+
+    expect(retried.status).toBe(201);
+    expect(await storedState(created.id)).toEqual(activeState(created));
+  });
+
+  it("creates only the sandbox project on a deployment that admits no production project", async () => {
+    env.SDP_ALLOW_PRODUCTION_PROJECTS = "false";
+
+    const { response, created } = await createActiveOrganization();
+
+    expect(response.status).toBe(201);
+    expect(await storedState(created.id)).toEqual({
+      ...activeState(created),
+      projectMembers: [
+        {
+          organization_id: created.id,
+          environment: "sandbox",
+          user_id: created.created_by_user_id,
+        },
+      ],
+    });
   });
 
   it("finishes a creation whose Clerk membership failed without creating the Clerk organization again", async () => {

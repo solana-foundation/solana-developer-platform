@@ -91,12 +91,15 @@ export async function findClerkOrganizationMapping(
  *
  * @param params.db - The database.
  * @param params.organization - The Clerk organization, as Clerk holds it now.
+ * @param params.productionProjectsAllowed - Whether this deployment admits production projects;
+ *   when not, the production entitlement is never copied.
  * @returns The mapping it synced, with the mainnet entitlement when the sync turned it on or
  *   off, or null when SDP does not know the organization.
  */
 export async function syncClerkOrganization(params: {
   db: DatabaseClient;
   organization: ClerkOrganization;
+  productionProjectsAllowed: boolean;
 }): Promise<
   (ClerkOrganizationMapping & { productionEntitlementChangedTo: boolean | null }) | null
 > {
@@ -108,6 +111,7 @@ export async function syncClerkOrganization(params: {
   const synced = await syncProviderAccessFromClerk(params.db, {
     organizationId: mapping.organizationId,
     clerkOrganization: params.organization,
+    productionProjectsAllowed: params.productionProjectsAllowed,
   });
 
   return {

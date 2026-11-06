@@ -10,7 +10,8 @@ import type { OrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
-import { AppError, badRequest } from "@/lib/errors";
+import { AppError, badRequest, notFound } from "@/lib/errors";
+import { productionProjectsAllowed } from "@/lib/production-entitlement";
 import { success } from "@/lib/response";
 import { getLogger } from "@/runtime/logger";
 import { type AuditLogEntry, AuditService } from "@/services/audit.service";
@@ -57,7 +58,11 @@ async function syncOrganization(c: AppContext, data: OrganizationJSON) {
   // Audited with the sync, so a mainnet entitlement change commits with its record, and the
   // record is what emails the organization's admins (HOO-2299).
   await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
-    const synced = await syncClerkOrganization({ db: tx, organization: current });
+    const synced = await syncClerkOrganization({
+      db: tx,
+      organization: current,
+      productionProjectsAllowed: productionProjectsAllowed(c.env),
+    });
     return {
       entry:
         synced && synced.productionEntitlementChangedTo !== null
@@ -105,6 +110,7 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
 
   const mapping = await findOrganizationMapping(c, data.id);
   if (!mapping) {
+    logIgnoredClerkEvent(c, "organization", data.id);
     return;
   }
 
@@ -438,6 +444,10 @@ async function syncUser(c: AppContext, data: UserJSON) {
 }
 
 export const handleRampProviderWebhook = async (c: AppContext, environment: SdpEnvironment) => {
+  // A deployment that admits no production project takes no production delivery.
+  if (environment === "production" && !productionProjectsAllowed(c.env)) {
+    throw notFound("Webhook endpoint");
+  }
   const provider = parseRampWebhookProvider(c.req.param("provider"));
   const rawBody = await c.req.raw.text();
   const processor: WebhookProcessor<unknown> = RAMP_PROVIDER_WEBHOOK_PROCESSOR[provider];

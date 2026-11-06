@@ -38,7 +38,13 @@ async function paymentMayStart(
   scope: { organizationId: string; projectId: string }
 ): Promise<boolean> {
   const subject = { custodyWalletId: null };
-  const facts = await readMovementFactsWith(getDb(env), scope, "payments.pay_request", subject);
+  const facts = await readMovementFactsWith(
+    getDb(env),
+    env,
+    scope,
+    "payments.pay_request",
+    subject
+  );
   return decideMovement("payments.pay_request", facts, subject).admitted;
 }
 

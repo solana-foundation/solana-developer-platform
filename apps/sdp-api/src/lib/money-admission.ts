@@ -27,7 +27,10 @@ import {
   type MoneyPrincipalKind,
 } from "@/lib/money-principal";
 import { parseDisabledMovements } from "@/lib/movement-control";
-import { parseOrganizationEntitlements } from "@/lib/production-entitlement";
+import {
+  parseOrganizationEntitlements,
+  productionProjectsAllowed,
+} from "@/lib/production-entitlement";
 import { logEvent } from "@/runtime/money-path-events";
 import { parseGrantsColumn } from "@/services/api-key.service";
 import type { Env } from "@/types/env";
@@ -120,6 +123,8 @@ export interface MoneyAdmissionFacts {
   projectEnvironment: ProjectEnvironment;
   /** The raw `organizations.settings` column. */
   rawSettings: string | null;
+  /** Whether this deployment admits production projects at all (`SDP_ALLOW_PRODUCTION_PROJECTS`). */
+  productionProjectsAllowed: boolean;
   /** Operator-only project controls, read live for starts. */
   disabledMovements: readonly MovementId[];
   principal: MoneyPrincipalFacts;
@@ -127,10 +132,13 @@ export interface MoneyAdmissionFacts {
   readAt: number;
 }
 
+/** What the admission read takes from the process environment. */
+type AdmissionEnv = Pick<Env, "SDP_ALLOW_PRODUCTION_PROJECTS">;
+
 /** The organization half of {@link MoneyAdmissionFacts}. */
 export type OrganizationAdmissionFacts = Pick<
   MoneyAdmissionFacts,
-  "organizationStatus" | "projectEnvironment" | "rawSettings"
+  "organizationStatus" | "projectEnvironment" | "rawSettings" | "productionProjectsAllowed"
 >;
 
 /**
@@ -320,7 +328,8 @@ export function decideMoneyStart(facts: OrganizationAdmissionFacts | null): Mone
   }
   if (
     facts.projectEnvironment === "production" &&
-    parseOrganizationEntitlements(facts.rawSettings).enableProductionProject !== true
+    parseOrganizationEntitlements(facts.rawSettings, facts.productionProjectsAllowed)
+      .enableProductionProject !== true
   ) {
     return { admitted: false, reason: "production_not_enabled" };
   }
@@ -654,12 +663,13 @@ export function movementNeedsAdmissionFacts(movement: MovementId): boolean {
 /** {@link readMoneyAdmissionFactsWith}, or `null` when the movement needs no read. */
 export async function readMovementFactsWith(
   db: DatabaseExecutor,
+  env: AdmissionEnv,
   scope: MoneyAdmissionScope,
   movement: MovementId,
   subject: MoneyAdmissionSubject
 ): Promise<MoneyAdmissionFacts | null> {
   return movementNeedsAdmissionFacts(movement)
-    ? readMoneyAdmissionFactsWith(db, scope, movement, subject)
+    ? readMoneyAdmissionFactsWith(db, env, scope, movement, subject)
     : null;
 }
 
@@ -670,7 +680,7 @@ export async function readMoneyAdmissionFacts(
   movement: MovementId,
   subject: MoneyAdmissionSubject
 ): Promise<MoneyAdmissionFacts | null> {
-  return readMoneyAdmissionFactsWith(getDb(env), scope, movement, subject);
+  return readMoneyAdmissionFactsWith(getDb(env), env, scope, movement, subject);
 }
 
 /**
@@ -684,6 +694,7 @@ export async function readMoneyAdmissionFacts(
  */
 async function readMoneyAdmissionFactsWith(
   db: DatabaseExecutor,
+  env: AdmissionEnv,
   scope: MoneyAdmissionScope,
   movement: MovementId,
   subject: MoneyAdmissionSubject
@@ -736,6 +747,7 @@ async function readMoneyAdmissionFactsWith(
         organizationStatus: row.status,
         projectEnvironment: row.environment,
         rawSettings: row.settings,
+        productionProjectsAllowed: productionProjectsAllowed(env),
         // A malformed control fails starts closed. Exits never consult it,
         // including when their credential still requires a live read.
         disabledMovements:
@@ -757,7 +769,7 @@ export async function checkMoneyStart(
 ): Promise<MoneyAdmissionDecision> {
   const decision = decideMovement(
     context.movement,
-    await readMovementFactsWith(getDb(env), scope, context.movement, subject),
+    await readMovementFactsWith(getDb(env), env, scope, context.movement, subject),
     subject
   );
   if (!decision.admitted) {

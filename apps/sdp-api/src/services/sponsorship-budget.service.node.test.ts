@@ -57,6 +57,7 @@ const ACTIVE_SANDBOX: MoneyAdmissionFacts = admittedMoneyFacts();
 const ACTIVE_ENTITLED_PRODUCTION: MoneyAdmissionFacts = admittedMoneyFacts({
   projectEnvironment: "production",
   rawSettings: JSON.stringify({ enableProductionProject: true }),
+  productionProjectsAllowed: true,
 });
 
 function buildTransaction(version: 0 | "legacy" = 0): Uint8Array {
