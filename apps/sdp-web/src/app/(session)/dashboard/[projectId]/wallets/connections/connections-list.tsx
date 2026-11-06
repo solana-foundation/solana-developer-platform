@@ -58,6 +58,7 @@ function walletsPart(
   return t("DashboardCustody.connectionNoWallets");
 }
 
+const COLUMN_LABEL = "text-xs leading-4 font-normal text-tertiary";
 /**
  * The line under a connection's name. An active connection reads as what it holds, and says so
  * when it cannot sign; any other state leads with the state, a dot in its tone before it.
@@ -175,9 +176,11 @@ export function ConnectionsList({
       <Table className="-mx-3 min-w-0 rounded-none border-0 [&_table]:table-fixed">
         <TableHeader>
           <TableRow>
-            <TableHead>{t("DashboardCustody.connectionColumn")}</TableHead>
+            <TableHead>
+              <span className={COLUMN_LABEL}>{t("DashboardCustody.connectionColumn")}</span>
+            </TableHead>
             <TableHead className="hidden w-32 text-right sm:table-cell">
-              {t("DashboardCustody.created")}
+              <span className={COLUMN_LABEL}>{t("DashboardCustody.created")}</span>
             </TableHead>
             <TableHead className="w-10">
               <span className="sr-only">{t("DashboardCustody.openConnection")}</span>
