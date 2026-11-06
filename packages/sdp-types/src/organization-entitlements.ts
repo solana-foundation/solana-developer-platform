@@ -4,7 +4,8 @@ const providerFlagsSchema = z.record(z.string(), z.boolean());
 
 /**
  * The entitlement half of `organizations.settings`: what the organization may
- * use, synced from Clerk metadata. The API loads it once per request during
+ * use. Provider overrides are synced from Clerk metadata; the production
+ * entitlement is SDP's own, set by the operator script. The API loads it once per request during
  * authentication, for every actor, and gates read it from the request context.
  */
 export const organizationEntitlementsSchema = z.object({

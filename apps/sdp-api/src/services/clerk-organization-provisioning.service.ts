@@ -84,36 +84,27 @@ export async function findClerkOrganizationMapping(
 }
 
 /**
- * Copies a Clerk organization's entitlement metadata (private metadata, which
- * operators set in Clerk) onto the SDP organization it maps to. SDP owns the
- * name and slug (ADR 0012) and creates every organization, so a Clerk
- * organization SDP does not know is left alone.
+ * Copies a Clerk organization's tier and provider overrides (private metadata, which operators
+ * set in Clerk) onto the SDP organization it maps to. SDP owns the name and slug (ADR 0012) and
+ * creates every organization, so a Clerk organization SDP does not know is left alone. The
+ * production entitlement is SDP's own and never comes from Clerk.
  *
  * @param params.db - The database.
  * @param params.organization - The Clerk organization, as Clerk holds it now.
- * @returns The mapping it synced, with the mainnet entitlement when the sync turned it on or
- *   off, or null when SDP does not know the organization.
+ * @returns The mapping it synced, or null when SDP does not know the organization.
  */
 export async function syncClerkOrganization(params: {
   db: DatabaseClient;
   organization: ClerkOrganization;
-}): Promise<
-  (ClerkOrganizationMapping & { productionEntitlementChangedTo: boolean | null }) | null
-> {
+}): Promise<ClerkOrganizationMapping | null> {
   const mapping = await findClerkOrganizationMapping(params.db, params.organization.id);
   if (!mapping) {
     return null;
   }
 
-  const synced = await syncProviderAccessFromClerk(params.db, {
+  await syncProviderAccessFromClerk(params.db, {
     organizationId: mapping.organizationId,
     clerkOrganization: params.organization,
   });
-
-  return {
-    ...mapping,
-    productionEntitlementChangedTo: synced.productionEntitlementChanged
-      ? synced.settings?.enableProductionProject === true
-      : null,
-  };
+  return mapping;
 }

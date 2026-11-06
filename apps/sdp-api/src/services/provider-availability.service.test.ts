@@ -19,8 +19,9 @@ import {
   custodyProviderNotInReleaseChannel,
   getProjectProviderAvailability,
   getProviderAvailability,
-  parseClerkOrganizationTierMetadata,
   parseProviderOverridesFromClerkMetadata,
+  readProductionEntitlement,
+  setProductionEntitlement,
   syncProviderAccessFromClerk,
 } from "@/services/provider-availability.service";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
@@ -590,27 +591,6 @@ describe("provider-availability.service", () => {
     });
   });
 
-  it("parseClerkOrganizationTierMetadata returns enableProductionProject true only for boolean true", () => {
-    const cases: Array<{ metadata: unknown; expected: boolean }> = [
-      { metadata: { sdp: { enableProductionProject: true } }, expected: true },
-      { metadata: { sdp: { enableProductionProject: false } }, expected: false },
-      { metadata: { sdp: { enableProductionProject: "true" } }, expected: false },
-      { metadata: { sdp: { enableProductionProject: 1 } }, expected: false },
-      { metadata: { sdp: {} }, expected: false },
-      { metadata: {}, expected: false },
-      { metadata: undefined, expected: false },
-    ];
-
-    for (const { metadata, expected } of cases) {
-      expect(
-        parseClerkOrganizationTierMetadata({
-          id: "org_parse_test",
-          private_metadata: metadata,
-        }).enableProductionProject
-      ).toBe(expected);
-    }
-  });
-
   it("parseProviderOverridesFromClerkMetadata drops a stale rpc family and keeps the families it knows", () => {
     expect(
       parseProviderOverridesFromClerkMetadata({
@@ -621,57 +601,32 @@ describe("provider-availability.service", () => {
     expect(parseProviderOverridesFromClerkMetadata({ rpc: { helius: true } })).toBeUndefined();
   });
 
-  it("syncs enableProductionProject into settings when true and strips it when absent, preserving unrelated keys", async () => {
+  it("keeps the production entitlement SDP holds when Clerk metadata drops or denies it", async () => {
     await getDb(env)
       .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
       .bind(
-        JSON.stringify({
-          defaultEnvironment: "sandbox",
-          enableProductionProject: true,
-        }),
+        JSON.stringify({ defaultEnvironment: "sandbox", enableProductionProject: true }),
         TEST_ORG_ID
       )
       .run();
 
-    await syncProviderAccessFromClerk(getDb(env), {
-      organizationId: TEST_ORG_ID,
-      clerkOrganization: {
-        id: "org_clerk_strip_test",
-        private_metadata: {},
-      },
-    });
-
-    const stripped = await getDb(env)
-      .prepare("SELECT settings FROM organizations WHERE id = ?")
-      .bind(TEST_ORG_ID)
-      .first<{ settings: string | null }>();
-    expect(stripped?.settings ? JSON.parse(stripped.settings) : null).toEqual({
-      defaultEnvironment: "sandbox",
-    });
+    for (const privateMetadata of [{}, { sdp: { enableProductionProject: false } }]) {
+      await syncProviderAccessFromClerk(getDb(env), {
+        organizationId: TEST_ORG_ID,
+        clerkOrganization: { id: "org_clerk_keep_test", private_metadata: privateMetadata },
+      });
+      const kept = await getDb(env)
+        .prepare("SELECT settings FROM organizations WHERE id = ?")
+        .bind(TEST_ORG_ID)
+        .first<{ settings: string | null }>();
+      expect(kept?.settings ? JSON.parse(kept.settings) : null).toEqual({
+        defaultEnvironment: "sandbox",
+        enableProductionProject: true,
+      });
+    }
   });
 
-  it("syncs enableProductionProject and collapses settings to null when nothing remains", async () => {
-    await getDb(env)
-      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ enableProductionProject: true }), TEST_ORG_ID)
-      .run();
-
-    await syncProviderAccessFromClerk(getDb(env), {
-      organizationId: TEST_ORG_ID,
-      clerkOrganization: {
-        id: "org_clerk_collapse_test",
-        private_metadata: {},
-      },
-    });
-
-    const collapsed = await getDb(env)
-      .prepare("SELECT settings FROM organizations WHERE id = ?")
-      .bind(TEST_ORG_ID)
-      .first<{ settings: string | null }>();
-    expect(collapsed?.settings).toBeNull();
-  });
-
-  it("syncs enableProductionProject true alongside provider overrides", async () => {
+  it("never takes the production entitlement from Clerk metadata, while syncing provider overrides", async () => {
     await syncProviderAccessFromClerk(getDb(env), {
       organizationId: TEST_ORG_ID,
       clerkOrganization: {
@@ -692,9 +647,38 @@ describe("provider-availability.service", () => {
       .bind(TEST_ORG_ID)
       .first<{ settings: string | null }>();
     expect(combined?.settings ? JSON.parse(combined.settings) : null).toEqual({
-      enableProductionProject: true,
       providerOverrides: { custody: { local: true } },
     });
+    expect(await readProductionEntitlement(getDb(env), TEST_ORG_ID)).toBe(false);
+  });
+
+  it("sets and clears the production entitlement, keeping other settings and reporting a no-op", async () => {
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ defaultEnvironment: "sandbox" }), TEST_ORG_ID)
+      .run();
+    const settings = async () => {
+      const row = await getDb(env)
+        .prepare("SELECT settings FROM organizations WHERE id = ?")
+        .bind(TEST_ORG_ID)
+        .first<{ settings: string | null }>();
+      return row?.settings ? JSON.parse(row.settings) : null;
+    };
+
+    expect(await setProductionEntitlement(getDb(env), TEST_ORG_ID, true)).toEqual({
+      changed: true,
+    });
+    expect(await settings()).toEqual({
+      defaultEnvironment: "sandbox",
+      enableProductionProject: true,
+    });
+    expect(await setProductionEntitlement(getDb(env), TEST_ORG_ID, true)).toEqual({
+      changed: false,
+    });
+    expect(await setProductionEntitlement(getDb(env), TEST_ORG_ID, false)).toEqual({
+      changed: true,
+    });
+    expect(await settings()).toEqual({ defaultEnvironment: "sandbox" });
   });
 
   it("resolves earn entitlements as override-only, regardless of tier", () => {

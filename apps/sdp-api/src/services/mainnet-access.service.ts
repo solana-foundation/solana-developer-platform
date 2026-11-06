@@ -1,8 +1,9 @@
 /**
  * An organization's one-time request for mainnet (HOO-2427). An admin declares the organization's
  * jurisdiction and accepts the SDP Terms and Conditions in the same submit; SDP records both and
- * emails its alias. Approval is not here: an operator sets `enableProductionProject` in Clerk, the
- * webhook syncs it into the organization's settings, and `state` reads `approved` from that alone.
+ * emails its alias. An operator approves it with `grantProductionEntitlement`
+ * (`pnpm -C apps/sdp-api mainnet-access grant`), which sets the entitlement in SDP's database, and
+ * `state` reads `approved` from that alone.
  */
 import { COUNTRY_CODES, countryByCode } from "@sdp/types/countries";
 import { type MainnetAccess, type MainnetAccessState, SDP_TERMS } from "@sdp/types/mainnet-access";
@@ -22,6 +23,10 @@ import {
   sendMainnetAccessCorrectionEmail,
   sendMainnetAccessRequestEmail,
 } from "@/services/mainnet-access-email";
+import {
+  readProductionEntitlement,
+  setProductionEntitlement,
+} from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 
 export function readMainnetAccessRow(
@@ -173,7 +178,7 @@ export interface MainnetAccessCorrectionResult {
 /**
  * The operator's correction of a request, when an organization writes to the alias about a
  * wrong jurisdiction or asks to start over (`pnpm -C apps/sdp-api mainnet-access`). It never
- * grants mainnet: that stays Clerk's `enableProductionProject`. Audited with the change, then
+ * grants mainnet: that is `changeProductionEntitlement`. Audited with the change, then
  * emailed to the operator address, because the request email sent earlier no longer describes the
  * request and must not be approved from.
  *
@@ -252,4 +257,66 @@ export async function correctMainnetAccess(
     );
   }
   return { request, operatorEmail: "sent" };
+}
+
+/** `grant` turns the production entitlement on; `revoke` turns it off. */
+export const productionEntitlementChangeSchema = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("grant"), ...correctionFields }),
+  z.object({ operation: z.literal("revoke"), ...correctionFields }),
+]);
+
+export type ProductionEntitlementChange = z.infer<typeof productionEntitlementChangeSchema>;
+
+export interface ProductionEntitlementChangeResult {
+  organizationId: string;
+  productionEntitled: boolean;
+  /** False when the organization already had the requested value; nothing was written. */
+  changed: boolean;
+}
+
+/**
+ * The operator's approval (or withdrawal) of an organization's production access, run against the
+ * production database (`pnpm -C apps/sdp-api mainnet-access grant|revoke`). SDP's database is the
+ * only place the entitlement is held. The change commits with its audit record, and that record
+ * emails the organization's admins (HOO-2299).
+ */
+export async function changeProductionEntitlement(
+  env: Env,
+  input: ProductionEntitlementChange
+): Promise<ProductionEntitlementChangeResult> {
+  const enabled = input.operation === "grant";
+  return createSystemAuditService(env).logSystemWithin(async (db) => {
+    const { changed } = await setProductionEntitlement(db, input.organizationId, enabled);
+    return {
+      result: { organizationId: input.organizationId, productionEntitled: enabled, changed },
+      entry: changed
+        ? {
+            action: "update" as const,
+            resourceType: "organization" as const,
+            resourceId: input.organizationId,
+            organizationId: input.organizationId,
+            status: "success" as const,
+            metadata: {
+              event: "production_entitlement_changed",
+              enabled,
+              source: "operator",
+              operator: input.operator,
+              reason: input.reason,
+              ticket: input.ticket,
+            },
+          }
+        : null,
+    };
+  });
+}
+
+/** The organization's mainnet request and whether it holds the production entitlement. */
+export async function readMainnetAccessStatus(
+  db: DatabaseExecutor,
+  organizationId: string
+): Promise<{ request: MainnetAccessRow | null; productionEntitled: boolean }> {
+  return {
+    request: await readMainnetAccessRow(db, organizationId),
+    productionEntitled: await readProductionEntitlement(db, organizationId),
+  };
 }

@@ -52,7 +52,7 @@ export function mainnetAccessRequestEmailContent(request: MainnetAccessRequestEm
   return {
     preheader: `${request.organizationName} accepted the SDP terms and asked to use mainnet.`,
     heading: "Mainnet access requested",
-    summary: `${request.organizationName} asked to use SDP on mainnet. Review the details below, then approve the organization in Clerk.`,
+    summary: `${request.organizationName} asked to use SDP on mainnet. Review the details below, then approve the organization with the operator script.`,
     details: [
       { label: "Organization", value: request.organizationName },
       { label: "Organization ID", value: request.organizationId },
@@ -68,8 +68,7 @@ export function mainnetAccessRequestEmailContent(request: MainnetAccessRequestEm
       },
       { label: "Terms", value: `Version ${request.termsVersion}, accepted with the request` },
     ],
-    action: { label: "Open Clerk", url: "https://dashboard.clerk.com" },
-    note: "To approve, set enableProductionProject in the organization's Clerk private metadata.",
+    note: `To approve, run \`pnpm -C apps/sdp-api mainnet-access grant --organization-id ${request.organizationId}\` against production, with --operator, --reason and --ticket.`,
   };
 }
 

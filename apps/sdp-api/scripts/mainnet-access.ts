@@ -1,10 +1,15 @@
 /**
- * Operator corrections to an organization's mainnet access request (HOO-2427). The dashboard
- * request is one-time; an organization that declared the wrong jurisdiction, or wants to start
- * over, writes to the SDP alias and an operator runs this. Approval is not here: set
- * `enableProductionProject` in the organization's Clerk private metadata.
+ * Operator actions on an organization's mainnet access (HOO-2427), run against the production
+ * database. `grant` approves a request by setting the production entitlement, which SDP's
+ * database alone holds; `revoke` takes it back. The dashboard request is one-time; an
+ * organization that declared the wrong jurisdiction, or wants to start over, writes to the SDP
+ * alias and an operator runs `set-country` or `reset`.
  *
  *   pnpm -C apps/sdp-api mainnet-access status --organization-id <id>
+ *   pnpm -C apps/sdp-api mainnet-access grant --organization-id <id> \
+ *     --operator <you> --reason <why> --ticket <HOO-…>
+ *   pnpm -C apps/sdp-api mainnet-access revoke --organization-id <id> \
+ *     --operator <you> --reason <why> --ticket <HOO-…>
  *   pnpm -C apps/sdp-api mainnet-access set-country --organization-id <id> --country <CC> \
  *     --operator <you> --reason <why> --ticket <HOO-…>
  *   pnpm -C apps/sdp-api mainnet-access reset --organization-id <id> \
@@ -17,14 +22,17 @@ import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import {
+  changeProductionEntitlement,
   correctMainnetAccess,
   mainnetAccessCorrectionSchema,
-  readMainnetAccessRow,
+  productionEntitlementChangeSchema,
+  readMainnetAccessStatus,
 } from "@/services/mainnet-access.service";
 
 const commandSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("status"), organizationId: z.string().trim().min(1) }),
   ...mainnetAccessCorrectionSchema.options,
+  ...productionEntitlementChangeSchema.options,
 ]);
 
 function parseCommandLine(): z.infer<typeof commandSchema> {
@@ -41,7 +49,7 @@ function parseCommandLine(): z.infer<typeof commandSchema> {
     },
   });
   if (positionals.length !== 1) {
-    throw new Error("Usage: mainnet-access <status|set-country|reset> [flags]");
+    throw new Error("Usage: mainnet-access <status|grant|revoke|set-country|reset> [flags]");
   }
   const input = {
     operation: positionals[0],
@@ -59,10 +67,18 @@ function parseCommandLine(): z.infer<typeof commandSchema> {
 async function main(): Promise<void> {
   const command = parseCommandLine();
   const env = getProcessEnv();
-  const result =
-    command.operation === "status"
-      ? await readMainnetAccessRow(getDb(env), command.organizationId)
-      : await correctMainnetAccess(env, command);
+  let result: unknown;
+  switch (command.operation) {
+    case "status":
+      result = await readMainnetAccessStatus(getDb(env), command.organizationId);
+      break;
+    case "grant":
+    case "revoke":
+      result = await changeProductionEntitlement(env, command);
+      break;
+    default:
+      result = await correctMainnetAccess(env, command);
+  }
   console.log(JSON.stringify(result, null, 2));
 }
 
