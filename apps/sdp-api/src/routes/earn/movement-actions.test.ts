@@ -53,10 +53,16 @@ function waistAdmits({ actions, declared }: EarnStartRoute): boolean {
 describe("Earn routes declare an action their movement admits (HOO-2099)", () => {
   const routes = earnStartRoutes();
 
-  it("classifies deposit routes as starts", () => {
+  it("classifies every start route", () => {
     expect(routes.map(({ route }) => route).sort()).toEqual([
       "POST /v1/earn/external-wallet/deposit-transactions",
       "POST /v1/earn/external-wallet/deposits",
+      "POST /v1/earn/provider-actions/cancellations",
+      "POST /v1/earn/provider-actions/external/cancellation-transactions",
+      "POST /v1/earn/provider-actions/external/cancellations",
+      "POST /v1/earn/provider-actions/external/preparation-transactions",
+      "POST /v1/earn/provider-actions/external/preparations",
+      "POST /v1/earn/provider-actions/preparations",
       "POST /v1/earn/vault-deposits",
     ]);
   });
