@@ -136,12 +136,14 @@ export function RecordBlock({
 const RECORD_STACK_SPACING = {
   default: "gap-8 md:gap-16",
   loose: "gap-12 pt-6 pb-16 md:gap-20 md:pt-10 md:pb-24",
+  compact: "gap-6",
 } as const;
 
 /**
  * The parts of a record, 64px apart on a desktop (32px on a phone), as the design spaces them.
  * `loose` sets a page of several titled blocks under the header 80px apart (48px on a phone),
  * with room under the title before the first and after the last (the shell pads neither).
+ * `compact` sets a provider page's band and sections 24px apart.
  */
 export function RecordStack({
   spacing = "default",

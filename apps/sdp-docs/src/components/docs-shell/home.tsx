@@ -1,11 +1,11 @@
 import type { CustodyProvider } from "@sdp/types/custody";
-import { ORGANIZATION_RPC_PROVIDERS, type OrganizationRpcProvider } from "@sdp/types/organizations";
 import {
   COMPLIANCE_PROVIDERS,
   type ComplianceProviderId,
   RAMP_PROVIDERS,
   type RampProviderId,
 } from "@sdp/types/provider-access";
+import { MANAGED_RPC_PROVIDERS, type ManagedRpcProvider } from "@sdp/types/rpc";
 import Image from "next/image";
 import Link from "next/link";
 import { isModulePublished, publicSurface } from "@/lib/release-channel";
@@ -45,7 +45,7 @@ const RPC_PARTNERS = {
   quicknode: { name: "QuickNode", logo: "quicknode" },
   triton: { name: "Triton", logo: "triton" },
   validationcloud: { name: "Validation Cloud", logo: "validation-cloud" },
-} as const satisfies Record<OrganizationRpcProvider, Partner | null>;
+} as const satisfies Record<ManagedRpcProvider, Partner | null>;
 
 function PartnerRow({ label, partners }: { label: string; partners: readonly Partner[] }) {
   if (partners.length === 0) return null;
@@ -133,7 +133,7 @@ export function DocsHome() {
   const rampPartners = RAMP_PROVIDERS.filter((provider) =>
     PUBLISHED_RAMP_PROVIDERS.has(provider)
   ).map((provider) => RAMP_PARTNERS[provider]);
-  const rpcPartners = ORGANIZATION_RPC_PROVIDERS.flatMap((provider) => {
+  const rpcPartners = MANAGED_RPC_PROVIDERS.flatMap((provider) => {
     const partner = RPC_PARTNERS[provider];
     return partner ? [partner] : [];
   });

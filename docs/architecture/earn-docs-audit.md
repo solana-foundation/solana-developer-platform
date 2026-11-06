@@ -139,14 +139,14 @@ issues or external comments were created by this audit.
 - Dashboard and backend proxy focus: 43 files, 544 tests passed.
 - API focus: seven suites, 57 tests passed, including contract parity,
   schemas, exit classification, movement actions, hydration, and queued exits.
-- OpenAPI/reference focus: three suites, 89 tests passed, including opt-in
+- OpenAPI/reference focus: three suites, 90 tests passed, including opt-in
   Earn generation and SDK 501 examples. Overlaps the API focus.
 - API typecheck and source OpenAPI Biome checks passed.
 - Generated integration snippet focus: 13 tests passed.
 - Direct Quickstart helper: TypeScript syntax and five mocked polling/pagination
   cases passed, including confirmation, failure, and invalid cursor handling.
 - Docs: 132 tests, typecheck, prose, production build, and link checks passed
-  (176 pages, 670 links, 22 external URLs).
+  (177 pages, 673 links, 22 external URLs).
 - All 57 draft pages passed module gates, MDX/prose parsing, future links,
   and Markdown parity, including exact preservation of all 250 code examples.
   The private AI corpus includes all 57 pages once, with Earn's notice on each.

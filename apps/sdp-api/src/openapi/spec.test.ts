@@ -1,5 +1,9 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { CUSTODY_PROVIDER_CATALOG_BY_ID, CUSTODY_PROVIDERS } from "@sdp/types/custody";
+import {
+  CUSTODY_PROVIDER_CATALOG_BY_ID,
+  CUSTODY_PROVIDERS,
+  PROVIDER_MODES,
+} from "@sdp/types/custody";
 import {
   IDEMPOTENCY_REQUIRED_ROUTES,
   INTERNAL_IDEMPOTENCY_REQUIRED_ROUTES,
@@ -82,6 +86,53 @@ function getWalletListItemSchema(value: unknown): TestJsonSchema {
 }
 
 const OPERATION_METHODS = ["get", "put", "post", "delete", "patch"] as const;
+
+const integrationStatesDocumentSchema = z.object({
+  get: z.object({
+    responses: z.object({
+      200: z.object({
+        content: z.object({
+          "application/json": z.object({
+            schema: z.object({
+              properties: z.object({
+                data: z.object({
+                  properties: z.object({
+                    families: z.object({
+                      items: z.object({
+                        oneOf: z.array(
+                          z.object({
+                            properties: z.object({
+                              integrations: z.object({
+                                items: z.object({
+                                  properties: z.object({
+                                    state: z.object({
+                                      oneOf: z.array(
+                                        z.object({
+                                          properties: z.object({
+                                            status: z.object({ enum: z.array(z.string()) }),
+                                            modes: z.unknown().optional(),
+                                          }),
+                                        })
+                                      ),
+                                    }),
+                                  }),
+                                }),
+                              }),
+                            }),
+                          })
+                        ),
+                      }),
+                    }),
+                  }),
+                }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    }),
+  }),
+});
 
 const errorEnvelopeResponseSchema = z.object({
   content: z.object({
@@ -923,6 +974,24 @@ describe("OpenAPI spec", () => {
     expect(JSON.stringify(experimentalCreate)).toContain(
       JSON.stringify(CUSTODY_PROVIDERS.filter((provider) => provider !== "local"))
     );
+  });
+
+  it("publishes every family's not configured modes as one or more, with no upper bound", () => {
+    const document = createPublicOpenApiDocument(EXPERIMENTAL);
+    const families = integrationStatesDocumentSchema.parse(document.paths["/v1/integrations"]).get
+      .responses[200].content["application/json"].schema.properties.data.properties.families.items
+      .oneOf;
+    const notConfiguredModes = families
+      .flatMap((family) => family.properties.integrations.items.properties.state.oneOf)
+      .filter((state) => state.properties.status.enum.includes("not_configured"))
+      .map((state) => state.properties.modes);
+    const oneOrMoreModes = {
+      type: "array",
+      items: { type: "string", enum: [...PROVIDER_MODES] },
+      minItems: 1,
+    };
+
+    expect(notConfiguredModes).toEqual(families.map(() => oneOrMoreModes));
   });
 
   it("drops a custody provider's own transfer fields where the channel does not publish it", () => {

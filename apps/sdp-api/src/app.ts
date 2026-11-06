@@ -56,6 +56,7 @@ import { dvp } from "@/routes/dvp";
 import { earnRoutes as earn } from "@/routes/earn";
 import { health } from "@/routes/health";
 import { heliusRings } from "@/routes/helius-rings";
+import { integrations } from "@/routes/integrations";
 import { internalCustody } from "@/routes/internal-custody";
 import { internalFireblocks } from "@/routes/internal-fireblocks";
 import { internalHeliusRings } from "@/routes/internal-helius-rings";
@@ -422,6 +423,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.use("/dvp/*", requireModule("dvp"));
   v1.route("/dvp", dvp);
   v1.route("/places", places);
+  v1.route("/integrations", integrations);
   v1.use("/private-channels/*", requireModule("private_channels"));
   v1.route("/private-channels", privateChannels);
   v1.use("/helius-rings/*", requireModule("helius_rings"));

@@ -20,6 +20,7 @@
   "/v1/dvp": "prefix",
   "/v1/earn": "prefix",
   "/v1/helius-rings": "prefix",
+  "/v1/integrations": "prefix",
   "/v1/issuance": "prefix",
   "/v1/members": "prefix",
   "/v1/onboarding": "prefix",

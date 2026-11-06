@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { integrationProviderIdentity } from "@/app/(session)/dashboard/[projectId]/integrations/integration-detail";
-import { IntegrationProviderMark } from "@/app/(session)/dashboard/[projectId]/integrations/integration-provider-mark";
+import { ProviderBrandMark } from "@/components/provider-brand-mark";
+import { CUSTODY_BRAND_MARKS } from "@/lib/provider-brand-marks";
 import { getDashboardPageConfig } from "./dashboard-header";
 
 type Translate = Parameters<typeof getDashboardPageConfig>[1];
@@ -8,7 +8,7 @@ const t = ((key: string) => key) as Translate;
 
 describe("Markets dashboard headers", () => {
   it("sets the Markets landing title left over the page column, without header tabs", () => {
-    const config = getDashboardPageConfig("/dashboard/markets", t);
+    const config = getDashboardPageConfig("/dashboard/markets", t, []);
 
     expect(config).toMatchObject({
       title: "Shared.dashboardShell.markets",
@@ -20,7 +20,7 @@ describe("Markets dashboard headers", () => {
   });
 
   it("titles Treasury left over the page column, without header tabs", () => {
-    const config = getDashboardPageConfig("/dashboard/markets/treasury-solutions", t);
+    const config = getDashboardPageConfig("/dashboard/markets/treasury-solutions", t, []);
 
     expect(config).toMatchObject({
       title: "Shared.dashboardShell.treasurySolutions",
@@ -32,7 +32,7 @@ describe("Markets dashboard headers", () => {
   });
 
   it("titles Embedded Yield left over the page column, with the integration as its action", () => {
-    const config = getDashboardPageConfig("/dashboard/markets/embedded-yield", t);
+    const config = getDashboardPageConfig("/dashboard/markets/embedded-yield", t, []);
 
     expect(config).toMatchObject({
       title: "Shared.dashboardShell.earnProgram",
@@ -49,7 +49,7 @@ describe("Markets dashboard headers", () => {
   });
 
   it("sets the way back to Embedded Yield over the integration's title", () => {
-    const config = getDashboardPageConfig("/dashboard/markets/embedded-yield/configure", t);
+    const config = getDashboardPageConfig("/dashboard/markets/embedded-yield/configure", t, []);
 
     expect(config).toMatchObject({
       title: "DashboardMarkets.earnProgram.configureShort",
@@ -64,7 +64,7 @@ describe("Markets dashboard headers", () => {
   });
 
   it("centers the shared Markets title on DvP", () => {
-    const config = getDashboardPageConfig("/dashboard/markets/dvp", t);
+    const config = getDashboardPageConfig("/dashboard/markets/dvp", t, []);
 
     expect(config).toMatchObject({
       title: "Shared.dashboardShell.markets",
@@ -78,7 +78,7 @@ describe("Markets dashboard headers", () => {
 
 describe("Settings header", () => {
   it("gates the Members and Security tabs on the capability the workspace checks", () => {
-    expect(getDashboardPageConfig("/dashboard/settings", t).headerTabs).toEqual({
+    expect(getDashboardPageConfig("/dashboard/settings", t, []).headerTabs).toEqual({
       tabs: [
         { id: "general", label: "Shared.organizationSettings.tabs.general", capability: undefined },
         {
@@ -98,69 +98,65 @@ describe("Settings header", () => {
 });
 
 describe("Integrations dashboard headers", () => {
-  it("keeps category navigation in the sidebar submenu", () => {
-    const config = getDashboardPageConfig("/dashboard/integrations", t, true);
+  it("tabs the catalog with All and each family passed, in order", () => {
+    const config = getDashboardPageConfig(
+      "/dashboard/integrations",
+      t,
+      ["custody", "rpc"],
+      true,
+      false
+    );
+
+    expect(config.headerTabs).toEqual({
+      tabs: [
+        { id: "all", label: "Shared.integrations.tabAll" },
+        { id: "custody", label: "Shared.integrations.custodyTitle" },
+        { id: "rpc", label: "Shared.integrations.rpcTitle" },
+      ],
+      hideOnMobile: false,
+      filteredByPage: true,
+    });
+  });
+
+  it("gives a provider page no family tabs", () => {
+    const config = getDashboardPageConfig(
+      "/dashboard/integrations/privy",
+      t,
+      ["custody", "rpc"],
+      true,
+      false
+    );
 
     expect(config.headerTabs).toBeUndefined();
   });
 
-  it("does not recreate category tabs when modules are disabled", () => {
-    const config = getDashboardPageConfig("/dashboard/integrations", t, false);
-
-    expect(config.headerTabs).toBeUndefined();
+  it("names a custody provider with its mark and description, back to the custody family", () => {
+    expect(getDashboardPageConfig("/dashboard/integrations/privy", t, [], true)).toMatchObject({
+      title: "Privy",
+      description: "DashboardCustody.providerPrivyDescription",
+      contentWidthClass: "max-w-page",
+      backAction: { href: "/dashboard/integrations", label: "Shared.integrations.custodyTitle" },
+      titleMark: { type: ProviderBrandMark, props: { mark: CUSTODY_BRAND_MARKS.privy } },
+    });
   });
 
-  it.each([
-    [
-      "privy",
-      "Privy",
-      "DashboardCustody.providerPrivyDescription",
-      "Shared.integrations.custodyTitle",
-    ],
-    [
-      "moonpay",
-      "MoonPay",
-      "Shared.integrations.rampMoonpayDescription",
-      "Shared.integrations.rampsTitle",
-    ],
-    [
-      "range",
-      "Range",
-      "Shared.integrations.complianceRangeDescription",
-      "Shared.integrations.complianceTitle",
-    ],
-  ])(
-    "names %s with its mark and description, back to its family",
-    (provider, title, description, family) => {
-      const config = getDashboardPageConfig(`/dashboard/integrations/${provider}`, t, true);
-
-      expect(config).toMatchObject({
-        title,
-        description,
+  it.each(["not-a-provider", "moonpay"])(
+    "keeps the Integrations title for %s, which has no provider page",
+    (provider) => {
+      expect(getDashboardPageConfig(`/dashboard/integrations/${provider}`, t, [], true)).toEqual({
+        title: "Shared.dashboardShell.integrations",
         contentWidthClass: "max-w-page",
-        backAction: { href: "/dashboard/integrations", label: family },
-        titleMark: {
-          type: IntegrationProviderMark,
-          props: { identity: integrationProviderIdentity(provider) },
+        backAction: {
+          href: "/dashboard/integrations",
+          label: "Shared.integrations.backToIntegrations",
         },
       });
     }
   );
 
-  it("keeps the Integrations title for a provider the catalog does not name", () => {
-    expect(getDashboardPageConfig("/dashboard/integrations/not-a-provider", t, true)).toEqual({
-      title: "Shared.dashboardShell.integrations",
-      contentWidthClass: "max-w-page",
-      backAction: {
-        href: "/dashboard/integrations",
-        label: "Shared.integrations.backToIntegrations",
-      },
-    });
-  });
-
   it("frames a new connection as a flow, back to its provider, ahead of the connection route", () => {
     expect(
-      getDashboardPageConfig("/dashboard/integrations/privy/connections/new", t, true)
+      getDashboardPageConfig("/dashboard/integrations/privy/connections/new", t, [], true)
     ).toEqual({
       title: "DashboardCustody.newConnectionTitle",
       contentWidthClass: "max-w-none",
@@ -174,10 +170,10 @@ describe("Deposit header", () => {
   // A provider deposit is an on-ramp; without Ramps in the channel the tab led to a dead end.
   it("offers the provider tab only where the channel runs Ramps", () => {
     expect(
-      getDashboardPageConfig("/dashboard/payments/deposit", t, true, false).headerTabs
+      getDashboardPageConfig("/dashboard/payments/deposit", t, [], true, false).headerTabs
     ).toBeUndefined();
     expect(
-      getDashboardPageConfig("/dashboard/payments/deposit", t, true, true).headerTabs?.tabs.map(
+      getDashboardPageConfig("/dashboard/payments/deposit", t, [], true, true).headerTabs?.tabs.map(
         (tab) => tab.id
       )
     ).toEqual(["address", "provider"]);
@@ -238,6 +234,6 @@ describe("dashboard route headers", () => {
     ["/dashboard/allowlist", "Shared.dashboardShell.allowlist"],
     ["/dashboard/unknown", "Shared.dashboardShell.newDesign.home"],
   ])("maps %s to its route-specific title", (pathname, title) => {
-    expect(getDashboardPageConfig(pathname, t, true).title).toBe(title);
+    expect(getDashboardPageConfig(pathname, t, [], true).title).toBe(title);
   });
 });

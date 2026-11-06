@@ -3,10 +3,12 @@
 import { useAuth } from "@clerk/nextjs";
 import { Badge } from "@sdp/ui/badge";
 import { cn } from "@sdp/ui/cn";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { integrationTabFamilies } from "@/app/(session)/dashboard/[projectId]/integrations/integration-sections";
 import { isKnownCustodyProvider } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
 import {
@@ -16,7 +18,10 @@ import {
   HeaderBackAction,
 } from "@/components/dashboard-header";
 import { DashboardHeaderTabs } from "@/components/dashboard-header-tabs";
-import { DashboardHeaderTabsTrailingContext } from "@/components/dashboard-header-tabs-trailing-context";
+import {
+  DashboardHeaderTabsHideContext,
+  DashboardHeaderTabsTrailingContext,
+} from "@/components/dashboard-header-tabs-trailing-context";
 import { DashboardLoadingScreen } from "@/components/dashboard-loading-screen";
 import {
   DASHBOARD_SUBNAV_GROUPS,
@@ -312,16 +317,20 @@ function DashboardSidebarContent({
 function DashboardShellPageContexts({
   setPageTitle,
   headerTabsTrailingSlot,
+  setHiddenHeaderTabIds,
   children,
 }: {
   setPageTitle: (override: DashboardPageTitleOverride | null) => void;
   headerTabsTrailingSlot: HTMLElement | null;
+  setHiddenHeaderTabIds: (tabIds: readonly string[] | null) => void;
   children: ReactNode;
 }) {
   return (
     <DashboardPageTitleContext.Provider value={setPageTitle}>
       <DashboardHeaderTabsTrailingContext.Provider value={headerTabsTrailingSlot}>
-        {children}
+        <DashboardHeaderTabsHideContext.Provider value={setHiddenHeaderTabIds}>
+          {children}
+        </DashboardHeaderTabsHideContext.Provider>
       </DashboardHeaderTabsTrailingContext.Provider>
     </DashboardPageTitleContext.Provider>
   );
@@ -393,6 +402,7 @@ export function DashboardShell({
   );
   // Set once the header tab row's trailing slot mounts, so a page's controls portal into it.
   const [headerTabsTrailingSlot, setHeaderTabsTrailingSlot] = useState<HTMLElement | null>(null);
+  const [hiddenHeaderTabIds, setHiddenHeaderTabIds] = useState<readonly string[] | null>(null);
   const [openSubnavs, setOpenSubnavs] = useState<Record<DashboardSubnavKey, boolean>>(() => {
     const initial = {} as Record<DashboardSubnavKey, boolean>;
     for (const [key, group] of Object.entries(DASHBOARD_SUBNAV_GROUPS)) {
@@ -409,7 +419,13 @@ export function DashboardShell({
   // The design's sidebar is 280px (17.5rem) including its rule.
   const sidebarExpandedWidth = 280;
   const sidebarCollapsedWidth = 64;
-  const pageConfig = getDashboardPageConfig(pathname, t, paymentsEnabled, rampsEnabled);
+  const pageConfig = getDashboardPageConfig(
+    pathname,
+    t,
+    integrationTabFamilies(flags),
+    paymentsEnabled,
+    rampsEnabled
+  );
   const { favorites: walletFavorites } = useWalletFavorites();
   const walletFavoriteItems: SubNavItem[] = walletFavorites.map((favorite) => ({
     label: favorite.name,
@@ -445,10 +461,13 @@ export function DashboardShell({
   // A page can insist on its title where the route hides it: a missing page has to say so.
   const titleAlwaysVisible = activeTitleOverride?.alwaysVisible === true;
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
+  const hiddenHeaderTabIdSet = new Set(hiddenHeaderTabIds);
   const headerTabs = pageConfig.headerTabs && {
     ...pageConfig.headerTabs,
     tabs: pageConfig.headerTabs.tabs.filter(
-      (tab) => !tab.capability || dashboardAccess.capabilities[tab.capability]
+      (tab) =>
+        (!tab.capability || dashboardAccess.capabilities[tab.capability]) &&
+        !hiddenHeaderTabIdSet.has(tab.id)
     ),
   };
   const routeTabs = pageConfig.routeTabs;
@@ -609,6 +628,7 @@ export function DashboardShell({
       <DashboardShellPageContexts
         setPageTitle={setPageTitleOverride}
         headerTabsTrailingSlot={headerTabsTrailingSlot}
+        setHiddenHeaderTabIds={setHiddenHeaderTabIds}
       >
         <SentryUserContext />
         <NetworkDebugPanel />
@@ -750,7 +770,19 @@ export function DashboardShell({
                   {headerTabs ? (
                     <div className="flex items-end gap-4">
                       <div className="sdp-quiet-scroll flex min-w-0 items-end overflow-x-auto">
-                        <DashboardHeaderTabs {...headerTabs} />
+                        {headerTabs.filteredByPage && hiddenHeaderTabIds === null ? (
+                          <div
+                            aria-hidden
+                            className="flex h-9 items-center gap-6.5"
+                            data-header-tabs-placeholder="true"
+                          >
+                            <SkeletonBlock className="h-4 w-6 rounded" />
+                            <SkeletonBlock className="h-4 w-14 rounded" />
+                            <SkeletonBlock className="h-4 w-8 rounded" />
+                          </div>
+                        ) : (
+                          <DashboardHeaderTabs {...headerTabs} />
+                        )}
                       </div>
                       {/* A page's own controls for the tab row (DashboardHeaderTabsTrailing). */}
                       <div

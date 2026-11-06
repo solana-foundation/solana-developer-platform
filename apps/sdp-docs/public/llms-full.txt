@@ -2788,6 +2788,7 @@ Source: https://platform.solana.com/docs/reference/api/projects
 | `GET` | `/v1/projects/{projectId}` | [Get project](/docs/reference/api/projects/get-project.md) |
 | `PATCH` | `/v1/projects/{projectId}` | [Update project](/docs/reference/api/projects/update-project.md) |
 | `GET` | `/v1/projects/{projectId}/provider-availability` | [Get project provider availability](/docs/reference/api/projects/get-project-provider-availability.md) |
+| `GET` | `/v1/integrations` | [List project integrations](/docs/reference/api/projects/list-project-integrations.md) |
 
 ---
 
@@ -3662,6 +3663,332 @@ r = requests.get("https://api.solana.com/v1/projects/prj_example/provider-availa
         "provider": "moonpay",
         "available": false,
         "reason": "provider_not_entitled"
+      }
+    ]
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: projects.read",
+    "details": {
+      "action": "projects.read"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+---
+
+### List project integrations
+Source: https://platform.solana.com/docs/reference/api/projects/list-project-integrations
+
+> Lists the project's integrations and how each reaches the project.
+
+`GET /v1/integrations`
+
+A provider is listed only when the project can use it, decided by the same rule that admits its use, so an integration listed here is never refused for availability at its entry point. The project comes from the `x-project-id` header, or from the API key's own project.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `projects.read` action.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+## Responses
+
+- **`200`** Project integrations
+
+  - **`data`** · `object` · required
+
+    The project's integrations, grouped by family in a fixed order. A family this deployment does not run, or with no provider the project can use, is omitted. Each integration's `state` is `not_configured` (the project can set it up, in the listed `modes`), `provided` (SDP supplies it and the project sets nothing up), or `connected` (the project's own setup is active; `mode` says whether it runs on the deployment's provider account, `managed`, or the project's own, `byok`).
+
+    - **`projectId`** · `string` · required
+
+    - **`environment`** · `string` · required · one of `sandbox`, `production`
+
+    - **`families`** · `object[]` · required
+
+      One of:
+
+      - **family: "custody"**
+
+        - **`family`** · `string` · required · always `custody`
+
+        - **`integrations`** · `object[]` · required · min items 1
+
+          - **`provider`** · `string` · required
+
+          - **`category`** · `string` · required · one of `server`, `institutional`
+
+          - **`state`** · `object` · required
+
+            One of:
+
+            - **status: "not_configured"**
+
+              - **`status`** · `string` · required · always `not_configured`
+
+              - **`modes`** · `string[]` · required · min items 1 · each one of `managed`, `byok`
+
+            - **status: "provided"**
+
+              - **`status`** · `string` · required · always `provided`
+
+              - **`modes`** · `string[]` · required · each one of `managed`, `byok`
+
+            - **status: "connected"**
+
+              - **`status`** · `string` · required · always `connected`
+
+              - **`mode`** · `string` · required · one of `managed`, `byok`
+
+      - **family: "rpc"**
+
+        - **`family`** · `string` · required · always `rpc`
+
+        - **`integrations`** · `object[]` · required · min items 1
+
+          - **`provider`** · `string` · required · one of `alchemy`, `helius`, `nodit`, `quicknode`, `triton`, `validationcloud`
+
+          - **`state`** · `object` · required
+
+            One of:
+
+            - **status: "not_configured"**
+
+              - **`status`** · `string` · required · always `not_configured`
+
+              - **`modes`** · `string[]` · required · min items 1 · each one of `managed`, `byok`
+
+            - **status: "provided"**
+
+              - **`status`** · `string` · required · always `provided`
+
+              - **`modes`** · `string[]` · required · each one of `managed`, `byok`
+
+            - **status: "connected"**
+
+              - **`status`** · `string` · required · always `connected`
+
+              - **`mode`** · `string` · required · one of `managed`, `byok`
+
+      - **family: "ramps"**
+
+        - **`family`** · `string` · required · always `ramps`
+
+        - **`integrations`** · `object[]` · required · min items 1
+
+          - **`provider`** · `string` · required · one of `moonpay`, `stripe`
+
+          - **`state`** · `object` · required
+
+            One of:
+
+            - **status: "not_configured"**
+
+              - **`status`** · `string` · required · always `not_configured`
+
+              - **`modes`** · `string[]` · required · min items 1 · each one of `managed`, `byok`
+
+            - **status: "provided"**
+
+              - **`status`** · `string` · required · always `provided`
+
+              - **`modes`** · `string[]` · required · each one of `managed`, `byok`
+
+            - **status: "connected"**
+
+              - **`status`** · `string` · required · always `connected`
+
+              - **`mode`** · `string` · required · one of `managed`, `byok`
+
+      - **family: "compliance"**
+
+        - **`family`** · `string` · required · always `compliance`
+
+        - **`integrations`** · `object[]` · required · min items 1
+
+          - **`provider`** · `string` · required · one of `range`, `elliptic`, `trm`, `chainalysis`
+
+          - **`state`** · `object` · required
+
+            One of:
+
+            - **status: "not_configured"**
+
+              - **`status`** · `string` · required · always `not_configured`
+
+              - **`modes`** · `string[]` · required · min items 1 · each one of `managed`, `byok`
+
+            - **status: "provided"**
+
+              - **`status`** · `string` · required · always `provided`
+
+              - **`modes`** · `string[]` · required · each one of `managed`, `byok`
+
+            - **status: "connected"**
+
+              - **`status`** · `string` · required · always `connected`
+
+              - **`mode`** · `string` · required · one of `managed`, `byok`
+
+      - **family: "private_channels"**
+
+        - **`family`** · `string` · required · always `private_channels`
+
+        - **`integrations`** · `object[]` · required · min items 1
+
+          - **`provider`** · `string` · required · always `private_channels`
+
+          - **`state`** · `object` · required
+
+            One of:
+
+            - **status: "not_configured"**
+
+              - **`status`** · `string` · required · always `not_configured`
+
+              - **`modes`** · `string[]` · required · min items 1 · each one of `managed`, `byok`
+
+            - **status: "provided"**
+
+              - **`status`** · `string` · required · always `provided`
+
+              - **`modes`** · `string[]` · required · each one of `managed`, `byok`
+
+            - **status: "connected"**
+
+              - **`status`** · `string` · required · always `connected`
+
+              - **`mode`** · `string` · required · one of `managed`, `byok`
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `projects.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
+## Example request
+
+```bash tab="cURL"
+curl 'https://api.solana.com/v1/integrations' \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/integrations", {
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.get("https://api.solana.com/v1/integrations",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "projectId": "prj_sandbox01",
+    "environment": "sandbox",
+    "families": [
+      {
+        "family": "custody",
+        "integrations": [
+          {
+            "provider": "privy",
+            "category": "server",
+            "state": {
+              "status": "connected",
+              "mode": "byok"
+            }
+          },
+          {
+            "provider": "fireblocks",
+            "category": "institutional",
+            "state": {
+              "status": "not_configured",
+              "modes": [
+                "managed",
+                "byok"
+              ]
+            }
+          }
+        ]
       }
     ]
   },
