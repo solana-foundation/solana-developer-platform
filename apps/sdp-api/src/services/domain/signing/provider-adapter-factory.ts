@@ -18,11 +18,7 @@ import { assertLocalSigningAllowed } from "@/services/adapters/signing";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import { assertCustodyProviderAvailable } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
-import {
-  type ProviderConfigRecord,
-  parseConfigRecord,
-  parseOptionalRequestDelayMs,
-} from "./provider-config";
+import { type ProviderConfigRecord, parseConfigRecord } from "./provider-config";
 
 type AdapterFactoryContext<TParsed extends ProviderConfigRecord = ProviderConfigRecord> = {
   env: Env;
@@ -94,11 +90,7 @@ const providerAdapterFactories = {
       );
     }
 
-    const requestDelayMs =
-      parsed.requestDelayMs ??
-      parseOptionalRequestDelayMs(env.PRIVY_REQUEST_DELAY_MS, {
-        envVarName: "PRIVY_REQUEST_DELAY_MS",
-      });
+    const requestDelayMs = parsed.requestDelayMs;
 
     return new KeychainPrivyAdapter({
       appId,
@@ -129,11 +121,7 @@ const providerAdapterFactories = {
   },
   para: async ({ env, parsed }) => {
     const apiKey = env.PARA_API_KEY;
-    const requestDelayMs =
-      parsed.requestDelayMs ??
-      parseOptionalRequestDelayMs(env.PARA_REQUEST_DELAY_MS, {
-        envVarName: "PARA_REQUEST_DELAY_MS",
-      });
+    const requestDelayMs = parsed.requestDelayMs;
 
     if (!apiKey) {
       throw new SigningError("Para configuration is missing API key", "PROVIDER_NOT_CONFIGURED");
@@ -149,11 +137,7 @@ const providerAdapterFactories = {
     const apiPublicKey = env.TURNKEY_API_PUBLIC_KEY;
     const apiPrivateKey = env.TURNKEY_API_PRIVATE_KEY;
     const organizationId = parsed.organizationId ?? env.TURNKEY_ORGANIZATION_ID;
-    const requestDelayMs =
-      parsed.requestDelayMs ??
-      parseOptionalRequestDelayMs(env.TURNKEY_REQUEST_DELAY_MS, {
-        envVarName: "TURNKEY_REQUEST_DELAY_MS",
-      });
+    const requestDelayMs = parsed.requestDelayMs;
 
     if (!apiPublicKey || !apiPrivateKey || !organizationId) {
       throw new SigningError(
@@ -239,7 +223,7 @@ export async function createAdapterFromEncryptedConfig(
  * @param input.appId - The Privy app ID.
  * @param input.appSecret - The Privy app secret.
  * @param input.walletId - The connection's Privy wallet the adapter signs with.
- * @param input.requestDelayMs - The connection's request delay, else `PRIVY_REQUEST_DELAY_MS`.
+ * @param input.requestDelayMs - The connection's request delay.
  * @returns The Privy signing adapter.
  * @throws 403 when the (privy, byok) pair is outside the release channel.
  */
@@ -257,11 +241,7 @@ export function createPrivyAdapterFromCredential(
     appSecret: input.appSecret,
     defaultWalletId: input.walletId,
     apiBaseUrl: env.PRIVY_API_BASE_URL,
-    requestDelayMs:
-      input.requestDelayMs ??
-      parseOptionalRequestDelayMs(env.PRIVY_REQUEST_DELAY_MS, {
-        envVarName: "PRIVY_REQUEST_DELAY_MS",
-      }),
+    requestDelayMs: input.requestDelayMs,
   });
 }
 

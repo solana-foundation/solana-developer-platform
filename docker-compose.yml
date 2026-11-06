@@ -56,7 +56,6 @@ services:
     environment:
       # Core
       ENVIRONMENT: ${ENVIRONMENT:-development}
-      ASSET_PROFILES_ENABLED: ${ASSET_PROFILES_ENABLED:-true}
       SDP_RELEASE_CHANNEL: ${SDP_RELEASE_CHANNEL:-experimental}
       PRIVATE_CHANNELS_ENABLED: ${PRIVATE_CHANNELS_ENABLED:-false}
       # Origins a project's Private Channels gateway/auth URL may point at. The
@@ -94,7 +93,6 @@ services:
       FEE_PAYMENT_PROVIDER: ${FEE_PAYMENT_PROVIDER:-native}
 
       # Observability (optional)
-      SENTRY_DSN: ${SENTRY_DSN:-}
     depends_on:
       postgres:
         condition: service_healthy

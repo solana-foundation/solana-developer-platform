@@ -135,21 +135,6 @@ export async function parseConfigRecord(
   }
 }
 
-export function parseOptionalRequestDelayMs(
-  value?: string,
-  options?: { envVarName?: string }
-): number | undefined {
-  if (!value) return undefined;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new SigningError(
-      `${options?.envVarName ?? "REQUEST_DELAY_MS"} must be a non-negative number`,
-      "INVALID_REQUEST"
-    );
-  }
-  return parsed;
-}
-
 function tryParseJson(value: string): unknown | null {
   try {
     return JSON.parse(value);

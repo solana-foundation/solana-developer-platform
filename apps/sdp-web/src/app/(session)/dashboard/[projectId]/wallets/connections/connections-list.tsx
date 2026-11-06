@@ -1,29 +1,19 @@
 "use client";
 
 import type { CustodyProvider, CustodyWalletSummary } from "@sdp/types/custody";
-import { Button } from "@sdp/ui/button";
-import { cn } from "@sdp/ui/cn";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@sdp/ui/dropdown-menu";
 import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { StatusText, type StatusTone } from "@sdp/ui/status-text";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
-import { MoreHorizontalIcon } from "lucide-react";
+import { ChevronRightIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { formatCustodyProviderName } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
-import { WalletAddressCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
-import { formatWalletMeta } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-format-utils";
-import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
+import type { MouseEvent, ReactNode } from "react";
 import { PaginatedFooter } from "@/components/ui/paginated-footer";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { ConnectionStatusCell } from "./connection-status";
+import { failureHint, statusLabel } from "./connection-status-presentation";
 import {
   buildConnectionsSearchParams,
   CONNECTIONS_PAGE_SIZE,
@@ -32,24 +22,47 @@ import {
   type CustodyConnectionListItem,
 } from "./connections.data";
 
-const PROVIDER_COLUMN_CLASS = "hidden @2xl/connections-table:table-cell";
-const CREATED_COLUMN_CLASS = "hidden @4xl/connections-table:table-cell";
-
 type Translate = ReturnType<typeof useTranslations>;
 
-function formatDate(value: string | null, locale: string, timeZone: string, t: Translate): string {
-  if (!value) return t("DashboardCustody.never");
+const LIFECYCLE_TONES = {
+  pending: "attention",
+  checking: "progress",
+  active: "positive",
+  failed: "critical",
+  deactivated: "neutral",
+} as const satisfies Record<CustodyConnectionListItem["status"], StatusTone>;
+
+function formatCreated(value: string, locale: string, timeZone: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString(locale, {
     month: "short",
-    day: "2-digit",
+    day: "numeric",
     year: "numeric",
     timeZone,
   });
 }
 
-function WalletCell({
+function walletsPart(
+  connection: CustodyConnectionListItem,
+  wallets: CustodyWalletSummary[],
+  walletsUnavailable: boolean,
+  t: Translate
+): string {
+  if (wallets.length === 1) return t("DashboardCustody.connectionWalletCountOne");
+  if (wallets.length > 1) {
+    return t("DashboardCustody.connectionWalletCount", { count: wallets.length });
+  }
+  if (walletsUnavailable) return t("DashboardCustody.connectionWalletsUnavailable");
+  if (connection.pendingWalletLabel) return t("DashboardCustody.connectionWalletPending");
+  return t("DashboardCustody.connectionNoWallets");
+}
+
+/**
+ * The line under a connection's name. An active connection reads as what it holds, and says so
+ * when it cannot sign; any other state leads with the state, a dot in its tone before it.
+ */
+function ConnectionSummary({
   connection,
   wallets,
   walletsUnavailable,
@@ -59,47 +72,47 @@ function WalletCell({
   walletsUnavailable: boolean;
 }) {
   const t = useTranslations();
-
-  if (wallets.length > 0) {
-    const [first] = wallets;
+  if (connection.status === "active") {
     return (
-      <div className="min-w-0">
-        <span className="block truncate">{first.label?.trim() || first.walletId}</span>
-        <span className="relative mt-1 flex items-center gap-1">
-          <span className="block truncate font-mono text-[11px] font-normal text-tertiary">
-            {formatWalletMeta(first.publicKey)}
-          </span>
-          <WalletAddressCopyButton address={first.publicKey} tooltip={first.publicKey} />
-          {wallets.length > 1 ? (
-            <span className="text-[11px] font-normal text-tertiary">
-              {t("DashboardCustody.connectionMoreWallets", { count: wallets.length - 1 })}
-            </span>
-          ) : null}
-        </span>
-      </div>
-    );
-  }
-
-  if (walletsUnavailable) {
-    return (
-      <span className="text-xs text-tertiary">
-        {t("DashboardCustody.connectionWalletsUnavailable")}
+      <span className="block truncate text-body text-secondary">
+        {walletsPart(connection, wallets, walletsUnavailable, t)}
+        {connection.isRuntimeExecutionAllowed ? null : (
+          <>
+            {" · "}
+            <StatusText tone="attention" className="whitespace-nowrap">
+              <span data-signing-state="paused">
+                {t("DashboardCustody.connectionSigningPaused")}
+              </span>
+            </StatusText>
+          </>
+        )}
       </span>
     );
   }
-
-  if (connection.pendingWalletLabel) {
-    return (
-      <div className="min-w-0">
-        <span className="block truncate">{connection.pendingWalletLabel}</span>
-        <span className="mt-1 block text-[11px] font-normal text-tertiary">
-          {t("DashboardCustody.connectionWalletPending")}
-        </span>
-      </div>
-    );
-  }
-
-  return <span className="text-xs text-tertiary">{t("DashboardCustody.connectionNoWallets")}</span>;
+  const state = statusLabel(connection.status, t);
+  const text =
+    connection.status === "failed"
+      ? t("DashboardCustody.connectionStateWithReason", {
+          state,
+          reason: failureHint(connection.lastCheck?.failureCode ?? null, t),
+        })
+      : state;
+  return (
+    <StatusText
+      tone={LIFECYCLE_TONES[connection.status]}
+      className="flex min-w-0 items-center gap-2 text-body"
+    >
+      <span
+        aria-hidden
+        className={
+          connection.status === "deactivated"
+            ? "size-1.5 shrink-0 rounded-full border border-current"
+            : "size-1.5 shrink-0 rounded-full bg-current"
+        }
+      />
+      <span className="truncate">{text}</span>
+    </StatusText>
+  );
 }
 
 export function ConnectionsList({
@@ -117,7 +130,7 @@ export function ConnectionsList({
   walletsUnavailable: boolean;
   provider: CustodyProvider;
   projectName: string;
-  emptyStateAction?: React.ReactNode;
+  emptyStateAction?: ReactNode;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -137,6 +150,13 @@ export function ConnectionsList({
   const connectionHref = (connectionId: string) =>
     href(`/dashboard/integrations/${provider}/connections/${encodeURIComponent(connectionId)}`);
 
+  // The name is the row's link for keyboards and screen readers; a press anywhere else on the
+  // row goes to the same place.
+  const openRow = (event: MouseEvent<HTMLTableRowElement>, connectionId: string) => {
+    if (event.target instanceof Element && event.target.closest("a")) return;
+    router.push(connectionHref(connectionId));
+  };
+
   // Keyed on the slice, not the total: a deletion race can hand page 1 an
   // empty slice with a stale nonzero count, and a rowless table is never the
   // right render for that.
@@ -151,105 +171,60 @@ export function ConnectionsList({
   }
 
   return (
-    <div className="@container/connections-table flex min-w-0 flex-1 flex-col">
-      <Table className="[&_table]:w-full [&_table]:min-w-0 [&_table]:table-fixed">
+    <div className="flex min-w-0 flex-col">
+      <Table className="-mx-3 min-w-0 rounded-none border-0 [&_table]:table-fixed">
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[30%] @2xl/connections-table:w-[24%]">
-              {t("DashboardCustody.connectionColumn")}
-            </TableHead>
-            <TableHead className={cn(PROVIDER_COLUMN_CLASS, "w-[14%]")}>
-              {t("DashboardCustody.provider")}
-            </TableHead>
-            <TableHead className="w-[34%] @2xl/connections-table:w-[28%]">
-              {t("DashboardCustody.wallets")}
-            </TableHead>
-            <TableHead className="w-[28%] @2xl/connections-table:w-[18%] @4xl/connections-table:w-[16%]">
-              {t("DashboardCustody.status")}
-            </TableHead>
-            <TableHead className={cn(CREATED_COLUMN_CLASS, "w-[12%]")}>
+            <TableHead>{t("DashboardCustody.connectionColumn")}</TableHead>
+            <TableHead className="hidden w-32 text-right sm:table-cell">
               {t("DashboardCustody.created")}
             </TableHead>
-            <TableHead className="w-[8%]">
-              <span className="sr-only">{t("DashboardCustody.actions")}</span>
+            <TableHead className="w-10">
+              <span className="sr-only">{t("DashboardCustody.openConnection")}</span>
             </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {connections.map((connection) => (
-            <TableRow key={connection.id} data-connection-id={connection.id}>
-              <TableCell className="font-medium">
-                <span className="flex min-w-0 items-center gap-2">
+            <TableRow
+              key={connection.id}
+              data-connection-id={connection.id}
+              className="cursor-pointer"
+              onClick={(event: MouseEvent<HTMLTableRowElement>) => openRow(event, connection.id)}
+            >
+              <TableCell className="min-w-0 py-3 whitespace-normal">
+                <span className="flex min-w-0 items-baseline gap-2">
                   <Link
                     href={connectionHref(connection.id)}
-                    className="truncate hover:underline"
+                    className="truncate text-field font-medium text-primary hover:underline"
                     data-connection-link
                   >
                     {connection.label}
                   </Link>
-                </span>
-                <span className="mt-1 block truncate font-mono text-[11px] font-normal text-tertiary">
-                  {formatWalletMeta(connection.id, 10, 6)}
-                </span>
-              </TableCell>
-              <TableCell className={PROVIDER_COLUMN_CLASS}>
-                <span className="flex items-center gap-2">
-                  <WalletProviderMark provider={connection.provider} size="xs" />
-                  <span className="truncate text-xs">
-                    {formatCustodyProviderName(connection.provider)}
+                  <span className="shrink-0 font-mono text-meta text-tertiary">
+                    {`····${connection.id.slice(-4)}`}
                   </span>
                 </span>
+                <span className="mt-1 block min-w-0">
+                  <ConnectionSummary
+                    connection={connection}
+                    wallets={walletsByConnection[connection.id] ?? []}
+                    walletsUnavailable={walletsUnavailable}
+                  />
+                </span>
               </TableCell>
-              <TableCell className="text-xs">
-                <WalletCell
-                  connection={connection}
-                  wallets={walletsByConnection[connection.id] ?? []}
-                  walletsUnavailable={walletsUnavailable}
-                />
+              <TableCell className="hidden align-top py-3 text-right text-secondary tabular-nums sm:table-cell">
+                {formatCreated(connection.createdAt, locale, timeZone)}
               </TableCell>
-              <TableCell className="text-xs">
-                <ConnectionStatusCell
-                  status={connection.status}
-                  failureCode={connection.lastCheck?.failureCode ?? null}
-                  isRuntimeExecutionAllowed={connection.isRuntimeExecutionAllowed}
-                />
-              </TableCell>
-              <TableCell className={cn(CREATED_COLUMN_CLASS, "text-xs text-secondary")}>
-                {formatDate(connection.createdAt, locale, timeZone, t)}
-              </TableCell>
-              <TableCell className="text-right">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={t("DashboardCustody.connectionRowActions", {
-                        label: connection.label,
-                      })}
-                    >
-                      <MoreHorizontalIcon aria-hidden className="size-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem asChild>
-                      <Link href={connectionHref(connection.id)}>
-                        {t("DashboardCustody.openConnection")}
-                      </Link>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+              <TableCell className="align-top py-3 text-right text-tertiary">
+                <ChevronRightIcon aria-hidden className="ml-auto size-4" />
               </TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
       {pageCount > 1 ? (
-        <PaginatedFooter
-          className="mt-auto"
-          page={filters.page}
-          pageCount={pageCount}
-          onPageChange={goToPage}
-        />
+        <PaginatedFooter page={filters.page} pageCount={pageCount} onPageChange={goToPage} />
       ) : null}
     </div>
   );

@@ -2,6 +2,14 @@ import { auth } from "@clerk/nextjs/server";
 import type { CustodyConfigSummary } from "@sdp/types/custody";
 import type { PrivateChannelInstanceEnvelope } from "@sdp/types/private-channels";
 import { redirect } from "next/navigation";
+import { isIntegrationFamilyEnabled } from "@/app/(session)/dashboard/[projectId]/integrations/integration-feature-gates";
+import { IntegrationsCatalog } from "@/app/(session)/dashboard/[projectId]/integrations/integrations-catalog";
+import {
+  resolveComplianceIntegrations,
+  resolveCustodyIntegrations,
+  resolvePrivacyIntegrations,
+  resolveRampIntegrations,
+} from "@/app/(session)/dashboard/[projectId]/integrations/integrations-status";
 import type { OnboardingStatusResponse } from "@/app/(session)/dashboard/[projectId]/onboarding-status";
 import { isKnownCustodyProvider } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import { privateChannels } from "@/flags";
@@ -16,14 +24,6 @@ import {
 import { fetchProjectProviderAvailability } from "@/lib/provider-availability.server";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createRequestScopedSdpApiClients, type SdpApiClient } from "@/lib/sdp-api";
-import { isIntegrationFamilyEnabled } from "./integration-feature-gates";
-import { IntegrationsCatalog } from "./integrations-catalog";
-import {
-  resolveComplianceIntegrations,
-  resolveCustodyIntegrations,
-  resolvePrivacyIntegrations,
-  resolveRampIntegrations,
-} from "./integrations-status";
 
 async function getConnectedCustodyProviders(request: SdpApiClient["request"]) {
   const res = await request("/v1/wallets/configs");

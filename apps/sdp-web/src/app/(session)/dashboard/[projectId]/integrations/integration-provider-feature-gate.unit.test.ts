@@ -39,7 +39,7 @@ vi.mock("@/lib/sdp-api", async (importOriginal) => ({
   requestMemberRole: mocks.requestMemberRole,
 }));
 
-import IntegrationDetailPage from "./[provider]/page";
+import IntegrationDetailPage from "./[provider]/(detail)/page";
 
 describe("integration provider route feature gates", () => {
   beforeEach(() => {
