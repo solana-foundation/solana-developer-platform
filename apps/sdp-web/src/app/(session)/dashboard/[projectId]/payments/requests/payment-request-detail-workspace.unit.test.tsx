@@ -13,7 +13,6 @@ import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
-import { PaymentsDemoProvider } from "@/lib/payments-demo/payments-demo-context";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { stubMatchMedia } from "@/test/media-queries";
 import { forgetCreatedRequestLink, noteCreatedRequestLink } from "./created-request-link";
@@ -55,17 +54,16 @@ const paymentRequest: PaymentRequest = {
 };
 
 function renderDetail(
-  demo: boolean,
   publicToken: string | null,
   request: PaymentRequest,
-  canceler: requestsData.PaymentRequestCanceler | null = null
+  canceler: requestsData.PaymentRequestCanceler | null
 ) {
   function wrapper({ children }: { children: ReactNode }) {
     return (
       // The dashboard's own SWR defaults, which keep a key's last read once it goes null.
       <SWRConfig value={{ ...DASHBOARD_SWR_CONFIG, provider: () => new Map() }}>
         <I18nProvider locale="en" messages={getMessages("en")}>
-          <PaymentsDemoProvider value={demo}>{children}</PaymentsDemoProvider>
+          {children}
         </I18nProvider>
       </SWRConfig>
     );
@@ -100,7 +98,7 @@ describe("PaymentRequestDetailWorkspace payment watch", () => {
   it("shows a payment land on an open request without a reload", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const read = vi.spyOn(requestsData, "fetchPaymentRequestFromBrowser").mockResolvedValue(paid);
-    renderDetail(false, "tok_1", paymentRequest);
+    renderDetail("tok_1", paymentRequest, null);
 
     expect(screen.getAllByText("Awaiting payment").length).toBeGreaterThan(0);
     await vi.advanceTimersByTimeAsync(10_000);
@@ -116,7 +114,7 @@ describe("PaymentRequestDetailWorkspace payment watch", () => {
     const read = vi
       .spyOn(requestsData, "fetchPaymentRequestFromBrowser")
       .mockResolvedValue(expired);
-    renderDetail(false, "tok_1", paymentRequest);
+    renderDetail("tok_1", paymentRequest, null);
 
     await vi.advanceTimersByTimeAsync(10_000);
     await waitFor(() => expect(screen.getAllByText("Expired").length).toBeGreaterThan(0));
@@ -130,7 +128,7 @@ describe("PaymentRequestDetailWorkspace payment watch", () => {
     const read = vi
       .spyOn(requestsData, "fetchPaymentRequestFromBrowser")
       .mockResolvedValue(paymentRequest);
-    const { rerender } = renderDetail(false, "tok_1", paymentRequest);
+    const { rerender } = renderDetail("tok_1", paymentRequest, null);
     await vi.advanceTimersByTimeAsync(10_000);
     expect(read).toHaveBeenCalledOnce();
 
@@ -156,7 +154,7 @@ describe("PaymentRequestDetailWorkspace payment watch", () => {
       updatedAt: "2026-09-14T00:05:00.000Z",
     };
     vi.spyOn(requestsData, "fetchPaymentRequestFromBrowser").mockResolvedValue(canceled);
-    renderDetail(false, "tok_1", paymentRequest);
+    renderDetail("tok_1", paymentRequest, null);
 
     await vi.advanceTimersByTimeAsync(10_000);
     await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledOnce());
@@ -167,16 +165,7 @@ describe("PaymentRequestDetailWorkspace payment watch", () => {
   it("reads a request that is no longer open no more", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const read = vi.spyOn(requestsData, "fetchPaymentRequestFromBrowser").mockResolvedValue(paid);
-    renderDetail(false, "tok_1", paid);
-
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(read).not.toHaveBeenCalled();
-  });
-
-  it("never reads a demo request, which is a fixture", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const read = vi.spyOn(requestsData, "fetchPaymentRequestFromBrowser").mockResolvedValue(paid);
-    renderDetail(true, null, paymentRequest);
+    renderDetail("tok_1", paid, null);
 
     await vi.advanceTimersByTimeAsync(30_000);
     expect(read).not.toHaveBeenCalled();
@@ -187,40 +176,24 @@ describe("PaymentRequestDetailWorkspace payment link", () => {
   // The token is a bearer credential (APE-849): a member who may not manage
   // payment requests gets none, and no link is drawn.
   it("shows no link or QR code without the link token", async () => {
-    renderDetail(false, null, paymentRequest);
+    renderDetail(null, paymentRequest, null);
 
     await waitFor(() => expect(screen.queryByText(/\/pay\//)).toBeNull());
     expect(screen.queryByRole("img", { name: "QR code for the payment link" })).toBeNull();
   });
 
   it("shows the pay link and its QR code", async () => {
-    renderDetail(false, "tok_1", paymentRequest);
+    renderDetail("tok_1", paymentRequest, null);
 
     expect(await screen.findByText(`${window.location.origin}/pay/tok_1`)).toBeTruthy();
     expect(await screen.findByRole("img", { name: "QR code for the payment link" })).toBeTruthy();
-  });
-
-  it("shows no QR code or link for a demo request, only why there is none", async () => {
-    renderDetail(true, "tok_1", paymentRequest);
-
-    // Once the actions enable, the link would be drawn.
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Copy link" })).toHaveProperty("disabled", false)
-    );
-    expect(
-      screen.getByText(
-        "Demo requests have no pay link to share. Turn off demo mode to create a real one."
-      )
-    ).toBeTruthy();
-    expect(screen.queryByRole("img", { name: "QR code for the payment link" })).toBeNull();
-    expect(screen.queryByText(/\/pay\/tok_1/)).toBeNull();
   });
 
   it("reads Copied for 1.4s once Copy link copies, and raises no toast", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const success = vi.spyOn(toast, "success");
     const user = userEvent.setup();
-    renderDetail(false, "tok_1", paymentRequest);
+    renderDetail("tok_1", paymentRequest, null);
 
     await user.click(screen.getByRole("button", { name: "Copy link" }));
 
@@ -242,7 +215,7 @@ describe("PaymentRequestDetailWorkspace opened by the new-request page", () => {
   it("reads Copied on Copy link for 1.4s when the link was copied", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     noteCreatedRequestLink("preq_1", true);
-    renderDetail(false, "tok_1", paymentRequest);
+    renderDetail("tok_1", paymentRequest, null);
 
     expect(copyButton("Copied")).toBeTruthy();
     expect(screen.queryByText(notCopiedLine)).toBeNull();
@@ -252,7 +225,7 @@ describe("PaymentRequestDetailWorkspace opened by the new-request page", () => {
 
   it("says plainly when the link was not copied, under the buttons", () => {
     noteCreatedRequestLink("preq_1", false);
-    renderDetail(false, "tok_1", paymentRequest);
+    renderDetail("tok_1", paymentRequest, null);
 
     const line = screen.getByText(notCopiedLine);
     const copy = copyButton("Copy link");
@@ -264,7 +237,7 @@ describe("PaymentRequestDetailWorkspace opened by the new-request page", () => {
   it("clears the failed-copy line once Copy link copies the link", async () => {
     noteCreatedRequestLink("preq_1", false);
     const user = userEvent.setup();
-    renderDetail(false, "tok_1", paymentRequest);
+    renderDetail("tok_1", paymentRequest, null);
     expect(screen.getByText(notCopiedLine)).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Copy link" }));
@@ -275,17 +248,17 @@ describe("PaymentRequestDetailWorkspace opened by the new-request page", () => {
 
   it("says it on that request's first arrival only", () => {
     noteCreatedRequestLink("preq_2", true);
-    renderDetail(false, "tok_1", paymentRequest);
+    renderDetail("tok_1", paymentRequest, null);
     expect(copyButton("Copied")).toBeNull();
     cleanup();
 
     noteCreatedRequestLink("preq_1", true);
-    renderDetail(false, "tok_1", paymentRequest);
+    renderDetail("tok_1", paymentRequest, null);
     expect(copyButton("Copied")).toBeTruthy();
     cleanup();
 
     // A later visit, a reload's render included, finds the note gone.
-    renderDetail(false, "tok_1", paymentRequest);
+    renderDetail("tok_1", paymentRequest, null);
     expect(copyButton("Copy link")).toBeTruthy();
   });
 
@@ -298,13 +271,13 @@ describe("PaymentRequestDetailWorkspace opened by the new-request page", () => {
     );
     cleanup();
 
-    renderDetail(false, "tok_1", paymentRequest);
+    renderDetail("tok_1", paymentRequest, null);
     expect(copyButton("Copy link")).toBeTruthy();
   });
 
   it("takes the failed-copy line away once the request can no longer be paid", () => {
     noteCreatedRequestLink("preq_1", false);
-    const { rerender } = renderDetail(false, "tok_1", paymentRequest);
+    const { rerender } = renderDetail("tok_1", paymentRequest, null);
     expect(screen.getByText(notCopiedLine)).toBeTruthy();
 
     // A cancel's refresh hands the page the closed request; the page itself stays mounted.
@@ -324,14 +297,14 @@ describe("PaymentRequestDetailWorkspace opened by the new-request page", () => {
     Object.defineProperty(HTMLElement.prototype, "animate", { value: animate, configurable: true });
     try {
       noteCreatedRequestLink("preq_1", true);
-      renderDetail(false, "tok_1", paymentRequest);
+      renderDetail("tok_1", paymentRequest, null);
       expect(animate).toHaveBeenCalledTimes(1);
       expect(animate.mock.contexts[0]).toBe(
         screen.getByText(`${window.location.origin}/pay/tok_1`)
       );
       cleanup();
 
-      renderDetail(false, "tok_1", paymentRequest);
+      renderDetail("tok_1", paymentRequest, null);
       expect(animate).toHaveBeenCalledTimes(1);
     } finally {
       Reflect.deleteProperty(HTMLElement.prototype, "animate");
@@ -351,7 +324,7 @@ describe("PaymentRequestDetailWorkspace dead link", () => {
   ])(
     "shows no link, QR code, copy or share for a $status request expiring $expiresAt",
     async ({ status, expiresAt }) => {
-      renderDetail(false, "tok_1", { ...paymentRequest, status, expiresAt });
+      renderDetail("tok_1", { ...paymentRequest, status, expiresAt }, null);
 
       await waitFor(() => expect(screen.queryByText(/\/pay\//)).toBeNull());
       expect(screen.queryByText("Payment link")).toBeNull();
@@ -379,7 +352,7 @@ describe("PaymentRequestDetailWorkspace canceled by", () => {
   };
 
   it("names the member who canceled it, with when", () => {
-    renderDetail(false, "tok_1", byMember, { kind: "member", id: "usr_1", name: "Ada Lovelace" });
+    renderDetail("tok_1", byMember, { kind: "member", id: "usr_1", name: "Ada Lovelace" });
 
     expect(
       screen.getByText(/^Ada Lovelace canceled it on .+2026.*, before anyone paid\./)
@@ -387,7 +360,7 @@ describe("PaymentRequestDetailWorkspace canceled by", () => {
   });
 
   it("names the API key that canceled it", () => {
-    renderDetail(false, "tok_1", byKey, { kind: "api_key", id: "key_1", name: "Checkout bot" });
+    renderDetail("tok_1", byKey, { kind: "api_key", id: "key_1", name: "Checkout bot" });
 
     expect(
       screen.getByText(/^The API key “Checkout bot” canceled it on .+, before anyone paid\./)
@@ -395,23 +368,23 @@ describe("PaymentRequestDetailWorkspace canceled by", () => {
   });
 
   it("says a member or an API key when the name could not be read", () => {
-    renderDetail(false, "tok_1", byMember, { kind: "member", id: "usr_1", name: null });
+    renderDetail("tok_1", byMember, { kind: "member", id: "usr_1", name: null });
     expect(screen.getByText(/^A member canceled it on /)).toBeTruthy();
     cleanup();
 
-    renderDetail(false, "tok_1", byKey, null);
+    renderDetail("tok_1", byKey, null);
     expect(screen.getByText(/^An API key canceled it on /)).toBeTruthy();
   });
 
   it("never names a canceler read for someone else", () => {
-    renderDetail(false, "tok_1", byMember, { kind: "member", id: "usr_2", name: "Grace Hopper" });
+    renderDetail("tok_1", byMember, { kind: "member", id: "usr_2", name: "Grace Hopper" });
 
     expect(screen.queryByText(/Grace Hopper/)).toBeNull();
     expect(screen.getByText(/^A member canceled it on /)).toBeTruthy();
   });
 
   it("keeps the plain words for a cancel that names nobody", () => {
-    renderDetail(false, "tok_1", { ...paymentRequest, status: "canceled" });
+    renderDetail("tok_1", { ...paymentRequest, status: "canceled" }, null);
 
     expect(
       screen.getByText("Canceled before anyone paid it. The link is dead and cannot be reopened.")
@@ -421,7 +394,7 @@ describe("PaymentRequestDetailWorkspace canceled by", () => {
 
 describe("PaymentRequestDetailWorkspace facts", () => {
   it("reads who pays and where it lands, then its reference, expiry and creation", () => {
-    renderDetail(false, "tok_1", paymentRequest);
+    renderDetail("tok_1", paymentRequest, null);
 
     expect(
       [...document.querySelectorAll("[data-record-fact] dt")].map((label) => label.textContent)
@@ -451,7 +424,7 @@ describe("PaymentRequestDetailWorkspace cancel", () => {
     "offers Cancel request to $role on a $status request expiring $expiresAt: $shown",
     ({ role, status, expiresAt, shown }) => {
       workspace.role = role;
-      renderDetail(false, "tok_1", { ...paymentRequest, status, expiresAt });
+      renderDetail("tok_1", { ...paymentRequest, status, expiresAt }, null);
 
       expect(screen.queryByRole("button", { name: "Cancel request…" }) !== null).toBe(shown);
       expect(screen.queryByRole("heading", { name: "Danger zone" }) !== null).toBe(shown);
@@ -462,7 +435,7 @@ describe("PaymentRequestDetailWorkspace cancel", () => {
     const pending = Promise.withResolvers<{ ok: true } | { ok: false; error: string }>();
     const cancel = vi.spyOn(requestsData, "cancelPaymentRequest").mockReturnValue(pending.promise);
     const user = userEvent.setup();
-    renderDetail(false, "tok_1", paymentRequest);
+    renderDetail("tok_1", paymentRequest, null);
 
     expect(
       await screen.findByText("The link stops accepting payments. Cannot be undone.")

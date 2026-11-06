@@ -11,7 +11,6 @@ import { z } from "zod";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
-import { PaymentsDemoProvider } from "@/lib/payments-demo/payments-demo-context";
 import { stubClipboard } from "@/test/clipboard";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { createdRequestLinkCopied, forgetCreatedRequestLink } from "./created-request-link";
@@ -163,29 +162,6 @@ describe("New request page", () => {
     await expect(pending).rejects.toThrow("The create named no request");
     expect(createdRequestLinkCopied("preq_1")).toBeNull();
     expect(dashboardRouter.push).not.toHaveBeenCalled();
-  });
-
-  it("copies nothing for a demo request, which has no pay link to share", async () => {
-    const sends = recordSends(201);
-    const user = userEvent.setup();
-    const clipboard = stubClipboard("writes");
-    render(
-      <PaymentsDemoProvider value>
-        <PaymentRequestCreateWorkspace wallets={[wallet]} walletsError={null} />
-      </PaymentsDemoProvider>,
-      { wrapper }
-    );
-    await user.click(screen.getByRole("button", { name: "Destination wallet" }));
-    await user.click(screen.getByRole("button", { name: /Treasury/ }));
-    await createLater(user, sends, 0);
-
-    await waitFor(() =>
-      expect(dashboardRouter.push).toHaveBeenCalledWith(
-        "/dashboard/prj_test_sandbox/payments/requests/preq_1"
-      )
-    );
-    expect(clipboard.writes).toHaveLength(0);
-    expect(createdRequestLinkCopied("preq_1")).toBeNull();
   });
 
   // The expiry comes from the clock. Read again on the retry, it would be a new

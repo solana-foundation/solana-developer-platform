@@ -32,7 +32,6 @@ export function dashboardFlagsAt(releaseChannel: SdpReleaseChannel): DashboardFl
     issuance,
     markets: inChannel(releaseChannel, "markets"),
     payments,
-    paymentsDemoMode: false,
     privateChannels: inChannel(releaseChannel, "private_channels"),
     // `isRampsEnabled`: Payments is on and the channel runs at least one provider.
     ramps: payments && rampProvidersInReleaseChannel(releaseChannel).length > 0,

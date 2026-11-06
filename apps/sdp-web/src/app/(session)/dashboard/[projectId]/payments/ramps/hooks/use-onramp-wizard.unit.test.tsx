@@ -11,7 +11,6 @@ import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
-import { PaymentsDemoProvider } from "@/lib/payments-demo/payments-demo-context";
 import { stubClerkSession } from "@/test/clerk";
 import { useOnrampWizard } from "./use-onramp-wizard";
 import type { UseRampWizardProps } from "./use-ramp-wizard";
@@ -94,7 +93,6 @@ const PROPS: UseRampWizardProps = {
 
 let currentTransfer: PaymentTransferSummary = transferFixture("awaiting_payment");
 let currentQuote: object = MOONPAY_QUOTE;
-let demoMode = false;
 const fetchMock = vi.fn<typeof fetch>();
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -120,11 +118,7 @@ function wrapper({ children }: { children: ReactNode }) {
         serverDashboardCacheScope={{ orgId: "org-test", userId: "user-test" }}
         projects={[]}
       >
-        <PaymentsDemoProvider value={demoMode}>
-          <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
-            {children}
-          </SWRConfig>
-        </PaymentsDemoProvider>
+        <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>{children}</SWRConfig>
       </DashboardWorkspaceProvider>
     </I18nProvider>
   );
@@ -142,7 +136,6 @@ beforeEach(() => {
   resetIdempotencyKeyStoresForTests();
   currentTransfer = transferFixture("awaiting_payment");
   currentQuote = MOONPAY_QUOTE;
-  demoMode = false;
   fetchMock.mockReset().mockImplementation((input, init) => {
     const url = String(input);
     const method = init?.method ?? "GET";
@@ -274,22 +267,6 @@ describe("useOnrampWizard — showCompleteScreen and transfer-status polling", (
     const callsBefore = transferStatusCalls();
     await allowPollingTick();
     expect(transferStatusCalls()).toBe(callsBefore);
-  });
-});
-
-describe("useOnrampWizard — demo funding simulation", () => {
-  it("simulates the quoted transfer by its transferId", async () => {
-    demoMode = true;
-    const rendered = renderHook(() => useOnrampWizard(PROPS), { wrapper });
-    await driveToTransferStatus(rendered);
-    await act(async () => {
-      await rendered.result.current.simulateCurrentQuote();
-    });
-    const calls = fetchMock.mock.calls.filter(
-      ([input]) => String(input) === "/api/dashboard/payments/ramps/sandbox/simulate"
-    );
-    expect(calls).toHaveLength(1);
-    expect(JSON.parse(String(calls[0]?.[1]?.body))).toEqual({ transferId: TRANSFER_ID });
   });
 });
 

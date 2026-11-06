@@ -1,4 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -2133,7 +2134,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(outcome?.count).toBe(0);
   });
 
-  it("converges concurrent same-key submissions", async () => {
+  it("converges concurrent same-key submissions into one submitted event", async () => {
+    const info = vi.spyOn(rootLogger, "info").mockImplementation(() => undefined);
     const { app, token } = buildApp();
     const key = "concurrent-same-key";
     const [left, right] = await Promise.all([
@@ -2164,6 +2166,20 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       )
       .first<{ count: number }>();
     expect(auditCount?.count).toBe(1);
+    expect(
+      info.mock.calls.filter((call) => call[1] === "sdp_api_provider_credential_submitted")
+    ).toEqual([
+      [
+        expect.objectContaining({
+          event: "sdp_api_provider_credential_submitted",
+          provider: "privy",
+          cluster: CLUSTER_BY_SDP_ENVIRONMENT.sandbox,
+          setup: "fresh",
+          project_id: PROJECT_ID,
+        }),
+        "sdp_api_provider_credential_submitted",
+      ],
+    ]);
   });
 
   it("writes only the winning secret when concurrent fresh GCP installations race", async () => {
