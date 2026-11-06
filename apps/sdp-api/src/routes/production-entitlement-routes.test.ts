@@ -50,10 +50,23 @@ function concretePath(path: string): string {
     .replace(/\*/g, "x1");
 }
 
-function exemption(method: string, path: string): string | undefined {
+/**
+ * Why a route need not refuse, or undefined. Earn reads and exits stay open to
+ * an organization that lost the entitlement (ADR 0002), never on a deployment
+ * that admits no production project at all.
+ */
+function exemption(
+  method: string,
+  path: string,
+  productionProjectsAllowed: boolean
+): string | undefined {
   const reason = NO_PROJECT_ROUTES.find(([pattern]) => pattern.test(path))?.[1];
   if (reason) return reason;
-  if (path.startsWith("/v1/earn/") && isEarnExitOrRead(probeMethod(method), concretePath(path))) {
+  if (
+    productionProjectsAllowed &&
+    path.startsWith("/v1/earn/") &&
+    isEarnExitOrRead(probeMethod(method), concretePath(path))
+  ) {
     return "Earn read or exit (ADR 0002)";
   }
   return undefined;
@@ -128,7 +141,7 @@ describe.each([
     it(`refuses a production project ${label} on every non-exempt route`, async () => {
       const reached: string[] = [];
       for (const { method, path } of routes.values()) {
-        if (exemption(method, path)) continue;
+        if (exemption(method, path, allowProductionProjects !== "false")) continue;
         const response = await app.request(
           concretePath(path),
           { method: probeMethod(method), headers },

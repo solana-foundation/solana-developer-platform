@@ -10,7 +10,7 @@ import type { OrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
-import { AppError, badRequest } from "@/lib/errors";
+import { AppError, badRequest, notFound } from "@/lib/errors";
 import { productionProjectsAllowed } from "@/lib/production-entitlement";
 import { success } from "@/lib/response";
 import { getLogger } from "@/runtime/logger";
@@ -444,6 +444,10 @@ async function syncUser(c: AppContext, data: UserJSON) {
 }
 
 export const handleRampProviderWebhook = async (c: AppContext, environment: SdpEnvironment) => {
+  // A deployment that admits no production project takes no production delivery.
+  if (environment === "production" && !productionProjectsAllowed(c.env)) {
+    throw notFound("Webhook endpoint");
+  }
   const provider = parseRampWebhookProvider(c.req.param("provider"));
   const rawBody = await c.req.raw.text();
   const processor: WebhookProcessor<unknown> = RAMP_PROVIDER_WEBHOOK_PROCESSOR[provider];

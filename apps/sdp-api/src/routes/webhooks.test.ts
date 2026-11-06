@@ -1013,6 +1013,30 @@ describe("MoonPay ramp webhook", () => {
       .first<{ failure_reason: string | null }>();
     expect(retired).toEqual({ failure_reason: "kyc_rejected" });
   });
+  it("takes no production delivery on a deployment that admits no production project", async () => {
+    const body = JSON.stringify(completedPayload);
+    const res = await app.request(
+      "/webhooks/payments/ramps/production/moonpay",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Moonpay-Signature-V2": moonpaySignatureHeader(body, Math.floor(Date.now() / 1000), {
+            key: MOONPAY_WEBHOOK_KEY,
+          }),
+        },
+        body,
+      },
+      { ...env, SDP_ALLOW_PRODUCTION_PROJECTS: "false" }
+    );
+
+    expect(res.status).toBe(404);
+    expect(
+      await getDb(env).queryMany(
+        "SELECT id FROM ramp_webhook_events WHERE environment = 'production'"
+      )
+    ).toEqual([]);
+  });
   it("rejects a moonpay webhook whose signed timestamp is outside the replay window", async () => {
     const body = JSON.stringify(completedPayload);
     const staleHeader = moonpaySignatureHeader(body, Math.floor(Date.now() / 1000) - 6 * 60, {
