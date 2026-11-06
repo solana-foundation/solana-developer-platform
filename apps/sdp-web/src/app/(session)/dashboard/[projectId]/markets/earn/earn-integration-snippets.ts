@@ -7,7 +7,7 @@ import { DEFAULT_SDP_API_URL } from "@sdp/types/site";
  * customer's own wallet, the wallet signs it, the backend SUBMITS the signed
  * bytes, and SDP verifies the signature, records the movement, then
  * broadcasts. The reads close the loop: poll the movement to a terminal
- * state, show balance and earned, list activity, and withdraw the same way
+ * state, show balance and earned, list movements, and withdraw the same way
  * money came in.
  *
  * Copy-and-go by construction: the module needs one strategy id and one API
@@ -28,7 +28,7 @@ export interface EarnIntegrationSections {
   client: string;
   /** Money in: build, customer signs, submit, poll to terminal. */
   deposit: string;
-  /** Reads: balance and earned, activity feed, live positions. */
+  /** Reads: balance and earned, movements, live positions. */
   portfolio: string;
   /** Money out: preview, build the exit, customer signs, submit. */
   withdraw: string;
@@ -83,7 +83,7 @@ export function buildEarnIntegrationSections(
     throw new Error(quote.blockingIssues.map((issue: { message: string }) => issue.message).join("; "));
   }
   const minSharesOut = floorForTolerance(quote.sharesOut, quote.shareDecimals, slippageBps);`
-    : "  // This strategy accepts no on-chain deposit floor (depositSlippage is\n  // null). That can mean a live-rate deposit or a next-NAV provider order; a\n  // preview is informational and cannot bound later provider settlement.\n  const minSharesOut = undefined;";
+    : "  // This strategy accepts no onchain deposit floor (depositSlippage is\n  // null). That can mean a live-rate deposit or a next-NAV provider order; a\n  // preview is informational and cannot bound later provider settlement.\n  const minSharesOut = undefined;";
   const withdrawalFloor = requiresWithdrawalFloor
     ? `  // This strategy requires a quote-derived floor: preview, then take the
   // customer's tolerance off the live figure.
@@ -92,7 +92,7 @@ export function buildEarnIntegrationSections(
     throw new Error(quote.blockingIssues.map((issue: { message: string }) => issue.message).join("; "));
   }
   const minAmountOut = floorForTolerance(quote.assetsOut, quote.assetDecimals, slippageBps);`
-    : "  // This strategy accepts no on-chain exit floor (withdrawalSlippage is\n  // null), so minAmountOut is not accepted. A preview may be informational;\n  // for a provider order it cannot promise the later NAV-struck payout.\n  const minAmountOut = undefined;";
+    : "  // This strategy accepts no onchain withdrawal floor (withdrawalSlippage is\n  // null), so minAmountOut is not accepted. A preview may be informational;\n  // for a provider order it cannot promise the later NAV-struck payout.\n  const minAmountOut = undefined;";
   const floorHelper =
     requiresDepositFloor || requiresWithdrawalFloor
       ? `
@@ -142,16 +142,35 @@ function sdpHeaders(extra: Record<string, string> = {}) {
   };
 }
 
+type SdpErrorBody = {
+  error?: { code?: string; message?: string; details?: unknown };
+} | null;
+
+/** An SDP error response. Branch on status, code and details, not the message. */
+export class EarnApiError extends Error {
+  readonly status: number;
+  readonly code: string | undefined;
+  readonly details: unknown;
+  /** The Retry-After header on a 429 or 503, in seconds, when SDP sent one. */
+  readonly retryAfter: string | null;
+
+  constructor(response: Response, body: SdpErrorBody) {
+    const code = body?.error?.code;
+    super(\`SDP \${response.status}\${code ? \` \${code}\` : ""}: \${body?.error?.message ?? "Request failed"}\`);
+    this.name = "EarnApiError";
+    this.status = response.status;
+    this.code = code;
+    this.details = body?.error?.details;
+    this.retryAfter = response.headers.get("Retry-After");
+  }
+}
+
 async function sdpFetch(path: string, init?: RequestInit) {
   const response = await fetch(\`\${SDP_API_URL}\${path}\`, init);
   // An error body is not always JSON (a gateway 502, an empty 503), so parse
-  // defensively and keep the status in the thrown message either way.
+  // defensively and keep the status in the error either way.
   const result = await response.json().catch(() => null);
-  if (!response.ok) {
-    const code = result?.error?.code ? \` \${result.error.code}\` : "";
-    const message = result?.error?.message ?? "Request failed";
-    throw new Error(\`SDP \${response.status}\${code}: \${message}\`);
-  }
+  if (!response.ok) throw new EarnApiError(response, result);
   return result.data;
 }
 
@@ -357,20 +376,31 @@ export async function getEarnMovement(movementId: string) {
   return data.movement;
 }
 
+/**
+ * Polls a movement to finalized or failed: every second for the first minute,
+ * then every five seconds, so tracking stays well inside the rate limit.
+ */
 export async function waitForEarnMovement(
   movementId: string,
   { signal, intervalMs = 1_000 }: { signal?: AbortSignal; intervalMs?: number } = {}
 ) {
+  const startedAt = Date.now();
   while (true) {
     signal?.throwIfAborted();
     const movement = await getEarnMovement(movementId);
     if (movement.status === "finalized" || movement.status === "failed") return movement;
+    const delayMs = Date.now() - startedAt < 60_000 ? intervalMs : Math.max(intervalMs, 5_000);
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(resolve, intervalMs);
-      signal?.addEventListener("abort", () => {
+      const onAbort = () => {
         clearTimeout(timer);
-        reject(signal.reason ?? new Error("Polling aborted"));
-      }, { once: true });
+        reject(signal?.reason ?? new Error("Polling aborted"));
+      };
+      const timer = setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }, delayMs);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) onAbort();
     });
   }
 }`;
@@ -392,11 +422,12 @@ export async function getEarnEarnings(ownerAddress: string) {
 }
 
 /**
- * Activity feed, newest first. Render \`tokenAmount\` in \`tokenMint\` units for
- * both directions; \`amount\`/\`denomination\` is the on-chain quantity, which is
+ * One page of the wallet's movements, newest first. Pass nextCursor back as
+ * cursor while hasMore is true. Render \`tokenAmount\` in \`tokenMint\` units for
+ * both directions; \`amount\`/\`denomination\` is the onchain quantity, which is
  * shares on a withdrawal. A withdrawal's tokenAmount is null until it finalizes.
  */
-export async function listEarnActivity(ownerAddress: string, cursor?: string) {
+export async function listEarnMovements(ownerAddress: string, cursor?: string) {
   const query = new URLSearchParams({ ownerAddress });
   if (cursor) query.set("before", cursor);
   // { movements, hasMore, nextCursor }
@@ -494,7 +525,7 @@ export async function getEarnWithdrawalOptions(positionId: string) {
 function compareDecimalStrings(left: string, right: string): number {
   const parse = (value: string) => {
     if (!/^\\d+(\\.\\d+)?$/.test(value)) throw new Error("Invalid decimal amount");
-    const [whole, fraction = ""] = value.split(".");
+    const [whole = "", fraction = ""] = value.split(".");
     return { whole: whole.replace(/^0+(?=\\d)/, ""), fraction: fraction.replace(/0+$/, "") };
   };
   const a = parse(left);
@@ -576,7 +607,7 @@ export async function previewEarnParRedemption({
 
 /**
  * Build an unsigned queue request. Landing this transaction escrows shares; it
- * does NOT pay assets. The provider's solve authority may fulfil after maturity.
+ * does NOT pay assets. The provider's solve authority may fulfill after maturity.
  */
 export async function buildEarnQueuedWithdrawalRequest({
   positionId,
@@ -697,9 +728,14 @@ export async function listPendingEarnQueuedWithdrawals(ownerAddress: string) {
   } while (true);
 }
 
+/**
+ * Polls a withdrawal request to fulfilled, cancelled or failed, once a minute.
+ * A request can take hours or days, so after a restart, restore open requests
+ * with listPendingEarnQueuedWithdrawals instead of keeping this loop alive.
+ */
 export async function waitForEarnQueuedWithdrawal(
   withdrawalRequestId: string,
-  { signal, intervalMs = 5_000 }: { signal?: AbortSignal; intervalMs?: number } = {}
+  { signal, intervalMs = 60_000 }: { signal?: AbortSignal; intervalMs?: number } = {}
 ) {
   const terminal = new Set(["fulfilled", "cancelled", "failed"]);
   while (true) {
