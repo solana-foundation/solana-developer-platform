@@ -254,14 +254,16 @@ describe("Counterparties Routes", () => {
         env
       );
       expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: {
-          fields: {
-            entityTypes: string[];
-            countries: { code: string; name: string }[];
-          };
-        };
-      };
+      const body = z
+        .object({
+          data: z.object({
+            fields: z.object({
+              entityTypes: z.array(z.string()),
+              countries: z.array(z.object({ code: z.string(), name: z.string() })),
+            }),
+          }),
+        })
+        .parse(await res.json());
       expect(body.data.fields.entityTypes).toContain("individual");
       expect(body.data.fields.entityTypes).toContain("business");
       expect(body.data.fields.countries.some((c) => c.code === "US")).toBe(true);
@@ -976,8 +978,9 @@ describe("Counterparties Routes", () => {
           { headers: { Authorization: authHeader } },
           env
         );
-        // SAFETY: the list route's response schema; a wrong shape fails the assertions below.
-        const { accounts } = (await res.json()).data as { accounts: { id: string }[] };
+        const { accounts } = z
+          .object({ data: z.object({ accounts: z.array(z.object({ id: z.string() })) }) })
+          .parse(await res.json()).data;
         return accounts.map((account) => account.id);
       }
 

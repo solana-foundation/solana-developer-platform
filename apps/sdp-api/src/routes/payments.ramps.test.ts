@@ -72,6 +72,46 @@ const quotedTransferSchema = z.object({
 
 const onrampEstimatesSchema = z.object({ data: z.object({ estimates: z.array(z.unknown()) }) });
 
+const rampCurrencySupportData = z.object({
+  currencies: z.object({ sources: z.array(z.string()), destinations: z.array(z.string()) }),
+  pairs: z.array(
+    z.object({ source: z.string(), dest: z.string(), providers: z.array(z.string()) })
+  ),
+});
+
+const rampCurrencySupportSchema = z.object({ data: rampCurrencySupportData });
+
+const hashedRampCurrencySupportSchema = z.object({
+  data: rampCurrencySupportData.extend({ supportHash: z.string() }),
+});
+
+const hostedQuoteSchema = z.object({
+  data: z.object({
+    transferId: z.string(),
+    quote: z.object({
+      id: z.string(),
+      provider: z.string(),
+      status: z.string(),
+      deliveryMode: z.string(),
+      hostedUrl: z.string(),
+    }),
+  }),
+});
+
+const memoTransferSchema = z.object({
+  data: z.object({
+    transfer: z.object({
+      id: z.string(),
+      providerReference: z.string().optional(),
+      rampsMemo: z.record(z.string(), z.string()),
+    }),
+  }),
+});
+
+const canceledTransferSchema = z.object({
+  data: z.object({ transfer: z.object({ id: z.string(), status: z.string() }) }),
+});
+
 const TEST_CONNECTION_WALLET_ID = "privy_payments_connection_wallet";
 const TEST_CONNECTION_CUSTODY_WALLET_ID = "cwlt_payments_connection_balance";
 
@@ -181,7 +221,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: { message: string } };
+    const body = errorResponseSchema.parse(await response.json());
     expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
   });
 
@@ -203,7 +243,7 @@ describe("Payments routes — ramps", () => {
       );
 
       expect(response.status).toBe(403);
-      const body = (await response.json()) as { error: { code: string } };
+      const body = errorResponseSchema.parse(await response.json());
       expect(body.error.code).toBe("INSUFFICIENT_PERMISSIONS");
     }
   });
@@ -227,7 +267,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: { message: string } };
+    const body = errorResponseSchema.parse(await response.json());
     expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
   });
 
@@ -250,7 +290,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: { message: string } };
+    const body = errorResponseSchema.parse(await response.json());
     expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
   });
 
@@ -276,7 +316,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: { message: string } };
+    const body = errorResponseSchema.parse(await response.json());
     expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
   });
 
@@ -306,7 +346,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: { message: string } };
+    const body = errorResponseSchema.parse(await response.json());
     expect(body.error.message).toContain('Unrecognized key: "destinationWallet"');
   });
   it("rejects a provider walletId value passed as destinationCustodyWalletId", async () => {
@@ -602,13 +642,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: {
-        currencies: { sources: string[]; destinations: string[] };
-        pairs: Array<{ source: string; dest: string; providers: string[] }>;
-        supportHash: string;
-      };
-    };
+    const body = hashedRampCurrencySupportSchema.parse(await res.json());
 
     expect(body.data.currencies.sources).toContain("USD");
     expect(body.data.currencies.destinations).toContain("usdc.solana");
@@ -632,12 +666,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: {
-        currencies: { sources: string[]; destinations: string[] };
-        pairs: Array<{ source: string; dest: string; providers: string[] }>;
-      };
-    };
+    const body = rampCurrencySupportSchema.parse(await res.json());
 
     expect(body.data.currencies.sources).toContain("usdc.solana");
     expect(body.data.currencies.destinations).toContain("USD");
@@ -673,18 +702,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: {
-        quote: {
-          id: string;
-          provider: string;
-          status: string;
-          deliveryMode: string;
-          hostedUrl: string;
-        };
-        transferId: string;
-      };
-    };
+    const body = hostedQuoteSchema.parse(await res.json());
 
     expect(body.data.quote.id).toBe(body.data.transferId);
     expect(body.data.transferId.startsWith("xfr_")).toBe(true);
@@ -715,15 +733,7 @@ describe("Payments routes — ramps", () => {
       env
     );
     expect(transfersRes.status).toBe(200);
-    const transfersBody = (await transfersRes.json()) as {
-      data: {
-        transfer: {
-          id: string;
-          providerReference?: string;
-          rampsMemo: Record<string, string>;
-        };
-      };
-    };
+    const transfersBody = memoTransferSchema.parse(await transfersRes.json());
     expect(transfersBody.data.transfer.id).toBe(body.data.transferId);
     expect(transfersBody.data.transfer.providerReference).toBeUndefined();
     expect(transfersBody.data.transfer.rampsMemo).toEqual({ invoice: "INV-123", po: "PO-9" });
@@ -760,18 +770,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      data: {
-        quote: {
-          id: string;
-          provider: string;
-          status: string;
-          deliveryMode: string;
-          hostedUrl: string;
-        };
-        transferId: string;
-      };
-    };
+    const body = hostedQuoteSchema.parse(await response.json());
     expect(body.data.quote.id).toBe(body.data.transferId);
     expect(body.data.transferId.startsWith("xfr_")).toBe(true);
 
@@ -886,7 +885,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { message: string } };
+    const body = errorResponseSchema.parse(await res.json());
     expect(body.error.message).toContain("rampsMemo must contain at most 20 key-value pairs");
   });
 
@@ -1050,7 +1049,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { data: { transfer: { id: string; status: string } } };
+    const body = canceledTransferSchema.parse(await res.json());
     expect(body.data.transfer.status).toBe("canceled");
 
     const row = await getDb(env)
@@ -1082,7 +1081,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { code: string } };
+    const body = errorResponseSchema.parse(await res.json());
     expect(body.error.code).toBe("BAD_REQUEST");
 
     const row = await getDb(env)
@@ -1341,7 +1340,7 @@ describe("Payments routes — ramps", () => {
       );
 
       expect(res.status).toBe(429);
-      const body = (await res.json()) as { error: { code: string } };
+      const body = errorResponseSchema.parse(await res.json());
       expect(body.error.code).toBe("RATE_LIMITED");
     });
 
@@ -1410,7 +1409,7 @@ describe("Payments routes — ramps", () => {
       const res = await simulateAsClerk(TEST_PRODUCTION_PROJECT_ID, NONEXISTENT_SIMULATE_BODY);
 
       expect(res.status).toBe(403);
-      const body = (await res.json()) as { error: { message: string } };
+      const body = errorResponseSchema.parse(await res.json());
       expect(body.error.message).toContain("only available in sandbox mode");
     });
 
@@ -1420,7 +1419,7 @@ describe("Payments routes — ramps", () => {
       const res = await simulateAsClerk(TEST_PROJECT.id, NONEXISTENT_SIMULATE_BODY);
 
       expect(res.status).toBe(404);
-      const body = (await res.json()) as { error: { code: string } };
+      const body = errorResponseSchema.parse(await res.json());
       expect(body.error.code).toBe("NOT_FOUND");
     });
   });
@@ -1495,7 +1494,7 @@ describe("Payments routes — ramps", () => {
 
       const mutated = await createStripeOnrampQuote(counterpartyId, "26");
       expect(mutated.status).toBe(409);
-      const body = (await mutated.json()) as { error: { message: string } };
+      const body = errorResponseSchema.parse(await mutated.json());
       expect(body.error.message).toContain("already bound");
       fetchSpy.mockRestore();
     });
@@ -1540,7 +1539,7 @@ describe("Payments routes — ramps", () => {
       const res = await createStripeOnrampQuote(counterpartyId, "25");
 
       expect(res.status).toBe(409);
-      const body = (await res.json()) as { error: { message: string } };
+      const body = errorResponseSchema.parse(await res.json());
       expect(body.error.message).toContain("already bound");
       fetchSpy.mockRestore();
     });
