@@ -16,7 +16,6 @@ vi.mock("@/i18n/server", async () => {
   };
 });
 
-import { PaymentKindProvider } from "./payments/payment-kind-context";
 import { PaymentsSection } from "./payments-section";
 
 afterEach(() => {
@@ -28,9 +27,7 @@ async function renderPayments() {
   const container = document.createElement("div");
   container.innerHTML = renderToStaticMarkup(
     <EnglishI18n>
-      <PaymentKindProvider>
-        <PaymentsSection />
-      </PaymentKindProvider>
+      <PaymentsSection />
     </EnglishI18n>
   );
   return container;

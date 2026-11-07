@@ -61,20 +61,21 @@ export function useNavScroll(navRoot: RefObject<HTMLElement | null>) {
   return { ground, scrolled };
 }
 
-const { platform, builders, docs } = NAV_GROUP_IDS;
+const { platform, docs } = NAV_GROUP_IDS;
 
-/** Which group's part of the page each section belongs to (`null`: none, the hero). */
+/**
+ * Which group's part of the page each section belongs to (`null`: none, the hero and the builders,
+ * whose group left the bar).
+ */
 const SECTION_GROUP = {
   top: null,
   stack: platform,
   network: platform,
   issuance: platform,
   payments: platform,
-  "payments-api": platform,
   markets: platform,
-  privacy: platform,
   interfaces: docs,
-  builders,
+  builders: null,
   start: docs,
 } as const satisfies Record<string, NavGroupId | null>;
 

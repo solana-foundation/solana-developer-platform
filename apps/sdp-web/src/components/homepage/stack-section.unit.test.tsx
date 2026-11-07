@@ -60,7 +60,7 @@ describe("StackSection markup", () => {
     const headings = doc.querySelectorAll("h1, h2, h3");
     expect(headings).toHaveLength(1);
     expect(headings[0].tagName).toBe("H2");
-    expect(headings[0].textContent).toContain("One integration across the stack");
+    expect(headings[0].textContent).toContain("Modular, institutional-grade infrastructure");
   });
 
   it("describes each bubble as an image with its whole meaning", async () => {
@@ -73,7 +73,7 @@ describe("StackSection markup", () => {
     );
     expect(labels).toEqual([
       "Partner APIs: custody, compliance, ramps, nodes, wallets",
-      "SDP",
+      "Solana Developer Platform",
       "Your product: a wallet, checkout, payroll, treasury",
     ]);
   });

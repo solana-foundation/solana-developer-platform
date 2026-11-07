@@ -3,12 +3,12 @@ import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import type { GatedSurface } from "@/components/homepage/release-gate";
 
 /**
- * The three calls the Interfaces section shows, one per way of working. They are real requests
+ * The two calls the Interfaces section shows, one per way of working. They are real requests
  * against the public SDP API (apps/sdp-api/src/openapi/paths), with shortened placeholder values;
  * they are code, not copy, so they stay out of the message catalog.
  */
 
-export type InterfaceMode = "execute" | "prepare" | "dashboard";
+export type InterfaceMode = "api" | "dashboard";
 
 /** A run of code: plain text, the shell prompt, a JSON key, or a highlighted status value. */
 export type CodeToken = string | { kind: "prompt" | "key" | "value"; text: string };
@@ -43,7 +43,7 @@ const value = (text: string): CodeToken => ({ kind: "value", text: `"${text}"` }
 
 export const INTERFACE_SNIPPETS: readonly InterfaceSnippet[] = [
   {
-    mode: "execute",
+    mode: "api",
     method: "POST",
     path: "/v1/payments/transfers",
     request: [
@@ -74,38 +74,6 @@ export const INTERFACE_SNIPPETS: readonly InterfaceSnippet[] = [
       ["      ", key("id"), ': "xfr_9f2c",'],
       ["      ", key("status"), ": ", value("confirmed"), ","],
       ["      ", key("slot"), ": 291044476"],
-      ["    }"],
-      ["  }"],
-      ["}"],
-    ],
-  },
-  {
-    mode: "prepare",
-    method: "POST",
-    path: "/v1/payments/subscriptions/{subscriptionId}/prepare-collection",
-    gate: "subscriptions",
-    request: [
-      [PROMPT, " curl -X POST \\"],
-      [`    ${API}/v1/payments/subscriptions/psub_71c/prepare-collection \\`],
-      [`    ${AUTH} \\`],
-      [`    ${JSON_TYPE} \\`],
-      [`    -d '{"receiverTokenAccount":"9WzD…AWWM"}'`],
-    ],
-    narrowRequest: [
-      [PROMPT, " curl -X POST \\"],
-      [`  ${API}/v1/payments/subscriptions/psub_71c/prepare-collection \\`],
-      [`  ${AUTH} \\`],
-      [`  ${JSON_TYPE} \\`],
-      ["  -d '{"],
-      ["    ", key("receiverTokenAccount"), ': "9WzD…AWWM"'],
-      ["  }'"],
-    ],
-    response: [
-      ["{"],
-      ["  ", key("data"), ": {"],
-      ["    ", key("preparedTransaction"), ": {"],
-      ["      ", key("serialized"), ": ", value("AQAB…3kx9"), ","],
-      ["      ", key("requiredSigners"), ': ["7xKX…gAsU"]'],
       ["    }"],
       ["  }"],
       ["}"],
