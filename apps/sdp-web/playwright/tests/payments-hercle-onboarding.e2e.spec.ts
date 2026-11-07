@@ -5,13 +5,13 @@ import type { PaymentRampQuote, PaymentTransferSummary } from "@sdp/types/paymen
 import type { CounterpartyRequirements, RequirementField } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { projectHref } from "@/lib/dashboard-project-path";
-import { createLocalApiClient } from "../support/local-api-client";
+import { createLocalApiClient } from "@/playwright/support/local-api-client";
 import {
   bootstrapLocalWalletFixtures,
   getBootstrapApiBaseUrl,
   getPlaywrightCustodyProvider,
   provisionWithAdminSession,
-} from "../support/local-dashboard-bootstrap";
+} from "@/playwright/support/local-dashboard-bootstrap";
 
 /**
  * Hercle is KYB-gated and on-ramp only.
