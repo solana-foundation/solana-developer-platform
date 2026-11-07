@@ -58,6 +58,20 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   );
 });
 
+/** The fields the Hercle quote tests read from an on-ramp quote's answer. */
+const quotedTransferSchema = z.object({
+  data: z.object({
+    transferId: z.string(),
+    quote: z.object({
+      id: z.string(),
+      deliveryMode: z.string(),
+      paymentInstructions: z.array(z.unknown()),
+    }),
+  }),
+});
+
+const onrampEstimatesSchema = z.object({ data: z.object({ estimates: z.array(z.unknown()) }) });
+
 const TEST_CONNECTION_WALLET_ID = "privy_payments_connection_wallet";
 const TEST_CONNECTION_CUSTODY_WALLET_ID = "cwlt_payments_connection_balance";
 
@@ -1600,7 +1614,7 @@ describe("Payments routes — ramps", () => {
       const res = await createHercleOnrampQuote(counterpartyId, "usdt.solana");
 
       expect(res.status).toBe(400);
-      expect(((await res.json()) as { error: { message: string } }).error.message).toContain(
+      expect(errorResponseSchema.parse(await res.json()).error.message).toContain(
         "USDT is not available"
       );
       expect(fetchSpy).not.toHaveBeenCalled();
@@ -1627,7 +1641,7 @@ describe("Payments routes — ramps", () => {
       );
 
       expect(res.status).toBe(200);
-      expect(((await res.json()) as { data: unknown }).data).toEqual({ estimates: [] });
+      expect(onrampEstimatesSchema.parse(await res.json()).data).toEqual({ estimates: [] });
       expect(fetchSpy).not.toHaveBeenCalled();
     });
 
@@ -1659,7 +1673,7 @@ describe("Payments routes — ramps", () => {
       });
       const quoted = await createHercleOnrampQuote(counterpartyId);
       expect(quoted.status).toBe(200);
-      return ((await quoted.json()).data as { transferId: string }).transferId;
+      return quotedTransferSchema.parse(await quoted.json()).data.transferId;
     }
 
     it("asks Hercle to settle a sandbox order as soon as it is quoted", async () => {
@@ -1715,7 +1729,7 @@ describe("Payments routes — ramps", () => {
 
       expect(first.status).toBe(204);
       expect(second.status).toBe(409);
-      expect(((await second.json()) as { error: { message: string } }).error.message).toContain(
+      expect(errorResponseSchema.parse(await second.json()).error.message).toContain(
         "already simulated"
       );
       expect(requests).toHaveLength(2);
@@ -1773,7 +1787,7 @@ describe("Payments routes — ramps", () => {
       const res = await createHercleOnrampQuote(counterpartyId);
 
       expect(res.status).toBe(409);
-      expect(((await res.json()) as { error: { message: string } }).error.message).toContain(
+      expect(errorResponseSchema.parse(await res.json()).error.message).toContain(
         "not provisioned for hercle onramp"
       );
       expect(fetchSpy).not.toHaveBeenCalled();
@@ -1805,7 +1819,7 @@ describe("Payments routes — ramps", () => {
       const refused = await createHercleOnrampQuote(counterpartyId);
 
       expect(refused.status).toBe(409);
-      expect(((await refused.json()) as { error: { message: string } }).error.message).toBe(
+      expect(errorResponseSchema.parse(await refused.json()).error.message).toBe(
         "Hercle has suspended the business's account."
       );
       expect(requests.map((request) => `${request.method} ${request.url}`)).toEqual([
@@ -1816,7 +1830,7 @@ describe("Payments routes — ramps", () => {
       const again = await createHercleOnrampQuote(counterpartyId);
 
       expect(again.status).toBe(409);
-      expect(((await again.json()) as { error: { message: string } }).error.message).toContain(
+      expect(errorResponseSchema.parse(await again.json()).error.message).toContain(
         "not provisioned for hercle onramp"
       );
       expect(requests).toHaveLength(1);
@@ -1885,10 +1899,7 @@ describe("Payments routes — ramps", () => {
       const res = await createHercleOnrampQuote(counterpartyId);
 
       expect(res.status).toBe(200);
-      const { quote, transferId } = (await res.json()).data as {
-        quote: { id: string; deliveryMode: string; paymentInstructions: unknown[] };
-        transferId: string;
-      };
+      const { quote, transferId } = quotedTransferSchema.parse(await res.json()).data;
       expect(quote).toMatchObject({ id: "ord_route_test", deliveryMode: "manual_instructions" });
       expect(quote.paymentInstructions).toEqual([
         expect.objectContaining({

@@ -24,6 +24,7 @@ import {
   notFound,
 } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
+import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { rampRuntime } from "@/routes/payments/context";
 import { admitRamp } from "@/routes/payments/ramps/admission";
@@ -45,6 +46,17 @@ import {
   type submitCounterpartyRequirementsSchema,
   type updateCounterpartySchema,
 } from "./schemas";
+
+/**
+ * A requirements read for a provider that onboards the customer itself calls that provider.
+ * Every project shares its partner credential, so reads are metered too.
+ * Their quota is apart from submissions', sized for the dashboard's onboarding poll every 10 seconds.
+ */
+const RAMP_REQUIREMENTS_READ_QUOTA = {
+  name: "ramp-requirements-read",
+  actorMax: 60,
+  orgMax: 240,
+} as const;
 
 function mapToCounterparty(row: CounterpartyRow): Counterparty {
   return {
@@ -219,6 +231,7 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
 
   const client = RAMP_PROVIDER_CLIENTS[query.data.provider];
   if (client.requirements !== undefined) {
+    await enforceMeteredQuota(c, RAMP_REQUIREMENTS_READ_QUOTA);
     return success(
       c,
       await client.requirements.describe(rampRuntime(c, query.data.provider), {

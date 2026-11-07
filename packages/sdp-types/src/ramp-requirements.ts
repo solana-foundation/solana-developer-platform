@@ -128,6 +128,30 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: "hercle"; status: "customer_verification_failed" }
 );
 
+/** Hercle's verdicts on a business's KYB, as its verification endpoints and its verification webhook report them. */
+export const HERCLE_VERIFICATION_STATUSES = [
+  "action_required",
+  "pending",
+  "rejected",
+  "approved",
+] as const;
+export type HercleVerificationStatus = (typeof HERCLE_VERIFICATION_STATUSES)[number];
+
+/** The verdict that lets a business place orders; Hercle refuses an order under any other. */
+export const HERCLE_APPROVED_VERIFICATION_STATUS = "approved" satisfies HercleVerificationStatus;
+
+/**
+ * The status SDP records for a business whose financial operations Hercle has suspended.
+ * Hercle refuses its orders with `ACCOUNT_SUSPENDED` whatever its verdict.
+ * Its account read reports `financialStatus: "Suspended"`.
+ * Hercle sends no event for it, so SDP learns it from a refused order and sees it lifted only by reading the account.
+ */
+export const HERCLE_SUSPENDED_ACCOUNT_STATUS = "suspended";
+
+export function isHercleVerificationStatus(status: string): status is HercleVerificationStatus {
+  return HERCLE_VERIFICATION_STATUSES.some((verdict) => verdict === status);
+}
+
 /** Statuses the provider moves on its own, so a client re-reads requirements until they change. */
 export const COUNTERPARTY_REQUIREMENTS_POLL_STATUSES = [
   "customer_verification_required",

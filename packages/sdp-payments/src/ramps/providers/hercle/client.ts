@@ -7,7 +7,12 @@ import type {
   PaymentRampQuote,
 } from "@sdp/types/payments";
 import { checkRampDestination } from "@sdp/types/ramp-destinations";
-import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
+import {
+  type CounterpartyRequirements,
+  HERCLE_APPROVED_VERIFICATION_STATUS,
+  HERCLE_SUSPENDED_ACCOUNT_STATUS,
+  HERCLE_VERIFICATION_STATUSES,
+} from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { subtractDecimalAmounts } from "#/decimal";
 import {
@@ -30,6 +35,7 @@ import type {
   ProviderRailSupportDistillation,
   RampCustomerLink,
   RampCustomerLinkStore,
+  RampCustomerStatusObservation,
   RampDiscoveryContext,
   RampEstimateOnrampInput,
   RampKeyFormats,
@@ -49,16 +55,11 @@ import {
   hercleJurisdictionForCountry,
   hercleOnboardingDecision,
   hercleOnboardingFields,
+  hercleRecordedRequirements,
   hercleSuspendedRequirements,
   hercleVerificationRequirements,
 } from "./counterparty";
-import {
-  HERCLE_APPROVED_VERIFICATION_STATUS,
-  HERCLE_SUSPENDED_ACCOUNT_STATUS,
-  HERCLE_VERIFICATION_STATUSES,
-  hercleSuspensionObservation,
-  hercleVerdictObservation,
-} from "./customer-status-mapping";
+import { hercleSuspensionObservation, hercleVerdictObservation } from "./customer-status-mapping";
 import { hercleOrderSettlementEvent, hercleOrderStatusSchema } from "./order-status-mapping";
 
 /** The partner surface of Hercle's public API in each mode. */
@@ -437,25 +438,41 @@ async function isHercleAccountSuspended(
 }
 
 /**
- * Records Hercle's verdict on the link, which the quote gate reads, and answers for it.
+ * Records Hercle's report on the link, which the quote gate reads, and answers for the status the link then holds.
  * Every read is recorded, so it also outdates any older Hercle event still waiting to be applied.
+ * A newer report the link already holds wins, so the answer never shows a business ready that a quote would refuse.
+ *
+ * @param answer - The answer for the report's own status.
  */
+async function answerRecordedHercleStatus(
+  input: RampRequirementsInput,
+  observation: RampCustomerStatusObservation,
+  answer: CounterpartyRequirements
+): Promise<CounterpartyRequirements> {
+  const kept = await input.customerLink.recordStatus(observation);
+  return kept === observation.providerStatus
+    ? answer
+    : hercleRecordedRequirements(input.counterparty, input.direction, kept);
+}
+
 async function answerHercleVerification(
   input: RampRequirementsInput,
   verification: HercleVerification,
   observedAt: string,
   accountActive: boolean
 ): Promise<CounterpartyRequirements> {
-  await input.customerLink.recordStatus(
-    hercleVerdictObservation(verification.status, observedAt, accountActive)
+  return answerRecordedHercleStatus(
+    input,
+    hercleVerdictObservation(verification.status, observedAt, accountActive),
+    hercleVerificationRequirements(verification, input.direction)
   );
-  return hercleVerificationRequirements(verification, input.direction);
 }
 
 /**
  * The answer for a business SDP last saw suspended.
  * Only Hercle's account read shows a suspension, so it comes first.
  * Once Hercle has lifted the suspension, the verdict read after it replaces the suspension on the link.
+ * The verdict carries the account read's time, so a suspension recorded while the verdict was read stays in place.
  *
  * @param startIfNone - Whether to start the verification when Hercle holds none, as a submission does.
  */
@@ -468,20 +485,25 @@ async function answerSuspendedHercleBusiness(
   const accountId = link.providerCustomerReference;
   const accountObservedAt = hercleAskedAt();
   if (await isHercleAccountSuspended(ctx, accountId)) {
-    await input.customerLink.recordStatus(hercleSuspensionObservation(accountObservedAt));
-    return hercleSuspendedRequirements(input.direction);
+    return answerRecordedHercleStatus(
+      input,
+      hercleSuspensionObservation(accountObservedAt),
+      hercleSuspendedRequirements(input.direction)
+    );
   }
-  const observedAt = hercleAskedAt();
   const read = await readStartedHercleVerification(ctx, accountId);
   const verification =
     read === null && startIfNone
       ? await startHercleVerification(ctx, input.counterparty, accountId)
       : read;
   if (verification === null) {
-    await input.customerLink.recordStatus(hercleVerdictObservation(null, observedAt, true));
-    return hercleOnboardingDecision(input.counterparty, input.direction, false);
+    return answerRecordedHercleStatus(
+      input,
+      hercleVerdictObservation(null, accountObservedAt, true),
+      hercleOnboardingDecision(input.counterparty, input.direction, false)
+    );
   }
-  return answerHercleVerification(input, verification, observedAt, true);
+  return answerHercleVerification(input, verification, accountObservedAt, true);
 }
 
 /**
@@ -489,6 +511,7 @@ async function answerSuspendedHercleBusiness(
  * A suspension is the refusal's own news.
  * A refusal for want of verification does not name the verdict, so the verdict is read again.
  * That refusal also shows the account is not suspended, because Hercle reports a suspension first.
+ * The verdict read after it therefore carries the order's time, as a verdict read after an account read does.
  *
  * @returns Why the link could not be corrected, for the refusal's diagnostics.
  * The next refusal or requirements read corrects it.
@@ -506,12 +529,11 @@ async function recordHercleOrderRefusal(
         await customerLink.recordStatus(hercleSuspensionObservation(orderObservedAt));
         return undefined;
       case "ACCOUNT_NOT_VERIFIED": {
-        const observedAt = hercleAskedAt();
         const verification = await readStartedHercleVerification(ctx, accountId);
         await customerLink.recordStatus(
           hercleVerdictObservation(
             verification === null ? null : verification.status,
-            observedAt,
+            orderObservedAt,
             true
           )
         );

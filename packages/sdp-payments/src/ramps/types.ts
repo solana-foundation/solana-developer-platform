@@ -366,8 +366,11 @@ export interface RampCustomerLinkStore {
   read: () => Promise<RampCustomerLink | null>;
   /** Links the provider's customer. The first reference stored stays canonical. */
   link: (providerCustomerReference: string) => Promise<RampCustomerLink>;
-  /** Records the provider's status for the linked customer, unless the link holds a newer report. */
-  recordStatus: (observation: RampCustomerStatusObservation) => Promise<void>;
+  /**
+   * Records the provider's status for the linked customer, unless the link holds a newer report.
+   * It answers with the status the link then holds: the report's, or the newer one it kept.
+   */
+  recordStatus: (observation: RampCustomerStatusObservation) => Promise<string | null>;
 }
 
 export interface RampRequirementsInput {

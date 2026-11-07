@@ -2,6 +2,7 @@ import { hashString } from "@sdp/payments/hash";
 import type { OrganizationProviderOverrides } from "@sdp/types/provider-access";
 import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { createApp } from "@/app";
 import { getDb } from "@/db/client";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
@@ -30,6 +31,9 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import { seedRateLimit } from "@/test/mocks/kv";
 
 const TEST_PROJECT_ID = "prj_counterparties_test";
+const createdCounterpartySchema = z.object({
+  data: z.object({ counterparty: z.object({ id: z.string() }) }),
+});
 const TEST_CP_CUSTODY_WALLET_ID = "cwlt_counterparties_test";
 const TEST_CP_CUSTODY_CONFIG_ID = "ccfg_counterparties_test";
 const TEST_CP_WALLET_PUBLIC_KEY = "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ";
@@ -482,7 +486,7 @@ describe("Counterparties Routes", () => {
           entityType: "business",
           displayName: "Hercle Test Business AG",
         });
-        return (await created.json()).data.counterparty as { id: string };
+        return createdCounterpartySchema.parse(await created.json()).data.counterparty;
       }
 
       function linkScopeOf(counterpartyId: string) {
@@ -510,6 +514,27 @@ describe("Counterparties Routes", () => {
         const body = (await res.json()).data;
         expect(body).toMatchObject({ provider: "hercle", direction: "onramp", status: "collect" });
         expect(body.fields.map((field: { key: string }) => field.key)).toEqual(Object.keys(KYB));
+        expect(calls).toHaveLength(0);
+      });
+
+      it("429s a requirements read once the actor's read quota is exhausted, before Hercle is called", async () => {
+        const cp = await createBusiness("hercle_read_quota");
+        await seedHercleLink(linkScopeOf(cp.id), "acct_route_read_quota", "pending");
+        const calls = hercleReplies([]);
+        await seedRateLimit(
+          env,
+          `metered:ramp-requirements-read:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`,
+          60
+        );
+
+        const res = await app.request(
+          `/v1/counterparties/${cp.id}/requirements?${requirementsQuery}`,
+          { headers: { Authorization: authHeader } },
+          env
+        );
+
+        expect(res.status).toBe(429);
+        expect((await res.json()).error.code).toBe("RATE_LIMITED");
         expect(calls).toHaveLength(0);
       });
 
@@ -828,6 +853,20 @@ describe("Counterparties Routes", () => {
         );
 
         const res = await submitRequirements(cp.id);
+
+        expect(res.status).toBe(200);
+      });
+
+      it("meters only the requirements reads that ask the provider", async () => {
+        const created = await createCounterparty({ externalId: "quota_read_unmetered" });
+        const cp = createdCounterpartySchema.parse(await created.json()).data.counterparty;
+        await seedRateLimit(env, `metered:ramp-requirements-read:org:${TEST_ORG.id}`, 240);
+
+        const res = await app.request(
+          `/v1/counterparties/${cp.id}/requirements?provider=stripe&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=${TEST_CP_CUSTODY_WALLET_ID}`,
+          { headers: { Authorization: authHeader } },
+          env
+        );
 
         expect(res.status).toBe(200);
       });

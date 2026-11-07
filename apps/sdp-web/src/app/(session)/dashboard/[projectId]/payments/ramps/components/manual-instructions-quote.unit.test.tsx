@@ -4,12 +4,11 @@ import type { PaymentRampQuote } from "@sdp/types/payments";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
+import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
-
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const HERCLE_QUOTE = {
   id: "ord_hercle",
@@ -43,6 +42,7 @@ function wrapper({ children }: { children: ReactNode }) {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
 });
 
 describe("ManualInstructionsQuote", () => {
@@ -64,6 +64,7 @@ describe("ManualInstructionsQuote", () => {
     const user = userEvent.setup();
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const copied = vi.spyOn(toast, "success");
     render(<ManualInstructionsQuote amount="100" fiatCurrency="EUR" quote={HERCLE_QUOTE} />, {
       wrapper,
     });
@@ -71,5 +72,6 @@ describe("ManualInstructionsQuote", () => {
     await user.click(screen.getByRole("button", { name: "Copy Payment reference" }));
 
     expect(writeText).toHaveBeenCalledWith("HRC-ORD-1");
+    expect(copied).toHaveBeenCalledWith("Payment reference copied.", { position: "bottom-right" });
   });
 });

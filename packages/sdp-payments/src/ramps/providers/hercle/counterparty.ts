@@ -1,11 +1,21 @@
 import type { Counterparty } from "@sdp/types/counterparties";
 import type { CountryCode } from "@sdp/types/countries";
 import type { RampDirection } from "@sdp/types/payments";
-import type { CounterpartyRequirements, RequirementField } from "@sdp/types/ramp-requirements";
-import { SdpPaymentsError, unsupportedCounterparty } from "#/errors";
+import {
+  type CounterpartyRequirements,
+  HERCLE_SUSPENDED_ACCOUNT_STATUS,
+  type HercleVerificationStatus,
+  isHercleVerificationStatus,
+  type RequirementField,
+} from "@sdp/types/ramp-requirements";
+import {
+  internalError,
+  providerUnavailable,
+  SdpPaymentsError,
+  unsupportedCounterparty,
+} from "#/errors";
 import { consentField, countryField, readyCounterparty, textField } from "#/ramps/requirements";
 import type { ValidateCounterpartyOptions } from "#/ramps/types";
-import type { HercleVerificationStatus } from "./customer-status-mapping";
 
 /**
  * Hercle onboards regulated businesses in its Swiss and EEA perimeter.
@@ -242,4 +252,43 @@ export function hercleVerificationRequirements(
       throw new Error(`Unhandled Hercle verification status: ${String(exhaustive)}`);
     }
   }
+}
+
+/**
+ * The requirements answer for the status a business's link kept, because it holds a newer report than SDP's read.
+ * Every answer then matches what the quote gate reads.
+ *
+ * @param counterparty - The counterparty asking.
+ * @param direction - The ramp direction asked for.
+ * @param status - The status the link holds: a verdict, the suspension, or null while Hercle holds no verification.
+ * @returns The requirements arm for that status.
+ * @throws SdpPaymentsError PROVIDER_UNAVAILABLE when the newer report asks the business to act, with no link in hand.
+ * The next read fetches the link.
+ */
+export function hercleRecordedRequirements(
+  counterparty: Counterparty,
+  direction: RampDirection,
+  status: string | null
+): CounterpartyRequirements {
+  if (status === null) {
+    return hercleOnboardingDecision(counterparty, direction, false);
+  }
+  if (status === HERCLE_SUSPENDED_ACCOUNT_STATUS) {
+    return hercleSuspendedRequirements(direction);
+  }
+  if (!isHercleVerificationStatus(status)) {
+    throw internalError("The Hercle link holds a status SDP never records.", {
+      provider: "hercle",
+      status,
+    });
+  }
+  if (status === "action_required") {
+    throw providerUnavailable(
+      "Hercle's verdict changed while SDP read it. Read the requirements again.",
+      {
+        provider: "hercle",
+      }
+    );
+  }
+  return hercleVerificationRequirements({ status }, direction);
 }

@@ -1,32 +1,14 @@
+import {
+  HERCLE_APPROVED_VERIFICATION_STATUS,
+  HERCLE_SUSPENDED_ACCOUNT_STATUS,
+  type HercleVerificationStatus,
+  isHercleVerificationStatus,
+} from "@sdp/types/ramp-requirements";
 import type {
   RampCustomerStatusEvent,
   RampCustomerStatusObservation,
   RampSettlementEvent,
 } from "#/ramps/types";
-
-/** Hercle's verdicts on a business's KYB, as its verification endpoints and its verification webhook report them. */
-export const HERCLE_VERIFICATION_STATUSES = [
-  "action_required",
-  "pending",
-  "rejected",
-  "approved",
-] as const;
-export type HercleVerificationStatus = (typeof HERCLE_VERIFICATION_STATUSES)[number];
-
-/** The verdict that lets a business place orders; Hercle refuses an order under any other. */
-export const HERCLE_APPROVED_VERIFICATION_STATUS = "approved" satisfies HercleVerificationStatus;
-
-/**
- * The status SDP records for a business whose financial operations Hercle has suspended.
- * Hercle refuses its orders with `ACCOUNT_SUSPENDED` whatever its verdict.
- * Its account read reports `financialStatus: "Suspended"`.
- * Hercle sends no event for it, so SDP learns it from a refused order and sees it lifted only by reading the account.
- */
-export const HERCLE_SUSPENDED_ACCOUNT_STATUS = "suspended";
-
-function isHercleVerificationStatus(status: string): status is HercleVerificationStatus {
-  return HERCLE_VERIFICATION_STATUSES.some((verdict) => verdict === status);
-}
 
 /**
  * The instant a Hercle event stamped `epochSeconds` counts as observed.
@@ -41,10 +23,11 @@ export function hercleEventObservedAt(epochSeconds: number): string {
 /**
  * A verdict Hercle reported, or null when it holds none, as SDP records it on the business's link.
  * A verdict cannot show a suspension, so it leaves a recorded one in place.
- * Read right after the account showed no suspension, it replaces one.
+ * Read right after Hercle showed the account not suspended, it replaces a suspension recorded before that showing.
+ * It then carries the showing's time, so a suspension recorded while SDP read the verdict stays in place.
  *
  * @param verdict - Hercle's verdict, or null while the business's verification has not started.
- * @param observedAt - When Hercle reported it.
+ * @param observedAt - When Hercle reported it; with `accountActive`, when SDP asked what showed the account active.
  * @param accountActive - Whether Hercle showed in the same exchange that the account is not suspended.
  * @returns The observation for the link store.
  */

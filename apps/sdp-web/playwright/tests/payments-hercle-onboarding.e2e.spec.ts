@@ -3,6 +3,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test";
 import type { CounterpartyResponse } from "@sdp/types/counterparties";
 import type { PaymentRampQuote, PaymentTransferSummary } from "@sdp/types/payments";
 import type { CounterpartyRequirements, RequirementField } from "@sdp/types/ramp-requirements";
+import { z } from "zod";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { createLocalApiClient } from "../support/local-api-client";
 import {
@@ -27,6 +28,9 @@ const TRANSFER_ID = "xfr_7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f";
 const SAMPLE_IBAN = "CH9300762011623852957";
 
 const REQUIREMENTS_ROUTE = "**/api/dashboard/counterparty/*/requirements*";
+
+/** The fields a requirements submission hands the dashboard's route. */
+const submittedFieldsSchema = z.object({ collectedData: z.record(z.string(), z.string()) });
 
 /** A slice of Hercle's KYB form: one registration field and the two consents it requires. */
 const KYB_FIELDS: RequirementField[] = [
@@ -212,7 +216,7 @@ test.describe
         (request) => request.method() === "POST" && /\/requirements$/.test(request.url())
       );
       await next.click();
-      const sent = (await advance).postDataJSON() as { collectedData?: Record<string, string> };
+      const sent = submittedFieldsSchema.parse((await advance).postDataJSON());
       expect(sent.collectedData).toEqual({
         registrationNumber: "CHE-123.456.789",
         acceptHercleTerms: "true",

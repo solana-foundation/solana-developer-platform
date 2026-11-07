@@ -36,9 +36,15 @@ export function createRampCustomerLinkStore(
       );
     },
     async recordStatus(observation) {
-      if ((await accounts.recordCustomerLinkStatus({ ...scope, observation })) === "missing") {
+      const outcome = await accounts.recordCustomerLinkStatus({ ...scope, observation });
+      if (outcome === "recorded") {
+        return observation.providerStatus;
+      }
+      const kept = outcome === "stale" ? await accounts.getProviderAccount(scope) : null;
+      if (kept === null) {
         throw internalError("The customer link a provider status was recorded on is gone.");
       }
+      return kept.provider_status;
     },
   };
 }

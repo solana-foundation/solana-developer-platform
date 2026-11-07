@@ -30,11 +30,13 @@ Hercle serves business counterparties registered in Switzerland or the EEA; an i
 
 SDP keeps the verdict it recorded, and a read for an approved business answers `ready` without asking Hercle. The verdict changes when Hercle's `customer.verification.status_changed` webhook reports a new one, or when Hercle refuses a quote: `ACCOUNT_SUSPENDED` records the business as suspended, and a refusal for want of verification makes SDP read the verdict again. An older event never overwrites a newer verdict.
 
+A read or submission answers with the status SDP keeps, the one a quote reads. If a newer event lands while it asks Hercle, it answers with that event's verdict instead. When that verdict asks the business to act, SDP holds no link for it yet, so the request answers `503 PROVIDER_UNAVAILABLE`; read again to get the link.
+
 A suspended business answers `unsupported`, and each read asks Hercle whether the suspension still holds. Once Hercle lifts it, the read records the verdict again, and an approved business answers `ready`.
 
 The registered company name is the name Hercle's bank expects on the wire, so give the legal name, not the counterparty's display name. Once Hercle has opened the account, a later submission never changes its details. SDP keys the account and its verification on the counterparty, so a retried submission resumes them instead of opening a second account.
 
-Submissions are metered per caller and per organization, because each one can make up to three Hercle calls on a partner credential every project shares. Past the limit, a submission answers `429 RATE_LIMITED` before Hercle is called.
+Submissions are metered per caller and per organization, because each one can make up to three Hercle calls on a partner credential every project shares. Reads are metered too, on a quota of their own sized for polling every 10 seconds, because a read for a business Hercle has not approved asks Hercle. Past either limit, the request answers `429 RATE_LIMITED` before Hercle is called.
 
 SDP stores the Hercle account id and its verification status, never the collected details.
 
