@@ -3,9 +3,8 @@ import { loadEarnProviderAccess } from "@/app/(session)/dashboard/[projectId]/ma
 import { resolvePlaygroundApiBaseUrl } from "@/app/(session)/dashboard/[projectId]/playground-api-data";
 
 /**
- * The body shared by the two Embedded Yield guide routes (`configure` and
- * `integrate`): Next.js requires one `page.tsx` per segment, but both segments
- * render exactly this, so the resolution lives here and each route stays a
+ * The configure route's body (`EarnIntegrationGuide`): Next.js requires one
+ * `page.tsx` per segment, so the resolution lives here and the route stays a
  * wrapper.
  */
 export async function EarnIntegrationGuidePage({

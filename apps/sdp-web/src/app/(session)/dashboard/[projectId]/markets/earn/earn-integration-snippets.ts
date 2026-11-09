@@ -102,6 +102,13 @@ function floorForTolerance(quote: string, decimals: number, toleranceBps: number
   if (!Number.isInteger(toleranceBps) || toleranceBps < 1 || toleranceBps > 1_000) {
     throw new Error("slippage tolerance must be 1-1000 basis points");
   }
+  // The quote's scale arrives from the API's answer and sizes the padEnd and
+  // padStart below. A hostile or drifted response must not steer allocation
+  // with an absurd figure, so it is bounded to the same 0-38 mint-scale window
+  // SDP's own dashboard enforces on this identical field.
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 38) {
+    throw new Error("provider quote decimals is not a plausible mint scale");
+  }
   const [whole, fraction = ""] = quote.split(".");
   // Providers do not canonicalize scale: a trailing-zero-PADDED fraction
   // ("1.2000000" at scale 6) is not finer precision, so the padding is
@@ -366,11 +373,15 @@ export async function waitForEarnMovement(
     const movement = await getEarnMovement(movementId);
     if (movement.status === "finalized" || movement.status === "failed") return movement;
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(resolve, intervalMs);
-      signal?.addEventListener("abort", () => {
+      const onAbort = () => {
         clearTimeout(timer);
         reject(signal.reason ?? new Error("Polling aborted"));
-      }, { once: true });
+      };
+      const timer = setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }, intervalMs);
+      signal?.addEventListener("abort", onAbort, { once: true });
     });
   }
 }`;

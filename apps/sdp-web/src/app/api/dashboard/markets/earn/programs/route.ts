@@ -12,8 +12,9 @@ export async function GET(request: Request) {
 /**
  * Explicit create (PRO-1670). The API requires exactly one of a body
  * `requestId` or an `Idempotency-Key` header — this legacy program client sends
- * the body form. The route intentionally supplies no upstream headers, so an
- * inbound `Idempotency-Key` is still dropped rather than implicitly relayed.
+ * the body form. The route supplies no `upstreamHeaders` of its own; the proxy
+ * still relays an inbound `Idempotency-Key` on the mutation (HOO-1918), and the
+ * API's exactly-one rule answers a body that carries both with a 400.
  */
 export async function POST(request: Request) {
   return proxyToSdpApi({

@@ -14,8 +14,9 @@ export async function POST(request: Request) {
 
 /**
  * This workspace's recorded deposits, so the dashboard can re-derive what is
- * still in flight after a reload. No `upstreamHeaders`: unlike the POST above,
- * this read accepts no client-owned transport metadata.
+ * still in flight after a reload. The read supplies no `upstreamHeaders` and
+ * forwards no client-owned transport metadata: the proxy relays an inbound
+ * `Idempotency-Key` on the POST above, a mutation — never on a GET.
  */
 export async function GET(request: Request) {
   const validated = vaultDepositsProxyQuery(request);
