@@ -342,6 +342,45 @@ describe("Recurring Payment exact source selection", () => {
   });
 });
 
+describe("Recurring Payment edit form after a refresh (HOO-2562)", () => {
+  it("edits the version it opened on, never stamping its fields with a newer one", async () => {
+    const writes: unknown[] = [];
+    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH") writes.push(JSON.parse(String(init.body)));
+      return Response.json({ data: { wallets: [source], recurringPayment: recurring } });
+    });
+    const workspace = (shown: typeof recurring) => (
+      <RecurringPaymentDetailWorkspace
+        recurringPayment={shown}
+        wallet={source}
+        wallets={[source]}
+        issuedTokensByMint={{}}
+        counterpartyAccounts={[account]}
+        counterpartyLabel="Receiver"
+        collectionAttempts={[]}
+        collectionAttemptsTotal={0}
+      />
+    );
+    const view = render(workspace(recurring), { wrapper });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+
+    // A refresh while the form is open brings someone else's weekly edit.
+    view.rerender(
+      workspace({ ...recurring, periodHours: 168, updatedAt: "2026-09-15T00:00:00.000Z" })
+    );
+    const amount = screen.getByRole("textbox", { name: "Amount" });
+    await user.clear(amount);
+    await user.type(amount, "2");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(writes).toHaveLength(1));
+    // Only the amount changed from what the form showed, under that version, so
+    // the API refuses it as stale instead of reverting the weekly period.
+    expect(writes[0]).toEqual({ amount: "2", expectedUpdatedAt: recurring.updatedAt });
+  });
+});
+
 describe("Recurring Payment lifecycle actions", () => {
   const lastRunError =
     "Privy blocked signing due to a wallet policy. Review the policy in Privy or adjust the request.";

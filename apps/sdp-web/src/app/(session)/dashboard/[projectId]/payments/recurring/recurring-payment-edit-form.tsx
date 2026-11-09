@@ -104,13 +104,18 @@ export function RecurringPaymentEditForm({
 }) {
   const t = useTranslations();
   const router = useRouter();
+  // The version the form opened on, which its fields show. A refresh while it
+  // is open brings newer props; the edit stays a diff against, and names, the
+  // version the user reviewed, so the API answers 409 instead of undoing the
+  // newer edit with these fields (HOO-2562).
+  const [reviewed] = useState(recurringPayment);
   const [fields, setFields] = useState<EditFields>(() => ({
-    amount: recurringPayment.amount,
-    token: recurringPayment.token,
-    sourceCustodyWalletId: recurringPayment.sourceCustodyWalletId,
-    counterpartyAccountId: recurringPayment.counterpartyAccountId,
-    schedulePreset: schedulePresetForPeriodHours(recurringPayment.periodHours),
-    customPeriodHours: String(recurringPayment.periodHours),
+    amount: reviewed.amount,
+    token: reviewed.token,
+    sourceCustodyWalletId: reviewed.sourceCustodyWalletId,
+    counterpartyAccountId: reviewed.counterpartyAccountId,
+    schedulePreset: schedulePresetForPeriodHours(reviewed.periodHours),
+    customPeriodHours: String(reviewed.periodHours),
   }));
   const [validationError, setValidationError] = useState<string | null>(null);
   const setField = <K extends keyof EditFields>(key: K, value: EditFields[K]) => {
@@ -128,7 +133,7 @@ export function RecurringPaymentEditForm({
     selectedCustodyWalletId: fields.sourceCustodyWalletId,
   });
   const assetOptions = recurringPaymentAssetOptions(selectedWallet ?? wallet, {}, t);
-  const walletChanged = fields.sourceCustodyWalletId !== recurringPayment.sourceCustodyWalletId;
+  const walletChanged = fields.sourceCustodyWalletId !== reviewed.sourceCustodyWalletId;
   // Another wallet funds the schedule only in a token it holds; the schedule's own wallet keeps
   // its token even when its balance has run out.
   const tokenOffered = assetOptions.some((option) => option.value === fields.token);
@@ -138,11 +143,11 @@ export function RecurringPaymentEditForm({
     const nextOptions = recurringPaymentAssetOptions(nextWallet ?? null, {}, t);
     setFields((current) => {
       // Back on the schedule's own wallet, a token cleared on the way picks up the schedule's.
-      if (sourceCustodyWalletId === recurringPayment.sourceCustodyWalletId) {
+      if (sourceCustodyWalletId === reviewed.sourceCustodyWalletId) {
         return {
           ...current,
           sourceCustodyWalletId,
-          token: current.token || recurringPayment.token,
+          token: current.token || reviewed.token,
         };
       }
       const keepsToken = nextOptions.some((option) => option.value === current.token);
@@ -158,7 +163,7 @@ export function RecurringPaymentEditForm({
       setValidationError(t("DashboardPayments.recurring.selectCurrency"));
       return;
     }
-    const result = editUpdates(fields, recurringPayment, t);
+    const result = editUpdates(fields, reviewed, t);
     if ("error" in result) {
       setValidationError(result.error);
       return;
@@ -170,8 +175,8 @@ export function RecurringPaymentEditForm({
     try {
       // Applies to the version this form showed, or answers 409 (HOO-2562).
       await updateRecurringPayment(
-        recurringPayment.id,
-        { ...result.updates, expectedUpdatedAt: recurringPayment.updatedAt },
+        reviewed.id,
+        { ...result.updates, expectedUpdatedAt: reviewed.updatedAt },
         undefined,
         t
       );
