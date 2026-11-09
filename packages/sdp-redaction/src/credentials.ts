@@ -261,7 +261,13 @@ function parseJson(value: string): JsonValue | undefined {
   }
 }
 
-type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
 
 /**
  * Returns `value` itself when nothing inside it changed. A property name is

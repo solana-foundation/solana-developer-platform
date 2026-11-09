@@ -11,7 +11,7 @@
  *   full address stays in the invitations table, behind tenant scoping.
  */
 
-import { parseJsonDocument, redactCredentialString } from "./credentials";
+import { type JsonValue, parseJsonDocument, redactCredentialString } from "./credentials";
 import { isSensitiveKey, REDACTED, REDACTED_EMAIL } from "./policy";
 
 export type EmailMode = "redact" | "mask";
@@ -90,14 +90,22 @@ function scrubSerializedJson(
   if (document === undefined) {
     return undefined;
   }
-  const scrubbed = scrubValue(document.parsed, emails, new WeakSet<object>(), 0, nesting + 1);
+  // SAFETY: scrubValue maps a JSON value to a JSON value: it keeps structure,
+  // replaces strings with strings and truncates past MAX_DEPTH with a string.
+  const scrubbed = scrubValue(
+    document.parsed,
+    emails,
+    new WeakSet<object>(),
+    0,
+    nesting + 1
+  ) as JsonValue;
   if (unchangedBy(document.parsed, scrubbed)) {
     return undefined;
   }
   return document.restoreNumbers(JSON.stringify(scrubbed));
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+function isJsonObject(value: JsonValue): value is { [key: string]: JsonValue } {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -106,7 +114,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * the scrubbed side, which the walker truncates at {@link MAX_DEPTH}, so an
  * arbitrarily nested original never recurses past that.
  */
-function unchangedBy(original: unknown, scrubbed: unknown): boolean {
+function unchangedBy(original: JsonValue | undefined, scrubbed: JsonValue): boolean {
   if (scrubbed === null || typeof scrubbed !== "object") {
     return Object.is(original, scrubbed);
   }
@@ -117,7 +125,7 @@ function unchangedBy(original: unknown, scrubbed: unknown): boolean {
       scrubbed.every((item, index) => unchangedBy(original[index], item))
     );
   }
-  if (!isRecord(original) || !isRecord(scrubbed)) {
+  if (original === undefined || !isJsonObject(original) || !isJsonObject(scrubbed)) {
     return false;
   }
   const keys = Object.keys(scrubbed);
