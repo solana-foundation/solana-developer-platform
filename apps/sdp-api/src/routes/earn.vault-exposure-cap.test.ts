@@ -352,6 +352,7 @@ beforeEach(async () => {
   depositIntoVault.mockResolvedValue({
     position: { id: "earn_position_cap_test" },
     movement: {
+      provider_data: {},
       id: "earn_movement_cap_test",
       status: "submitted",
       signature: "sig_test",

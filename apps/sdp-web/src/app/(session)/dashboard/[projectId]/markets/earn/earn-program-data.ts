@@ -34,13 +34,17 @@ import {
   type ListEarnProgramWithdrawalsResponse,
   type ListEarnStrategiesResponse,
 } from "@sdp/types/earn";
+import { EARN_PROVIDER_REDEMPTION_MODES } from "@sdp/types/earn-provider-orders";
 import {
   earnBalanceReadContextSchema,
   earnVaultDepositRecordSchema,
   earnVaultDepositSchema,
   earnVaultWithdrawalSchema,
 } from "@sdp/types/earn-wire";
-import { earnProviderWithdrawalSettlement } from "@sdp/types/provider-access";
+import {
+  earnProviderWithdrawalSettlement,
+  earnTracksProviderSettlement,
+} from "@sdp/types/provider-access";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -1145,6 +1149,8 @@ function useEarnVaultMovementOutcome<Movement extends WatchableVaultMovement>(in
  * settlement" state lives in presentation, not the wire.
  */
 export function isEarnVaultDepositInFlight(deposit: EarnVaultDepositRecord): boolean {
+  if (earnTracksProviderSettlement(deposit.provider) && deposit.status === "confirmed")
+    return deposit.settlementOutcome !== "delivered";
   return !SETTLED_VAULT_MOVEMENT_STATUSES.has(deposit.status);
 }
 
@@ -1221,6 +1227,7 @@ export async function createEarnVaultWithdrawal(
   const body: EarnVaultWithdrawalRequest = {
     positionId: input.positionId,
     shares: input.shares,
+    redemptionMode: input.redemptionMode,
     ...(input.minAmountOut === undefined ? {} : { minAmountOut: input.minAmountOut }),
   };
   const result = await dashboardFetch<unknown>("/api/dashboard/markets/earn/vault-withdrawals", {
@@ -1335,7 +1342,10 @@ const PROVIDER_ORDER_WATCH_TERMINAL_STATUSES: ReadonlySet<EarnVaultDirectMovemen
 
 /** Shared by the recovery filter and the poll's stop condition — one rule. */
 export function isEarnVaultWithdrawalInFlight(withdrawal: EarnVaultWithdrawal): boolean {
-  if (earnProviderWithdrawalSettlement(withdrawal.provider) === "provider_order") {
+  if (
+    earnProviderWithdrawalSettlement(withdrawal.provider) === "provider_order" &&
+    !earnTracksProviderSettlement(withdrawal.provider)
+  ) {
     // Watch-terminal at `confirmed` — the same fork risk the legacy deposit
     // poll already accepts — while the "awaiting provider settlement" copy
     // stays in presentation, which already branches on settlement kind.
@@ -1400,6 +1410,7 @@ const earnVaultWithdrawalOptionsSchema: z.ZodType<EarnVaultWithdrawalOptions> = 
   positionId: z.string(),
   instant: z.boolean(),
   providerOrder: z.boolean(),
+  providerRedemptionModes: z.array(z.enum(EARN_PROVIDER_REDEMPTION_MODES)).optional(),
   queued: z.boolean(),
   withdrawAuthority: z.string().nullable(),
   queueState: z.string().nullable(),

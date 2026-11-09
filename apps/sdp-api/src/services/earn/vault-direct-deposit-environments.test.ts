@@ -27,6 +27,7 @@ describe("EARN_PROVIDER_DEPLOYED_CLUSTERS", () => {
       ondo: ["mainnet-beta"],
       hastra: ["mainnet-beta"],
       wisdomtree: [],
+      plume: [],
     });
   });
 
