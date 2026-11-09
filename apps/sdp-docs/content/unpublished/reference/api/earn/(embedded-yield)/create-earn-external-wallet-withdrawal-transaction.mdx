@@ -30,6 +30,10 @@ Build one unsigned withdrawal transaction for a position. SDP reads the strategy
 
   The position's ID, from the positions list or the deposit submit response.
 
+- **`redemptionMode`** · `string` · one of `standard`, `instant`
+
+  The redemption route to build: `standard` queues a provider-managed order for a later payout, `instant` is the provider's faster route but still waits for cross-chain delivery — chain confirmation alone is not payout, so treat the exit as complete only at the movement's verified `delivered` outcome. Defaults to `standard`; a provider without the requested route refuses the build.
+
 - **`shares`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `10`
 
   Shares to redeem, decimal string in share units.

@@ -1,5 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 import type { SdpModule } from "@sdp/types/release-channels";
+import { test } from "@/playwright/support/vercel-bypass";
 import { getE2EEnv } from "../env";
 import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
 import { provisionWithAdminSession } from "../support/local-dashboard-bootstrap";

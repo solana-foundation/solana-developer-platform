@@ -86,6 +86,22 @@ description: Strategy reads, previews, withdrawal-route discovery, unsigned buil
 
 </ApiOperationTable>
 
+## Provider actions
+
+<ApiOperationTable>
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `POST` | `/v1/earn/provider-actions/preparations` | [Prepare a custody vault share account](/docs/reference/api/earn/prepare-earn-vault-account) |
+| `POST` | `/v1/earn/provider-actions/cancellations` | [Cancel a custody provider redemption](/docs/reference/api/earn/cancel-earn-provider-order) |
+| `POST` | `/v1/earn/provider-actions/external/preparation-transactions` | [Build an external-wallet account preparation](/docs/reference/api/earn/build-external-earn-vault-preparation) |
+| `POST` | `/v1/earn/provider-actions/external/cancellation-transactions` | [Build an external-wallet provider cancellation](/docs/reference/api/earn/build-external-earn-provider-cancellation) |
+| `POST` | `/v1/earn/provider-actions/external/preparations` | [Submit an external-wallet account preparation](/docs/reference/api/earn/submit-external-earn-vault-preparation) |
+| `POST` | `/v1/earn/provider-actions/external/cancellations` | [Submit an external-wallet provider cancellation](/docs/reference/api/earn/submit-external-earn-provider-cancellation) |
+| `GET` | `/v1/earn/provider-actions/{actionId}` | [Read a provider action](/docs/reference/api/earn/get-earn-provider-action) |
+
+</ApiOperationTable>
+
 ## Onboarding
 
 <ApiOperationTable>

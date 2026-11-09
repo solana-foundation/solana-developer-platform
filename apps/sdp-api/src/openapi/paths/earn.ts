@@ -57,6 +57,7 @@ import {
 import { earnErrorResponses } from "./earn-errors";
 import { EARN_GROUPS } from "./earn-groups";
 import { registerEarnOnboardingPaths } from "./earn-onboarding";
+import { registerEarnProviderActionPaths } from "./earn-provider-actions";
 import { registerEarnTreasuryPaths } from "./earn-treasury";
 import {
   DOCS_GROUP,
@@ -76,6 +77,7 @@ export function registerEarnPaths(registry: OpenAPIRegistry) {
   registerEarnDepositPreviewPath(registry, earnConfigurationSecurity);
   registerEarnExternalWalletPaths(registry, earnConfigurationSecurity);
   registerEarnTreasuryPaths(registry, earnConfigurationSecurity);
+  registerEarnProviderActionPaths(registry, earnConfigurationSecurity);
   registerEarnOnboardingPaths(registry);
   // Treasury-facing, so the internal document only: partners hold no custody
   // wallets for this read to reconcile.

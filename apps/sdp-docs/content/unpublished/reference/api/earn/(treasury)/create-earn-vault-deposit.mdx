@@ -54,6 +54,8 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
     - **`movementId`** · `string` · required
 
+    - **`settlementOutcome`** · `string` · one of `delivered`, `cancelled`
+
     - **`status`** · `string` · required · one of `pending`, `submitted`, `confirmed`, `failed`
 
     - **`signature`** · `string` · required
@@ -219,6 +221,7 @@ r = requests.post("https://api.solana.com/v1/earn/vault-deposits",
   "data": {
     "positionId": "position_example",
     "movementId": "movement_example",
+    "settlementOutcome": "delivered",
     "status": "pending",
     "signature": "example",
     "failureReason": "example",

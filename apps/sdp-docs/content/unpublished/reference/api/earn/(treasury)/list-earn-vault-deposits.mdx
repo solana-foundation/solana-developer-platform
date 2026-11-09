@@ -44,6 +44,8 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       - **`movementId`** · `string` · required
 
+      - **`settlementOutcome`** · `string` · one of `delivered`, `cancelled`
+
       - **`positionId`** · `string` · required
 
       - **`provider`** · `string` · required
@@ -191,6 +193,7 @@ r = requests.get("https://api.solana.com/v1/earn/vault-deposits",
     "deposits": [
       {
         "movementId": "movement_example",
+        "settlementOutcome": "delivered",
         "positionId": "position_example",
         "provider": "example",
         "providerReference": "example",

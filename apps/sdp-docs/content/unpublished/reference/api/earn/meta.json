@@ -1,4 +1,11 @@
 {
   "title": "Earn",
-  "pages": ["(discovery)", "(embedded-yield)", "(treasury)", "(programs)", "(onboarding)"]
+  "pages": [
+    "(discovery)",
+    "(embedded-yield)",
+    "(treasury)",
+    "(programs)",
+    "(provider-actions)",
+    "(onboarding)"
+  ]
 }

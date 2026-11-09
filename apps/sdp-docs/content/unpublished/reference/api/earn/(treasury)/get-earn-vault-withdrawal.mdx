@@ -36,13 +36,19 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
     - **`withdrawal`** · `object` · required
 
+      - **`redemptionMode`** · `string` · one of `standard`, `instant`
+
       - **`movementId`** · `string` · required
+
+      - **`settlementOutcome`** · `string` · one of `delivered`, `cancelled`
 
       - **`positionId`** · `string` · required
 
       - **`provider`** · `string` · required
 
       - **`providerReference`** · `string` · required
+
+      - **`ownerAddress`** · `string | null` · required
 
       - **`status`** · `string` · required · one of `requested`, `submitted`, `confirmed`, `finalized`, `failed`
 
@@ -183,10 +189,13 @@ r = requests.get("https://api.solana.com/v1/earn/vault-withdrawals/movement_exam
 {
   "data": {
     "withdrawal": {
+      "redemptionMode": "standard",
       "movementId": "movement_example",
+      "settlementOutcome": "delivered",
       "positionId": "position_example",
       "provider": "example",
       "providerReference": "example",
+      "ownerAddress": "11111111111111111111111111111111",
       "status": "requested",
       "signature": "example",
       "shares": "example",

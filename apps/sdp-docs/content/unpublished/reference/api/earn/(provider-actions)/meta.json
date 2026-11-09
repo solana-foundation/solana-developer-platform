@@ -1,0 +1,12 @@
+{
+  "title": "Provider actions",
+  "pages": [
+    "prepare-earn-vault-account",
+    "cancel-earn-provider-order",
+    "build-external-earn-vault-preparation",
+    "build-external-earn-provider-cancellation",
+    "submit-external-earn-vault-preparation",
+    "submit-external-earn-provider-cancellation",
+    "get-earn-provider-action"
+  ]
+}

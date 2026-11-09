@@ -1,4 +1,5 @@
 import { EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS } from "@sdp/types/earn";
+import { EARN_PROVIDER_REDEMPTION_MODES } from "@sdp/types/earn-provider-orders";
 import { z } from "zod";
 import {
   errorResponseSchema,
@@ -345,6 +346,17 @@ const earnExternalWalletPositionLocatorSchema = z.object({
 });
 
 const earnExternalWalletWithdrawalFields = {
+  redemptionMode: z
+    .enum(EARN_PROVIDER_REDEMPTION_MODES)
+    .optional()
+    .openapi({
+      description:
+        "The redemption route to build: `standard` queues a provider-managed order for a later " +
+        "payout, `instant` is the provider's faster route but still waits for cross-chain " +
+        "delivery — chain confirmation alone is not payout, so treat the exit as complete only " +
+        "at the movement's verified `delivered` outcome. Defaults to `standard`; a provider " +
+        "without the requested route refuses the build.",
+    }),
   shares: earnDecimalAmountSchema.openapi({
     description: "Shares to redeem, decimal string in share units.",
     example: "10",
@@ -679,6 +691,7 @@ export const earnQueuedWithdrawalOptionsFields = {
       "Whether the withdrawal endpoints build an instant withdrawal for this position. " +
       "Never true together with `providerOrder`.",
   }),
+  providerRedemptionModes: z.array(z.enum(EARN_PROVIDER_REDEMPTION_MODES)).optional(),
   providerOrder: z.boolean().openapi({
     description:
       "Whether the withdrawal endpoints build a provider order that pays out later. " +
@@ -1108,6 +1121,7 @@ const earnExternalWalletWithdrawalTransactionSchema = earnExternalWalletTransact
 
 const earnExternalWalletMovementSchema = z
   .object({
+    settlementOutcome: z.enum(["delivered", "cancelled"]).optional(),
     movementId: z.string().openapi({ example: EARN_EXAMPLE_IDS.depositMovement }),
     positionId: z.string().openapi({ example: EARN_EXAMPLE_IDS.position }),
     provider: z.string().openapi({ example: "kamino" }),

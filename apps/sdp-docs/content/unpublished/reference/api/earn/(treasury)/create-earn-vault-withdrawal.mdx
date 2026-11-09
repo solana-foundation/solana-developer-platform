@@ -32,6 +32,8 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
 `application/json` · required
 
+- **`redemptionMode`** · `string` · one of `standard`, `instant`
+
 - **`positionId`** · `string` · required · min length 1 · max length 128
 
 - **`shares`** · `string` · required · max length 128 · pattern `^\d+(\.\d+)?$`
@@ -46,13 +48,19 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
     - **`withdrawal`** · `object` · required
 
+      - **`redemptionMode`** · `string` · one of `standard`, `instant`
+
       - **`movementId`** · `string` · required
+
+      - **`settlementOutcome`** · `string` · one of `delivered`, `cancelled`
 
       - **`positionId`** · `string` · required
 
       - **`provider`** · `string` · required
 
       - **`providerReference`** · `string` · required
+
+      - **`ownerAddress`** · `string | null` · required
 
       - **`status`** · `string` · required · one of `requested`, `submitted`, `confirmed`, `finalized`, `failed`
 
@@ -176,6 +184,7 @@ curl -X POST 'https://api.solana.com/v1/earn/vault-withdrawals' \
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
+    "redemptionMode": "standard",
     "positionId": "position_example",
     "shares": "example"
   }'
@@ -190,6 +199,7 @@ const res = await fetch("https://api.solana.com/v1/earn/vault-withdrawals", {
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
+    "redemptionMode": "standard",
     "positionId": "position_example",
     "shares": "example"
   })
@@ -202,6 +212,7 @@ import os, requests, uuid
 r = requests.post("https://api.solana.com/v1/earn/vault-withdrawals",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
   json={
+    "redemptionMode": "standard",
     "positionId": "position_example",
     "shares": "example"
   })
@@ -213,10 +224,13 @@ r = requests.post("https://api.solana.com/v1/earn/vault-withdrawals",
 {
   "data": {
     "withdrawal": {
+      "redemptionMode": "standard",
       "movementId": "movement_example",
+      "settlementOutcome": "delivered",
       "positionId": "position_example",
       "provider": "example",
       "providerReference": "example",
+      "ownerAddress": "11111111111111111111111111111111",
       "status": "requested",
       "signature": "example",
       "shares": "example",

@@ -42,6 +42,8 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       Whether the withdrawal endpoints build an instant withdrawal for this position. Never true together with `providerOrder`.
 
+    - **`providerRedemptionModes`** · `string[]` · each one of `standard`, `instant`
+
     - **`providerOrder`** · `boolean` · required
 
       Whether the withdrawal endpoints build a provider order that pays out later. Never true together with `instant`.
@@ -257,6 +259,9 @@ r = requests.post("https://api.solana.com/v1/earn/vault-withdrawal-options",
   "data": {
     "positionId": "position_example",
     "instant": false,
+    "providerRedemptionModes": [
+      "standard"
+    ],
     "providerOrder": false,
     "queued": false,
     "withdrawAuthority": "example",

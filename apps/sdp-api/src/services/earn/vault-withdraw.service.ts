@@ -1,3 +1,4 @@
+import { supportsProviderRedemptionModes } from "@sdp/earn/capabilities";
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnVaultTransactionPlan } from "@sdp/earn/types";
 import { currentClusterScope } from "@sdp/rpc/scope";
@@ -9,7 +10,7 @@ import {
   type EarnMovementRow,
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
-import { internalError } from "@/lib/errors";
+import { badRequest, internalError } from "@/lib/errors";
 import { buildEarnVaultWithdrawalFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import { resolveVaultWithdrawClient } from "@/services/earn/execution-registry";
@@ -31,6 +32,7 @@ import { resolveVaultSponsorship, vaultRentPayer } from "./vault-sponsorship";
  * The open cluster scope decides the environment and cluster.
  */
 export interface VaultWithdrawalInput {
+  redemptionMode?: "standard" | "instant";
   organizationId: string;
   projectId: string;
   provider: string;
@@ -130,6 +132,7 @@ export async function withdrawFromVault(
     positionId: input.positionId,
     shares: input.shares,
     minAmountOut: input.minAmountOut ?? null,
+    redemptionMode: input.redemptionMode,
   });
 
   const prior = await resolveIdempotencyReplay(
@@ -200,10 +203,17 @@ export async function withdrawFromVault(
 
   let plan: EarnVaultTransactionPlan;
   try {
+    if (
+      input.redemptionMode !== undefined &&
+      (!supportsProviderRedemptionModes(client) ||
+        !client.getProviderRedemptionModes().includes(input.redemptionMode))
+    )
+      throw badRequest("This provider does not support the requested redemption mode");
     const built = await client.buildVaultWithdrawal(runtime, {
       providerReference: input.vaultAddress,
       owner: input.wallet.publicKey,
       shares: input.shares,
+      redemptionMode: input.redemptionMode,
       ...(rentPayer === undefined ? {} : { rentPayer }),
       ...(rentRefundTo === undefined ? {} : { rentRefundTo }),
       minAmountOut: input.minAmountOut,
@@ -244,6 +254,8 @@ export async function withdrawFromVault(
         custodyWalletId: input.wallet.id,
         shareMint: input.shareMint,
         requestedShares: input.shares,
+        redemptionMode:
+          input.redemptionMode === undefined ? plan.accepted?.redemptionMode : input.redemptionMode,
         walletAddress: input.wallet.publicKey,
         signature: signed.signature,
         signedTransaction: Buffer.from(signed.bytes).toString("base64"),
