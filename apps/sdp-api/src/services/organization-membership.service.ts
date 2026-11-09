@@ -6,7 +6,7 @@ import {
 } from "@sdp/types/organizations";
 import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types/roles";
 import { z } from "zod";
-import type { DatabaseExecutor } from "@/db/client";
+import type { DatabaseClient, DatabaseExecutor } from "@/db/client";
 import { AppError, conflict, missingAction, notFound, unauthorized } from "@/lib/errors";
 
 export type MembershipChange =
@@ -379,6 +379,62 @@ export async function organizationsReachingPerson(
     .bind(userId, ...emails)
     .all<{ organization_id: string }>();
   return rows.results.map((row) => row.organization_id);
+}
+
+/**
+ * Removes a deleted Clerk user's personal data (SDP-001 SA-7, HOO-2303), in
+ * one transaction, once no other Clerk user is linked to the person: the
+ * email and name on `users`, and the email on every invitation that is no
+ * longer pending sent to any of their addresses. The deleted identity's own
+ * email goes either way. The `users` row keeps its id under a pseudonym, so
+ * the audit log and the rows the person created still read as one person.
+ * Someone who signed up again keeps their email, which their new Clerk user
+ * signs in with.
+ *
+ * Run it after the person's memberships and pending invitations are mirrored:
+ * those read the emails this clears.
+ *
+ * @param db - The database.
+ * @param params.userId - The person.
+ * @param params.deletedClerkUserId - The Clerk user Clerk deleted.
+ * @returns Whether the person was pseudonymized.
+ */
+export async function pseudonymizeDeletedPerson(
+  db: DatabaseClient,
+  params: { userId: string; deletedClerkUserId: string }
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const locked = await tx.queryOne<{ id: string }>(
+      "SELECT id FROM users WHERE id = ? FOR UPDATE",
+      [params.userId]
+    );
+    if (!locked) return false;
+    await tx.execute(
+      `UPDATE auth_user_identities SET email = NULL, updated_at = sdp_datetime_now()
+        WHERE provider = 'clerk' AND provider_user_id = ? AND user_id = ?`,
+      [params.deletedClerkUserId, params.userId]
+    );
+    const remaining = await tx.queryOne<{ count: number }>(
+      `SELECT count(*)::int AS count FROM auth_user_identities
+        WHERE user_id = ? AND NOT (provider = 'clerk' AND provider_user_id = ?)`,
+      [params.userId, params.deletedClerkUserId]
+    );
+    if ((remaining?.count ?? 0) > 0) return false;
+    const emails = await personEmails(tx, params.userId);
+    const pseudonym = `deleted+${params.userId}@users.invalid`;
+    if (emails.length > 0) {
+      await tx.execute(
+        `UPDATE invitations SET email = ?
+          WHERE status <> 'pending' AND LOWER(email) IN (${emails.map(() => "?").join(", ")})`,
+        [pseudonym, ...emails]
+      );
+    }
+    await tx.execute("UPDATE users SET email = ?, name = NULL, status = 'deleted' WHERE id = ?", [
+      pseudonym,
+      params.userId,
+    ]);
+    return true;
+  });
 }
 
 /**

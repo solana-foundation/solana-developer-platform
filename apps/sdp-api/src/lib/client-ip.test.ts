@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Env } from "@/types/env";
-import { resolveClientIp } from "./client-ip";
+import { resolveClientIp, truncateClientIp } from "./client-ip";
 
 describe("resolveClientIp", () => {
   it("uses the verified client appended by the Google load balancer in gclb mode", () => {
@@ -61,5 +61,19 @@ describe("resolveClientIp", () => {
         TRUST_PROXY_HEADERS: "gclb",
       })
     ).toBeNull();
+  });
+});
+
+describe("truncateClientIp", () => {
+  it.each([
+    ["203.0.113.77", "203.0.113.0"],
+    ["::ffff:203.0.113.77", "203.0.113.0"],
+    ["2001:db8:85a3:8d3:1319:8a2e:370:7348", "2001:db8:85a3::"],
+    ["2001:0DB8:0000::1", "2001:db8:0::"],
+    ["::1", "0:0:0::"],
+    [null, null],
+    ["not-an-ip", null],
+  ])("keeps only the network of %s", (ip, network) => {
+    expect(truncateClientIp(ip)).toBe(network);
   });
 });

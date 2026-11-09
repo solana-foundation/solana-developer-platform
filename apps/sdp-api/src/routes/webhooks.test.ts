@@ -354,6 +354,65 @@ describe("Clerk webhooks", () => {
       )
     ).toEqual([{ action: "revoke", organization_id: "org_webhook_outsider" }]);
   });
+  it("user.deleted pseudonymizes the person and their past invitations, keeping their id (SA-7)", async () => {
+    await seedKnownOrganization();
+    await seedInvitation(getDb(env), {
+      id: "inv_webhook_deleted_accepted",
+      organizationId: KNOWN_ORGANIZATION.id,
+      email: KNOWN_ADMIN.email,
+      role: "admin",
+      invitedBy: OUTSIDER.userId,
+      status: "accepted",
+      expiresInDays: 7,
+    });
+    stubClerkBackend(env);
+
+    const deleted = { id: OLD_CLERK_USER_ID, object: "user", deleted: true };
+    expect((await simulateClerkWebhook({ type: "user.deleted", data: deleted })).status).toBe(200);
+    // A redelivery changes nothing further.
+    expect((await simulateClerkWebhook({ type: "user.deleted", data: deleted })).status).toBe(200);
+
+    const pseudonym = `deleted+${KNOWN_ADMIN.userId}@users.invalid`;
+    expect(
+      await getDb(env).queryOne("SELECT email, name, status FROM users WHERE id = ?", [
+        KNOWN_ADMIN.userId,
+      ])
+    ).toEqual({ email: pseudonym, name: null, status: "deleted" });
+    expect(
+      await getDb(env).queryMany("SELECT email FROM auth_user_identities WHERE user_id = ?", [
+        KNOWN_ADMIN.userId,
+      ])
+    ).toEqual([{ email: null }]);
+    expect(
+      await getDb(env).queryOne("SELECT email FROM invitations WHERE id = ?", [
+        "inv_webhook_deleted_accepted",
+      ])
+    ).toEqual({ email: pseudonym });
+  });
+
+  it("user.deleted keeps the email of a person who signed up again under a new Clerk user", async () => {
+    await seedKnownOrganization();
+    await getDb(env).execute(
+      `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+       VALUES (?, 'clerk', ?, ?, ?)`,
+      ["aui_webhook_known_admin_new", NEW_CLERK_USER_ID, KNOWN_ADMIN.userId, KNOWN_ADMIN.email]
+    );
+    const clerk = stubClerkBackend(env);
+    clerk.answer({ status: 200, body: { data: [], total_count: 1 } });
+
+    const response = await simulateClerkWebhook({
+      type: "user.deleted",
+      data: { id: OLD_CLERK_USER_ID, object: "user", deleted: true },
+    });
+
+    expect(response.status).toBe(200);
+    expect(
+      await getDb(env).queryOne("SELECT email, status FROM users WHERE id = ?", [
+        KNOWN_ADMIN.userId,
+      ])
+    ).toEqual({ email: KNOWN_ADMIN.email, status: "active" });
+  });
+
   it("user.deleted naming no user is refused", async () => {
     const response = await simulateClerkWebhook({ type: "user.deleted", data: {} });
 

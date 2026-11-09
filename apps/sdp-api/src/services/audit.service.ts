@@ -16,7 +16,7 @@ import {
 } from "@/db/identity";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { getOptionalAuth } from "@/lib/auth";
-import { getClientIp } from "@/lib/client-ip";
+import { getClientIp, truncateClientIp } from "@/lib/client-ip";
 import { forbidden } from "@/lib/errors";
 import type { KVStore } from "@/runtime/kv";
 import { createAuditLedgerCheckpointStore } from "@/runtime/kv-redis";
@@ -528,12 +528,16 @@ const AUDIT_LEDGER_DATABASE_IDENTITY = { kind: "system", component: "audit-ledge
 function requestActor(c: Context<{ Bindings: Env }>, entry: AuditLogEntry): AuditActor {
   const auth = c.get("apiKey");
   const clerk = c.get("clerk");
+  // A caller with neither an API key nor a session is a third party, such as
+  // a /pay payer: the record keeps its network, not its address, and no user
+  // agent (SDP-022 PA-6, HOO-2345).
+  const anonymous = !auth && !clerk;
   return {
     organizationId: entry.organizationId || auth?.organizationId || clerk?.organizationId || null,
     userId: entry.userId || clerk?.userId || null,
     apiKeyId: entry.apiKeyId || auth?.id || null,
-    ipAddress: getClientIp(c),
-    userAgent: c.req.header("user-agent") || null,
+    ipAddress: anonymous ? truncateClientIp(getClientIp(c)) : getClientIp(c),
+    userAgent: anonymous ? null : c.req.header("user-agent") || null,
     requestId: c.get("requestId"),
   };
 }
@@ -1052,7 +1056,8 @@ export class AuditService {
           // else identifying — names, phone, date of birth, street, bank
           // instrument, whole identity blobs — goes. `ip_address` and
           // `user_agent` are unaffected: they are dedicated columns and part of
-          // the security record, not caller-supplied metadata.
+          // the security record, not caller-supplied metadata (an anonymous
+          // caller's are already coarsened in requestActor).
           const metadata = entry.metadata ? scrubAuditMetadata(entry.metadata) : null;
           const currentHead = await tx.queryOne<AuditLedgerHead>(
             `SELECT ledger.ledger_sequence,

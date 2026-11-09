@@ -875,3 +875,34 @@ describe("redactCredentialString: credentials encoded inside strings", () => {
     }
   });
 });
+
+describe("scrubTelemetry on serialized JSON (HOO-2570)", () => {
+  it("redacts PII by key inside a provider error that echoes its body as text (SOLA9-883)", () => {
+    const body = JSON.stringify({
+      beneficiaryName: "Jane Doe",
+      holderName: "Jane Doe",
+      line1: "1 Main St",
+      currency: "USD",
+    });
+    assert.deepEqual(JSON.parse(scrubTelemetryString(`${body}`)), {
+      beneficiaryName: "[REDACTED]",
+      holderName: "[REDACTED]",
+      line1: "[REDACTED]",
+      currency: "USD",
+    });
+  });
+
+  it("redacts PII nested in serialized JSON inside serialized JSON (SOLA9-850)", () => {
+    const nested = JSON.stringify({ data: JSON.stringify({ firstName: "Jane", status: "x" }) });
+    const scrubbed = scrubTelemetry({ error: { body: nested } });
+    assert.deepEqual(JSON.parse(JSON.parse(scrubbed.error.body).data), {
+      firstName: "[REDACTED]",
+      status: "x",
+    });
+  });
+
+  it("keeps serialized JSON with nothing to redact exactly as written", () => {
+    const text = '{"ok": true,  "count": 2}';
+    assert.equal(scrubTelemetryString(text), text);
+  });
+});

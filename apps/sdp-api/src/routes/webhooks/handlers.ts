@@ -25,6 +25,7 @@ import { applyStoredRampWebhookEvent } from "@/services/jobs/replay-ramp-webhook
 import {
   mirrorClerkMembershipDeletion,
   organizationsReachingPerson,
+  pseudonymizeDeletedPerson,
 } from "@/services/organization-membership.service";
 import type { WebhookProcessor } from "@/services/ramps/webhooks/processor";
 import {
@@ -317,6 +318,8 @@ async function mirrorMembershipDeletion(c: AppContext, data: OrganizationMembers
  * through a membership or a pending invitation. A deleted Clerk user never
  * comes back, so Clerk lists none of their memberships, but the person may have
  * signed up again under a new Clerk user that holds one: that membership stays.
+ * Then the person's email and name are pseudonymized, unless another Clerk user
+ * is still linked to them (pseudonymizeDeletedPerson).
  *
  * @param c - The request context.
  * @param data - The deleted Clerk user.
@@ -341,6 +344,7 @@ async function mirrorUserDeletion(c: AppContext, data: DeletedObjectJSON) {
       }),
     });
   }
+  await pseudonymizeDeletedPerson(getDb(c.env), { userId, deletedClerkUserId: data.id });
 }
 
 async function ensureUserMapping(

@@ -64,3 +64,35 @@ export function getClientIp(c: Context<{ Bindings: Env }>): string | null {
   }
   return resolveClientIp({ get: (name) => c.req.header(name) ?? null }, c.env ?? {});
 }
+
+/**
+ * A client IP coarsened to its network: IPv4 to /24, IPv6 to /48 (an
+ * IPv4-mapped IPv6 address as IPv4). For records about callers SDP cannot
+ * identify, whose full address is personal data SDP has no need to keep
+ * (SDP-022 PA-6). Anything that is not an IP address comes back null.
+ */
+export function truncateClientIp(ip: string | null): string | null {
+  if (ip === null) return null;
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(ip)?.[1];
+  const value = mapped ?? ip;
+  const version = isIP(value);
+  if (version === 4) {
+    return `${value.split(".").slice(0, 3).join(".")}.0`;
+  }
+  if (version === 6) {
+    return `${expandIpv6(value).slice(0, 3).join(":")}::`;
+  }
+  return null;
+}
+
+/** The eight hextets of a valid IPv6 address, `::` expanded, without leading zeros. */
+function expandIpv6(ip: string): string[] {
+  const [head = "", tail] = ip.split("::");
+  const parts = (text: string) => (text === "" ? [] : text.split(":"));
+  const left = parts(head);
+  const right = tail === undefined ? [] : parts(tail);
+  const zeros = Array<string>(8 - left.length - right.length).fill("0");
+  return [...left, ...zeros, ...right].map((hextet) =>
+    hextet.toLowerCase().replace(/^0+(?=.)/, "")
+  );
+}
