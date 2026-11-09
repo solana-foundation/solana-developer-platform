@@ -1,33 +1,31 @@
-import { type ComponentProps, isValidElement, type ReactNode } from "react";
+import { type ComponentProps, isValidElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EarnIntegrationGuide } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-integration-guide";
-
-const { mockLoadEarnProviderAccess } = vi.hoisted(() => ({
-  mockLoadEarnProviderAccess: vi.fn(),
-}));
-
-vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-provider-access.server", () => ({
-  loadEarnProviderAccess: mockLoadEarnProviderAccess,
-}));
+import * as earnProviderAccess from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-provider-access.server";
 
 import { EarnIntegrationGuidePage } from "./integration-guide-page";
 
 type GuideProps = ComponentProps<typeof EarnIntegrationGuide>;
 
 async function renderGuidePage(strategy?: string): Promise<GuideProps> {
-  const page = (await EarnIntegrationGuidePage({
+  // The page's own inferred element type, not a widened `ReactNode`.
+  const page = await EarnIntegrationGuidePage({
     searchParams: Promise.resolve(strategy === undefined ? {} : { strategy }),
-  })) as ReactNode;
+  });
   expect(isValidElement(page)).toBe(true);
   if (!isValidElement(page)) throw new Error("no element");
   expect(page.type).toBe(EarnIntegrationGuide);
+  // SAFETY: the page renders exactly one `EarnIntegrationGuide` element, so its
+  // props are that component's; `isValidElement` can only type them `unknown`.
   return page.props as GuideProps;
 }
 
 describe("EarnIntegrationGuidePage", () => {
   beforeEach(() => {
-    mockLoadEarnProviderAccess.mockReset();
-    mockLoadEarnProviderAccess.mockResolvedValue(null);
+    vi.restoreAllMocks();
+    // The loader reads the request's organization over the API; the page's
+    // rendering is what's under test here, so it resolves without access.
+    vi.spyOn(earnProviderAccess, "loadEarnProviderAccess").mockResolvedValue(null);
   });
 
   afterEach(() => {
