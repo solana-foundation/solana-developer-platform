@@ -397,6 +397,42 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       expect(await batchCount()).toBe(0);
     });
 
+    it("waits for an account update in flight and refuses the address it committed", async () => {
+      let commitUpdate = () => {};
+      const updateHeld = new Promise<void>((resolve) => {
+        commitUpdate = resolve;
+      });
+      let updateLocked = () => {};
+      const locked = new Promise<void>((resolve) => {
+        updateLocked = resolve;
+      });
+      // A concurrent account rotation holds the row lock while admission starts.
+      const update = getDb(env).transaction(async (tx) => {
+        await tx.execute(
+          `UPDATE counterparty_accounts
+              SET details = jsonb_set(details, '{address}', '"Rotated111"')
+            WHERE id = ?`,
+          [recipient.counterpartyAccountId]
+        );
+        updateLocked();
+        await updateHeld;
+      });
+      await locked;
+      let admissionSettled = false;
+      const admission = create("recheck-concurrent").finally(() => {
+        admissionSettled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      // FOR SHARE waits on the update's lock instead of reading the old row.
+      expect(admissionSettled).toBe(false);
+      commitUpdate();
+      await update;
+      await expect(admission).rejects.toMatchObject({
+        code: "TRANSFER_BATCH_DESTINATION_CHANGED",
+      });
+      expect(await batchCount()).toBe(0);
+    });
+
     for (const [change, apply, code] of [
       ["archived", archiveAccount, "NOT_FOUND"],
       ["rotated", rotateAccount, "TRANSFER_BATCH_DESTINATION_CHANGED"],

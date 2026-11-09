@@ -1,3 +1,4 @@
+import type { CounterpartyAccountStatus } from "@sdp/types/counterparties";
 import { z } from "zod";
 import type { DatabaseClient as AppDb, DatabaseExecutor } from "@/db/client";
 import { parsePostgresJson } from "@/db/postgres-utils";
@@ -1128,7 +1129,7 @@ async function assertRecipientAccountsUnchanged(
           FOR SHARE`
     )
     .bind(scope.organizationId, scope.projectId, ...accountIds)
-    .all<{ id: string; status: string; address: string | null }>();
+    .all<{ id: string; status: CounterpartyAccountStatus; address: string | null }>();
   const accounts = new Map(rows.results.map((row) => [row.id, row]));
   const gone = accountIds.find((id) => accounts.get(id)?.status !== "active");
   if (gone !== undefined) {
