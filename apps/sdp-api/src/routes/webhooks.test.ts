@@ -6,7 +6,10 @@ import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { asTransactionalClient, getDb } from "@/db/client";
 import { app } from "@/index";
-import { pseudonymizeDeletedPerson } from "@/services/organization-membership.service";
+import {
+  lockClerkUser,
+  pseudonymizeDeletedPerson,
+} from "@/services/organization-membership.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { readAuditActions } from "@/test/helpers/audit-logs";
 import { stubClerkBackend } from "@/test/helpers/clerk-backend";
@@ -508,6 +511,72 @@ describe("Clerk webhooks", () => {
         KNOWN_ADMIN.email,
       ])
     ).toEqual({ count: 0 });
+  });
+
+  it("makes a user.updated that overlaps a deletion wait for it, then recreate nothing", async () => {
+    await seedKnownOrganization();
+    const pseudonym = `deleted+${KNOWN_ADMIN.userId}@users.invalid`;
+    let commitDeletion = () => {};
+    const deletionHeld = new Promise<void>((resolve) => {
+      commitDeletion = resolve;
+    });
+    let deletionLocked = () => {};
+    const locked = new Promise<void>((resolve) => {
+      deletionLocked = resolve;
+    });
+    // A deletion in flight: it holds the Clerk user's lock and has written its tombstone.
+    const deletion = getDb(env).transaction(async (tx) => {
+      await lockClerkUser(tx, OLD_CLERK_USER_ID);
+      await tx.execute(
+        `UPDATE auth_user_identities SET provider = 'clerk_deleted', email = NULL
+          WHERE provider = 'clerk' AND provider_user_id = ?`,
+        [OLD_CLERK_USER_ID]
+      );
+      await tx.execute("UPDATE users SET email = ?, name = NULL, status = 'deleted' WHERE id = ?", [
+        pseudonym,
+        KNOWN_ADMIN.userId,
+      ]);
+      deletionLocked();
+      await deletionHeld;
+    });
+    await locked;
+    let updateSettled = false;
+    const update = simulateClerkWebhook({
+      type: "user.updated",
+      data: {
+        id: OLD_CLERK_USER_ID,
+        first_name: "Restored",
+        primary_email_address_id: "email_overlap",
+        email_addresses: [
+          {
+            id: "email_overlap",
+            email_address: KNOWN_ADMIN.email,
+            verification: { status: "verified" },
+          },
+        ],
+      },
+    }).finally(() => {
+      updateSettled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const updateWaited = !updateSettled;
+    // Released before any assertion, so a failure never leaves the lock held.
+    commitDeletion();
+    const [, answered] = await Promise.allSettled([deletion, update]);
+
+    expect(updateWaited).toBe(true);
+    expect(answered.status === "fulfilled" ? answered.value.status : answered.reason).toBe(200);
+    expect(
+      await getDb(env).queryOne("SELECT count(*)::int AS count FROM users WHERE email = ?", [
+        KNOWN_ADMIN.email,
+      ])
+    ).toEqual({ count: 0 });
+    expect(
+      await getDb(env).queryMany(
+        "SELECT provider FROM auth_user_identities WHERE provider_user_id = ?",
+        [OLD_CLERK_USER_ID]
+      )
+    ).toEqual([{ provider: "clerk_deleted" }]);
   });
 
   it("rolls the whole pseudonymization back when one of its writes fails", async () => {

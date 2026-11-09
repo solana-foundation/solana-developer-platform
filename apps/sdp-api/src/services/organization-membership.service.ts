@@ -397,7 +397,24 @@ export async function organizationsReachingPerson(
 export const DELETED_CLERK_IDENTITY_PROVIDER = "clerk_deleted";
 
 /**
- * Whether Clerk deleted this Clerk user (its identity is tombstoned).
+ * Serializes, until the transaction ends, every write that maps or deletes
+ * one Clerk user: the mapping a `user.created` or `user.updated` writes and
+ * the tombstone `user.deleted` writes. Taken first in both, so a mapping
+ * either commits before the deletion tombstones it, or reads the tombstone
+ * and writes nothing.
+ *
+ * @param tx - The open transaction.
+ * @param clerkUserId - The Clerk user.
+ */
+export async function lockClerkUser(tx: DatabaseExecutor, clerkUserId: string): Promise<void> {
+  await tx.queryOne("SELECT pg_advisory_xact_lock(hashtext('sdp:clerk-user'), hashtext(?::text))", [
+    clerkUserId,
+  ]);
+}
+
+/**
+ * Whether Clerk deleted this Clerk user (its identity is tombstoned). Read it
+ * under {@link lockClerkUser} before writing a mapping.
  *
  * @param db - The database.
  * @param clerkUserId - The Clerk user an event names.
@@ -437,6 +454,7 @@ export async function pseudonymizeDeletedPerson(
   params: { userId: string; deletedClerkUserId: string }
 ): Promise<boolean> {
   return db.transaction(async (tx) => {
+    await lockClerkUser(tx, params.deletedClerkUserId);
     const locked = await tx.queryOne<{ id: string }>(
       "SELECT id FROM users WHERE id = ? FOR UPDATE",
       [params.userId]
