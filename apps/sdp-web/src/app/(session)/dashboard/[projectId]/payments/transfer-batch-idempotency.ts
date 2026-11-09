@@ -293,8 +293,11 @@ export async function sendTransferBatchUnderKey(
   };
   if (outlived) {
     // The API may have forgotten a key this old, so a retry under it could pay
-    // every recipient again. Nothing is sent: the user checks the list.
-    settleKey();
+    // every recipient again. Nothing is sent: the user checks the list. Only
+    // the request key is retired: the saved payout reference stays until the
+    // batch's outcome is known, since the API finds an earlier run by that
+    // reference and refuses to pay it again.
+    store.release(fingerprint, key);
     throw new TransferBatchRequestError(
       t("Shared.idempotency.outcomeUnknownCheckList"),
       409,
