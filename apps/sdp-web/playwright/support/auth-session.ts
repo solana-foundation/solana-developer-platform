@@ -2,6 +2,7 @@ import { type Browser, expect, type Page } from "@playwright/test";
 import { authStatePath } from "./auth-state";
 import type { ClerkTestIdentity } from "./clerk-admin";
 import { resolveClerkTestIdentity } from "./clerk-admin";
+import { routeVercelBypass } from "./vercel-bypass";
 
 type ClerkWindow = {
   Clerk?: {
@@ -58,9 +59,11 @@ async function getClerkBearerToken(page: Page): Promise<string> {
 }
 
 async function openAuthenticatedBootstrapPage(browser: Browser): Promise<Page> {
-  return browser.newPage({
+  const page = await browser.newPage({
     storageState: authStatePath,
   });
+  await routeVercelBypass(page.context());
+  return page;
 }
 
 export function createClerkBearerTokenProvider(page: Page): () => Promise<string> {
