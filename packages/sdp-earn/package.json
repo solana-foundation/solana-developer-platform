@@ -78,6 +78,16 @@
       "types": "./src/types.ts",
       "import": "./src/types.ts",
       "default": "./src/types.ts"
+    },
+    "./providers/wisdomtree/onboarding": {
+      "types": "./src/providers/wisdomtree/onboarding.ts",
+      "import": "./src/providers/wisdomtree/onboarding.ts",
+      "default": "./src/providers/wisdomtree/onboarding.ts"
+    },
+    "./providers/wisdomtree/onboarding-schemas": {
+      "types": "./src/providers/wisdomtree/onboarding-schemas.ts",
+      "import": "./src/providers/wisdomtree/onboarding-schemas.ts",
+      "default": "./src/providers/wisdomtree/onboarding-schemas.ts"
     }
   },
   "imports": {
@@ -90,7 +100,8 @@
   },
   "dependencies": {
     "@sdp/redaction": "workspace:*",
-    "@sdp/types": "workspace:*"
+    "@sdp/types": "workspace:*",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "26.6.5",

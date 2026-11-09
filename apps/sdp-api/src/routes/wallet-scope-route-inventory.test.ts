@@ -206,6 +206,18 @@ const WALLET_SCOPE_ROUTES = {
     exempt: SPONSOR_ONLY,
   },
   "POST /v1/earn/external-wallet/withdrawal-request-cancellations": { exempt: SPONSOR_ONLY },
+  "POST /v1/earn/onboarding/wisdomtree/:counterpartyId": {
+    exempt: "saves a KYC/KYB application with the provider; signs nothing",
+  },
+  "POST /v1/earn/onboarding/wisdomtree/:counterpartyId/corrections/:reasonId": {
+    exempt: "answers a provider correction; signs nothing",
+  },
+  "POST /v1/earn/onboarding/wisdomtree/:counterpartyId/documents": {
+    exempt: "uploads a document to the provider; signs nothing",
+  },
+  "POST /v1/earn/onboarding/wisdomtree/:counterpartyId/wallets": {
+    exempt: "registers a wallet with the provider; signs nothing",
+  },
 
   // Issuance
   "POST /v1/issuance/tokens/:tokenId/burn": { refusedEarly: ISSUANCE_BURN },
