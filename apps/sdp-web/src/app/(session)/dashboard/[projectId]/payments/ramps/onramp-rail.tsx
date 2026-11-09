@@ -1,5 +1,6 @@
 "use client";
 
+import type { PaymentRampQuote, PaymentTransferSummary } from "@sdp/types/payments";
 import { Button } from "@sdp/ui/button";
 import Link from "next/link";
 import { WizardSummaryList } from "@/app/(session)/dashboard/[projectId]/payments/wizard-summary-list";
@@ -21,7 +22,10 @@ import { preStepSummaryDetails } from "./wizard-summary";
  * Whether the footer's primary button simulates the deposit's pay-in: on the provider step of a
  * sandbox deposit still waiting for its money, when no verification is due first.
  */
-function simulatesDeposit(wizard: OnrampWizard, verificationUrl: string | undefined): boolean {
+function simulatesDeposit(
+  wizard: Pick<OnrampWizard, "currentStepId" | "simulateAvailable">,
+  verificationUrl: string | undefined
+): boolean {
   return (
     wizard.currentStepId === "PROVIDER" && verificationUrl === undefined && wizard.simulateAvailable
   );
@@ -84,12 +88,32 @@ function displaySteps(wizard: OnrampWizard, t: ReturnType<typeof useTranslations
   });
 }
 
+/** The wizard state the frame reads. */
+export type OnrampFrameWizard = Pick<
+  OnrampWizard,
+  | "canProceed"
+  | "currentStepId"
+  | "handleSecondary"
+  | "hostedQuoteLoading"
+  | "isCanceling"
+  | "onTransactionStage"
+  | "onboarding"
+  | "quoteSimulationLoading"
+  | "quoteSimulationSucceeded"
+  | "simulateAvailable"
+  | "walletsLoading"
+> & {
+  fields: Pick<OnrampWizard["fields"], "provider">;
+  quote: Pick<PaymentRampQuote, "deliveryMode"> | null;
+  transferStatus: Pick<PaymentTransferSummary, "status"> | undefined;
+};
+
 /**
  * What the frame shows for where the deposit is: the verification the provider still wants,
  * whether the transfer can still be canceled, and the hints, labels and gates that follow.
  */
-function onrampFrameState(
-  wizard: OnrampWizard,
+export function onrampFrameState(
+  wizard: OnrampFrameWizard,
   onCancel: (() => void) | undefined,
   t: ReturnType<typeof useTranslations>
 ) {
@@ -117,12 +141,14 @@ function onrampFrameState(
       : onCancel,
     cancelLabel: wizard.onTransactionStage ? t("DashboardPayments.ramps.cancelDeposit") : undefined,
     confirmCancel: wizard.onTransactionStage && cancelable,
+    // A simulated pay-in and a cancel each change where the deposit goes, so neither starts while the other runs.
+    cancelDisabled: wizard.isCanceling || wizard.quoteSimulationLoading,
     completionTitle:
       wizard.transferStatus?.status === "completed"
         ? t("DashboardPayments.ramps.depositComplete")
         : undefined,
     primaryDisabled: simulatesDeposit(wizard, verificationUrl)
-      ? wizard.quoteSimulationLoading || wizard.quoteSimulationSucceeded
+      ? wizard.quoteSimulationLoading || wizard.quoteSimulationSucceeded || wizard.isCanceling
       : wizard.hostedQuoteLoading ||
         verificationPending ||
         !wizard.canProceed ||
@@ -188,6 +214,7 @@ export function OnrampRail({
       onCancel={frame.onCancel}
       cancelLabel={frame.cancelLabel}
       confirmCancel={frame.confirmCancel}
+      cancelDisabled={frame.cancelDisabled}
       completionTitle={frame.completionTitle}
       primaryDisabled={frame.primaryDisabled}
       primaryLoading={frame.primaryLoading}
