@@ -877,7 +877,7 @@ describe("redactCredentialString: credentials encoded inside strings", () => {
 });
 
 describe("scrubTelemetry on serialized JSON (HOO-2570)", () => {
-  it("redacts PII by key inside a provider error that echoes its body as text (SOLA9-883)", () => {
+  it("redacts PII by key inside a provider error that echoes its body as text", () => {
     const body = JSON.stringify({
       beneficiaryName: "Jane Doe",
       holderName: "Jane Doe",
@@ -892,7 +892,7 @@ describe("scrubTelemetry on serialized JSON (HOO-2570)", () => {
     });
   });
 
-  it("redacts PII nested in serialized JSON inside serialized JSON (SOLA9-850)", () => {
+  it("redacts PII nested in serialized JSON inside serialized JSON", () => {
     const nested = JSON.stringify({ data: JSON.stringify({ firstName: "Jane", status: "x" }) });
     const scrubbed = scrubTelemetry({ error: { body: nested } });
     assert.deepEqual(JSON.parse(JSON.parse(scrubbed.error.body).data), {
