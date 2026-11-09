@@ -29,6 +29,7 @@ import {
 import {
   MANAGED_RPC_ENV_KEYS,
   MANAGED_RPC_HOSTS,
+  managedRpcSlotUrl,
   PUBLIC_CLUSTER_HOSTS,
 } from "./managed-rpc-env-keys";
 import { currentClusterScope } from "./scope";
@@ -541,7 +542,7 @@ function createPoolTransport(endpoints: readonly RpcEndpoint[]) {
  * never another cluster's.
  *
  * @param cluster - The cluster whose pool to read.
- * @returns Every non-empty `SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL` value, possibly none.
+ * @returns Every filled `SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL` value (`managedRpcSlotUrl`), possibly none.
  * @throws RpcUnavailableError `not_configured` when a value isn't an https URL on its slot's host.
  */
 function configuredEndpointUrls(cluster: SolanaCluster): string[] {
@@ -569,7 +570,7 @@ function configuredPoolEndpoints(
   );
   return providers.flatMap((provider) => {
     const envKey = envKeys[provider];
-    const endpointUrl = process.env[envKey];
+    const endpointUrl = managedRpcSlotUrl(envKey);
     if (!endpointUrl) return [];
     assertManagedEndpointUrl(cluster, provider, envKey, endpointUrl);
     return [{ provider, endpointUrl }];
@@ -682,7 +683,7 @@ function assertManagedEndpointUrl(
  * The configured endpoint URLs for `cluster`, in failover order.
  *
  * @param cluster - The cluster whose pool to read.
- * @returns Every non-empty `SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL` value.
+ * @returns Every filled `SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL` value (`managedRpcSlotUrl`).
  * @throws RpcUnavailableError `not_configured` when the cluster has no endpoint configured.
  */
 function managedEndpointUrls(cluster: SolanaCluster): string[] {
@@ -763,7 +764,7 @@ export function createClusterRpc(options?: ClusterRpcOptions): SolanaRpc {
  */
 export function createClusterHistoryRpc(): SolanaRpc {
   const { cluster } = currentClusterScope();
-  const heliusUrl = process.env[MANAGED_RPC_ENV_KEYS[cluster].helius];
+  const heliusUrl = managedRpcSlotUrl(MANAGED_RPC_ENV_KEYS[cluster].helius);
   const endpointUrls = managedEndpointUrls(cluster);
   return pooledClusterRpc(
     cluster,
