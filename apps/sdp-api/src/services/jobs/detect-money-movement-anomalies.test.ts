@@ -1,4 +1,6 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
+import type { PaymentTransferStatus, PaymentTransferType } from "@sdp/types/payments";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import * as logger from "@/runtime/logger";
@@ -13,7 +15,7 @@ import { seedTestDatabase } from "@/test/mocks/db";
 
 const SANDBOX_PROJECT_ID = "prj_anomaly_job_test";
 const PRODUCTION_PROJECT_ID = "prj_anomaly_job_test_production";
-const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const USDC = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
 const HOUR_MS = 60 * 60 * 1000;
 /** Ten minutes into an hour, so the hour checked is [CHECKED, CHECKED + 1h). */
 const NOW = new Date("2026-11-09T12:10:00.000Z");
@@ -25,9 +27,9 @@ async function seedMovement(input: {
   hoursBeforeChecked: number;
   amount: string;
   token?: string;
-  type?: string;
-  status?: string;
-  direction?: string;
+  type?: PaymentTransferType;
+  status?: PaymentTransferStatus;
+  direction?: "outbound" | "inbound";
   recurring?: boolean;
   projectId?: string;
 }): Promise<void> {
@@ -201,6 +203,21 @@ describe("detectMoneyMovementAnomalies", () => {
     expect(anomalies.map((anomaly) => [anomaly.kind, anomaly.token])).toEqual([
       ["recurring", USDC],
     ]);
+  });
+
+  it("buckets hours in UTC whatever the session's time zone", async () => {
+    await seedBaseline("100.00");
+    await seedMovement({ hoursBeforeChecked: 0, amount: "100000.00" });
+
+    // A half-hour offset would put every local hour bucket at :30 UTC.
+    const anomalies = await getDb(env).transaction(async (tx) => {
+      await tx.execute("SET LOCAL TIME ZONE 'Asia/Kolkata'");
+      return runInClusterScope({ projectId: SANDBOX_PROJECT_ID, environment: "sandbox" }, () =>
+        detectMoneyMovementAnomalies(env, NOW, tx)
+      );
+    });
+
+    expect(anomalies.anomalies).toHaveLength(1);
   });
 
   it("reads only the environment the scan runs in", async () => {

@@ -61,11 +61,13 @@ interface AnomalyRow {
  *
  * @param env - Process environment.
  * @param now - The clock, for tests.
+ * @param db - The database, for tests.
  * @returns The hour checked and what was flagged.
  */
 export async function detectMoneyMovementAnomalies(
   env: Env,
-  now: Date = new Date()
+  now: Date = new Date(),
+  db: DatabaseExecutor = getDb(env)
 ): Promise<MoneyMovementAnomalyScan> {
   const { environment } = currentClusterScope();
   const hourEnd = Math.floor(now.getTime() / HOUR_MS) * HOUR_MS;
@@ -73,7 +75,7 @@ export async function detectMoneyMovementAnomalies(
   const baselineStart = new Date(
     hourEnd - (MONEY_MOVEMENT_BASELINE_HOURS + 1) * HOUR_MS
   ).toISOString();
-  const rows = await readAnomalies(getDb(env), {
+  const rows = await readAnomalies(db, {
     environment,
     baselineStart,
     hourStart,
@@ -127,7 +129,9 @@ async function readAnomalies(
   window: { environment: string; baselineStart: string; hourStart: string; hourEnd: string }
 ): Promise<AnomalyRow[]> {
   // created_at is an ISO-8601 UTC string, so a string range selects the
-  // window; the hour bucket parses it.
+  // window. The hour bucket is truncated in UTC, never the session's time
+  // zone: an offset like +05:30 would put every bucket at :30 and miss the
+  // hour checked.
   const result = await db
     .prepare(
       `WITH hourly AS (
@@ -138,7 +142,7 @@ async function readAnomalies(
                   ELSE pt.type
                 END AS kind,
                 pt.token,
-                date_trunc('hour', pt.created_at::timestamptz) AS hour,
+                date_trunc('hour', pt.created_at::timestamptz, 'UTC') AS hour,
                 count(*)::int AS count,
                 sum(pt.amount::numeric) AS value
            FROM payment_transfers pt
