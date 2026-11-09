@@ -1,0 +1,221 @@
+---
+module: earn
+title: Upload one PDF, JPEG or PNG (base64, up to 20 MiB decoded)
+description: Authenticated project-scoped Moderator onboarding for an existing SDP counterparty.
+icon: method:POST
+apiReference: true
+---
+<Callout type="info">
+This operation is internal. It is not part of the partner-facing Earn API.
+</Callout>
+
+
+<ApiOperation>
+
+<ApiEndpoint method="POST" path="/v1/earn/onboarding/wisdomtree/{counterpartyId}/documents" />
+
+Requires earn.read for reads and earn.execute plus Idempotency-Key for writes. Use current form rules and the applicant's own agreement answers. No applicant data is persisted by SDP. A submitted application is not approval. A timeout requires reconciliation before another create. Child organization and person GUIDs are derived from the durable mapping; callers cannot select them.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
+
+## Path parameters
+
+- **`counterpartyId`** · `string` · required · min length 1
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+- **`Idempotency-Key`** · `string` · required · pattern `^[\x20-\x7e]{1,255}$` · example `idempotency_example_12345`
+
+  Idempotency key for safely retrying mutating requests. 1-255 printable ASCII characters; echoed back on the response.
+
+## Request body
+
+`application/json` · required
+
+- **`documentType`** · `string` · required · min length 1 · max length 256
+
+- **`filename`** · `string` · required · min length 1 · max length 256
+
+- **`contentType`** · `string` · required · one of `application/pdf`, `image/jpeg`, `image/png`
+
+- **`contentBase64`** · `string` · required · min length 4 · max length 27962028
+
+## Responses
+
+- **`200`** Onboarding result
+
+  - **`data`** · `object` · required
+
+    - **`documentId`** · `string` · required
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`201`** Document stored
+
+  Same fields as `200`.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `earn.execute` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`409`** Conflict
+
+  Same fields as `400`.
+
+- **`413`** Payload Too Large
+
+  Same fields as `400`.
+
+- **`429`** Too Many Requests
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
+<ApiPanel>
+
+## Example request
+
+```bash tab="cURL"
+curl -X POST 'https://api.solana.com/v1/earn/onboarding/wisdomtree/counterparty_example/documents' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "documentType": "example",
+    "filename": "example",
+    "contentType": "application/pdf",
+    "contentBase64": "example"
+  }'
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/earn/onboarding/wisdomtree/counterparty_example/documents", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Idempotency-Key": crypto.randomUUID(),
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    "documentType": "example",
+    "filename": "example",
+    "contentType": "application/pdf",
+    "contentBase64": "example"
+  })
+});
+```
+
+```python tab="Python"
+import os, requests, uuid
+
+r = requests.post("https://api.solana.com/v1/earn/onboarding/wisdomtree/counterparty_example/documents",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  json={
+    "documentType": "example",
+    "filename": "example",
+    "contentType": "application/pdf",
+    "contentBase64": "example"
+  })
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "documentId": "document_example"
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="201"
+{
+  "data": {
+    "documentId": "document_example"
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: earn.execute",
+    "details": {
+      "action": "earn.execute"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+</ApiPanel>
+
+</ApiOperation>

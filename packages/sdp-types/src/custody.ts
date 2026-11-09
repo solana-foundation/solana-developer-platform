@@ -824,6 +824,15 @@ export const INACTIVE_CUSTODY_CONNECTION_LIFECYCLES: readonly InactiveCustodyCon
     (lifecycle): lifecycle is InactiveCustodyConnectionLifecycle => lifecycle !== "active"
   );
 
+/**
+ * Connection lifecycles the earn wallet-binding proof distinguishes: only an
+ * `active` connection proves a wallet binding, and `pending` is the state a
+ * not-yet-usable connection holds instead.
+ */
+export const CUSTODY_CONNECTION_BINDING_LIFECYCLES = ["active", "pending"] as const;
+export type CustodyConnectionBindingLifecycle =
+  (typeof CUSTODY_CONNECTION_BINDING_LIFECYCLES)[number];
+
 /** Outcome of a single connection install check. */
 export const CUSTODY_CONNECTION_CHECK_STATUSES = [
   "running",

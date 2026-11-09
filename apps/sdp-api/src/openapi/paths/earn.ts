@@ -56,6 +56,7 @@ import {
 } from "@/routes/earn/schemas";
 import { earnErrorResponses } from "./earn-errors";
 import { EARN_GROUPS } from "./earn-groups";
+import { registerEarnOnboardingPaths } from "./earn-onboarding";
 import { registerEarnTreasuryPaths } from "./earn-treasury";
 import {
   DOCS_GROUP,
@@ -75,6 +76,7 @@ export function registerEarnPaths(registry: OpenAPIRegistry) {
   registerEarnDepositPreviewPath(registry, earnConfigurationSecurity);
   registerEarnExternalWalletPaths(registry, earnConfigurationSecurity);
   registerEarnTreasuryPaths(registry, earnConfigurationSecurity);
+  registerEarnOnboardingPaths(registry);
   // Treasury-facing, so the internal document only: partners hold no custody
   // wallets for this read to reconcile.
   registerEarnVaultShareReconciliationPath(registry, earnConfigurationSecurity);

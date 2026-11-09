@@ -4,4 +4,5 @@ export const EARN_GROUPS = {
   embeddedYield: "Embedded Yield",
   treasury: "Treasury",
   programs: "Programs",
+  onboarding: "Onboarding",
 } as const;

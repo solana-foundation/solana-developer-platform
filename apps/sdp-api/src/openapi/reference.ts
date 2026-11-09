@@ -409,6 +409,8 @@ export function exampleErrorCode(
       return "NOT_FOUND";
     case "409":
       return "CONFLICT";
+    case "413":
+      return "PAYLOAD_TOO_LARGE";
     case "422":
       return takesIdempotencyKey ? "IDEMPOTENCY_KEY_REUSED" : "SIGNING_REJECTED";
     case "429":

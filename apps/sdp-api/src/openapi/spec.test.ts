@@ -456,9 +456,30 @@ describe("OpenAPI spec", () => {
       .map((file) => readFileSync(new URL(file, draftDirectory), "utf8"))
       .join("\n");
     const partnerPaths = literalEarnPaths(`${guide}\n${generatedModule}`);
-    expect(partnerPaths.length).toBeGreaterThan(0);
+    expect(partnerPaths).toEqual(
+      expect.arrayContaining([
+        "/v1/earn/external-wallet/withdrawal-options",
+        "/v1/earn/external-wallet/queued-withdrawal-previews",
+        "/v1/earn/external-wallet/withdrawal-request-transactions",
+        "/v1/earn/external-wallet/withdrawal-requests",
+        "/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
+        "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+        "/v1/earn/external-wallet/withdrawal-request-cancellations",
+      ])
+    );
     for (const path of partnerPaths) {
-      expect(publicDocument.paths?.[path], `Missing public OpenAPI path: ${path}`).toBeDefined();
+      if (path.startsWith("/v1/earn/onboarding/wisdomtree/")) {
+        expect(
+          internalDocument.paths?.[path],
+          `Missing internal onboarding path: ${path}`
+        ).toBeDefined();
+        expect(
+          publicDocument.paths?.[path],
+          `Onboarding must remain internal: ${path}`
+        ).toBeUndefined();
+      } else {
+        expect(publicDocument.paths?.[path], `Missing public OpenAPI path: ${path}`).toBeDefined();
+      }
     }
     const draftPaths = literalEarnPaths(drafts);
     expect(draftPaths.length).toBeGreaterThan(0);

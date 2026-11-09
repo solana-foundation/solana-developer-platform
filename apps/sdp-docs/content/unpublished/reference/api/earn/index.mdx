@@ -85,3 +85,18 @@ description: Strategy reads, previews, withdrawal-route discovery, unsigned buil
 | `GET` | `/v1/earn/programs/{programId}/withdrawals/{withdrawalRef}` | [Get a program withdrawal](/docs/reference/api/earn/get-earn-program-withdrawal) |
 
 </ApiOperationTable>
+
+## Onboarding
+
+<ApiOperationTable>
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/earn/onboarding/wisdomtree/forms/{entityType}` | [Get the current WisdomTree KYC or KYB form](/docs/reference/api/earn/get-earn-wisdom-tree-onboarding-form) |
+| `GET` | `/v1/earn/onboarding/wisdomtree/{counterpartyId}` | [Get customer verification status and corrections](/docs/reference/api/earn/get-earn-wisdom-tree-onboarding) |
+| `POST` | `/v1/earn/onboarding/wisdomtree/{counterpartyId}` | [Create KYC or save/submit the same KYB application](/docs/reference/api/earn/save-earn-wisdom-tree-onboarding) |
+| `POST` | `/v1/earn/onboarding/wisdomtree/{counterpartyId}/documents` | [Upload one PDF, JPEG or PNG (base64, up to 20 MiB decoded)](/docs/reference/api/earn/upload-earn-wisdom-tree-onboarding-document) |
+| `POST` | `/v1/earn/onboarding/wisdomtree/{counterpartyId}/corrections/{reasonId}` | [Answer one KYB correction; submit the same application afterward](/docs/reference/api/earn/answer-earn-wisdom-tree-onboarding-correction) |
+| `POST` | `/v1/earn/onboarding/wisdomtree/{counterpartyId}/wallets` | [Register a Solana wallet for an active assigned child organization. Proof of control of `owner`: a base58 Ed25519 `signature` over the scope-bound registration message, or the authorized binding of `owner` as an active SDP custody wallet (config-owned or connection-owned) of the same project (custody wallets cannot sign arbitrary messages)](/docs/reference/api/earn/register-earn-wisdom-tree-customer-wallet) |
+
+</ApiOperationTable>

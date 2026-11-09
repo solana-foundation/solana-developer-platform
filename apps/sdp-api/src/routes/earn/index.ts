@@ -7,6 +7,7 @@ import { projectContextMiddleware } from "@/middleware/project-context";
 import { requestGate } from "@/middleware/request-gate";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
+import { createEarnOnboardingRoutes } from "@/routes/earn-onboarding";
 import type { Env } from "@/types/env";
 import { isEarnExitOrRead } from "./exits";
 import {
@@ -513,4 +514,5 @@ earn.get(
   getEarnProgramWithdrawal
 );
 
+earn.route("/onboarding/wisdomtree", createEarnOnboardingRoutes("wisdomtree"));
 earnRoutes.route("/", earn);

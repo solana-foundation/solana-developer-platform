@@ -140,8 +140,49 @@ covers every field. Two rules matter most:
 4. On startup, restore every open request with
    `listPendingEarnQueuedWithdrawals`.
 
+| Step | Module function | Endpoint |
+| --- | --- | --- |
+| Choose a route | `getEarnWithdrawalOptions` | [`POST /v1/earn/external-wallet/withdrawal-options`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-options) |
+| Withdraw instantly | `buildEarnWithdrawalTransaction`, `submitEarnWithdrawal` | [`POST /v1/earn/external-wallet/withdrawal-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-transaction), [`POST /v1/earn/external-wallet/withdrawals`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal) |
+| Preview a request | `previewEarnQueuedWithdrawal` | [`POST /v1/earn/external-wallet/queued-withdrawal-previews`](/docs/reference/api/earn/create-earn-external-wallet-queued-withdrawal-preview) |
+| Build a request | `buildEarnQueuedWithdrawalRequest` | [`POST /v1/earn/external-wallet/withdrawal-request-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-transaction) |
+| Submit a request | `submitEarnWithdrawalRequest` | [`POST /v1/earn/external-wallet/withdrawal-requests`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request) |
+| Track a request | `getEarnWithdrawalRequest` | [`GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-request) |
+| Cancel a request | `buildEarnWithdrawalRequestCancellation`, `submitEarnWithdrawalRequestCancellation` | [`POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancel-transaction), [`POST /v1/earn/external-wallet/withdrawal-request-cancellations`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancellation) |
+
 A withdrawal spends shares, not a dollar amount, and a request transaction
 is not a payout. [Withdraw funds](/docs/earn/withdrawals) covers each route.
+
+## WisdomTree customer verification (internal, pre-launch)
+
+The backend Moderator onboarding flow uses an existing project-scoped
+counterparty as the customer. All endpoints start with
+`onboarding/wisdomtree`; reads take `earn.read` and writes take
+`earn.execute` plus `Idempotency-Key`.
+
+| Step | Endpoint |
+| --- | --- |
+| Read the live KYC/KYB form | `GET /v1/earn/onboarding/wisdomtree/forms/{entityType}` (`individual` or `business`) |
+| Create KYC or save/submit KYB | `POST /v1/earn/onboarding/wisdomtree/{counterpartyId}` |
+| Upload one business document | `POST /v1/earn/onboarding/wisdomtree/{counterpartyId}/documents` |
+| Read verification/corrections | `GET /v1/earn/onboarding/wisdomtree/{counterpartyId}` |
+| Answer one business correction | `POST /v1/earn/onboarding/wisdomtree/{counterpartyId}/corrections/{reasonId}` |
+| Register an active child customer's Solana wallet | `POST /v1/earn/onboarding/wisdomtree/{counterpartyId}/wallets` |
+
+Submit `{ application, documents? }` using the latest form's template and the
+applicant's own agreement answers. Business intent is explicit (`draft` or
+`submit`); individual KYC submits immediately and is US-only. Document uploads
+accept base64 PDF/JPEG/PNG up to 20 MiB decoded and return SDP document IDs;
+map those IDs under `documents` using the form's submission keys. Provider
+GUIDs and blob paths cannot be supplied by callers.
+
+A business's returned child organization is durably linked to the counterparty.
+A retail person's GUID is separate and never turns the moderator into a child.
+Only an `active`, still-assigned business child can register wallets on this
+rail. Submission is not approval. After answering corrections, submit the same
+business again. Unknown create outcomes require operator reconciliation; do
+not create a second application. This backend workflow does not enable
+WisdomTree surfacing or production deposits.
 
 ## Go live
 

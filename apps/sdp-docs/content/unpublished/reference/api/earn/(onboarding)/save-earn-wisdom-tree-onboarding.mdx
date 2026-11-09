@@ -1,0 +1,365 @@
+---
+module: earn
+title: Create KYC or save/submit the same KYB application
+description: Authenticated project-scoped Moderator onboarding for an existing SDP counterparty.
+icon: method:POST
+apiReference: true
+---
+<Callout type="info">
+This operation is internal. It is not part of the partner-facing Earn API.
+</Callout>
+
+
+<ApiOperation>
+
+<ApiEndpoint method="POST" path="/v1/earn/onboarding/wisdomtree/{counterpartyId}" />
+
+Requires earn.read for reads and earn.execute plus Idempotency-Key for writes. Use current form rules and the applicant's own agreement answers. No applicant data is persisted by SDP. A submitted application is not approval. A timeout requires reconciliation before another create. Child organization and person GUIDs are derived from the durable mapping; callers cannot select them.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
+
+## Path parameters
+
+- **`counterpartyId`** · `string` · required · min length 1
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+- **`Idempotency-Key`** · `string` · required · pattern `^[\x20-\x7e]{1,255}$` · example `idempotency_example_12345`
+
+  Idempotency key for safely retrying mutating requests. 1-255 printable ASCII characters; echoed back on the response.
+
+## Request body
+
+`application/json` · required
+
+- **`application`** · `object` · required
+
+  One of:
+
+  - **entity_type: "retail"**
+
+    - **`entity_type`** · `string` · required · always `retail`
+
+    - **`first_name`** · `string` · required · min length 1
+
+    - **`last_name`** · `string` · required · min length 1
+
+    - **`email`** · `string` · required · format `email`
+
+    - **`phone_number`** · `string` · required · min length 1
+
+    - **`date_of_birth`** · `string` · required · pattern `^\d{2}-\d{2}-\d{4}$`
+
+    - **`tax_id`** · `string` · required · pattern `^\d{9}$`
+
+    - **`address`** · `string` · required · min length 1
+
+    - **`flat_number`** · `string`
+
+    - **`city`** · `string` · required · min length 1
+
+    - **`state`** · `string` · required · min length 1
+
+    - **`postal_code`** · `string` · required · min length 1
+
+    - **`country`** · `string` · required · always `US`
+
+    - **`primary_source_of_funds`** · `string` · required · min length 1
+
+    - **`client_external_id`** · `string` · min length 1
+
+    - **`agreement_set_version`** · `string` · required · min length 1
+
+    - **`agreements`** · `object[]` · required · min items 1
+
+      - **`key`** · `string` · required · min length 1
+
+      - **`version`** · `string` · required · min length 1
+
+      - **`accepted`** · `boolean` · required
+
+  - **entity_type: "organization"**
+
+    - **`entity_type`** · `string` · required · always `organization`
+
+    - **`status`** · `string` · required · one of `draft`, `submit`
+
+    - **`org_details`** · `object`
+
+      - **`*`** · `any`
+
+    - **`control_person`** · `object`
+
+      - **`*`** · `any`
+
+    - **`owners`** · `object`
+
+      - **`*`** · `any`
+
+    - **`authorized_rep`** · `object`
+
+      - **`*`** · `any`
+
+    - **`aml_profile`** · `object`
+
+      - **`*`** · `any`
+
+    - **`source`** · `object`
+
+      - **`*`** · `any`
+
+    - **`sanctions`** · `object`
+
+      - **`*`** · `any`
+
+    - **`agreement_details`** · `object`
+
+      - **`*`** · `any`
+
+- **`documents`** · `object`
+
+  - **`*`** · `string`
+
+## Responses
+
+- **`200`** Onboarding result
+
+  - **`data`** · `object` · required
+
+    - **`counterpartyId`** · `string` · required
+
+    - **`state`** · `string` · required · one of `claimed`, `linked`, `archived`
+
+    - **`reconciliationRequired`** · `boolean`
+
+    - **`providerStatus`** · `string`
+
+    - **`organizationGuid`** · `string | null` · format `uuid`
+
+    - **`personGuid`** · `string | null` · format `uuid`
+
+    - **`corrections`** · `object[]`
+
+      - **`*`** · `any`
+
+    - **`correctionDueAt`** · `string | null`
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `earn.execute` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`409`** Conflict
+
+  Same fields as `400`.
+
+- **`413`** Payload Too Large
+
+  Same fields as `400`.
+
+- **`429`** Too Many Requests
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
+<ApiPanel>
+
+## Example request
+
+```bash tab="cURL"
+curl -X POST 'https://api.solana.com/v1/earn/onboarding/wisdomtree/counterparty_example' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "application": {
+      "entity_type": "retail",
+      "first_name": "example",
+      "last_name": "example",
+      "email": "example",
+      "phone_number": "example",
+      "date_of_birth": "example",
+      "tax_id": "tax__example",
+      "address": "11111111111111111111111111111111",
+      "city": "example",
+      "state": "example",
+      "postal_code": "example",
+      "country": "US",
+      "primary_source_of_funds": "example",
+      "agreement_set_version": "example",
+      "agreements": [
+        {
+          "key": "example",
+          "version": "example",
+          "accepted": false
+        }
+      ]
+    },
+    "documents": {}
+  }'
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/earn/onboarding/wisdomtree/counterparty_example", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Idempotency-Key": crypto.randomUUID(),
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    "application": {
+      "entity_type": "retail",
+      "first_name": "example",
+      "last_name": "example",
+      "email": "example",
+      "phone_number": "example",
+      "date_of_birth": "example",
+      "tax_id": "tax__example",
+      "address": "11111111111111111111111111111111",
+      "city": "example",
+      "state": "example",
+      "postal_code": "example",
+      "country": "US",
+      "primary_source_of_funds": "example",
+      "agreement_set_version": "example",
+      "agreements": [
+        {
+          "key": "example",
+          "version": "example",
+          "accepted": false
+        }
+      ]
+    },
+    "documents": {}
+  })
+});
+```
+
+```python tab="Python"
+import os, requests, uuid
+
+r = requests.post("https://api.solana.com/v1/earn/onboarding/wisdomtree/counterparty_example",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  json={
+    "application": {
+      "entity_type": "retail",
+      "first_name": "example",
+      "last_name": "example",
+      "email": "example",
+      "phone_number": "example",
+      "date_of_birth": "example",
+      "tax_id": "tax__example",
+      "address": "11111111111111111111111111111111",
+      "city": "example",
+      "state": "example",
+      "postal_code": "example",
+      "country": "US",
+      "primary_source_of_funds": "example",
+      "agreement_set_version": "example",
+      "agreements": [
+        {
+          "key": "example",
+          "version": "example",
+          "accepted": False
+        }
+      ]
+    },
+    "documents": {}
+  })
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "counterpartyId": "counterparty_example",
+    "state": "claimed",
+    "corrections": [
+      {}
+    ]
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: earn.execute",
+    "details": {
+      "action": "earn.execute"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+</ApiPanel>
+
+</ApiOperation>
