@@ -43,7 +43,7 @@ const walletCreateKeyHeaders = projectScopeWithDeclaredIdempotencyHeaders({
 /**
  * Custody setup, which takes `wallets.configure`: an API key can never hold a
  * `configure` action, so the public document, which an API key calls, omits
- * it (SOLA9-889).
+ * it.
  */
 export function registerCustodyAdministrationPaths(registry: OpenAPIRegistry) {
   registry.registerPath({

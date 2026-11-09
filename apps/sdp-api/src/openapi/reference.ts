@@ -573,7 +573,7 @@ function toApiOperation(
   // The public document is what an API key calls. An operation whose action no
   // key can hold (key, member, organization and project administration, every
   // `configure`) answers a signed-in person only, so it belongs in the internal
-  // document (SOLA9-889).
+  // document.
   if (action !== null && !isApiKeyGrantableAction(action)) {
     throw new Error(
       `${where} takes ${action}, which no API key can hold: register it outside the public document`

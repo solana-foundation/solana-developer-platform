@@ -37,7 +37,7 @@ describe("buildSnippets", () => {
     expect(py.endsWith("})")).toBe(true);
   });
 
-  // SOLA9-876: each run minted its key inside the call, so a retry of the
+  // each run minted its key inside the call, so a retry of the
   // sample was a second request. The key is minted once, before the call.
   it("mints a call's Idempotency-Key once, before the call, in each language where the route takes one", () => {
     for (const method of ["POST", "PATCH", "DELETE"]) {

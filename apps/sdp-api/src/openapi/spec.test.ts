@@ -955,7 +955,7 @@ describe("OpenAPI spec", () => {
       .object({ properties: z.object({ provider: z.object({ enum: z.array(z.string()) }) }) })
       .parse(z.object({ anyOf: z.array(z.unknown()) }).parse(createBody).anyOf[0]);
     expect(managedOwner.properties.provider.enum).toEqual(["privy"]);
-    // Session-only (wallets.configure), so no channel publishes it (SOLA9-889).
+    // Session-only (wallets.configure), so no channel publishes it.
     expect(paths?.["/v1/wallets/initialize"]).toBeUndefined();
     expect(createOpenApiDocument().paths?.["/v1/wallets/initialize"]?.post?.security).toEqual([
       { clerkBearerAuth: [] },

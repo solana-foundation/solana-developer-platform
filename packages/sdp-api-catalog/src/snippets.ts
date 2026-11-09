@@ -60,7 +60,7 @@ function shellQuote(value: string): string {
 /**
  * A keyed call mints its Idempotency-Key once, before the call, so a retry of the same request
  * sends the same key; a key minted inside the call would make every retry a new request that
- * the API runs again (SOLA9-876).
+ * the API runs again.
  */
 const RETRY_KEY_COMMENT = "Reuse this key when you retry this request.";
 

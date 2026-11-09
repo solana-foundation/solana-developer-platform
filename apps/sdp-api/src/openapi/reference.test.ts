@@ -172,7 +172,7 @@ describe("buildApiReference", () => {
     expect(notReady).toMatchObject({ kind: "json", example: { status: "not_ready" } });
   });
 
-  it("refuses to publish an operation whose action no API key can hold (SOLA9-889)", () => {
+  it("refuses to publish an operation whose action no API key can hold", () => {
     const publicDocument = createPublicOpenApiDocument({ releaseChannel: "stable" });
     const internalProjectUpdate = createOpenApiDocument().paths["/v1/projects/{projectId}"]?.patch;
     if (internalProjectUpdate === undefined) throw new Error("no internal project update");
@@ -201,7 +201,7 @@ describe("buildApiReference", () => {
       createPublicOpenApiDocument({ releaseChannel: "stable" })
     ).families.flatMap((family) => family.operations);
     // Initialize is session-only (wallets.configure), so only the internal
-    // document carries it (SOLA9-889), and the reference model refuses it. Its
+    // document carries it, and the reference model refuses it. Its
     // body is still the one variant set titled by a pinned value, so the body is
     // grafted onto a test-only API-key operation that names no action.
     const publicDocument = createPublicOpenApiDocument({ releaseChannel: "stable" });
