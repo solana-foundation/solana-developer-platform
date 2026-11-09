@@ -31,7 +31,7 @@ import { registerApiKeyPaths } from "./paths/api-keys";
 import { registerAssetProfilePaths } from "./paths/asset-profiles";
 import { registerCompliancePaths } from "./paths/compliance";
 import { registerCounterpartyPaths } from "./paths/counterparties";
-import { registerCustodyPaths } from "./paths/custody";
+import { registerCustodyAdministrationPaths, registerCustodyPaths } from "./paths/custody";
 import { registerDvpPaths } from "./paths/dvp";
 import { registerEarnPaths, registerPublicEarnPaths } from "./paths/earn";
 import { registerHealthPaths } from "./paths/health";
@@ -52,7 +52,7 @@ import {
 import routeActionsJson from "./route-actions.generated.json";
 
 const EARN_TAG_DESCRIPTION =
-  "Strategy reads, previews, withdrawal-route discovery, unsigned builds, submission, queued actions, and tenant tracking.";
+  "Strategy reads, previews, withdrawal-route discovery, unsigned builds, submission, queued actions, and tenant tracking. Availability follows the deployment's release channel.";
 
 const OPENAPI_TAG = {
   HEALTH: { name: "Health", description: "Service health and readiness endpoints." },
@@ -251,6 +251,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerOrganizationPaths(registry);
   registerApiKeyPaths(registry);
   registerMemberPaths(registry);
+  registerCustodyAdministrationPaths(registry);
   registerCustodyPaths(registry);
   registerEarnPaths(registry);
   registerDvpPaths(registry);

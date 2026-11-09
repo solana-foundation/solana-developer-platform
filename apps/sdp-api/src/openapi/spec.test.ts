@@ -400,6 +400,10 @@ describe("OpenAPI spec", () => {
       expect.arrayContaining(["positionId", "shares"])
     );
     expect(withdrawalBuildRequest.properties).not.toHaveProperty("strategyId");
+    expect(withdrawalBuildRequest.properties?.redemptionMode?.enum).toEqual([
+      "standard",
+      "instant",
+    ]);
 
     expect(
       JSON.stringify(
@@ -427,7 +431,8 @@ describe("OpenAPI spec", () => {
     );
   });
 
-  it("keeps every literal Embedded Yield guide route in the publishable Earn document", () => {
+  it("keeps Embedded Yield routes in their publishable or internal document", () => {
+    const internalDocument = createOpenApiDocument();
     const publicDocument = createPublicOpenApiDocument(PUBLISHABLE_EARN);
     // The guide is unpublished until PRO-2038 (apps/sdp-docs/CLAUDE.md,
     // "Unpublishing a Page") but its route contract is still pinned here.
@@ -456,7 +461,27 @@ describe("OpenAPI spec", () => {
       ])
     );
     for (const path of referencedPaths) {
-      expect(publicDocument.paths?.[path], `Missing public OpenAPI path: ${path}`).toBeDefined();
+      if (path.startsWith("/v1/earn/onboarding/wisdomtree/")) {
+        expect(
+          internalDocument.paths?.[path],
+          `Missing internal onboarding path: ${path}`
+        ).toBeDefined();
+        expect(
+          publicDocument.paths?.[path],
+          `Onboarding must remain internal: ${path}`
+        ).toBeUndefined();
+      } else if (path.startsWith("/v1/earn/provider-actions")) {
+        expect(
+          internalDocument.paths?.[path],
+          `Missing internal OpenAPI path: ${path}`
+        ).toBeDefined();
+        expect(
+          publicDocument.paths?.[path],
+          `Unreviewed public promotion: ${path}`
+        ).toBeUndefined();
+      } else {
+        expect(publicDocument.paths?.[path], `Missing public OpenAPI path: ${path}`).toBeDefined();
+      }
     }
   });
 
@@ -943,11 +968,11 @@ describe("OpenAPI spec", () => {
       .object({ properties: z.object({ provider: z.object({ enum: z.array(z.string()) }) }) })
       .parse(z.object({ anyOf: z.array(z.unknown()) }).parse(createBody).anyOf[0]);
     expect(managedOwner.properties.provider.enum).toEqual(["privy"]);
-    const initialize = z
-      .object({ oneOf: z.array(z.unknown()) })
-      .parse(getJsonSchema(paths?.["/v1/wallets/initialize"]?.post?.requestBody));
-    expect(initialize.oneOf).toHaveLength(1);
-    expect(JSON.stringify(initialize)).toContain('"privy"');
+    // Session-only (wallets.configure), so no channel publishes it.
+    expect(paths?.["/v1/wallets/initialize"]).toBeUndefined();
+    expect(createOpenApiDocument().paths?.["/v1/wallets/initialize"]?.post?.security).toEqual([
+      { clerkBearerAuth: [] },
+    ]);
 
     for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
       expect(JSON.stringify(createPublicOpenApiDocument({ releaseChannel }))).not.toContain(

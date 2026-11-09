@@ -79,15 +79,20 @@ transfer carries is the owner.
 
 ### Supported Connect organization model
 
-Admission currently supports only Connect's **direct/omnibus credential**
-model. `GET /api/organizations/me` identifies the organization whose wallet
-registry and credential-scoped product shelf SDP checks. A moderator B2B2C
-credential requires an explicit, durable mapping from an SDP organization to
-the correct Connect child-organization GUID. No such mapping exists today, so
-the integration does not guess a child organization and does not claim
-moderator-mode support. The `/me` GUID is cached on the bearer-token entry (same
-credential digest, same lifetime); wallet status, products and on-receipt
-wallets stay live on every call.
+Hosted Earn uses **Moderator mode**. The onboarding API maps a project-scoped
+SDP counterparty to the Connect child GUID returned by its business application;
+wallet registration binds a Solana owner to that customer. Admission resolves
+that stored mapping and verifies the moderator's LIVE `client_organizations`
+before reading the child's wallets and products (`organization_guid` query).
+A missing/revoked mapping, pending wallet or missing product receives the same
+non-enumerating refusal. A retail person's GUID is stored separately and never
+turns the moderator's GUID into a child. Retail-only KYC does not enable this
+business-wallet rail.
+
+The standalone package's direct-org tooling remains available without a
+customer reference. Hosted deposits always require the durable mapping.
+Setup, endpoints, sensitive-data handling and operator recovery:
+`docs/architecture/wisdomtree-onboarding.md`.
 
 Builds read every account they can name up front in one `getAccounts` request
 (deposit: mint, owner fund ATA, on-receipt USDC ATA; redemption: mint,
@@ -176,8 +181,8 @@ or completed an actual transfer-agent order.
   the second credential exists and its routes are measured. Missing renders
   "—", never a fabricated rate.
 - **Business prerequisites**: a WisdomTree Connect agreement using the
-  currently supported direct/omnibus credential model, per-wallet KYC
+  Moderator model, a verified and assigned child customer, per-wallet
   registration, fund entitlement, and packed
   credentials in `WISDOMTREE_API_KEY` / `WISDOMTREE_SANDBOX_API_KEY`
-  (format on `EarnRuntimeEnvironment`). Moderator B2B2C operation remains
-  blocked on a durable SDP-org-to-Connect-child mapping.
+  (format on `EarnRuntimeEnvironment`). Onboarding does not clear the separate
+  production deposit and provider-surfacing launch gates.

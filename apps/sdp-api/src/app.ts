@@ -54,6 +54,7 @@ import { internalWallets } from "@/routes/custody/internal";
 import { docs } from "@/routes/docs";
 import { dvp } from "@/routes/dvp";
 import { earnRoutes as earn } from "@/routes/earn";
+import { EARN_ONBOARDING_MAX_BODY_BYTES } from "@/routes/earn-onboarding/schemas";
 import { health } from "@/routes/health";
 import { heliusRings } from "@/routes/helius-rings";
 import { integrations } from "@/routes/integrations";
@@ -121,7 +122,7 @@ const KV_FREE_PATHS = [
 
 // Backstop bound for any /v1 request body. Handler-side schemas are far
 // smaller; the webhooks router already enforces this same ceiling on its
-// subset, and no public /v1 route accepts file uploads.
+// subset. The internal Earn onboarding document route has its own bound.
 const MAX_API_BODY_BYTES = 1024 * 1024;
 
 // Bound for any /pay request body. The only body /pay reads is the Solana Pay
@@ -340,15 +341,17 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // body whole before zod validation runs, so without a ceiling a single
   // authenticated request could make the instance buffer unbounded bytes.
   // Route-level limits (webhooks) are equal or stricter.
-  app.use(
-    "/v1/*",
-    bodyLimit({
-      maxSize: MAX_API_BODY_BYTES,
+  app.use("/v1/*", async (c, next) => {
+    const isOnboardingDocument =
+      c.req.method === "POST" &&
+      /^\/v1\/earn\/onboarding\/wisdomtree\/[^/]+\/documents$/.test(c.req.path);
+    return bodyLimit({
+      maxSize: isOnboardingDocument ? EARN_ONBOARDING_MAX_BODY_BYTES : MAX_API_BODY_BYTES,
       onError: () => {
         throw payloadTooLarge();
       },
-    })
-  );
+    })(c, next);
+  });
   app.use(
     "/pay/*",
     bodyLimit({

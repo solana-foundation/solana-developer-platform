@@ -33,7 +33,17 @@ const storedEntrySchema = z.object({
   /** The request fingerprint this key belongs to. */
   id: z.string().min(1),
   value: z.string().min(1),
+  /** When the key was first claimed, epoch ms; absent on an entry an earlier build wrote. */
+  claimedAt: z.number().optional(),
 });
+
+/**
+ * How long a kept key may still go out: under the API's 24-hour
+ * Idempotency-Key record (ADR 0009). Past it the API may no longer recognize
+ * the key, so a retry under it could run as a second request; the store
+ * reports it `outlived` and the caller sends nothing.
+ */
+export const KEPT_KEY_WINDOW_MS = 23 * 60 * 60 * 1_000;
 
 type StoredEntry = z.infer<typeof storedEntrySchema>;
 
@@ -201,7 +211,20 @@ export interface IdempotencyKeyStore {
    *
    * @param mint - Makes the value the first time; a fresh UUID by default.
    */
-  claim(fingerprint: string, mint?: () => string): { key: string; persisted: boolean };
+  claim(
+    fingerprint: string,
+    mint?: () => string
+  ): {
+    key: string;
+    persisted: boolean;
+    /**
+     * The kept key was first claimed {@link KEPT_KEY_WINDOW_MS} ago or more:
+     * the API may have forgotten it, so the request must not go out under it.
+     * The caller releases it and asks the user to check what the first
+     * attempt did; the next submit is a new action.
+     */
+    outlived: boolean;
+  };
   /**
    * Retires the key: the next submit of this request is a new action. Only
    * the claimed key is retired, in the user and org scope that claimed it: a
@@ -226,21 +249,24 @@ export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore
     claim(fingerprint, mint = () => crypto.randomUUID()) {
       const name = scopedKey(storeKey);
       const entries = readEntries(name);
-      const kept = entries.find((entry) => entry.id === fingerprint)?.value;
+      const keptEntry = entries.find((entry) => entry.id === fingerprint);
+      const kept = keptEntry?.value;
+      const claimedAt = keptEntry?.claimedAt ?? Date.now();
+      const outlived = kept !== undefined && Date.now() - claimedAt >= KEPT_KEY_WINDOW_MS;
       if (kept !== undefined && storedValue(name, fingerprint) === kept) {
         // Already persisted: the retry needs no rewrite, so a store that now
         // refuses writes never blocks the retry of an earlier attempt.
         claimedIn.set(JSON.stringify([fingerprint, kept]), name);
-        return { key: kept, persisted: true };
+        return { key: kept, persisted: true, outlived };
       }
       const key = kept ?? mint();
       // A new key, or one kept only in memory, must reach storage to count.
       const persisted = writeEntries(name, [
         ...entries.filter((entry) => entry.id !== fingerprint),
-        { id: fingerprint, value: key },
+        { id: fingerprint, value: key, claimedAt },
       ]);
       claimedIn.set(JSON.stringify([fingerprint, key]), name);
-      return { key, persisted };
+      return { key, persisted, outlived };
     },
 
     release(fingerprint, key) {

@@ -80,7 +80,7 @@ describe("unresolved Treasury intent identity", () => {
     });
     try {
       expect(store.claim("other-intent").persisted).toBe(false);
-      expect(store.claim("intent")).toEqual({ key: kept, persisted: true });
+      expect(store.claim("intent")).toEqual({ key: kept, persisted: true, outlived: false });
     } finally {
       write.mockRestore();
     }

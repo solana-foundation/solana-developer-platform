@@ -111,6 +111,24 @@ describe("Helius DAS on the scope's cluster", () => {
     });
   }
 
+  it("reads a Helius slot that still holds the deployment's placeholder as unset", async () => {
+    process.env.SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL = "placeholder";
+    const fetchMock = stubFetch(Response.json({ jsonrpc: "2.0", id: "das_test", result: [] }));
+
+    assert.equal(
+      inScope("production", () => isHeliusDasConfigured()),
+      false
+    );
+    await assert.rejects(
+      inScope("production", async () => fetchHeliusDas(DAS_REQUEST_INIT)),
+      {
+        name: "RpcUnavailableError",
+        details: { reason: "not_configured", cluster: "mainnet-beta" },
+      }
+    );
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+
   it("refuses to resolve a Helius endpoint outside a cluster scope", async () => {
     Object.assign(process.env, HELIUS_DAS_URLS);
     const fetchMock = stubFetch(Response.json({ jsonrpc: "2.0", id: "das_test", result: [] }));

@@ -9,6 +9,7 @@ import {
   createActionMemo,
   createFloorMemo,
   createIdempotencyKeyStore,
+  KEPT_KEY_WINDOW_MS,
   resetIdempotencyKeyStoresForTests,
   setIdempotencyKeyScope,
   settleMoneyIdempotencyKey,
@@ -30,7 +31,7 @@ describe("claim", () => {
   it("mints and keeps a key, and hands the kept one to every retry until it is released", () => {
     expect(store.has(fingerprint)).toBe(false);
     const first = store.claim(fingerprint);
-    expect(first).toEqual({ key: expect.any(String), persisted: true });
+    expect(first).toEqual({ key: expect.any(String), persisted: true, outlived: false });
     expect(store.has(fingerprint)).toBe(true);
     expect(store.claim(fingerprint).key).toBe(first.key);
 
@@ -48,6 +49,19 @@ describe("claim", () => {
     // The first attempt's late answer settles nothing the user has not sent yet.
     store.release(fingerprint, first);
     expect(store.claim(fingerprint).key).toBe(second);
+  });
+
+  it("reports a kept key outlived once it is as old as the API keeps it", () => {
+    vi.useFakeTimers();
+    try {
+      const first = store.claim(fingerprint);
+      vi.setSystemTime(Date.now() + KEPT_KEY_WINDOW_MS - 1);
+      expect(store.claim(fingerprint)).toMatchObject({ key: first.key, outlived: false });
+      vi.setSystemTime(Date.now() + 1);
+      expect(store.claim(fingerprint)).toMatchObject({ key: first.key, outlived: true });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("reports a key the browser would not store, and still keeps it for this page", () => {

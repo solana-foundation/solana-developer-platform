@@ -32,19 +32,24 @@ async function setFlash(flash: ApiKeyFlash) {
   // (encrypted) and bound to the Clerk session that created it. Without an
   // authenticated session there is nobody to deliver it to — fail closed
   // rather than write anything readable to the browser.
-  const { sessionId, userId } = await auth();
-  if (!sessionId || !userId) {
+  const { sessionId, userId, orgId } = await auth();
+  if (!sessionId || !userId || !orgId) {
     return;
   }
 
+  const projectId = await requestProjectId();
   const maxAge = apiKeyFlashMaxAgeSeconds(flash);
-  const sealed = await sealApiKeyFlash(flash, { sessionId, userId }, maxAge);
+  const sealed = await sealApiKeyFlash(
+    flash,
+    { sessionId, userId, organizationId: orgId, projectId },
+    maxAge
+  );
   if (!sealed) {
     return;
   }
 
   const jar = await cookies();
-  jar.set(API_KEY_FLASH_COOKIE, sealed, apiKeyFlashCookieOptions(await requestProjectId(), maxAge));
+  jar.set(API_KEY_FLASH_COOKIE, sealed, apiKeyFlashCookieOptions(projectId, maxAge));
 }
 
 function extractErrorMessage(error: unknown): string {

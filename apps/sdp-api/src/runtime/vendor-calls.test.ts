@@ -120,6 +120,33 @@ describe("instrumentVendorPort", () => {
     expect(emitted[0][1].duration_ms).toBeTypeOf("number");
   });
 
+  it("writes the port's cluster and custody mode on its success and failure lines", async () => {
+    const port = instrumentVendorPort(
+      "privy",
+      { sign: async () => "signed", refuse: async () => Promise.reject(new Error("refused")) },
+      undefined,
+      { cluster: "devnet", custody_mode: "byok" }
+    );
+
+    await port.sign();
+    await expect(port.refuse()).rejects.toThrow("refused");
+
+    expect(vendorEvents().map(([, payload]) => payload)).toEqual([
+      expect.objectContaining({
+        operation: "sign",
+        outcome: "succeeded",
+        cluster: "devnet",
+        custody_mode: "byok",
+      }),
+      expect.objectContaining({
+        operation: "refuse",
+        outcome: "failed",
+        cluster: "devnet",
+        custody_mode: "byok",
+      }),
+    ]);
+  });
+
   it("passes non-function properties through untouched", () => {
     const port = instrumentVendorPort("kora", { limit: 7, name: "adapter" });
     expect(port.limit).toBe(7);

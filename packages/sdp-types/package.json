@@ -259,6 +259,11 @@
       "import": "./src/fireblocks.ts",
       "default": "./src/fireblocks.ts"
     },
+    "./earn-onboarding": {
+      "types": "./src/earn-onboarding.ts",
+      "import": "./src/earn-onboarding.ts",
+      "default": "./src/earn-onboarding.ts"
+    },
     "./mainnet-access": {
       "types": "./src/mainnet-access.ts",
       "import": "./src/mainnet-access.ts",
@@ -268,6 +273,16 @@
       "types": "./src/sdp-terms-text.ts",
       "import": "./src/sdp-terms-text.ts",
       "default": "./src/sdp-terms-text.ts"
+    },
+    "./plume-programs": {
+      "types": "./src/plume-programs.ts",
+      "import": "./src/plume-programs.ts",
+      "default": "./src/plume-programs.ts"
+    },
+    "./earn-provider-orders": {
+      "types": "./src/earn-provider-orders.ts",
+      "import": "./src/earn-provider-orders.ts",
+      "default": "./src/earn-provider-orders.ts"
     }
   },
   "scripts": {

@@ -85,7 +85,18 @@ async function performTransferUnderKey(
   fingerprint: string,
   providerSession: boolean
 ): Promise<TransferSendResult> {
-  const { key, persisted } = store.claim(fingerprint);
+  const { key, persisted, outlived } = store.claim(fingerprint);
+  if (outlived && !providerSession) {
+    // The API may have forgotten a key this old, so a retry under it could pay
+    // again. Nothing is sent: the user checks the list, and the next send is new.
+    store.release(fingerprint, key);
+    throw new TransferRequestError(
+      t("Shared.idempotency.outcomeUnknownCheckList"),
+      409,
+      false,
+      "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN"
+    );
+  }
   let transfer: TransferRecord;
   try {
     transfer = await createTransfer(submission, t, { value: key, persisted });

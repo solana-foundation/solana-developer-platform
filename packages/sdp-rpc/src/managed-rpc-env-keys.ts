@@ -55,6 +55,26 @@ export const MANAGED_RPC_HOSTS = {
   },
 } as const satisfies Record<SolanaCluster, Record<ManagedRpcProvider, string | null>>;
 
+/**
+ * The value a deployment writes into a slot it mounts before anyone has filled it: sdp-infra seeds
+ * every app secret with it, and Doppler keeps it for a provider with no account yet. A slot holding
+ * it is unset, so a deployment can mount every slot and its pool is whichever slots hold a URL.
+ */
+export const UNFILLED_SLOT_VALUE = "placeholder";
+
+/**
+ * A managed slot's endpoint URL, read from the environment.
+ *
+ * @param envKey - The slot's `SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL` key.
+ * @returns The URL, or `undefined` when the slot is empty or holds `UNFILLED_SLOT_VALUE`.
+ */
+export function managedRpcSlotUrl(envKey: string): string | undefined {
+  const value = process.env[envKey];
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed.toLowerCase() === UNFILLED_SLOT_VALUE) return undefined;
+  return value;
+}
+
 /** Each cluster's public Solana Labs endpoint hosts, which only that cluster's slots may name. */
 export const PUBLIC_CLUSTER_HOSTS = {
   devnet: ["api.devnet.solana.com"],

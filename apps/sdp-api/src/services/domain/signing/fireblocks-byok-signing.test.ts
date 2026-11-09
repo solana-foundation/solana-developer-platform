@@ -11,8 +11,9 @@ import {
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, aroundEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "@/lib/errors";
+import { inSandboxScope } from "@/test/helpers/cluster-rpc";
 import { env as testEnv } from "@/test/helpers/env";
 import { admittedSigner } from "./admitted-signer";
 import { createFireblocksAdapterFromCredential } from "./provider-adapter-factory";
@@ -41,6 +42,7 @@ const CREDENTIAL: Parameters<typeof createFireblocksAdapterFromCredential>[1] = 
 };
 
 afterEach(() => vi.restoreAllMocks());
+aroundEach((runTest) => inSandboxScope(runTest));
 
 function testTransaction() {
   return compileTransaction(
