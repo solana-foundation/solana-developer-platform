@@ -22,6 +22,25 @@ function identityFor(request = TEST_REQUEST, signMessage = testSignMessage): Pro
 }
 
 describe("createCustodyMaterialSource", () => {
+  /**
+   * Known-answer vector. The derived identity is what the user registry records
+   * are written against, so the derivation is wire-compatible: the same owner
+   * must derive the same identity forever, or every existing wallet reads back
+   * as foreign. The determinism tests below stay green if the derivation itself
+   * changes (the new value is deterministic too), so the actual value is pinned.
+   * Deliberately changing it re-keys every existing rings wallet and needs a
+   * migration plan first.
+   */
+  const TEST_OWNER_IDENTITY =
+    "2imneMYrBruetpHzKM4D3SXHoDBnyKiiFDEQW5Es7GFhnKMh9U2wzuqZTV6DbQWBLL5EXiGTVyv9GSe51w1x5qxAH";
+  const TEST_OTHER_OWNER_IDENTITY =
+    "Zj8n141a4hrVoyB9BppmFcxVrA9uErcAkV2M9Nfgg9JHN84VJcx3QADdG8DGdUNAAzekBBsjf2WfGtxXcNXxh8VQ";
+
+  it("derives the pinned identity for an owner, matching the records it created", async () => {
+    expect(await identityFor()).toBe(TEST_OWNER_IDENTITY);
+    expect(await identityFor(TEST_FOREIGN_REQUEST)).toBe(TEST_OTHER_OWNER_IDENTITY);
+  });
+
   it("derives the same identity every time for one owner", async () => {
     expect(await identityFor()).toBe(await identityFor());
   });
