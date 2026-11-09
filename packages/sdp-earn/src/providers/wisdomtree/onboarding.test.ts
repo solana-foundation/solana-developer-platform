@@ -274,6 +274,46 @@ describe("WisdomTree onboarding wire contract", () => {
       assert.doesNotMatch(JSON.stringify(error) + error.message, /666123456/);
     }
   });
+  it("surfaces an unreadable 4xx reply as an uncertain outcome, not a rejection", async () => {
+    // A reply SDP cannot read — a proxy page, an empty body, or an invalid
+    // recovery ID type — leaves it unknown whether the write was saved.
+    // Surfacing it as BAD_REQUEST would let the caller release its create
+    // claim and submit a duplicate application.
+    for (const body of [
+      "gateway error page",
+      ["unexpected"],
+      { organization_guid: "not-a-uuid" },
+    ]) {
+      resetWisdomTreeTokenCache();
+      replies(ok(token), { status: 400, body });
+      try {
+        await client.saveBusiness(ctx, { entity_type: "organization", status: "submit" });
+        assert.fail("expected the submission to be rejected");
+      } catch (error) {
+        assert.ok(error instanceof SdpEarnError);
+        assert.equal(error.code, "PROVIDER_UNAVAILABLE");
+        assert.equal(error.details?.providerStatus, 400);
+        assert.equal(error.details?.organization_guid, undefined);
+        assert.equal(error.details?.person_guid, undefined);
+      } finally {
+        mock.restoreAll();
+      }
+    }
+  });
+  it("keeps a readable 400 refusal a confirmed rejection with no recovery GUID", async () => {
+    // The twin of the unreadable case: a reply SDP can read is the provider's
+    // own refusal, so the caller may release its claim and retry corrected.
+    replies(ok(token), { status: 400, body: { detail: "invalid calendar date" } });
+    try {
+      await client.saveBusiness(ctx, { entity_type: "organization", status: "submit" });
+      assert.fail("expected the submission to be rejected");
+    } catch (error) {
+      assert.ok(error instanceof SdpEarnError);
+      assert.equal(error.code, "BAD_REQUEST");
+      assert.equal(error.details?.providerStatus, 400);
+      assert.equal(error.details?.organization_guid, undefined);
+    }
+  });
   it("does not replay a write on 401 or 5xx", async () => {
     for (const status of [401, 503]) {
       resetWisdomTreeTokenCache();

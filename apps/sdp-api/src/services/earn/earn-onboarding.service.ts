@@ -32,11 +32,13 @@ const storedDocumentReferenceSchema = z.object({
 });
 
 /**
- * WisdomTree processed and refused the write (any 4xx), or the write could
- * never start (unconfigured credentials, thrown before any HTTP call):
- * nothing was written, so the unverified claim can be released. Timeouts, 5xx
- * and malformed responses leave the outcome unknown — the wallet or
- * application may exist — so those claims stay for reconciliation instead.
+ * WisdomTree processed and refused the write (a readable 4xx reply), or the
+ * write could never start (unconfigured credentials, thrown before any HTTP
+ * call): nothing was written, so the unverified claim can be released.
+ * Timeouts, 5xx and unreadable error replies leave the outcome unknown — the
+ * wallet or application may exist — so those claims stay for reconciliation
+ * instead. The onboarding client guarantees the distinction: a 4xx it cannot
+ * read surfaces as PROVIDER_UNAVAILABLE, never as a rejection code.
  */
 function isConfirmedRejection(error: SdpEarnError): boolean {
   return (

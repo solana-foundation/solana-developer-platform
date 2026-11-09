@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import type { z } from "zod";
-import { providerNotConfigured, providerUnavailable, SdpEarnError } from "#/errors";
+import {
+  providerNotConfigured,
+  providerUnavailable,
+  SdpEarnError,
+  type SdpEarnErrorCode,
+} from "#/errors";
 import { classifyProviderStatus, providerFetch, providerFetchJson } from "#/fetch";
 import type { EarnRuntimeContext } from "#/types";
 import {
@@ -562,13 +567,24 @@ export async function requestWisdomTreeOnboarding<T>(
     // Strip everything except validated GUIDs. Even field-error prose may
     // contain the submitted SSN or an applicant's identity.
     const recovery = wisdomTreeOnboardingRecoverySchema.safeParse(result.parsed);
+    // A READABLE error reply (any JSON object) is the provider's own refusal —
+    // a confirmed rejection whose claim-holding callers may release. A reply
+    // that cannot be read (a proxy page, an empty body, an invalid recovery ID
+    // type) leaves the outcome UNKNOWN — the write may have been saved before
+    // the 4xx — so it surfaces as PROVIDER_UNAVAILABLE, the code every claim
+    // holder already treats as "keep the claim and reconcile". Classifying it
+    // per status instead would let the next request archive its claim and
+    // create a duplicate application.
+    const code: SdpEarnErrorCode = recovery.success
+      ? classifyProviderStatus(result.response.status)
+      : "PROVIDER_UNAVAILABLE";
     const details: Record<string, unknown> = {
       provider: WISDOMTREE_PROVIDER,
       providerStatus: result.response.status,
     };
     if (recovery.success) Object.assign(details, recovery.data);
     throw new SdpEarnError(
-      classifyProviderStatus(result.response.status),
+      code,
       "WisdomTree onboarding request failed; reconcile saved records before retrying",
       details
     );
