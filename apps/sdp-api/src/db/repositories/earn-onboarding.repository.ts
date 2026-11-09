@@ -39,6 +39,8 @@ export interface EarnOnboardingRepository {
     scope: EarnOnboardingScope,
     input: { moderatorGuid: string; organizationGuid: string | null; personGuid: string | null }
   ): Promise<EarnOnboardingCustomer | null>;
+  /** Archives an unverified claim so a confirmed create rejection can be retried. */
+  releaseClaim(scope: EarnOnboardingScope): Promise<void>;
   claimWallet(scope: EarnOnboardingScope, owner: string): Promise<boolean>;
   /** Archives an unverified claim so a rejected registration cannot block the real owner. */
   releaseWallet(scope: EarnOnboardingScope, owner: string): Promise<void>;

@@ -89,25 +89,27 @@ concurrent loser cannot create a second applicant. Returned GUIDs are
 first-write-wins and globally unique per environment. Even a failed 4xx can
 have saved a business: the client preserves validated recovery GUIDs and the
 service links one before returning the error. A later attempt continues that
-same GUID. Unfinished claims are never automatically released.
+same GUID. A confirmed rejection without a recovery GUID — WisdomTree
+processed and refused the create (any other 4xx), or the request could never
+start — wrote nothing, so the service releases the unverified claim: the
+claim is archived (a soft delete that keeps its history) and a corrected
+application can claim afresh and retry.
 
-If a request times out, crashes, returns malformed data or fails without a
-GUID, the outcome is unknown. Further creates for that customer return 409.
+If a request times out, crashes, returns malformed data or otherwise fails
+where the outcome is unknown, further creates for that customer return 409.
 A named operator must use the audited operator-access path, verify the exact
 customer against Connect's list/detail and the creating Moderator, then attach
 the proven saved GUID with the repository's compare-and-set `link`. Never
 match on name alone, delete a claim, guess a GUID, or create another business
 just to inspect progress. If no unique applicant can be proven, involve
-WisdomTree support. Wallet claims differ in one way: the owner address is
-unique per environment across every customer, so a confirmed provider
-rejection (any 4xx) archives the unverified claim instead of keeping it —
-otherwise a refused registration would permanently block the real owner.
-Archived claims are soft-deleted rows, never deleted history. An uncertain
-outcome (timeout, 5xx, malformed reply — the wallet may be registered)
-keeps the claim like a customer create: reconcile before another write.
-Verify the exact stored child's wallet registry before calling
-`linkWallet`. Requests naming a
-new HTTP key cannot bypass these domain claims.
+WisdomTree support. Wallet claims release the same way on a confirmed
+rejection — the owner address is unique per environment across every
+customer, so a refused registration must never block the real owner — while
+an uncertain outcome (timeout, 5xx, malformed reply — the wallet may be
+registered) keeps the claim like a customer create: reconcile before another
+write. Archived claims are soft-deleted rows, never deleted history. Verify
+the exact stored child's wallet registry before calling `linkWallet`.
+Requests naming a new HTTP key cannot bypass these domain claims.
 
 SSNs, CDD answers, document bytes and provider readback are never stored.
 Only immutable identity references, claim state, and encrypted upload-reference

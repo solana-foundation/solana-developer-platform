@@ -21,8 +21,13 @@ export function createPostgresEarnOnboardingRepository(
 ): EarnOnboardingRepository {
   return {
     async get(scope) {
+      // Only the live row: released claims stay as archived history (a scope
+      // may hold many), and the partial unique index guarantees at most one
+      // live row per scope.
       const row = await db
-        .prepare(`SELECT * FROM earn_onboarding_customers WHERE ${scopeWhere}`)
+        .prepare(
+          `SELECT * FROM earn_onboarding_customers WHERE ${scopeWhere} AND status <> 'archived'`
+        )
         .bind(...scopeValues(scope))
         .first<Record<string, unknown>>();
       return row === null ? null : earnOnboardingCustomerSchema.parse(row);
@@ -50,6 +55,16 @@ export function createPostgresEarnOnboardingRepository(
         .bind(input.organizationGuid, input.personGuid, ...scopeValues(scope), input.moderatorGuid)
         .first<Record<string, unknown>>();
       return row === null ? null : earnOnboardingCustomerSchema.parse(row);
+    },
+    async releaseClaim(scope) {
+      // Soft delete only: archiving the unverified claim keeps its history
+      // while freeing the scope for a corrected retry. A linked customer is
+      // confirmed and is never released.
+      await db
+        .prepare(`UPDATE earn_onboarding_customers SET status = 'archived', updated_at = sdp_iso_now()
+        WHERE ${scopeWhere} AND status = 'claimed'`)
+        .bind(...scopeValues(scope))
+        .run();
     },
     async claimWallet(scope, owner) {
       const row = await db

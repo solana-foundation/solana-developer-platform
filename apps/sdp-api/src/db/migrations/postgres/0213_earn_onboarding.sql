@@ -15,7 +15,6 @@ CREATE TABLE earn_onboarding_customers (
   status TEXT NOT NULL DEFAULT 'claimed' CHECK (status IN ('claimed', 'linked', 'archived')),
   created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
   updated_at TEXT NOT NULL DEFAULT sdp_iso_now(),
-  UNIQUE (organization_id, project_id, environment, provider, counterparty_id),
   UNIQUE (environment, provider, organization_guid),
   UNIQUE (environment, provider, person_guid),
   CHECK (organization_guid IS NULL OR organization_guid <> moderator_guid),
@@ -23,6 +22,12 @@ CREATE TABLE earn_onboarding_customers (
          (entity_type = 'individual' AND organization_guid IS NULL)),
   CHECK (status <> 'linked' OR organization_guid IS NOT NULL OR person_guid IS NOT NULL)
 );
+-- Soft delete only: released claims keep their history, so one scope may hold
+-- many archived rows. Only live claims and linked customers occupy the scope,
+-- so releasing a claim after a confirmed rejection frees it for a corrected
+-- retry without erasing anything.
+CREATE UNIQUE INDEX earn_onboarding_customers_active_scope_key ON earn_onboarding_customers
+  (organization_id, project_id, environment, provider, counterparty_id) WHERE status <> 'archived';
 CREATE TABLE earn_onboarding_documents (
   id TEXT PRIMARY KEY,
   organization_id TEXT NOT NULL,

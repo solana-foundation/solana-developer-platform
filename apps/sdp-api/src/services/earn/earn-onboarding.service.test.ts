@@ -250,6 +250,48 @@ describe("durable customer mapping", () => {
       reconciliationRequired: true,
     });
   });
+  it("releases the claim after a confirmed rejection so the corrected application can retry", async () => {
+    vi.spyOn(provider, "submitPerson").mockRejectedValueOnce(
+      new SdpEarnError("BAD_REQUEST", "invalid calendar date")
+    );
+    const input = onboardingApplicationSchema.parse({
+      application: {
+        entity_type: "retail",
+        first_name: "Jane",
+        last_name: "Doe",
+        email: "jane@example.com",
+        phone_number: "+12025550123",
+        date_of_birth: "01-31-1990",
+        tax_id: "666123456",
+        address: "123 Main",
+        city: "New York",
+        state: "NY",
+        postal_code: "10001",
+        country: "US",
+        primary_source_of_funds: "Savings",
+        agreement_set_version: "v1",
+        agreements: [{ key: "privacy", version: "v1", accepted: true }],
+      },
+    });
+    // A validation 400 (e.g. a date our regex passes but WisdomTree rejects)
+    // creates nothing, so the claim must not block the corrected retry.
+    await expect(service.save(scope, "individual", input)).rejects.toThrow("invalid calendar date");
+    expect(await repo.get(scope)).toBeNull();
+    vi.spyOn(provider, "submitPerson").mockResolvedValue({ person_guid: personGuid });
+    await service.save(scope, "individual", input);
+    expect(provider.submitPerson).toHaveBeenCalledTimes(2);
+    expect(await repo.get(scope)).toMatchObject({ status: "linked", person_guid: personGuid });
+    // The release is a soft delete: the first claim stays as archived history.
+    const history = await runWithDatabaseIdentity(
+      { kind: "tenant", organizationId: TEST_ORG.id },
+      () =>
+        db
+          .prepare("SELECT status FROM earn_onboarding_customers WHERE counterparty_id = ?")
+          .bind(scope.counterpartyId)
+          .all()
+    );
+    expect(history.results.map((row) => row.status).sort()).toEqual(["archived", "linked"]);
+  });
   it("recovers the saved child GUID on a partial 400, then resumes that same application", async () => {
     vi.spyOn(provider, "saveBusiness").mockRejectedValueOnce(
       new SdpEarnError("BAD_REQUEST", "partial save", { organization_guid: childGuid })

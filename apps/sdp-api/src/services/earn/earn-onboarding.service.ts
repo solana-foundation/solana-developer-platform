@@ -32,13 +32,13 @@ const storedDocumentReferenceSchema = z.object({
 });
 
 /**
- * WisdomTree processed and refused the registration (any 4xx), or the write
- * could never start (unconfigured credentials, thrown before any HTTP call):
+ * WisdomTree processed and refused the write (any 4xx), or the write could
+ * never start (unconfigured credentials, thrown before any HTTP call):
  * nothing was written, so the unverified claim can be released. Timeouts, 5xx
- * and malformed responses leave the outcome unknown — the wallet may be
- * registered — so those claims stay for reconciliation instead.
+ * and malformed responses leave the outcome unknown — the wallet or
+ * application may exist — so those claims stay for reconciliation instead.
  */
-function isConfirmedWalletRejection(error: SdpEarnError): boolean {
+function isConfirmedRejection(error: SdpEarnError): boolean {
   return (
     error.code === "BAD_REQUEST" ||
     error.code === "CONFLICT" ||
@@ -137,7 +137,6 @@ export class EarnOnboardingService {
     const moderator = await this.provider.getOnboardingModerator(this.runtime);
     if (moderator.guid !== row.moderator_guid)
       throw conflict("Onboarding provider credentials changed; reconcile the customer mapping");
-    if (row.status === "archived") throw conflict("Earn onboarding customer is archived");
     return { row, moderator };
   }
 
@@ -232,10 +231,17 @@ export class EarnOnboardingService {
     const reference = this.provider.onboardingRecoveryReferences(cause);
     if (claimed.entity_type === "business" && reference.organizationGuid !== undefined) {
       await this.link(scope, claimed, { organizationGuid: reference.organizationGuid });
+      return;
     }
     if (claimed.entity_type === "individual" && reference.personGuid !== undefined) {
       await this.link(scope, claimed, { personGuid: reference.personGuid });
+      return;
     }
+    // A confirmed rejection wrote nothing: release the unverified claim so a
+    // corrected application can retry. An uncertain outcome (timeout, 5xx,
+    // malformed reply) may have created the customer, so the claim stays for
+    // reconciliation — a retry must never double-submit it.
+    if (isConfirmedRejection(cause)) await this.repository.releaseClaim(scope);
   }
 
   async status(scope: EarnOnboardingScope) {
@@ -296,7 +302,7 @@ export class EarnOnboardingService {
       // cannot block the real owner; an uncertain outcome (timeout, 5xx,
       // malformed reply) keeps the claim — the provider may have accepted
       // the wallet.
-      if (error instanceof SdpEarnError && isConfirmedWalletRejection(error))
+      if (error instanceof SdpEarnError && isConfirmedRejection(error))
         await this.repository.releaseWallet(scope, owner);
       throw error;
     }
@@ -308,10 +314,7 @@ export class EarnOnboardingService {
   async upload(scope: EarnOnboardingScope, document: { documentType: string; file: File }) {
     const moderator = await this.provider.getOnboardingModerator(this.runtime);
     const existing = await this.repository.get(scope);
-    if (
-      existing !== null &&
-      (existing.moderator_guid !== moderator.guid || existing.status === "archived")
-    )
+    if (existing !== null && existing.moderator_guid !== moderator.guid)
       throw conflict("Onboarding customer cannot accept documents");
     const reference = await this.provider.uploadOnboardingDocument(this.runtime, document);
     const encrypted = await this.cipher.encrypt(this.documentAad(scope), JSON.stringify(reference));
