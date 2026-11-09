@@ -320,10 +320,16 @@ export function mergeOpenApiPlaygroundEndpoints(
 
   return [
     ...curatedEndpoints.map((endpoint) => {
-      const referenceEndpointId = generatedByKey.get(operationKey(endpoint))?.id;
-      return referenceEndpointId && referenceEndpointId !== endpoint.id
-        ? { ...endpoint, referenceEndpointId }
-        : endpoint;
+      const generated = generatedByKey.get(operationKey(endpoint));
+      const merged: ApiPlaygroundEndpointConfig = { ...endpoint };
+      if (generated !== undefined && generated.id !== endpoint.id) {
+        merged.referenceEndpointId = generated.id;
+      }
+      // A hand-authored form takes the route's key contract from the reference.
+      if (endpoint.takesIdempotencyKey === undefined && generated !== undefined) {
+        merged.takesIdempotencyKey = generated.takesIdempotencyKey;
+      }
+      return merged;
     }),
     ...missingEndpoints,
   ];

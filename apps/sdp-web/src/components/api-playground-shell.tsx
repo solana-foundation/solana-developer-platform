@@ -58,6 +58,11 @@ export interface ApiPlaygroundEndpointConfig {
   expectedResponse: unknown;
   /** The API family this endpoint belongs to, grouping the endpoint picker when set. */
   group?: string;
+  /**
+   * Whether the route takes an Idempotency-Key, from the public reference; a hand-authored form
+   * inherits it when merged. Unset, the snippets show a key on every write.
+   */
+  takesIdempotencyKey?: boolean;
 }
 
 export interface ApiPlaygroundMessage {
@@ -651,8 +656,9 @@ function useApiPlaygroundState({
             : null,
         // Keep existing dashboard snippets stable; the docs use each route's auth metadata.
         auth: "apiKey",
-        // Send keys every write; the displayed snippets keep their existing body rule.
-        takesIdempotencyKey: hasRequestBody(activeEndpoint?.method ?? "GET"),
+        // Every write is sent with a key; the snippet shows one only where the route takes it.
+        takesIdempotencyKey:
+          activeEndpoint?.takesIdempotencyKey ?? hasRequestBody(activeEndpoint?.method ?? "GET"),
       }),
     [activeEndpoint, effectiveApiBaseUrl, requestBody, resolvedPath]
   );
