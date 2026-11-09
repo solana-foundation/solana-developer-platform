@@ -1,5 +1,5 @@
 import { isIP } from "node:net";
-import { canonicalizeIpRange } from "@sdp/ip/ip-range";
+import { canonicalizeIpRange, parseIpRange } from "@sdp/ip/ip-range";
 import type { Context } from "hono";
 import type { Env } from "@/types/env";
 
@@ -78,7 +78,16 @@ export function truncateClientIp(ip: string | null): string | null {
   const version = isIP(ip);
   if (version === 4) return canonicalizeIpRange(`${ip}/24`);
   if (version !== 6) return null;
-  return canonicalizeIpRange(IPV4_MAPPED.test(ip) ? `${ip}/120` : `${ip}/48`);
+  return canonicalizeIpRange(isIpv4Mapped(ip) ? `${ip}/120` : `${ip}/48`);
 }
 
-const IPV4_MAPPED = /^::ffff:\d+\.\d+\.\d+\.\d+$/i;
+/** `::ffff:a.b.c.d` in any spelling (`::ffff:cb00:714d`, `0:0:0:0:0:ffff:…`). */
+function isIpv4Mapped(ip: string): boolean {
+  const groups = parseIpRange(ip)?.groups;
+  return (
+    groups !== undefined &&
+    groups.length === 8 &&
+    groups.slice(0, 5).every((group) => group === 0) &&
+    groups[5] === 0xffff
+  );
+}

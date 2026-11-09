@@ -182,16 +182,20 @@ function redactJsonDocument(value: string, nesting: number): string | undefined 
   return document.restoreNumbers(JSON.stringify(redacted));
 }
 
-/** Stands in for a number whose text a JSON round trip would change, until it is restored. */
+/**
+ * Stands in for a number whose text a JSON round trip would change, until it
+ * is restored. Each document gets its own random tag, so no string or key the
+ * document already holds can be taken for a mark.
+ */
 const NUMBER_TEXT_MARK = "\u0000sdp-number-text:";
 
-/** A mark as `JSON.stringify` writes it: `"\u0000sdp-number-text:<index>"`. */
-const MARKED_NUMBER = new RegExp(
-  `${JSON.stringify(NUMBER_TEXT_MARK)
+/** A document's marks as `JSON.stringify` writes them: `"<mark><index>"`. */
+function markedNumberPattern(mark: string): RegExp {
+  const escaped = JSON.stringify(mark)
     .slice(0, -1)
-    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\d+)"`,
-  "g"
-);
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`${escaped}(\\d+)"`, "g");
+}
 
 /** The source text the reviver sees, where the runtime gives it (JSON.parse source text access). */
 interface ReviverContext {
@@ -218,6 +222,7 @@ export interface JsonDocument {
  */
 export function parseJsonDocument(value: string): JsonDocument | undefined {
   const sources: string[] = [];
+  const mark = `${NUMBER_TEXT_MARK}${crypto.randomUUID()}:`;
   let exactNumbers = true;
   let parsed: JsonValue;
   try {
@@ -231,7 +236,7 @@ export function parseJsonDocument(value: string): JsonDocument | undefined {
       }
       if (JSON.stringify(item) === context.source) return item;
       sources.push(context.source);
-      return `${NUMBER_TEXT_MARK}${sources.length - 1}`;
+      return `${mark}${sources.length - 1}`;
     });
   } catch {
     // A document too deep for the reviver's recursion still parses plainly,
@@ -248,7 +253,10 @@ export function parseJsonDocument(value: string): JsonDocument | undefined {
     restoreNumbers: (text) =>
       sources.length === 0
         ? text
-        : text.replace(MARKED_NUMBER, (mark, index: string) => sources[Number(index)] ?? mark),
+        : text.replace(
+            markedNumberPattern(mark),
+            (marked, index: string) => sources[Number(index)] ?? marked
+          ),
   };
 }
 

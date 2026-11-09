@@ -948,6 +948,17 @@ describe("one JSON parse for every redaction pass", () => {
       '{"apiKey":"[REDACTED]","amount":12345678901234567890,"fee":1.50}'
     );
   });
+
+  // Greptile (#2833): a string or key spelled like a number mark became that number.
+  it("leaves strings and keys spelled like a number mark as they were", () => {
+    const lookalike = "\\u0000sdp-number-text:0";
+    assert.equal(
+      redactCredentialString(
+        `{"apiKey":"secret","amount":1.50,"label":"${lookalike}","${lookalike}":true}`
+      ),
+      `{"apiKey":"[REDACTED]","amount":1.50,"label":"${lookalike}","${lookalike}":true}`
+    );
+  });
 });
 
 // Greptile (#2833): a document too deep for the number-keeping reviver fell back
