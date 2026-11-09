@@ -331,6 +331,115 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       })
     ).toMatchObject({ batch_id: batch.id, recipient_ids: [first] });
   });
+
+  describe("counterparty accounts re-read at admission (HOO-2563)", () => {
+    const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+    const recipient = {
+      ...scope,
+      externalId: null,
+      counterpartyId: "cpty_batch_recheck",
+      counterpartyAccountId: "cpa_batch_recheck",
+      destinationAddress: "Dest111",
+      amount: "1",
+      status: "pending" as const,
+      error: null,
+      attemptId: "attempt-create",
+    };
+
+    beforeEach(async () => {
+      await seedProjectCryptoWalletCounterparty(getDb(env), {
+        ...scope,
+        createdBy: TEST_USER.id,
+        counterpartyId: recipient.counterpartyId,
+        counterpartyAccountId: recipient.counterpartyAccountId,
+        walletAddress: recipient.destinationAddress,
+      });
+    });
+
+    const archiveAccount = () =>
+      getDb(env)
+        .prepare("UPDATE counterparty_accounts SET status = 'archived' WHERE id = ?")
+        .bind(recipient.counterpartyAccountId)
+        .run();
+    const rotateAccount = () =>
+      getDb(env)
+        .prepare(
+          `UPDATE counterparty_accounts
+              SET details = jsonb_set(details, '{address}', '"Rotated111"')
+            WHERE id = ?`
+        )
+        .bind(recipient.counterpartyAccountId)
+        .run();
+    const create = (idempotencyKey: string) =>
+      repo.createTransferBatchWithRecipients({
+        batch: { ...baseInput, projectId: TEST_PROJECT_ID, idempotencyKey },
+        recipients: [recipient],
+      });
+    const batchCount = async () =>
+      (
+        await getDb(env)
+          .prepare("SELECT count(*)::int AS n FROM payment_transfer_batches")
+          .first<{ n: number }>()
+      )?.n;
+
+    it("refuses a create whose account was archived after authorize, writing nothing", async () => {
+      await archiveAccount();
+      await expect(create("recheck-archived")).rejects.toMatchObject({ code: "NOT_FOUND" });
+      expect(await batchCount()).toBe(0);
+    });
+
+    it("refuses a create whose account address rotated after authorize, writing nothing", async () => {
+      await rotateAccount();
+      await expect(create("recheck-rotated")).rejects.toMatchObject({
+        code: "TRANSFER_BATCH_DESTINATION_CHANGED",
+        details: { counterpartyAccountIds: [recipient.counterpartyAccountId] },
+      });
+      expect(await batchCount()).toBe(0);
+    });
+
+    for (const [change, apply, code] of [
+      ["archived", archiveAccount, "NOT_FOUND"],
+      ["rotated", rotateAccount, "TRANSFER_BATCH_DESTINATION_CHANGED"],
+    ] as const) {
+      it(`refuses a retry claim when the account was ${change}, leaving the recipient failed`, async () => {
+        const { batch, recipients } = await create(`recheck-retry-${change}`);
+        const [failed] = recipients.map((row) => row.id);
+        await repo.updateTransferRecipientsStatus({
+          ...scope,
+          recipientIds: [failed],
+          transferId: null,
+          status: "failed",
+          error: "rejected",
+        });
+        await apply();
+        await expect(
+          repo.claimFailedTransferRecipients({
+            ...scope,
+            batchId: batch.id,
+            recipientIds: [failed],
+            addedTransactionCount: 1,
+            attemptLastValidBlockHeight: 1_000n,
+            attemptId: "attempt-retry",
+            retry: {
+              idempotencyKey: `recheck-retry-key-${change}`,
+              idempotencyFingerprint: "retry-fingerprint",
+              initiatedByKeyId: null,
+            },
+          })
+        ).rejects.toMatchObject({ code });
+        expect(
+          await repo.getTransferRecipientById({ ...scope, recipientId: failed })
+        ).toMatchObject({ status: "failed" });
+        expect(
+          await repo.findTransferBatchRetryByIdempotency({
+            ...scope,
+            batchId: batch.id,
+            idempotencyKey: `recheck-retry-key-${change}`,
+          })
+        ).toBeNull();
+      });
+    }
+  });
 });
 
 describe("PaymentTransferBatchesRepository.listStrandedTransferBatches (postgres)", () => {
