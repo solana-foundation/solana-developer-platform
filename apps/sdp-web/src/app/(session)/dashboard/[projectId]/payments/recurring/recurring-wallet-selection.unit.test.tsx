@@ -380,7 +380,7 @@ describe("Recurring Payment edit form after a refresh (HOO-2562)", () => {
     expect(writes[0]).toEqual({ amount: "2", expectedUpdatedAt: recurring.updatedAt });
   });
 
-  // Greptile (#2831): the form stayed open and resent the stale version.
+  // Regression: the form stayed open and resent the stale version.
   it("closes when the API refuses its version, so the next edit starts from the current terms", async () => {
     const writes: unknown[] = [];
     vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {

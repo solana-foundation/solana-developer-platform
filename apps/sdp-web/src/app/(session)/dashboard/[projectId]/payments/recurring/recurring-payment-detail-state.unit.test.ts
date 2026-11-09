@@ -117,7 +117,7 @@ describe("refreshIfOutcomeUnknown", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  // Zach (#2831): a failed activation's reset moves the version, and without a
+  // Regression: a failed activation's reset moves the version, and without a
   // refresh every Activate retry was refused as stale until a manual reload.
   it("refreshes the page when the API refuses a version the page no longer shows", () => {
     const refresh = vi.fn();

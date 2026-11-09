@@ -937,7 +937,7 @@ describe("scrubTelemetry on serialized JSON (HOO-2570)", () => {
   });
 });
 
-// Zach (#2833): the credential pass parsed JSON on its own and rounded a number
+// Regression: the credential pass parsed JSON on its own and rounded a number
 // whenever a credential key in the same document needed redaction.
 describe("one JSON parse for every redaction pass", () => {
   it("keeps a number's digits when a credential sibling is redacted", () => {
@@ -949,7 +949,7 @@ describe("one JSON parse for every redaction pass", () => {
     );
   });
 
-  // Greptile (#2833): a string or key spelled like a number mark became that number.
+  // Regression: a string or key spelled like a number mark became that number.
   it("leaves strings and keys spelled like a number mark as they were", () => {
     const lookalike = "\\u0000sdp-number-text:0";
     assert.equal(
@@ -961,7 +961,7 @@ describe("one JSON parse for every redaction pass", () => {
   });
 });
 
-// Greptile (#2833): a document too deep for the number-keeping reviver fell back
+// Regression: a document too deep for the number-keeping reviver fell back
 // to the text patterns, which cannot decode an escaped credential key.
 describe("redaction of a document too deep for the reviver", () => {
   it("still redacts an escaped credential key by parsing the document plainly", () => {
