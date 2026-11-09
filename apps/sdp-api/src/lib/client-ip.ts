@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { canonicalizeIpRange, parseIpRange } from "@sdp/ip/ip-range";
 import type { Context } from "hono";
 import type { Env } from "@/types/env";
 
@@ -63,4 +64,30 @@ export function getClientIp(c: Context<{ Bindings: Env }>): string | null {
     return gatewayIdentity.clientIp;
   }
   return resolveClientIp({ get: (name) => c.req.header(name) ?? null }, c.env ?? {});
+}
+
+/**
+ * A client IP coarsened to its network: IPv4 to /24, IPv6 to /48, an
+ * IPv4-mapped IPv6 address as its IPv4 /24 (`canonicalizeIpRange` masks it).
+ * For records about callers SDP cannot identify, whose full address SDP has
+ * no need to keep (SDP-022 PA-6). Anything that is not
+ * an IP address comes back null.
+ */
+export function truncateClientIp(ip: string | null): string | null {
+  if (ip === null) return null;
+  const version = isIP(ip);
+  if (version === 4) return canonicalizeIpRange(`${ip}/24`);
+  if (version !== 6) return null;
+  return canonicalizeIpRange(isIpv4Mapped(ip) ? `${ip}/120` : `${ip}/48`);
+}
+
+/** `::ffff:a.b.c.d` in any spelling (`::ffff:cb00:714d`, `0:0:0:0:0:ffff:…`). */
+function isIpv4Mapped(ip: string): boolean {
+  const groups = parseIpRange(ip)?.groups;
+  return (
+    groups !== undefined &&
+    groups.length === 8 &&
+    groups.slice(0, 5).every((group) => group === 0) &&
+    groups[5] === 0xffff
+  );
 }

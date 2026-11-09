@@ -15,6 +15,7 @@ const SHARED_TABLES: Record<string, string> = {
   schema_migrations: "migration bookkeeping, created by the runner",
   users: "global identity; tenancy lives in organization_members/project_members",
   auth_user_identities: "global Clerk identity map keyed by user",
+  clerk_deleted_users: "global record of Clerk users Clerk deleted, keyed by Clerk user id (0221)",
   allowlist: "platform-operator allowlist, deliberately cross-tenant",
   earn_strategies: "shared yield catalog partitioned by environment",
   sponsorship_reconciliation_state: "singleton per-network failure counter",

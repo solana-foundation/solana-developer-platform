@@ -6,8 +6,15 @@ import {
 } from "@sdp/types/organizations";
 import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types/roles";
 import { z } from "zod";
-import type { DatabaseExecutor } from "@/db/client";
-import { AppError, conflict, missingAction, notFound, unauthorized } from "@/lib/errors";
+import type { DatabaseClient, DatabaseExecutor } from "@/db/client";
+import {
+  AppError,
+  conflict,
+  internalError,
+  missingAction,
+  notFound,
+  unauthorized,
+} from "@/lib/errors";
 
 export type MembershipChange =
   | { kind: "set_role"; memberId: string; role: OrganizationRole }
@@ -379,6 +386,211 @@ export async function organizationsReachingPerson(
     .bind(userId, ...emails)
     .all<{ organization_id: string }>();
   return rows.results.map((row) => row.organization_id);
+}
+
+/**
+ * The provider a deleted Clerk user's identity row moves to, so live lookups
+ * (`provider = 'clerk'`) no longer find it and only live identities hold off
+ * pseudonymization. The lasting record that Clerk deleted the user is
+ * `clerk_deleted_users` ({@link isDeletedClerkUser}).
+ */
+export const DELETED_CLERK_IDENTITY_PROVIDER = "clerk_deleted";
+
+/**
+ * Serializes, until the transaction ends, every write that maps or deletes
+ * one Clerk user: the mapping a `user.created` or `user.updated` writes and
+ * the tombstone `user.deleted` writes. Taken first in both, so a mapping
+ * either commits before the deletion tombstones it, or reads the tombstone
+ * and writes nothing.
+ *
+ * @param tx - The open transaction.
+ * @param clerkUserId - The Clerk user.
+ */
+export async function lockClerkUser(tx: DatabaseExecutor, clerkUserId: string): Promise<void> {
+  await tx.queryOne("SELECT pg_advisory_xact_lock(hashtext('sdp:clerk-user'), hashtext(?::text))", [
+    clerkUserId,
+  ]);
+}
+
+/**
+ * Whether Clerk deleted this Clerk user: `clerk_deleted_users` holds it, linked
+ * or not. Read it under {@link lockClerkUser} before writing a mapping.
+ *
+ * @param db - The database.
+ * @param clerkUserId - The Clerk user an event names.
+ */
+export async function isDeletedClerkUser(
+  db: DatabaseExecutor,
+  clerkUserId: string
+): Promise<boolean> {
+  const tombstone = await db.queryOne<{ clerk_user_id: string }>(
+    "SELECT clerk_user_id FROM clerk_deleted_users WHERE clerk_user_id = ?",
+    [clerkUserId]
+  );
+  return tombstone !== null;
+}
+
+/**
+ * Links a Clerk user SDP has not linked yet to the person its verified email
+ * belongs to, creating the person when none has it, inside the caller's
+ * transaction and {@link lockClerkUser} lock (HOO-2303). The person's row is
+ * locked by email, as cleanup locks it: a cleanup that committed first no
+ * longer matches the email, so a new person is created, and one that comes
+ * after waits for this link and sees a live identity.
+ *
+ * @param tx - The open transaction, holding the Clerk user's lock.
+ * @param params.clerkUserId - The Clerk user.
+ * @param params.email - Its verified primary email, lowercased.
+ * @param params.name - A name for a person created here.
+ * @returns The SDP person.
+ */
+export async function linkClerkIdentityWithin(
+  tx: DatabaseExecutor,
+  params: { clerkUserId: string; email: string; name?: string | null }
+): Promise<{ userId: string; email: string }> {
+  const byEmail = () =>
+    tx.queryOne<{ id: string; email: string }>(
+      "SELECT id, email FROM users WHERE email = ? FOR UPDATE",
+      [params.email]
+    );
+  let user = await byEmail();
+  if (user === null) {
+    await tx.execute(
+      `INSERT INTO users (id, email, name, email_verified, status)
+       VALUES (?, ?, ?, 1, 'active')
+       ON CONFLICT (email) DO NOTHING`,
+      [`usr_${crypto.randomUUID()}`, params.email, params.name ?? null]
+    );
+    user = await byEmail();
+  }
+  if (user === null) {
+    throw internalError("Unable to resolve the person for a Clerk user");
+  }
+  await tx.execute(
+    `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+     VALUES (?, 'clerk', ?, ?, ?)
+     ON CONFLICT (provider, provider_user_id)
+     DO UPDATE SET user_id = EXCLUDED.user_id, email = EXCLUDED.email, updated_at = sdp_datetime_now()`,
+    [`aui_${crypto.randomUUID()}`, params.clerkUserId, user.id, params.email]
+  );
+  return { userId: user.id, email: user.email };
+}
+
+/**
+ * {@link linkClerkIdentityWithin} in its own transaction under the Clerk
+ * user's lock, for sign-in: null when Clerk deleted the Clerk user, so a
+ * sign-in that raced its deletion stores nothing.
+ */
+export async function linkClerkIdentity(
+  db: DatabaseClient,
+  params: { clerkUserId: string; email: string; name?: string | null }
+): Promise<{ userId: string; email: string } | null> {
+  return db.transaction(async (tx) => {
+    await lockClerkUser(tx, params.clerkUserId);
+    if (await isDeletedClerkUser(tx, params.clerkUserId)) return null;
+    return linkClerkIdentityWithin(tx, params);
+  });
+}
+
+/** Records that Clerk deleted the Clerk user, inside the caller's transaction and lock. */
+async function insertDeletedClerkUser(tx: DatabaseExecutor, clerkUserId: string): Promise<void> {
+  await tx.execute(
+    "INSERT INTO clerk_deleted_users (clerk_user_id) VALUES (?) ON CONFLICT (clerk_user_id) DO NOTHING",
+    [clerkUserId]
+  );
+}
+
+/**
+ * Records that Clerk deleted the Clerk user, first and under its lock
+ * (HOO-2303), and reads the person it is linked to there. Once this commits,
+ * no mapping for the Clerk user can be written, and a mapping that committed
+ * before it is the one returned, so a deletion never misses a person linked
+ * while it waited. A Clerk user SDP never linked returns null: nothing of
+ * theirs is stored, and a late or retried `user.created` stores nothing.
+ *
+ * @param db - The database.
+ * @param clerkUserId - The Clerk user Clerk deleted.
+ * @returns The SDP person the Clerk user is linked to, or null.
+ */
+export async function recordDeletedClerkUser(
+  db: DatabaseClient,
+  clerkUserId: string
+): Promise<string | null> {
+  return db.transaction(async (tx) => {
+    await lockClerkUser(tx, clerkUserId);
+    await insertDeletedClerkUser(tx, clerkUserId);
+    const identity = await tx.queryOne<{ user_id: string }>(
+      "SELECT user_id FROM auth_user_identities WHERE provider = 'clerk' AND provider_user_id = ?",
+      [clerkUserId]
+    );
+    return identity?.user_id ?? null;
+  });
+}
+
+/**
+ * Tombstones a deleted Clerk user's identity and, once no live Clerk user is
+ * linked to the person, removes the details SDP no longer needs (SDP-001 SA-7,
+ * HOO-2303), all in one transaction: the email and name on `users`, the email
+ * on every identity they held, and the email on every invitation that is no
+ * longer pending sent to any of those addresses. The `users` row keeps its id
+ * under a pseudonym, so the audit log and the rows the person created still
+ * read as one person. Someone who signed up again keeps their email, which
+ * their new Clerk user signs in with; a tombstoned identity keeps its own
+ * email until then, so the last deletion still finds invitations sent to it.
+ *
+ * Run it after the person's memberships and pending invitations are mirrored:
+ * those read the emails this clears.
+ *
+ * @param db - The database.
+ * @param params.userId - The person.
+ * @param params.deletedClerkUserId - The Clerk user Clerk deleted.
+ * @returns Whether the person was pseudonymized.
+ */
+export async function pseudonymizeDeletedPerson(
+  db: DatabaseClient,
+  params: { userId: string; deletedClerkUserId: string }
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    await lockClerkUser(tx, params.deletedClerkUserId);
+    await insertDeletedClerkUser(tx, params.deletedClerkUserId);
+    const locked = await tx.queryOne<{ id: string }>(
+      "SELECT id FROM users WHERE id = ? FOR UPDATE",
+      [params.userId]
+    );
+    if (!locked) return false;
+    await tx.execute(
+      `UPDATE auth_user_identities SET provider = ?, updated_at = sdp_datetime_now()
+        WHERE provider = 'clerk' AND provider_user_id = ? AND user_id = ?`,
+      [DELETED_CLERK_IDENTITY_PROVIDER, params.deletedClerkUserId, params.userId]
+    );
+    const live = await tx.queryOne<{ count: number }>(
+      `SELECT count(*)::int AS count FROM auth_user_identities
+        WHERE user_id = ? AND provider <> ?`,
+      [params.userId, DELETED_CLERK_IDENTITY_PROVIDER]
+    );
+    if (live === null) {
+      throw internalError("Counting a person's live identities returned no row");
+    }
+    if (live.count > 0) return false;
+    const emails = await personEmails(tx, params.userId);
+    const pseudonym = `deleted+${params.userId}@users.invalid`;
+    if (emails.length > 0) {
+      await tx.execute(
+        `UPDATE invitations SET email = ?
+          WHERE status <> 'pending' AND LOWER(email) IN (${emails.map(() => "?").join(", ")})`,
+        [pseudonym, ...emails]
+      );
+    }
+    await tx.execute(
+      "UPDATE auth_user_identities SET email = NULL, updated_at = sdp_datetime_now() WHERE user_id = ?",
+      [params.userId]
+    );
+    await tx.execute("UPDATE users SET email = ?, name = NULL, status = 'deleted' WHERE id = ?", [
+      pseudonym,
+      params.userId,
+    ]);
+    return true;
+  });
 }
 
 /**
