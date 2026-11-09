@@ -13,10 +13,10 @@ import { reconcileVaultShareHoldings } from "@/services/earn/vault-share-reconci
 import { listReadableEarnVaultWallets } from "./vault";
 
 /**
- * GET /v1/earn/vault-share-reconciliation — custody share balances versus the
+ * GET /v1/earn/positions/provider-signed/share-reconciliation-report — custody share balances versus the
  * recorded claim set, both directions (PRO-1741).
  *
- * `GET /vault-positions` can only report what SDP recorded, and the recorded
+ * `GET /positions/provider-signed` can only report what SDP recorded, and the recorded
  * set can genuinely diverge from chain: `self_service` custody credentials let
  * an org sign from the same wallet outside SDP. This read enumerates each
  * scoped wallet's SPL balances, attributes share mints through the stored

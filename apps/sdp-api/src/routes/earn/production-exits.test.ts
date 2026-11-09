@@ -21,12 +21,12 @@ const EARN_ENTRY_ROUTES = [
   "POST /v1/earn/provider-actions/external/cancellation-transactions",
   "POST /v1/earn/provider-actions/external/preparations",
   "POST /v1/earn/provider-actions/external/cancellations",
-  "POST /v1/earn/vault-deposit-previews",
-  "POST /v1/earn/external-wallet/deposit-transactions",
-  "POST /v1/earn/vault-deposits",
-  "POST /v1/earn/external-wallet/deposits",
-  "POST /v1/earn/programs",
-  "PUT /v1/earn/programs/:programId",
+  "POST /v1/earn/deposits/preview",
+  "POST /v1/earn/deposits/build-unsigned-transaction",
+  "POST /v1/earn/deposits/execute",
+  "POST /v1/earn/deposits/submit-signed-transaction",
+  "POST /v1/earn/portfolio-accounts",
+  "PUT /v1/earn/portfolio-accounts/:programId/allocation",
 ];
 
 function earnRoutes(): Array<{ method: string; path: string }> {
@@ -83,16 +83,16 @@ describe("Earn exits without the production entitlement (APE-351, ADR 0002)", ()
   });
 
   it.each([
-    "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
-    "/v1/earn/external-wallet/withdrawal-request-cancellations",
-    "/v1/earn/vault-withdrawal-requests/request-id/cancel",
+    "/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
+    "/v1/earn/withdrawal-requests/cancel/submit-signed-transaction",
+    "/v1/earn/withdrawal-requests/request-id/cancel/execute",
   ])("keeps cancellation available as an exit: %s", (path) => {
     expect(isEarnExitOrRead("POST", path)).toBe(true);
   });
 
   it("refuses unknown methods and paths outside Earn", () => {
-    expect(isEarnExitOrRead("DELETE", "/v1/earn/vault-withdrawals")).toBe(false);
-    expect(isEarnExitOrRead("POST", "/v1/payments/transfers")).toBe(false);
-    expect(isEarnExitOrRead("POST", "/v1/earn/vault-withdrawals/extra")).toBe(false);
+    expect(isEarnExitOrRead("DELETE", "/v1/earn/withdrawals/provider-signed")).toBe(false);
+    expect(isEarnExitOrRead("POST", "/v1/payments/transfers/execute")).toBe(false);
+    expect(isEarnExitOrRead("POST", "/v1/earn/withdrawals/provider-signed/extra")).toBe(false);
   });
 });

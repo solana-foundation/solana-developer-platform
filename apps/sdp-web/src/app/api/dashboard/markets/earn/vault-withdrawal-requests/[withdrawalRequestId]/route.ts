@@ -8,6 +8,6 @@ export async function GET(
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.vault_withdrawal_requests.get",
-    path: `/v1/earn/vault-withdrawal-requests/${encodeURIComponent(withdrawalRequestId)}`,
+    path: `/v1/earn/withdrawal-requests/provider-signed/${encodeURIComponent(withdrawalRequestId)}`,
   });
 }

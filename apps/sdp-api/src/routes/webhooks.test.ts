@@ -39,7 +39,7 @@ async function simulateClerkWebhook(
     .digest("base64");
   const signature = `v1,${digest}`;
   return app.request(
-    "/webhooks/clerk/link-orgs",
+    "/webhooks/clerk",
     {
       method: "POST",
       headers: {

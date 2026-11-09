@@ -195,7 +195,7 @@ describe.each(RETIRED_RAMP_PROVIDERS)("retired ramp provider %s", (provider) => 
 
   it("refuses a quote that names it at validation", async () => {
     const res = await app.request(
-      "/v1/payments/ramps/onramp/quote",
+      "/v1/payments/ramps/onramp/start",
       {
         method: "POST",
         headers: { ...authorization, "Content-Type": "application/json" },

@@ -21,10 +21,10 @@ const MODULE_PROBES = {
     ["POST", "/v1/payments/subscriptions"],
   ],
   ramps: [
-    ["GET", "/v1/payments/ramps/onramp/currency"],
+    ["GET", "/v1/payments/ramps/onramp/supported-pairs"],
     ["POST", "/webhooks/payments/ramps/sandbox/moonpay"],
-    ["GET", "/v1/counterparties/cp_1/requirements"],
-    ["POST", "/v1/counterparties/cp_1/requirements"],
+    ["GET", "/v1/counterparties/cp_1/ramp-requirements"],
+    ["POST", "/v1/counterparties/cp_1/ramp-requirements/check"],
     ["GET", "/v1/counterparties/cp_1/provider-accounts"],
   ],
   compliance: [["POST", "/v1/compliance/address-screenings"]],
@@ -35,12 +35,12 @@ const MODULE_PROBES = {
   // Markets has no route of its own: it is the parent of Earn and DvP, and
   // leaving it out refuses both.
   markets: [
-    ["GET", "/v1/earn/movements"],
+    ["GET", "/v1/earn/treasury/movements"],
     ["GET", "/v1/dvp/trades"],
   ],
-  earn: [["GET", "/v1/earn/movements"]],
+  earn: [["GET", "/v1/earn/treasury/movements"]],
   dvp: [["GET", "/v1/dvp/trades"]],
-  private_channels: [["GET", "/v1/private-channels/health"]],
+  private_channels: [["GET", "/v1/private-channels/instance-connection/check-gateway-health"]],
   helius_rings: [
     ["GET", "/v1/helius-rings/health"],
     ["GET", "/internal/dashboard/helius-rings/connections"],

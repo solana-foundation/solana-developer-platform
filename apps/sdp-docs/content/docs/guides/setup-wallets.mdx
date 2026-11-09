@@ -53,9 +53,9 @@ A connection signs only with its current credentials. If you rotate or remove th
 
 #### 1. Set up the provider in the dashboard
 
-Setting up a custody provider takes `wallets.configure`, and no API key can hold a `configure` action. An organization admin sets it up once per project, signed in to the dashboard (see the **Dashboard** tab), which calls `POST /v1/wallets/initialize` with that session. The same call with an API key returns `403 INSUFFICIENT_PERMISSIONS` with `details.action` set to `wallets.configure`.
+Setting up a custody provider takes `wallets.configure`, and no API key can hold a `configure` action. An organization admin sets it up once per project, signed in to the dashboard (see the **Dashboard** tab), which calls `POST /v1/wallets/managed-signing/initialize-with-wallet` with that session. The same call with an API key returns `403 INSUFFICIENT_PERMISSIONS` with `details.action` set to `wallets.configure`.
 
-Production projects take only your own provider account. `POST /v1/wallets/initialize` sets up SDP's account of the provider (Managed custody), so in a Production project it returns `403` with `details.reason` set to `custody_mode_not_allowed`. Connect your own account to the project in the dashboard instead. Then create wallets in that connection with `connectionId`, using an API key that holds `wallets.manage`:
+Production projects take only your own provider account. `POST /v1/wallets/managed-signing/initialize-with-wallet` sets up SDP's account of the provider (Managed custody), so in a Production project it returns `403` with `details.reason` set to `custody_mode_not_allowed`. Connect your own account to the project in the dashboard instead. Then create wallets in that connection with `connectionId`, using an API key that holds `wallets.manage`:
 
 ```bash title="Terminal"
 export IDEMPOTENCY_KEY=$(uuidgen)

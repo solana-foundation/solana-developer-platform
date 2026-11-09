@@ -4,8 +4,8 @@
     "command": "pnpm -C apps/sdp-api playground:generate",
     "families": {
       "Health": 2,
-      "Wallets": 9,
-      "Projects": 4,
+      "Wallets": 10,
+      "Projects": 5,
       "Issuance": 37,
       "Payments": 41,
       "Compliance": 1,
@@ -14,7 +14,7 @@
       "Earn": 21
     },
     "modules": {
-      "wallets": 9,
+      "wallets": 10,
       "payments": 41,
       "counterparties": 13,
       "issuance": 37
@@ -22,6 +22,32 @@
   },
   "modules": {
     "wallets": [
+      {
+        "id": "initialize-wallet-signing",
+        "operationId": "initializeWalletSigning",
+        "title": "Initialize wallet signing",
+        "method": "POST",
+        "path": "/v1/wallets/managed-signing/initialize-with-wallet",
+        "pathFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"provider\": \"fireblocks\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "configId": "cfg_example",
+          "publicKey": "So11111111111111111111111111111111111111112",
+          "walletId": "privy_wallet_123"
+        },
+        "releaseModule": "custody",
+        "shadowedBy": []
+      },
       {
         "id": "create-wallet",
         "operationId": "createWallet",
@@ -60,7 +86,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "custody",
         "shadowedBy": []
       },
@@ -92,7 +117,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "custody",
         "shadowedBy": []
       },
@@ -202,16 +226,15 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "custody",
         "shadowedBy": []
       },
       {
         "id": "list-wallet-configs",
         "operationId": "listWalletConfigs",
-        "title": "List wallet signing configs",
+        "title": "List managed signing configurations",
         "method": "GET",
-        "path": "/v1/wallets/configs",
+        "path": "/v1/wallets/managed-signing/configurations",
         "pathFields": [],
         "bodyFields": [],
         "expectedResponse": {
@@ -232,7 +255,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "custody",
         "shadowedBy": []
       },
@@ -241,7 +263,7 @@
         "operationId": "aggregateWalletBalances",
         "title": "Aggregate wallet balances",
         "method": "GET",
-        "path": "/v1/wallets/aggregate?provider={provider}",
+        "path": "/v1/wallets/balances/aggregate?provider={provider}",
         "pathFields": [
           {
             "key": "provider",
@@ -313,7 +335,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "custody",
         "shadowedBy": []
       },
@@ -336,7 +357,6 @@
         "expectedResponse": {
           "publicKey": "So11111111111111111111111111111111111111112"
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "custody",
         "shadowedBy": []
       },
@@ -373,7 +393,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "custody",
         "shadowedBy": []
       },
@@ -431,9 +450,8 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "custody",
-        "shadowedBy": ["/v1/wallets/aggregate", "/v1/wallets/configs", "/v1/wallets/public-key"]
+        "shadowedBy": ["/v1/wallets/public-key"]
       },
       {
         "id": "update-wallet",
@@ -481,7 +499,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "custody",
         "shadowedBy": []
       }
@@ -535,16 +552,15 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
       {
         "id": "create-payment-transfer",
         "operationId": "createPaymentTransfer",
-        "title": "Execute transfer (custody)",
+        "title": "Execute a provider-signed transfer",
         "method": "POST",
-        "path": "/v1/payments/transfers",
+        "path": "/v1/payments/transfers/execute",
         "pathFields": [],
         "bodyFields": [
           {
@@ -638,7 +654,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -930,7 +945,6 @@
             "requestId": "req_example"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -1031,7 +1045,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -1049,7 +1062,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpacct_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"externalId\": \"payroll_2026_06_30\"\n}",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpacct_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  },\n  \"externalId\": \"payroll_2026_06_30\"\n}",
             "required": true
           }
         ],
@@ -1079,7 +1092,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -1088,7 +1100,7 @@
         "operationId": "createPaymentTransferBatch",
         "title": "Create transfer batch",
         "method": "POST",
-        "path": "/v1/payments/transfer-batches",
+        "path": "/v1/payments/transfer-batches/execute",
         "pathFields": [],
         "bodyFields": [
           {
@@ -1097,7 +1109,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpacct_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"externalId\": \"payroll_2026_06_30\"\n}",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpacct_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  },\n  \"externalId\": \"payroll_2026_06_30\"\n}",
             "required": true
           }
         ],
@@ -1216,118 +1228,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
-        "releaseModule": "payments",
-        "shadowedBy": []
-      },
-      {
-        "id": "list-payment-transfer-batches",
-        "operationId": "listPaymentTransferBatches",
-        "title": "List transfer batches",
-        "method": "GET",
-        "path": "/v1/payments/transfer-batches?sourceCustodyWalletId={sourceCustodyWalletId}&token={token}&status={status}&externalId={externalId}&page={page}&pageSize={pageSize}",
-        "pathFields": [
-          {
-            "key": "sourceCustodyWalletId",
-            "label": "sourceCustodyWalletId",
-            "description": "Filter by exact source SDP Wallet ID.",
-            "defaultValue": "cwlt_example",
-            "required": false
-          },
-          {
-            "key": "token",
-            "label": "token",
-            "description": "Filter by token symbol or mint.",
-            "defaultValue": "SOL",
-            "required": false
-          },
-          {
-            "key": "status",
-            "label": "status",
-            "description": "Filter by transfer batch status.",
-            "defaultValue": "processing",
-            "required": false,
-            "kind": "select",
-            "options": [
-              {
-                "label": "pending",
-                "value": "pending"
-              },
-              {
-                "label": "processing",
-                "value": "processing"
-              },
-              {
-                "label": "confirmed",
-                "value": "confirmed"
-              },
-              {
-                "label": "failed",
-                "value": "failed"
-              },
-              {
-                "label": "partially_failed",
-                "value": "partially_failed"
-              },
-              {
-                "label": "archived",
-                "value": "archived"
-              }
-            ]
-          },
-          {
-            "key": "externalId",
-            "label": "externalId",
-            "description": "Filter by caller-provided batch correlation ID.",
-            "defaultValue": "payroll_2026_06_30",
-            "required": false
-          },
-          {
-            "key": "page",
-            "label": "page",
-            "description": "Page number (1-based).",
-            "defaultValue": "1",
-            "required": false,
-            "valueType": "number"
-          },
-          {
-            "key": "pageSize",
-            "label": "pageSize",
-            "description": "Number of batches per page.",
-            "defaultValue": "20",
-            "required": false,
-            "valueType": "number"
-          }
-        ],
-        "bodyFields": [],
-        "expectedResponse": {
-          "data": [
-            {
-              "id": "xbatch_example",
-              "organizationId": "org_example",
-              "projectId": "prj_example",
-              "externalId": "payroll_2026_06_30",
-              "sourceCustodyWalletId": "cwlt_example",
-              "sourceProviderWalletId": "privy_wallet_123",
-              "sourceAddress": "So11111111111111111111111111111111111111112",
-              "token": "SOL",
-              "status": "processing",
-              "totalAmount": "1000.00",
-              "recipientCount": 20,
-              "transactionCount": 1,
-              "createdAt": "2025-01-01T00:00:00.000Z",
-              "updatedAt": "2025-01-01T00:00:00.000Z"
-            }
-          ],
-          "meta": {
-            "total": 1,
-            "page": 1,
-            "pageSize": 1,
-            "hasMore": false,
-            "requestId": "req_example"
-          }
-        },
-        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -1462,7 +1362,116 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
+        "releaseModule": "payments",
+        "shadowedBy": []
+      },
+      {
+        "id": "list-payment-transfer-batches",
+        "operationId": "listPaymentTransferBatches",
+        "title": "List transfer batches",
+        "method": "GET",
+        "path": "/v1/payments/transfer-batches?sourceCustodyWalletId={sourceCustodyWalletId}&token={token}&status={status}&externalId={externalId}&page={page}&pageSize={pageSize}",
+        "pathFields": [
+          {
+            "key": "sourceCustodyWalletId",
+            "label": "sourceCustodyWalletId",
+            "description": "Filter by exact source SDP Wallet ID.",
+            "defaultValue": "cwlt_example",
+            "required": false
+          },
+          {
+            "key": "token",
+            "label": "token",
+            "description": "Filter by token symbol or mint.",
+            "defaultValue": "SOL",
+            "required": false
+          },
+          {
+            "key": "status",
+            "label": "status",
+            "description": "Filter by transfer batch status.",
+            "defaultValue": "processing",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "pending",
+                "value": "pending"
+              },
+              {
+                "label": "processing",
+                "value": "processing"
+              },
+              {
+                "label": "confirmed",
+                "value": "confirmed"
+              },
+              {
+                "label": "failed",
+                "value": "failed"
+              },
+              {
+                "label": "partially_failed",
+                "value": "partially_failed"
+              },
+              {
+                "label": "archived",
+                "value": "archived"
+              }
+            ]
+          },
+          {
+            "key": "externalId",
+            "label": "externalId",
+            "description": "Filter by caller-provided batch correlation ID.",
+            "defaultValue": "payroll_2026_06_30",
+            "required": false
+          },
+          {
+            "key": "page",
+            "label": "page",
+            "description": "Page number (1-based).",
+            "defaultValue": "1",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "pageSize",
+            "label": "pageSize",
+            "description": "Number of batches per page.",
+            "defaultValue": "20",
+            "required": false,
+            "valueType": "number"
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": [
+            {
+              "id": "xbatch_example",
+              "organizationId": "org_example",
+              "projectId": "prj_example",
+              "externalId": "payroll_2026_06_30",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
+              "sourceAddress": "So11111111111111111111111111111111111111112",
+              "token": "SOL",
+              "status": "processing",
+              "totalAmount": "1000.00",
+              "recipientCount": 20,
+              "transactionCount": 1,
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-01T00:00:00.000Z"
+            }
+          ],
+          "meta": {
+            "total": 1,
+            "page": 1,
+            "pageSize": 1,
+            "hasMore": false,
+            "requestId": "req_example"
+          }
+        },
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -1597,7 +1606,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -1668,7 +1676,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -1792,7 +1799,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -1871,7 +1877,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -1940,7 +1945,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -1959,17 +1963,7 @@
             "required": true
           }
         ],
-        "bodyFields": [
-          {
-            "key": "$body",
-            "label": "JSON request body",
-            "description": "Generated from this operation's public OpenAPI request schema.",
-            "kind": "textarea",
-            "valueType": "json",
-            "defaultValue": "{}",
-            "required": false
-          }
-        ],
+        "bodyFields": [],
         "expectedResponse": {
           "data": {
             "recurringPayment": {
@@ -2019,7 +2013,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -2088,7 +2081,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -2144,7 +2136,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -2239,7 +2230,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -2292,7 +2282,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -2322,7 +2311,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -2375,7 +2363,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -2528,7 +2515,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -2597,7 +2583,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -2695,7 +2680,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -2745,7 +2729,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -2827,7 +2810,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -2836,7 +2818,7 @@
         "operationId": "preparePaymentSubscriptionPlanCreate",
         "title": "Prepare subscription plan creation",
         "method": "POST",
-        "path": "/v1/payments/subscription-plans/{planId}/prepare-create",
+        "path": "/v1/payments/subscription-plans/{planId}/create/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "planId",
@@ -2892,7 +2874,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -2940,7 +2921,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -2998,7 +2978,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -3048,7 +3027,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -3157,7 +3135,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -3166,7 +3143,7 @@
         "operationId": "preparePaymentSubscriptionAuthorization",
         "title": "Prepare subscription authorization",
         "method": "POST",
-        "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-authorization",
+        "path": "/v1/payments/subscriptions/{subscriptionId}/authorize/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -3223,7 +3200,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -3232,7 +3208,7 @@
         "operationId": "preparePaymentSubscriptionCancel",
         "title": "Prepare subscription cancellation",
         "method": "POST",
-        "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-cancel",
+        "path": "/v1/payments/subscriptions/{subscriptionId}/cancel/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -3287,7 +3263,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -3296,7 +3271,7 @@
         "operationId": "preparePaymentSubscriptionResume",
         "title": "Prepare subscription resume",
         "method": "POST",
-        "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-resume",
+        "path": "/v1/payments/subscriptions/{subscriptionId}/resume/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -3351,7 +3326,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -3360,7 +3334,7 @@
         "operationId": "preparePaymentSubscriptionCollection",
         "title": "Prepare subscription collection",
         "method": "POST",
-        "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-collection",
+        "path": "/v1/payments/subscriptions/{subscriptionId}/collect/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -3436,7 +3410,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -3484,7 +3457,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -3582,7 +3554,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -3591,7 +3562,7 @@
         "operationId": "listPaymentOnrampCurrencies",
         "title": "List on-ramp currency support",
         "method": "GET",
-        "path": "/v1/payments/ramps/onramp/currency?source={source}&dest={dest}&provider={provider}",
+        "path": "/v1/payments/ramps/onramp/supported-pairs?source={source}&dest={dest}&provider={provider}",
         "pathFields": [
           {
             "key": "source",
@@ -3820,7 +3791,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "ramps",
         "shadowedBy": []
       },
@@ -3829,7 +3799,7 @@
         "operationId": "listPaymentOfframpCurrencies",
         "title": "List off-ramp currency support",
         "method": "GET",
-        "path": "/v1/payments/ramps/offramp/currency?source={source}&dest={dest}&provider={provider}",
+        "path": "/v1/payments/ramps/offramp/supported-pairs?source={source}&dest={dest}&provider={provider}",
         "pathFields": [
           {
             "key": "source",
@@ -4058,16 +4028,15 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "ramps",
         "shadowedBy": []
       },
       {
         "id": "create-payment-onramp-quote",
         "operationId": "createPaymentOnrampQuote",
-        "title": "Create on-ramp quote",
+        "title": "Start on-ramp",
         "method": "POST",
-        "path": "/v1/payments/ramps/onramp/quote",
+        "path": "/v1/payments/ramps/onramp/start",
         "pathFields": [],
         "bodyFields": [
           {
@@ -4095,7 +4064,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "ramps",
         "shadowedBy": []
       },
@@ -4118,7 +4086,6 @@
           }
         ],
         "expectedResponse": {},
-        "takesIdempotencyKey": false,
         "releaseModule": "ramps",
         "shadowedBy": []
       },
@@ -4259,7 +4226,6 @@
             "nextCursor": "example"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       }
@@ -4270,7 +4236,7 @@
         "operationId": "getCounterpartyFieldOptions",
         "title": "Get counterparty field options",
         "method": "GET",
-        "path": "/v1/counterparties/metadata",
+        "path": "/v1/counterparties/field-options",
         "pathFields": [],
         "bodyFields": [],
         "expectedResponse": {
@@ -4290,7 +4256,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -4363,7 +4328,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -4405,7 +4369,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -4445,9 +4408,8 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "payments",
-        "shadowedBy": ["/v1/counterparties/accounts", "/v1/counterparties/metadata"]
+        "shadowedBy": ["/v1/counterparties/accounts", "/v1/counterparties/field-options"]
       },
       {
         "id": "update-counterparty",
@@ -4495,7 +4457,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -4516,7 +4477,6 @@
         ],
         "bodyFields": [],
         "expectedResponse": {},
-        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -4525,7 +4485,7 @@
         "operationId": "getCounterpartyRequirements",
         "title": "Get counterparty ramp requirements",
         "method": "GET",
-        "path": "/v1/counterparties/{counterpartyId}/requirements?provider={provider}&direction={direction}&assetRail={assetRail}&fiatCurrency={fiatCurrency}&destinationCustodyWalletId={destinationCustodyWalletId}",
+        "path": "/v1/counterparties/{counterpartyId}/ramp-requirements?provider={provider}&direction={direction}&assetRail={assetRail}&fiatCurrency={fiatCurrency}&destinationCustodyWalletId={destinationCustodyWalletId}",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -4734,7 +4694,7 @@
           {
             "key": "destinationCustodyWalletId",
             "label": "destinationCustodyWalletId",
-            "description": "Custody wallet ID (the `id` returned by the wallets API). Required when direction is onramp.",
+            "description": "Connected wallet ID (the `id` returned by the wallets API). Required when direction is onramp.",
             "defaultValue": "cwlt_example",
             "required": false
           }
@@ -4751,7 +4711,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "ramps",
         "shadowedBy": []
       },
@@ -4849,7 +4808,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -4903,7 +4861,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -5989,7 +5946,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "ramps",
         "shadowedBy": []
       },
@@ -6040,7 +5996,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -6101,7 +6056,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -6129,7 +6083,6 @@
         ],
         "bodyFields": [],
         "expectedResponse": {},
-        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       }
@@ -6167,7 +6120,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6209,7 +6161,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6299,7 +6250,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6507,7 +6457,6 @@
             "requestId": "req_example"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6539,7 +6488,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6658,7 +6606,6 @@
             "requestId": "req_example"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6818,7 +6765,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": ["/v1/issuance/tokens/facets"]
       },
@@ -6916,7 +6862,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6940,7 +6885,6 @@
           "name": "example",
           "symbol": "example"
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7028,7 +6972,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7174,7 +7117,6 @@
             "requestId": "req_example"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7238,7 +7180,6 @@
             "requestId": "req_example"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7247,7 +7188,7 @@
         "operationId": "deployToken",
         "title": "Deploy token",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/deploy",
+        "path": "/v1/issuance/tokens/{tokenId}/deploy/execute",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7336,7 +7277,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7345,7 +7285,7 @@
         "operationId": "prepareDeployToken",
         "title": "Prepare token deploy transaction",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/deploy/prepare",
+        "path": "/v1/issuance/tokens/{tokenId}/deploy/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7381,16 +7321,15 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
       {
         "id": "confirm-deploy",
         "operationId": "confirmDeploy",
-        "title": "Confirm non-custodial deploy",
+        "title": "Confirm a caller-signed deployment",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/deploy/confirm",
+        "path": "/v1/issuance/tokens/{tokenId}/deploy/confirm-submitted-transaction",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7479,7 +7418,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7488,7 +7426,7 @@
         "operationId": "prepareDeployMetadata",
         "title": "Prepare metadata-URI follow-up transaction",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata",
+        "path": "/v1/issuance/tokens/{tokenId}/deploy/metadata/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7519,7 +7457,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7528,7 +7465,7 @@
         "operationId": "prepareMint",
         "title": "Prepare mint transaction",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/mint/prepare",
+        "path": "/v1/issuance/tokens/{tokenId}/mint/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7588,7 +7525,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7597,7 +7533,7 @@
         "operationId": "executeMint",
         "title": "Execute mint",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/mint",
+        "path": "/v1/issuance/tokens/{tokenId}/mint/execute",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7646,7 +7582,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7655,7 +7590,7 @@
         "operationId": "prepareBurn",
         "title": "Prepare burn transaction",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/burn/prepare",
+        "path": "/v1/issuance/tokens/{tokenId}/burn/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7714,7 +7649,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7723,7 +7657,7 @@
         "operationId": "executeBurn",
         "title": "Execute burn",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/burn",
+        "path": "/v1/issuance/tokens/{tokenId}/burn/execute",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7771,7 +7705,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7780,7 +7713,7 @@
         "operationId": "prepareSeize",
         "title": "Prepare seize transaction",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/seize/prepare",
+        "path": "/v1/issuance/tokens/{tokenId}/seize/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7839,7 +7772,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7848,7 +7780,7 @@
         "operationId": "executeSeize",
         "title": "Execute seize",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/seize",
+        "path": "/v1/issuance/tokens/{tokenId}/seize/execute",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7896,7 +7828,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7905,7 +7836,7 @@
         "operationId": "prepareForceBurn",
         "title": "Prepare force burn transaction",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/force-burn/prepare",
+        "path": "/v1/issuance/tokens/{tokenId}/force-burn/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7964,7 +7895,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7973,7 +7903,7 @@
         "operationId": "executeForceBurn",
         "title": "Execute force burn",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/force-burn",
+        "path": "/v1/issuance/tokens/{tokenId}/force-burn/execute",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8021,7 +7951,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8030,7 +7959,7 @@
         "operationId": "prepareUpdateAuthority",
         "title": "Prepare authority update",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/authority/prepare",
+        "path": "/v1/issuance/tokens/{tokenId}/authority/update/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8089,7 +8018,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8098,7 +8026,7 @@
         "operationId": "executeUpdateAuthority",
         "title": "Execute authority update",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/authority",
+        "path": "/v1/issuance/tokens/{tokenId}/authority/update/execute",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8146,7 +8074,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8203,7 +8130,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8260,7 +8186,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8269,7 +8194,7 @@
         "operationId": "freezeAccount",
         "title": "Freeze account",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/freeze",
+        "path": "/v1/issuance/tokens/{tokenId}/freeze-account",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8309,7 +8234,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8318,7 +8242,7 @@
         "operationId": "unfreezeAccount",
         "title": "Unfreeze account",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/unfreeze",
+        "path": "/v1/issuance/tokens/{tokenId}/unfreeze-account",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8358,7 +8282,6 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8367,7 +8290,7 @@
         "operationId": "listFrozenAccounts",
         "title": "List frozen accounts",
         "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}/frozen?page={page}&pageSize={pageSize}",
+        "path": "/v1/issuance/tokens/{tokenId}/frozen-accounts?page={page}&pageSize={pageSize}",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8416,16 +8339,15 @@
             "requestId": "req_example"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
       {
         "id": "list-token-allowlist",
         "operationId": "listTokenAllowlist",
-        "title": "List token allowlist",
+        "title": "List token control list",
         "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}/allowlist?page={page}&pageSize={pageSize}&search={search}&label={label}",
+        "path": "/v1/issuance/tokens/{tokenId}/control-list?page={page}&pageSize={pageSize}&search={search}&label={label}",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8487,16 +8409,15 @@
             "requestId": "req_example"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
       {
         "id": "add-token-allowlist-entry",
         "operationId": "addTokenAllowlistEntry",
-        "title": "Add token allowlist entry",
+        "title": "Add token control-list entry",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/allowlist",
+        "path": "/v1/issuance/tokens/{tokenId}/control-list",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8535,16 +8456,15 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
       {
         "id": "list-token-allowlist-labels",
         "operationId": "listTokenAllowlistLabels",
-        "title": "List token allowlist labels",
+        "title": "List token control-list labels",
         "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}/allowlist/labels",
+        "path": "/v1/issuance/tokens/{tokenId}/control-list/labels",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8565,16 +8485,15 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
       {
         "id": "remove-token-allowlist-entry",
         "operationId": "removeTokenAllowlistEntry",
-        "title": "Remove token allowlist entry",
+        "title": "Remove token control-list entry",
         "method": "DELETE",
-        "path": "/v1/issuance/tokens/{tokenId}/allowlist/{entryId}?signingCustodyWalletId={signingCustodyWalletId}",
+        "path": "/v1/issuance/tokens/{tokenId}/control-list/{entryId}?signingCustodyWalletId={signingCustodyWalletId}",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8593,23 +8512,22 @@
           {
             "key": "signingCustodyWalletId",
             "label": "signingCustodyWalletId",
-            "description": "Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Database-only lists do not require a signer.",
+            "description": "Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope wallet record; multiple matches return 409. Database-only lists do not require a signer.",
             "defaultValue": "cwlt_example",
             "required": false
           }
         ],
         "bodyFields": [],
         "expectedResponse": {},
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
       {
         "id": "list-holders",
         "operationId": "listHolders",
-        "title": "List verified holders",
+        "title": "List holder enrollments",
         "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}/holders",
+        "path": "/v1/issuance/tokens/{tokenId}/holder-enrollments",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8626,16 +8544,15 @@
           },
           "meta": {}
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
       {
         "id": "enroll-holder",
         "operationId": "enrollHolder",
-        "title": "Enroll a verified holder",
+        "title": "Enroll a holder",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/holders",
+        "path": "/v1/issuance/tokens/{tokenId}/holder-enrollments",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8662,7 +8579,6 @@
           },
           "meta": {}
         },
-        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       }
@@ -8931,12 +8847,12 @@
   "channelOverrides": {
     "experimental": {},
     "beta": {
-      "POST /v1/payments/transfers": {
+      "POST /v1/payments/transfers/execute": {
         "id": "create-payment-transfer",
         "operationId": "createPaymentTransfer",
-        "title": "Execute transfer (custody)",
+        "title": "Execute a provider-signed transfer",
         "method": "POST",
-        "path": "/v1/payments/transfers",
+        "path": "/v1/payments/transfers/execute",
         "pathFields": [],
         "bodyFields": [
           {
@@ -8995,8 +8911,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "takesIdempotencyKey": true
+        }
       },
       "GET /v1/payments/transfers": {
         "id": "list-payment-transfers",
@@ -9221,8 +9136,7 @@
             "hasMore": false,
             "requestId": "req_example"
           }
-        },
-        "takesIdempotencyKey": false
+        }
       },
       "GET /v1/payments/transfers/{transferId}": {
         "id": "get-payment-transfer",
@@ -9286,15 +9200,14 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "takesIdempotencyKey": false
+        }
       },
-      "POST /v1/payments/transfer-batches": {
+      "POST /v1/payments/transfer-batches/execute": {
         "id": "create-payment-transfer-batch",
         "operationId": "createPaymentTransferBatch",
         "title": "Create transfer batch",
         "method": "POST",
-        "path": "/v1/payments/transfer-batches",
+        "path": "/v1/payments/transfer-batches/execute",
         "pathFields": [],
         "bodyFields": [
           {
@@ -9303,7 +9216,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpacct_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"externalId\": \"payroll_2026_06_30\"\n}",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpacct_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  },\n  \"externalId\": \"payroll_2026_06_30\"\n}",
             "required": true
           }
         ],
@@ -9387,8 +9300,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "takesIdempotencyKey": true
+        }
       },
       "POST /v1/payments/transfer-batches/{batchId}/retry": {
         "id": "retry-payment-transfer-batch",
@@ -9486,8 +9398,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "takesIdempotencyKey": true
+        }
       },
       "GET /v1/payments/transfer-batches/{batchId}": {
         "id": "get-payment-transfer-batch",
@@ -9585,8 +9496,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "takesIdempotencyKey": false
+        }
       },
       "POST /v1/payments/recurring-payments/{id}/collect": {
         "id": "collect-payment-recurring-payment",
@@ -9702,8 +9612,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "takesIdempotencyKey": true
+        }
       },
       "GET /v1/transactions": {
         "id": "list-unified-transactions",
@@ -9825,11 +9734,34 @@
             ],
             "nextCursor": "example"
           }
-        },
-        "takesIdempotencyKey": false
+        }
       }
     },
     "stable": {
+      "POST /v1/wallets/managed-signing/initialize-with-wallet": {
+        "id": "initialize-wallet-signing",
+        "operationId": "initializeWalletSigning",
+        "title": "Initialize wallet signing",
+        "method": "POST",
+        "path": "/v1/wallets/managed-signing/initialize-with-wallet",
+        "pathFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"provider\": \"privy\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "configId": "cfg_example",
+          "publicKey": "So11111111111111111111111111111111111111112",
+          "walletId": "privy_wallet_123"
+        }
+      },
       "GET /v1/wallets": {
         "id": "list-wallets",
         "operationId": "listWallets",
@@ -9903,15 +9835,14 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "takesIdempotencyKey": false
+        }
       },
-      "GET /v1/wallets/aggregate": {
+      "GET /v1/wallets/balances/aggregate": {
         "id": "aggregate-wallet-balances",
         "operationId": "aggregateWalletBalances",
         "title": "Aggregate wallet balances",
         "method": "GET",
-        "path": "/v1/wallets/aggregate?provider={provider}",
+        "path": "/v1/wallets/balances/aggregate?provider={provider}",
         "pathFields": [
           {
             "key": "provider",
@@ -9950,15 +9881,14 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "takesIdempotencyKey": false
+        }
       },
-      "POST /v1/payments/transfers": {
+      "POST /v1/payments/transfers/execute": {
         "id": "create-payment-transfer",
         "operationId": "createPaymentTransfer",
-        "title": "Execute transfer (custody)",
+        "title": "Execute a provider-signed transfer",
         "method": "POST",
-        "path": "/v1/payments/transfers",
+        "path": "/v1/payments/transfers/execute",
         "pathFields": [],
         "bodyFields": [
           {
@@ -10012,8 +9942,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "takesIdempotencyKey": true
+        }
       },
       "GET /v1/payments/transfers": {
         "id": "list-payment-transfers",
@@ -10233,8 +10162,7 @@
             "hasMore": false,
             "requestId": "req_example"
           }
-        },
-        "takesIdempotencyKey": false
+        }
       },
       "GET /v1/payments/transfers/{transferId}": {
         "id": "get-payment-transfer",
@@ -10293,15 +10221,14 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "takesIdempotencyKey": false
+        }
       },
-      "POST /v1/payments/transfer-batches": {
+      "POST /v1/payments/transfer-batches/execute": {
         "id": "create-payment-transfer-batch",
         "operationId": "createPaymentTransferBatch",
         "title": "Create transfer batch",
         "method": "POST",
-        "path": "/v1/payments/transfer-batches",
+        "path": "/v1/payments/transfer-batches/execute",
         "pathFields": [],
         "bodyFields": [
           {
@@ -10310,7 +10237,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpacct_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"externalId\": \"payroll_2026_06_30\"\n}",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpacct_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  },\n  \"externalId\": \"payroll_2026_06_30\"\n}",
             "required": true
           }
         ],
@@ -10389,8 +10316,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "takesIdempotencyKey": true
+        }
       },
       "POST /v1/payments/transfer-batches/{batchId}/retry": {
         "id": "retry-payment-transfer-batch",
@@ -10483,8 +10409,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "takesIdempotencyKey": true
+        }
       },
       "GET /v1/payments/transfer-batches/{batchId}": {
         "id": "get-payment-transfer-batch",
@@ -10577,8 +10502,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "takesIdempotencyKey": false
+        }
       },
       "POST /v1/payments/recurring-payments/{id}/collect": {
         "id": "collect-payment-recurring-payment",
@@ -10689,8 +10613,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "takesIdempotencyKey": true
+        }
       },
       "GET /v1/transactions": {
         "id": "list-unified-transactions",
@@ -10808,8 +10731,7 @@
             ],
             "nextCursor": "example"
           }
-        },
-        "takesIdempotencyKey": false
+        }
       }
     }
   }

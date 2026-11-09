@@ -340,7 +340,7 @@ export async function createRingsZone(c: AppContext) {
 
 // --- operations ---------------------------------------------------------------
 
-/** POST /operations — reserve the intent and run it. */
+/** POST /operations/execute — reserve the intent and run it. */
 export async function prepareRingsOperation(c: AppContext) {
   const parsed = prepareRingsOperationSchema.safeParse(await c.req.json());
   if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "invalid body");
@@ -379,7 +379,7 @@ export async function getRingsOperation(c: AppContext) {
 }
 
 /**
- * POST /operations/:operationId/execute — advance an operation a crash left
+ * POST /operations/:operationId/resume-execution — advance an operation a crash left
  * mid-pipeline. The request carries no body worth trusting.
  */
 export async function executeRingsOperation(c: AppContext) {

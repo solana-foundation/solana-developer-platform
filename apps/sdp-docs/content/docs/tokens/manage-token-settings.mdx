@@ -74,7 +74,7 @@ On **Permissions**, click **Edit** beside the authority. Pick another wallet, or
 SDP signs the rotation:
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority/update/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: rotate-001" \

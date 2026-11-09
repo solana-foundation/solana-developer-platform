@@ -31,8 +31,8 @@ token; every Earn route does.
 
 ## Internal Routes (Maintainers Only)
 
-- `/admin/allowlist/*` — Admin allowlist management
-- `/webhooks/clerk/link-orgs` — Clerk org sync webhook
+- `/admin/onboarding-allowlist/*` — Admin allowlist management
+- `/webhooks/clerk` — Clerk org sync webhook
 - `/v1/organizations/*` — Multi-tenant org management (internal)
 - `/v1/members/*` — Team member management (internal)
 - `/v1/onboarding/*` — Internal onboarding status
