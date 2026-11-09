@@ -307,6 +307,7 @@ function submitResult(overrides: Record<string, unknown> = {}) {
     // The wire's tokenMint/tokenAmount come from the position's deposit token.
     position: { id: "earn_position_ext_test", token_mint: USDC_MINT },
     movement: {
+      provider_data: {},
       id: movementId,
       position_id: "earn_position_ext_test",
       provider: "kamino",

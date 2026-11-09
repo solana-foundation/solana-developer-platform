@@ -79,6 +79,16 @@
       "import": "./src/types.ts",
       "default": "./src/types.ts"
     },
+    "./providers/plume/client": {
+      "types": "./src/providers/plume/client.ts",
+      "import": "./src/providers/plume/client.ts",
+      "default": "./src/providers/plume/client.ts"
+    },
+    "./providers/plume/api": {
+      "types": "./src/providers/plume/api.ts",
+      "import": "./src/providers/plume/api.ts",
+      "default": "./src/providers/plume/api.ts"
+    },
     "./providers/wisdomtree/onboarding": {
       "types": "./src/providers/wisdomtree/onboarding.ts",
       "import": "./src/providers/wisdomtree/onboarding.ts",

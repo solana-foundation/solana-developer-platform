@@ -1,0 +1,38 @@
+{
+  "name": "@sdp/plume",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./client": {
+      "types": "./src/client.ts",
+      "import": "./src/client.ts",
+      "default": "./src/client.ts"
+    },
+    "./types": {
+      "types": "./src/types.ts",
+      "import": "./src/types.ts",
+      "default": "./src/types.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "biome check src/"
+  },
+  "dependencies": {
+    "@sdp/earn": "workspace:*",
+    "@sdp/rpc": "workspace:*",
+    "@sdp/solana": "workspace:*",
+    "@sdp/types": "workspace:*",
+    "@solana/kit": "catalog:",
+    "@solana-program/token": "catalog:",
+    "zod": "4.6.7",
+    "@sdp/payments": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.2",
+    "typescript": "6.0.3",
+    "vitest": "4.1.12"
+  }
+}

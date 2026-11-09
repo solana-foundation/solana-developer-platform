@@ -54,6 +54,7 @@ import {
   EarnRowIdentity,
   EarnSummary,
 } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-page-blocks";
+import { EarnProviderOrdersCard } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-provider-orders-card";
 import {
   type EarnProviderAccess,
   earnVaultDepositAvailability,
@@ -1719,6 +1720,7 @@ export function TreasuryWorkspaceContent({
         withdrawals={vaultWithdrawals}
       />
       <EarnVaultWithdrawalRequestsCard onChanged={onHoldingsChanged} />
+      <EarnProviderOrdersCard onChanged={onHoldingsChanged} />
       <TreasuryStrategies
         devnetFailed={devnetCatalogueFailed}
         devnetLoading={devnetCatalogueLoading}

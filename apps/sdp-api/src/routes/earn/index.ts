@@ -73,6 +73,7 @@ import {
   listEarnVaultWithdrawals,
 } from "./handlers/vault";
 import { getEarnVaultShareReconciliation } from "./handlers/vault-reconciliation";
+import { providerActions } from "./provider-actions";
 import {
   earnExternalWalletDepositTransactionSchema,
   earnExternalWalletQueuedWithdrawalPreviewSchema,
@@ -151,6 +152,8 @@ earn.use("*", projectContextMiddleware(earnProjectContextOptions));
 //
 // Money-IN carries no such rule, so the deposit quote and the external-wallet
 // deposit build are metered.
+earn.route("/provider-actions", providerActions);
+
 // Strategy catalogue (source: DB, admitted only by the sync cron), read in
 // the caller's project environment.
 earn.get("/strategies", requireAction("earn.read"), cacheEarnCatalogue, listEarnStrategies);

@@ -218,6 +218,28 @@ const WALLET_SCOPE_ROUTES = {
   "POST /v1/earn/onboarding/wisdomtree/:counterpartyId/wallets": {
     exempt: "registers a wallet with the provider; signs nothing",
   },
+  "POST /v1/earn/provider-actions/preparations": {
+    refusedEarly: {
+      file: "routes/earn.provider-actions-wallet-scope.test.ts",
+      test: "refuses a preparation for a custody wallet outside the key's scope before creating the action",
+    },
+  },
+  "POST /v1/earn/provider-actions/cancellations": {
+    refusedEarly: {
+      file: "routes/earn.provider-actions-wallet-scope.test.ts",
+      test: "refuses a cancellation whose custody wallet is outside the key's scope before creating the action",
+    },
+  },
+  // The external provider-action routes build for and submit the caller's own
+  // signed transaction; the custody wallet stays out of the signing path.
+  "POST /v1/earn/provider-actions/external/preparation-transactions": {
+    exempt: SPONSOR_ONLY,
+  },
+  "POST /v1/earn/provider-actions/external/cancellation-transactions": {
+    exempt: SPONSOR_ONLY,
+  },
+  "POST /v1/earn/provider-actions/external/preparations": { exempt: SPONSOR_ONLY },
+  "POST /v1/earn/provider-actions/external/cancellations": { exempt: SPONSOR_ONLY },
 
   // Issuance
   "POST /v1/issuance/tokens/:tokenId/burn": { refusedEarly: ISSUANCE_BURN },

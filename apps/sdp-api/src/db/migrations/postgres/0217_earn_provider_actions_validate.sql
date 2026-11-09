@@ -1,0 +1,4 @@
+ALTER TABLE earn_provider_actions VALIDATE CONSTRAINT earn_provider_actions_org_fk;
+ALTER TABLE earn_provider_actions VALIDATE CONSTRAINT earn_provider_actions_project_fk;
+ALTER TABLE earn_provider_actions VALIDATE CONSTRAINT earn_provider_actions_parent_fk;
+ALTER TABLE earn_provider_actions VALIDATE CONSTRAINT earn_provider_actions_wallet_fk;

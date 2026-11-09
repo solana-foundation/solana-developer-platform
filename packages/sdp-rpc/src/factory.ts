@@ -29,8 +29,10 @@ import {
 import {
   MANAGED_RPC_ENV_KEYS,
   MANAGED_RPC_HOSTS,
+  managedRpcSlotUrl,
   PUBLIC_CLUSTER_HOSTS,
 } from "./managed-rpc-env-keys";
+import { withRpcReadContext } from "./read-context";
 import { currentClusterScope } from "./scope";
 import { withReadSocketRetry } from "./socket-retry";
 import {
@@ -541,7 +543,7 @@ function createPoolTransport(endpoints: readonly RpcEndpoint[]) {
  * never another cluster's.
  *
  * @param cluster - The cluster whose pool to read.
- * @returns Every non-empty `SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL` value, possibly none.
+ * @returns Every filled `SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL` value (`managedRpcSlotUrl`), possibly none.
  * @throws RpcUnavailableError `not_configured` when a value isn't an https URL on its slot's host.
  */
 function configuredEndpointUrls(cluster: SolanaCluster): string[] {
@@ -569,7 +571,7 @@ function configuredPoolEndpoints(
   );
   return providers.flatMap((provider) => {
     const envKey = envKeys[provider];
-    const endpointUrl = process.env[envKey];
+    const endpointUrl = managedRpcSlotUrl(envKey);
     if (!endpointUrl) return [];
     assertManagedEndpointUrl(cluster, provider, envKey, endpointUrl);
     return [{ provider, endpointUrl }];
@@ -682,7 +684,7 @@ function assertManagedEndpointUrl(
  * The configured endpoint URLs for `cluster`, in failover order.
  *
  * @param cluster - The cluster whose pool to read.
- * @returns Every non-empty `SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL` value.
+ * @returns Every filled `SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL` value (`managedRpcSlotUrl`).
  * @throws RpcUnavailableError `not_configured` when the cluster has no endpoint configured.
  */
 function managedEndpointUrls(cluster: SolanaCluster): string[] {
@@ -745,7 +747,7 @@ export function createClusterRpc(options?: ClusterRpcOptions): SolanaRpc {
   const memoizedRpc = boundedRpcs.get(clientKey);
   if (memoizedRpc) return memoizedRpc;
   const rpc = createSolanaRpcFromTransport(
-    withTransportDeadline(poolTransport, options.timeoutMs, "caller")
+    withTransportDeadline(withRpcReadContext(poolTransport), options.timeoutMs, "caller")
   );
   boundedRpcs.set(clientKey, rpc);
   return rpc;
@@ -763,7 +765,7 @@ export function createClusterRpc(options?: ClusterRpcOptions): SolanaRpc {
  */
 export function createClusterHistoryRpc(): SolanaRpc {
   const { cluster } = currentClusterScope();
-  const heliusUrl = process.env[MANAGED_RPC_ENV_KEYS[cluster].helius];
+  const heliusUrl = managedRpcSlotUrl(MANAGED_RPC_ENV_KEYS[cluster].helius);
   const endpointUrls = managedEndpointUrls(cluster);
   return pooledClusterRpc(
     cluster,
@@ -1027,7 +1029,10 @@ function pooledClusterRpc(
   const { poolKey, poolTransport } = pooledClusterTransport(cluster, endpointUrls, memo.transports);
   const memoizedRpc = memo.rpcs.get(poolKey);
   if (memoizedRpc) return memoizedRpc;
-  const rpc = createSolanaRpcFromTransport(poolTransport);
+  // The shared confirmation context (`withMinimumRpcSlot`) is a no-op without a
+  // scope, so unscoped callers are unchanged; a scoped read injects its
+  // `minContextSlot` and observes the returned bank here, at the pool boundary.
+  const rpc = createSolanaRpcFromTransport(withRpcReadContext(poolTransport));
   memo.rpcs.set(poolKey, rpc);
   return rpc;
 }

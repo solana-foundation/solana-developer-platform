@@ -29,7 +29,7 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
   }'
 ```
 
-Each recipient names a counterparty account (`cpacct_…`) that is an active `crypto_wallet` account in the project. `counterpartyId` is optional; if you pass it, it must be that account's counterparty. An unknown, archived or mismatched account returns `404`. A batch takes up to 500 recipients.
+Each recipient names a counterparty account (`cpacct_…`) that is an active `crypto_wallet` account in the project. `counterpartyId` is optional; if you pass it, it must be that account's counterparty. An unknown, archived or mismatched account returns `404`. An account whose address changes while the batch is being prepared returns `409 TRANSFER_BATCH_DESTINATION_CHANGED` naming it in `error.details.counterpartyAccountIds`; nothing is sent, so send the request again. A batch takes up to 500 recipients.
 
 The two ids do different jobs:
 

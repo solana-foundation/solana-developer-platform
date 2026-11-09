@@ -3,9 +3,13 @@ import type {
   EarnLiveMetricsProvider,
   EarnOnboardingProvider,
   EarnPortfolioWalletProvider,
+  EarnProviderOrderCancellationProvider,
+  EarnProviderRedemptionModesProvider,
+  EarnProviderSettlementProvider,
   EarnVaultDepositQuoteProvider,
   EarnVaultDirectProvider,
   EarnVaultParRedemptionProvider,
+  EarnVaultPreparationProvider,
   EarnVaultProvider,
   EarnVaultProviderOrderWithdrawProvider,
   EarnVaultQueuedWithdrawProvider,
@@ -13,6 +17,45 @@ import type {
   EarnVaultWithdrawQuoteProvider,
   EarnWithdrawalApprovalProvider,
 } from "./types";
+
+export function supportsProviderSettlement(
+  client: EarnVaultProvider
+): client is EarnProviderSettlementProvider {
+  // SAFETY: the capability is narrowed only after testing its method's presence.
+  return (
+    typeof (client as Partial<EarnProviderSettlementProvider>).readProviderSettlement === "function"
+  );
+}
+
+export function supportsProviderRedemptionModes(
+  client: EarnVaultProvider
+): client is EarnProviderRedemptionModesProvider {
+  // SAFETY: method presence is the optional capability contract.
+  return (
+    typeof (client as Partial<EarnProviderRedemptionModesProvider>).getProviderRedemptionModes ===
+    "function"
+  );
+}
+
+export function supportsVaultPreparation(
+  client: EarnVaultProvider
+): client is EarnVaultPreparationProvider {
+  // SAFETY: optional capability narrowing by method presence.
+  return (
+    typeof (client as Partial<EarnVaultPreparationProvider>).buildVaultPreparation === "function"
+  );
+}
+export function supportsProviderOrderCancellation(
+  client: EarnVaultProvider
+): client is EarnProviderOrderCancellationProvider {
+  // SAFETY: both halves of the cancellation lifecycle must be implemented.
+  const candidate = client as Partial<EarnProviderOrderCancellationProvider>;
+  return (
+    supportsProviderSettlement(client) &&
+    typeof candidate.buildProviderOrderCancellation === "function" &&
+    typeof candidate.readProviderOrderCancellation === "function"
+  );
+}
 
 /**
  * `satisfies` pins this list to the capability's method names: renaming a

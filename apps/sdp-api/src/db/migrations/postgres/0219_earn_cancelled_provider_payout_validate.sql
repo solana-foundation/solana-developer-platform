@@ -1,0 +1,2 @@
+ALTER TABLE earn_movements VALIDATE CONSTRAINT earn_movements_token_amount_settled_check;
+ALTER TABLE earn_movements VALIDATE CONSTRAINT earn_movements_vault_amount_format_check;
