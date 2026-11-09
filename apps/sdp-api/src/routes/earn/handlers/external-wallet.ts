@@ -30,6 +30,7 @@ import type {
   EarnVaultDirectMovementStatus,
 } from "@sdp/types/earn";
 import { isEarnVaultHoldingEmpty } from "@sdp/types/earn";
+import { providerSettlementFromData } from "@sdp/types/earn-provider-orders";
 import {
   earnDepositStyle,
   earnProviderDepositSettlement,
@@ -945,6 +946,7 @@ export async function createEarnExternalWalletWithdrawalTransaction(
     label: target.label,
     shareAtaRentFunder: target.shareAtaRentFunder,
     shares: body.shares,
+    redemptionMode: body.redemptionMode,
     ...(body.minAmountOut === undefined ? {} : { minAmountOut: body.minAmountOut }),
   });
 
@@ -1422,6 +1424,7 @@ function toExternalWalletMovementWire(
   }
   const { status, settledAt } = movementStatusOnWire(movement);
   return {
+    settlementOutcome: providerSettlementFromData(movement.provider_data)?.outcome,
     movementId: movement.id,
     positionId: movement.position_id,
     provider: movement.provider,

@@ -2,6 +2,8 @@ import { currentClusterScope } from "@sdp/rpc/scope";
 import { getDb } from "@/db/client";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { logEvent } from "@/runtime/money-path-events";
+import { reconcileEarnProviderActions } from "@/services/earn/provider-actions-reconciliation.service";
+import { reconcileEarnProviderOrders } from "@/services/earn/provider-settlement.service";
 import {
   reconcileEarnVaultMovementBatch,
   repairUnvaluedKaminoDeposits,
@@ -55,10 +57,19 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
   // Start the independent queue/PDA projection before touching the instant
   // movement ledger. Even a persistent claim/payout/backlog query failure must
   // not strand escrowed shares by preventing this sibling from running.
-  const queuedRun = reconcileEarnVaultQueuedWithdrawals(env).then(
-    () => null,
-    (error: unknown) => error
-  );
+  const queuedRun = Promise.allSettled([
+    reconcileEarnVaultQueuedWithdrawals(env),
+    reconcileEarnProviderOrders(env),
+    reconcileEarnProviderActions(env),
+  ]).then((results) => {
+    const failures = results.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : []
+    );
+    if (failures.length === 0) return null;
+    return failures.length === 1
+      ? failures[0]
+      : new AggregateError(failures, "Earn pending obligations could not be reconciled");
+  });
   let ledger: ReturnType<typeof createPostgresEarnMovementsRepository>;
   let movements: Awaited<ReturnType<typeof ledger.claimUnsettledVaultMovements>>;
   let stats: Awaited<ReturnType<typeof reconcileEarnVaultMovementBatch>>;

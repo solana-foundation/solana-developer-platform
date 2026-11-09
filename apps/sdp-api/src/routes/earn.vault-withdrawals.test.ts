@@ -1037,17 +1037,28 @@ describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
     const list = await getWithdrawal("");
     expect(list.status).toBe(200);
     const page = (await list.json()) as {
-      data: { withdrawals: Array<{ movementId: string; shares: string; shareMint: string }> };
+      data: {
+        withdrawals: Array<{
+          movementId: string;
+          shares: string;
+          shareMint: string;
+          ownerAddress: string | null;
+        }>;
+      };
     };
     expect(page.data.withdrawals).toHaveLength(1);
+    // Custody rows record no owner — the wire names the wallet the movement
+    // pays, so equal-sized orders from different wallets stay distinguishable.
+    expect(page.data.withdrawals[0]?.ownerAddress).toBe(WALLET_ADDRESS);
 
     const detail = await getWithdrawal(`/${recorded.movement.id}`);
     expect(detail.status).toBe(200);
     const body = (await detail.json()) as {
-      data: { withdrawal: { movementId: string; signature: string } };
+      data: { withdrawal: { movementId: string; signature: string; ownerAddress: string | null } };
     };
     expect(body.data.withdrawal.movementId).toBe(recorded.movement.id);
     expect(body.data.withdrawal.signature).toBe(recorded.movement.signature);
+    expect(body.data.withdrawal.ownerAddress).toBe(WALLET_ADDRESS);
     expect(reconcileEarnVaultMovementReadThrough).toHaveBeenCalledWith(
       env,
       expect.objectContaining({ id: recorded.movement.id })

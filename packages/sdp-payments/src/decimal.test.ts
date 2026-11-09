@@ -4,6 +4,7 @@ import {
   compareDecimalAmounts,
   decimalStringFromNumber,
   divideDecimalAmounts,
+  multiplyDecimalAmounts,
   subtractDecimalAmounts,
   sumDecimalAmounts,
 } from "./decimal";
@@ -57,6 +58,30 @@ describe("subtractDecimalAmounts", () => {
 
   it("handles mixed scales exactly", () => {
     assert.equal(subtractDecimalAmounts("2", "0.000000001"), "1.999999999");
+  });
+});
+
+describe("multiplyDecimalAmounts", () => {
+  it("multiplies exactly at the inputs' combined precision", () => {
+    assert.equal(multiplyDecimalAmounts("1.5", "2"), "3");
+    assert.equal(multiplyDecimalAmounts("2", "1.5"), "3");
+    assert.equal(multiplyDecimalAmounts("0.5", "1.111592"), "0.555796");
+  });
+
+  it("values shares at a provider-reported NAV without strict-rounding loss", () => {
+    assert.equal(multiplyDecimalAmounts("1", "1.111592"), "1.111592");
+    assert.equal(multiplyDecimalAmounts("100", "1.111592"), "111.1592");
+  });
+
+  it("refuses a malformed or out-of-range amount", () => {
+    assert.throws(() => multiplyDecimalAmounts("abc", "1"), SdpPaymentsError);
+    assert.throws(
+      () => multiplyDecimalAmounts("18446744073709551615", "0.000000000000000000001"),
+      (error) =>
+        error instanceof SdpPaymentsError &&
+        error.statusCode === 400 &&
+        error.message === "Amount is out of range"
+    );
   });
 });
 

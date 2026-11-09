@@ -7,6 +7,7 @@ import {
   EARN_STRATEGY_SOURCE_KINDS,
   EARN_SWAP_MAX_SLIPPAGE_BPS,
 } from "@sdp/types/earn";
+import { EARN_PROVIDER_REDEMPTION_MODES } from "@sdp/types/earn-provider-orders";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import { SOLANA_CLUSTERS } from "@sdp/types/well-known-tokens";
 import { isAddress } from "@solana/addresses";
@@ -373,6 +374,7 @@ const earnMinAmountOutSchema = z
   .optional();
 
 export const earnVaultWithdrawalSchema = z.object({
+  redemptionMode: z.enum(EARN_PROVIDER_REDEMPTION_MODES).optional(),
   /** The `earn_positions` row being exited. */
   positionId: earnWithdrawalPositionIdSchema,
   /** Shares to redeem, decimal string in share units. */
@@ -609,6 +611,7 @@ export const earnExternalWalletDepositTransactionSchema = z.object({
  * `earn_positions` row, which carries the vault, owner and mints.
  */
 export const earnExternalWalletWithdrawalTransactionSchema = z.object({
+  redemptionMode: z.enum(EARN_PROVIDER_REDEMPTION_MODES).optional(),
   positionId: earnWithdrawalPositionIdSchema,
   /** Shares to redeem, decimal string in share units. */
   shares: earnWithdrawalSharesSchema,

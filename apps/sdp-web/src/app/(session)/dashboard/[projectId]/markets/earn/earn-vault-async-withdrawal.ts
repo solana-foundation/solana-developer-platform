@@ -30,6 +30,7 @@ export type EarnVaultAsyncWithdrawalRoute =
     }
   | {
       kind: "provider_order";
+      redemptionModes?: readonly ("standard" | "instant")[];
       summary: EarnVaultAsyncWithdrawalSummary;
     }
   | {
@@ -79,7 +80,7 @@ export function earnVaultAsyncWithdrawalRoute(
     };
   }
   if (options.providerOrder) {
-    return {
+    const route: EarnVaultAsyncWithdrawalRoute = {
       kind: "provider_order",
       summary: {
         titleKey: "DashboardEarn.exitRoute.providerOrderTitle",
@@ -87,6 +88,9 @@ export function earnVaultAsyncWithdrawalRoute(
         values: {},
       },
     };
+    if (options.providerRedemptionModes !== undefined)
+      route.redemptionModes = options.providerRedemptionModes;
+    return route;
   }
   if (parRedemption) {
     return {

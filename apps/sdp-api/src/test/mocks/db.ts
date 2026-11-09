@@ -37,6 +37,7 @@ const POSTGRES_TEST_TABLES = [
   "earn_vault_withdrawal_request_actions",
   "earn_vault_withdrawal_request_reservations",
   "earn_vault_withdrawal_requests",
+  "earn_provider_actions",
   "earn_movements",
   "earn_positions",
   "sponsorship_budget_policy_revisions",
