@@ -1,6 +1,7 @@
+import { expect } from "@playwright/test";
+import { test } from "@/playwright/support/vercel-bypass";
 import { getE2EEnv } from "../env";
 import { gotoProjectPage } from "../support/local-dashboard-bootstrap";
-import { expect, test } from "../support/vercel-bypass";
 
 const READ_ONLY_PAGES = [
   "/dashboard/tokens",
