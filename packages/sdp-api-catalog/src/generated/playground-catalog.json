@@ -1958,7 +1958,17 @@
             "required": true
           }
         ],
-        "bodyFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{}",
+            "required": false
+          }
+        ],
         "expectedResponse": {
           "data": {
             "recurringPayment": {

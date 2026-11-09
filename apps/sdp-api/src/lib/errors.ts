@@ -71,6 +71,8 @@ export type ErrorCode =
   | "TRANSFER_BATCH_DESTINATION_CHANGED"
   // A recipient token account whose rent exceeds the sponsor's per-transaction cap (HOO-2024)
   | "SPONSORED_RENT_OVER_CAP"
+  // A recurring payment edit or activation of a version the caller no longer holds (HOO-2562)
+  | "RECURRING_PAYMENT_CHANGED"
   // Idempotency-Key (HOO-1918, draft-ietf-httpapi-idempotency-key-header)
   | IdempotencyErrorCode;
 
@@ -151,6 +153,7 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   TRANSFER_BATCH_RETRY_CLAIMED: 409,
   TRANSFER_BATCH_DESTINATION_CHANGED: 409,
   SPONSORED_RENT_OVER_CAP: 409,
+  RECURRING_PAYMENT_CHANGED: 409,
   // Idempotency-Key (HOO-1918)
   IDEMPOTENCY_KEY_REQUIRED: 400,
   IDEMPOTENCY_KEY_REUSED: 422,
@@ -225,6 +228,8 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
     "A failed recipient's counterparty account changed its address since the batch was sent",
   SPONSORED_RENT_OVER_CAP:
     "A recipient's token account would cost more rent than the sponsor funds in one transaction",
+  RECURRING_PAYMENT_CHANGED:
+    "This recurring payment changed since it was read. Read it again and review the current terms",
   // Idempotency-Key (HOO-1918)
   IDEMPOTENCY_KEY_REQUIRED: "This operation requires an Idempotency-Key header",
   IDEMPOTENCY_KEY_REUSED: "This Idempotency-Key was already used for a different request",

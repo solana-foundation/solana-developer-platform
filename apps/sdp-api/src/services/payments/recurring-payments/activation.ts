@@ -736,6 +736,8 @@ export async function activateRecurringPayment(input: {
       updatedAt: nowIso,
       staleBefore: getRecurringPaymentOperationStaleBefore(nowIso),
       activatedBy,
+      // A fresh activation signs the terms it read and admitted, never an edit since.
+      expectedUpdatedAt: recoveringStaleActivation ? undefined : input.recurringPayment.updated_at,
     });
     if (!claimed) return null;
     const attempt = await createClaimedActivationAttempt({
@@ -758,6 +760,20 @@ export async function activateRecurringPayment(input: {
   });
 
   if (!claimResult) {
+    if (!recoveringStaleActivation) {
+      // Lost to an edit rather than to another activation: the caller reviewed other terms.
+      const current = await recurringRepo.getRecurringPaymentById({
+        recurringPaymentId: input.recurringPayment.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      });
+      if (current?.status === "pending_activation") {
+        throw new AppError("RECURRING_PAYMENT_CHANGED", undefined, {
+          recurringPaymentId: current.id,
+          updatedAt: current.updated_at,
+        });
+      }
+    }
     await journalActivationClaimConflict({
       recurringRepo,
       recurringPayment: input.recurringPayment,
