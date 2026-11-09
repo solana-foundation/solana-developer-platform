@@ -31,7 +31,7 @@ import { registerApiKeyPaths } from "./paths/api-keys";
 import { registerAssetProfilePaths } from "./paths/asset-profiles";
 import { registerCompliancePaths } from "./paths/compliance";
 import { registerCounterpartyPaths } from "./paths/counterparties";
-import { registerCustodyPaths } from "./paths/custody";
+import { registerCustodyAdministrationPaths, registerCustodyPaths } from "./paths/custody";
 import { registerDvpPaths } from "./paths/dvp";
 import { registerEarnPaths, registerPublicEarnPaths } from "./paths/earn";
 import { registerHealthPaths } from "./paths/health";
@@ -251,6 +251,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerOrganizationPaths(registry);
   registerApiKeyPaths(registry);
   registerMemberPaths(registry);
+  registerCustodyAdministrationPaths(registry);
   registerCustodyPaths(registry);
   registerEarnPaths(registry);
   registerDvpPaths(registry);

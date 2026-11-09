@@ -955,11 +955,11 @@ describe("OpenAPI spec", () => {
       .object({ properties: z.object({ provider: z.object({ enum: z.array(z.string()) }) }) })
       .parse(z.object({ anyOf: z.array(z.unknown()) }).parse(createBody).anyOf[0]);
     expect(managedOwner.properties.provider.enum).toEqual(["privy"]);
-    const initialize = z
-      .object({ oneOf: z.array(z.unknown()) })
-      .parse(getJsonSchema(paths?.["/v1/wallets/initialize"]?.post?.requestBody));
-    expect(initialize.oneOf).toHaveLength(1);
-    expect(JSON.stringify(initialize)).toContain('"privy"');
+    // Session-only (wallets.configure), so no channel publishes it (SOLA9-889).
+    expect(paths?.["/v1/wallets/initialize"]).toBeUndefined();
+    expect(createOpenApiDocument().paths?.["/v1/wallets/initialize"]?.post?.security).toEqual([
+      { clerkBearerAuth: [] },
+    ]);
 
     for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
       expect(JSON.stringify(createPublicOpenApiDocument({ releaseChannel }))).not.toContain(

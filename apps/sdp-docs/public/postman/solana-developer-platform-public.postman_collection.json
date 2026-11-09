@@ -100,30 +100,6 @@
       "name": "Wallets",
       "item": [
         {
-          "name": "Initialize wallet signing",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/wallets/initialize",
-            "description": "Sets up Managed custody for the project's named provider by creating its active signing configuration and first wallet. Production projects use BYOK only: there this returns 403 with details.reason custody_mode_not_allowed, and wallets are created in a Custody Connection with POST /v1/wallets and connectionId.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"provider\": \"fireblocks\",\n  \"walletLabel\": \"\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
           "name": "List wallets",
           "request": {
             "method": "GET",

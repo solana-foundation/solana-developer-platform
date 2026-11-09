@@ -13,7 +13,10 @@ describe("guide API examples", () => {
     const markdown = expandDocsBlocks(source, "content/docs/guides/setup-wallets.mdx");
     assert.match(markdown, /curl -X POST 'https:\/\/api\.solana\.com\/v1\/wallets'/);
     assert.match(markdown, /Authorization: Bearer \$SDP_API_KEY/);
-    assert.match(markdown, /Idempotency-Key: \$\(uuidgen\)/);
+    assert.match(
+      markdown,
+      /IDEMPOTENCY_KEY=\$\(uuidgen\)\n[\s\S]*Idempotency-Key: \$IDEMPOTENCY_KEY/
+    );
     assert.doesNotMatch(markdown, /sf_\.\.\./);
 
     const processor = unified().use(remarkParse).use(remarkMdx).use(remarkDocsBlocks);
@@ -34,7 +37,7 @@ describe("guide API examples", () => {
       "content/docs/introduction.mdx"
     );
     assert.match(markdown, /^```typescript\n/);
-    assert.match(markdown, /crypto\.randomUUID\(\)/);
+    assert.match(markdown, /const idempotencyKey = crypto\.randomUUID\(\);/);
     assert.match(markdown, /process\.env\.SDP_API_KEY/);
   });
 
@@ -43,7 +46,10 @@ describe("guide API examples", () => {
       '<ApiExample operation="pause-token" />\n',
       "content/docs/tokens/freeze-and-compliance.mdx"
     );
-    assert.match(markdown, /Idempotency-Key: \$\(uuidgen\)/);
+    assert.match(
+      markdown,
+      /IDEMPOTENCY_KEY=\$\(uuidgen\)\n[\s\S]*Idempotency-Key: \$IDEMPOTENCY_KEY/
+    );
     assert.match(markdown, /signingCustodyWalletId/);
     assert.doesNotMatch(markdown, /simulate|priorityFee/);
   });

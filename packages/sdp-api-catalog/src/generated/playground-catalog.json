@@ -4,8 +4,8 @@
     "command": "pnpm -C apps/sdp-api playground:generate",
     "families": {
       "Health": 2,
-      "Wallets": 10,
-      "Projects": 4,
+      "Wallets": 9,
+      "Projects": 5,
       "Issuance": 37,
       "Payments": 41,
       "Compliance": 1,
@@ -13,7 +13,7 @@
       "Asset Profiles": 7
     },
     "modules": {
-      "wallets": 10,
+      "wallets": 9,
       "payments": 41,
       "counterparties": 13,
       "issuance": 37
@@ -21,32 +21,6 @@
   },
   "modules": {
     "wallets": [
-      {
-        "id": "initialize-wallet-signing",
-        "operationId": "initializeWalletSigning",
-        "title": "Initialize wallet signing",
-        "method": "POST",
-        "path": "/v1/wallets/initialize",
-        "pathFields": [],
-        "bodyFields": [
-          {
-            "key": "$body",
-            "label": "JSON request body",
-            "description": "Generated from this operation's public OpenAPI request schema.",
-            "kind": "textarea",
-            "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"fireblocks\"\n}",
-            "required": true
-          }
-        ],
-        "expectedResponse": {
-          "configId": "cfg_example",
-          "publicKey": "So11111111111111111111111111111111111111112",
-          "walletId": "privy_wallet_123"
-        },
-        "releaseModule": "custody",
-        "shadowedBy": []
-      },
       {
         "id": "create-wallet",
         "operationId": "createWallet",
@@ -9729,30 +9703,6 @@
       }
     },
     "stable": {
-      "POST /v1/wallets/initialize": {
-        "id": "initialize-wallet-signing",
-        "operationId": "initializeWalletSigning",
-        "title": "Initialize wallet signing",
-        "method": "POST",
-        "path": "/v1/wallets/initialize",
-        "pathFields": [],
-        "bodyFields": [
-          {
-            "key": "$body",
-            "label": "JSON request body",
-            "description": "Generated from this operation's public OpenAPI request schema.",
-            "kind": "textarea",
-            "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"privy\"\n}",
-            "required": true
-          }
-        ],
-        "expectedResponse": {
-          "configId": "cfg_example",
-          "publicKey": "So11111111111111111111111111111111111111112",
-          "walletId": "privy_wallet_123"
-        }
-      },
       "GET /v1/wallets": {
         "id": "list-wallets",
         "operationId": "listWallets",

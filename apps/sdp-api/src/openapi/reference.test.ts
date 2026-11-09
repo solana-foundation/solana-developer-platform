@@ -8,7 +8,7 @@ import { z } from "zod";
 import { AppError, type ErrorCode, isErrorCode } from "@/lib/errors";
 import { DOCS_GROUP } from "./paths/helpers";
 import { buildApiReference, exampleErrorCode } from "./reference";
-import { createPublicOpenApiDocument } from "./spec";
+import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
 
 const HTTP_METHODS = ["get", "put", "post", "delete", "patch"] as const;
 
@@ -176,9 +176,27 @@ describe("buildApiReference", () => {
     const operations = buildApiReference(
       createPublicOpenApiDocument({ releaseChannel: "stable" })
     ).families.flatMap((family) => family.operations);
-    const initialize = operations.find((operation) => operation.path === "/v1/wallets/initialize");
+    // Initialize is session-only, so only the internal document carries it
+    // (SOLA9-889), and the reference model takes API-key operations only. Its
+    // body is still the one variant set titled by a pinned value, so it is
+    // grafted onto the public document as an API-key operation for this check.
+    const publicDocument = createPublicOpenApiDocument({ releaseChannel: "stable" });
+    const internalInitialize = createOpenApiDocument().paths["/v1/wallets/initialize"]?.post;
+    if (internalInitialize === undefined) throw new Error("no internal initialize operation");
+    const initialize = buildApiReference({
+      ...publicDocument,
+      paths: {
+        ...publicDocument.paths,
+        "/v1/wallets/initialize": {
+          post: { ...internalInitialize, security: [{ apiKeyAuth: [] }] },
+        },
+      },
+    })
+      .families.flatMap((family) => family.operations)
+      .find((operation) => operation.path === "/v1/wallets/initialize");
     expect(initialize?.requestBody?.schema.variantMode).toBe("oneOf");
-    expect(initialize?.requestBody?.schema.variants[0]?.title).toBe('provider: "privy"');
+    // The internal document keeps every provider, `local` first.
+    expect(initialize?.requestBody?.schema.variants[0]?.title).toBe('provider: "local"');
     const createWallet = operations.find((operation) => operation.operationId === "createWallet");
     expect(createWallet?.requestBody?.schema.variants[0]?.schema.constraints).toEqual([
       { kind: "excludes", value: ["connectionId"] },

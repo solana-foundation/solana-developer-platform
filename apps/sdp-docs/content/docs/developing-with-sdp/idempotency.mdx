@@ -40,7 +40,7 @@ Modules with their own key handling say so on their pages, and each operation's 
 ## Choosing a key
 
 - A key is 1–255 printable ASCII characters. Anything else returns `400`.
-- Generate one key per logical operation (a UUIDv4 or UUIDv7 works well), store it with the operation before you send it, and send the same key on every retry of that operation.
+- Generate one key per logical operation (a UUIDv4 or UUIDv7 works well), store it with the operation before you send it, and send the same key on every retry of that operation. The API reference samples mint the key on its own line before the call: to retry, run the call again, not the line that mints the key.
 - A new operation needs a new key, even when its request is identical to an earlier one.
 - Keys are scoped to your organization, project, HTTP method and route, and bound to the credential that sent them. The same key value on two different routes is two separate keys.
 

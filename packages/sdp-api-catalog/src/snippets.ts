@@ -57,17 +57,25 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+/**
+ * A keyed call mints its Idempotency-Key once, before the call, so a retry of the same request
+ * sends the same key; a key minted inside the call would make every retry a new request that
+ * the API runs again (SOLA9-876).
+ */
+const RETRY_KEY_COMMENT = "Reuse this key when you retry this request.";
+
 function curlSnippet({ method, url, body, auth, takesIdempotencyKey }: SnippetRequest): string {
   const lines = [`curl ${method === "GET" ? "" : `-X ${method} `}${shellQuote(url)}`];
   if (auth === "apiKey") lines.push(`  -H "Authorization: Bearer $${API_KEY_VARIABLE}"`);
-  if (takesIdempotencyKey) lines.push('  -H "Idempotency-Key: $(uuidgen)"');
+  if (takesIdempotencyKey) lines.push('  -H "Idempotency-Key: $IDEMPOTENCY_KEY"');
   if (body !== null) {
     lines.push(
       '  -H "Content-Type: application/json"',
       `  -d ${shellQuote(nestedJson(body, "  "))}`
     );
   }
-  return lines.join(" \\\n");
+  const call = lines.join(" \\\n");
+  return takesIdempotencyKey ? `# ${RETRY_KEY_COMMENT}\nIDEMPOTENCY_KEY=$(uuidgen)\n${call}` : call;
 }
 
 function typeScriptSnippet({
@@ -81,21 +89,27 @@ function typeScriptSnippet({
   if (auth === "apiKey") {
     headers.push(`    Authorization: \`Bearer \${process.env.${API_KEY_VARIABLE}}\``);
   }
-  if (takesIdempotencyKey) headers.push('    "Idempotency-Key": crypto.randomUUID()');
+  if (takesIdempotencyKey) headers.push('    "Idempotency-Key": idempotencyKey');
   if (body !== null) headers.push('    "Content-Type": "application/json"');
   const options = [`  method: "${method}"`];
   if (headers.length > 0) options.push(["  headers: {", headers.join(",\n"), "  }"].join("\n"));
   if (body !== null) options.push(`  body: JSON.stringify(${nestedJson(body, "  ")})`);
-  return [`const res = await fetch(${JSON.stringify(url)}, {`, options.join(",\n"), "});"].join(
-    "\n"
-  );
+  const keyLines = takesIdempotencyKey
+    ? [`// ${RETRY_KEY_COMMENT}`, "const idempotencyKey = crypto.randomUUID();"]
+    : [];
+  return [
+    ...keyLines,
+    `const res = await fetch(${JSON.stringify(url)}, {`,
+    options.join(",\n"),
+    "});",
+  ].join("\n");
 }
 
 function pythonSnippet({ method, url, body, auth, takesIdempotencyKey }: SnippetRequest): string {
   const headers: string[] = [];
   if (auth === "apiKey")
     headers.push(`"Authorization": f"Bearer {os.environ['${API_KEY_VARIABLE}']}"`);
-  if (takesIdempotencyKey) headers.push('"Idempotency-Key": str(uuid.uuid4())');
+  if (takesIdempotencyKey) headers.push('"Idempotency-Key": idempotency_key');
   const args = [JSON.stringify(url)];
   if (headers.length > 0) args.push(`headers={${headers.join(", ")}}`);
   if (body !== null) args.push(`json=${pythonLiteral(body).replace(/\n/g, "\n  ")}`);
@@ -105,6 +119,9 @@ function pythonSnippet({ method, url, body, auth, takesIdempotencyKey }: Snippet
   return [
     `import ${modules.join(", ")}`,
     "",
+    ...(takesIdempotencyKey
+      ? [`# ${RETRY_KEY_COMMENT}`, "idempotency_key = str(uuid.uuid4())"]
+      : []),
     `r = requests.${method.toLowerCase()}(${args.join(",\n  ")})`,
   ].join("\n");
 }
