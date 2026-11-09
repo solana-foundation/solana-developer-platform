@@ -641,7 +641,9 @@ async function updatePendingRecurringPaymentRow(
   });
 
   if (!updated) {
-    throw conflict("Recurring payment changed while updating; retry with the latest payment");
+    throw new AppError("RECURRING_PAYMENT_CHANGED", undefined, {
+      recurringPaymentId: input.recurringPayment.id,
+    });
   }
   return updated;
 }

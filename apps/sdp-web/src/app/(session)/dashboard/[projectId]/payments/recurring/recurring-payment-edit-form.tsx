@@ -16,7 +16,10 @@ import { toast } from "sonner";
 import { z } from "zod";
 import { shortenAddress } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
 import { useTranslations } from "@/i18n/provider";
-import { getRecurringPaymentDetailState } from "./recurring-payment-detail-state";
+import {
+  getRecurringPaymentDetailState,
+  refreshIfOutcomeUnknown,
+} from "./recurring-payment-detail-state";
 import { updateRecurringPayment } from "./recurring-payments.data";
 import {
   accountAddress,
@@ -187,6 +190,7 @@ export function RecurringPaymentEditForm({
       onClose();
       router.refresh();
     } catch (error) {
+      refreshIfOutcomeUnknown(error, () => router.refresh());
       toast.error(t("DashboardPayments.newDesign.recurring.paymentUpdateFailed"), {
         id: toastId,
         description:

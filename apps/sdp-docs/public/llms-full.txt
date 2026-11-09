@@ -20623,7 +20623,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
 Updates a recurring payment. Pending payments are edited directly. Active metadata or due-date updates are applied in place, while active term/source/destination/token updates create and authorize a replacement subscription before canceling the old one.
 
-- **`expectedUpdatedAt`** · `string` · min length 1 · max length 64 · example `2026-11-09T09:38:28.123Z`
+- **`expectedUpdatedAt`** · `string` · min length 1 · max length 64
 
   Optional `updatedAt` of the version you reviewed, from the last read of this recurring payment. When the recurring payment has changed since, the request returns `409` `RECURRING_PAYMENT_CHANGED` with the current `updatedAt` in `error.details` and changes nothing: read it again and review the current terms.
 
@@ -20891,7 +20891,6 @@ curl -X PATCH 'https://api.solana.com/v1/payments/recurring-payments/prp_example
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
-    "expectedUpdatedAt": "2026-11-09T09:38:28.123Z",
     "sourceCustodyWalletId": "cwlt_example",
     "counterpartyId": "cpty_example",
     "counterpartyAccountId": "cpacct_example",
@@ -20913,7 +20912,6 @@ const res = await fetch("https://api.solana.com/v1/payments/recurring-payments/p
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    "expectedUpdatedAt": "2026-11-09T09:38:28.123Z",
     "sourceCustodyWalletId": "cwlt_example",
     "counterpartyId": "cpty_example",
     "counterpartyAccountId": "cpacct_example",
@@ -20933,7 +20931,6 @@ import os, requests, uuid
 r = requests.patch("https://api.solana.com/v1/payments/recurring-payments/prp_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
   json={
-    "expectedUpdatedAt": "2026-11-09T09:38:28.123Z",
     "sourceCustodyWalletId": "cwlt_example",
     "counterpartyId": "cpty_example",
     "counterpartyAccountId": "cpacct_example",
@@ -21373,7 +21370,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
 Optional precondition for activating a recurring payment.
 
-- **`expectedUpdatedAt`** · `string` · min length 1 · max length 64 · example `2026-11-09T09:38:28.123Z`
+- **`expectedUpdatedAt`** · `string` · min length 1 · max length 64
 
   Optional `updatedAt` of the version you reviewed, from the last read of this recurring payment. When the recurring payment has changed since, the request returns `409` `RECURRING_PAYMENT_CHANGED` with the current `updatedAt` in `error.details` and changes nothing: read it again and review the current terms.
 
@@ -21604,9 +21601,7 @@ curl -X POST 'https://api.solana.com/v1/payments/recurring-payments/prp_example/
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
-  -d '{
-    "expectedUpdatedAt": "2026-11-09T09:38:28.123Z"
-  }'
+  -d '{}'
 ```
 
 ```ts tab="TypeScript"
@@ -21617,9 +21612,7 @@ const res = await fetch("https://api.solana.com/v1/payments/recurring-payments/p
     "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
-  body: JSON.stringify({
-    "expectedUpdatedAt": "2026-11-09T09:38:28.123Z"
-  })
+  body: JSON.stringify({})
 });
 ```
 
@@ -21628,9 +21621,7 @@ import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_example/activate",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
-  json={
-    "expectedUpdatedAt": "2026-11-09T09:38:28.123Z"
-  })
+  json={})
 ```
 
 ## Example responses

@@ -931,7 +931,6 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
 const expectedUpdatedAtField = withOpenApi(expectedUpdatedAtSchema.optional(), {
   description:
     "Optional `updatedAt` of the version you reviewed, from the last read of this recurring payment. When the recurring payment has changed since, the request returns `409` `RECURRING_PAYMENT_CHANGED` with the current `updatedAt` in `error.details` and changes nothing: read it again and review the current terms.",
-  example: "2026-11-09T09:38:28.123Z",
 });
 
 export const updateRecurringPaymentRequestSchema = updateRecurringPaymentSchemaBase

@@ -6,6 +6,7 @@ import {
   recurringPaymentReadFailureOutcome,
   refreshIfOutcomeUnknown,
 } from "./recurring-payment-detail-state";
+import { RecurringPaymentChangedError } from "./recurring-payments.data";
 
 describe("getRecurringPaymentDetailState", () => {
   it("allows pending edits and cancellation while signing is unavailable", () => {
@@ -113,6 +114,14 @@ describe("refreshIfOutcomeUnknown", () => {
     expect(refresh).not.toHaveBeenCalled();
 
     refreshIfOutcomeUnknown(new IdempotencyOutcomeUnknownError("check the list"), refresh);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  // Zach (#2831): a failed activation's reset moves the version, and without a
+  // refresh every Activate retry was refused as stale until a manual reload.
+  it("refreshes the page when the API refuses a version the page no longer shows", () => {
+    const refresh = vi.fn();
+    refreshIfOutcomeUnknown(new RecurringPaymentChangedError("changed"), refresh);
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 });

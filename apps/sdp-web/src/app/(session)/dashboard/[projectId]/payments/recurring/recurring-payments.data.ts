@@ -202,6 +202,15 @@ function buildRecurringPaymentsQuery(options: RecurringPaymentsListOptions): URL
   return query;
 }
 
+/**
+ * The API refused an edit or activation of a version the page no longer
+ * shows (409 `RECURRING_PAYMENT_CHANGED`); the page refreshes to the current
+ * one (`refreshIfOutcomeUnknown`).
+ */
+export class RecurringPaymentChangedError extends Error {
+  override name = "RecurringPaymentChangedError";
+}
+
 async function readDashboardEnvelope<T>(
   response: Response,
   schema: z.ZodType<{ data: T } | z.infer<typeof apiErrorEnvelopeSchema>>,
@@ -221,7 +230,9 @@ async function readDashboardEnvelope<T>(
       // The money rule keeps the key, so a retry is answered under it.
       throw new IdempotencyOutcomeUnknownError(t(uncertain));
     }
-    throw new Error(getPaymentApiError(body, `${fallback} (${response.status}).`));
+    const message = getPaymentApiError(body, `${fallback} (${response.status}).`);
+    if (code === "RECURRING_PAYMENT_CHANGED") throw new RecurringPaymentChangedError(message);
+    throw new Error(message);
   }
   if (!("data" in body)) {
     throw new Error(t("DashboardPayments.recurring.emptyResponse", { request: fallback }));
