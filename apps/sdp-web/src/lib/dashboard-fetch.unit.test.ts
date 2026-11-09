@@ -9,7 +9,11 @@ import {
   MOVEMENT_READ_PATHS,
   resetMovementWatchesForTests,
 } from "./dashboard-fetch";
-import { resetIdempotencyKeyStoresForTests, setIdempotencyKeyScope } from "./idempotency-key-store";
+import {
+  KEPT_KEY_WINDOW_MS,
+  resetIdempotencyKeyStoresForTests,
+  setIdempotencyKeyScope,
+} from "./idempotency-key-store";
 
 function noContentFetchMock() {
   return vi.fn(
@@ -291,6 +295,34 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
       body: { amount: "1" },
     });
     expect(result).toMatchObject({ ok: false, status: 400, replayed: true });
+  });
+
+  // Zach (#2834): a kept key had no age limit, so a retry a day later went out
+  // under a key the API had forgotten and could run as a second request.
+  it("sends nothing under a kept key older than the API keeps it, and the next submit is new", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+      const fetchMock = vi
+        .fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse(201))
+        .mockRejectedValueOnce(new TypeError("network down"));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(submit()).rejects.toThrow("network down");
+      vi.setSystemTime(Date.now() + KEPT_KEY_WINDOW_MS);
+      const stopped = await submit();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(stopped.status).toBe(409);
+      expect(await stopped.json()).toMatchObject({
+        error: { code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN" },
+      });
+
+      await submit();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(keyOfCall(fetchMock, 1)).not.toBe(keyOfCall(fetchMock, 0));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("holds the key when the request never got an answer", async () => {
