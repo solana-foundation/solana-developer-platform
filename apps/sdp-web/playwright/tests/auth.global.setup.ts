@@ -1,12 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { clerk, clerkSetup } from "@clerk/testing/playwright";
-import { expect, test as setup } from "@playwright/test";
 import { recordClerkSession } from "@/playwright/support/clerk-sessions";
 import { getE2EEnv } from "../env";
 import { authStatePath } from "../support/auth-state";
 import { CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS } from "../support/clerk-activation";
 import { resolveClerkTestIdentity, withTransientClerkRetry } from "../support/clerk-admin";
+import { expect, routeVercelBypass, test as setup } from "../support/vercel-bypass";
 
 setup("authenticate admin test user and save auth state", async ({ page, browser }) => {
   setup.setTimeout(360_000);
@@ -14,6 +14,7 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
   const identity = await resolveClerkTestIdentity();
 
   const ticketContext = env.ticketAuth ? await browser.newContext({ baseURL: env.baseURL }) : null;
+  if (ticketContext) await routeVercelBypass(ticketContext);
   const target = ticketContext ? await ticketContext.newPage() : page;
 
   if (env.ticketAuth) {

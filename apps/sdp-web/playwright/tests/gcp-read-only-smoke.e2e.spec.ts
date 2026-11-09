@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types/payments";
 import type { ListProjectsResponse, Project, ProjectEnvironment } from "@sdp/types/projects";
 import type { TokenTransactionListItem } from "@sdp/types/tokens";
@@ -12,6 +12,7 @@ import { CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS } from "../support/clerk-activ
 import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
 import { gotoProjectPage, provisionWithAdminSession } from "../support/local-dashboard-bootstrap";
 import { fetchApiReleaseChannel, isModuleServed } from "../support/release-channel";
+import { expect, test } from "../support/vercel-bypass";
 
 interface ReadOnlyFixture {
   issuanceTransactions: TokenTransactionListItem[];

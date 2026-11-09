@@ -1,9 +1,9 @@
-import { expect, test } from "@playwright/test";
 import type { SdpModule } from "@sdp/types/release-channels";
 import { getE2EEnv } from "../env";
 import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
 import { provisionWithAdminSession } from "../support/local-dashboard-bootstrap";
 import { fetchApiReleaseChannel, isModuleServed } from "../support/release-channel";
+import { expect, test } from "../support/vercel-bypass";
 
 interface GoldenEndpoint {
   domain: string;
