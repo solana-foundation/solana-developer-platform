@@ -15,6 +15,7 @@ import { earnMetricsRefreshCron } from "@/cron/earn-metrics-refresh";
 import { earnSplitSwapsCron } from "@/cron/earn-split-swaps";
 import { earnVaultMovementsCron } from "@/cron/earn-vault-movements";
 import { idempotencyKeyPruneCron } from "@/cron/idempotency-keys";
+import { moneyMovementAnomaliesCron } from "@/cron/money-movement-anomalies";
 import { paymentRequestsCron } from "@/cron/payment-requests";
 import { paymentRequestsExpiryCron } from "@/cron/payment-requests-expiry";
 import { paymentRequestsHotCron } from "@/cron/payment-requests-hot";
@@ -67,6 +68,7 @@ export const CRON_DEFINITIONS: readonly CronDefinition[] = [
   secretRetirementsCron,
   providerCredentialSecretCleanupCron,
   idempotencyKeyPruneCron,
+  moneyMovementAnomaliesCron,
   earnCatalogueSyncCron,
   earnMetricsRefreshCron,
   adminAlertEmailsCron,
