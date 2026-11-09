@@ -423,12 +423,17 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
         admissionSettled = true;
       });
       await new Promise((resolve) => setTimeout(resolve, 200));
-      // FOR SHARE waits on the update's lock instead of reading the old row.
-      expect(admissionSettled).toBe(false);
+      const waitedForUpdate = !admissionSettled;
+      // Released before any assertion, so a failure never leaves the row lock
+      // or either connection held for the tests after it.
       commitUpdate();
-      await update;
-      await expect(admission).rejects.toMatchObject({
-        code: "TRANSFER_BATCH_DESTINATION_CHANGED",
+      const [, admitted] = await Promise.allSettled([update, admission]);
+
+      // FOR SHARE waits on the update's lock instead of reading the old row.
+      expect(waitedForUpdate).toBe(true);
+      expect(admitted).toMatchObject({
+        status: "rejected",
+        reason: { code: "TRANSFER_BATCH_DESTINATION_CHANGED" },
       });
       expect(await batchCount()).toBe(0);
     });
