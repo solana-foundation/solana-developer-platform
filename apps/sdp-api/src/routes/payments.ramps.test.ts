@@ -1369,6 +1369,31 @@ describe("Payments routes — ramps", () => {
 
       expect(res.status).toBe(429);
     });
+
+    it("429s a simulation once the actor's metered quota is exhausted, before the transfer is read", async () => {
+      await seedRateLimit(
+        env,
+        `metered:ramp-sandbox-simulate:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`,
+        20
+      );
+
+      const res = await app.request(
+        "/v1/payments/ramps/sandbox/simulate",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ transferId: "xfr_quota_unknown" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(429);
+      const body = errorResponseSchema.parse(await res.json());
+      expect(body.error.code).toBe("RATE_LIMITED");
+    });
   });
 
   describe("Clerk-caller environment resolution", () => {

@@ -29007,6 +29007,8 @@ Simulates the fiat pay-in for an on-ramp transfer that still awaits it, when its
 
 After the action check (`403`) and body validation (`400`), the checks run in order: a project outside Sandbox gets `403`, an unknown transfer `404`, a transfer that isn't an on-ramp `400`, one no longer awaiting its pay-in (`pending` or `awaiting_payment`) `409`, one whose provider the project can't use `403` or `503`, and one whose provider offers no simulated pay-in `400`.
 
+A simulation asks the provider, so it is metered per caller and per organization, like a quote: past the limit, the request answers `429 RATE_LIMITED` after body validation and before the transfer is read.
+
 Each transfer is simulated at most once: a later request, or one sent at the same time, answers `409`. Only a simulation the provider refused outright can be sent again. After any other failure the provider may still have delivered the crypto, so quote again if the transfer never settles.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `ramp_transfers.manage` action.
@@ -29070,6 +29072,10 @@ Names the sandbox on-ramp transfer. Only the transfer ID is accepted.
   Same fields as `400`.
 
 - **`409`** Conflict
+
+  Same fields as `400`.
+
+- **`429`** Too Many Requests
 
   Same fields as `400`.
 
@@ -37779,7 +37785,7 @@ Hercle reports the order's progress by webhook, and SDP also asks Hercle for the
 
 In a Sandbox project, `POST /v1/payments/ramps/sandbox/simulate` has Hercle settle the order as its bank would, from the moment it is quoted, and answers `204`. The transfer then moves through the same webhook and status pull as a real wire.
 
-Hercle sends the order's devnet crypto when it settles the simulation, so SDP simulates a transfer once. A second request answers `409 CONFLICT`, including one sent at the same time. Only a simulation Hercle refused outright can be sent again: after any other failure Hercle may still have sent the crypto, so quote again if the transfer never settles.
+Hercle sends the order's devnet crypto when it settles the simulation, so SDP simulates a transfer once. A second request answers `409 CONFLICT`, including one sent at the same time. Only a simulation Hercle refused outright can be sent again: after any other failure Hercle may still have sent the crypto, so quote again if the transfer never settles. Simulations are metered per caller and per organization, like quotes, and answer `429 RATE_LIMITED` past the limit.
 
 ---
 

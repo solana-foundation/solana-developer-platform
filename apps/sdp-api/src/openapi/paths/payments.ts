@@ -1095,6 +1095,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     description:
       "Sandbox-only. Simulates the fiat pay-in for an on-ramp transfer that still awaits it, when its provider offers a simulated pay-in. With any other provider, pay in the provider's own hosted page or session with its test payment details.\n\n" +
       "After the action check (`403`) and body validation (`400`), the checks run in order: a project outside Sandbox gets `403`, an unknown transfer `404`, a transfer that isn't an on-ramp `400`, one no longer awaiting its pay-in (`pending` or `awaiting_payment`) `409`, one whose provider the project can't use `403` or `503`, and one whose provider offers no simulated pay-in `400`.\n\n" +
+      "A simulation asks the provider, so it is metered per caller and per organization, like a quote: past the limit, the request answers `429 RATE_LIMITED` after body validation and before the transfer is read.\n\n" +
       "Each transfer is simulated at most once: a later request, or one sent at the same time, answers `409`. Only a simulation the provider refused outright can be sent again. After any other failure the provider may still have delivered the crypto, so quote again if the transfer never settles.",
     security: [{ apiKeyAuth: [] }],
     request: {
@@ -1106,7 +1107,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     },
     responses: {
       204: { description: "Sandbox pay-in requested from the provider" },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 409, 500, 503]),
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 409, 429, 500, 503]),
       400: {
         description:
           "An invalid body, a transfer that isn't an on-ramp, or one whose provider offers no simulated pay-in.",
