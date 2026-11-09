@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { setWindowPathname } from "@/test/window-location";
-import { expiresAtForAction, settleExpiresAt } from "./payment-request-expiry";
+import {
+  expiresAtForAction,
+  PAYMENT_REQUEST_RETRY_WINDOW_MS,
+  settleExpiresAt,
+} from "./payment-request-expiry";
 
 const HOUR_MS = 60 * 60 * 1_000;
 const inAnHour = () => new Date(Date.now() + HOUR_MS);
@@ -29,6 +33,20 @@ describe("expiresAtForAction", () => {
     vi.setSystemTime(new Date("2026-10-13T14:00:00.000Z"));
     expect(expiresAtForAction("one-hour", inAnHour)).toBeUndefined();
     expect(expiresAtForAction("one-hour", inAnHour)).toBe("2026-10-13T15:00:00.000Z");
+  });
+
+  // SOLA9-901: a create with no expiry kept its frozen body, and so its key,
+  // past the API's 24-hour key record, so a late retry could create twice.
+  it("does not send a retry once its first attempt is older than the API keeps the key", () => {
+    expect(expiresAtForAction("no-expiry", () => null)).toBeNull();
+    settleExpiresAt("no-expiry", null, { ok: false, status: null });
+
+    vi.setSystemTime(new Date(Date.now() + PAYMENT_REQUEST_RETRY_WINDOW_MS - 1));
+    expect(expiresAtForAction("no-expiry", () => null)).toBeNull();
+    vi.setSystemTime(new Date(Date.now() + 1));
+    expect(expiresAtForAction("no-expiry", () => null)).toBeUndefined();
+    // The next press is a new action.
+    expect(expiresAtForAction("no-expiry", () => null)).toBeNull();
   });
 
   it("retires the expiry when the retry's refusal is a replay, on the same answer as the key", () => {

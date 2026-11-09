@@ -4,26 +4,31 @@
  * The flash can carry a freshly generated API key secret, so the cookie value
  * is never plaintext: it is AES-256-GCM encrypted with a key derived from
  * CLERK_SECRET_KEY, and the payload records which Clerk session and user it
- * was minted for plus an absolute expiry. Unsealing requires the same
- * session/user and a fresh timestamp — a different account on the same
- * browser, a logged-out browser, or a replayed old cookie value all fail
- * closed to `null`.
+ * was minted for, the organization and Project it belongs to, plus an
+ * absolute expiry. Unsealing requires the same session, user, organization
+ * and Project and a fresh timestamp — a different account on the same
+ * browser, a switched organization or Project, a logged-out browser, or a
+ * replayed old cookie value all fail closed to `null` (SOLA9-875).
  */
 
 import type { ApiKeyFlash } from "./api-key-flash";
 
-const SEAL_VERSION = "v1";
+const SEAL_VERSION = "v2";
 const KEY_CONTEXT = `sdp-api-key-flash:${SEAL_VERSION}`;
 
 export interface FlashSessionClaims {
   sessionId: string;
   userId: string;
+  organizationId: string;
+  projectId: string;
 }
 
 interface SealedFlashPayload {
   flash: ApiKeyFlash;
   sid: string;
   uid: string;
+  oid: string;
+  pid: string;
   /** Absolute expiry, epoch milliseconds. Enforced server-side on unseal. */
   exp: number;
 }
@@ -60,6 +65,8 @@ export async function sealApiKeyFlash(
     flash,
     sid: claims.sessionId,
     uid: claims.userId,
+    oid: claims.organizationId,
+    pid: claims.projectId,
     exp: now + ttlSeconds * 1000,
   };
   const ciphertext = await crypto.subtle.encrypt(
@@ -102,7 +109,12 @@ export async function unsealApiKeyFlash(
     const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
     const payload = JSON.parse(new TextDecoder().decode(plaintext)) as SealedFlashPayload;
 
-    if (payload.sid !== claims.sessionId || payload.uid !== claims.userId) {
+    if (
+      payload.sid !== claims.sessionId ||
+      payload.uid !== claims.userId ||
+      payload.oid !== claims.organizationId ||
+      payload.pid !== claims.projectId
+    ) {
       return null;
     }
     if (typeof payload.exp !== "number" || payload.exp <= now) {

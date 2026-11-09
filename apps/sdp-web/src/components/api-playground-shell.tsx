@@ -17,10 +17,13 @@ import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { parseDashboardPathname } from "@/lib/dashboard-project-path";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import {
+  type ApiAnswer,
   answerRetiresKey,
   apiErrorCode,
   canonicalizeAmounts,
   IDEMPOTENCY_KEY_HEADER,
+  moneyAnswerRetiresKey,
+  movementStatusOf,
   parseJsonValue,
   storageFingerprint,
 } from "@/lib/idempotency";
@@ -511,14 +514,18 @@ async function executePlaygroundRequest({
 
     // Only an answer to the write itself settles its key; a keyless read (say,
     // a GET checking whether the lost write landed) leaves it for the retry.
-    if (
-      claimed !== undefined &&
-      answerRetiresKey({
-        status: response.status,
-        replayed: responseHeaders["idempotent-replayed"] === "true",
-        code: response.ok ? null : apiErrorCode(text),
-      })
-    ) {
+    // A money route's 2xx whose movement is still in flight keeps it, as the
+    // dashboard's own sends do, so a resend cannot pay twice (SOLA9-854).
+    const answer: ApiAnswer = {
+      status: response.status,
+      replayed: responseHeaders["idempotent-replayed"] === "true",
+      code: response.ok ? null : apiErrorCode(text),
+      movementStatus: response.ok ? movementStatusOf(body) : null,
+    };
+    const retires = isMoneyRouteRequest(activeEndpoint.method, resolvedPath)
+      ? moneyAnswerRetiresKey(answer)
+      : answerRetiresKey(answer);
+    if (claimed !== undefined && retires) {
       playgroundRetryKeys.release(UNSETTLED_SEND, claimed.entry);
     }
 

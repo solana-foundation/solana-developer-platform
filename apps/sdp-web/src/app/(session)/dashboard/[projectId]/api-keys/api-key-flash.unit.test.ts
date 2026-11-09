@@ -18,9 +18,21 @@ import {
 import { sealApiKeyFlash, unsealApiKeyFlash } from "./api-key-flash-seal";
 import { DELETE, POST } from "./flash/route";
 
-const SESSION = { sessionId: "sess_owner", userId: "user_owner" };
-const OTHER_SESSION = { sessionId: "sess_other", userId: "user_owner" };
-const OTHER_USER = { sessionId: "sess_owner", userId: "user_other" };
+const SESSION = {
+  sessionId: "sess_owner",
+  userId: "user_owner",
+  organizationId: "org_owner",
+  projectId: PRODUCTION_PROJECT.id,
+};
+const OTHER_SESSION = { ...SESSION, sessionId: "sess_other" };
+const OTHER_USER = { ...SESSION, userId: "user_other" };
+const OTHER_ORGANIZATION = { ...SESSION, organizationId: "org_other" };
+const OTHER_PROJECT = { ...SESSION, projectId: "prj_other" };
+
+/** What Clerk's `auth()` answers for a session holding these claims. */
+function authFor(claims: typeof SESSION) {
+  return { sessionId: claims.sessionId, userId: claims.userId, orgId: claims.organizationId };
+}
 
 const SECRET_FLASH: ApiKeyFlash = {
   level: "success",
@@ -68,6 +80,12 @@ describe("api key flash handoff", () => {
     it("rejects a different user", async () => {
       const sealed = await sealedSecretFlash(Date.now());
       expect(await unsealApiKeyFlash(sealed, OTHER_USER)).toBeNull();
+    });
+
+    it("rejects another organization or Project for the same session (SOLA9-875)", async () => {
+      const sealed = await sealedSecretFlash(Date.now());
+      expect(await unsealApiKeyFlash(sealed, OTHER_ORGANIZATION)).toBeNull();
+      expect(await unsealApiKeyFlash(sealed, OTHER_PROJECT)).toBeNull();
     });
 
     it("rejects a replayed value after its expiry", async () => {
@@ -125,7 +143,7 @@ describe("api key flash handoff", () => {
   describe("POST /dashboard/api-keys/flash", () => {
     it("delivers the flash once to the minting session and consumes the cookie", async () => {
       const sealed = await sealedSecretFlash(Date.now());
-      mocks.auth.mockResolvedValue(SESSION);
+      mocks.auth.mockResolvedValue(authFor(SESSION));
       requestCookies.set(API_KEY_FLASH_COOKIE, sealed);
 
       const response = await POST();
@@ -146,7 +164,7 @@ describe("api key flash handoff", () => {
 
     it("returns null to a different session and still destroys the cookie", async () => {
       const sealed = await sealedSecretFlash(Date.now());
-      mocks.auth.mockResolvedValue(OTHER_SESSION);
+      mocks.auth.mockResolvedValue(authFor(OTHER_SESSION));
       requestCookies.set(API_KEY_FLASH_COOKIE, sealed);
 
       const response = await POST();
@@ -154,6 +172,16 @@ describe("api key flash handoff", () => {
       expect(await response.json()).toEqual({ flash: null });
       expect(response.cookies.get(API_KEY_FLASH_COOKIE)?.value).toBe("");
       expect(response.cookies.get(API_KEY_FLASH_COOKIE)?.maxAge).toBe(0);
+    });
+
+    it("returns null after the session switches organization and still destroys the cookie", async () => {
+      const sealed = await sealedSecretFlash(Date.now());
+      mocks.auth.mockResolvedValue(authFor(OTHER_ORGANIZATION));
+      requestCookies.set(API_KEY_FLASH_COOKIE, sealed);
+
+      const response = await POST();
+      expect(await response.json()).toEqual({ flash: null });
+      expect(response.cookies.get(API_KEY_FLASH_COOKIE)?.value).toBe("");
     });
 
     it("rejects logged-out requests and destroys any pending secret", async () => {
@@ -169,7 +197,7 @@ describe("api key flash handoff", () => {
     });
 
     it("ignores legacy plaintext cookies", async () => {
-      mocks.auth.mockResolvedValue(SESSION);
+      mocks.auth.mockResolvedValue(authFor(SESSION));
       requestCookies.set(API_KEY_FLASH_COOKIE, JSON.stringify(SECRET_FLASH));
 
       const response = await POST();

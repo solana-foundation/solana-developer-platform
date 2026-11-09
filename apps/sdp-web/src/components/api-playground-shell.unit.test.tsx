@@ -303,6 +303,47 @@ describe("ApiPlaygroundShell", () => {
     expect(sentKey(3)).not.toBe(sentKey(2));
   });
 
+  // SOLA9-854: any 2xx retired a transfer's key, even one still processing, so
+  // a Send after that answer went out under a new key and could pay twice.
+  it("keeps a transfer's key while its 2xx shows the transfer still processing", async () => {
+    setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
+    const transferAnswer = (status: string) =>
+      Response.json({ data: { transfer: { id: "tx_1", status } } }, { status: 201 });
+    const answers = [transferAnswer("processing"), transferAnswer("confirmed")];
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init: RequestInit) =>
+        answers.shift() ?? transferAnswer("confirmed")
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const transferEndpoint: ApiPlaygroundEndpointConfig = {
+      ...endpoint,
+      id: "post-transfer-in-flight",
+      method: "POST",
+      path: "/v1/payments/transfers",
+    };
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell endpoints={[transferEndpoint]} productName="Test product" />
+      </I18nProvider>
+    );
+    const sentKey = (call: number) =>
+      new Headers(fetchMock.mock.calls[call][1].headers).get("Idempotency-Key") ?? undefined;
+    const send = async (calls: number) => {
+      await waitFor(() =>
+        expect(view.getByRole("button", { name: "Run" }).hasAttribute("disabled")).toBe(false)
+      );
+      fireEvent.click(view.getByRole("button", { name: "Run" }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(calls));
+    };
+
+    await send(1);
+    await send(2);
+    await send(3);
+
+    expect(sentKey(1)).toBe(sentKey(0));
+    expect(sentKey(2)).not.toBe(sentKey(1));
+  });
+
   // SOLA9-817: the retry key was derived from order-sensitive JSON text, so a
   // Send that only reordered a body's keys after a lost answer minted a new key
   // and the API, which fingerprints the body key-sorted, ran the write again.
