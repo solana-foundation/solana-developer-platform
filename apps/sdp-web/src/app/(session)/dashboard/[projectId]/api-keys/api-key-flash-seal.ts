@@ -8,7 +8,7 @@
  * absolute expiry. Unsealing requires the same session, user, organization
  * and Project and a fresh timestamp — a different account on the same
  * browser, a switched organization or Project, a logged-out browser, or a
- * replayed old cookie value all fail closed to `null` (SOLA9-875).
+ * replayed old cookie value all fail closed to `null`.
  */
 
 import type { ApiKeyFlash } from "./api-key-flash";

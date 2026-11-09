@@ -82,7 +82,7 @@ describe("api key flash handoff", () => {
       expect(await unsealApiKeyFlash(sealed, OTHER_USER)).toBeNull();
     });
 
-    it("rejects another organization or Project for the same session (SOLA9-875)", async () => {
+    it("rejects another organization or Project for the same session", async () => {
       const sealed = await sealedSecretFlash(Date.now());
       expect(await unsealApiKeyFlash(sealed, OTHER_ORGANIZATION)).toBeNull();
       expect(await unsealApiKeyFlash(sealed, OTHER_PROJECT)).toBeNull();

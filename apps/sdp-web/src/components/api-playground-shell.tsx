@@ -14,20 +14,18 @@ import type { TranslationValues } from "@/i18n/translate";
 import { filterPlaygroundEndpointsToReleaseChannel } from "@/lib/api-playground-openapi-catalog";
 import { PLAYGROUND_PROXY_PREFIX, playgroundResponseHeaders } from "@/lib/api-playground-proxy";
 import {
+  answerOf,
   dashboardRequest,
-  MOVEMENT_READ_PATHS,
+  inFlightMovementReadPath,
   settleWhenMovementFinal,
 } from "@/lib/dashboard-fetch";
 import { parseDashboardPathname } from "@/lib/dashboard-project-path";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import {
-  type ApiAnswer,
   answerRetiresKey,
-  apiErrorCode,
   canonicalizeAmounts,
   IDEMPOTENCY_KEY_HEADER,
   moneyAnswerRetiresKey,
-  movementStatusOf,
   parseJsonValue,
   storageFingerprint,
 } from "@/lib/idempotency";
@@ -380,31 +378,6 @@ const MONEY_ROUTE_PATTERNS = IDEMPOTENCY_REQUIRED_ROUTES.map((route) => {
   return { method, pattern: new RegExp(`^${pattern.join("/")}$`) };
 });
 
-/** The records a kept money answer names, as far as their ids go. */
-const keptMovementSchema = z.object({
-  data: z.object({
-    transfer: z.object({ id: z.string() }).optional(),
-    batch: z.object({ id: z.string() }).optional(),
-    recurringPayment: z.object({ id: z.string() }).optional(),
-  }),
-});
-
-/**
- * The dashboard read that shows when a kept money answer's movement is final,
- * or `null` when the answer names none (SOLA9-854).
- */
-function movementReadPathOf(body: unknown): string | null {
-  const parsed = keptMovementSchema.safeParse(body);
-  if (!parsed.success) return null;
-  const { transfer, batch, recurringPayment } = parsed.data.data;
-  if (batch !== undefined) return MOVEMENT_READ_PATHS.batch(batch.id);
-  if (transfer !== undefined) return MOVEMENT_READ_PATHS.transfer(transfer.id);
-  if (recurringPayment !== undefined) {
-    return MOVEMENT_READ_PATHS.recurringPayment(recurringPayment.id);
-  }
-  return null;
-}
-
 /** Whether a Send moves money (`IDEMPOTENCY_REQUIRED_ROUTES`), so its key must survive a reload. */
 function isMoneyRouteRequest(method: ApiPlaygroundMethod, resolvedPath: string): boolean {
   const path = resolvedPath.split("?")[0] ?? resolvedPath;
@@ -416,35 +389,28 @@ function isMoneyRouteRequest(method: ApiPlaygroundMethod, resolvedPath: string):
  * itself settles it; a keyless read (say, a GET checking whether the lost write
  * landed) leaves it for the retry. A money route's 2xx whose movement is still
  * in flight keeps it, as the dashboard's own sends do, so a resend cannot pay
- * twice (SOLA9-854). The API replays that first 2xx verbatim, so a Run under
+ * twice. The API replays that first 2xx verbatim, so a Run under
  * the key keeps showing `processing`: the movement's own state settles it.
  */
 function settlePlaygroundKey({
   entry,
   movesMoney,
   response,
-  replayed,
   text,
-  body,
 }: {
   entry: string;
   movesMoney: boolean;
   response: Response;
-  replayed: boolean;
   text: string;
-  body: unknown;
 }): void {
-  const answer: ApiAnswer = {
-    status: response.status,
-    replayed,
-    code: response.ok ? null : apiErrorCode(text),
-    movementStatus: response.ok ? movementStatusOf(body) : null,
-  };
+  // The dashboard's own reading of an answer, so the two never drift.
+  const answer = answerOf(response, text);
+  if (answer === null) return;
   if (movesMoney ? moneyAnswerRetiresKey(answer) : answerRetiresKey(answer)) {
     playgroundRetryKeys.release(UNSETTLED_SEND, entry);
     return;
   }
-  const readPath = movesMoney && response.ok ? movementReadPathOf(body) : null;
+  const readPath = movesMoney && response.ok ? inFlightMovementReadPath(text) : null;
   if (readPath !== null) {
     settleWhenMovementFinal(readPath, () => playgroundRetryKeys.release(UNSETTLED_SEND, entry));
   }
@@ -585,9 +551,7 @@ async function executePlaygroundRequest({
         entry: claimed.entry,
         movesMoney: isMoneyRouteRequest(activeEndpoint.method, resolvedPath),
         response,
-        replayed: responseHeaders["idempotent-replayed"] === "true",
         text,
-        body,
       });
     }
 

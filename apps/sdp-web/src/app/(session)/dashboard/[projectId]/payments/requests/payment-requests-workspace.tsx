@@ -402,7 +402,7 @@ export function PaymentRequestsWorkspace({
   const projectHref = useProjectHref();
   const projectId = useProjectId();
   // The Project this list shows while it is mounted, so a link read that
-  // answers after the dashboard moved elsewhere copies nothing (SOLA9-871).
+  // answers after the dashboard moved elsewhere copies nothing.
   const copyScope = useRef({ projectId, mounted: true });
   useEffect(() => {
     copyScope.current = { projectId, mounted: true };

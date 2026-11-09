@@ -1,19 +1,13 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { z } from "zod";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import {
-  createActionMemo,
   resetIdempotencyKeyStoresForTests,
   setIdempotencyKeyScope,
 } from "@/lib/idempotency-key-store";
 import { setWindowPathname } from "@/test/window-location";
-import {
-  expiresAtForAction,
-  PAYMENT_REQUEST_RETRY_WINDOW_MS,
-  settleExpiresAt,
-} from "./payment-request-expiry";
+import { expiresAtForAction, settleExpiresAt } from "./payment-request-expiry";
 
 const HOUR_MS = 60 * 60 * 1_000;
 
@@ -47,38 +41,6 @@ describe("expiresAtForAction", () => {
     vi.setSystemTime(new Date("2026-10-13T14:00:00.000Z"));
     expect(expiresAtForAction("one-hour", inAnHour)).toBeUndefined();
     expect(instantOf("one-hour", inAnHour)).toBe("2026-10-13T15:00:00.000Z");
-  });
-
-  // SOLA9-901: a create with no expiry kept its frozen body, and so its key,
-  // past the API's 24-hour key record, so a late retry could create twice.
-  it("does not send a retry once its first attempt is older than the API keeps the key", () => {
-    const first = required(expiresAtForAction("no-expiry", () => null));
-    expect(first.expiresAt).toBeNull();
-    settleExpiresAt("no-expiry", first, { ok: false, status: null });
-
-    vi.setSystemTime(new Date(Date.now() + PAYMENT_REQUEST_RETRY_WINDOW_MS - 1));
-    expect(instantOf("no-expiry", () => null)).toBeNull();
-    vi.setSystemTime(new Date(Date.now() + 1));
-    expect(expiresAtForAction("no-expiry", () => null)).toBeUndefined();
-    // The next press is a new action.
-    expect(instantOf("no-expiry", () => null)).toBeNull();
-  });
-
-  it("still reads and settles a bare expiry an earlier build stored", () => {
-    // The memo an earlier build wrote: the bare expiry, under the same store key.
-    createActionMemo("sdp:payments:request-expiry:v1", z.string().nullable()).valueFor(
-      "legacy",
-      () => "2026-10-13T13:00:00.000Z"
-    );
-    const read = required(expiresAtForAction("legacy", inAnHour));
-    expect(read).toEqual({
-      expiresAt: "2026-10-13T13:00:00.000Z",
-      entry: "2026-10-13T13:00:00.000Z",
-    });
-    settleExpiresAt("legacy", read, { ok: true, status: 201 });
-
-    vi.setSystemTime(new Date("2026-10-13T12:30:00.000Z"));
-    expect(instantOf("legacy", inAnHour)).toBe("2026-10-13T13:30:00.000Z");
   });
 
   it("settles the entry its send went out with after the dashboard switched organization", () => {

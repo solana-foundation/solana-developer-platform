@@ -202,7 +202,7 @@ describe("PaymentRequestsWorkspace copy link", () => {
     await waitFor(() => expect(copied).toHaveBeenCalledWith("Payment link copied"));
   });
 
-  it("copies nothing and says nothing when the list leaves the page before the link answers (SOLA9-871)", async () => {
+  it("copies nothing and says nothing when the list leaves the page before the link answers", async () => {
     let answerLink: (response: Response) => void = () => {};
     vi.stubGlobal(
       "fetch",

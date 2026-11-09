@@ -286,11 +286,22 @@ export async function sendTransferBatchUnderKey(
 ): Promise<CreateTransferBatchResult> {
   const canonical = nameTransferBatchRequest(request);
   const fingerprint = transferBatchRequestFingerprint(canonical);
-  const { key, persisted } = store.claim(fingerprint);
+  const { key, persisted, outlived } = store.claim(fingerprint);
   const settleKey = () => {
     store.release(fingerprint, key);
     releaseDefaultTransferBatchReference(canonical);
   };
+  if (outlived) {
+    // The API may have forgotten a key this old, so a retry under it could pay
+    // every recipient again. Nothing is sent: the user checks the list.
+    settleKey();
+    throw new TransferBatchRequestError(
+      t("Shared.idempotency.outcomeUnknownCheckList"),
+      409,
+      false,
+      "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN"
+    );
+  }
   let result: CreateTransferBatchResult;
   try {
     result = await createTransferBatch(canonical, t, { value: key, persisted });

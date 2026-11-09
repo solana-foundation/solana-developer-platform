@@ -304,7 +304,7 @@ describe("ApiPlaygroundShell", () => {
     expect(sentKey(3)).not.toBe(sentKey(2));
   });
 
-  // SOLA9-854: any 2xx retired a transfer's key, even one still processing, so
+  // any 2xx retired a transfer's key, even one still processing, so
   // a Send after that answer went out under a new key and could pay twice.
   it("keeps a transfer's key while it is processing, and settles it once a read shows it final", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
