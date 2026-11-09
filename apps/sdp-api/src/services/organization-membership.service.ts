@@ -467,7 +467,7 @@ export async function recordDeletedClerkUser(
 
 /**
  * Tombstones a deleted Clerk user's identity and, once no live Clerk user is
- * linked to the person, removes their personal data (SDP-001 SA-7,
+ * linked to the person, removes the details SDP no longer needs (SDP-001 SA-7,
  * HOO-2303), all in one transaction: the email and name on `users`, the email
  * on every identity they held, and the email on every invitation that is no
  * longer pending sent to any of those addresses. The `users` row keeps its id

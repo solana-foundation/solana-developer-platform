@@ -69,8 +69,8 @@ export function getClientIp(c: Context<{ Bindings: Env }>): string | null {
 /**
  * A client IP coarsened to its network: IPv4 to /24, IPv6 to /48, an
  * IPv4-mapped IPv6 address as its IPv4 /24 (`canonicalizeIpRange` masks it).
- * For records about callers SDP cannot identify, whose full address is
- * personal data SDP has no need to keep (SDP-022 PA-6). Anything that is not
+ * For records about callers SDP cannot identify, whose full address SDP has
+ * no need to keep (SDP-022 PA-6). Anything that is not
  * an IP address comes back null.
  */
 export function truncateClientIp(ip: string | null): string | null {
