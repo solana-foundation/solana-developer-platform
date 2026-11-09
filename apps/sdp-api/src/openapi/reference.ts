@@ -15,7 +15,7 @@ import {
   type ApiVariant,
 } from "@sdp/api-catalog/reference";
 import { SdpEarnError, type SdpEarnErrorCode } from "@sdp/earn/errors";
-import { ACTIONS, type Action } from "@sdp/types/actions";
+import { ACTIONS, type Action, isApiKeyGrantableAction } from "@sdp/types/actions";
 import type {
   OpenAPIObject,
   OperationObject,
@@ -586,6 +586,15 @@ function toApiOperation(
     throw new Error(`${where} has no owning module in src/routes/route-modules.ts`);
   }
   const action = ROUTE_ACTIONS[routeActionKey(method, path)] ?? null;
+  // The public document is what an API key calls. An operation whose action no
+  // key can hold (key, member, organization and project administration, every
+  // `configure`) answers a signed-in person only, so it belongs in the internal
+  // document.
+  if (action !== null && !isApiKeyGrantableAction(action)) {
+    throw new Error(
+      `${where} takes ${action}, which no API key can hold: register it outside the public document`
+    );
+  }
   const parameters = [...pathParameters, ...(operation.parameters ?? [])].map((parameter) =>
     dereferenceParameter(parameter, document)
   );

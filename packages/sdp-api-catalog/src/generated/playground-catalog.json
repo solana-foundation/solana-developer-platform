@@ -4,7 +4,7 @@
     "command": "pnpm -C apps/sdp-api playground:generate",
     "families": {
       "Health": 2,
-      "Wallets": 10,
+      "Wallets": 9,
       "Projects": 4,
       "Issuance": 37,
       "Payments": 41,
@@ -13,7 +13,7 @@
       "Asset Profiles": 7
     },
     "modules": {
-      "wallets": 10,
+      "wallets": 9,
       "payments": 41,
       "counterparties": 13,
       "issuance": 37
@@ -21,32 +21,6 @@
   },
   "modules": {
     "wallets": [
-      {
-        "id": "initialize-wallet-signing",
-        "operationId": "initializeWalletSigning",
-        "title": "Initialize wallet signing",
-        "method": "POST",
-        "path": "/v1/wallets/initialize",
-        "pathFields": [],
-        "bodyFields": [
-          {
-            "key": "$body",
-            "label": "JSON request body",
-            "description": "Generated from this operation's public OpenAPI request schema.",
-            "kind": "textarea",
-            "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"fireblocks\"\n}",
-            "required": true
-          }
-        ],
-        "expectedResponse": {
-          "configId": "cfg_example",
-          "publicKey": "So11111111111111111111111111111111111111112",
-          "walletId": "privy_wallet_123"
-        },
-        "releaseModule": "custody",
-        "shadowedBy": []
-      },
       {
         "id": "create-wallet",
         "operationId": "createWallet",
@@ -85,6 +59,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "custody",
         "shadowedBy": []
       },
@@ -116,6 +91,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "custody",
         "shadowedBy": []
       },
@@ -225,6 +201,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "custody",
         "shadowedBy": []
       },
@@ -254,6 +231,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "custody",
         "shadowedBy": []
       },
@@ -334,6 +312,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "custody",
         "shadowedBy": []
       },
@@ -356,6 +335,7 @@
         "expectedResponse": {
           "publicKey": "So11111111111111111111111111111111111111112"
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "custody",
         "shadowedBy": []
       },
@@ -392,6 +372,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "custody",
         "shadowedBy": []
       },
@@ -449,6 +430,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "custody",
         "shadowedBy": ["/v1/wallets/aggregate", "/v1/wallets/configs", "/v1/wallets/public-key"]
       },
@@ -498,6 +480,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "custody",
         "shadowedBy": []
       }
@@ -551,6 +534,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -653,6 +637,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -944,6 +929,7 @@
             "requestId": "req_example"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -1044,6 +1030,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -1091,6 +1078,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -1227,6 +1215,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -1337,6 +1326,7 @@
             "requestId": "req_example"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -1471,6 +1461,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -1605,6 +1596,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -1675,6 +1667,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -1798,6 +1791,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -1876,6 +1870,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -1944,6 +1939,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -2012,6 +2008,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -2080,6 +2077,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -2135,6 +2133,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -2229,6 +2228,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -2281,6 +2281,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -2310,6 +2311,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -2362,6 +2364,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -2514,6 +2517,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -2582,6 +2586,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -2679,6 +2684,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -2728,6 +2734,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -2809,6 +2816,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -2873,6 +2881,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -2920,6 +2929,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -2977,6 +2987,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -3026,6 +3037,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -3134,6 +3146,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -3199,6 +3212,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -3262,6 +3276,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -3325,6 +3340,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -3409,6 +3425,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -3456,6 +3473,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -3553,6 +3571,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "subscriptions",
         "shadowedBy": []
       },
@@ -3790,6 +3809,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "ramps",
         "shadowedBy": []
       },
@@ -4027,6 +4047,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "ramps",
         "shadowedBy": []
       },
@@ -4063,6 +4084,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "ramps",
         "shadowedBy": []
       },
@@ -4085,6 +4107,7 @@
           }
         ],
         "expectedResponse": {},
+        "takesIdempotencyKey": false,
         "releaseModule": "ramps",
         "shadowedBy": []
       },
@@ -4221,6 +4244,7 @@
             "nextCursor": "example"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       }
@@ -4251,6 +4275,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -4323,6 +4348,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -4364,6 +4390,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -4403,6 +4430,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": ["/v1/counterparties/accounts", "/v1/counterparties/metadata"]
       },
@@ -4452,6 +4480,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -4472,6 +4501,7 @@
         ],
         "bodyFields": [],
         "expectedResponse": {},
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -4706,6 +4736,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "ramps",
         "shadowedBy": []
       },
@@ -4803,6 +4834,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -4856,6 +4888,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -5941,6 +5974,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "ramps",
         "shadowedBy": []
       },
@@ -5991,6 +6025,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -6051,6 +6086,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -6078,6 +6114,7 @@
         ],
         "bodyFields": [],
         "expectedResponse": {},
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       }
@@ -6115,6 +6152,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6156,6 +6194,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6245,6 +6284,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6452,6 +6492,7 @@
             "requestId": "req_example"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6483,6 +6524,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6601,6 +6643,7 @@
             "requestId": "req_example"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6760,6 +6803,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": ["/v1/issuance/tokens/facets"]
       },
@@ -6857,6 +6901,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6880,6 +6925,7 @@
           "name": "example",
           "symbol": "example"
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6967,6 +7013,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7112,6 +7159,7 @@
             "requestId": "req_example"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7175,6 +7223,7 @@
             "requestId": "req_example"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7272,6 +7321,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7316,6 +7366,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7413,6 +7464,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7452,6 +7504,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7520,6 +7573,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7577,6 +7631,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7644,6 +7699,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7700,6 +7756,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7767,6 +7824,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7823,6 +7881,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7890,6 +7949,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7946,6 +8006,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8013,6 +8074,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8069,6 +8131,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8125,6 +8188,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8181,6 +8245,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8229,6 +8294,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8277,6 +8343,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8334,6 +8401,7 @@
             "requestId": "req_example"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8404,6 +8472,7 @@
             "requestId": "req_example"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8451,6 +8520,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8480,6 +8550,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8514,6 +8585,7 @@
         ],
         "bodyFields": [],
         "expectedResponse": {},
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8539,6 +8611,7 @@
           },
           "meta": {}
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8574,6 +8647,7 @@
           },
           "meta": {}
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       }
@@ -8906,7 +8980,8 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        }
+        },
+        "takesIdempotencyKey": true
       },
       "GET /v1/payments/transfers": {
         "id": "list-payment-transfers",
@@ -9131,7 +9206,8 @@
             "hasMore": false,
             "requestId": "req_example"
           }
-        }
+        },
+        "takesIdempotencyKey": false
       },
       "GET /v1/payments/transfers/{transferId}": {
         "id": "get-payment-transfer",
@@ -9195,7 +9271,8 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        }
+        },
+        "takesIdempotencyKey": false
       },
       "POST /v1/payments/transfer-batches": {
         "id": "create-payment-transfer-batch",
@@ -9295,7 +9372,8 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        }
+        },
+        "takesIdempotencyKey": true
       },
       "POST /v1/payments/transfer-batches/{batchId}/retry": {
         "id": "retry-payment-transfer-batch",
@@ -9393,7 +9471,8 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        }
+        },
+        "takesIdempotencyKey": true
       },
       "GET /v1/payments/transfer-batches/{batchId}": {
         "id": "get-payment-transfer-batch",
@@ -9491,7 +9570,8 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        }
+        },
+        "takesIdempotencyKey": false
       },
       "POST /v1/payments/recurring-payments/{id}/collect": {
         "id": "collect-payment-recurring-payment",
@@ -9607,7 +9687,8 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        }
+        },
+        "takesIdempotencyKey": true
       },
       "GET /v1/transactions": {
         "id": "list-unified-transactions",
@@ -9725,34 +9806,11 @@
             ],
             "nextCursor": "example"
           }
-        }
+        },
+        "takesIdempotencyKey": false
       }
     },
     "stable": {
-      "POST /v1/wallets/initialize": {
-        "id": "initialize-wallet-signing",
-        "operationId": "initializeWalletSigning",
-        "title": "Initialize wallet signing",
-        "method": "POST",
-        "path": "/v1/wallets/initialize",
-        "pathFields": [],
-        "bodyFields": [
-          {
-            "key": "$body",
-            "label": "JSON request body",
-            "description": "Generated from this operation's public OpenAPI request schema.",
-            "kind": "textarea",
-            "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"privy\"\n}",
-            "required": true
-          }
-        ],
-        "expectedResponse": {
-          "configId": "cfg_example",
-          "publicKey": "So11111111111111111111111111111111111111112",
-          "walletId": "privy_wallet_123"
-        }
-      },
       "GET /v1/wallets": {
         "id": "list-wallets",
         "operationId": "listWallets",
@@ -9826,7 +9884,8 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        }
+        },
+        "takesIdempotencyKey": false
       },
       "GET /v1/wallets/aggregate": {
         "id": "aggregate-wallet-balances",
@@ -9872,7 +9931,8 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        }
+        },
+        "takesIdempotencyKey": false
       },
       "POST /v1/payments/transfers": {
         "id": "create-payment-transfer",
@@ -9933,7 +9993,8 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        }
+        },
+        "takesIdempotencyKey": true
       },
       "GET /v1/payments/transfers": {
         "id": "list-payment-transfers",
@@ -10153,7 +10214,8 @@
             "hasMore": false,
             "requestId": "req_example"
           }
-        }
+        },
+        "takesIdempotencyKey": false
       },
       "GET /v1/payments/transfers/{transferId}": {
         "id": "get-payment-transfer",
@@ -10212,7 +10274,8 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        }
+        },
+        "takesIdempotencyKey": false
       },
       "POST /v1/payments/transfer-batches": {
         "id": "create-payment-transfer-batch",
@@ -10307,7 +10370,8 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        }
+        },
+        "takesIdempotencyKey": true
       },
       "POST /v1/payments/transfer-batches/{batchId}/retry": {
         "id": "retry-payment-transfer-batch",
@@ -10400,7 +10464,8 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        }
+        },
+        "takesIdempotencyKey": true
       },
       "GET /v1/payments/transfer-batches/{batchId}": {
         "id": "get-payment-transfer-batch",
@@ -10493,7 +10558,8 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        }
+        },
+        "takesIdempotencyKey": false
       },
       "POST /v1/payments/recurring-payments/{id}/collect": {
         "id": "collect-payment-recurring-payment",
@@ -10604,7 +10670,8 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        }
+        },
+        "takesIdempotencyKey": true
       },
       "GET /v1/transactions": {
         "id": "list-unified-transactions",
@@ -10722,7 +10789,8 @@
             ],
             "nextCursor": "example"
           }
-        }
+        },
+        "takesIdempotencyKey": false
       }
     }
   }

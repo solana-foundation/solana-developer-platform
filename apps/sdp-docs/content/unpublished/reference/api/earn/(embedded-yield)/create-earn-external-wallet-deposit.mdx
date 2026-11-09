@@ -181,9 +181,10 @@ Submit the signed bytes back. Requires the Idempotency-Key header; a retry with 
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/earn/external-wallet/deposits' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "transactionId": "earn_external_wallet_transaction_e7a88258-1d19-48f3-8d0e-81fefa4bf3b3",
@@ -192,11 +193,13 @@ curl -X POST 'https://api.solana.com/v1/earn/external-wallet/deposits' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/earn/external-wallet/deposits", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -209,8 +212,10 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/deposits
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/earn/external-wallet/deposits",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "transactionId": "earn_external_wallet_transaction_e7a88258-1d19-48f3-8d0e-81fefa4bf3b3",
     "signedTransaction": "AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOA"

@@ -179,9 +179,10 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/earn/vault-withdrawals' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "redemptionMode": "standard",
@@ -191,11 +192,13 @@ curl -X POST 'https://api.solana.com/v1/earn/vault-withdrawals' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/earn/vault-withdrawals", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -209,8 +212,10 @@ const res = await fetch("https://api.solana.com/v1/earn/vault-withdrawals", {
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/earn/vault-withdrawals",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "redemptionMode": "standard",
     "positionId": "position_example",

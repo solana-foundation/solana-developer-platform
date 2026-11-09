@@ -9,7 +9,7 @@ import { z } from "zod";
 import { AppError, type ErrorCode, isErrorCode } from "@/lib/errors";
 import { DOCS_GROUP } from "./paths/helpers";
 import { buildApiReference, exampleErrorCode } from "./reference";
-import { createPublicOpenApiDocument } from "./spec";
+import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
 
 const HTTP_METHODS = ["get", "put", "post", "delete", "patch"] as const;
 
@@ -218,13 +218,55 @@ describe("buildApiReference", () => {
     expect(notReady).toMatchObject({ kind: "json", example: { status: "not_ready" } });
   });
 
+  it("refuses to publish an operation whose action no API key can hold", () => {
+    const publicDocument = createPublicOpenApiDocument({ releaseChannel: "stable" });
+    const internalProjectUpdate = createOpenApiDocument().paths["/v1/projects/{projectId}"]?.patch;
+    if (internalProjectUpdate === undefined) throw new Error("no internal project update");
+    // Every channel's public document builds, so none publishes such an operation.
+    for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
+      expect(() =>
+        buildApiReference(createPublicOpenApiDocument({ releaseChannel }))
+      ).not.toThrow();
+    }
+    expect(() =>
+      buildApiReference({
+        ...publicDocument,
+        paths: {
+          ...publicDocument.paths,
+          "/v1/projects/{projectId}": {
+            ...publicDocument.paths["/v1/projects/{projectId}"],
+            patch: { ...internalProjectUpdate, security: [{ apiKeyAuth: [] }] },
+          },
+        },
+      })
+    ).toThrow("PATCH /v1/projects/{projectId} takes projects.manage, which no API key can hold");
+  });
+
   it("titles variants by the value they pin, and keeps a `not` as the properties it excludes", () => {
     const operations = buildApiReference(
       createPublicOpenApiDocument({ releaseChannel: "stable" })
     ).families.flatMap((family) => family.operations);
-    const initialize = operations.find((operation) => operation.path === "/v1/wallets/initialize");
+    // Initialize is session-only (wallets.configure), so only the internal
+    // document carries it, and the reference model refuses it. Its
+    // body is still the one variant set titled by a pinned value, so the body is
+    // grafted onto a test-only API-key operation that names no action.
+    const publicDocument = createPublicOpenApiDocument({ releaseChannel: "stable" });
+    const internalInitialize = createOpenApiDocument().paths["/v1/wallets/initialize"]?.post;
+    if (internalInitialize === undefined) throw new Error("no internal initialize operation");
+    const initialize = buildApiReference({
+      ...publicDocument,
+      paths: {
+        ...publicDocument.paths,
+        "/v1/wallets/variant-titling-fixture": {
+          post: { ...internalInitialize, security: [{ apiKeyAuth: [] }] },
+        },
+      },
+    })
+      .families.flatMap((family) => family.operations)
+      .find((operation) => operation.path === "/v1/wallets/variant-titling-fixture");
     expect(initialize?.requestBody?.schema.variantMode).toBe("oneOf");
-    expect(initialize?.requestBody?.schema.variants[0]?.title).toBe('provider: "privy"');
+    // The internal document keeps every provider, `local` first.
+    expect(initialize?.requestBody?.schema.variants[0]?.title).toBe('provider: "local"');
     const createWallet = operations.find((operation) => operation.operationId === "createWallet");
     expect(createWallet?.requestBody?.schema.variants[0]?.schema.constraints).toEqual([
       { kind: "excludes", value: ["connectionId"] },
