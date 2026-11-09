@@ -1697,6 +1697,60 @@ describe("Payments routes — recurring", () => {
       expect(recurringExecutionCallCounts()).toEqual(calls);
     });
 
+    it("answers an edit that loses the race after its read with the version that won", async () => {
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const otherAccountId = `counterparty_account_${crypto.randomUUID()}`;
+      const now = new Date().toISOString();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO counterparty_accounts (
+             id, organization_id, project_id, counterparty_id, account_kind, label,
+             details, provider_account_data, status, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, 'crypto_wallet', 'Other wallet', ?, '{}', 'active', ?, ?)`
+        )
+        .bind(
+          otherAccountId,
+          "org_payments_policy_test",
+          created.projectId,
+          created.counterpartyId,
+          JSON.stringify({ network: "solana", address: TEST_SOLANA_ADDRESSES.wallet3 }),
+          now,
+          now
+        )
+        .run();
+      const winner = new Date(Date.now() + 1_000).toISOString();
+      const original = counterpartyAccountResolution.resolveSolanaCounterpartyAccount;
+      const lookup = vi
+        .spyOn(counterpartyAccountResolution, "resolveSolanaCounterpartyAccount")
+        .mockImplementationOnce(async (lookupInput) => {
+          // Another edit commits between this edit's read and its write.
+          await getDb(env)
+            .prepare("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?")
+            .bind(winner, created.id)
+            .run();
+          return original(lookupInput);
+        });
+      onTestFinished(() => lookup.mockRestore());
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${created.id}`,
+        {
+          method: "PATCH",
+          headers: RECURRING_HEADERS,
+          body: JSON.stringify({ counterpartyAccountId: otherAccountId }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "RECURRING_PAYMENT_CHANGED",
+          details: { recurringPaymentId: created.id, updatedAt: winner },
+        },
+      });
+    });
+
     it("refuses an activation an edit overtook after it read the row, claiming nothing", async () => {
       const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
       const original = counterpartyAccountResolution.resolveSolanaCounterpartyAccount;

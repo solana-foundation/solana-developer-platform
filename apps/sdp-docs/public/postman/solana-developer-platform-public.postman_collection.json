@@ -114,7 +114,7 @@
             "description": "Sets up Managed custody for the project's named provider by creating its active signing configuration and first wallet. Production projects use BYOK only: there this returns 403 with details.reason custody_mode_not_allowed, and wallets are created in a Custody Connection with POST /v1/wallets and connectionId.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"fireblocks\",\n  \"walletLabel\": \"\"\n}",
+              "raw": "{\n  \"provider\": \"fireblocks\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -427,7 +427,7 @@
             "description": "Updates stored token fields. For deployed tokens, metadata fields are also written on-chain through the current metadata authority.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"name\": \"Example Token Updated\",\n  \"symbol\": \"\",\n  \"decimals\": 0,\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"requiresAllowlist\": true,\n  \"maxSupply\": \"1000000\"\n}",
+              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"name\": \"Example Token Updated\",\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"requiresAllowlist\": true,\n  \"maxSupply\": \"1000000\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -958,7 +958,7 @@
             "description": "Registers a wallet for this asset (upserts its KYC identity + an active enrollment).",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"walletAddress\": \"\",\n  \"counterpartyId\": \"\",\n  \"reviewMode\": \"auto\"\n}",
+              "raw": "{\n  \"walletAddress\": \"\",\n  \"reviewMode\": \"auto\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1181,7 +1181,7 @@
             "description": "Updates an SDP-custody recurring payment. Pending records are updated directly. Active metadata and due-date edits are applied in place, while active term, source, destination, or token edits create a replacement Solana subscription, authorize it, cancel the old subscription, and then swap the recurring payment to the replacement records.\n\nSend `expectedUpdatedAt` from the version you reviewed to make the edit apply to that version only: when the recurring payment has changed since, the edit returns `409` `RECURRING_PAYMENT_CHANGED` and changes nothing.\n\nRequires an `Idempotency-Key`, because an edit can sign and broadcast a replacement subscription. A same-key retry of a completed edit replays its answer. A retry of an interrupted edit gets `409` `IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After` until the attempt is stale, then resumes from the last step SDP recorded. If a step was sent but not yet recorded when the edit was interrupted, which is rare, the retry can fail or send that step again, so read the recurring payment with `GET` before editing it again.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"expectedUpdatedAt\": \"\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"cpacct_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2099-02-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+              "raw": "{\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"cpacct_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2099-02-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1210,7 +1210,7 @@
             "description": "Activates a pending SDP-custody recurring payment by creating the Solana subscriptions plan, authorizing the subscription, and storing the resulting on-chain identifiers and signatures.\n\nA fresh activation signs the terms it read: when an edit lands while it runs, or `expectedUpdatedAt` names an earlier version, it returns `409` `RECURRING_PAYMENT_CHANGED` before claiming the schedule or signing.\n\nBoth the counterparty and its account must be active before a fresh activation; an unavailable recipient returns `404` before claiming the schedule or signing. Recovery can confirm saved transactions, but cannot sign a new step for an unavailable recipient.\n\nThe source wallet gives the Subscriptions program's authority for that token an approval of 0, and each collection approves exactly its own amount in the same transaction as the pull, so the token program's `Approve` instruction appears in activation and collection transactions. If your custody provider's wallet policy allowlists programs or instructions, allow `Approve` to that authority, or the provider refuses the collection and SDP pauses the recurring payment with `pausedReason` `custody_policy_refused`.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"expectedUpdatedAt\": \"\"\n}",
+              "raw": "{}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1414,7 +1414,7 @@
             "description": "Updates mutable subscription plan fields and on-chain identifiers.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"planPda\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"destinationAddress\": \"\",\n  \"pullerWalletId\": \"wal_collector\",\n  \"metadataUri\": \"https://example.com\",\n  \"status\": \"active\"\n}",
+              "raw": "{\n  \"planPda\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"pullerWalletId\": \"wal_collector\",\n  \"status\": \"active\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

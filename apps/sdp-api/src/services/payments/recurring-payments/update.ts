@@ -641,8 +641,17 @@ async function updatePendingRecurringPaymentRow(
   });
 
   if (!updated) {
-    throw new AppError("RECURRING_PAYMENT_CHANGED", undefined, {
+    // Another write won after the read: answer with the version it left, as
+    // the documented RECURRING_PAYMENT_CHANGED does, so the caller can re-read.
+    const current = await recurringRepo.getRecurringPaymentById({
       recurringPaymentId: input.recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    });
+    if (current === null) throw notFound("Recurring payment");
+    throw new AppError("RECURRING_PAYMENT_CHANGED", undefined, {
+      recurringPaymentId: current.id,
+      updatedAt: current.updated_at,
     });
   }
   return updated;
