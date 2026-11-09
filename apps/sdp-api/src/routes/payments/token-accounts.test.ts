@@ -146,7 +146,7 @@ describe("buildSplTransferInstructions", () => {
   );
 });
 
-describe("resolveSourceTokenAccountOrAta (SOLA9-885)", () => {
+describe("resolveSourceTokenAccountOrAta", () => {
   const rpc = installClusterRpcResponder();
   const owner = syntheticAddress(21);
   const mint = syntheticAddress(22);

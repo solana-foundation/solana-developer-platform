@@ -216,7 +216,7 @@ export async function resolveSourceTokenAccountOrAta(
 const SYSTEM_PROGRAM_ID = address("11111111111111111111111111111111");
 
 /**
- * Whether the owner's ATA address holds its token account (SOLA9-885). Only
+ * Whether the owner's ATA address holds its token account. Only
  * the ATA program can put a token account at that address, so an account an
  * SPL token program owns is it. Anyone can send lamports to the address
  * first, leaving a system-owned account there: that is no token account, and
