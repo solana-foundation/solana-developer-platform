@@ -1,6 +1,7 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
+import * as logger from "@/runtime/logger";
 import {
   detectMoneyMovementAnomalies,
   MONEY_MOVEMENT_ANOMALY_FACTOR,
@@ -85,6 +86,10 @@ describe("detectMoneyMovementAnomalies", () => {
     await seedTestDatabase(env);
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   beforeEach(async () => {
     const db = getDb(env);
     await db.prepare("DELETE FROM payment_transfers").run();
@@ -128,6 +133,29 @@ describe("detectMoneyMovementAnomalies", () => {
         baselineActiveHours: 4,
       },
     ]);
+  });
+
+  it("logs each flagged hour with the fields the alert reads", async () => {
+    const testLogger = logger.rootLogger.child({});
+    const warn = vi.spyOn(testLogger, "warn").mockImplementation(() => undefined);
+    vi.spyOn(logger, "getLogger").mockReturnValue(testLogger);
+    await seedBaseline("100.00");
+    await seedMovement({ hoursBeforeChecked: 0, amount: "100000.00" });
+
+    await scan();
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "sdp_api_money_movement_anomaly",
+        environment: "sandbox",
+        organization_id: TEST_ORG.id,
+        kind: "transfer",
+        mint: USDC,
+        value: "100000.00",
+        baseline_max_value: "100.00",
+      }),
+      expect.any(String)
+    );
   });
 
   it("flags an hour whose count is far above the busiest hour, at an ordinary value each", async () => {

@@ -569,12 +569,13 @@ async function failUnsentInvitation(
   });
   getLogger().warn(
     {
+      event: "sdp_api_invitation_failed",
       organizationId,
       invitationId: invitation.id,
       clerkStatus: clerkError === null ? null : clerkError.clerkStatus,
       clerkCode,
     },
-    "sdp_api_invitation_failed"
+    "invitation failed at Clerk"
   );
 }
 

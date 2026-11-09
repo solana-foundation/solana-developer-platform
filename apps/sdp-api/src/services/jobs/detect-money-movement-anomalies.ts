@@ -91,23 +91,30 @@ export async function detectMoneyMovementAnomalies(
       baselineActiveHours: row.baseline_active_hours,
     })
   );
-  const logger = getLogger();
   for (const anomaly of anomalies) {
-    logger.warn(
+    getLogger().warn(
       {
         event: "sdp_api_money_movement_anomaly",
         environment,
-        hourStart,
-        ...anomaly,
+        hour_start: hourStart,
+        organization_id: anomaly.organizationId,
+        kind: anomaly.kind,
+        // Named mint: a bare "token" key is scrubbed as a credential.
+        mint: anomaly.token,
+        count: anomaly.count,
+        value: anomaly.value,
+        baseline_max_count: anomaly.baselineMaxCount,
+        baseline_max_value: anomaly.baselineMaxValue,
+        baseline_active_hours: anomaly.baselineActiveHours,
       },
       "money movement above the organization's busiest hour of the past week"
     );
   }
-  logger.info(
+  getLogger().info(
     {
       event: "sdp_api_money_movement_anomaly_scan",
       environment,
-      hourStart,
+      hour_start: hourStart,
       flagged: anomalies.length,
     },
     "money movement anomaly scan"
