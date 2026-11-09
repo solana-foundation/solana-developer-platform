@@ -256,15 +256,18 @@ export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore
       const kept = keptEntry?.value;
       const claimedAt = keptEntry?.claimedAt ?? Date.now();
       const outlived = kept !== undefined && Date.now() - claimedAt >= KEPT_KEY_WINDOW_MS;
-      // An entry an earlier build wrote has no claim time: it is stamped now,
-      // so it ages out like any other instead of never.
-      if (
-        kept !== undefined &&
-        keptEntry?.claimedAt !== undefined &&
-        storedValue(name, fingerprint) === kept
-      ) {
+      if (kept !== undefined && storedValue(name, fingerprint) === kept) {
         // Already persisted: the retry needs no rewrite, so a store that now
         // refuses writes never blocks the retry of an earlier attempt.
+        if (keptEntry?.claimedAt === undefined) {
+          // An entry an earlier build wrote has no claim time: it is stamped
+          // now, so it ages out like any other instead of never. The key is
+          // stored either way, so a refused stamp changes nothing about it.
+          writeEntries(name, [
+            ...entries.filter((entry) => entry.id !== fingerprint),
+            { id: fingerprint, value: kept, claimedAt },
+          ]);
+        }
         claimedIn.set(JSON.stringify([fingerprint, kept]), name);
         return { key: kept, persisted: true, outlived };
       }

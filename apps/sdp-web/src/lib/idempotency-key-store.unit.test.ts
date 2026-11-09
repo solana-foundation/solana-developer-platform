@@ -84,6 +84,22 @@ describe("claim", () => {
     }
   });
 
+  it("still reports an earlier build's stored key as kept when stamping it is refused", () => {
+    const first = store.claim(fingerprint);
+    const [name] = Object.keys(sessionStorage);
+    if (name === undefined) throw new Error("the claim stored no entry");
+    const entries = z
+      .array(z.object({ id: z.string(), value: z.string() }))
+      .parse(JSON.parse(sessionStorage.getItem(name) ?? "[]"));
+    sessionStorage.setItem(name, JSON.stringify(entries.map(({ id, value }) => ({ id, value }))));
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota exceeded", "QuotaExceededError");
+    });
+
+    // The key is in storage already, so a money route may still send it.
+    expect(store.claim(fingerprint)).toMatchObject({ key: first.key, persisted: true });
+  });
+
   it("reports a key the browser would not store, and still keeps it for this page", () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("quota exceeded", "QuotaExceededError");
