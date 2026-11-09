@@ -949,3 +949,14 @@ describe("one JSON parse for every redaction pass", () => {
     );
   });
 });
+
+// Greptile (#2833): a document too deep for the number-keeping reviver fell back
+// to the text patterns, which cannot decode an escaped credential key.
+describe("redaction of a document too deep for the reviver", () => {
+  it("still redacts an escaped credential key by parsing the document plainly", () => {
+    const deep = `{"\\u0061piKey":"sk_live_secret","d":${"[".repeat(10_000)}${"]".repeat(10_000)}}`;
+    const redacted = redactCredentialString(deep);
+    assert.ok(!redacted.includes("sk_live_secret"));
+    assert.ok(redacted.startsWith('{"apiKey":"[REDACTED]"'));
+  });
+});

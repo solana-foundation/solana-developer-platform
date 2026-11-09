@@ -623,6 +623,62 @@ describe("Clerk webhooks", () => {
     ).toEqual({ count: 0 });
   });
 
+  // Greptile (#2833): the deletion read the mapping before taking the lock, so
+  // a mapping committed while it waited was never cleaned up.
+  it("cleans up a person whose mapping commits while the user.deleted waits for the lock", async () => {
+    stubClerkBackend(env);
+    const clerkUserId = "clerk_user_mapping_in_flight";
+    const email = "mapping.in.flight@example.com";
+    let commitMapping = () => {};
+    const mappingHeld = new Promise<void>((resolve) => {
+      commitMapping = resolve;
+    });
+    let mappingLocked = () => {};
+    const locked = new Promise<void>((resolve) => {
+      mappingLocked = resolve;
+    });
+    // A user.created in flight: it holds the Clerk user's lock with its mapping written.
+    const mapping = getDb(env).transaction(async (tx) => {
+      await lockClerkUser(tx, clerkUserId);
+      await tx.execute(
+        "INSERT INTO users (id, email, name, email_verified, status) VALUES (?, ?, 'In Flight', 1, 'active')",
+        ["usr_mapping_in_flight", email]
+      );
+      await tx.execute(
+        `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+         VALUES (?, 'clerk', ?, ?, ?)`,
+        ["aui_mapping_in_flight", clerkUserId, "usr_mapping_in_flight", email]
+      );
+      mappingLocked();
+      await mappingHeld;
+    });
+    await locked;
+    let deletionSettled = false;
+    const deletion = simulateClerkWebhook({
+      type: "user.deleted",
+      data: { id: clerkUserId, object: "user", deleted: true },
+    }).finally(() => {
+      deletionSettled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const deletionWaited = !deletionSettled;
+    // Released before any assertion, so a failure never leaves the lock held.
+    commitMapping();
+    const [, answered] = await Promise.allSettled([mapping, deletion]);
+
+    expect(deletionWaited).toBe(true);
+    expect(answered.status === "fulfilled" ? answered.value.status : answered.reason).toBe(200);
+    expect(
+      await getDb(env).queryOne("SELECT email, name, status FROM users WHERE id = ?", [
+        "usr_mapping_in_flight",
+      ])
+    ).toEqual({
+      email: "deleted+usr_mapping_in_flight@users.invalid",
+      name: null,
+      status: "deleted",
+    });
+  });
+
   it("rolls the whole pseudonymization back when one of its writes fails", async () => {
     await seedKnownOrganization();
     await seedInvitation(getDb(env), {

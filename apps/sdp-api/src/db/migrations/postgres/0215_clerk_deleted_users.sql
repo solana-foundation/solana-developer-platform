@@ -7,7 +7,11 @@
 --
 -- Global, like `users` and `auth_user_identities`: no tenant policy (0081).
 -- Expand-only: a new table no previous revision reads.
+--
+-- `status` is the one value `deleted`: a record is never archived, since an
+-- archived one would let a late event store the person again.
 CREATE TABLE IF NOT EXISTS clerk_deleted_users (
     clerk_user_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'deleted' CHECK (status IN ('deleted')),
     deleted_at TEXT NOT NULL DEFAULT sdp_iso_now()
 );

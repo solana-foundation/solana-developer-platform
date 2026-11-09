@@ -234,7 +234,11 @@ export function parseJsonDocument(value: string): JsonDocument | undefined {
       return `${NUMBER_TEXT_MARK}${sources.length - 1}`;
     });
   } catch {
-    return undefined;
+    // A document too deep for the reviver's recursion still parses plainly,
+    // and the bounded walker redacts it by key; only its number text is lost.
+    const plain = parseJson(value);
+    if (plain === undefined) return undefined;
+    return { parsed: plain, exactNumbers: false, restoreNumbers: (text) => text };
   }
   return {
     parsed,

@@ -331,11 +331,12 @@ async function mirrorUserDeletion(c: AppContext, data: DeletedObjectJSON) {
   if (!data.id) {
     throw badRequest("user.deleted event names no user");
   }
-  const userId = await findClerkUserMapping(c, data.id);
+  // Recorded first, under the Clerk user's lock, with the mapping read there:
+  // a mapping written while this waited is still found and cleaned up, and
+  // none can be written after (HOO-2303).
+  const userId = await recordDeletedClerkUser(getDb(c.env), data.id);
   if (userId === null) {
-    // Never linked, or already deleted: the record still stops a later event
-    // from storing the person (HOO-2303).
-    await recordDeletedClerkUser(getDb(c.env), data.id);
+    logIgnoredClerkEvent(c, "user", data.id);
     return;
   }
   for (const organizationId of await organizationsReachingPerson(getDb(c.env), userId)) {

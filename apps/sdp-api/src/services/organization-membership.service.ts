@@ -439,20 +439,29 @@ async function insertDeletedClerkUser(tx: DatabaseExecutor, clerkUserId: string)
 }
 
 /**
- * Records a deletion of a Clerk user SDP never linked to a person (HOO-2303):
- * nothing of theirs is stored yet, but a late or retried `user.created` must
- * still find the deletion and store nothing.
+ * Records that Clerk deleted the Clerk user, first and under its lock
+ * (HOO-2303), and reads the person it is linked to there. Once this commits,
+ * no mapping for the Clerk user can be written, and a mapping that committed
+ * before it is the one returned, so a deletion never misses a person linked
+ * while it waited. A Clerk user SDP never linked returns null: nothing of
+ * theirs is stored, and a late or retried `user.created` stores nothing.
  *
  * @param db - The database.
  * @param clerkUserId - The Clerk user Clerk deleted.
+ * @returns The SDP person the Clerk user is linked to, or null.
  */
 export async function recordDeletedClerkUser(
   db: DatabaseClient,
   clerkUserId: string
-): Promise<void> {
-  await db.transaction(async (tx) => {
+): Promise<string | null> {
+  return db.transaction(async (tx) => {
     await lockClerkUser(tx, clerkUserId);
     await insertDeletedClerkUser(tx, clerkUserId);
+    const identity = await tx.queryOne<{ user_id: string }>(
+      "SELECT user_id FROM auth_user_identities WHERE provider = 'clerk' AND provider_user_id = ?",
+      [clerkUserId]
+    );
+    return identity?.user_id ?? null;
   });
 }
 
