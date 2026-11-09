@@ -430,6 +430,68 @@ export async function isDeletedClerkUser(
   return tombstone !== null;
 }
 
+/**
+ * Links a Clerk user SDP has not linked yet to the person its verified email
+ * belongs to, creating the person when none has it, inside the caller's
+ * transaction and {@link lockClerkUser} lock (HOO-2303). The person's row is
+ * locked by email, as cleanup locks it: a cleanup that committed first no
+ * longer matches the email, so a new person is created, and one that comes
+ * after waits for this link and sees a live identity.
+ *
+ * @param tx - The open transaction, holding the Clerk user's lock.
+ * @param params.clerkUserId - The Clerk user.
+ * @param params.email - Its verified primary email, lowercased.
+ * @param params.name - A name for a person created here.
+ * @returns The SDP person.
+ */
+export async function linkClerkIdentityWithin(
+  tx: DatabaseExecutor,
+  params: { clerkUserId: string; email: string; name?: string | null }
+): Promise<{ userId: string; email: string }> {
+  const byEmail = () =>
+    tx.queryOne<{ id: string; email: string }>(
+      "SELECT id, email FROM users WHERE email = ? FOR UPDATE",
+      [params.email]
+    );
+  let user = await byEmail();
+  if (user === null) {
+    await tx.execute(
+      `INSERT INTO users (id, email, name, email_verified, status)
+       VALUES (?, ?, ?, 1, 'active')
+       ON CONFLICT (email) DO NOTHING`,
+      [`usr_${crypto.randomUUID()}`, params.email, params.name ?? null]
+    );
+    user = await byEmail();
+  }
+  if (user === null) {
+    throw internalError("Unable to resolve the person for a Clerk user");
+  }
+  await tx.execute(
+    `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+     VALUES (?, 'clerk', ?, ?, ?)
+     ON CONFLICT (provider, provider_user_id)
+     DO UPDATE SET user_id = EXCLUDED.user_id, email = EXCLUDED.email, updated_at = sdp_datetime_now()`,
+    [`aui_${crypto.randomUUID()}`, params.clerkUserId, user.id, params.email]
+  );
+  return { userId: user.id, email: user.email };
+}
+
+/**
+ * {@link linkClerkIdentityWithin} in its own transaction under the Clerk
+ * user's lock, for sign-in: null when Clerk deleted the Clerk user, so a
+ * sign-in that raced its deletion stores nothing.
+ */
+export async function linkClerkIdentity(
+  db: DatabaseClient,
+  params: { clerkUserId: string; email: string; name?: string | null }
+): Promise<{ userId: string; email: string } | null> {
+  return db.transaction(async (tx) => {
+    await lockClerkUser(tx, params.clerkUserId);
+    if (await isDeletedClerkUser(tx, params.clerkUserId)) return null;
+    return linkClerkIdentityWithin(tx, params);
+  });
+}
+
 /** Records that Clerk deleted the Clerk user, inside the caller's transaction and lock. */
 async function insertDeletedClerkUser(tx: DatabaseExecutor, clerkUserId: string): Promise<void> {
   await tx.execute(

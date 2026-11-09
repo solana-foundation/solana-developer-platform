@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { asTransactionalClient, getDb } from "@/db/client";
 import { app } from "@/index";
 import {
+  linkClerkIdentity,
   lockClerkUser,
   pseudonymizeDeletedPerson,
 } from "@/services/organization-membership.service";
@@ -677,6 +678,89 @@ describe("Clerk webhooks", () => {
       name: null,
       status: "deleted",
     });
+  });
+
+  // Greptile (#2833): a new Clerk account read the person, then linked them
+  // after the old account's deletion had cleared them.
+  it("links a new Clerk account to a fresh person when a deletion of the old one commits first", async () => {
+    await seedKnownOrganization();
+    stubClerkBackend(env);
+    const pseudonym = `deleted+${KNOWN_ADMIN.userId}@users.invalid`;
+    let commitDeletion = () => {};
+    const deletionHeld = new Promise<void>((resolve) => {
+      commitDeletion = resolve;
+    });
+    let deletionLocked = () => {};
+    const locked = new Promise<void>((resolve) => {
+      deletionLocked = resolve;
+    });
+    // The old account's deletion in flight: it holds the person's row, already cleared.
+    const deletion = getDb(env).transaction(async (tx) => {
+      await lockClerkUser(tx, OLD_CLERK_USER_ID);
+      await tx.execute("SELECT id FROM users WHERE id = ? FOR UPDATE", [KNOWN_ADMIN.userId]);
+      await tx.execute("UPDATE users SET email = ?, name = NULL, status = 'deleted' WHERE id = ?", [
+        pseudonym,
+        KNOWN_ADMIN.userId,
+      ]);
+      deletionLocked();
+      await deletionHeld;
+    });
+    await locked;
+    let signupSettled = false;
+    const signup = simulateClerkWebhook({
+      type: "user.created",
+      data: {
+        id: NEW_CLERK_USER_ID,
+        primary_email_address_id: "email_signup",
+        email_addresses: [
+          {
+            id: "email_signup",
+            email_address: KNOWN_ADMIN.email,
+            verification: { status: "verified" },
+          },
+        ],
+      },
+    }).finally(() => {
+      signupSettled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const signupWaited = !signupSettled;
+    // Released before any assertion, so a failure never leaves the row lock held.
+    commitDeletion();
+    const [, answered] = await Promise.allSettled([deletion, signup]);
+
+    expect(signupWaited).toBe(true);
+    expect(answered.status === "fulfilled" ? answered.value.status : answered.reason).toBe(200);
+    const linked = await getDb(env).queryOne<{ user_id: string }>(
+      "SELECT user_id FROM auth_user_identities WHERE provider = 'clerk' AND provider_user_id = ?",
+      [NEW_CLERK_USER_ID]
+    );
+    expect(linked?.user_id).toBeDefined();
+    expect(linked?.user_id).not.toBe(KNOWN_ADMIN.userId);
+    expect(
+      await getDb(env).queryOne("SELECT email, status FROM users WHERE id = ?", [
+        KNOWN_ADMIN.userId,
+      ])
+    ).toEqual({ email: pseudonym, status: "deleted" });
+  });
+
+  // Greptile (#2833): sign-in wrote the mapping without the deletion's lock or check.
+  it("refuses to link a Clerk user Clerk deleted, as a sign-in that raced its deletion would", async () => {
+    await getDb(env).execute("INSERT INTO clerk_deleted_users (clerk_user_id) VALUES (?)", [
+      "clerk_user_deleted_before_signin",
+    ]);
+
+    expect(
+      await linkClerkIdentity(getDb(env), {
+        clerkUserId: "clerk_user_deleted_before_signin",
+        email: "deleted.before.signin@example.com",
+      })
+    ).toBeNull();
+    expect(
+      await getDb(env).queryOne("SELECT count(*)::int AS count FROM users WHERE email = ?", [
+        "deleted.before.signin@example.com",
+      ])
+    ).toEqual({ count: 0 });
   });
 
   it("rolls the whole pseudonymization back when one of its writes fails", async () => {

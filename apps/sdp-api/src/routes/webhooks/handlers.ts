@@ -24,6 +24,7 @@ import { verifiedPrimaryEmailFromClerkUser } from "@/services/clerk-users.servic
 import { applyStoredRampWebhookEvent } from "@/services/jobs/replay-ramp-webhook-events";
 import {
   isDeletedClerkUser,
+  linkClerkIdentityWithin,
   lockClerkUser,
   mirrorClerkMembershipDeletion,
   organizationsReachingPerson,
@@ -415,33 +416,8 @@ async function ensureUserMapping(
       return existing.user_id;
     }
 
-    const localUser = await tx
-      .prepare("SELECT id FROM users WHERE email = ?")
-      .bind(email)
-      .first<{ id: string }>();
-    const userId = localUser?.id ?? `usr_${crypto.randomUUID()}`;
-
-    if (!localUser) {
-      await tx
-        .prepare(
-          `INSERT INTO users (id, email, name, email_verified, status)
-           VALUES (?, ?, ?, 1, 'active')`
-        )
-        .bind(userId, email, user.name)
-        .run();
-    }
-
-    await tx
-      .prepare(
-        `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
-         VALUES (?, 'clerk', ?, ?, ?)
-         ON CONFLICT (provider, provider_user_id)
-         DO UPDATE SET user_id = EXCLUDED.user_id, email = EXCLUDED.email, updated_at = datetime('now')`
-      )
-      .bind(`aui_${crypto.randomUUID()}`, user.id, userId, email)
-      .run();
-
-    return userId;
+    return (await linkClerkIdentityWithin(tx, { clerkUserId: user.id, email, name: user.name }))
+      .userId;
   });
 }
 

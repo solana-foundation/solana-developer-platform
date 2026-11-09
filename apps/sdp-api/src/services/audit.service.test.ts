@@ -176,19 +176,21 @@ describe("AuditService", () => {
   ])(
     "keeps the full IP unless the entry marks its requester anonymous (%s)",
     async (anonymousRequester, ip, userAgent) => {
-      const { db, queryOne, checkpoint } = createAuditWriter();
-      const context = {
-        get: (key: string) => (key === "requestId" ? "req_123" : undefined),
-        req: {
-          header: (name: string) =>
-            ({ "x-forwarded-for": "203.0.113.77", "user-agent": "Payer Phone" })[
-              name.toLowerCase()
-            ],
-        },
-        env: { TRUST_PROXY_HEADERS: "true" },
+      const { queryOne, audit } = criticalIntentAudit();
+      // A request through a self-hosted ingress that sets the client address.
+      const env: Env = {
+        ENVIRONMENT: "development",
+        API_VERSION: "v1",
+        TRUST_PROXY_HEADERS: "true",
       };
+      const context = new Context<{ Bindings: Env }>(
+        new Request("https://audit.test/", {
+          headers: { "x-forwarded-for": "203.0.113.77", "user-agent": "Payer Phone" },
+        }),
+        { env }
+      );
 
-      await new AuditService(db as never, checkpoint).log(context as never, {
+      await audit.log(context, {
         anonymousRequester,
         action: "create",
         resourceType: "member",
