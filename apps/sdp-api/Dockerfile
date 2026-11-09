@@ -43,6 +43,7 @@ COPY packages/sdp-wisdomtree/package.json ./packages/sdp-wisdomtree/
 COPY packages/bigint-buffer/package.json ./packages/bigint-buffer/
 COPY packages/sdp-veda/package.json ./packages/sdp-veda/
 COPY packages/sdp-ondo/package.json ./packages/sdp-ondo/
+COPY packages/sdp-plume/package.json ./packages/sdp-plume/
 COPY patches ./patches
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
@@ -78,6 +79,7 @@ COPY packages/sdp-wisdomtree ./packages/sdp-wisdomtree
 COPY packages/bigint-buffer ./packages/bigint-buffer
 COPY packages/sdp-veda ./packages/sdp-veda
 COPY packages/sdp-ondo ./packages/sdp-ondo
+COPY packages/sdp-plume ./packages/sdp-plume
 
 WORKDIR /repo/apps/sdp-api
 RUN node scripts/build-node.mjs

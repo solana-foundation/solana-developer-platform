@@ -125,7 +125,7 @@ function managedRampDefinition(provider: RampProviderId): ProviderAvailabilityDe
  */
 type KeyPairedEarnProviderId = Exclude<
   EarnProviderId,
-  "kamino" | "veda" | "jupiter_lend" | "ondo" | "hastra"
+  "kamino" | "veda" | "jupiter_lend" | "ondo" | "hastra" | "plume"
 >;
 
 /**
@@ -294,6 +294,7 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
     // EARN_HASTRA_DEX_EXIT_ENABLED plus JUPITER_SWAP_API_KEY; neither may gate
     // deposits or the default par-redemption escape hatch.
     hastra: publicApiDefinition("Hastra / Figure"),
+    plume: publicApiDefinition("Plume"),
     // One packed JSON credential per environment (OAuth2 password-grant quad —
     // clientId/clientSecret/username/password); format documented on
     // `EarnRuntimeEnvironment` in @sdp/earn. Configured means "the key is set",

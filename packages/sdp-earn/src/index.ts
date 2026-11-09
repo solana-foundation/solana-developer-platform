@@ -5,6 +5,7 @@ import { JupiterLendEarnClient } from "./providers/jupiter-lend/client";
 import { KaminoEarnClient } from "./providers/kamino/client";
 import { OndoEarnClient } from "./providers/ondo/client";
 import { PerenaEarnClient } from "./providers/perena/client";
+import { PlumeEarnClient } from "./providers/plume/client";
 import { UpshiftEarnClient } from "./providers/upshift/client";
 import { VedaEarnClient } from "./providers/veda/client";
 import { WisdomTreeEarnClient } from "./providers/wisdomtree/client";
@@ -23,6 +24,7 @@ export const EARN_PROVIDER_CLIENTS = {
   ondo: new OndoEarnClient(),
   hastra: new HastraEarnClient(),
   wisdomtree: new WisdomTreeEarnClient(),
+  plume: new PlumeEarnClient(),
 } as const satisfies Record<EarnProviderId, EarnVaultProvider>;
 
 export function isEarnProviderId(value: string): value is EarnProviderId {

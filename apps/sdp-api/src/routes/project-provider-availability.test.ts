@@ -150,6 +150,7 @@ const EARN_AVAILABILITY: ProjectProviderAvailabilityEntry[] = [
   { family: "earn", provider: "ondo", available: false, reason: "provider_not_entitled" },
   { family: "earn", provider: "hastra", available: false, reason: "provider_not_offered" },
   { family: "earn", provider: "wisdomtree", available: false, reason: "provider_not_offered" },
+  { family: "earn", provider: "plume", available: false, reason: "provider_not_offered" },
 ];
 const SANDBOX_AVAILABILITY: ProjectProviderAvailability = {
   projectId: PROJECT_IDS.sandbox,

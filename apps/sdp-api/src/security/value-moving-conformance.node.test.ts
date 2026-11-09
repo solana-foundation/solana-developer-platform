@@ -540,6 +540,9 @@ const signingSinkInventory: Record<string, string[]> = {
   // The custody signer check is deliberately absent: it partially signs and
   // SIMULATES its memo transaction — verified locally, never broadcast — so it
   // has no signing sink and cannot spend sponsorship.
+  // The custody provider-action flow and the vault intent executor sign and
+  // persist through the owned sponsorship submission sink before broadcasting.
+  "apps/sdp-api/src/services/earn/provider-actions.service.ts": ["prepareOwnedSubmission"],
   "apps/sdp-api/src/services/earn/vault-execution.service.ts": [
     // Sponsored signing adds the fee-payer signature without broadcasting, so
     // the final signature can still be recorded before bytes reach the network.
@@ -547,6 +550,7 @@ const signingSinkInventory: Record<string, string[]> = {
     // Wallet-paid signing likewise returns fully signed bytes without sending.
     "signTransactionMessageWithSigners",
   ],
+  "apps/sdp-api/src/services/earn/vault-intent-execution.service.ts": ["prepareOwnedSubmission"],
   // DvP create, fund, settle/cancel and payments share the owned sponsorship
   // submission sink, which signs and persists before broadcasting; fund and
   // settle only partially sign as authorities and are not sinks of their own.

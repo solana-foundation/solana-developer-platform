@@ -18,6 +18,8 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.json ./
 COPY apps/sdp-docs/package.json ./apps/sdp-docs/
 COPY apps/sdp-api/package.json ./apps/sdp-api/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
+# sdp-api imports @sdp/earn from its earn-onboarding route schemas.
+COPY packages/sdp-earn/package.json ./packages/sdp-earn/
 # The API reference model and request snippets the reference renders from.
 COPY packages/sdp-api-catalog/package.json ./packages/sdp-api-catalog/
 # The palette, type scale and font files the docs render with.
@@ -43,6 +45,8 @@ COPY --from=deps /repo /repo
 COPY apps/sdp-docs ./apps/sdp-docs
 COPY apps/sdp-api ./apps/sdp-api
 COPY packages/sdp-types ./packages/sdp-types
+# sdp-api imports @sdp/earn from its earn-onboarding route schemas.
+COPY packages/sdp-earn ./packages/sdp-earn
 COPY packages/sdp-api-catalog ./packages/sdp-api-catalog
 COPY packages/sdp-design-tokens ./packages/sdp-design-tokens
 COPY packages/sdp-env-config ./packages/sdp-env-config

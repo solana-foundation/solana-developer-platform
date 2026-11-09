@@ -1561,6 +1561,8 @@ export interface CreatePaymentRecurringPaymentRequest {
 }
 
 export interface UpdatePaymentRecurringPaymentRequest {
+  /** The `updatedAt` of the version the caller reviewed; a stale one answers 409 (HOO-2562). */
+  expectedUpdatedAt?: string;
   sourceCustodyWalletId?: string;
   counterpartyId?: string;
   counterpartyAccountId?: string;

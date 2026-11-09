@@ -403,9 +403,12 @@ describe("renderOperation", () => {
   it("sends an Idempotency-Key in the samples only where the route takes one", () => {
     assert.ok(!markdown.includes("Idempotency-Key"));
     const keyed = renderOperation({ ...CREATE_WIDGET, takesIdempotencyKey: true });
-    assert.ok(keyed.includes('  -H "Idempotency-Key: $(uuidgen)"'));
-    assert.ok(keyed.includes('    "Idempotency-Key": crypto.randomUUID()'));
-    assert.ok(keyed.includes('"Idempotency-Key": str(uuid.uuid4())'));
+    assert.ok(keyed.includes("IDEMPOTENCY_KEY=$(uuidgen)"));
+    assert.ok(keyed.includes('  -H "Idempotency-Key: $IDEMPOTENCY_KEY"'));
+    assert.ok(keyed.includes("const idempotencyKey = crypto.randomUUID();"));
+    assert.ok(keyed.includes('    "Idempotency-Key": idempotencyKey'));
+    assert.ok(keyed.includes("idempotency_key = str(uuid.uuid4())"));
+    assert.ok(keyed.includes('"Idempotency-Key": idempotency_key'));
   });
 
   it("summarizes the shared idempotency contract without dropping custom headers", () => {

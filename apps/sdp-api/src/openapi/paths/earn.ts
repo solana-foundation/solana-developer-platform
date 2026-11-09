@@ -41,6 +41,8 @@ import {
   earnVaultWithdrawalRequestParamsSchema,
   listEarnStrategiesQuerySchema,
 } from "@/routes/earn/schemas";
+import { registerEarnOnboardingPaths } from "./earn-onboarding";
+import { registerEarnProviderActionPaths } from "./earn-provider-actions";
 import { registerEarnTreasuryPaths } from "./earn-treasury";
 import {
   errorResponses,
@@ -56,7 +58,9 @@ const earnConfigurationSecurity: EarnSecurity = [{ apiKeyAuth: [] }, { clerkBear
 const earnPublicSecurity: EarnSecurity = [{ apiKeyAuth: [] }];
 
 export function registerEarnPaths(registry: OpenAPIRegistry) {
+  registerEarnOnboardingPaths(registry);
   registerEarnTreasuryPaths(registry, earnConfigurationSecurity);
+  registerEarnProviderActionPaths(registry, earnConfigurationSecurity);
   registerEarnStrategyPaths(registry, earnConfigurationSecurity);
   registerEarnDepositPreviewPath(registry, earnConfigurationSecurity);
   // Treasury-facing, so the internal document only: partners hold no custody

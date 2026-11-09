@@ -28,6 +28,7 @@ import {
 import { RpcUnavailableError } from "./errors";
 import {
   assertManagedRpcConfigured,
+  configuredManagedRpcProviders,
   createClusterHistoryRpc,
   createClusterRpc,
   createKoraUpstreamRpc,
@@ -1133,6 +1134,33 @@ describe("managed endpoint URL validation", () => {
     assert.deepEqual(calls, []);
   });
 
+  it("skips a slot that still holds the deployment's placeholder and serves from the filled ones", async () => {
+    const filled = "https://devnet-filled-beside-placeholder.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "placeholder",
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: " Placeholder ",
+      SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL: filled,
+    });
+    const calls = stubEndpoints({ [filled]: SERVES_DEVNET });
+
+    assert.deepEqual(configuredManagedRpcProviders("devnet"), ["alchemy"]);
+    assert.equal(await runInClusterScope(SANDBOX, createClusterRpc).getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(calls, [genesisProbe(filled), slotRead(filled)]);
+  });
+
+  it("reads a cluster whose every slot holds the placeholder as one with no endpoint", () => {
+    configurePool({
+      SOLANA_RPC_TRITON_MAINNET_API_KEY_URL: "placeholder",
+      SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL: "placeholder",
+    });
+
+    assert.deepEqual(configuredManagedRpcProviders("mainnet-beta"), []);
+    assert.throws(() => runInClusterScope(PRODUCTION, createClusterRpc), {
+      message: "No RPC endpoint is configured for mainnet-beta",
+      details: { reason: "not_configured", cluster: "mainnet-beta" },
+    });
+  });
+
   it("accepts loopback http and reserved test hosts in any slot", () => {
     configurePool({
       SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL: "http://127.0.0.1:8899",
@@ -1407,6 +1435,21 @@ describe("createClusterHistoryRpc", () => {
       genesisProbe(mainnetHelius),
       slotRead(mainnetHelius),
     ]);
+  });
+
+  it("is the plain pool when the scope's Helius slot holds the placeholder", async () => {
+    const devnetTriton = "https://devnet-placeholder-helius-triton.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: devnetTriton,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: "placeholder",
+    });
+    const calls = stubEndpoints({ [devnetTriton]: SERVES_DEVNET });
+
+    assert.equal(
+      await runInClusterScope(SANDBOX, createClusterHistoryRpc).getSlot().send(),
+      BigInt(SLOT)
+    );
+    assert.deepEqual(calls, [genesisProbe(devnetTriton), slotRead(devnetTriton)]);
   });
 
   it("is the plain pool when the scope's cluster has no Helius endpoint, whatever another cluster has", async () => {

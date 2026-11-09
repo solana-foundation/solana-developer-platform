@@ -116,9 +116,9 @@ describe("providerFetch", () => {
     const [url, init] = fetchMock.mock.calls[0].arguments;
     assert.equal(url, "https://veda.test/deposit");
     assert.equal(init?.method, "POST");
-    assert.deepEqual(init?.headers, {
-      "Content-Type": "application/json",
-      Accept: "application/json",
+    assert.deepEqual(Object.fromEntries(new Headers(init?.headers)), {
+      "content-type": "application/json",
+      accept: "application/json",
     });
     assert.equal(init?.body, JSON.stringify({ amount: "100" }));
   });
@@ -135,9 +135,9 @@ describe("providerFetch", () => {
 
     const [, init] = fetchMock.mock.calls[0].arguments;
     assert.equal(init?.body, form);
-    assert.deepEqual(init?.headers, {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Accept: "application/json",
+    assert.deepEqual(Object.fromEntries(new Headers(init?.headers)), {
+      "content-type": "application/x-www-form-urlencoded",
+      accept: "application/json",
     });
   });
 

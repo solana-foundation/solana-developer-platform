@@ -61,7 +61,7 @@ describe("earn provider credential key drift", () => {
    * the provider level; only its optional DEX rail needs that key.
    */
   it("declares credential keys for every earn provider except the known keyless ones", () => {
-    const KEYLESS_EARN_PROVIDERS = new Set(["kamino", "veda", "jupiter_lend", "hastra"]);
+    const KEYLESS_EARN_PROVIDERS = new Set(["kamino", "veda", "jupiter_lend", "hastra", "plume"]);
     const undeclared = EARN_PROVIDERS.filter(
       (provider) =>
         !KEYLESS_EARN_PROVIDERS.has(provider) &&
@@ -76,7 +76,7 @@ describe("earn provider credential key drift", () => {
    * so the set above cannot quietly carry a provider that grew a credential.
    */
   it("declares no credential keys for the known keyless providers", () => {
-    for (const provider of ["kamino", "veda", "jupiter_lend", "hastra"] as const) {
+    for (const provider of ["kamino", "veda", "jupiter_lend", "hastra", "plume"] as const) {
       expect({ provider, keys: EARN_CREDENTIAL_ENV_KEYS_BY_PROVIDER[provider] }).toEqual({
         provider,
         keys: [],

@@ -40,7 +40,12 @@ const walletCreateKeyHeaders = projectScopeWithDeclaredIdempotencyHeaders({
   recovery: "record",
 });
 
-export function registerCustodyPaths(registry: OpenAPIRegistry) {
+/**
+ * Custody setup, which takes `wallets.configure`: an API key can never hold a
+ * `configure` action, so the public document, which an API key calls, omits
+ * it.
+ */
+export function registerCustodyAdministrationPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
     method: "post",
     path: "/v1/wallets/initialize",
@@ -48,8 +53,8 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Initialize wallet signing",
     operationId: "initializeWalletSigning",
     description:
-      "Sets up Managed custody for the project's named provider by creating its active signing configuration and first wallet. Production projects use BYOK only: there this returns 403 with details.reason custody_mode_not_allowed, and wallets are created in a Custody Connection with POST /v1/wallets and connectionId.",
-    security: [{ apiKeyAuth: [] }],
+      "Sets up Managed custody for the project's named provider by creating its active signing configuration and first wallet. Takes `wallets.configure`, which only a signed-in person holds: the dashboard calls it, and an API key gets 403 INSUFFICIENT_PERMISSIONS. Production projects use BYOK only: there this returns 403 with details.reason custody_mode_not_allowed, and wallets are created in a Custody Connection with POST /v1/wallets and connectionId.",
+    security: [{ clerkBearerAuth: [] }],
     request: {
       headers: keyAcceptedHeaders,
       body: {
@@ -75,7 +80,9 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       },
     },
   });
+}
 
+export function registerCustodyPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
     method: "post",
     path: "/v1/wallets",

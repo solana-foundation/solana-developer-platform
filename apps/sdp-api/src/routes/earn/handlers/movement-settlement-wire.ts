@@ -1,3 +1,4 @@
+import { providerSettlementFromData } from "@sdp/types/earn-provider-orders";
 import {
   earnProviderDepositSettlement,
   earnProviderWithdrawalSettlement,
@@ -33,7 +34,7 @@ export function movementStatusOnWire(row: EarnMovementRow): {
     row.direction === "deposit"
       ? earnProviderDepositSettlement(row.provider)
       : earnProviderWithdrawalSettlement(row.provider);
-  if (settlement !== "provider_order") {
+  if (settlement !== "provider_order" || providerSettlementFromData(row.provider_data) !== null) {
     return { status: row.status, settledAt: row.settled_at };
   }
   return { status: "confirmed", settledAt: null };

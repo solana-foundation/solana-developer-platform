@@ -25,6 +25,7 @@ import {
   type EarnPositionRow,
   generateEarnPositionId,
 } from "./earn-movements.repository";
+import { createEarnProviderActionsRepository } from "./earn-provider-actions.repository";
 
 /**
  * The unified movement ledger (PRO-1705).
@@ -91,6 +92,7 @@ describe("Unified earn movement ledger (postgres)", () => {
     const db = getDb(env);
 
     for (const table of [
+      "earn_provider_actions",
       "earn_external_wallet_transactions",
       "earn_movements",
       "earn_positions",
@@ -184,6 +186,221 @@ describe("Unified earn movement ledger (postgres)", () => {
       ...overrides,
     };
   }
+
+  describe("provider action outbox", () => {
+    function actionClaim(parent: string | null = null, key = "action-key") {
+      return {
+        organization_id: ORG,
+        project_id: PROJECT,
+        environment: "sandbox" as const,
+        provider: "plume",
+        action: parent === null ? ("preparation" as const) : ("cancellation" as const),
+        parent_movement_id: parent,
+        custody_wallet_id: WALLET,
+        owner_address: WALLET_PUBKEY,
+        vault_address: VAULT,
+        token_mint: TOKEN_MINT,
+        share_mint: SHARE_MINT,
+        fee_payer: null,
+        request_id: key,
+        fingerprint: "action-fingerprint",
+        created_by: USER,
+        initiated_by_key_id: null,
+      };
+    }
+    it("gives one concurrent request ownership before any build or spend", async () => {
+      const repo = createEarnProviderActionsRepository(getDb(env));
+      const results = await Promise.all([repo.claim(actionClaim()), repo.claim(actionClaim())]);
+      expect(results.filter((result) => result.owned)).toHaveLength(1);
+      expect(new Set(results.map((result) => result.row.id)).size).toBe(1);
+      await expect(repo.claim({ ...actionClaim(), fingerprint: "changed" })).rejects.toMatchObject({
+        code: "CONFLICT",
+      });
+    });
+    it("keeps action reads scoped to the project and organization", async () => {
+      const repo = createEarnProviderActionsRepository(getDb(env)),
+        { row } = await repo.claim(actionClaim());
+      expect(
+        await repo.get({
+          organizationId: ORG,
+          projectId: `${PROJECT}_production`,
+          actionId: row.id,
+        })
+      ).toBeNull();
+      expect(
+        await repo.get({ organizationId: ORG_OTHER, projectId: PROJECT, actionId: row.id })
+      ).toBeNull();
+    });
+    it("allows one cancellation per parent across different request keys", async () => {
+      const { movement } = await ledger.createSignedVaultDepositIntent(intent());
+      const repo = createEarnProviderActionsRepository(getDb(env));
+      const results = await Promise.all([
+        repo.claim(actionClaim(movement.id, "cancel-1")),
+        repo.claim(actionClaim(movement.id, "cancel-2")),
+      ]);
+      expect(results.filter((result) => result.owned)).toHaveLength(1);
+      expect(results[0].row.id).toBe(results[1].row.id);
+    });
+    it("reclaims an abandoned cancellation claim under an expired lease", async () => {
+      const { movement } = await ledger.createSignedVaultDepositIntent(intent());
+      const repo = createEarnProviderActionsRepository(getDb(env));
+      const { row: first } = await repo.claim(actionClaim(movement.id, "cancel-1"));
+      // A live lease still reports the abandoned claim without ownership.
+      expect((await repo.claim(actionClaim(movement.id, "cancel-2"))).owned).toBe(false);
+      await getDb(env)
+        .prepare("UPDATE earn_provider_actions SET lease_until=? WHERE id=?")
+        .bind("2000-01-01T00:00:00.000Z", first.id)
+        .run();
+      // The creator crashed or refused holding the parent's unique slot: a new
+      // key takes the claim over instead of being blocked forever.
+      const reclaimed = await repo.claim(actionClaim(movement.id, "cancel-3"));
+      expect(reclaimed.owned).toBe(true);
+      expect(reclaimed.row.id).toBe(first.id);
+    });
+    it("reaches the abandoned claim past an older prepared build", async () => {
+      const { movement } = await ledger.createSignedVaultDepositIntent(intent());
+      const repo = createEarnProviderActionsRepository(getDb(env));
+      // The unique slot excludes `prepared`, so an older build can coexist
+      // with a newer claim whose creator was lost mid-preparation.
+      const { row: stale } = await repo.claim(actionClaim(movement.id, "cancel-1"));
+      await repo.advance(
+        {
+          organizationId: ORG,
+          projectId: PROJECT,
+          actionId: stale.id,
+          preparationLeaseUntil: stale.lease_until,
+        },
+        "preparing",
+        "prepared",
+        { unsigned_transaction: "stale unsigned bytes" }
+      );
+      const { row: lost } = await repo.claim(actionClaim(movement.id, "cancel-2"));
+      await getDb(env)
+        .prepare("UPDATE earn_provider_actions SET lease_until=? WHERE id=?")
+        .bind("2000-01-01T00:00:00.000Z", lost.id)
+        .run();
+      // The stale build holds no slot and its submission can only conflict:
+      // a new key must reach the newer abandoned claim and reclaim it instead.
+      const reclaimed = await repo.claim(actionClaim(movement.id, "cancel-3"));
+      expect(reclaimed.owned).toBe(true);
+      expect(reclaimed.row.id).toBe(lost.id);
+    });
+    it("conflicts with a recovery claiming different fields than the abandoned claim", async () => {
+      const { movement } = await ledger.createSignedVaultDepositIntent(intent());
+      const repo = createEarnProviderActionsRepository(getDb(env));
+      const { row: first } = await repo.claim(actionClaim(movement.id, "cancel-1"));
+      // Claimed fields are immutable: the builder reads the row, not the
+      // request, so a recovery naming a different fee payer must conflict
+      // instead of owning a build that spends from the original claim's payer.
+      const changed = {
+        ...actionClaim(movement.id, "cancel-2"),
+        fee_payer: "FeePayerPublicKey1111111111111111111111111111",
+      };
+      await expect(repo.claim(changed)).rejects.toMatchObject({ code: "CONFLICT" });
+      await getDb(env)
+        .prepare("UPDATE earn_provider_actions SET lease_until=? WHERE id=?")
+        .bind("2000-01-01T00:00:00.000Z", first.id)
+        .run();
+      await expect(repo.claim(changed)).rejects.toMatchObject({ code: "CONFLICT" });
+    });
+    it("records a cancelled redemption as returned shares with zero payout", async () => {
+      const { position } = await ledger.createSignedVaultDepositIntent(
+        intent({ provider: "plume" })
+      );
+      const { movement } = await ledger.createSignedVaultWithdrawalIntent({
+        organizationId: ORG,
+        projectId: PROJECT,
+        environment: "sandbox",
+        provider: "plume",
+        positionId: position.id,
+        vaultAddress: VAULT,
+        custodyWalletId: WALLET,
+        shareMint: SHARE_MINT,
+        requestedShares: "10",
+        walletAddress: WALLET_PUBKEY,
+        signature: "cancel-parent-source",
+        signedTransaction: "signed",
+        lastValidBlockHeight: "123456",
+        requestId: "withdraw-key",
+        idempotencyFingerprint: "withdraw-fingerprint",
+        redemptionMode: "standard",
+      });
+      expect(movement.provider_data.redemptionMode).toBe("standard");
+      await expect(
+        ledger.advanceVaultMovement({
+          organizationId: ORG,
+          movementId: movement.id,
+          toStatus: "finalized",
+          confirmedAt: new Date().toISOString(),
+          settledAt: new Date().toISOString(),
+          tokenAmountSettled: "0",
+        })
+      ).rejects.toThrow();
+      const settled = await ledger.advanceVaultMovement({
+        organizationId: ORG,
+        movementId: movement.id,
+        toStatus: "finalized",
+        confirmedAt: new Date().toISOString(),
+        settledAt: new Date().toISOString(),
+        providerSettlement: {
+          outcome: "cancelled",
+          sourceSignature: "cancel-parent-source",
+          destinationSignature: "share-return",
+          ownerAddress: WALLET_PUBKEY,
+          providerReference: VAULT,
+          tokenMint: SHARE_MINT,
+          amount: "10",
+          observedSlot: "42",
+        },
+      });
+      expect(settled?.amount_settled).toBe("0");
+      expect(settled?.token_amount_settled).toBe("0");
+      expect(settled?.provider_data.providerSettlement).toMatchObject({
+        outcome: "cancelled",
+        amount: "10",
+      });
+    });
+    it("fences a build whose preparation lease was replaced", async () => {
+      const repo = createEarnProviderActionsRepository(getDb(env)),
+        { row } = await repo.claim(actionClaim());
+      await getDb(env)
+        .prepare("UPDATE earn_provider_actions SET lease_until=? WHERE id=?")
+        .bind("2000-01-01T00:00:00.000Z", row.id)
+        .run();
+      const stale = await repo.advance(
+        {
+          organizationId: ORG,
+          projectId: PROJECT,
+          actionId: row.id,
+          preparationLeaseUntil: row.lease_until,
+        },
+        "preparing",
+        "prepared",
+        { unsigned_transaction: "old-bytes", last_valid_block_height: "123" }
+      );
+      expect(stale).toBeNull();
+      expect((await repo.claim(actionClaim())).owned).toBe(true);
+    });
+    it("requires signed bytes before an action can become a broadcast outbox", async () => {
+      const repo = createEarnProviderActionsRepository(getDb(env)),
+        { row } = await repo.claim(actionClaim());
+      await expect(
+        repo.advance(
+          {
+            organizationId: ORG,
+            projectId: PROJECT,
+            actionId: row.id,
+            preparationLeaseUntil: row.lease_until,
+          },
+          "preparing",
+          "requested"
+        )
+      ).rejects.toThrow();
+      expect(
+        (await repo.get({ organizationId: ORG, projectId: PROJECT, actionId: row.id }))?.status
+      ).toBe("preparing");
+    });
+  });
 
   async function linkProgram(walletRef = "gw-ref-1", label: string | null = "Treasury program") {
     const wallet = await earnRepo.insertProviderWallet({
@@ -413,6 +630,46 @@ describe("Unified earn movement ledger (postgres)", () => {
           vaultAddress: VAULT,
         })
       ).toBe("3");
+    });
+
+    it("finalizes a provider deposit with the verified share amount in one step", async () => {
+      // Mirrors reconcileEarnProviderOrders: a provider-order deposit whose
+      // delivery the chain verifies goes straight to finalized, carrying the
+      // observed share amount — no separate confirmation stop exists to hold it.
+      const created = await ledger.createSignedVaultDepositIntent(
+        intent({ provider: "plume", signature: "plume-delivery-source" })
+      );
+      const observedAt = new Date().toISOString();
+      await ledger.advanceVaultMovement({
+        movementId: created.movement.id,
+        organizationId: ORG,
+        toStatus: "finalized",
+        confirmedAt: observedAt,
+        settledAt: observedAt,
+        sharesOut: "97.5",
+        providerSettlement: {
+          outcome: "delivered",
+          sourceSignature: "plume-delivery-source",
+          destinationSignature: "plume-delivery-destination",
+          ownerAddress: WALLET_PUBKEY,
+          providerReference: VAULT,
+          tokenMint: SHARE_MINT,
+          amount: "97.5",
+          observedSlot: "123456789",
+        },
+      });
+      expect(await onlyMovement()).toMatchObject({
+        status: "finalized",
+        shares_out: "97.5",
+        settled_at: observedAt,
+        confirmed_at: observedAt,
+        provider_data: {
+          providerSettlement: expect.objectContaining({
+            outcome: "delivered",
+            amount: "97.5",
+          }),
+        },
+      });
     });
 
     it("hides legacy projections and rejects premature receipt provenance", async () => {

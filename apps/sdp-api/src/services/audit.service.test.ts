@@ -167,6 +167,41 @@ describe("AuditService", () => {
     expect(execute.mock.invocationCallOrder[0]).toBeLessThan(firstRedisCall);
   });
 
+  // Zach (#2833): "no API key and no session" also matched invite acceptance
+  // and org signup, so those signed-in people lost their full IP. Only a writer
+  // that marks its requester anonymous (/pay) coarsens it.
+  it.each([
+    [undefined, "203.0.113.77", "Payer Phone"],
+    [true as const, "203.0.113.0/24", null],
+  ])(
+    "keeps the full IP unless the entry marks its requester anonymous (%s)",
+    async (anonymousRequester, ip, userAgent) => {
+      const { queryOne, audit } = criticalIntentAudit();
+      // A request through a self-hosted ingress that sets the client address.
+      const env: Env = {
+        ENVIRONMENT: "development",
+        API_VERSION: "v1",
+        TRUST_PROXY_HEADERS: "true",
+      };
+      const context = new Context<{ Bindings: Env }>(
+        new Request("https://audit.test/", {
+          headers: { "x-forwarded-for": "203.0.113.77", "user-agent": "Payer Phone" },
+        }),
+        { env }
+      );
+
+      await audit.log(context, {
+        anonymousRequester,
+        action: "create",
+        resourceType: "member",
+        resourceId: "mem_123",
+      });
+
+      const params = insertedCalls(queryOne)[0]?.[1];
+      expect([params?.[8], params?.[9]]).toEqual([ip, userAgent]);
+    }
+  );
+
   it("redacts credential-shaped metadata before persisting", async () => {
     const { db, queryOne, checkpoint } = createAuditWriter();
     const context = {
