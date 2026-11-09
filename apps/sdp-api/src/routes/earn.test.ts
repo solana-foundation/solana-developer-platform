@@ -240,7 +240,7 @@ describe("Earn routes — retired surfaces stay retired (PRO-1628)", () => {
   it("serves the DELIBERATELY re-introduced movements collection (PRO-1705)", async () => {
     await seedAuth();
 
-    const res = await getEarn("/v1/earn/movements", {});
+    const res = await getEarn("/v1/earn/treasury/movements", {});
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -285,7 +285,7 @@ describe("Earn routes — retired program surfaces (PRO-1670)", () => {
       expect(res.status, `${method} ${path}`).toBe(404);
     }
 
-    const collection = await getEarn("/v1/earn/programs", {});
+    const collection = await getEarn("/v1/earn/portfolio-accounts", {});
     expect(collection.status).toBe(200);
     const body = (await collection.json()) as {
       data: { programs: unknown[]; total: number; page: number; pageSize: number };
@@ -302,7 +302,7 @@ describe("Earn routes — retired program surfaces (PRO-1670)", () => {
       expect(res.status, path).toBe(404);
     }
 
-    const ledger = await getEarn(`/v1/earn/programs/${program.id}/withdrawals`, {});
+    const ledger = await getEarn(`/v1/earn/portfolio-accounts/${program.id}/withdrawals`, {});
     expect(ledger.status).toBe(200);
     const ledgerBody = (await ledger.json()) as {
       data: { withdrawals: unknown[]; total: number };
@@ -311,7 +311,7 @@ describe("Earn routes — retired program surfaces (PRO-1670)", () => {
     expect(ledgerBody.data.total).toBe(0);
 
     const unknownProgram = await getEarn(
-      "/v1/earn/programs/earn_provider_wallet_nope/withdrawals",
+      "/v1/earn/portfolio-accounts/earn_provider_wallet_nope/withdrawals",
       {}
     );
     expect(unknownProgram.status).toBe(404);
@@ -635,7 +635,7 @@ describe("Earn route middleware isolation", () => {
   it("charges an authenticated keyed-only route exactly once", async () => {
     await seedAuth();
 
-    const res = await getEarn("/v1/earn/movements", {});
+    const res = await getEarn("/v1/earn/treasury/movements", {});
 
     expect(res.status).toBe(200);
     expect(await readRateLimitCount(env, TEST_API_KEY.id)).toBe(1);

@@ -5,6 +5,6 @@ export async function POST(request: Request) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.vault_withdrawal_options.create",
-    path: "/v1/earn/vault-withdrawal-options",
+    path: "/v1/earn/withdrawals/provider-signed/options",
   });
 }

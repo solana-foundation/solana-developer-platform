@@ -13,7 +13,7 @@ import { DEFAULT_SDP_API_URL } from "@sdp/types/site";
  * Copy-and-go by construction: the module needs one strategy id and one API
  * key. The API key comes from process.env and never reaches a browser; the
  * customer's key never leaves their wallet. The treasury route
- * (`/vault-deposits` + `custodyWalletId`) must not appear here, because a
+ * (`/deposits/provider-signed` + `custodyWalletId`) must not appear here, because a
  * partner cannot name a custody wallet.
  *
  * The sections concatenate into one server module. `@solana/kit` is the only
@@ -207,7 +207,7 @@ export async function listEarnStrategies() {
 /** What a deposit would mint right now. Read-only; nothing is built. */
 export async function previewEarnDeposit(amount: string) {
   // { sharesOut, shareDecimals, blockingIssues }
-  return sdpFetch("/v1/earn/vault-deposit-previews", {
+  return sdpFetch("/v1/earn/deposits/preview", {
     method: "POST",
     headers: sdpHeaders(),
     body: JSON.stringify({ strategyId: STRATEGY_ID, amount }),
@@ -217,7 +217,7 @@ export async function previewEarnDeposit(amount: string) {
 /** What redeeming these shares would pay right now. Read-only; nothing is built. */
 export async function previewEarnWithdrawal(positionId: string, shares: string) {
   // { assetsOut, assetDecimals, blockingIssues }
-  return sdpFetch("/v1/earn/external-wallet/withdrawal-previews", {
+  return sdpFetch("/v1/earn/withdrawals/caller-signed/preview", {
     method: "POST",
     headers: sdpHeaders(),
     body: JSON.stringify({ positionId, shares }),
@@ -321,7 +321,7 @@ ${depositSlippageInput}}: {
   feePayer?: string;
 ${depositSlippageType}}) {
 ${depositFloor}
-  const data = await sdpFetch("/v1/earn/external-wallet/deposit-transactions", {
+  const data = await sdpFetch("/v1/earn/deposits/build-unsigned-transaction", {
     method: "POST",
     headers: sdpHeaders(),
     body: JSON.stringify({
@@ -351,7 +351,7 @@ export async function submitEarnDeposit({
   signedTransaction: string;
   idempotencyKey: string;
 }) {
-  const data = await sdpFetch("/v1/earn/external-wallet/deposits", {
+  const data = await sdpFetch("/v1/earn/deposits/submit-signed-transaction", {
     method: "POST",
     headers: sdpHeaders({ "Idempotency-Key": idempotencyKey }),
     body: JSON.stringify({ transactionId, signedTransaction }),
@@ -369,7 +369,7 @@ export async function submitEarnDeposit({
  */
 export async function getEarnMovement(movementId: string) {
   const data = await sdpFetch(
-    \`/v1/earn/external-wallet/movements/\${encodeURIComponent(movementId)}\`,
+    \`/v1/earn/movements/caller-signed/\${encodeURIComponent(movementId)}\`,
     { headers: sdpHeaders() }
   );
   // { movementId, direction, status, tokenAmount, tokenMint, signature, failureReason, ... }
@@ -414,7 +414,7 @@ export async function waitForEarnMovement(
  */
 export async function getEarnEarnings(ownerAddress: string) {
   const data = await sdpFetch(
-    \`/v1/earn/external-wallet/earnings?\${new URLSearchParams({ ownerAddress })}\`,
+    \`/v1/earn/earnings/caller-signed?\${new URLSearchParams({ ownerAddress })}\`,
     { headers: sdpHeaders() }
   );
   // { ownerAddress, totalsByToken: [{ tokenMint, currentValue?, totalDeposited, totalWithdrawn, earned?, ... }] }
@@ -431,7 +431,7 @@ export async function listEarnMovements(ownerAddress: string, cursor?: string) {
   const query = new URLSearchParams({ ownerAddress });
   if (cursor) query.set("before", cursor);
   // { movements, hasMore, nextCursor }
-  return sdpFetch(\`/v1/earn/external-wallet/movements?\${query}\`, { headers: sdpHeaders() });
+  return sdpFetch(\`/v1/earn/movements/caller-signed?\${query}\`, { headers: sdpHeaders() });
 }
 
 /**
@@ -449,7 +449,7 @@ export async function listEarnPositions(ownerAddress: string) {
     const query = new URLSearchParams({ ownerAddress });
     if (cursor) query.set("before", cursor);
     const data = await sdpFetch(
-      \`/v1/earn/external-wallet/positions?\${query}\`,
+      \`/v1/earn/positions/caller-signed?\${query}\`,
       { headers: sdpHeaders() }
     );
     // { positions: [{ id, shares?, withdrawableShares?, tokenValue?, ... }], hasMore, nextCursor }
@@ -477,7 +477,7 @@ ${withdrawalSlippageInput}}: {
   feePayer?: string;
 ${withdrawalSlippageType}}) {
 ${withdrawalFloor}
-  const data = await sdpFetch("/v1/earn/external-wallet/withdrawal-transactions", {
+  const data = await sdpFetch("/v1/earn/withdrawals/build-unsigned-transaction", {
     method: "POST",
     headers: sdpHeaders(),
     body: JSON.stringify({
@@ -500,7 +500,7 @@ export async function submitEarnWithdrawal({
   signedTransaction: string;
   idempotencyKey: string;
 }) {
-  const data = await sdpFetch("/v1/earn/external-wallet/withdrawals", {
+  const data = await sdpFetch("/v1/earn/withdrawals/submit-signed-transaction", {
     method: "POST",
     headers: sdpHeaders({ "Idempotency-Key": idempotencyKey }),
     body: JSON.stringify({ transactionId, signedTransaction }),
@@ -515,7 +515,7 @@ export async function submitEarnWithdrawal({
  * both, or neither.
  */
 export async function getEarnWithdrawalOptions(positionId: string) {
-  return sdpFetch("/v1/earn/external-wallet/withdrawal-options", {
+  return sdpFetch("/v1/earn/withdrawals/caller-signed/options", {
     method: "POST",
     headers: sdpHeaders(),
     body: JSON.stringify({ positionId }),
@@ -583,7 +583,7 @@ export async function previewEarnQueuedWithdrawal({
 }) {
   const options = await getEarnWithdrawalOptions(positionId);
   assertQueuedWithdrawalTerms(options, shares, discountBps, deadlineSeconds);
-  return sdpFetch("/v1/earn/external-wallet/queued-withdrawal-previews", {
+  return sdpFetch("/v1/earn/withdrawal-requests/caller-signed/preview", {
     method: "POST",
     headers: sdpHeaders(),
     body: JSON.stringify({ positionId, shares, discountBps, deadlineSeconds }),
@@ -598,7 +598,7 @@ export async function previewEarnParRedemption({
   positionId: string;
   shares: string;
 }) {
-  return sdpFetch("/v1/earn/external-wallet/queued-withdrawal-previews", {
+  return sdpFetch("/v1/earn/withdrawal-requests/caller-signed/preview", {
     method: "POST",
     headers: sdpHeaders(),
     body: JSON.stringify({ positionId, shares, mechanism: "operatorRedemption" }),
@@ -633,7 +633,7 @@ export async function buildEarnQueuedWithdrawalRequest({
       preview.blockingIssues.map((issue: { message: string }) => issue.message).join("; ")
     );
   }
-  const data = await sdpFetch("/v1/earn/external-wallet/withdrawal-request-transactions", {
+  const data = await sdpFetch("/v1/earn/withdrawal-requests/build-unsigned-transaction", {
     method: "POST",
     headers: sdpHeaders(),
     body: JSON.stringify({
@@ -662,7 +662,7 @@ export async function buildEarnParRedemptionRequest({
   shares: string;
   feePayer?: string;
 }) {
-  const data = await sdpFetch("/v1/earn/external-wallet/withdrawal-request-transactions", {
+  const data = await sdpFetch("/v1/earn/withdrawal-requests/build-unsigned-transaction", {
     method: "POST",
     headers: sdpHeaders(),
     body: JSON.stringify({
@@ -682,7 +682,7 @@ export async function submitEarnWithdrawalRequest(input: {
   signedTransaction: string;
   idempotencyKey: string;
 }) {
-  const data = await sdpFetch("/v1/earn/external-wallet/withdrawal-requests", {
+  const data = await sdpFetch("/v1/earn/withdrawal-requests/submit-signed-transaction", {
     method: "POST",
     headers: sdpHeaders({ "Idempotency-Key": input.idempotencyKey }),
     body: JSON.stringify({
@@ -700,7 +700,7 @@ export async function submitEarnWithdrawalRequest(input: {
  */
 export async function getEarnWithdrawalRequest(withdrawalRequestId: string) {
   const data = await sdpFetch(
-    \`/v1/earn/external-wallet/withdrawal-requests/\${encodeURIComponent(withdrawalRequestId)}\`,
+    \`/v1/earn/withdrawal-requests/caller-signed/\${encodeURIComponent(withdrawalRequestId)}\`,
     { headers: sdpHeaders() }
   );
   return data.withdrawalRequest;
@@ -715,7 +715,7 @@ export async function listPendingEarnQueuedWithdrawals(ownerAddress: string) {
     const query = new URLSearchParams({ ownerAddress, settled: "false" });
     if (cursor) query.set("before", cursor);
     const data = await sdpFetch(
-      \`/v1/earn/external-wallet/withdrawal-requests?\${query}\`,
+      \`/v1/earn/withdrawal-requests/caller-signed?\${query}\`,
       { headers: sdpHeaders() }
     );
     withdrawalRequests.push(...data.withdrawalRequests);
@@ -771,7 +771,7 @@ export async function buildEarnWithdrawalRequestCancellation({
   feePayer?: string;
 }) {
   const data = await sdpFetch(
-    "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+    "/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
     {
       method: "POST",
       headers: sdpHeaders(),
@@ -791,7 +791,7 @@ export async function submitEarnWithdrawalRequestCancellation(input: {
   idempotencyKey: string;
 }) {
   const data = await sdpFetch(
-    "/v1/earn/external-wallet/withdrawal-request-cancellations",
+    "/v1/earn/withdrawal-requests/cancel/submit-signed-transaction",
     {
       method: "POST",
       headers: sdpHeaders({ "Idempotency-Key": input.idempotencyKey }),

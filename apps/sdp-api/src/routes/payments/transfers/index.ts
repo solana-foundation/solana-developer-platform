@@ -20,7 +20,7 @@ import { createTransferSchema, walletTransferSchema } from "./schemas";
 export const transfers = new Hono<{ Bindings: Env }>();
 
 transfers.post(
-  "/",
+  "/execute",
   requireAction("transfers.execute"),
   validateBody((c) =>
     isModuleInChannel(c, "ramps") ? createTransferSchema : walletTransferSchema

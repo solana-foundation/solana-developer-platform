@@ -19,7 +19,7 @@ Amounts are decimal strings in whole-token units: `"100.00"` is 100 tokens, what
 
 ## Transfer execution
 
-`POST /v1/payments/transfers` runs the whole transfer on the server. SDP builds the transaction, has the source wallet's custody provider sign it, submits it to your project's cluster, and waits for the cluster to finalize it before it answers.
+`POST /v1/payments/transfers/execute` runs the whole transfer on the server. SDP builds the transaction, has the source wallet's custody provider sign it, submits it to your project's cluster, and waits for the cluster to finalize it before it answers.
 
 ## Fees and sponsorship
 

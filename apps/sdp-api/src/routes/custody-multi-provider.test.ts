@@ -68,7 +68,7 @@ let adminHeaders: Record<string, string>;
 
 async function initializeProvider(body: { provider: "para" }): Promise<Response> {
   return app.request(
-    "/v1/wallets/initialize",
+    "/v1/wallets/managed-signing/initialize-with-wallet",
     {
       method: "POST",
       headers: {
@@ -385,7 +385,7 @@ describe("Custody multi-provider routes", () => {
     });
   });
 
-  it("returns every active config, with or without wallets, from /v1/wallets/configs", async () => {
+  it("returns every active config, with or without wallets, from /v1/wallets/managed-signing/configurations", async () => {
     const walletlessConfigId = "cust_cfg_walletless";
     await getDb(env).transaction((tx) =>
       insertTestCustodyConfigRow(tx, {
@@ -399,7 +399,7 @@ describe("Custody multi-provider routes", () => {
     );
 
     const res = await app.request(
-      "/v1/wallets/configs",
+      "/v1/wallets/managed-signing/configurations",
       {
         method: "GET",
         headers: {

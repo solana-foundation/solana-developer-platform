@@ -33,7 +33,7 @@ describe("POST /api/dashboard/markets/earn/vault-withdrawals", () => {
     expect(mocks.proxyToSdpApi).toHaveBeenCalledWith({
       request,
       traceSource: "route.dashboard.earn.vault_withdrawals.create",
-      path: "/v1/earn/vault-withdrawals",
+      path: "/v1/earn/withdrawals/execute",
     });
   });
 });
@@ -55,7 +55,7 @@ describe("GET /api/dashboard/markets/earn/vault-withdrawals", () => {
       request,
       traceSource: "route.dashboard.earn.vault_withdrawals.list",
       // The validator emits params in ITS declaration order, not the caller's.
-      path: "/v1/earn/vault-withdrawals?limit=50&requestId=key%2Fwith%2Fslashes&settled=false",
+      path: "/v1/earn/withdrawals/provider-signed?limit=50&requestId=key%2Fwith%2Fslashes&settled=false",
     });
   });
 

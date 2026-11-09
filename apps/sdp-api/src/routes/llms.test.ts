@@ -30,7 +30,7 @@ describe("GET /llms.txt", () => {
     expect(body).toContain("/v1/issuance");
     expect(body).toContain("/v1/compliance");
     expect(body).toContain("/v1/earn");
-    expect(body).not.toContain("/admin/allowlist");
+    expect(body).not.toContain("/admin/onboarding-allowlist");
     expect(body).not.toContain("/v1/onboarding");
     expect(body).not.toContain("/v1/organizations");
   });

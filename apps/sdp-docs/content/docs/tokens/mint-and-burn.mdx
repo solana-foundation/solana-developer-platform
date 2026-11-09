@@ -41,9 +41,9 @@ The **Supply** block shows the **Issued supply** with **Mint** and **Burn**, the
 Supply operations share one URL pattern:
 
 ```text title="Endpoints"
-POST /v1/issuance/tokens/{tokenId}/mint
-POST /v1/issuance/tokens/{tokenId}/burn
-POST /v1/issuance/tokens/{tokenId}/force-burn
+POST /v1/issuance/tokens/{tokenId}/mint/execute
+POST /v1/issuance/tokens/{tokenId}/burn/execute
+POST /v1/issuance/tokens/{tokenId}/force-burn/execute
 ```
 
 `amount` is a decimal string in **UI units**: `"1"` is one token and `"1.5"` is one and a half. SDP converts it to base units with the token's `decimals`.
@@ -84,7 +84,7 @@ The toast reads "Mint transaction finalized." and **Transactions** lists the min
 <Tab value="API">
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: mint-001" \
@@ -100,7 +100,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
 
 ```typescript title="mint-tokens.ts"
 const res = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint",
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/execute",
   {
     method: "POST",
     headers: {
@@ -160,7 +160,7 @@ For a force burn, open **Recovery** on **Operations** and click **Force burn**. 
 **Burn from a custody wallet.** The `source` must be the signing wallet or its token account, or the call fails with `400 INVALID_BURN_SOURCE`. A wallet that holds too little gets `400 INSUFFICIENT_TOKEN_BALANCE`.
 
 ```typescript title="burn-tokens.ts"
-await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
+await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn/execute", {
   method: "POST",
   headers: {
     Authorization: "Bearer sf_...",
@@ -177,7 +177,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
 **Force burn from any holder** (needs `issuance.enforce`):
 
 ```typescript title="force-burn-tokens.ts"
-await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
+await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn/execute", {
   method: "POST",
   headers: {
     Authorization: "Bearer sf_...",

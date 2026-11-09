@@ -137,7 +137,7 @@ earn.use("*", projectContextMiddleware(earnProjectContextOptions));
 
 // Metered quotas for the Earn reads that fan out to a PAID upstream — the
 // provider's API on a program read, Solana RPC on a live-hydrated one. A single
-// `GET /programs` page is 2N provider round trips against a shared account, so
+// `GET /portfolio-accounts` page is 2N provider round trips against a shared account, so
 // an unmetered caller spends the platform's money at whatever rate it likes.
 //
 // What is deliberately NOT metered is every money-OUT route and every EXIT
@@ -169,7 +169,7 @@ earn.get(
 // malformed request must not spend the pool that later valid quotes and builds
 // draw from.
 earn.post(
-  "/vault-deposit-previews",
+  "/deposits/preview",
   requireAction("earn.read"),
   validateBody(earnVaultDepositPreviewSchema),
   meteredQuota(EARN_PROVIDER_READ_QUOTA),
@@ -182,13 +182,13 @@ earn.post(
 // ever be captured as a Solana address. `earn.read` only: these are end-user
 // wallets SDP does not custody, so no wallet scope applies.
 earn.get(
-  "/external-wallet/positions/summary",
+  "/positions/caller-signed/project-summary",
   requireAction("earn.read"),
   meteredQuota(EARN_CHAIN_READ_QUOTA),
   getEarnExternalWalletPositionSummary
 );
 earn.get(
-  "/external-wallet/positions",
+  "/positions/caller-signed",
   requireAction("earn.read"),
   meteredQuota(EARN_CHAIN_READ_QUOTA),
   listEarnExternalWalletPositions
@@ -200,43 +200,43 @@ earn.get(
 // these report on money that already moved (ADR 0002). The
 // movements collection is declared before its `:movementId` detail so a
 // literal segment can never be captured as an id.
-earn.get("/external-wallet/movements", requireAction("earn.read"), listEarnExternalWalletMovements);
+earn.get("/movements/caller-signed", requireAction("earn.read"), listEarnExternalWalletMovements);
 earn.get(
-  "/external-wallet/movements/:movementId",
+  "/movements/caller-signed/:movementId",
   requireAction("earn.read"),
   getEarnExternalWalletMovement
 );
 earn.get(
-  "/external-wallet/earnings",
+  "/earnings/caller-signed",
   requireAction("earn.read"),
   meteredQuota(EARN_CHAIN_READ_QUOTA),
   getEarnExternalWalletEarnings
 );
 earn.post(
-  "/external-wallet/withdrawal-request-transactions",
+  "/withdrawal-requests/build-unsigned-transaction",
   requireAction("earn.execute"),
   validateBody(earnExternalWalletWithdrawalRequestTransactionSchema),
   createEarnExternalWalletWithdrawalRequestTransaction
 );
 earn.post(
-  "/external-wallet/withdrawal-request-cancel-transactions",
+  "/withdrawal-requests/cancel/build-unsigned-transaction",
   requireAction("earn.manage"),
   validateBody(earnExternalWalletWithdrawalRequestCancelTransactionSchema),
   createEarnExternalWalletWithdrawalRequestCancelTransaction
 );
 earn.get(
-  "/external-wallet/withdrawal-requests",
+  "/withdrawal-requests/caller-signed",
   requireAction("earn.read"),
   listEarnExternalWalletWithdrawalRequests
 );
 earn.get(
-  "/external-wallet/withdrawal-requests/:withdrawalRequestId",
+  "/withdrawal-requests/caller-signed/:withdrawalRequestId",
   requireAction("earn.read"),
   getEarnExternalWalletWithdrawalRequest
 );
 
 // Non-custodial ("vault_direct") positions: SDP builds and signs the deposit
-// from a custody wallet, so unlike /programs there is no provider wallet to
+// from a custody wallet, so unlike /portfolio-accounts there is no provider wallet to
 // provision and no address to fund afterwards.
 //
 // Each route declares one action; whether the caller may sign with the named
@@ -249,7 +249,7 @@ earn.get(
 // so the gate must sit AFTER `requireAction` and `validateBody`, and immediately before the handler, so a refusal is
 // decided before any KMS or relay access.
 earn.post(
-  "/vault-deposits",
+  "/deposits/execute",
   requireAction("earn.execute"),
   validateBody(earnVaultDepositSchema),
   requestGate({
@@ -271,11 +271,11 @@ earn.post(
 // saw, and the every-minute reconciliation sweep is what eventually settles it.
 //
 // The collection is declared BEFORE the `:movementId` route, the same ordering
-// rule `/programs` follows, so a literal segment can never be captured as an id.
+// rule `/portfolio-accounts` follows, so a literal segment can never be captured as an id.
 // `?requestId=` on the collection finds a deposit by the caller's
 // Idempotency-Key when the original response was lost.
-earn.get("/vault-deposits", requireAction("earn.read"), listEarnVaultDeposits);
-earn.get("/vault-deposits/:movementId", requireAction("earn.read"), getEarnVaultDeposit);
+earn.get("/deposits/provider-signed", requireAction("earn.read"), listEarnVaultDeposits);
+earn.get("/deposits/provider-signed/:movementId", requireAction("earn.read"), getEarnVaultDeposit);
 // The EXIT half (PRO-1702): redeem a position's shares back to the custody
 // wallet that holds them. Request-gated for the same reason the deposit is —
 // it reaches `createOrgSignerForCustodyWallet` and broadcasts value-moving
@@ -285,7 +285,7 @@ earn.get("/vault-deposits/:movementId", requireAction("earn.read"), getEarnVault
 // any catalogue dependency — the position row names the instrument, so a
 // delisted vault stays exitable.
 earn.post(
-  "/vault-withdrawals",
+  "/withdrawals/execute",
   requireAction("earn.execute"),
   validateBody(earnVaultWithdrawalSchema),
   requestGate({
@@ -305,7 +305,7 @@ earn.post(
 // safety): no surfacing, no entitlement, no admission, no environment
 // capability. Project-scoped like the position reads (HOO-2099).
 earn.post(
-  "/vault-withdrawal-previews",
+  "/withdrawals/provider-signed/preview",
   requireAction("earn.read"),
   validateBody(earnVaultWithdrawalPreviewSchema),
   createEarnVaultWithdrawalPreview
@@ -313,22 +313,26 @@ earn.post(
 // Withdrawal READS mirror the deposit reads: no request gate, no provider gate,
 // collection before the `:movementId` route, `?requestId=` finds the whole leg
 // group.
-earn.get("/vault-withdrawals", requireAction("earn.read"), listEarnVaultWithdrawals);
-earn.get("/vault-withdrawals/:movementId", requireAction("earn.read"), getEarnVaultWithdrawal);
+earn.get("/withdrawals/provider-signed", requireAction("earn.read"), listEarnVaultWithdrawals);
+earn.get(
+  "/withdrawals/provider-signed/:movementId",
+  requireAction("earn.read"),
+  getEarnVaultWithdrawal
+);
 earn.post(
-  "/vault-withdrawal-options",
+  "/withdrawals/provider-signed/options",
   requireAction("earn.read"),
   validateBody(earnVaultWithdrawalOptionsSchema),
   getEarnVaultWithdrawalOptions
 );
 earn.post(
-  "/vault-queued-withdrawal-previews",
+  "/withdrawal-requests/provider-signed/preview",
   requireAction("earn.read"),
   validateBody(earnVaultQueuedWithdrawalPreviewSchema),
   createEarnVaultQueuedWithdrawalPreview
 );
 earn.post(
-  "/vault-withdrawal-requests",
+  "/withdrawal-requests/execute",
   requireAction("earn.execute"),
   validateBody(earnVaultWithdrawalRequestSchema),
   requestGate({
@@ -337,9 +341,13 @@ earn.post(
   }),
   createEarnVaultWithdrawalRequest
 );
-earn.get("/vault-withdrawal-requests", requireAction("earn.read"), listEarnVaultWithdrawalRequests);
 earn.get(
-  "/vault-withdrawal-requests/:withdrawalRequestId",
+  "/withdrawal-requests/provider-signed",
+  requireAction("earn.read"),
+  listEarnVaultWithdrawalRequests
+);
+earn.get(
+  "/withdrawal-requests/provider-signed/:withdrawalRequestId",
   requireAction("earn.read"),
   getEarnVaultWithdrawalRequest
 );
@@ -350,13 +358,13 @@ earn.get(
 // (`earn.queued_withdraw_cancel`) needs at the signer, so a key without it is
 // refused here rather than after sponsorship, a build and a simulation.
 earn.post(
-  "/vault-withdrawal-requests/:withdrawalRequestId/cancel",
+  "/withdrawal-requests/:withdrawalRequestId/cancel/execute",
   requireAction("earn.manage"),
   validateBody(earnVaultWithdrawalRequestCancelSchema),
   cancelEarnVaultWithdrawalRequest
 );
 earn.get(
-  "/vault-positions",
+  "/positions/provider-signed",
   requireAction("earn.read"),
   meteredQuota(EARN_CHAIN_READ_QUOTA),
   listEarnVaultPositions
@@ -368,7 +376,7 @@ earn.get(
 // describes money the org already holds), project-scoped like the positions
 // read, which is why it carries the same action.
 earn.get(
-  "/vault-share-reconciliation",
+  "/positions/provider-signed/share-reconciliation-report",
   requireAction("earn.read"),
   meteredQuota(EARN_CHAIN_READ_QUOTA),
   getEarnVaultShareReconciliation
@@ -385,56 +393,56 @@ earn.get(
 // value-moving conformance inventory to find. `earn.execute` gates the builds
 // and submits because they create and broadcast recorded movements.
 earn.post(
-  "/external-wallet/deposit-transactions",
+  "/deposits/build-unsigned-transaction",
   requireAction("earn.execute"),
   validateBody(earnExternalWalletDepositTransactionSchema),
   meteredQuota(EARN_PROVIDER_READ_QUOTA),
   createEarnExternalWalletDepositTransaction
 );
 earn.post(
-  "/external-wallet/withdrawal-previews",
+  "/withdrawals/caller-signed/preview",
   requireAction("earn.read"),
   validateBody(earnExternalWalletWithdrawalPreviewSchema),
   createEarnExternalWalletWithdrawalPreview
 );
 earn.post(
-  "/external-wallet/withdrawal-transactions",
+  "/withdrawals/build-unsigned-transaction",
   requireAction("earn.execute"),
   validateBody(earnExternalWalletWithdrawalTransactionSchema),
   createEarnExternalWalletWithdrawalTransaction
 );
 earn.post(
-  "/external-wallet/withdrawal-options",
+  "/withdrawals/caller-signed/options",
   requireAction("earn.read"),
   validateBody(earnExternalWalletWithdrawalOptionsSchema),
   getEarnExternalWalletWithdrawalOptions
 );
 earn.post(
-  "/external-wallet/queued-withdrawal-previews",
+  "/withdrawal-requests/caller-signed/preview",
   requireAction("earn.read"),
   validateBody(earnExternalWalletQueuedWithdrawalPreviewSchema),
   createEarnExternalWalletQueuedWithdrawalPreview
 );
 earn.post(
-  "/external-wallet/deposits",
+  "/deposits/submit-signed-transaction",
   requireAction("earn.execute"),
   validateBody(earnExternalWalletSubmitSchema),
   createEarnExternalWalletDeposit
 );
 earn.post(
-  "/external-wallet/withdrawals",
+  "/withdrawals/submit-signed-transaction",
   requireAction("earn.execute"),
   validateBody(earnExternalWalletSubmitSchema),
   createEarnExternalWalletWithdrawal
 );
 earn.post(
-  "/external-wallet/withdrawal-requests",
+  "/withdrawal-requests/submit-signed-transaction",
   requireAction("earn.execute"),
   validateBody(earnExternalWalletSubmitSchema),
   createEarnExternalWalletWithdrawalRequest
 );
 earn.post(
-  "/external-wallet/withdrawal-request-cancellations",
+  "/withdrawal-requests/cancel/submit-signed-transaction",
   requireAction("earn.manage"),
   validateBody(earnExternalWalletSubmitSchema),
   createEarnExternalWalletWithdrawalRequestCancellation
@@ -444,7 +452,7 @@ earn.post(
 // history spanning both execution models, which no per-family list can serve —
 // and like them it takes NO provider gate, because it reports on money that has
 // already moved. Project-scoped like every Earn read (HOO-2099).
-earn.get("/movements", requireAction("earn.read"), listEarnMovements);
+earn.get("/treasury/movements", requireAction("earn.read"), listEarnMovements);
 
 // Portfolio programs: N provider wallets per org+environment+provider
 // (PRO-1670), each addressed by its own id. Money-in (create, re-target) takes
@@ -458,37 +466,37 @@ earn.get("/movements", requireAction("earn.read"), listEarnMovements);
 // The collection is declared BEFORE the `:programId` routes so a literal
 // segment can never be captured as an id.
 earn.get(
-  "/programs",
+  "/portfolio-accounts",
   requireAction("earn.read"),
   meteredQuota(EARN_PROVIDER_READ_QUOTA),
   listEarnPrograms
 );
 earn.post(
-  "/programs",
+  "/portfolio-accounts",
   requireAction("earn.manage"),
   validateBody(earnProgramCreateSchema),
   createEarnProgram
 );
 earn.get(
-  "/programs/:programId",
+  "/portfolio-accounts/:programId",
   requireAction("earn.read"),
   meteredQuota(EARN_PROVIDER_READ_QUOTA),
   getEarnProgram
 );
 earn.put(
-  "/programs/:programId",
+  "/portfolio-accounts/:programId/allocation",
   requireAction("earn.manage"),
   validateBody(earnProgramRetargetSchema),
   retargetEarnProgram
 );
 earn.get(
-  "/programs/:programId/deposits",
+  "/portfolio-accounts/:programId/deposits",
   requireAction("earn.read"),
   meteredQuota(EARN_PROVIDER_READ_QUOTA),
   listEarnProgramDeposits
 );
 earn.post(
-  "/programs/:programId/withdrawal-preview",
+  "/portfolio-accounts/:programId/withdrawals/preview",
   requireAction("earn.read"),
   validateBody(earnProgramWithdrawalPreviewSchema),
   previewEarnProgramWithdrawal
@@ -498,7 +506,7 @@ earn.post(
 // so the extractor refuses a wallet-scoped key, which has no wallet here to be
 // bound against. Retries are resolved by the handler over the movement ledger.
 earn.post(
-  "/programs/:programId/withdrawals",
+  "/portfolio-accounts/:programId/withdrawals/execute",
   requireAction("earn.execute"),
   validateBody(earnProgramWithdrawalCreateSchema),
   requestGate({
@@ -507,12 +515,12 @@ earn.post(
   createEarnProgramWithdrawal
 );
 earn.get(
-  "/programs/:programId/withdrawals",
+  "/portfolio-accounts/:programId/withdrawals",
   requireAction("earn.read"),
   listEarnProgramWithdrawals
 );
 earn.get(
-  "/programs/:programId/withdrawals/:withdrawalRef",
+  "/portfolio-accounts/:programId/withdrawals/:withdrawalRef",
   requireAction("earn.read"),
   getEarnProgramWithdrawal
 );

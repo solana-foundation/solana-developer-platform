@@ -235,8 +235,19 @@ jobs:
       - name: Create a wallet
         run: |
           set -euo pipefail
+          # The smoke tests the latest published release, whose API surface can
+          # lag this workflow. Ask the release's own OpenAPI document which
+          # wallet-initialize path it serves, so a release that predates the
+          # managed-signing rename is still exercisable.
+          initialize_path="$(curl -fsS http://localhost:8787/openapi.json | jq -r '
+            .paths |
+            if has("/v1/wallets/managed-signing/initialize-with-wallet")
+            then "/v1/wallets/managed-signing/initialize-with-wallet"
+            else "/v1/wallets/initialize"
+            end')"
+          echo "initialize path -> $initialize_path"
           code="$(curl -sS -o /tmp/wallet.json -w '%{http_code}' \
-            -X POST http://localhost:8787/v1/wallets/initialize \
+            -X POST "http://localhost:8787${initialize_path}" \
             -H "Authorization: Bearer $SMOKE_SESSION_TOKEN" \
             -H 'x-project-id: proj_smoke' \
             -H 'content-type: application/json' \

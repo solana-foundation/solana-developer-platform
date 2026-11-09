@@ -14,7 +14,7 @@ import { allowlistEntriesResponse, allowlistEntryResponse } from "./responses";
 export function registerAdminPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
     method: "get",
-    path: "/admin/allowlist",
+    path: "/admin/onboarding-allowlist",
     tags: ["Admin"],
     summary: "List allowlist entries",
     operationId: "listAllowlistEntries",
@@ -38,7 +38,7 @@ export function registerAdminPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/admin/allowlist",
+    path: "/admin/onboarding-allowlist",
     tags: ["Admin"],
     summary: "Add allowlist entry",
     operationId: "addAllowlistEntry",
@@ -62,7 +62,7 @@ export function registerAdminPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "delete",
-    path: "/admin/allowlist/{id}",
+    path: "/admin/onboarding-allowlist/{id}",
     tags: ["Admin"],
     summary: "Remove allowlist entry",
     operationId: "removeAllowlistEntry",

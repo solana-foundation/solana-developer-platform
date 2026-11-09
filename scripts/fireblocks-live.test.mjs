@@ -77,7 +77,7 @@ function transport(overrides = {}) {
           signature: "memo-signature",
         },
       });
-    if (url.endsWith("/v1/payments/transfers")) {
+    if (url.endsWith("/v1/payments/transfers/execute")) {
       if (overrides.unknown) throw new Error("socket closed");
       return Response.json({
         data: {
@@ -245,8 +245,8 @@ test("unknown payment outcome preserves the exact intent and key on retry", asyn
     );
     const second = transport();
     await runLive(config, "payment", { ...second, receiptPath, sendMainnet: true });
-    const before = first.calls.find((call) => call.url.endsWith("/transfers"));
-    const after = second.calls.find((call) => call.url.endsWith("/transfers"));
+    const before = first.calls.find((call) => call.url.endsWith("/transfers/execute"));
+    const after = second.calls.find((call) => call.url.endsWith("/transfers/execute"));
     assert.equal(before.headers["Idempotency-Key"], after.headers["Idempotency-Key"]);
     assert.equal(before.body, after.body);
     const result = JSON.parse(await readFile(`${receiptPath}.result.json`, "utf8"));
@@ -323,7 +323,7 @@ test("refuses a new API key against an existing receipt before submitting", asyn
       /different SDP API key/
     );
     assert.equal(
-      second.calls.filter((call) => call.url.endsWith("/v1/payments/transfers")).length,
+      second.calls.filter((call) => call.url.endsWith("/v1/payments/transfers/execute")).length,
       0
     );
   } finally {

@@ -117,7 +117,7 @@ async function createAndDeployWalletActivityToken(
 
   await postWithSigningProviderRetry<TokenResponse>(
     api,
-    `/v1/issuance/tokens/${encodeURIComponent(created.token.id)}/deploy`,
+    `/v1/issuance/tokens/${encodeURIComponent(created.token.id)}/deploy/execute`,
     {
       signingCustodyWalletId,
     }
@@ -563,7 +563,7 @@ test.describe
 
           const minted = await postWithSigningProviderRetry<MintResponse>(
             api,
-            `/v1/issuance/tokens/${encodeURIComponent(deployedToken.id)}/mint`,
+            `/v1/issuance/tokens/${encodeURIComponent(deployedToken.id)}/mint/execute`,
             {
               signingCustodyWalletId: wallet.id,
               mint: {
@@ -577,7 +577,7 @@ test.describe
 
           const burned = await postWithSigningProviderRetry<TransactionResponse>(
             api,
-            `/v1/issuance/tokens/${encodeURIComponent(deployedToken.id)}/burn`,
+            `/v1/issuance/tokens/${encodeURIComponent(deployedToken.id)}/burn/execute`,
             {
               signingCustodyWalletId: wallet.id,
               burn: {

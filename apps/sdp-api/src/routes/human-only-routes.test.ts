@@ -73,7 +73,7 @@ describe("human-only routes", () => {
       "PATCH /v1/organizations/:orgId",
       "POST /v1/api-keys",
       "POST /v1/api-keys/:keyId/rotate",
-      "POST /v1/members/invite",
+      "POST /v1/members/invitations",
       "POST /v1/organizations/:orgId/feedback",
       "POST /v1/organizations/:orgId/mainnet-access",
       "POST /v1/organizations/:orgId/mainnet-access/notify",

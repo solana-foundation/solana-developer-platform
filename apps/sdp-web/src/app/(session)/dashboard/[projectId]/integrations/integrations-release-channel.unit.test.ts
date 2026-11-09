@@ -77,7 +77,7 @@ beforeEach(() => {
     }),
     projectClient: apiClient({
       "/v1/integrations": INTEGRATIONS,
-      "/v1/private-channels/instance": { instance: { isActive: true } },
+      "/v1/private-channels/instance-connection": { instance: { isActive: true } },
     }),
   }));
 });

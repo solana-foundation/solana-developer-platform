@@ -55,7 +55,7 @@ export const KEYED_IP_BACKSTOP_MAX_REQUESTS = Math.max(...Object.values(RATE_LIM
  * link's status read counts in its own bucket at that limit), and no JWKS
  * verification runs.
  */
-export const AUTHENTICATED_PATHS = ["/v1", "/internal/dashboard", "/admin/allowlist"];
+export const AUTHENTICATED_PATHS = ["/v1", "/internal/dashboard", "/admin/onboarding-allowlist"];
 
 /**
  * A payment link's status read, `GET /pay/:token`, as matchesFreePath matches it: one segment,

@@ -40,7 +40,7 @@ describe("Settings dashboard routes", () => {
         revokeInvitation(request, { params: Promise.resolve({ invitationId: "inv_test/1" }) }),
       "/v1/members/invitations/inv_test%2F1",
     ],
-    ["route.dashboard.members.invite", (request) => inviteMember(request), "/v1/members/invite"],
+    ["route.dashboard.members.invite", (request) => inviteMember(request), "/v1/members/invitations"],
     ["route.dashboard.members.leave", (request) => leaveOrganization(request), "/v1/members/me"],
     [
       "route.dashboard.organizations.update",
