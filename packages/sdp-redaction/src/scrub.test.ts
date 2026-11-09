@@ -908,6 +908,15 @@ describe("scrubTelemetry on serialized JSON (HOO-2570)", () => {
     );
   });
 
+  it("restores many marked numbers in one pass", () => {
+    const amounts = Array.from({ length: 5_000 }, () => "1.50").join(",");
+    const text = `{"firstName":"Jane","amounts":[${amounts}]}`;
+    const started = performance.now();
+    const scrubbed = scrubTelemetryString(text);
+    assert.ok(performance.now() - started < 1_000);
+    assert.equal(scrubbed, `{"firstName":"[REDACTED]","amounts":[${amounts}]}`);
+  });
+
   it("keeps an own __proto__ field", () => {
     const text = '{"__proto__":{"x":1},"ok":true}';
     assert.equal(scrubTelemetryString(text), text);

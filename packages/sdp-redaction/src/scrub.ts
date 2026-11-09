@@ -136,16 +136,22 @@ function parseKeepingNumberText(
   if (unsupported) return undefined;
   return {
     parsed,
-    // Each mark is written as a whole JSON string, closing quote included, so
-    // one mark's token is never a prefix of another's.
+    // One pass over the text, whatever the number of marks: each mark is
+    // written as a whole JSON string, closing quote included.
     restoreNumbers: (text) =>
-      sources.reduce(
-        (restored, source, index) =>
-          restored.split(JSON.stringify(`${NUMBER_TEXT_MARK}${index}`)).join(source),
-        text
-      ),
+      sources.length === 0
+        ? text
+        : text.replace(MARKED_NUMBER, (mark, index: string) => sources[Number(index)] ?? mark),
   };
 }
+
+/** A mark as `JSON.stringify` writes it: `"\u0000sdp-number-text:<index>"`. */
+const MARKED_NUMBER = new RegExp(
+  `${JSON.stringify(NUMBER_TEXT_MARK)
+    .slice(0, -1)
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\d+)"`,
+  "g"
+);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
