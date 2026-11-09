@@ -8,23 +8,23 @@ deletion does not depend on that age-based enforcement gate.
 
 ## Retention table
 
-| Data                                                        | Retention                                                                                                     | End of retention                                                                                 | Access                                             |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------- |
-| Account name and email (`users`)                            | Until no live linked identity remains                                                                         | Clear name; replace email with a stable, non-deliverable pseudonym; mark deleted                 | Person, organization directory, platform workloads |
-| Identity email (`auth_user_identities`)                     | Until final account deletion; retired identities keep their address for invitation cleanup                    | Clear email; retain opaque provider linkage and deletion record                                  | Authentication and platform workloads              |
-| Clerk deletion tombstones (`clerk_deleted_users`)           | Indefinite                                                                                                    | Retain opaque provider id to reject delayed identity mapping and profile events                  | Platform workloads only                            |
-| Invitation email                                            | Proposed: 30 days after the latest of creation, expiry, and acceptance; immediately on final account deletion | Pseudonymize email; expire stale pending invitations; preserve invitation ids and roles          | Organization members and platform workloads        |
-| Notification actor/subject snapshots and delivery email     | Proposed: 30 days after creation                                                                              | Clear actor/subject strings and replace recipient email; preserve send/dedupe evidence           | Platform workloads                                 |
-| Request idempotency snapshots, including batch external ids | Existing: 24 hours                                                                                            | Existing hourly job prunes expired request keys                                                  | Authenticated project and platform workloads       |
-| Durable batch external ids and money-movement rows          | Indefinite                                                                                                    | Preserve business dedupe, signed intent, settlement, and recovery evidence                       | Authorized project readers and platform workloads  |
-| Payment-request payer address and settlement evidence       | Indefinite                                                                                                    | Preserve settlement verification and recovery; no name or email is required                      | Authorized project readers and platform workloads  |
-| Transfer memo in SDP                                        | Indefinite with the financial record                                                                          | Retain movement evidence; never put account PII in free text                                     | Authorized project readers and platform workloads  |
-| Published on-chain data                                     | Chain lifetime                                                                                                | SDP cannot erase published transactions or memos                                                 | Public                                             |
-| Pending/failed ramp webhook payload                         | Until explicitly resolved                                                                                     | Never age out unresolved settlement evidence                                                     | Replay worker and operators                        |
-| Discharged ramp webhook payload/outcome                     | Existing: body cleared at discharge; outcome retained seven days                                              | Existing replay job archives the outcome and clears provider event id/error                      | Replay worker and operators                        |
-| Audit rows, hashes, anchors, and opaque actor ids           | Existing: indefinite                                                                                          | Never mutate or delete sealed rows; scrub metadata before sealing                                | Authorized organization readers and operators      |
-| Audit IP and user agent                                     | Existing: indefinite within sealed rows; new anonymous-payer entries retain only a network and no user agent  | Keep prior sealed context immutable; anonymous-payer IPv4 /24 and IPv6 /48 networks are retained | Authorized organization readers and operators      |
-| Cloud Logging, Sentry, backups, and external email delivery | Set by each service's owner                                                                                   | Separate provider retention/restore controls; not changed by the database job                    | IAM/project membership                             |
+| Data                                                        | Retention                                                                                                        | End of retention                                                                                 | Access                                             |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------- |
+| Account name and email (`users`)                            | Until no live linked identity remains                                                                            | Clear name; replace email with a stable, non-deliverable pseudonym; mark deleted                 | Person, organization directory, platform workloads |
+| Identity email (`auth_user_identities`)                     | Until final account deletion; retired identities keep their address for invitation cleanup                       | Clear email; retain opaque provider linkage and deletion record                                  | Authentication and platform workloads              |
+| Clerk deletion tombstones (`clerk_deleted_users`)           | Indefinite                                                                                                       | Retain opaque provider id to reject delayed identity mapping and profile events                  | Platform workloads only                            |
+| Invitation email                                            | Proposed: 30 days after latest creation, expiry or acceptance; deletion only matches stored user/identity emails | Pseudonymize email; expire stale pending invitations; preserve invitation ids and roles          | Organization members and platform workloads        |
+| Notification actor/subject snapshots and delivery email     | Proposed: 30 days after creation                                                                                 | Clear actor/subject strings and replace recipient email; preserve send/dedupe evidence           | Platform workloads                                 |
+| Request idempotency snapshots, including batch external ids | Existing: 24 hours                                                                                               | Existing hourly job prunes expired request keys                                                  | Authenticated project and platform workloads       |
+| Durable batch external ids and money-movement rows          | Indefinite                                                                                                       | Preserve business dedupe, signed intent, settlement, and recovery evidence                       | Authorized project readers and platform workloads  |
+| Payment-request payer address and settlement evidence       | Indefinite                                                                                                       | Preserve settlement verification and recovery; no name or email is required                      | Authorized project readers and platform workloads  |
+| Transfer memo in SDP                                        | Indefinite with the financial record                                                                             | Retain movement evidence; never put account PII in free text                                     | Authorized project readers and platform workloads  |
+| Published on-chain data                                     | Chain lifetime                                                                                                   | SDP cannot erase published transactions or memos                                                 | Public                                             |
+| Pending/failed ramp webhook payload                         | Until explicitly resolved                                                                                        | Never age out unresolved settlement evidence                                                     | Replay worker and operators                        |
+| Discharged ramp webhook payload/outcome                     | Existing: body cleared at discharge; outcome retained seven days                                                 | Existing replay job archives the outcome and clears provider event id/error                      | Replay worker and operators                        |
+| Audit rows, hashes, anchors, and opaque actor ids           | Existing: indefinite                                                                                             | Never mutate or delete sealed rows; scrub metadata before sealing                                | Authorized organization readers and operators      |
+| Audit IP and user agent                                     | Existing: indefinite within sealed rows; new anonymous-payer entries retain only a network and no user agent     | Keep prior sealed context immutable; anonymous-payer IPv4 /24 and IPv6 /48 networks are retained | Authorized organization readers and operators      |
+| Cloud Logging, Sentry, backups, and external email delivery | Set by each service's owner                                                                                      | Separate provider retention/restore controls; not changed by the database job                    | IAM/project membership                             |
 
 An idempotency key's expiry never authorizes deleting a financial recovery row
 or forgetting a batch's durable business dedupe key.
@@ -35,10 +35,20 @@ current data.
 ## Account deletion
 
 The existing implementation from [PR #2833](https://github.com/solana-foundation/solana-developer-platform/pull/2833)
-records a lasting `clerk_deleted_users` tombstone and pseudonymizes the user's
-email/name, identity emails, and past invitation emails after the last linked
-identity is deleted. Opaque user ids remain stable for history. This retention
-change reuses that implementation.
+records a lasting `clerk_deleted_users` tombstone. After the last linked identity
+is deleted, it clears the user's name and identity emails and replaces the
+user's email with a pseudonym. Invitation cleanup only matches addresses still
+stored in `users` or `auth_user_identities`, including retired identities. The
+membership mirror first revokes pending invitations it finds at those
+addresses; final deletion pseudonymizes matching non-pending invitations.
+Opaque user ids remain stable for history. This retention change reuses that
+implementation.
+
+An email change from X to Y can remove the last stored link to X. Invitations to
+X can then retain their email and pending status after final account deletion.
+[HOO-2758](https://linear.app/solana-fndn/issue/HOO-2758)
+tracks the historical-address fix. Age-based cleanup is disabled, so the
+proposed 30-day period does not currently scrub those copies.
 
 Notification snapshots follow the proposed age-based policy above. Shared
 business counterparties, provider-held verification records, arbitrary customer
