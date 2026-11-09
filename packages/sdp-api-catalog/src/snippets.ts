@@ -75,7 +75,8 @@ function curlSnippet({ method, url, body, auth, takesIdempotencyKey }: SnippetRe
     );
   }
   const call = lines.join(" \\\n");
-  return takesIdempotencyKey ? `# ${RETRY_KEY_COMMENT}\nIDEMPOTENCY_KEY=$(uuidgen)\n${call}` : call;
+  // No `#` comment line: interactive zsh, the macOS default, runs it as a command.
+  return takesIdempotencyKey ? `IDEMPOTENCY_KEY=$(uuidgen)\n${call}` : call;
 }
 
 function typeScriptSnippet({

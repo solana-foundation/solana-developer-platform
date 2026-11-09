@@ -264,30 +264,6 @@
           }
         },
         {
-          "name": "Update project",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/projects/{{projectId}}",
-            "description": "Updates project attributes.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Payments Updated\",\n  \"description\": \"Updated project description.\",\n  \"settings\": {\n    \"webhookUrl\": \"https://example.com/webhook\"\n  }\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
           "name": "Get project provider availability",
           "request": {
             "method": "GET",

@@ -43,7 +43,7 @@ describe("buildSnippets", () => {
     for (const method of ["POST", "PATCH", "DELETE"]) {
       const { curl, ts, py } = buildSnippets({ ...READ, method, takesIdempotencyKey: true });
       expect(curl).toBe(
-        `# Reuse this key when you retry this request.\nIDEMPOTENCY_KEY=$(uuidgen)\ncurl -X ${method} '${URL}' \\\n  -H "Authorization: Bearer $SDP_API_KEY" \\\n  -H "Idempotency-Key: $IDEMPOTENCY_KEY"`
+        `IDEMPOTENCY_KEY=$(uuidgen)\ncurl -X ${method} '${URL}' \\\n  -H "Authorization: Bearer $SDP_API_KEY" \\\n  -H "Idempotency-Key: $IDEMPOTENCY_KEY"`
       );
       expect(
         ts.startsWith(

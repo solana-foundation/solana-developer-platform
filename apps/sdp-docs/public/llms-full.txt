@@ -819,7 +819,6 @@ Any of:
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/wallets' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -1024,7 +1023,6 @@ Delete wallet request body.
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X DELETE 'https://api.solana.com/v1/wallets' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -1969,7 +1967,6 @@ walletId is the Provider wallet ID to check, required. Ambiguous Provider IDs ar
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/wallets/signer-check' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -2481,7 +2478,6 @@ Update wallet request body.
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X PATCH 'https://api.solana.com/v1/wallets/privy_wallet_123' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -2575,7 +2571,6 @@ Source: https://platform.solana.com/docs/reference/api/projects
 | --- | --- | --- |
 | `GET` | `/v1/projects` | [List projects](/docs/reference/api/projects/list-projects.md) |
 | `GET` | `/v1/projects/{projectId}` | [Get project](/docs/reference/api/projects/get-project.md) |
-| `PATCH` | `/v1/projects/{projectId}` | [Update project](/docs/reference/api/projects/update-project.md) |
 | `GET` | `/v1/projects/{projectId}/provider-availability` | [Get project provider availability](/docs/reference/api/projects/get-project-provider-availability.md) |
 | `GET` | `/v1/integrations` | [List project integrations](/docs/reference/api/projects/list-project-integrations.md) |
 
@@ -2975,261 +2970,6 @@ r = requests.get("https://api.solana.com/v1/projects/prj_example",
     "message": "Missing action: projects.read",
     "details": {
       "action": "projects.read"
-    }
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-Error responses use the [standard error shape](/docs/reference/conventions/errors).
-
----
-
-### Update project
-Source: https://platform.solana.com/docs/reference/api/projects/update-project
-
-> Updates project attributes.
-
-`PATCH /v1/projects/{projectId}`
-
-Requires an [API key](/docs/developing-with-sdp/authentication) with the `projects.manage` action.
-
-## Path parameters
-
-- **`projectId`** · `string` · required · min length 1 · example `prj_example`
-
-  Project identifier.
-
-## Request body
-
-`application/json` · required
-
-Update project request body.
-
-- **`name`** · `string` · min length 1 · max length 100 · example `Payments Updated`
-
-  Updated project name.
-
-- **`description`** · `string | null` · max length 500 · example `Updated project description.`
-
-  Updated description. Use null to clear.
-
-- **`settings`** · `object | null`
-
-  Updated project settings. Use null to clear.
-
-  - **`webhookUrl`** · `string` · format `uri`
-
-  - **`metadata`** · `object`
-
-    - **`*`** · `string`
-
-## Responses
-
-- **`200`** Project updated
-
-  - **`data`** · `object` · required
-
-    Project response payload.
-
-    - **`project`** · `object` · required
-
-      Project details.
-
-      - **`id`** · `string` · required · min length 1 · example `prj_example`
-
-        Project identifier.
-
-      - **`organizationId`** · `string` · required · min length 1 · example `org_example`
-
-        Organization identifier.
-
-      - **`name`** · `string` · required · example `Payments`
-
-        Project name.
-
-      - **`slug`** · `string` · required · example `payments`
-
-        URL-friendly slug.
-
-      - **`description`** · `string | null` · required · example `Payments workflow`
-
-        Optional project description.
-
-      - **`environment`** · `string` · required · one of `sandbox`, `beta`, `production` · example `sandbox`
-
-        Project environment.
-
-      - **`settings`** · `object | null` · required
-
-        Project settings, or null when none have been set.
-
-        - **`webhookUrl`** · `string` · format `uri` · example `https://example.com/webhook`
-
-          Webhook URL for event notifications.
-
-        - **`metadata`** · `object`
-
-          Arbitrary metadata key/value pairs.
-
-          - **`*`** · `string`
-
-      - **`status`** · `string` · required · one of `active`, `archived` · example `active`
-
-        Project status.
-
-      - **`createdBy`** · `string` · required · min length 1 · example `usr_example`
-
-        Identifier of the creator.
-
-      - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
-
-        Creation timestamp.
-
-      - **`updatedAt`** · `string` · required · format `date-time` · example `2025-01-02T00:00:00.000Z`
-
-        Last update timestamp.
-
-  - **`meta`** · `object` · required
-
-    Response metadata.
-
-    - **`requestId`** · `string` · required · min length 1 · example `req_example`
-
-      Request identifier for tracing.
-
-    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
-
-      ISO 8601 timestamp.
-
-- **`400`** Bad Request
-
-  - **`error`** · `object` · required
-
-    Standard error payload.
-
-    - **`code`** · `string` · required
-
-      Machine-readable error code.
-
-    - **`message`** · `string` · required
-
-      Human-readable error message.
-
-    - **`details`** · `object`
-
-      Optional error details for debugging.
-
-      - **`*`** · `any`
-
-  - **`meta`** · `object`
-
-    - **`requestId`** · `string` · min length 1 · example `req_example`
-
-      Request identifier for tracing.
-
-- **`401`** Unauthorized
-
-  Same fields as `400`.
-
-- **`403`** Forbidden. Requires the `projects.manage` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
-
-  Same fields as `400`.
-
-- **`404`** Not Found
-
-  Same fields as `400`.
-
-- **`500`** Internal Server Error
-
-  Same fields as `400`.
-
-## Example request
-
-```bash tab="cURL"
-curl -X PATCH 'https://api.solana.com/v1/projects/prj_example' \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Payments Updated",
-    "description": "Updated project description.",
-    "settings": {
-      "webhookUrl": "https://example.com/webhook"
-    }
-  }'
-```
-
-```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/projects/prj_example", {
-  method: "PATCH",
-  headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Content-Type": "application/json"
-  },
-  body: JSON.stringify({
-    "name": "Payments Updated",
-    "description": "Updated project description.",
-    "settings": {
-      "webhookUrl": "https://example.com/webhook"
-    }
-  })
-});
-```
-
-```python tab="Python"
-import os, requests
-
-r = requests.patch("https://api.solana.com/v1/projects/prj_example",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
-  json={
-    "name": "Payments Updated",
-    "description": "Updated project description.",
-    "settings": {
-      "webhookUrl": "https://example.com/webhook"
-    }
-  })
-```
-
-## Example responses
-
-```json tab="200"
-{
-  "data": {
-    "project": {
-      "id": "prj_example",
-      "organizationId": "org_example",
-      "name": "Payments",
-      "slug": "payments",
-      "description": "Payments workflow",
-      "environment": "sandbox",
-      "settings": {
-        "webhookUrl": "https://example.com/webhook",
-        "metadata": {
-          "region": "us"
-        }
-      },
-      "status": "active",
-      "createdBy": "usr_example",
-      "createdAt": "2025-01-01T00:00:00.000Z",
-      "updatedAt": "2025-01-02T00:00:00.000Z"
-    }
-  },
-  "meta": {
-    "requestId": "req_example",
-    "timestamp": "2025-01-01T00:00:00.000Z"
-  }
-}
-```
-
-```json tab="403"
-{
-  "error": {
-    "code": "INSUFFICIENT_PERMISSIONS",
-    "message": "Missing action: projects.manage",
-    "details": {
-      "action": "projects.manage"
     }
   },
   "meta": {
@@ -8050,7 +7790,6 @@ Direct token deployment request body.
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/deploy' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -9691,7 +9430,6 @@ Mint request body.
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/mint' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -10391,7 +10129,6 @@ Burn request body.
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/burn' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -11112,7 +10849,6 @@ Seize (force transfer) request body.
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/seize' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -11826,7 +11562,6 @@ Force burn request body.
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/force-burn' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -12142,7 +11877,6 @@ Pause token request body.
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/pause' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -12428,7 +12162,6 @@ Pause token request body.
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/unpause' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -12674,7 +12407,6 @@ Freeze account request body.
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/freeze' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -12914,7 +12646,6 @@ Unfreeze account request body.
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/unfreeze' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -13770,7 +13501,6 @@ Update authority request body.
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/authority' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -15937,7 +15667,6 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/transfers' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -17991,7 +17720,6 @@ Create a custody-executed outbound transfer batch.
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/transfer-batches' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -18958,7 +18686,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/transfer-batches/xbatch_example/retry' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -20026,7 +19753,6 @@ Creates an SDP-custody outbound recurring payment intent. Activation and collect
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/recurring-payments' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -20753,7 +20479,6 @@ Updates a recurring payment. Pending payments are edited directly. Active metada
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X PATCH 'https://api.solana.com/v1/payments/recurring-payments/prp_example' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -21458,7 +21183,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/recurring-payments/prp_example/activate' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -21811,7 +21535,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/recurring-payments/prp_example/cancel' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -22520,7 +22243,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/recurring-payments/prp_example/collect' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -22957,7 +22679,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/recurring-payments/prp_example/resume' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -23562,7 +23283,6 @@ Create payment request payload.
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/requests' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -24539,7 +24259,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `paymen
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/requests/preq_example/cancel' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -24844,7 +24563,6 @@ Creates an SDP subscription plan record. Prepare the on-chain Solana subscriptio
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/subscription-plans' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -25954,7 +25672,6 @@ Updates mutable SDP subscription plan fields.
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X PATCH 'https://api.solana.com/v1/payments/subscription-plans/psp_example' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -26239,7 +25956,6 @@ Creates a pending SDP subscription record tied to a counterparty. Lifecycle, sch
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/subscriptions' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -29512,7 +29228,6 @@ Address compliance screening request payload.
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/compliance/address-screenings' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -30155,7 +29870,6 @@ Create counterparty request body.
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/counterparties' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -30596,7 +30310,6 @@ Update counterparty request body. At least one field must be provided.
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X PATCH 'https://api.solana.com/v1/counterparties/cpty_example' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -30769,7 +30482,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X DELETE 'https://api.solana.com/v1/counterparties/cpty_example' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -31614,7 +31326,6 @@ Create counterparty account request body.
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/counterparties/cpty_example/accounts' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -32380,7 +32091,6 @@ Update counterparty account request body. At least one field must be provided.
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X PATCH 'https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -32570,7 +32280,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 ## Example request
 
 ```bash tab="cURL"
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X DELETE 'https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -35437,7 +35146,6 @@ Every wallet names the provider account it lives under: `provider` for SDP's acc
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/wallets' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -36167,7 +35875,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 
 **Accepted.** The key is optional, and honored when sent.
 
-- Wallets: `POST /v1/wallets`, `POST /v1/wallets/initialize`, `POST /v1/wallets/signer-check`, `PATCH /v1/wallets/{walletId}`, `DELETE /v1/wallets`
+- Wallets: `POST /v1/wallets`, `POST /v1/wallets/signer-check`, `PATCH /v1/wallets/{walletId}`, `DELETE /v1/wallets`
 - Counterparties: `POST`, `PATCH` and `DELETE` on `/v1/counterparties` and on counterparty accounts
 - Payment requests: `POST /v1/payments/requests` and `POST /v1/payments/requests/{paymentRequestId}/cancel`
 
@@ -38849,7 +38557,6 @@ The token page has no screening action. When screening is enabled for your organ
 <Tab value="API">
 
 ```bash
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/compliance/address-screenings' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -38981,7 +38688,6 @@ To resume, click **Resume** on the **Transfers** row and then **Resume transfers
 **Pause:**
 
 ```bash
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/pause' \
   -H "Authorization: Bearer $SDP_API_KEY" \
@@ -38995,7 +38701,6 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/pause' \
 **Unpause:**
 
 ```bash
-# Reuse this key when you retry this request.
 IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/unpause' \
   -H "Authorization: Bearer $SDP_API_KEY" \

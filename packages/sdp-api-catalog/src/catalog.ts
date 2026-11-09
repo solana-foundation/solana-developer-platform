@@ -46,6 +46,8 @@ export interface PlaygroundEndpoint {
   pathFields: PlaygroundField[];
   bodyFields: PlaygroundField[];
   expectedResponse: unknown;
+  /** Whether the route takes an Idempotency-Key, so the snippets show one only where it does. */
+  takesIdempotencyKey: boolean;
 }
 
 function fieldFromParameter(parameter: ApiParameter): PlaygroundField | null {
@@ -122,5 +124,6 @@ export function toPlaygroundEndpoint(operation: ApiOperation): PlaygroundEndpoin
       .filter((field): field is PlaygroundField => field !== null),
     bodyFields,
     expectedResponse: success?.body.kind === "json" ? success.body.example : {},
+    takesIdempotencyKey: operation.takesIdempotencyKey,
   };
 }
