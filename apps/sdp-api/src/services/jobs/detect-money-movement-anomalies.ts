@@ -1,4 +1,5 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
@@ -126,7 +127,12 @@ export async function detectMoneyMovementAnomalies(
 
 async function readAnomalies(
   db: DatabaseExecutor,
-  window: { environment: string; baselineStart: string; hourStart: string; hourEnd: string }
+  window: {
+    environment: SdpEnvironment;
+    baselineStart: string;
+    hourStart: string;
+    hourEnd: string;
+  }
 ): Promise<AnomalyRow[]> {
   // created_at is an ISO-8601 UTC string, so a string range selects the
   // window. The hour bucket is truncated in UTC, never the session's time
