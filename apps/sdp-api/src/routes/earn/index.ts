@@ -7,6 +7,7 @@ import { projectContextMiddleware } from "@/middleware/project-context";
 import { requestGate } from "@/middleware/request-gate";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
+import { createEarnOnboardingRoutes } from "@/routes/earn-onboarding";
 import type { Env } from "@/types/env";
 import { isEarnExitOrRead } from "./exits";
 import {
@@ -72,6 +73,7 @@ import {
   listEarnVaultWithdrawals,
 } from "./handlers/vault";
 import { getEarnVaultShareReconciliation } from "./handlers/vault-reconciliation";
+import { providerActions } from "./provider-actions";
 import {
   earnExternalWalletDepositTransactionSchema,
   earnExternalWalletQueuedWithdrawalPreviewSchema,
@@ -150,6 +152,8 @@ earn.use("*", projectContextMiddleware(earnProjectContextOptions));
 //
 // Money-IN carries no such rule, so the deposit quote and the external-wallet
 // deposit build are metered.
+earn.route("/provider-actions", providerActions);
+
 // Strategy catalogue (source: DB, admitted only by the sync cron), read in
 // the caller's project environment.
 earn.get("/strategies", requireAction("earn.read"), cacheEarnCatalogue, listEarnStrategies);
@@ -513,4 +517,5 @@ earn.get(
   getEarnProgramWithdrawal
 );
 
+earn.route("/onboarding/wisdomtree", createEarnOnboardingRoutes("wisdomtree"));
 earnRoutes.route("/", earn);

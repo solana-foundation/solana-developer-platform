@@ -159,6 +159,7 @@ function withdrawalProgressStep(
   step: "details" | "review",
   settlement: EarnVaultWithdrawalSettlement
 ): number {
+  if (outcome?.movement.settlementOutcome !== undefined) return 4;
   if (settlement === "provider_order") {
     if (!outcome) return step === "review" ? 1 : 0;
     return isLandedEarnVaultDirectMovementStatus(outcome.movement.status) ? 3 : 2;
@@ -241,6 +242,22 @@ function withdrawalResultCopy(
   t: ReturnType<typeof useTranslations>,
   settlement: EarnVaultWithdrawalSettlement
 ): WithdrawalResultCopy {
+  if (outcome.movement.settlementOutcome === "cancelled")
+    return {
+      title: t("DashboardEarn.providerAction.cancelled"),
+      body: t("DashboardEarn.providerAction.cancelledBody"),
+      note: "",
+      status: t("DashboardEarn.providerAction.cancelledStatus"),
+      statusVariant: "info",
+    };
+  if (outcome.movement.settlementOutcome === "delivered")
+    return {
+      title: t("DashboardEarn.providerAction.delivered"),
+      body: t("DashboardEarn.providerAction.deliveredBody"),
+      note: "",
+      status: t("DashboardEarn.providerAction.delivered"),
+      statusVariant: "success",
+    };
   if (settlement === "provider_order") {
     if (outcome.movement.status === "failed") {
       return {
@@ -392,6 +409,7 @@ function WithdrawalResult({
 }
 
 export interface EarnVaultWithdrawModalProps {
+  redemptionMode?: "standard" | "instant";
   onSubmissionStart?: VaultSubmissionObserver;
   position: EarnVaultPosition;
   environment: SdpEnvironment;
@@ -735,6 +753,7 @@ export function EarnVaultWithdrawModal({
   onSubmissionStart,
   onMovementUpdated,
   settlement = "atomic",
+  redemptionMode,
 }: EarnVaultWithdrawModalProps) {
   const t = useTranslations();
   const [amountInput, setAmountInput] = useState("");
@@ -840,6 +859,7 @@ export function EarnVaultWithdrawModal({
       positionId: position.id,
       shares,
       toleranceBps: slippagePolicy === null ? null : slippageBps,
+      redemptionMode,
     });
     const reused = vaultWithdrawalIdempotencyKeyStore.has(fingerprint);
 
@@ -876,6 +896,7 @@ export function EarnVaultWithdrawModal({
       {
         positionId: position.id,
         shares,
+        redemptionMode,
         ...(replay.floor === null ? {} : { minAmountOut: replay.floor }),
       },
       key

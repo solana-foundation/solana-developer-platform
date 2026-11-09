@@ -316,8 +316,8 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
       const input = JSON.stringify([wallet.walletId, token.mintAddress, amount.trim(), expiry]);
       // Read from the clock once per action, so a retry resends the same body
       // under the first attempt's key.
-      const expiresAt = expiresAtForAction(input, () => resolveExpiryDate(expiry));
-      if (expiresAt === undefined) {
+      const sentExpiry = expiresAtForAction(input, () => resolveExpiryDate(expiry));
+      if (sentExpiry === undefined) {
         // The retry's frozen expiry has passed: not sent. Show the list to check.
         toast.error(t("DashboardPayments.requests.staleRetryCheckList"));
         router.push(projectHref(PAYMENT_REQUESTS_HREF));
@@ -331,14 +331,14 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
             walletId: wallet.walletId,
             token: token.mintAddress,
             amount: amount.trim(),
-            expiresAt,
+            expiresAt: sentExpiry.expiresAt,
           },
         }
       );
       // The copy starts inside the press, before the answer that names the link.
       linkCopied = copyPendingText(sent.then(createdPayLink));
       const res = await sent;
-      settleExpiresAt(input, expiresAt, res);
+      settleExpiresAt(input, sentExpiry, res);
       if (!res.ok) {
         // The earlier attempt may have created it: show the list to check.
         if (notice(fetchResultAnswer(res))) {

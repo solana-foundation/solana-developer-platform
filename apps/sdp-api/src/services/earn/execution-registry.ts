@@ -24,6 +24,7 @@ import {
   assertNotPortfolioProvider as assertOndoNotPortfolioProvider,
   OndoVaultDirectClient,
 } from "@sdp/ondo/client";
+import { PlumeVaultDirectClient } from "@sdp/plume/client";
 import {
   assertNotPortfolioProvider as assertVedaNotPortfolioProvider,
   VedaVaultDirectClient,
@@ -76,6 +77,8 @@ export function resolveEarnExecutionClient(
     assertClusterEndpoint
   );
 
+  if (provider === "plume")
+    return instrumentVendorPort("plume", new PlumeVaultDirectClient(runOperation));
   if (provider === "kamino") {
     const client = new KaminoVaultDirectClient(provenRpcUrl, runOperation);
     assertNotPortfolioProvider(client);

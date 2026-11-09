@@ -15,7 +15,7 @@ import { Table, TableBody, TableRow } from "@solana/design-system/table";
 import { CopyIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type KeyboardEvent, useMemo, useState, useTransition } from "react";
+import { type KeyboardEvent, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { shortenAddress } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
 import {
@@ -36,7 +36,7 @@ import {
   PAYMENT_REQUESTS_HREF,
   paymentRequestHref,
 } from "@/lib/payments-routes";
-import { useProjectHref } from "@/lib/use-dashboard-project";
+import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
 import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
 import {
   deriveTokenOptions,
@@ -400,6 +400,16 @@ export function PaymentRequestsWorkspace({
   const amountLabel = usePaymentRequestAmountLabel();
   const router = useRouter();
   const projectHref = useProjectHref();
+  const projectId = useProjectId();
+  // The Project this list shows while it is mounted, so a link read that
+  // answers after the dashboard moved elsewhere copies nothing.
+  const copyScope = useRef({ projectId, mounted: true });
+  useEffect(() => {
+    copyScope.current = { projectId, mounted: true };
+    return () => {
+      copyScope.current = { projectId, mounted: false };
+    };
+  }, [projectId]);
   const canWrite = useDashboardWorkspace().dashboardAccess.capabilities.canWrite;
   const [isPending, startTransition] = useTransition();
   // TODO(api): send the search to GET /v1/payments/requests once it can search. The API lists
@@ -426,9 +436,15 @@ export function PaymentRequestsWorkspace({
     // Reads never carry the pay link (APE-849); the link read returns it only to a
     // member whose role may manage payment requests.
     let refusal: string | null = null;
+    let leftScope = false;
+    const pressedIn = projectId;
     const link = dashboardFetch<{ data: PaymentRequestLink }>(
       `/api/dashboard/payments/requests/${encodeURIComponent(row.id)}/link`
     ).then((res) => {
+      if (!copyScope.current.mounted || copyScope.current.projectId !== pressedIn) {
+        leftScope = true;
+        throw new Error("The dashboard left this Project while the link was read");
+      }
       if (!res.ok) {
         refusal =
           res.status === 403 ? t("DashboardPayments.requests.paymentLinkNotPermitted") : res.error;
@@ -436,11 +452,11 @@ export function PaymentRequestsWorkspace({
       }
       return `${window.location.origin}/pay/${res.data.data.publicToken}`;
     });
-    void copyPendingText(link).then((copied) =>
-      copied
-        ? toast.success(t("DashboardPayments.requests.paymentLinkCopied"))
-        : toast.error(refusal ?? t("DashboardPayments.requests.paymentLinkCopyFailed"))
-    );
+    void copyPendingText(link).then((copied) => {
+      if (leftScope) return;
+      if (copied) toast.success(t("DashboardPayments.requests.paymentLinkCopied"));
+      else toast.error(refusal ?? t("DashboardPayments.requests.paymentLinkCopyFailed"));
+    });
   };
 
   return (

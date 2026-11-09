@@ -70,32 +70,6 @@ export function registerProjectPaths(registry: OpenAPIRegistry, publishEarn: boo
   });
 
   registry.registerPath({
-    method: "patch",
-    path: "/v1/projects/{projectId}",
-    tags: ["Projects"],
-    summary: "Update project",
-    operationId: "updateProject",
-    description: "Updates project attributes.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      params: z.object({
-        projectId: projectIdParamSchema,
-      }),
-      body: {
-        required: true,
-        content: jsonContent(updateProjectRequestSchema),
-      },
-    },
-    responses: {
-      200: {
-        description: "Project updated",
-        content: jsonContent(projectResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
     method: "get",
     path: "/v1/projects/{projectId}/provider-availability",
     tags: ["Projects"],
@@ -127,6 +101,33 @@ export function registerProjectPaths(registry: OpenAPIRegistry, publishEarn: boo
  * @param registry - The OpenAPI registry being built.
  */
 export function registerProjectAdministrationPaths(registry: OpenAPIRegistry) {
+  // Takes projects.manage, which no API key can hold, so only the internal document carries it.
+  registry.registerPath({
+    method: "patch",
+    path: "/v1/projects/{projectId}",
+    tags: ["Projects"],
+    summary: "Update project",
+    operationId: "updateProject",
+    description: "Updates project attributes.",
+    security: [{ clerkBearerAuth: [] }],
+    request: {
+      params: z.object({
+        projectId: projectIdParamSchema,
+      }),
+      body: {
+        required: true,
+        content: jsonContent(updateProjectRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Project updated",
+        content: jsonContent(projectResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
   registry.registerPath({
     method: "get",
     path: "/v1/projects/{projectId}/members",

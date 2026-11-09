@@ -113,6 +113,7 @@ export type ResourceType =
   | "custody_connection"
   | "earn_movement"
   | "earn_vault_withdrawal_request"
+  | "earn_provider_action"
   | "dvp_trade"
   | "payment_request"
   | "payment_transfer"
