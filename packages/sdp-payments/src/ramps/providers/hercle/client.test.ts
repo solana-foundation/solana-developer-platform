@@ -439,7 +439,16 @@ describe("Hercle order", () => {
 describe("Hercle sandbox settlement", () => {
   it("asks Hercle to settle the order as its rail would", async () => {
     const calls = scriptedFetch([
-      { status: 200, body: { orderId: "ord_1", status: "settled", webhookDelivered: true } },
+      {
+        status: 200,
+        body: {
+          orderId: "ord_1",
+          status: "settling",
+          error: null,
+          reference: "HRC-ORD1",
+          txHash: null,
+        },
+      },
     ]);
     await simulateSettlement(sandbox, "ord_1");
     const [call] = calls;
