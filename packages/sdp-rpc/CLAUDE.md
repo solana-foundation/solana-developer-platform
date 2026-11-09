@@ -12,6 +12,15 @@ change the v0 transactions SDP builds or broadcasts. `pnpm
 check:transaction-reads` runs in CI and requires the shared option on production
 transaction reads. It rejects an omitted option or an explicit v0-only cap.
 
+## Pool slots
+
+Each cluster's pool is every filled `SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL`
+slot, in `MANAGED_RPC_ENV_KEYS` order. Read a slot only through
+`managedRpcSlotUrl`: an empty slot, or one holding `placeholder` (the value
+sdp-infra seeds every app secret with), is unset. So a deployment can mount
+every slot, and a provider joins the pool when its URL is filled in Doppler. A
+filled slot on the wrong host still fails the pool (`not_configured`).
+
 ## Outbound pool
 
 `apps/sdp-api/src/runtime/outbound-dispatcher.ts` installs one undici `Agent`
