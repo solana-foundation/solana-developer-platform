@@ -63,6 +63,19 @@ export function privyWalletExternalId(requestId: string): string {
   return `sdp_cw_${requestId}`;
 }
 
+/**
+ * The Managed providers whose wallet create dedupes on the request id: the
+ * same id returns the same wallet (Privy by its idempotency key and the
+ * permanent `external_id`, Coinbase CDP by its idempotency key and the account
+ * name), so a failed keyed create is safe to run again. Any other provider
+ * makes a new wallet on every call.
+ */
+const WALLET_CREATE_DEDUPES_ON_REQUEST_ID: ReadonlySet<string> = new Set(["privy", "coinbase_cdp"]);
+
+export function walletCreateDedupesOnRequestId(provider: string): boolean {
+  return WALLET_CREATE_DEDUPES_ON_REQUEST_ID.has(provider);
+}
+
 type WalletDeleteContext<TParsed extends ProviderConfigRecord = ProviderConfigRecord> = {
   env: Env;
   walletId: string;
