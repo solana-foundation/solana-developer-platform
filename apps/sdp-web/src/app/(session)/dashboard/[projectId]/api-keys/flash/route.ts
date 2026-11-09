@@ -20,7 +20,7 @@ async function clearFlashCookie(response: NextResponse) {
 /**
  * One-time delivery of the sealed flash. The cookie is consumed (cleared) on
  * every read attempt, successful or not, and only unseals for the exact
- * Clerk session and user it was minted for. Logout, a different account on
+ * Clerk session, user, organization and Project it was minted for. Logout, a different account on
  * the same browser, an expired payload, or a tampered value all yield
  * `{ flash: null }` — never the secret.
  *
@@ -31,10 +31,14 @@ async function clearFlashCookie(response: NextResponse) {
  * requests.
  */
 export async function POST() {
-  const [{ sessionId, userId }, jar] = await Promise.all([auth(), cookies()]);
+  const [{ sessionId, userId, orgId }, jar, projectId] = await Promise.all([
+    auth(),
+    cookies(),
+    requestProjectId(),
+  ]);
   const raw = jar.get(API_KEY_FLASH_COOKIE)?.value;
 
-  if (!sessionId || !userId) {
+  if (!sessionId || !userId || !orgId) {
     // Not authenticated: destroy any pending secret rather than leave it for
     // whoever signs in on this browser next.
     const response = NextResponse.json({ flash: null }, { status: 401 });
@@ -46,7 +50,12 @@ export async function POST() {
 
   let flash: ApiKeyFlash | null = null;
   if (raw) {
-    flash = await unsealApiKeyFlash(raw, { sessionId, userId });
+    flash = await unsealApiKeyFlash(raw, {
+      sessionId,
+      userId,
+      organizationId: orgId,
+      projectId,
+    });
   }
 
   const response = NextResponse.json({ flash });
