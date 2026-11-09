@@ -1,7 +1,7 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
-import { type Address, createNoopSigner, getBase64Decoder } from "@solana/kit";
+import { type Address, createNoopSigner } from "@solana/kit";
 import {
   findAssociatedTokenPda,
   getTransferCheckedInstructionDataDecoder,

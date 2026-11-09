@@ -225,7 +225,7 @@ const SYSTEM_PROGRAM_ID = address("11111111111111111111111111111111");
  */
 function holdsTokenAccount(info: Awaited<ReturnType<typeof getAccountInfo>>): boolean {
   if (info === null || info.owner === SYSTEM_PROGRAM_ID) return false;
-  if ((SPL_TOKEN_PROGRAM_IDS as readonly Address[]).includes(info.owner)) return true;
+  if (SPL_TOKEN_PROGRAM_IDS.some((programId) => programId === info.owner)) return true;
   throw badRequest(
     "The source wallet's token account address holds an account another program owns"
   );

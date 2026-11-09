@@ -737,9 +737,7 @@ export async function activateRecurringPayment(input: {
       staleBefore: getRecurringPaymentOperationStaleBefore(nowIso),
       activatedBy,
       // A fresh activation signs the terms it read and admitted, never an edit since.
-      ...(recoveringStaleActivation
-        ? {}
-        : { expectedUpdatedAt: input.recurringPayment.updated_at }),
+      expectedUpdatedAt: recoveringStaleActivation ? undefined : input.recurringPayment.updated_at,
     });
     if (!claimed) return null;
     const attempt = await createClaimedActivationAttempt({

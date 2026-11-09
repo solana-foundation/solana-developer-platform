@@ -3,7 +3,9 @@ import {
   RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS,
 } from "@sdp/payments/recurring-payment-lifecycle";
 import {
+  isEditableRecurringPaymentStatus,
   isInFlightRecurringPaymentAttemptStatus,
+  isPendingActivationRecurringPaymentStatus,
   type ListPaymentRecurringPaymentsResponse,
   type PaymentRecurringPayment,
   type PaymentRecurringPaymentCollectionResponse,
@@ -366,24 +368,15 @@ export const createRecurringPayment = async (
 function assertReviewedVersion(
   recurringPayment: PaymentRecurringPaymentRow,
   expectedUpdatedAt: string | undefined,
-  restingStatuses: ReadonlySet<PaymentRecurringPaymentRow["status"]>
+  isAtRest: (status: PaymentRecurringPaymentRow["status"]) => boolean
 ): void {
-  if (expectedUpdatedAt === undefined || !restingStatuses.has(recurringPayment.status)) return;
+  if (expectedUpdatedAt === undefined || !isAtRest(recurringPayment.status)) return;
   if (expectedUpdatedAt === recurringPayment.updated_at) return;
   throw new AppError("RECURRING_PAYMENT_CHANGED", undefined, {
     recurringPaymentId: recurringPayment.id,
     updatedAt: recurringPayment.updated_at,
   });
 }
-
-const EDIT_RESTING_STATUSES: ReadonlySet<PaymentRecurringPaymentRow["status"]> = new Set([
-  "pending_activation",
-  "active",
-  "paused",
-]);
-const ACTIVATE_RESTING_STATUSES: ReadonlySet<PaymentRecurringPaymentRow["status"]> = new Set([
-  "pending_activation",
-]);
 
 export const updateRecurringPayment = async (
   c: ValidatedBodyContext<typeof updateRecurringPaymentSchema>
@@ -394,7 +387,7 @@ export const updateRecurringPayment = async (
   const { expectedUpdatedAt, ...body } = c.req.valid("json");
   const authorized = getAuthorized<AuthorizedRecurringPaymentUpdate>(c);
   const { recurringPayment, nextSourceWallet } = authorized;
-  assertReviewedVersion(recurringPayment, expectedUpdatedAt, EDIT_RESTING_STATUSES);
+  assertReviewedVersion(recurringPayment, expectedUpdatedAt, isEditableRecurringPaymentStatus);
   const sourceWallet = pinnedSourceWallet(authorized);
   // Authorize resolves the named wallet whatever its status; moving a
   // schedule onto it needs an active one.
@@ -438,7 +431,7 @@ export const activateRecurringPayment = async (
   assertReviewedVersion(
     recurringPayment,
     c.req.valid("json").expectedUpdatedAt,
-    ACTIVATE_RESTING_STATUSES
+    isPendingActivationRecurringPaymentStatus
   );
   const sourceWallet = pinnedSourceWallet(authorized);
 
