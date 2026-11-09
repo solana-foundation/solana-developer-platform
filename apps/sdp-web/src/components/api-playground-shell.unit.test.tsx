@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import * as playgroundCatalog from "@/lib/api-playground-openapi-catalog";
+import { MOVEMENT_POLL_INTERVAL_MS } from "@/lib/dashboard-fetch";
 import {
   createIdempotencyKeyStore,
   resetIdempotencyKeyStoresForTests,
@@ -305,15 +306,29 @@ describe("ApiPlaygroundShell", () => {
 
   // SOLA9-854: any 2xx retired a transfer's key, even one still processing, so
   // a Send after that answer went out under a new key and could pay twice.
-  it("keeps a transfer's key while its 2xx shows the transfer still processing", async () => {
+  it("keeps a transfer's key while it is processing, and settles it once a read shows it final", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
-    const transferAnswer = (status: string) =>
-      Response.json({ data: { transfer: { id: "tx_1", status } } }, { status: 201 });
-    const answers = [transferAnswer("processing"), transferAnswer("confirmed")];
-    const fetchMock = vi.fn(
-      async (_input: RequestInfo | URL, _init: RequestInit) =>
-        answers.shift() ?? transferAnswer("confirmed")
-    );
+    let settled = false;
+    const posts: RequestInit[] = [];
+    // The API replays the first 2xx verbatim: every Run under the key answers
+    // `processing`, and only the transfer's own read can show it final.
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init: RequestInit) => {
+      if ((init.method ?? "GET") === "GET") {
+        return Response.json({
+          data: { transfer: { id: "tx_1", status: settled ? "confirmed" : "processing" } },
+        });
+      }
+      const replayed = posts.length > 0 && !settled;
+      posts.push(init);
+      return Response.json(
+        { data: { transfer: { id: "tx_1", status: "processing" } } },
+        {
+          status: 201,
+          headers: replayed ? { "Idempotent-Replayed": "true" } : undefined,
+        }
+      );
+    });
     vi.stubGlobal("fetch", fetchMock);
     const transferEndpoint: ApiPlaygroundEndpointConfig = {
       ...endpoint,
@@ -326,22 +341,30 @@ describe("ApiPlaygroundShell", () => {
         <ApiPlaygroundShell endpoints={[transferEndpoint]} productName="Test product" />
       </I18nProvider>
     );
-    const sentKey = (call: number) =>
-      new Headers(fetchMock.mock.calls[call][1].headers).get("Idempotency-Key") ?? undefined;
-    const send = async (calls: number) => {
+    const sentKey = (post: number) =>
+      new Headers(posts[post]?.headers).get("Idempotency-Key") ?? undefined;
+    const run = async (expectedPosts: number) => {
       await waitFor(() =>
         expect(view.getByRole("button", { name: "Run" }).hasAttribute("disabled")).toBe(false)
       );
       fireEvent.click(view.getByRole("button", { name: "Run" }));
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(calls));
+      await waitFor(() => expect(posts).toHaveLength(expectedPosts));
     };
 
-    await send(1);
-    await send(2);
-    await send(3);
+    try {
+      await run(1);
+      await run(2);
+      // Still processing: the replay keeps the key.
+      expect(sentKey(1)).toBe(sentKey(0));
 
-    expect(sentKey(1)).toBe(sentKey(0));
-    expect(sentKey(2)).not.toBe(sentKey(1));
+      settled = true;
+      await vi.advanceTimersByTimeAsync(MOVEMENT_POLL_INTERVAL_MS);
+      await run(3);
+      // The read showed it final, so the next Run is a new request.
+      expect(sentKey(2)).not.toBe(sentKey(1));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // SOLA9-817: the retry key was derived from order-sensitive JSON text, so a

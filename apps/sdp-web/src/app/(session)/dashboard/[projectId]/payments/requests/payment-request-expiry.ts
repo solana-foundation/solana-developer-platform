@@ -5,16 +5,22 @@ import { fetchResultAnswer } from "@/lib/idempotency";
 import { createActionMemo } from "@/lib/idempotency-key-store";
 
 /**
- * A frozen expiry with the time it was frozen, which is when its create was
- * first sent. An entry an earlier build wrote is the bare expiry.
+ * What the memo stores: a frozen expiry with the time it was frozen, which is
+ * when its create was first sent. An entry an earlier build wrote is the bare
+ * expiry; it is read at this storage boundary only, and kept as written so it
+ * still settles (a memo value must serialize back to what was stored).
  */
-const frozenExpirySchema = z.union([
-  z.object({ expiresAt: z.string().nullable(), frozenAt: z.number() }),
+const storedExpirySchema = z.union([
+  z.object({
+    kind: z.literal("frozen"),
+    expiresAt: z.string().nullable(),
+    frozenAt: z.number(),
+  }),
   z.string().nullable(),
 ]);
-type FrozenExpiry = z.infer<typeof frozenExpirySchema>;
+type StoredExpiry = z.infer<typeof storedExpirySchema>;
 
-const frozenExpiries = createActionMemo("sdp:payments:request-expiry:v1", frozenExpirySchema);
+const frozenExpiries = createActionMemo("sdp:payments:request-expiry:v1", storedExpirySchema);
 
 /**
  * How long a create's retry may go out under its first attempt's key: under
@@ -24,8 +30,25 @@ const frozenExpiries = createActionMemo("sdp:payments:request-expiry:v1", frozen
  */
 export const PAYMENT_REQUEST_RETRY_WINDOW_MS = 23 * 60 * 60 * 1_000;
 
-function expiryOf(frozen: FrozenExpiry): string | null {
-  return frozen === null || typeof frozen === "string" ? frozen : frozen.expiresAt;
+/** A create's frozen expiry, as the action logic reads it. */
+type FrozenExpiry =
+  | { kind: "frozen"; expiresAt: string | null; frozenAt: number }
+  | { kind: "legacy"; expiresAt: string | null };
+
+function frozenExpiryOf(stored: StoredExpiry): FrozenExpiry {
+  return stored === null || typeof stored === "string"
+    ? { kind: "legacy", expiresAt: stored }
+    : stored;
+}
+
+/**
+ * One send's expiry: the instant it carries and the memo entry it was read
+ * from, which {@link settleExpiresAt} settles directly, so an answer that
+ * arrives after the dashboard switched organization still settles this entry.
+ */
+export interface SentExpiry {
+  readonly expiresAt: string | null;
+  readonly entry: StoredExpiry;
 }
 
 /**
@@ -38,8 +61,8 @@ function expiryOf(frozen: FrozenExpiry): string | null {
  * @param input - The form as the user chose it, with the expiry preset (never
  *   the computed instant).
  * @param resolve - Reads the instant from the clock, the first time only.
- * @returns The instant to send, `null` for no expiry, or `undefined` when the
- *   frozen instant has already passed or the first attempt is older than
+ * @returns The send's expiry, or `undefined` when the frozen instant has
+ *   already passed or the first attempt is older than
  *   {@link PAYMENT_REQUEST_RETRY_WINDOW_MS}. That request is not sent: the
  *   earlier attempt may have created it, so the caller says to check the list.
  *   The expiry is forgotten, so the next press is a new action with a fresh
@@ -48,31 +71,31 @@ function expiryOf(frozen: FrozenExpiry): string | null {
 export function expiresAtForAction(
   input: string,
   resolve: () => Date | null
-): string | null | undefined {
-  const frozen = frozenExpiries.valueFor(input, () => ({
+): SentExpiry | undefined {
+  const entry = frozenExpiries.valueFor(input, () => ({
+    kind: "frozen" as const,
     expiresAt: resolve()?.toISOString() ?? null,
     frozenAt: Date.now(),
   }));
-  const expiresAt = expiryOf(frozen);
+  const frozen = frozenExpiryOf(entry);
   const outlivedKey =
-    frozen !== null &&
-    typeof frozen === "object" &&
-    Date.now() - frozen.frozenAt >= PAYMENT_REQUEST_RETRY_WINDOW_MS;
-  if (outlivedKey || (expiresAt !== null && Date.parse(expiresAt) <= Date.now())) {
-    frozenExpiries.settle(input, frozen, { status: 200, replayed: false, code: null });
+    frozen.kind === "frozen" && Date.now() - frozen.frozenAt >= PAYMENT_REQUEST_RETRY_WINDOW_MS;
+  const expired = frozen.expiresAt !== null && Date.parse(frozen.expiresAt) <= Date.now();
+  if (outlivedKey || expired) {
+    frozenExpiries.settle(input, entry, { status: 200, replayed: false, code: null });
     return undefined;
   }
-  return expiresAt;
+  return { expiresAt: frozen.expiresAt, entry };
 }
 
 /**
  * Record the create's answer, forgetting the expiry on the rule that retires its key.
  *
- * @param expiresAt - What `expiresAtForAction` returned for the answered send.
+ * @param sent - What `expiresAtForAction` returned for the answered send.
  */
 export function settleExpiresAt(
   input: string,
-  expiresAt: string | null,
+  sent: SentExpiry,
   result: {
     ok: boolean;
     status: number | null;
@@ -81,9 +104,5 @@ export function settleExpiresAt(
     unreadable?: boolean;
   }
 ) {
-  // The entry this send went out with, or, when it is already gone, one that
-  // settling forgets at once on a retiring answer.
-  const frozen = frozenExpiries.valueFor(input, () => ({ expiresAt, frozenAt: Date.now() }));
-  if (expiryOf(frozen) !== expiresAt) return;
-  frozenExpiries.settle(input, frozen, fetchResultAnswer(result));
+  frozenExpiries.settle(input, sent.entry, fetchResultAnswer(result));
 }

@@ -13,7 +13,11 @@ import { useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
 import { filterPlaygroundEndpointsToReleaseChannel } from "@/lib/api-playground-openapi-catalog";
 import { PLAYGROUND_PROXY_PREFIX, playgroundResponseHeaders } from "@/lib/api-playground-proxy";
-import { dashboardRequest } from "@/lib/dashboard-fetch";
+import {
+  dashboardRequest,
+  MOVEMENT_READ_PATHS,
+  settleWhenMovementFinal,
+} from "@/lib/dashboard-fetch";
 import { parseDashboardPathname } from "@/lib/dashboard-project-path";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import {
@@ -376,10 +380,74 @@ const MONEY_ROUTE_PATTERNS = IDEMPOTENCY_REQUIRED_ROUTES.map((route) => {
   return { method, pattern: new RegExp(`^${pattern.join("/")}$`) };
 });
 
+/** The records a kept money answer names, as far as their ids go. */
+const keptMovementSchema = z.object({
+  data: z.object({
+    transfer: z.object({ id: z.string() }).optional(),
+    batch: z.object({ id: z.string() }).optional(),
+    recurringPayment: z.object({ id: z.string() }).optional(),
+  }),
+});
+
+/**
+ * The dashboard read that shows when a kept money answer's movement is final,
+ * or `null` when the answer names none (SOLA9-854).
+ */
+function movementReadPathOf(body: unknown): string | null {
+  const parsed = keptMovementSchema.safeParse(body);
+  if (!parsed.success) return null;
+  const { transfer, batch, recurringPayment } = parsed.data.data;
+  if (batch !== undefined) return MOVEMENT_READ_PATHS.batch(batch.id);
+  if (transfer !== undefined) return MOVEMENT_READ_PATHS.transfer(transfer.id);
+  if (recurringPayment !== undefined) {
+    return MOVEMENT_READ_PATHS.recurringPayment(recurringPayment.id);
+  }
+  return null;
+}
+
 /** Whether a Send moves money (`IDEMPOTENCY_REQUIRED_ROUTES`), so its key must survive a reload. */
 function isMoneyRouteRequest(method: ApiPlaygroundMethod, resolvedPath: string): boolean {
   const path = resolvedPath.split("?")[0] ?? resolvedPath;
   return MONEY_ROUTE_PATTERNS.some((route) => route.method === method && route.pattern.test(path));
+}
+
+/**
+ * Settles the key a Send claimed, on its answer. Only an answer to the write
+ * itself settles it; a keyless read (say, a GET checking whether the lost write
+ * landed) leaves it for the retry. A money route's 2xx whose movement is still
+ * in flight keeps it, as the dashboard's own sends do, so a resend cannot pay
+ * twice (SOLA9-854). The API replays that first 2xx verbatim, so a Run under
+ * the key keeps showing `processing`: the movement's own state settles it.
+ */
+function settlePlaygroundKey({
+  entry,
+  movesMoney,
+  response,
+  replayed,
+  text,
+  body,
+}: {
+  entry: string;
+  movesMoney: boolean;
+  response: Response;
+  replayed: boolean;
+  text: string;
+  body: unknown;
+}): void {
+  const answer: ApiAnswer = {
+    status: response.status,
+    replayed,
+    code: response.ok ? null : apiErrorCode(text),
+    movementStatus: response.ok ? movementStatusOf(body) : null,
+  };
+  if (movesMoney ? moneyAnswerRetiresKey(answer) : answerRetiresKey(answer)) {
+    playgroundRetryKeys.release(UNSETTLED_SEND, entry);
+    return;
+  }
+  const readPath = movesMoney && response.ok ? movementReadPathOf(body) : null;
+  if (readPath !== null) {
+    settleWhenMovementFinal(readPath, () => playgroundRetryKeys.release(UNSETTLED_SEND, entry));
+  }
 }
 
 interface ExecutePlaygroundRequestOptions {
@@ -512,21 +580,15 @@ async function executePlaygroundRequest({
     const body = text ? parseResponseBody(text) : {};
     const responseHeaders = playgroundResponseHeaders(response.headers);
 
-    // Only an answer to the write itself settles its key; a keyless read (say,
-    // a GET checking whether the lost write landed) leaves it for the retry.
-    // A money route's 2xx whose movement is still in flight keeps it, as the
-    // dashboard's own sends do, so a resend cannot pay twice (SOLA9-854).
-    const answer: ApiAnswer = {
-      status: response.status,
-      replayed: responseHeaders["idempotent-replayed"] === "true",
-      code: response.ok ? null : apiErrorCode(text),
-      movementStatus: response.ok ? movementStatusOf(body) : null,
-    };
-    const retires = isMoneyRouteRequest(activeEndpoint.method, resolvedPath)
-      ? moneyAnswerRetiresKey(answer)
-      : answerRetiresKey(answer);
-    if (claimed !== undefined && retires) {
-      playgroundRetryKeys.release(UNSETTLED_SEND, claimed.entry);
+    if (claimed !== undefined) {
+      settlePlaygroundKey({
+        entry: claimed.entry,
+        movesMoney: isMoneyRouteRequest(activeEndpoint.method, resolvedPath),
+        response,
+        replayed: responseHeaders["idempotent-replayed"] === "true",
+        text,
+        body,
+      });
     }
 
     onResult({
