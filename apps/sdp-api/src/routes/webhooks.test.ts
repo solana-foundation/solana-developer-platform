@@ -4,8 +4,9 @@ import type { PaymentTransferStatus } from "@sdp/types/payments";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db/client";
+import { asTransactionalClient, getDb } from "@/db/client";
 import { app } from "@/index";
+import { pseudonymizeDeletedPerson } from "@/services/organization-membership.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { readAuditActions } from "@/test/helpers/audit-logs";
 import { stubClerkBackend } from "@/test/helpers/clerk-backend";
@@ -411,6 +412,145 @@ describe("Clerk webhooks", () => {
         KNOWN_ADMIN.userId,
       ])
     ).toEqual({ email: KNOWN_ADMIN.email, status: "active" });
+  });
+
+  it("user.deleted pseudonymizes a person once their last linked Clerk user is deleted", async () => {
+    await seedKnownOrganization();
+    const newEmail = "known.admin.again@example.com";
+    await getDb(env).execute(
+      `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+       VALUES (?, 'clerk', ?, ?, ?)`,
+      ["aui_webhook_known_admin_new", NEW_CLERK_USER_ID, KNOWN_ADMIN.userId, newEmail]
+    );
+    await seedInvitation(getDb(env), {
+      id: "inv_webhook_old_address",
+      organizationId: KNOWN_ORGANIZATION.id,
+      email: KNOWN_ADMIN.email,
+      role: "admin",
+      invitedBy: OUTSIDER.userId,
+      status: "accepted",
+      expiresInDays: 7,
+    });
+    const clerk = stubClerkBackend(env);
+    clerk.answer({ status: 200, body: { data: [], total_count: 1 } });
+
+    for (const clerkUserId of [OLD_CLERK_USER_ID, NEW_CLERK_USER_ID]) {
+      const response = await simulateClerkWebhook({
+        type: "user.deleted",
+        data: { id: clerkUserId, object: "user", deleted: true },
+      });
+      expect(response.status).toBe(200);
+    }
+
+    const pseudonym = `deleted+${KNOWN_ADMIN.userId}@users.invalid`;
+    expect(
+      await getDb(env).queryOne("SELECT email, status FROM users WHERE id = ?", [
+        KNOWN_ADMIN.userId,
+      ])
+    ).toEqual({ email: pseudonym, status: "deleted" });
+    expect(
+      await getDb(env).queryMany(
+        "SELECT provider, email FROM auth_user_identities WHERE user_id = ? ORDER BY id",
+        [KNOWN_ADMIN.userId]
+      )
+    ).toEqual([
+      { provider: "clerk_deleted", email: null },
+      { provider: "clerk_deleted", email: null },
+    ]);
+    // An invitation to the first account's address, which only its tombstone still held.
+    expect(
+      await getDb(env).queryOne("SELECT email FROM invitations WHERE id = ?", [
+        "inv_webhook_old_address",
+      ])
+    ).toEqual({ email: pseudonym });
+  });
+
+  it("ignores a late user.updated for a deleted Clerk user, restoring nothing", async () => {
+    await seedKnownOrganization();
+    stubClerkBackend(env);
+    expect(
+      (
+        await simulateClerkWebhook({
+          type: "user.deleted",
+          data: { id: OLD_CLERK_USER_ID, object: "user", deleted: true },
+        })
+      ).status
+    ).toBe(200);
+
+    const late = await simulateClerkWebhook({
+      type: "user.updated",
+      data: {
+        id: OLD_CLERK_USER_ID,
+        first_name: "Restored",
+        primary_email_address_id: "email_late",
+        email_addresses: [
+          {
+            id: "email_late",
+            email_address: KNOWN_ADMIN.email,
+            verification: { status: "verified" },
+          },
+        ],
+      },
+    });
+
+    expect(late.status).toBe(200);
+    expect(
+      await getDb(env).queryOne("SELECT email, name, status FROM users WHERE id = ?", [
+        KNOWN_ADMIN.userId,
+      ])
+    ).toEqual({
+      email: `deleted+${KNOWN_ADMIN.userId}@users.invalid`,
+      name: null,
+      status: "deleted",
+    });
+    expect(
+      await getDb(env).queryOne("SELECT count(*)::int AS count FROM users WHERE email = ?", [
+        KNOWN_ADMIN.email,
+      ])
+    ).toEqual({ count: 0 });
+  });
+
+  it("rolls the whole pseudonymization back when one of its writes fails", async () => {
+    await seedKnownOrganization();
+    await seedInvitation(getDb(env), {
+      id: "inv_webhook_rollback",
+      organizationId: KNOWN_ORGANIZATION.id,
+      email: KNOWN_ADMIN.email,
+      role: "admin",
+      invitedBy: OUTSIDER.userId,
+      status: "accepted",
+      expiresInDays: 7,
+    });
+    const personRows = async () => ({
+      user: await getDb(env).queryOne("SELECT email, name, status FROM users WHERE id = ?", [
+        KNOWN_ADMIN.userId,
+      ]),
+      identities: await getDb(env).queryMany(
+        "SELECT provider, email FROM auth_user_identities WHERE user_id = ?",
+        [KNOWN_ADMIN.userId]
+      ),
+      invitation: await getDb(env).queryOne("SELECT email FROM invitations WHERE id = ?", [
+        "inv_webhook_rollback",
+      ]),
+    });
+    const seeded = await personRows();
+
+    await expect(
+      getDb(env).transaction(async (tx) => {
+        // The failing transaction also removes this test-only trigger.
+        await tx.execute(`CREATE FUNCTION refuse_user_pseudonym() RETURNS trigger
+          LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'pseudonym refused'; END $$`);
+        await tx.execute(`CREATE TRIGGER refuse_user_pseudonym
+          BEFORE UPDATE ON users FOR EACH ROW
+          WHEN (NEW.status = 'deleted') EXECUTE FUNCTION refuse_user_pseudonym()`);
+        await pseudonymizeDeletedPerson(asTransactionalClient(tx), {
+          userId: KNOWN_ADMIN.userId,
+          deletedClerkUserId: OLD_CLERK_USER_ID,
+        });
+      })
+    ).rejects.toThrow("pseudonym refused");
+
+    expect(await personRows()).toEqual(seeded);
   });
 
   it("user.deleted naming no user is refused", async () => {

@@ -7,7 +7,14 @@ import {
 import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types/roles";
 import { z } from "zod";
 import type { DatabaseClient, DatabaseExecutor } from "@/db/client";
-import { AppError, conflict, missingAction, notFound, unauthorized } from "@/lib/errors";
+import {
+  AppError,
+  conflict,
+  internalError,
+  missingAction,
+  notFound,
+  unauthorized,
+} from "@/lib/errors";
 
 export type MembershipChange =
   | { kind: "set_role"; memberId: string; role: OrganizationRole }
@@ -382,14 +389,40 @@ export async function organizationsReachingPerson(
 }
 
 /**
- * Removes a deleted Clerk user's personal data (SDP-001 SA-7, HOO-2303), in
- * one transaction, once no other Clerk user is linked to the person: the
- * email and name on `users`, and the email on every invitation that is no
- * longer pending sent to any of their addresses. The deleted identity's own
- * email goes either way. The `users` row keeps its id under a pseudonym, so
- * the audit log and the rows the person created still read as one person.
- * Someone who signed up again keeps their email, which their new Clerk user
- * signs in with.
+ * The provider a deleted Clerk user's identity row moves to: a lasting
+ * tombstone. A deleted Clerk user never comes back, so an event that still
+ * names one (a late `user.updated`) is stale and must not restore what the
+ * deletion removed (`isDeletedClerkUser`). Live lookups match only `clerk`.
+ */
+export const DELETED_CLERK_IDENTITY_PROVIDER = "clerk_deleted";
+
+/**
+ * Whether Clerk deleted this Clerk user (its identity is tombstoned).
+ *
+ * @param db - The database.
+ * @param clerkUserId - The Clerk user an event names.
+ */
+export async function isDeletedClerkUser(
+  db: DatabaseExecutor,
+  clerkUserId: string
+): Promise<boolean> {
+  const tombstone = await db.queryOne<{ id: string }>(
+    "SELECT id FROM auth_user_identities WHERE provider = ? AND provider_user_id = ?",
+    [DELETED_CLERK_IDENTITY_PROVIDER, clerkUserId]
+  );
+  return tombstone !== null;
+}
+
+/**
+ * Tombstones a deleted Clerk user's identity and, once no live Clerk user is
+ * linked to the person, removes their personal data (SDP-001 SA-7,
+ * HOO-2303), all in one transaction: the email and name on `users`, the email
+ * on every identity they held, and the email on every invitation that is no
+ * longer pending sent to any of those addresses. The `users` row keeps its id
+ * under a pseudonym, so the audit log and the rows the person created still
+ * read as one person. Someone who signed up again keeps their email, which
+ * their new Clerk user signs in with; a tombstoned identity keeps its own
+ * email until then, so the last deletion still finds invitations sent to it.
  *
  * Run it after the person's memberships and pending invitations are mirrored:
  * those read the emails this clears.
@@ -410,16 +443,19 @@ export async function pseudonymizeDeletedPerson(
     );
     if (!locked) return false;
     await tx.execute(
-      `UPDATE auth_user_identities SET email = NULL, updated_at = sdp_datetime_now()
+      `UPDATE auth_user_identities SET provider = ?, updated_at = sdp_datetime_now()
         WHERE provider = 'clerk' AND provider_user_id = ? AND user_id = ?`,
-      [params.deletedClerkUserId, params.userId]
+      [DELETED_CLERK_IDENTITY_PROVIDER, params.deletedClerkUserId, params.userId]
     );
-    const remaining = await tx.queryOne<{ count: number }>(
+    const live = await tx.queryOne<{ count: number }>(
       `SELECT count(*)::int AS count FROM auth_user_identities
-        WHERE user_id = ? AND NOT (provider = 'clerk' AND provider_user_id = ?)`,
-      [params.userId, params.deletedClerkUserId]
+        WHERE user_id = ? AND provider <> ?`,
+      [params.userId, DELETED_CLERK_IDENTITY_PROVIDER]
     );
-    if ((remaining?.count ?? 0) > 0) return false;
+    if (live === null) {
+      throw internalError("Counting a person's live identities returned no row");
+    }
+    if (live.count > 0) return false;
     const emails = await personEmails(tx, params.userId);
     const pseudonym = `deleted+${params.userId}@users.invalid`;
     if (emails.length > 0) {
@@ -429,6 +465,10 @@ export async function pseudonymizeDeletedPerson(
         [pseudonym, ...emails]
       );
     }
+    await tx.execute(
+      "UPDATE auth_user_identities SET email = NULL, updated_at = sdp_datetime_now() WHERE user_id = ?",
+      [params.userId]
+    );
     await tx.execute("UPDATE users SET email = ?, name = NULL, status = 'deleted' WHERE id = ?", [
       pseudonym,
       params.userId,

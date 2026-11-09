@@ -901,6 +901,27 @@ describe("scrubTelemetry on serialized JSON (HOO-2570)", () => {
     });
   });
 
+  it("keeps a number's digits when a sibling field is redacted", () => {
+    assert.equal(
+      scrubTelemetryString('{"email":"a@example.com","amount":12345678901234567890,"price":1.50}'),
+      '{"email":"[REDACTED]","amount":12345678901234567890,"price":1.50}'
+    );
+  });
+
+  it("keeps an own __proto__ field", () => {
+    const text = '{"__proto__":{"x":1},"ok":true}';
+    assert.equal(scrubTelemetryString(text), text);
+    assert.equal(
+      scrubTelemetryString('{"__proto__":{"x":1},"firstName":"Jane"}'),
+      '{"__proto__":{"x":1},"firstName":"[REDACTED]"}'
+    );
+  });
+
+  it("scrubs a deeply nested serialized document without overflowing the stack", () => {
+    const deep = `${"[".repeat(10_000)}${"]".repeat(10_000)}`;
+    assert.doesNotThrow(() => scrubTelemetryString(deep));
+  });
+
   it("keeps serialized JSON with nothing to redact exactly as written", () => {
     const text = '{"ok": true,  "count": 2}';
     assert.equal(scrubTelemetryString(text), text);

@@ -86,16 +86,95 @@ function scrubSerializedJson(
   ) {
     return undefined;
   }
+  const document = parseKeepingNumberText(value);
+  if (document === undefined) {
+    return undefined;
+  }
+  const scrubbed = scrubValue(document.parsed, emails, new WeakSet<object>(), 0, nesting + 1);
+  if (unchangedBy(document.parsed, scrubbed)) {
+    return undefined;
+  }
+  return document.restoreNumbers(JSON.stringify(scrubbed));
+}
+
+/** Stands in for a number whose text a JSON round trip would change, until it is restored. */
+const NUMBER_TEXT_MARK = "\u0000sdp-number-text:";
+
+/** The source text the reviver sees, where the runtime gives it (JSON.parse source text access). */
+interface ReviverContext {
+  source?: string;
+}
+
+/**
+ * Parses a JSON document, keeping each number's source text: a number that
+ * would not serialize back to the same digits (`12345678901234567890`, `1.50`)
+ * is held as a marked string and written back as it was, so scrubbing a
+ * sibling field never rounds an amount or an identifier. On a runtime without
+ * source text access such a document is not parsed at all, and the text
+ * patterns alone scrub it.
+ */
+function parseKeepingNumberText(
+  value: string
+): { parsed: unknown; restoreNumbers: (text: string) => string } | undefined {
+  const sources: string[] = [];
+  let unsupported = false;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(value);
+    parsed = JSON.parse(value, (_key, item: unknown, context?: ReviverContext) => {
+      if (typeof item !== "number") return item;
+      if (context?.source === undefined) {
+        unsupported ||= /[.eE]|\d{16,}/.test(value);
+        return item;
+      }
+      if (JSON.stringify(item) === context.source) return item;
+      sources.push(context.source);
+      return `${NUMBER_TEXT_MARK}${sources.length - 1}`;
+    });
   } catch {
     return undefined;
   }
-  const scrubbed = JSON.stringify(
-    scrubValue(parsed, emails, new WeakSet<object>(), 0, nesting + 1)
+  if (unsupported) return undefined;
+  return {
+    parsed,
+    // Each mark is written as a whole JSON string, closing quote included, so
+    // one mark's token is never a prefix of another's.
+    restoreNumbers: (text) =>
+      sources.reduce(
+        (restored, source, index) =>
+          restored.split(JSON.stringify(`${NUMBER_TEXT_MARK}${index}`)).join(source),
+        text
+      ),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Whether scrubbing left a parsed document as it was. The walk is bounded by
+ * the scrubbed side, which the walker truncates at {@link MAX_DEPTH}, so an
+ * arbitrarily nested original never recurses past that.
+ */
+function unchangedBy(original: unknown, scrubbed: unknown): boolean {
+  if (scrubbed === null || typeof scrubbed !== "object") {
+    return Object.is(original, scrubbed);
+  }
+  if (Array.isArray(scrubbed)) {
+    return (
+      Array.isArray(original) &&
+      original.length === scrubbed.length &&
+      scrubbed.every((item, index) => unchangedBy(original[index], item))
+    );
+  }
+  if (!isRecord(original) || !isRecord(scrubbed)) {
+    return false;
+  }
+  const keys = Object.keys(scrubbed);
+  return (
+    keys.length === Object.keys(original).length &&
+    keys.every((key) => Object.hasOwn(original, key) && unchangedBy(original[key], scrubbed[key]))
   );
-  return scrubbed === JSON.stringify(parsed) ? undefined : scrubbed;
 }
 
 function scrubString(value: string, emails: EmailMode, nesting = 0): string {
@@ -185,13 +264,16 @@ function scrubValue(
     return value.map((item) => scrubValue(item, emails, seen, depth + 1, nesting));
   }
 
-  const result: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(value)) {
-    result[key] = isSensitiveKey(key)
-      ? scrubSensitive(item, emails)
-      : scrubValue(item, emails, seen, depth + 1, nesting);
-  }
-  return result;
+  // `Object.fromEntries` defines own properties, so a `__proto__` field
+  // survives instead of hitting the inherited setter.
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      key,
+      isSensitiveKey(key)
+        ? scrubSensitive(item, emails)
+        : scrubValue(item, emails, seen, depth + 1, nesting),
+    ])
+  );
 }
 
 /**

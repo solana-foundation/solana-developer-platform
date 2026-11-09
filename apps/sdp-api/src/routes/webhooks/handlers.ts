@@ -23,6 +23,7 @@ import { ClerkOrganizationsService } from "@/services/clerk-organizations.servic
 import { verifiedPrimaryEmailFromClerkUser } from "@/services/clerk-users.service";
 import { applyStoredRampWebhookEvent } from "@/services/jobs/replay-ramp-webhook-events";
 import {
+  isDeletedClerkUser,
   mirrorClerkMembershipDeletion,
   organizationsReachingPerson,
   pseudonymizeDeletedPerson,
@@ -350,8 +351,14 @@ async function mirrorUserDeletion(c: AppContext, data: DeletedObjectJSON) {
 async function ensureUserMapping(
   c: AppContext,
   user: { id: string; email: string; name?: string | null }
-): Promise<string> {
+): Promise<string | null> {
   const db = getDb(c.env);
+  // A late event for a Clerk user Clerk already deleted would restore the
+  // details its deletion removed (HOO-2303).
+  if (await isDeletedClerkUser(db, user.id)) {
+    logIgnoredClerkEvent(c, "user", user.id);
+    return null;
+  }
   const email = user.email.toLowerCase();
   const existing = await db
     .prepare(
