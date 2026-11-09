@@ -27,7 +27,7 @@
     "@sdp/types": "workspace:*",
     "@solana/kit": "catalog:",
     "@solana-program/token": "catalog:",
-    "zod": "4.6.6",
+    "zod": "4.6.7",
     "@sdp/payments": "workspace:*"
   },
   "devDependencies": {
