@@ -38,10 +38,12 @@ const storedEntrySchema = z.object({
 });
 
 /**
- * How long a kept key may still go out: under the API's 24-hour
- * Idempotency-Key record (ADR 0009). Past it the API may no longer recognize
- * the key, so a retry under it could run as a second request; the store
- * reports it `outlived` and the caller sends nothing.
+ * How long a kept key may still go out on a route that only the API's
+ * 24-hour Idempotency-Key record answers (ADR 0009). Past it the API may no
+ * longer recognize the key, so a retry under it could run as a second
+ * request; the store reports it `outlived` and the caller sends nothing.
+ * A money route answers the key from its own row however old it is
+ * (`IDEMPOTENCY_REQUIRED_ROUTES`), so its callers send it anyway.
  */
 export const KEPT_KEY_WINDOW_MS = 23 * 60 * 60 * 1_000;
 
@@ -218,10 +220,11 @@ export interface IdempotencyKeyStore {
     key: string;
     persisted: boolean;
     /**
-     * The kept key was first claimed {@link KEPT_KEY_WINDOW_MS} ago or more:
-     * the API may have forgotten it, so the request must not go out under it.
-     * The caller releases it and asks the user to check what the first
-     * attempt did; the next submit is a new action.
+     * The kept key was first claimed {@link KEPT_KEY_WINDOW_MS} ago or more.
+     * On a route only the key record answers, the API may have forgotten it,
+     * so the caller releases it and asks the user to check what the first
+     * attempt did; the next submit is a new action. A money route answers it
+     * from its row, so the caller sends it as usual.
      */
     outlived: boolean;
   };
@@ -253,7 +256,13 @@ export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore
       const kept = keptEntry?.value;
       const claimedAt = keptEntry?.claimedAt ?? Date.now();
       const outlived = kept !== undefined && Date.now() - claimedAt >= KEPT_KEY_WINDOW_MS;
-      if (kept !== undefined && storedValue(name, fingerprint) === kept) {
+      // An entry an earlier build wrote has no claim time: it is stamped now,
+      // so it ages out like any other instead of never.
+      if (
+        kept !== undefined &&
+        keptEntry?.claimedAt !== undefined &&
+        storedValue(name, fingerprint) === kept
+      ) {
         // Already persisted: the retry needs no rewrite, so a store that now
         // refuses writes never blocks the retry of an earlier attempt.
         claimedIn.set(JSON.stringify([fingerprint, kept]), name);

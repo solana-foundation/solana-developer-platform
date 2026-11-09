@@ -264,16 +264,20 @@ async function sendUnderActionKey(
     // money movement refuses to send then, since a reload and retry could move
     // it twice; any other mutation sends, as a duplicate costs at most a replay.
     const { key, persisted, outlived } = keys.claim(fingerprint);
-    if (outlived) {
-      // The API may have forgotten a key this old, so a retry under it could
-      // run as a second request. Nothing is sent: the user checks what the
-      // first attempt did, and the next submit is a new action.
+    const movesMoney = requiresPersistedKey(init.method ?? "GET", path);
+    // A money route answers a kept key from its own row however old it is,
+    // and a new key could move the money twice, so the key goes out.
+    if (outlived && !movesMoney) {
+      // Only the key record answers this route, and the API may have
+      // forgotten a key this old, so a retry under it could run as a second
+      // request. Nothing is sent: the user checks what the first attempt did,
+      // and the next submit is a new action.
       keys.release(fingerprint, key);
       return keyOutlivedResponse();
     }
     headers.set(IDEMPOTENCY_KEY_HEADER, key);
     if (!persisted) {
-      if (requiresPersistedKey(init.method ?? "GET", path)) {
+      if (movesMoney) {
         // Only a key this call minted is dropped: a kept one belongs to an
         // earlier attempt that may have written, and its retry still needs it.
         if (!kept) keys.release(fingerprint, key);
@@ -285,7 +289,6 @@ async function sendUnderActionKey(
       // The answer only counts once its body has arrived: a download that
       // fails leaves the key pinned, so the retry recovers the first result.
       const body = await response.arrayBuffer();
-      const movesMoney = requiresPersistedKey(init.method ?? "GET", path);
       if (retiresKey(response, body, movesMoney)) {
         keys.release(fingerprint, key);
       } else if (movesMoney && response.ok) {
@@ -354,11 +357,11 @@ function takesActionKey(path: string, init: RequestInit, headers: Headers): bool
   );
 }
 
-/** The refusal a money movement gets when its key cannot be kept across a reload. */
 /**
- * The answer for a retry whose kept key is older than the API keeps it
- * (`KEPT_KEY_WINDOW_MS`): the outcome-unknown answer, which every caller
- * already reads as "check the list" and which retires the key.
+ * The answer for a retry whose kept key is older than the API's key record
+ * keeps it (`KEPT_KEY_WINDOW_MS`), on a route nothing else answers it on: the
+ * outcome-unknown answer, which every caller already reads as "check the list"
+ * and which retires the key.
  */
 function keyOutlivedResponse(): Response {
   return new Response(
@@ -373,6 +376,7 @@ function keyOutlivedResponse(): Response {
   );
 }
 
+/** The refusal a money movement gets when its key cannot be kept across a reload. */
 function keyNotPersistedResponse(): Response {
   return new Response(
     JSON.stringify({

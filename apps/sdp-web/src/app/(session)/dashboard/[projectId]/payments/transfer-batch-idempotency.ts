@@ -286,25 +286,13 @@ export async function sendTransferBatchUnderKey(
 ): Promise<CreateTransferBatchResult> {
   const canonical = nameTransferBatchRequest(request);
   const fingerprint = transferBatchRequestFingerprint(canonical);
-  const { key, persisted, outlived } = store.claim(fingerprint);
+  // However old the kept key is, the API answers it from the batch's own row
+  // (`IDEMPOTENCY_REQUIRED_ROUTES`), so it goes out: a new key could pay again.
+  const { key, persisted } = store.claim(fingerprint);
   const settleKey = () => {
     store.release(fingerprint, key);
     releaseDefaultTransferBatchReference(canonical);
   };
-  if (outlived) {
-    // The API may have forgotten a key this old, so a retry under it could pay
-    // every recipient again. Nothing is sent: the user checks the list. Only
-    // the request key is retired: the saved payout reference stays until the
-    // batch's outcome is known, since the API finds an earlier run by that
-    // reference and refuses to pay it again.
-    store.release(fingerprint, key);
-    throw new TransferBatchRequestError(
-      t("Shared.idempotency.outcomeUnknownCheckList"),
-      409,
-      false,
-      "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN"
-    );
-  }
   let result: CreateTransferBatchResult;
   try {
     result = await createTransferBatch(canonical, t, { value: key, persisted });
