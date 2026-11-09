@@ -2075,7 +2075,7 @@ describe("payment transfer batches", () => {
         walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
       });
       const response = await app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {
@@ -2172,7 +2172,7 @@ describe("payment transfer batches", () => {
       );
 
       const response = await app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {
