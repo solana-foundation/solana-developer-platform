@@ -189,6 +189,16 @@ function redactJsonDocument(value: string, nesting: number): string | undefined 
  */
 const NUMBER_TEXT_MARK = "\u0000sdp-number-text:";
 
+/**
+ * 128 random bits as hex. `crypto.getRandomValues`, not `randomUUID`: the
+ * browser offers `randomUUID` only on secure pages, and the dashboard's error
+ * reporting scrubs through this on any page.
+ */
+function randomTag(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 /** A document's marks as `JSON.stringify` writes them: `"<mark><index>"`. */
 function markedNumberPattern(mark: string): RegExp {
   const escaped = JSON.stringify(mark)
@@ -222,7 +232,7 @@ export interface JsonDocument {
  */
 export function parseJsonDocument(value: string): JsonDocument | undefined {
   const sources: string[] = [];
-  const mark = `${NUMBER_TEXT_MARK}${crypto.randomUUID()}:`;
+  const mark = `${NUMBER_TEXT_MARK}${randomTag()}:`;
   let exactNumbers = true;
   let parsed: JsonValue;
   try {
