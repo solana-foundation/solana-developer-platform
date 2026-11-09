@@ -2116,6 +2116,32 @@ async function admitUpdateExecution(input: {
  * activation's is. A metadata or schedule change leaves the activator alone,
  * and so does a recovered stale update, whose own claim recorded its caller.
  */
+/**
+ * The answer to an active update whose claim lost to another write. One that
+ * finished and left the payment active again changed the terms the caller
+ * reviewed: RECURRING_PAYMENT_CHANGED with its version, as the pending path
+ * answers. Otherwise work still holds the payment.
+ */
+async function lostActiveClaimError(
+  recurringRepo: PaymentRecurringPaymentsRepository,
+  scope: { organizationId: string; projectId: string },
+  snapshot: PaymentRecurringPaymentRow
+): Promise<AppError> {
+  const current = await recurringRepo.getRecurringPaymentById({
+    recurringPaymentId: snapshot.id,
+    organizationId: scope.organizationId,
+    projectId: scope.projectId,
+  });
+  if (current === null) return notFound("Recurring payment");
+  if (current.status === "active" && current.updated_at !== snapshot.updated_at) {
+    return new AppError("RECURRING_PAYMENT_CHANGED", undefined, {
+      recurringPaymentId: current.id,
+      updatedAt: current.updated_at,
+    });
+  }
+  return conflict("Recurring payment update is already processing");
+}
+
 async function claimActiveRecurringPaymentUpdate(input: {
   env: Env;
   organizationId: string;
@@ -2323,7 +2349,7 @@ export async function updateRecurringPayment(input: {
     idempotency: input.idempotency,
   });
   if (!claimResult) {
-    throw conflict("Recurring payment update is already processing");
+    throw await lostActiveClaimError(recurringRepo, input, settled.recurringPayment);
   }
   const { attempt, claimed, revokeFence } = claimResult;
   const lease = recurringPaymentLease(claimed, "update");

@@ -379,6 +379,49 @@ describe("Recurring Payment edit form after a refresh (HOO-2562)", () => {
     // the API refuses it as stale instead of reverting the weekly period.
     expect(writes[0]).toEqual({ amount: "2", expectedUpdatedAt: recurring.updatedAt });
   });
+
+  // Greptile (#2831): the form stayed open and resent the stale version.
+  it("closes when the API refuses its version, so the next edit starts from the current terms", async () => {
+    const writes: unknown[] = [];
+    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        writes.push(JSON.parse(String(init.body)));
+        return Response.json(
+          {
+            error: {
+              code: "RECURRING_PAYMENT_CHANGED",
+              message: "The recurring payment changed since it was read",
+              details: { recurringPaymentId: recurring.id, updatedAt: "2026-09-15T00:00:00.000Z" },
+            },
+          },
+          { status: 409 }
+        );
+      }
+      return Response.json({ data: { wallets: [source], recurringPayment: recurring } });
+    });
+    render(
+      <RecurringPaymentDetailWorkspace
+        recurringPayment={recurring}
+        wallet={source}
+        wallets={[source]}
+        issuedTokensByMint={{}}
+        counterpartyAccounts={[account]}
+        counterpartyLabel="Receiver"
+        collectionAttempts={[]}
+        collectionAttemptsTotal={0}
+      />,
+      { wrapper }
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    const amount = screen.getByRole("textbox", { name: "Amount" });
+    await user.clear(amount);
+    await user.type(amount, "2");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull());
+    expect(writes).toHaveLength(1);
+  });
 });
 
 describe("Recurring Payment lifecycle actions", () => {

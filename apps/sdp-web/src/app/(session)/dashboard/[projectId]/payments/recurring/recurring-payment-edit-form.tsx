@@ -20,7 +20,7 @@ import {
   getRecurringPaymentDetailState,
   refreshIfOutcomeUnknown,
 } from "./recurring-payment-detail-state";
-import { updateRecurringPayment } from "./recurring-payments.data";
+import { RecurringPaymentChangedError, updateRecurringPayment } from "./recurring-payments.data";
 import {
   accountAddress,
   accountLabel,
@@ -191,6 +191,9 @@ export function RecurringPaymentEditForm({
       router.refresh();
     } catch (error) {
       refreshIfOutcomeUnknown(error, () => router.refresh());
+      // The fields were drafted from the version that changed: close, so the
+      // next edit starts from the current terms rather than overwriting them.
+      if (error instanceof RecurringPaymentChangedError) onClose();
       toast.error(t("DashboardPayments.newDesign.recurring.paymentUpdateFailed"), {
         id: toastId,
         description:
