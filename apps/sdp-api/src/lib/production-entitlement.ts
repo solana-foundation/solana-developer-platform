@@ -10,10 +10,9 @@ import type { Env } from "@/types/env";
 /**
  * Whether this deployment may admit a production project at all
  * (`SDP_ALLOW_PRODUCTION_PROJECTS`). Unset allows; an explicit `false` means
- * the deployment never admits one, whatever an organization's Clerk
- * entitlement says: a devnet-only deployment sharing the production Clerk
- * instance sets it. Any other value throws, so a typo fails at boot instead of
- * reading as allowed.
+ * the deployment never admits one, whatever an organization's entitlement
+ * says: a devnet-only deployment sets it. Any other value throws, so a typo
+ * fails at boot instead of reading as allowed.
  *
  * @param env - Process environment.
  * @returns False only when the deployment refuses production projects.

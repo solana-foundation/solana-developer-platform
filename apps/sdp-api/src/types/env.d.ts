@@ -66,8 +66,8 @@ export interface Env extends ManagedRpcEnv {
   SDP_RELEASE_CHANNEL?: string;
 
   // Whether this deployment may admit a production project. Unset allows;
-  // "false" refuses every production project whatever an organization's Clerk
-  // entitlement says (a devnet-only deployment on the production Clerk instance).
+  // "false" refuses every production project whatever an organization's
+  // entitlement says (a devnet-only deployment).
   SDP_ALLOW_PRODUCTION_PROJECTS?: string;
 
   // One extra origin the CORS allowlist admits, as an exact https origin, for a

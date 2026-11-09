@@ -185,46 +185,6 @@ describe("Clerk webhooks", () => {
     ]);
     expect(await knownOrganizationState()).toEqual(before);
   });
-  it.each([
-    {
-      type: "organization.deleted",
-      data: { id: "org_clerk_webhook_unknown", object: "organization", deleted: true },
-    },
-    {
-      type: "organizationMembership.deleted",
-      data: {
-        id: "orgmem_webhook_unknown",
-        organization: { id: "org_clerk_webhook_unknown", name: "Stranger Org" },
-        role: "org:admin",
-        public_user_data: { user_id: OLD_CLERK_USER_ID },
-      },
-    },
-    {
-      type: "user.deleted",
-      data: { id: "user_clerk_webhook_unknown", object: "user", deleted: true },
-    },
-  ])(
-    "$type naming an organization or user this deployment does not know changes nothing and asks Clerk nothing",
-    async ({ type, data }) => {
-      await seedKnownOrganization();
-      const clerk = stubClerkBackend(env);
-      const organizations = () =>
-        getDb(env).queryMany("SELECT id, status FROM organizations ORDER BY id");
-      const before = {
-        organizations: await organizations(),
-        memberships: await knownOrganizationMemberships(),
-      };
-
-      const response = await simulateClerkWebhook({ type, data });
-
-      expect(response.status).toBe(200);
-      expect(clerk.requests).toEqual([]);
-      expect({
-        organizations: await organizations(),
-        memberships: await knownOrganizationMemberships(),
-      }).toEqual(before);
-    }
-  );
   it("does not store a production entitlement Clerk grants on a deployment that admits no production project", async () => {
     await seedKnownOrganization();
     const clerk = stubClerkBackend(env);

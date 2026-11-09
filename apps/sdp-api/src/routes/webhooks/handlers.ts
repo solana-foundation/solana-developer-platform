@@ -110,7 +110,6 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
 
   const mapping = await findOrganizationMapping(c, data.id);
   if (!mapping) {
-    logIgnoredClerkEvent(c, "organization", data.id);
     return;
   }
 

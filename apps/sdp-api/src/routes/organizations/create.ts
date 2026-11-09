@@ -219,7 +219,6 @@ async function provisionClerkOrganization(
     }
     const createdId = await clerk.createOrganization({
       name: params.organization.name,
-      slug: params.organization.slug,
       sdpOrganizationId: params.organization.id,
     });
     await tx
