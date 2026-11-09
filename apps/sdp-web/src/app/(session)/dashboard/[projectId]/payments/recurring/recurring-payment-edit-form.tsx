@@ -168,7 +168,13 @@ export function RecurringPaymentEditForm({
       position: "bottom-right",
     });
     try {
-      await updateRecurringPayment(recurringPayment.id, result.updates, undefined, t);
+      // Applies to the version this form showed, or answers 409 (HOO-2562).
+      await updateRecurringPayment(
+        recurringPayment.id,
+        { ...result.updates, expectedUpdatedAt: recurringPayment.updatedAt },
+        undefined,
+        t
+      );
       toast.success(t("DashboardPayments.newDesign.recurring.paymentUpdated"), {
         id: toastId,
         position: "bottom-right",

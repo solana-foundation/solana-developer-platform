@@ -325,7 +325,11 @@ describe("Recurring Payment exact source selection", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
     if (keepsToken) {
       await waitFor(() => expect(writes).toHaveLength(1));
-      expect(writes[0]).toEqual({ sourceCustodyWalletId: replacement.id });
+      // The edit names the version the form showed (HOO-2562).
+      expect(writes[0]).toEqual({
+        sourceCustodyWalletId: replacement.id,
+        expectedUpdatedAt: recurring.updatedAt,
+      });
       return;
     }
     // The old token is not the new wallet's to pay with: the picker clears and the form asks

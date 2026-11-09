@@ -658,6 +658,11 @@ export interface PaymentRecurringPaymentsRepository {
     updatedAt: string;
     staleBefore?: string;
     activatedBy: RecurringPaymentActivator | null;
+    /**
+     * A fresh activation claims only the version it read (HOO-2562): an edit
+     * that committed since leaves the claim unmatched.
+     */
+    expectedUpdatedAt?: string;
   }): Promise<ClaimedRecurringPaymentRow | null>;
   /**
    * Locks the recurring payment `FOR UPDATE` while `lease` is still the one its last claim wrote,

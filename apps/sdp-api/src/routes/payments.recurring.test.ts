@@ -1632,6 +1632,104 @@ describe("Payments routes — recurring", () => {
     expect(event?.after_values.amount).toBe("30.50");
   });
 
+  describe("binds edits and activation to the reviewed version (HOO-2562)", () => {
+    const STALE = "2000-01-01T00:00:00.000Z";
+    const expectChanged = async (response: Response, recurringPaymentId: string) => {
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: { code: "RECURRING_PAYMENT_CHANGED", details: { recurringPaymentId } },
+      });
+    };
+
+    it("refuses an edit of a version the caller no longer holds, and applies one of the current version", async () => {
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const before = await recurringExecutionSnapshot(created.id);
+      const patch = (expectedUpdatedAt: string) =>
+        app.request(
+          `/v1/payments/recurring-payments/${created.id}`,
+          {
+            method: "PATCH",
+            headers: RECURRING_HEADERS,
+            body: JSON.stringify({ amount: "30.50", expectedUpdatedAt }),
+          },
+          env
+        );
+
+      await expectChanged(await patch(STALE), created.id);
+      expect(await recurringExecutionSnapshot(created.id)).toEqual(before);
+
+      const current = await patch(created.updatedAt);
+      expect(current.status).toBe(200);
+      expect((await parseRecurringResponse(current)).data.recurringPayment.amount).toBe("30.50");
+    });
+
+    it("refuses an edit naming only expectedUpdatedAt", async () => {
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${created.id}`,
+        {
+          method: "PATCH",
+          headers: RECURRING_HEADERS,
+          body: JSON.stringify({ expectedUpdatedAt: created.updatedAt }),
+        },
+        env
+      );
+      expect(response.status).toBe(400);
+    });
+
+    it("refuses activating a version the caller no longer holds, claiming and signing nothing", async () => {
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const before = await recurringExecutionSnapshot(created.id);
+      const calls = recurringExecutionCallCounts();
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${created.id}/activate`,
+        {
+          method: "POST",
+          headers: RECURRING_HEADERS,
+          body: JSON.stringify({ expectedUpdatedAt: STALE }),
+        },
+        env
+      );
+
+      await expectChanged(response, created.id);
+      expect(await recurringExecutionSnapshot(created.id)).toEqual(before);
+      expect(recurringExecutionCallCounts()).toEqual(calls);
+    });
+
+    it("refuses an activation an edit overtook after it read the row, claiming nothing", async () => {
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const original = counterpartyAccountResolution.resolveSolanaCounterpartyAccount;
+      const lookup = vi
+        .spyOn(counterpartyAccountResolution, "resolveSolanaCounterpartyAccount")
+        .mockImplementationOnce(async (input) => {
+          // An edit commits between the read and the claim.
+          await getDb(env)
+            .prepare(
+              "UPDATE payment_recurring_payments SET amount = '99.00', updated_at = ? WHERE id = ?"
+            )
+            .bind(new Date(Date.now() + 1_000).toISOString(), created.id)
+            .run();
+          return original(input);
+        });
+      onTestFinished(() => lookup.mockRestore());
+      const calls = recurringExecutionCallCounts();
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${created.id}/activate`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      await expectChanged(response, created.id);
+      expect(await recurringExecutionSnapshot(created.id)).toMatchObject({
+        recurring_payment: { status: "pending_activation", amount: "99.00" },
+        activation_attempts: 0,
+      });
+      expect(recurringExecutionCallCounts()).toEqual(calls);
+    });
+  });
+
   it("refuses changing a reset activation's plan terms, which a retry would reuse as they landed", async () => {
     const created = await createRecurringPaymentFixture({
       ...DEFAULT_RECURRING_FIXTURE,

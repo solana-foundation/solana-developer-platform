@@ -356,15 +356,45 @@ export const createRecurringPayment = async (
   return created(c, response);
 };
 
+/**
+ * Refuses (409 `RECURRING_PAYMENT_CHANGED`) an edit or activation of a version
+ * the caller no longer holds (HOO-2562): `expectedUpdatedAt` names the version
+ * it reviewed, and authorize read the current one. Only a row at rest is
+ * compared. A row mid-operation is this key's own interrupted run, which
+ * resumes, or another run, which the operation refuses as in flight.
+ */
+function assertReviewedVersion(
+  recurringPayment: PaymentRecurringPaymentRow,
+  expectedUpdatedAt: string | undefined,
+  restingStatuses: ReadonlySet<PaymentRecurringPaymentRow["status"]>
+): void {
+  if (expectedUpdatedAt === undefined || !restingStatuses.has(recurringPayment.status)) return;
+  if (expectedUpdatedAt === recurringPayment.updated_at) return;
+  throw new AppError("RECURRING_PAYMENT_CHANGED", undefined, {
+    recurringPaymentId: recurringPayment.id,
+    updatedAt: recurringPayment.updated_at,
+  });
+}
+
+const EDIT_RESTING_STATUSES: ReadonlySet<PaymentRecurringPaymentRow["status"]> = new Set([
+  "pending_activation",
+  "active",
+  "paused",
+]);
+const ACTIVATE_RESTING_STATUSES: ReadonlySet<PaymentRecurringPaymentRow["status"]> = new Set([
+  "pending_activation",
+]);
+
 export const updateRecurringPayment = async (
   c: ValidatedBodyContext<typeof updateRecurringPaymentSchema>
 ) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
-  const body = c.req.valid("json");
+  const { expectedUpdatedAt, ...body } = c.req.valid("json");
   const authorized = getAuthorized<AuthorizedRecurringPaymentUpdate>(c);
   const { recurringPayment, nextSourceWallet } = authorized;
+  assertReviewedVersion(recurringPayment, expectedUpdatedAt, EDIT_RESTING_STATUSES);
   const sourceWallet = pinnedSourceWallet(authorized);
   // Authorize resolves the named wallet whatever its status; moving a
   // schedule onto it needs an active one.
@@ -405,6 +435,11 @@ export const activateRecurringPayment = async (
 
   const authorized = getAuthorized<AuthorizedRecurringPayment>(c);
   const { recurringPayment } = authorized;
+  assertReviewedVersion(
+    recurringPayment,
+    c.req.valid("json").expectedUpdatedAt,
+    ACTIVATE_RESTING_STATUSES
+  );
   const sourceWallet = pinnedSourceWallet(authorized);
 
   const activated = await activateRecurringPaymentRecord({

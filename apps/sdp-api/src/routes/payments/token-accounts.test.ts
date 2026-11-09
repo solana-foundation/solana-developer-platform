@@ -1,18 +1,24 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
-import { type Address, createNoopSigner } from "@solana/kit";
+import { type Address, createNoopSigner, getBase64Decoder } from "@solana/kit";
 import {
+  findAssociatedTokenPda,
   getTransferCheckedInstructionDataDecoder,
   TOKEN_2022_PROGRAM_ADDRESS,
 } from "@solana-program/token-2022";
 import { describe, expect, it } from "vitest";
-import { installClusterRpcResponder, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
+import {
+  installClusterRpcResponder,
+  systemAccountInfoResult,
+  tokenAccountsByOwnerResult,
+} from "@/test/helpers/cluster-rpc";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { respondMintAccounts, scaledUiAmountConfig } from "@/test/helpers/token-mints";
 import {
   buildSplTransferInstructions,
   getSplTokenBalances,
+  resolveSourceTokenAccountOrAta,
   resolveTokenLabel,
   withIssuedTokenLabels,
 } from "./token-accounts";
@@ -138,4 +144,52 @@ describe("buildSplTransferInstructions", () => {
       ).toMatchObject({ amount: 9007199254740993n, decimals: 6 });
     }
   );
+});
+
+describe("resolveSourceTokenAccountOrAta (SOLA9-885)", () => {
+  const rpc = installClusterRpcResponder();
+  const owner = syntheticAddress(21);
+  const mint = syntheticAddress(22);
+  const paymentMint = {
+    decimals: 6,
+    tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+    toBaseUnits: () => 0n,
+  };
+  const accountOwnedBy = (programOwner: Address) => ({
+    context: { slot: 1 },
+    value: {
+      data: ["", "base64"],
+      executable: false,
+      lamports: 2_039_280,
+      owner: programOwner,
+      rentEpoch: 0,
+      space: 165,
+    },
+  });
+  const resolve = () =>
+    runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      resolveSourceTokenAccountOrAta(owner, mint, paymentMint)
+    );
+
+  it("finds the token account the mint's token program owns at the ATA address", async () => {
+    rpc.answer("getAccountInfo", accountOwnedBy(TOKEN_2022_PROGRAM_ADDRESS));
+    const [ata] = await findAssociatedTokenPda({
+      owner,
+      mint,
+      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+    });
+    await expect(resolve()).resolves.toEqual({ tokenAccount: ata, decimals: 6, exists: true });
+  });
+
+  it("treats no account and a system-owned dust account as no token account", async () => {
+    rpc.answer("getAccountInfo", { context: { slot: 1 }, value: null });
+    await expect(resolve()).resolves.toMatchObject({ exists: false });
+    rpc.answer("getAccountInfo", systemAccountInfoResult(1, 1));
+    await expect(resolve()).resolves.toMatchObject({ exists: false });
+  });
+
+  it("refuses an account another program owns at the ATA address", async () => {
+    rpc.answer("getAccountInfo", accountOwnedBy(syntheticAddress(23)));
+    await expect(resolve()).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
 });

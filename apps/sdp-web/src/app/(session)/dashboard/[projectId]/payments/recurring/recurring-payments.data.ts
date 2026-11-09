@@ -334,7 +334,9 @@ export async function runRecurringPaymentAction(
   recurringPaymentId: string,
   action: RecurringPaymentAction,
   signal: AbortSignal | undefined,
-  t: Translate
+  t: Translate,
+  /** The version the page showed: activate signs only those terms, or answers 409 (HOO-2562). */
+  reviewed?: { expectedUpdatedAt: string }
 ): Promise<PaymentRecurringPayment> {
   const response = await dashboardRequest(
     `/api/dashboard/payments/recurring-payments/${encodeURIComponent(
@@ -343,7 +345,7 @@ export async function runRecurringPaymentAction(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: "{}",
+      body: action === "activate" && reviewed ? JSON.stringify(reviewed) : "{}",
       signal,
     }
   );

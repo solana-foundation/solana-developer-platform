@@ -867,7 +867,9 @@ export function RecurringPaymentDetailWorkspace({
       position: "bottom-right",
     });
     try {
-      await runRecurringPaymentAction(recurringPayment.id, action, undefined, t);
+      await runRecurringPaymentAction(recurringPayment.id, action, undefined, t, {
+        expectedUpdatedAt: recurringPayment.updatedAt,
+      });
       toast.success(actionSuccessLabel(action, t), { id: toastId, position: "bottom-right" });
       router.refresh();
     } catch (error) {
