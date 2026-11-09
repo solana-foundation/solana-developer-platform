@@ -389,10 +389,10 @@ export async function organizationsReachingPerson(
 }
 
 /**
- * The provider a deleted Clerk user's identity row moves to: a lasting
- * tombstone. A deleted Clerk user never comes back, so an event that still
- * names one (a late `user.updated`) is stale and must not restore what the
- * deletion removed (`isDeletedClerkUser`). Live lookups match only `clerk`.
+ * The provider a deleted Clerk user's identity row moves to, so live lookups
+ * (`provider = 'clerk'`) no longer find it and only live identities hold off
+ * pseudonymization. The lasting record that Clerk deleted the user is
+ * `clerk_deleted_users` ({@link isDeletedClerkUser}).
  */
 export const DELETED_CLERK_IDENTITY_PROVIDER = "clerk_deleted";
 
@@ -413,8 +413,8 @@ export async function lockClerkUser(tx: DatabaseExecutor, clerkUserId: string): 
 }
 
 /**
- * Whether Clerk deleted this Clerk user (its identity is tombstoned). Read it
- * under {@link lockClerkUser} before writing a mapping.
+ * Whether Clerk deleted this Clerk user: `clerk_deleted_users` holds it, linked
+ * or not. Read it under {@link lockClerkUser} before writing a mapping.
  *
  * @param db - The database.
  * @param clerkUserId - The Clerk user an event names.
@@ -423,11 +423,37 @@ export async function isDeletedClerkUser(
   db: DatabaseExecutor,
   clerkUserId: string
 ): Promise<boolean> {
-  const tombstone = await db.queryOne<{ id: string }>(
-    "SELECT id FROM auth_user_identities WHERE provider = ? AND provider_user_id = ?",
-    [DELETED_CLERK_IDENTITY_PROVIDER, clerkUserId]
+  const tombstone = await db.queryOne<{ clerk_user_id: string }>(
+    "SELECT clerk_user_id FROM clerk_deleted_users WHERE clerk_user_id = ?",
+    [clerkUserId]
   );
   return tombstone !== null;
+}
+
+/** Records that Clerk deleted the Clerk user, inside the caller's transaction and lock. */
+async function insertDeletedClerkUser(tx: DatabaseExecutor, clerkUserId: string): Promise<void> {
+  await tx.execute(
+    "INSERT INTO clerk_deleted_users (clerk_user_id) VALUES (?) ON CONFLICT (clerk_user_id) DO NOTHING",
+    [clerkUserId]
+  );
+}
+
+/**
+ * Records a deletion of a Clerk user SDP never linked to a person (HOO-2303):
+ * nothing of theirs is stored yet, but a late or retried `user.created` must
+ * still find the deletion and store nothing.
+ *
+ * @param db - The database.
+ * @param clerkUserId - The Clerk user Clerk deleted.
+ */
+export async function recordDeletedClerkUser(
+  db: DatabaseClient,
+  clerkUserId: string
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    await lockClerkUser(tx, clerkUserId);
+    await insertDeletedClerkUser(tx, clerkUserId);
+  });
 }
 
 /**
@@ -455,6 +481,7 @@ export async function pseudonymizeDeletedPerson(
 ): Promise<boolean> {
   return db.transaction(async (tx) => {
     await lockClerkUser(tx, params.deletedClerkUserId);
+    await insertDeletedClerkUser(tx, params.deletedClerkUserId);
     const locked = await tx.queryOne<{ id: string }>(
       "SELECT id FROM users WHERE id = ? FOR UPDATE",
       [params.userId]

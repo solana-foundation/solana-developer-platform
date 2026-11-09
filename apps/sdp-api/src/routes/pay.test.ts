@@ -972,7 +972,9 @@ describe("Public payment request routes", () => {
         .bind(request.id, request.id)
         .all<{ ip_address: string | null; user_agent: string | null }>();
       expect(rows.results).toHaveLength(2);
-      expect(rows.results).toEqual(Array(2).fill({ ip_address: "203.0.113.0", user_agent: null }));
+      expect(rows.results).toEqual(
+        Array(2).fill({ ip_address: "203.0.113.0/24", user_agent: null })
+      );
     });
 
     it("files a fresh grant's audit intent under its tenant with the message digest and mint", async () => {

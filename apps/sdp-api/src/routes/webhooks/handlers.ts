@@ -28,6 +28,7 @@ import {
   mirrorClerkMembershipDeletion,
   organizationsReachingPerson,
   pseudonymizeDeletedPerson,
+  recordDeletedClerkUser,
 } from "@/services/organization-membership.service";
 import type { WebhookProcessor } from "@/services/ramps/webhooks/processor";
 import {
@@ -332,7 +333,9 @@ async function mirrorUserDeletion(c: AppContext, data: DeletedObjectJSON) {
   }
   const userId = await findClerkUserMapping(c, data.id);
   if (userId === null) {
-    logIgnoredClerkEvent(c, "user", data.id);
+    // Never linked, or already deleted: the record still stops a later event
+    // from storing the person (HOO-2303).
+    await recordDeletedClerkUser(getDb(c.env), data.id);
     return;
   }
   for (const organizationId of await organizationsReachingPerson(getDb(c.env), userId)) {

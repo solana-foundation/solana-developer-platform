@@ -154,31 +154,98 @@ function redactString(value: string, nesting: number): string {
 /**
  * Redacts a string that is a whole JSON document by key, or returns undefined
  * when it is not one. The original text comes back when nothing was redacted,
- * so formatting survives.
+ * so formatting survives, and numbers keep their digits ({@link parseJsonDocument}).
  */
 function redactJsonDocument(value: string, nesting: number): string | undefined {
   if (value.length > MAX_JSON_LENGTH || !JSON_DOCUMENT_START.test(value)) {
     return undefined;
   }
-  const parsed = parseJson(value);
-  if (parsed === undefined) {
+  const document = parseJsonDocument(value);
+  if (document === undefined) {
     return undefined;
   }
-  const redacted = redactJsonValue(parsed, nesting, 0);
-  if (redacted === parsed) {
+  const redacted = redactJsonValue(document.parsed, nesting, 0);
+  if (redacted === document.parsed) {
     return value;
   }
-  if (LOSSY_NUMBER.test(value)) {
-    // The scanners keep number text as written. Use their output when parsing
-    // it finds nothing more to redact (an escaped key such as `\u006dnemonic`
-    // is one they miss); otherwise the secret wins over the number's digits.
+  if (!document.exactNumbers && LOSSY_NUMBER.test(value)) {
+    // Without source text access, the scanners keep number text as written.
+    // Use their output when parsing it finds nothing more to redact (an escaped
+    // key such as `\u006dnemonic` is one they miss); otherwise the secret wins
+    // over the number's digits.
     const scanned = redactText(value);
     const rescanned = parseJson(scanned);
     if (rescanned !== undefined && redactJsonValue(rescanned, nesting, 0) === rescanned) {
       return scanned;
     }
   }
-  return JSON.stringify(redacted);
+  return document.restoreNumbers(JSON.stringify(redacted));
+}
+
+/** Stands in for a number whose text a JSON round trip would change, until it is restored. */
+const NUMBER_TEXT_MARK = "\u0000sdp-number-text:";
+
+/** A mark as `JSON.stringify` writes it: `"\u0000sdp-number-text:<index>"`. */
+const MARKED_NUMBER = new RegExp(
+  `${JSON.stringify(NUMBER_TEXT_MARK)
+    .slice(0, -1)
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\d+)"`,
+  "g"
+);
+
+/** The source text the reviver sees, where the runtime gives it (JSON.parse source text access). */
+interface ReviverContext {
+  source?: string;
+}
+
+/** A parsed JSON document, and how to write its numbers back as they were written. */
+export interface JsonDocument {
+  parsed: JsonValue;
+  /** Writes each number a round trip would change back as its source text. */
+  restoreNumbers: (text: string) => string;
+  /** False on a runtime without source text access: numbers may round. */
+  exactNumbers: boolean;
+}
+
+/**
+ * The one JSON parse every redaction pass uses (credentials by key, and the
+ * telemetry and audit scrub by the full key policy). It keeps each number's
+ * source text: a number that would not serialize back to the same digits
+ * (`12345678901234567890`, `1.50`) is held as a marked string and written back
+ * as it was, so redacting a sibling field never rounds an amount or an
+ * identifier. Redaction wins over digits only on a runtime without source text
+ * access (`exactNumbers: false`). Undefined when the text is not JSON.
+ */
+export function parseJsonDocument(value: string): JsonDocument | undefined {
+  const sources: string[] = [];
+  let exactNumbers = true;
+  let parsed: JsonValue;
+  try {
+    // SAFETY: JSON.parse only ever produces JSON values, and the reviver
+    // returns either the value it was given or a string.
+    parsed = JSON.parse(value, (_key, item: unknown, context?: ReviverContext) => {
+      if (typeof item !== "number") return item;
+      if (context?.source === undefined) {
+        exactNumbers = false;
+        return item;
+      }
+      if (JSON.stringify(item) === context.source) return item;
+      sources.push(context.source);
+      return `${NUMBER_TEXT_MARK}${sources.length - 1}`;
+    });
+  } catch {
+    return undefined;
+  }
+  return {
+    parsed,
+    exactNumbers,
+    // One pass over the text, whatever the number of marks: each mark is
+    // written as a whole JSON string, closing quote included.
+    restoreNumbers: (text) =>
+      sources.length === 0
+        ? text
+        : text.replace(MARKED_NUMBER, (mark, index: string) => sources[Number(index)] ?? mark),
+  };
 }
 
 function parseJson(value: string): JsonValue | undefined {

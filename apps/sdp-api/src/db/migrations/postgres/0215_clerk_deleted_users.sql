@@ -1,0 +1,13 @@
+-- HOO-2303: the lasting record that Clerk deleted a Clerk user. A deleted Clerk
+-- user never comes back, so any later event that names one (a late or retried
+-- `user.created` or `user.updated`) is stale and must not store the details the
+-- deletion removed. A deletion can arrive before SDP ever linked the person, when
+-- there is no identity row to tombstone, so the record is its own row, keyed by the
+-- Clerk user alone. It holds no personal data.
+--
+-- Global, like `users` and `auth_user_identities`: no tenant policy (0081).
+-- Expand-only: a new table no previous revision reads.
+CREATE TABLE IF NOT EXISTS clerk_deleted_users (
+    clerk_user_id TEXT PRIMARY KEY,
+    deleted_at TEXT NOT NULL DEFAULT sdp_iso_now()
+);

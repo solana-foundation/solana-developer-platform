@@ -936,3 +936,16 @@ describe("scrubTelemetry on serialized JSON (HOO-2570)", () => {
     assert.equal(scrubTelemetryString(text), text);
   });
 });
+
+// Zach (#2833): the credential pass parsed JSON on its own and rounded a number
+// whenever a credential key in the same document needed redaction.
+describe("one JSON parse for every redaction pass", () => {
+  it("keeps a number's digits when a credential sibling is redacted", () => {
+    assert.equal(
+      redactCredentialString(
+        '{"apiKey":"sk_live_example","amount":12345678901234567890,"fee":1.50}'
+      ),
+      '{"apiKey":"[REDACTED]","amount":12345678901234567890,"fee":1.50}'
+    );
+  });
+});

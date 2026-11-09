@@ -119,6 +119,12 @@ export type ResourceType =
   | "audit_ledger";
 
 export interface AuditLogEntry {
+  /**
+   * The request comes from someone SDP cannot identify (a `/pay` payer): the
+   * record keeps their network, not their address, and no user agent
+   * (SDP-022 PA-6, HOO-2345). Set by the writer, never inferred.
+   */
+  anonymousRequester?: true;
   organizationId?: string;
   userId?: string;
   apiKeyId?: string;
@@ -528,10 +534,7 @@ const AUDIT_LEDGER_DATABASE_IDENTITY = { kind: "system", component: "audit-ledge
 function requestActor(c: Context<{ Bindings: Env }>, entry: AuditLogEntry): AuditActor {
   const auth = c.get("apiKey");
   const clerk = c.get("clerk");
-  // A caller with neither an API key nor a session is a third party, such as
-  // a /pay payer: the record keeps its network, not its address, and no user
-  // agent (SDP-022 PA-6, HOO-2345).
-  const anonymous = !auth && !clerk;
+  const anonymous = entry.anonymousRequester === true;
   return {
     organizationId: entry.organizationId || auth?.organizationId || clerk?.organizationId || null,
     userId: entry.userId || clerk?.userId || null,
@@ -632,6 +635,7 @@ function assertIntentOrganization(c: Context<{ Bindings: Env }>, entry: AuditLog
 /** The ledger record that admits the critical operation `entry` describes under `intentId`. */
 function criticalIntentRecord(entry: AuditLogEntry, intentId: string): AuditLogEntry {
   return {
+    anonymousRequester: entry.anonymousRequester,
     organizationId: entry.organizationId,
     action: "maintenance",
     resourceType: "audit_ledger",

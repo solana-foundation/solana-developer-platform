@@ -11,7 +11,7 @@
  *   full address stays in the invitations table, behind tenant scoping.
  */
 
-import { redactCredentialString } from "./credentials";
+import { parseJsonDocument, redactCredentialString } from "./credentials";
 import { isSensitiveKey, REDACTED, REDACTED_EMAIL } from "./policy";
 
 export type EmailMode = "redact" | "mask";
@@ -86,7 +86,7 @@ function scrubSerializedJson(
   ) {
     return undefined;
   }
-  const document = parseKeepingNumberText(value);
+  const document = parseJsonDocument(value);
   if (document === undefined) {
     return undefined;
   }
@@ -96,62 +96,6 @@ function scrubSerializedJson(
   }
   return document.restoreNumbers(JSON.stringify(scrubbed));
 }
-
-/** Stands in for a number whose text a JSON round trip would change, until it is restored. */
-const NUMBER_TEXT_MARK = "\u0000sdp-number-text:";
-
-/** The source text the reviver sees, where the runtime gives it (JSON.parse source text access). */
-interface ReviverContext {
-  source?: string;
-}
-
-/**
- * Parses a JSON document, keeping each number's source text: a number that
- * would not serialize back to the same digits (`12345678901234567890`, `1.50`)
- * is held as a marked string and written back as it was, so scrubbing a
- * sibling field never rounds an amount or an identifier. On a runtime without
- * source text access such a document is not parsed at all, and the text
- * patterns alone scrub it.
- */
-function parseKeepingNumberText(
-  value: string
-): { parsed: unknown; restoreNumbers: (text: string) => string } | undefined {
-  const sources: string[] = [];
-  let unsupported = false;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value, (_key, item: unknown, context?: ReviverContext) => {
-      if (typeof item !== "number") return item;
-      if (context?.source === undefined) {
-        unsupported ||= /[.eE]|\d{16,}/.test(value);
-        return item;
-      }
-      if (JSON.stringify(item) === context.source) return item;
-      sources.push(context.source);
-      return `${NUMBER_TEXT_MARK}${sources.length - 1}`;
-    });
-  } catch {
-    return undefined;
-  }
-  if (unsupported) return undefined;
-  return {
-    parsed,
-    // One pass over the text, whatever the number of marks: each mark is
-    // written as a whole JSON string, closing quote included.
-    restoreNumbers: (text) =>
-      sources.length === 0
-        ? text
-        : text.replace(MARKED_NUMBER, (mark, index: string) => sources[Number(index)] ?? mark),
-  };
-}
-
-/** A mark as `JSON.stringify` writes it: `"\u0000sdp-number-text:<index>"`. */
-const MARKED_NUMBER = new RegExp(
-  `${JSON.stringify(NUMBER_TEXT_MARK)
-    .slice(0, -1)
-    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\d+)"`,
-  "g"
-);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

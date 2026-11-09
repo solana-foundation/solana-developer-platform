@@ -527,6 +527,9 @@ describe("Clerk webhooks", () => {
     // A deletion in flight: it holds the Clerk user's lock and has written its tombstone.
     const deletion = getDb(env).transaction(async (tx) => {
       await lockClerkUser(tx, OLD_CLERK_USER_ID);
+      await tx.execute("INSERT INTO clerk_deleted_users (clerk_user_id) VALUES (?)", [
+        OLD_CLERK_USER_ID,
+      ]);
       await tx.execute(
         `UPDATE auth_user_identities SET provider = 'clerk_deleted', email = NULL
           WHERE provider = 'clerk' AND provider_user_id = ?`,
@@ -577,6 +580,47 @@ describe("Clerk webhooks", () => {
         [OLD_CLERK_USER_ID]
       )
     ).toEqual([{ provider: "clerk_deleted" }]);
+  });
+
+  // Zach (#2833): a deletion before SDP ever linked the person left no
+  // tombstone, so a retried user.created stored their details.
+  it("ignores a user.created that arrives after the Clerk user's deletion, even never linked", async () => {
+    stubClerkBackend(env);
+    const neverLinked = "clerk_user_never_linked";
+    const deleted = await simulateClerkWebhook({
+      type: "user.deleted",
+      data: { id: neverLinked, object: "user", deleted: true },
+    });
+    expect(deleted.status).toBe(200);
+
+    const created = await simulateClerkWebhook({
+      type: "user.created",
+      data: {
+        id: neverLinked,
+        first_name: "Late",
+        primary_email_address_id: "email_late",
+        email_addresses: [
+          {
+            id: "email_late",
+            email_address: "never.linked@example.com",
+            verification: { status: "verified" },
+          },
+        ],
+      },
+    });
+
+    expect(created.status).toBe(200);
+    expect(
+      await getDb(env).queryOne("SELECT count(*)::int AS count FROM users WHERE email = ?", [
+        "never.linked@example.com",
+      ])
+    ).toEqual({ count: 0 });
+    expect(
+      await getDb(env).queryOne(
+        "SELECT count(*)::int AS count FROM auth_user_identities WHERE provider_user_id = ?",
+        [neverLinked]
+      )
+    ).toEqual({ count: 0 });
   });
 
   it("rolls the whole pseudonymization back when one of its writes fails", async () => {
