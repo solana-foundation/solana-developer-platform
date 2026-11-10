@@ -1,3 +1,4 @@
+import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import type { RampWebhookFailureOutcome, RampWebhookProcessResult } from "@sdp/types/payments";
 import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import type { SdpRampProviderMaturity } from "@sdp/types/release-channels";
@@ -8,6 +9,7 @@ import {
 } from "@/db/repositories/ramp-webhook-event.repository";
 import { AppError } from "@/lib/errors";
 import { isRampProviderAvailable } from "@/lib/feature-flags";
+import { productionProjectsAllowed } from "@/lib/production-entitlement";
 import { logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import {
   TerminalRampWebhookError,
@@ -254,6 +256,10 @@ export async function replayRampWebhookEvents(
   if (excludedProviders.length === RAMP_PROVIDERS.length) {
     return 0;
   }
+  // A devnet-only deployment never replays a production row.
+  const environments = SDP_ENVIRONMENTS.filter(
+    (environment) => environment !== "production" || productionProjectsAllowed(env)
+  );
   const cutoff = new Date(Date.now() - RAMP_WEBHOOK_EVENT_REPLAY_MIN_AGE_MS).toISOString();
   const appRevision = currentAppRevision(env);
 
@@ -262,7 +268,11 @@ export async function replayRampWebhookEvents(
   // path after an incident is "ship the fix" with no manual re-arm. Rows the
   // CURRENT revision parked stay parked — same code, same payload, same
   // outcome.
-  for (const row of await events.rearmParkedByOtherRevisions({ appRevision, excludedProviders })) {
+  for (const row of await events.rearmParkedByOtherRevisions({
+    appRevision,
+    excludedProviders,
+    environments,
+  })) {
     logEvent("info", {
       event: "sdp_api_ramp_webhook_event_rearmed",
       flow: "ramp-settlement",
@@ -280,6 +290,7 @@ export async function replayRampWebhookEvents(
     maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
     appRevision,
     excludedProviders,
+    environments,
   })) {
     logEvent("error", {
       event: RAMP_WEBHOOK_EVENT_EXHAUSTED_EVENT,
@@ -302,6 +313,7 @@ export async function replayRampWebhookEvents(
       maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
       limit: 1,
       excludedProviders,
+      environments,
     });
     if (!row) {
       break;

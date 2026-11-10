@@ -1,5 +1,6 @@
 import { getSdpDocsOrigin } from "@sdp/types/site";
 import { cors } from "hono/cors";
+import { z } from "zod";
 import type { Env } from "@/types/env";
 
 const PRODUCTION_ORIGINS = [
@@ -40,19 +41,24 @@ export function createOriginMatcher(
  * @returns The origins to add.
  */
 export function extraAllowedOrigins(value: string | undefined): string[] {
-  if (value === undefined) {
-    return [];
-  }
-  const origin = value.trim();
-  if (
-    !URL.canParse(origin) ||
-    new URL(origin).protocol !== "https:" ||
-    new URL(origin).origin !== origin
-  ) {
+  const parsed = extraOriginSchema.safeParse(value);
+  if (!parsed.success) {
     throw new Error(`Invalid CORS_EXTRA_ORIGIN: "${value}". Expected one https origin.`);
   }
-  return [origin];
+  return parsed.data === undefined ? [] : [parsed.data];
 }
+
+/** One https origin, exactly as a browser sends it: no path, query or trailing slash. */
+const extraOriginSchema = z
+  .string()
+  .trim()
+  .refine(
+    (origin) =>
+      URL.canParse(origin) &&
+      new URL(origin).protocol === "https:" &&
+      new URL(origin).origin === origin
+  )
+  .optional();
 
 export function corsMiddleware(env: Env["ENVIRONMENT"], extraOrigin?: string) {
   const isProduction = env === "production";

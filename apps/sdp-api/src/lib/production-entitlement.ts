@@ -3,6 +3,7 @@ import {
   organizationEntitlementsSchema,
 } from "@sdp/types/organization-entitlements";
 import type { Context } from "hono";
+import { z } from "zod";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { forbidden } from "@/lib/errors";
 import type { Env } from "@/types/env";
@@ -20,15 +21,21 @@ import type { Env } from "@/types/env";
 export function productionProjectsAllowed(
   env: Pick<Env, "SDP_ALLOW_PRODUCTION_PROJECTS">
 ): boolean {
-  const value = env.SDP_ALLOW_PRODUCTION_PROJECTS?.trim();
-  if (value === undefined || value === "true") {
-    return true;
+  const parsed = allowProductionProjectsSchema.safeParse(env.SDP_ALLOW_PRODUCTION_PROJECTS);
+  if (!parsed.success) {
+    throw new Error(
+      `Invalid SDP_ALLOW_PRODUCTION_PROJECTS: "${env.SDP_ALLOW_PRODUCTION_PROJECTS}". Expected "true" or "false".`
+    );
   }
-  if (value === "false") {
-    return false;
-  }
-  throw new Error(`Invalid SDP_ALLOW_PRODUCTION_PROJECTS: "${value}". Expected "true" or "false".`);
+  return parsed.data;
 }
+
+const allowProductionProjectsSchema = z
+  .string()
+  .trim()
+  .pipe(z.enum(["true", "false"]))
+  .optional()
+  .transform((value) => value !== "false");
 
 /**
  * Parses an organization's raw `settings` column into its entitlements. A
