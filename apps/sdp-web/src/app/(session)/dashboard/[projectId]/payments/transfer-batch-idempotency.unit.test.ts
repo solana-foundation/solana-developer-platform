@@ -125,7 +125,6 @@ describe("transferBatchRequestFingerprint", () => {
 
   it("keeps a batch's fingerprint, saved run name and generated run name identical across releases", () => {
     const unnamed: PaymentTransferBatchRequest = {
-      projectId: "proj_1",
       sourceCustodyWalletId: "cwlt_1",
       token: "USDC",
       recipients: [
@@ -133,25 +132,25 @@ describe("transferBatchRequestFingerprint", () => {
         { counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount: "1.0" },
       ],
     };
-    const savedName = "sdp:payments:transfer-batch:reference:v1:a9498c5c9418b845";
+    const savedName = "sdp:payments:transfer-batch:reference:v1:f3b6efcf708635d9";
     const sentAt = new Date("2026-11-10T12:00:00Z");
 
     expect(transferBatchRequestFingerprint({ ...unnamed, externalId: "payroll-11" })).toBe(
-      '["proj_1","payroll-11","cwlt_1","USDC",[["cp_1","acct_1","1"],["cp_2","acct_2","2.5"]],null]'
+      '[null,"payroll-11","cwlt_1","USDC",[["cp_1","acct_1","1"],["cp_2","acct_2","2.5"]],null]'
     );
     expect(defaultTransferBatchReference(unnamed, "2026-11-10")).toBe(
-      "batch-2026-11-10-a9498c5c9418b845"
+      "batch-2026-11-10-f3b6efcf708635d9"
     );
     expect(claimDefaultTransferBatchReference(unnamed, sentAt)).toBe(
-      "batch-2026-11-10-a9498c5c9418b845"
+      "batch-2026-11-10-f3b6efcf708635d9"
     );
     expect(Object.keys(window.localStorage)).toEqual([savedName]);
     window.localStorage.setItem(
       savedName,
-      JSON.stringify({ reference: "batch-2026-11-09-a9498c5c9418b845", savedAt: sentAt.getTime() })
+      JSON.stringify({ reference: "batch-2026-11-09-f3b6efcf708635d9", savedAt: sentAt.getTime() })
     );
     expect(claimDefaultTransferBatchReference(unnamed, sentAt)).toBe(
-      "batch-2026-11-09-a9498c5c9418b845"
+      "batch-2026-11-09-f3b6efcf708635d9"
     );
   });
 });
