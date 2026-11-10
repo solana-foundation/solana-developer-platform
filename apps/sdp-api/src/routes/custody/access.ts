@@ -5,7 +5,7 @@ import {
 } from "@sdp/types/custody";
 import { getDb } from "@/db/client";
 import { getAuth, requireProjectId, walletAccessAllows } from "@/lib/auth";
-import { AppError, badRequest } from "@/lib/errors";
+import { AppError, badRequest, internalError } from "@/lib/errors";
 import { assertCallerWalletInScope } from "@/lib/money-admission";
 import type { AuthorizeInput } from "@/middleware/authorize";
 import { markIdempotencyRerunnable } from "@/middleware/idempotency";
@@ -97,10 +97,11 @@ export async function authorizeCreateWallet(c: AppContext, input: AuthorizeInput
   if (!connection) {
     throw new AppError("NOT_FOUND", "Custody connection not found");
   }
-  if (
-    isByokCustodyProvider(connection.provider) &&
-    walletCreateDedupe(connection.provider, "byok") !== null
-  ) {
+  // The column is TEXT: parse it at the read, as the runtime target does.
+  if (!isByokCustodyProvider(connection.provider)) {
+    throw internalError("Custody Connection provider is unsupported");
+  }
+  if (walletCreateDedupe(connection.provider, "byok") !== null) {
     markIdempotencyRerunnable(c);
   }
 }

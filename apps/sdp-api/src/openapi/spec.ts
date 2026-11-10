@@ -13,6 +13,7 @@ import {
   CUSTODY_PROVIDERS,
   type CustodyMode,
   type CustodyProvider,
+  type ManagedCustodyProvider,
   type WalletCreateDedupe,
   walletCreateDedupe,
 } from "@sdp/types/custody";
@@ -406,7 +407,7 @@ export type PublicSurfaceManifest = {
   custodyProviders: CustodyProvider[];
   /** The published custody provider and mode pairs whose wallet create dedupes on the request id. */
   walletCreateDedupe: {
-    provider: CustodyProvider;
+    provider: ManagedCustodyProvider;
     mode: CustodyMode;
     window: WalletCreateDedupe;
   }[];
@@ -430,7 +431,10 @@ export function createPublicSurfaceManifest(
     modules: SDP_MODULES.filter((module) => modules.has(module)),
     rampProviders: RAMP_PROVIDERS.filter(published),
     custodyProviders: CUSTODY_PROVIDERS.filter(published),
-    walletCreateDedupe: CUSTODY_PROVIDERS.filter(published).flatMap((provider) =>
+    // Local signing is never published, so the rows name only Managed providers.
+    walletCreateDedupe: CUSTODY_PROVIDERS.filter(
+      (provider): provider is ManagedCustodyProvider => provider !== "local" && published(provider)
+    ).flatMap((provider) =>
       CUSTODY_MODES.flatMap((mode) => {
         const window = walletCreateDedupe(provider, mode);
         return window !== null && isCustodyProviderInReleaseChannel(releaseChannel, provider, mode)

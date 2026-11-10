@@ -1,6 +1,11 @@
 import type { ActionModule, ActionVerb } from "@sdp/types/actions";
 import type { RateLimitTier } from "@sdp/types/api-keys";
-import type { CustodyMode, CustodyProvider, WalletCreateDedupe } from "@sdp/types/custody";
+import type {
+  CustodyMode,
+  CustodyProvider,
+  ManagedCustodyProvider,
+  WalletCreateDedupe,
+} from "@sdp/types/custody";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { SdpModule, SdpReleaseChannel } from "@sdp/types/release-channels";
 import { parse as parseYaml } from "yaml";
@@ -25,7 +30,7 @@ export type PublicSurface = {
   custodyProviders: readonly CustodyProvider[];
   /** The custody provider and mode pairs whose wallet create dedupes on the request id, which `<WalletCreateRetryTable />` lists. */
   walletCreateDedupe: readonly {
-    provider: CustodyProvider;
+    provider: ManagedCustodyProvider;
     mode: CustodyMode;
     window: WalletCreateDedupe;
   }[];

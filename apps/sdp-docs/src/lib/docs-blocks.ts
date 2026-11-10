@@ -108,18 +108,11 @@ const BLOCKS = {
   WalletCreateRetryTable: ({ walletCreateDedupe }) =>
     table(
       ["Provider", "Wallets", "Same-key retry after a `5xx` returns the first wallet"],
-      // Local signing is never published, so the manifest never lists it.
-      walletCreateDedupe.flatMap(({ provider, mode, window }) =>
-        provider === "local"
-          ? []
-          : [
-              [
-                `**${DOCS_CUSTODY_PROVIDERS[provider].name}**`,
-                mode === "managed" ? "Managed (`provider`)" : "Custody Connection (`connectionId`)",
-                window === "permanent" ? "Always" : "Within 24 hours of the first attempt",
-              ],
-            ]
-      )
+      walletCreateDedupe.map(({ provider, mode, window }) => [
+        `**${DOCS_CUSTODY_PROVIDERS[provider].name}**`,
+        mode === "managed" ? "Managed (`provider`)" : "Custody Connection (`connectionId`)",
+        window === "permanent" ? "Always" : "Within 24 hours of the first attempt",
+      ])
     ),
   ApiKeyGrantsTable: (surface) =>
     table(
