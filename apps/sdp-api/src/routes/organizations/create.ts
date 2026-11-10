@@ -311,7 +311,6 @@ async function activateOrganization(
       result: true,
     };
   });
-  // Once per organization: a retry or a concurrent attempt that found it active logs nothing.
   if (activated) {
     logEvent("info", {
       event: "sdp_api_organization_created",
