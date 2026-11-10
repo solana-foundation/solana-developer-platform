@@ -363,6 +363,29 @@ describe("createClusterRpc", () => {
     ]);
   });
 
+  it("labels each attempt with its own slot when two slots hold the same URL", async (t) => {
+    const shared = "https://devnet-shared-slot.example.test/?api-key=private";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: shared,
+      SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL: shared,
+    });
+    const calls = stubEndpoints({ [shared]: devnetHttpStatus(429) });
+    const events = recordTelemetry(t);
+
+    await assert.rejects(runInClusterScope(SANDBOX, createClusterRpc).getSlot().send(), (error) =>
+      isSolanaError(error, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR)
+    );
+    assert.deepEqual(calls, [genesisProbe(shared), slotRead(shared), slotRead(shared)]);
+    assert.deepEqual(events, [
+      attemptLine({ provider: "triton", method: "getGenesisHash", outcome: "succeeded" }),
+      attemptLine({ provider: "triton", method: "getSlot", outcome: "failed", status_code: 429 }),
+      poolDecisionLine("sdp_rpc_cooldown", "triton"),
+      poolDecisionLine("sdp_rpc_failover", "triton"),
+      attemptLine({ provider: "default", method: "getSlot", outcome: "failed", status_code: 429 }),
+      poolDecisionLine("sdp_rpc_cooldown", "default"),
+    ]);
+  });
+
   it("logs a read's dead-socket re-send as its own marked attempt", async (t) => {
     const url = "https://devnet-socket-resend.example.test";
     configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: url });
