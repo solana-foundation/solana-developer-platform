@@ -6,8 +6,8 @@ import { LOG_REDACTION_PATHS, REDACTION_CENSOR } from "./log-redaction";
 
 /**
  * Merged into every line logged inside it, without passing through the scrubber: only values the
- * server generated or registered (ids, an environment, a route pattern, a cron name), never an email, a name or
- * anything a caller supplied. A field a line passes itself wins.
+ * server generated or registered (ids, an environment, a route pattern, a cron name), never an
+ * email, a name or anything a caller supplied. A field a line passes itself wins.
  */
 export interface LogContext {
   request_id?: string;
@@ -91,7 +91,8 @@ export function baseLoggerOptions(): LoggerOptions {
     // merged object, message, interpolation arguments — goes through it. The
     // `mixin` context bypasses hooks but only holds generated ids, a hash of a
     // strictly validated, server-generated web id, the HTTP method with the
-    // registered route pattern, and a Cron Definition name.
+    // registered route pattern, a Cron Definition name, and a project's
+    // environment.
     hooks: {
       logMethod(args, method) {
         method.apply(this, args.map((argument) => scrubTelemetry(argument)) as typeof args);

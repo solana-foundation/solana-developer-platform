@@ -6,7 +6,7 @@ export type LoggedEvent = [...Parameters<typeof events.logEvent>, LogContext];
 
 /**
  * Silences `logEvent`; the returned reader lists the calls naming one of `eventNames`, in order,
- * each with the request identity its log context held, without the per-request trace ids.
+ * each with the request identity its log context held, without what request tracing adds.
  */
 export function recordLoggedEvents(eventNames: readonly string[]): () => LoggedEvent[] {
   const logged: LoggedEvent[] = [];
@@ -16,6 +16,7 @@ export function recordLoggedEvents(eventNames: readonly string[]): () => LoggedE
       request_id: _requestId,
       trace_id: _traceId,
       web_trace_hash: _webTraceHash,
+      route: _route,
       ...identity
     } = getLogContext();
     logged.push([level, payload, identity]);
