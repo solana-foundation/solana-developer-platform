@@ -41,12 +41,7 @@ import {
   type SignatureStatusInfo,
   type SolanaRpc,
 } from "./solana";
-import {
-  emitRpcTelemetry,
-  markRpcAttemptDeadline,
-  rpcProviderForEndpoint,
-  withAttemptTelemetry,
-} from "./telemetry";
+import { emitRpcTelemetry, markRpcAttemptDeadline, withAttemptTelemetry } from "./telemetry";
 import { isTransientJsonRpcError, isTransientRpcError } from "./transient";
 
 /** How long a genesis match is trusted before re-probing: the node behind a URL can be repointed. */
@@ -440,9 +435,15 @@ function endpointAttemptOrder(lastFailedAt: readonly number[], now: number): num
   ];
 }
 
+/** One endpoint of a pool and the label its telemetry carries: its managed slot, or Kora's upstream. */
+type PoolEndpoint = Readonly<{
+  provider: ManagedRpcProvider | "kora-upstream";
+  endpointUrl: string;
+}>;
+
 interface RpcEndpoint {
   transport: RpcTransport;
-  provider: string;
+  provider: PoolEndpoint["provider"];
   cluster: SolanaCluster;
 }
 
@@ -644,15 +645,15 @@ function assertManagedEndpointUrl(
 }
 
 /**
- * The configured endpoint URLs for `cluster`, in failover order.
+ * The configured endpoints for `cluster`, in failover order, each with its slot's provider.
  *
  * @param cluster - The cluster whose pool to read.
- * @returns Every filled `SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL` value (`managedRpcSlotUrl`).
+ * @returns Every filled `SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL` slot (`managedRpcSlotUrl`).
  * @throws RpcUnavailableError `not_configured` when the cluster has no endpoint configured.
  */
-function managedEndpointUrls(cluster: SolanaCluster): string[] {
-  const endpointUrls = configuredEndpointUrls(cluster);
-  if (endpointUrls.length === 0) {
+function managedPoolEndpoints(cluster: SolanaCluster): PoolEndpoint[] {
+  const endpoints = configuredPoolEndpoints(cluster);
+  if (endpoints.length === 0) {
     throw new RpcUnavailableError(
       "not_configured",
       `No RPC endpoint is configured for ${cluster}`,
@@ -661,7 +662,7 @@ function managedEndpointUrls(cluster: SolanaCluster): string[] {
       }
     );
   }
-  return endpointUrls;
+  return endpoints;
 }
 
 /**
@@ -672,7 +673,7 @@ function managedEndpointUrls(cluster: SolanaCluster): string[] {
  */
 export function assertManagedRpcConfigured(): void {
   for (const cluster of SOLANA_CLUSTERS) {
-    managedEndpointUrls(cluster);
+    managedPoolEndpoints(cluster);
   }
 }
 
@@ -699,11 +700,11 @@ export type ClusterRpcOptions = Readonly<{
  */
 export function createClusterRpc(options?: ClusterRpcOptions): SolanaRpc {
   const { cluster } = currentClusterScope();
-  const endpointUrls = managedEndpointUrls(cluster);
-  if (options === undefined) return pooledClusterRpc(cluster, endpointUrls, managedPools);
+  const endpoints = managedPoolEndpoints(cluster);
+  if (options === undefined) return pooledClusterRpc(cluster, endpoints, managedPools);
   const { poolKey, poolTransport } = pooledClusterTransport(
     cluster,
-    endpointUrls,
+    endpoints,
     managedPools.transports
   );
   const clientKey = `${options.timeoutMs} ${poolKey}`;
@@ -728,13 +729,13 @@ export function createClusterRpc(options?: ClusterRpcOptions): SolanaRpc {
  */
 export function createClusterHistoryRpc(): SolanaRpc {
   const { cluster } = currentClusterScope();
-  const heliusUrl = managedRpcSlotUrl(MANAGED_RPC_ENV_KEYS[cluster].helius);
-  const endpointUrls = managedEndpointUrls(cluster);
+  const endpoints = managedPoolEndpoints(cluster);
+  const helius = endpoints.find((endpoint) => endpoint.provider === "helius");
   return pooledClusterRpc(
     cluster,
-    heliusUrl
-      ? [heliusUrl, ...endpointUrls.filter((endpointUrl) => endpointUrl !== heliusUrl)]
-      : endpointUrls,
+    helius === undefined
+      ? endpoints
+      : [helius, ...endpoints.filter((endpoint) => endpoint.endpointUrl !== helius.endpointUrl)],
     managedPools
   );
 }
@@ -774,8 +775,8 @@ export async function getSignatureStatusesFromEveryEndpoint(
 ): Promise<EveryEndpointSignatureStatus[]> {
   const { cluster } = currentClusterScope();
   const endpointReads = await Promise.allSettled(
-    managedEndpointUrls(cluster).map((endpointUrl) =>
-      getSignatureStatuses(pooledClusterRpc(cluster, [endpointUrl], managedPools), signatures, {
+    managedPoolEndpoints(cluster).map((endpoint) =>
+      getSignatureStatuses(pooledClusterRpc(cluster, [endpoint], managedPools), signatures, {
         searchTransactionHistory: true,
         minContextSlot: floor.minContextSlot,
         commitment: floor.commitment,
@@ -850,7 +851,7 @@ export function createKoraUpstreamRpc(): SolanaRpc {
       { cluster }
     );
   }
-  return pooledClusterRpc(cluster, [endpointUrl], koraUpstreamPools);
+  return pooledClusterRpc(cluster, [{ provider: "kora-upstream", endpointUrl }], koraUpstreamPools);
 }
 
 /**
@@ -931,23 +932,21 @@ export async function proveEarnClusterEndpoint(
  * with attempt telemetry innermost so each request sent is logged once.
  *
  * @param cluster - The cluster every endpoint must serve.
- * @param endpointUrls - The endpoints in failover order.
+ * @param poolEndpoints - The endpoints in failover order, each with its telemetry label.
  * @param memoizedTransports - The family's transport memo.
  * @returns The pool key and its transport.
  */
 function pooledClusterTransport(
   cluster: SolanaCluster,
-  endpointUrls: string[],
+  poolEndpoints: readonly PoolEndpoint[],
   memoizedTransports: PoolMemo["transports"]
 ): { poolKey: string; poolTransport: RpcTransport } {
-  const poolKey = `${cluster} ${endpointUrls.join(" ")}`;
+  const poolKey = `${cluster} ${poolEndpoints
+    .map(({ provider, endpointUrl }) => `${provider}=${endpointUrl}`)
+    .join(" ")}`;
   const memoizedTransport = memoizedTransports.get(poolKey);
   if (memoizedTransport) return { poolKey, poolTransport: memoizedTransport };
-  const endpoints = endpointUrls.map((endpointUrl): RpcEndpoint => {
-    const provider =
-      memoizedTransports === koraUpstreamPools.transports
-        ? "kora-upstream"
-        : rpcProviderForEndpoint(cluster, endpointUrl);
+  const endpoints = poolEndpoints.map(({ provider, endpointUrl }): RpcEndpoint => {
     return {
       provider,
       cluster,
@@ -985,16 +984,16 @@ function pooledClusterTransport(
  * probe's error.
  *
  * @param cluster - The cluster every endpoint must serve.
- * @param endpointUrls - The endpoints in failover order.
+ * @param endpoints - The endpoints in failover order, each with its telemetry label.
  * @param memo - The family the transport and client are kept in.
  * @returns The pooled RPC client.
  */
 function pooledClusterRpc(
   cluster: SolanaCluster,
-  endpointUrls: string[],
+  endpoints: readonly PoolEndpoint[],
   memo: PoolMemo
 ): SolanaRpc {
-  const { poolKey, poolTransport } = pooledClusterTransport(cluster, endpointUrls, memo.transports);
+  const { poolKey, poolTransport } = pooledClusterTransport(cluster, endpoints, memo.transports);
   const memoizedRpc = memo.rpcs.get(poolKey);
   if (memoizedRpc) return memoizedRpc;
   // The shared confirmation context (`withMinimumRpcSlot`) is a no-op without a
