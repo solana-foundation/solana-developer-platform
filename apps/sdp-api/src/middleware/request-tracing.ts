@@ -17,6 +17,28 @@ function appendServerTiming(existingValue: string | null, nextEntry: string): st
   return existingValue ? `${existingValue}, ${nextEntry}` : nextEntry;
 }
 
+/**
+ * Who the request turned out to be. The log context that carries this closes with the middleware
+ * that settled it, before the timing line is written, so the line reads it from the request.
+ */
+function settledIdentity(c: Context<{ Bindings: Env }>) {
+  const auth = getOptionalAuth(c);
+  if (auth) {
+    return {
+      organization_id: auth.organizationId,
+      project_id: auth.projectId,
+      user_id: auth.userId,
+      api_key_id: auth.apiKeyId,
+      auth_type: auth.authType,
+    };
+  }
+  const signup = c.get("clerkSignup");
+  if (signup) return { user_id: signup.userId };
+  const onboarding = c.get("clerkOnboarding");
+  if (onboarding) return { organization_id: onboarding.organizationId };
+  return {};
+}
+
 function traceSource(value: string | undefined): string {
   if (value === "sdp-web") return "sdp-web";
   if (value?.startsWith("route.playground.")) return "playground";
@@ -51,7 +73,6 @@ export function requestTracingMiddleware() {
         } finally {
           if (c.res) {
             const durationMs = roundDuration(performance.now() - startedAt);
-            const auth = getOptionalAuth(c);
             const path = routePath(c, -1) || "unmatched";
 
             c.header(TRACE_ID_HEADER, traceId);
@@ -67,10 +88,8 @@ export function requestTracingMiddleware() {
               path,
               status: c.res.status,
               duration_ms: durationMs,
-              organization_id: auth?.organizationId,
-              project_id: auth?.projectId,
-              api_key_id: auth?.apiKeyId,
-              auth_type: auth?.authType,
+              ...settledIdentity(c),
+              environment: c.get("projectEnvironment"),
             });
           }
         }
