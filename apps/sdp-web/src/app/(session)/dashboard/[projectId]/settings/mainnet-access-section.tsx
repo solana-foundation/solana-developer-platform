@@ -76,31 +76,18 @@ function MainnetAccessRecord({
   timeZone: string;
   t: Translate;
 }) {
-  const unsent = access.state === "pending" && access.request?.notified === false;
   const organization = { organization: organizationName };
   const requestedOn = access.request
     ? formatDate(locale, timeZone, access.request.requestedAt)
     : null;
   return (
     <>
-      {unsent ? (
-        <RecordStateBand
-          state={t("Shared.mainnetAccess.unsentTitle")}
-          tone="attention"
-          why={t("Shared.mainnetAccess.unsentBody")}
-          action={
-            access.available ? (
-              <MainnetAccessResendButton organizationId={organizationId} />
-            ) : undefined
-          }
-        />
-      ) : access.state === "pending" ? (
-        <RecordStateBand
-          state={t("Shared.mainnetAccess.statusPending")}
-          tone="progress"
-          why={t("Shared.mainnetAccess.pendingBody", organization)}
-        />
-      ) : null}
+      <MainnetAccessBand
+        organizationId={organizationId}
+        organizationName={organizationName}
+        access={access}
+        t={t}
+      />
       <RecordList>
         {access.state === "pending" ? null : (
           <RecordRow
@@ -121,35 +108,75 @@ function MainnetAccessRecord({
             {countryLabel(access.countryCode)}
           </RecordRow>
         ) : null}
-        {access.request ? (
+        {access.request && requestedOn !== null ? (
           <RecordRow label={t("Shared.mainnetAccess.termsLabel")}>
-            {requestedOn === null
-              ? t("Shared.mainnetAccess.termsVersion", { version: access.request.termsVersion })
-              : t("Shared.mainnetAccess.termsAcceptedValue", {
-                  version: access.request.termsVersion,
-                  date: requestedOn,
-                })}
+            {t("Shared.mainnetAccess.termsAcceptedValue", {
+              version: access.request.termsVersion,
+              date: requestedOn,
+            })}
           </RecordRow>
         ) : null}
         {access.state === "not_requested" ? null : (
-          <RecordRow
-            label={t("Shared.mainnetAccess.changesLabel")}
-            help={t("Shared.mainnetAccess.changesHelp")}
-          >
-            {access.contactEmail ? (
-              <a
-                className="font-medium text-primary underline underline-offset-2"
-                href={`mailto:${access.contactEmail}`}
-              >
-                {access.contactEmail}
-              </a>
-            ) : (
-              t("Shared.mainnetAccess.changesNoEmail")
-            )}
-          </RecordRow>
+          <ChangesRow contactEmail={access.contactEmail} t={t} />
         )}
       </RecordList>
     </>
+  );
+}
+
+/** Above the record: a request whose email did not go out, or one SDP is reviewing. */
+function MainnetAccessBand({
+  organizationId,
+  organizationName,
+  access,
+  t,
+}: {
+  organizationId: string;
+  organizationName: string;
+  access: MainnetAccess;
+  t: Translate;
+}) {
+  if (access.state !== "pending") return null;
+  if (access.request?.notified === false) {
+    return (
+      <RecordStateBand
+        state={t("Shared.mainnetAccess.unsentTitle")}
+        tone="attention"
+        why={t("Shared.mainnetAccess.unsentBody")}
+        action={
+          access.available ? (
+            <MainnetAccessResendButton organizationId={organizationId} />
+          ) : undefined
+        }
+      />
+    );
+  }
+  return (
+    <RecordStateBand
+      state={t("Shared.mainnetAccess.statusPending")}
+      tone="progress"
+      why={t("Shared.mainnetAccess.pendingBody", { organization: organizationName })}
+    />
+  );
+}
+
+function ChangesRow({ contactEmail, t }: { contactEmail: string | null; t: Translate }) {
+  return (
+    <RecordRow
+      label={t("Shared.mainnetAccess.changesLabel")}
+      help={t("Shared.mainnetAccess.changesHelp")}
+    >
+      {contactEmail ? (
+        <a
+          className="font-medium text-primary underline underline-offset-2"
+          href={`mailto:${contactEmail}`}
+        >
+          {contactEmail}
+        </a>
+      ) : (
+        t("Shared.mainnetAccess.changesNoEmail")
+      )}
+    </RecordRow>
   );
 }
 

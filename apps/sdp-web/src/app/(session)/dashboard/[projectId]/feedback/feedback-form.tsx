@@ -11,9 +11,16 @@ import { type ChangeEvent, useId, useRef, useState, useTransition } from "react"
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-
-export const FEEDBACK_CATEGORIES = ["problem", "idea", "question"] as const;
-type FeedbackCategory = (typeof FEEDBACK_CATEGORIES)[number];
+import {
+  type AttachedFile,
+  addFeedbackFiles,
+  FEEDBACK_CATEGORIES,
+  FEEDBACK_FILE_TYPES,
+  FEEDBACK_FILES_MAX,
+  type FeedbackCategory,
+  type FileRefusal,
+  feedbackFileSize,
+} from "./feedback-files";
 
 const CATEGORY_LABEL_KEYS = {
   problem: "Feedback.categoryProblem",
@@ -21,27 +28,23 @@ const CATEGORY_LABEL_KEYS = {
   question: "Feedback.categoryQuestion",
 } as const;
 
-export const FEEDBACK_FILE_TYPES = [
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "image/gif",
-  "application/pdf",
-] as const;
-export const FEEDBACK_FILE_MAX_BYTES = 10 * 1024 * 1024;
-export const FEEDBACK_FILES_MAX = 5;
-
 const HOME_HREF = "/dashboard";
 
-interface AttachedFile {
-  key: string;
-  file: File;
-}
+type Translate = ReturnType<typeof useTranslations>;
 
-function fileSize(bytes: number): string {
-  return bytes < 1024 * 1024
-    ? `${Math.max(1, Math.round(bytes / 1024))} KB`
-    : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+function refusalMessage(refusal: FileRefusal, t: Translate): string {
+  switch (refusal.reason) {
+    case "type":
+      return t("Feedback.attachWrongType", { name: refusal.name });
+    case "size":
+      return t("Feedback.attachTooLarge", { name: refusal.name });
+    case "count":
+      return t("Feedback.attachTooMany", { max: String(FEEDBACK_FILES_MAX) });
+    default: {
+      const exhaustive: never = refusal;
+      throw new Error(`Unhandled file refusal: ${JSON.stringify(exhaustive)}`);
+    }
+  }
 }
 
 /**
@@ -54,38 +57,21 @@ function fileSize(bytes: number): string {
 export function FeedbackForm({ organizationId }: { organizationId: string }) {
   const t = useTranslations();
   const projectHref = useProjectHref();
-  const { user } = useUser();
   const messageId = useId();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [category, setCategory] = useState<FeedbackCategory | "">("");
   const [message, setMessage] = useState("");
   const [files, setFiles] = useState<AttachedFile[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
-  const [sent, setSent] = useState<{ files: number } | null>(null);
+  const [sentFiles, setSentFiles] = useState<number | null>(null);
   const [sending, startSend] = useTransition();
   const homeHref = projectHref(HOME_HREF);
   const takesFiles = Sentry.getClient() !== undefined;
-  const email = user?.primaryEmailAddress?.emailAddress ?? null;
 
-  const pickFiles = (event: ChangeEvent<HTMLInputElement>) => {
-    const picked = Array.from(event.target.files ?? []);
-    event.target.value = "";
-    let next = files;
-    let error: string | null = null;
-    for (const file of picked) {
-      if (!(FEEDBACK_FILE_TYPES as readonly string[]).includes(file.type)) {
-        error = t("Feedback.attachWrongType", { name: file.name });
-      } else if (file.size > FEEDBACK_FILE_MAX_BYTES) {
-        error = t("Feedback.attachTooLarge", { name: file.name });
-      } else if (next.length >= FEEDBACK_FILES_MAX) {
-        error = t("Feedback.attachTooMany", { max: String(FEEDBACK_FILES_MAX) });
-      } else {
-        next = [...next, { key: `${file.name}-${file.size}-${file.lastModified}`, file }];
-      }
-    }
-    setFiles(next);
-    setFileError(error);
+  const pickFiles = (picked: File[]) => {
+    const added = addFeedbackFiles(files, picked);
+    setFiles(added.files);
+    setFileError(added.refusal ? refusalMessage(added.refusal, t) : null);
   };
 
   const submit = () => {
@@ -93,39 +79,15 @@ export function FeedbackForm({ organizationId }: { organizationId: string }) {
     if (!trimmed || sending) return;
     setSendError(null);
     startSend(async () => {
-      const attachments = await Promise.all(
-        files.map(async ({ file }) => ({
-          filename: file.name,
-          data: new Uint8Array(await file.arrayBuffer()),
-          contentType: file.type,
-        }))
-      );
-      const sentryEventId = takesFiles
-        ? Sentry.captureFeedback(
-            {
-              message: trimmed,
-              source: "dashboard",
-              url: window.location.href,
-              tags: category ? { feedback_category: category } : undefined,
-            },
-            { includeReplay: true, attachments }
-          )
-        : undefined;
-      const result = await dashboardFetch<unknown>(
-        `/api/dashboard/organizations/${encodeURIComponent(organizationId)}/feedback`,
-        {
-          method: "POST",
-          body: {
-            category: category || undefined,
-            message: trimmed,
-            pageUrl: window.location.href,
-            attachmentCount: files.length,
-            sentryEventId,
-          },
-        }
-      );
+      const result = await sendFeedback({
+        organizationId,
+        category,
+        message: trimmed,
+        files,
+        toSentry: takesFiles,
+      });
       if (result.ok) {
-        setSent({ files: files.length });
+        setSentFiles(files.length);
         return;
       }
       setSendError(
@@ -136,25 +98,7 @@ export function FeedbackForm({ organizationId }: { organizationId: string }) {
     });
   };
 
-  if (sent) {
-    const body =
-      email === null
-        ? t("Feedback.sentBodyNoEmail")
-        : sent.files === 0
-          ? t("Feedback.sentBody", { email })
-          : sent.files === 1
-            ? t("Feedback.sentBodyOneFile", { email })
-            : t("Feedback.sentBodyFiles", { email, count: String(sent.files) });
-    return (
-      <div className="flex flex-col items-start gap-3" role="status">
-        <h2 className="text-lg font-medium text-primary">{t("Feedback.sentTitle")}</h2>
-        <p className="text-body text-secondary">{body}</p>
-        <Button asChild variant="outline" className="mt-3">
-          <Link href={homeHref}>{t("Feedback.backTo")}</Link>
-        </Button>
-      </div>
-    );
-  }
+  if (sentFiles !== null) return <FeedbackSent files={sentFiles} homeHref={homeHref} />;
 
   return (
     <form
@@ -198,62 +142,22 @@ export function FeedbackForm({ organizationId }: { organizationId: string }) {
         />
       </div>
 
-      {files.length > 0 ? (
-        <ul aria-label={t("Feedback.attachedFiles")} className="-mt-2 flex flex-col gap-1">
-          {files.map(({ key, file }) => {
-            const Icon = file.type === "application/pdf" ? FileTextIcon : ImageIcon;
-            return (
-              <li key={key} className="flex items-center gap-2 text-body">
-                <Icon aria-hidden="true" className="size-4 shrink-0 text-tertiary" />
-                <span className="min-w-0 truncate text-primary">{file.name}</span>
-                <span className="shrink-0 text-meta tabular-nums text-tertiary">
-                  {fileSize(file.size)}
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t("Feedback.removeAttachment", { name: file.name })}
-                  disabled={sending}
-                  onClick={() => {
-                    setFiles(files.filter((entry) => entry.key !== key));
-                    setFileError(null);
-                  }}
-                >
-                  <XIcon aria-hidden="true" />
-                </Button>
-              </li>
-            );
-          })}
-        </ul>
-      ) : null}
+      <AttachedFileList
+        files={files}
+        disabled={sending}
+        onRemove={(key) => {
+          setFiles(files.filter((entry) => entry.key !== key));
+          setFileError(null);
+        }}
+      />
 
       <div className="-mt-2 flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           {takesFiles ? (
-            <div className="flex flex-wrap items-center gap-3">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={sending || files.length >= FEEDBACK_FILES_MAX}
-                iconLeft={<PaperclipIcon aria-hidden="true" />}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                {t("Feedback.attach")}
-              </Button>
-              <span className="text-meta text-tertiary">{t("Feedback.attachHint")}</span>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept={FEEDBACK_FILE_TYPES.join(",")}
-                className="hidden"
-                tabIndex={-1}
-                aria-hidden="true"
-                onChange={pickFiles}
-              />
-            </div>
+            <AttachControl
+              disabled={sending || files.length >= FEEDBACK_FILES_MAX}
+              onPick={pickFiles}
+            />
           ) : (
             <span />
           )}
@@ -283,5 +187,150 @@ export function FeedbackForm({ organizationId }: { organizationId: string }) {
         ) : null}
       </div>
     </form>
+  );
+}
+
+/**
+ * Files and the replay go to Sentry first, when the deployment runs it, so the email can name
+ * the event that holds them; the words then go to the SDP team's inbox through the API.
+ */
+async function sendFeedback(input: {
+  organizationId: string;
+  category: FeedbackCategory | "";
+  message: string;
+  files: readonly AttachedFile[];
+  toSentry: boolean;
+}) {
+  const url = window.location.href;
+  let sentryEventId: string | undefined;
+  if (input.toSentry) {
+    const attachments = await Promise.all(
+      input.files.map(async ({ file }) => ({
+        filename: file.name,
+        data: new Uint8Array(await file.arrayBuffer()),
+        contentType: file.type,
+      }))
+    );
+    sentryEventId = Sentry.captureFeedback(
+      {
+        message: input.message,
+        source: "dashboard",
+        url,
+        tags: input.category ? { feedback_category: input.category } : undefined,
+      },
+      { includeReplay: true, attachments }
+    );
+  }
+  return dashboardFetch<unknown>(
+    `/api/dashboard/organizations/${encodeURIComponent(input.organizationId)}/feedback`,
+    {
+      method: "POST",
+      body: {
+        category: input.category || undefined,
+        message: input.message,
+        pageUrl: url,
+        attachmentCount: input.files.length,
+        sentryEventId,
+      },
+    }
+  );
+}
+
+function FeedbackSent({ files, homeHref }: { files: number; homeHref: string }) {
+  const t = useTranslations();
+  const { user } = useUser();
+  const email = user?.primaryEmailAddress?.emailAddress ?? null;
+  let body: string;
+  if (email === null) body = t("Feedback.sentBodyNoEmail");
+  else if (files === 0) body = t("Feedback.sentBody", { email });
+  else if (files === 1) body = t("Feedback.sentBodyOneFile", { email });
+  else body = t("Feedback.sentBodyFiles", { email, count: String(files) });
+  return (
+    <div className="flex flex-col items-start gap-3" role="status">
+      <h2 className="text-lg font-medium text-primary">{t("Feedback.sentTitle")}</h2>
+      <p className="text-body text-secondary">{body}</p>
+      <Button asChild variant="outline" className="mt-3">
+        <Link href={homeHref}>{t("Feedback.backTo")}</Link>
+      </Button>
+    </div>
+  );
+}
+
+function AttachedFileList({
+  files,
+  disabled,
+  onRemove,
+}: {
+  files: readonly AttachedFile[];
+  disabled: boolean;
+  onRemove: (key: string) => void;
+}) {
+  const t = useTranslations();
+  if (files.length === 0) return null;
+  return (
+    <ul aria-label={t("Feedback.attachedFiles")} className="-mt-2 flex flex-col gap-1">
+      {files.map(({ key, file }) => {
+        const Icon = file.type === "application/pdf" ? FileTextIcon : ImageIcon;
+        return (
+          <li key={key} className="flex items-center gap-2 text-body">
+            <Icon aria-hidden="true" className="size-4 shrink-0 text-tertiary" />
+            <span className="min-w-0 truncate text-primary">{file.name}</span>
+            <span className="shrink-0 text-meta tabular-nums text-tertiary">
+              {feedbackFileSize(file.size)}
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t("Feedback.removeAttachment", { name: file.name })}
+              disabled={disabled}
+              onClick={() => onRemove(key)}
+            >
+              <XIcon aria-hidden="true" />
+            </Button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function AttachControl({
+  disabled,
+  onPick,
+}: {
+  disabled: boolean;
+  onPick: (files: File[]) => void;
+}) {
+  const t = useTranslations();
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={disabled}
+        iconLeft={<PaperclipIcon aria-hidden="true" />}
+        onClick={() => inputRef.current?.click()}
+      >
+        {t("Feedback.attach")}
+      </Button>
+      <span className="text-meta text-tertiary">{t("Feedback.attachHint")}</span>
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        accept={FEEDBACK_FILE_TYPES.join(",")}
+        className="hidden"
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={(event: ChangeEvent<HTMLInputElement>) => {
+          const picked = Array.from(event.target.files ?? []);
+          event.target.value = "";
+          if (picked.length > 0) onPick(picked);
+        }}
+      />
+    </div>
   );
 }
