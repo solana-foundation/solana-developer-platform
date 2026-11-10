@@ -297,9 +297,9 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(result).toMatchObject({ ok: false, status: 400, replayed: true });
   });
 
-  // Zach (#2834): a kept key had no age limit, so a retry a day later went out
-  // under a key the API had forgotten and could run as a second request.
-  it("sends nothing under a kept key older than the API keeps it, and the next submit is new", async () => {
+  // A money route answers its key from the movement's row after the 24-hour
+  // key record lapses, so the old key replays the first attempt.
+  it("resends a kept key on a money route however old it is", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
@@ -307,6 +307,28 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
         .fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse(201))
         .mockRejectedValueOnce(new TypeError("network down"));
       vi.stubGlobal("fetch", fetchMock);
+
+      await expect(submit()).rejects.toThrow("network down");
+      vi.setSystemTime(Date.now() + KEPT_KEY_WINDOW_MS);
+      await submit();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Elsewhere only the key record answers, so a key past it could run again.
+  it("sends nothing under an outlived key on another write, and the next submit is new", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+      const fetchMock = vi
+        .fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse(201))
+        .mockRejectedValueOnce(new TypeError("network down"));
+      vi.stubGlobal("fetch", fetchMock);
+      const submit = () =>
+        dashboardRequest("/api/dashboard/counterparties", { method: "POST", body: '{"name":"A"}' });
 
       await expect(submit()).rejects.toThrow("network down");
       vi.setSystemTime(Date.now() + KEPT_KEY_WINDOW_MS);

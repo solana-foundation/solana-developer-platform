@@ -269,7 +269,7 @@ function paths(endpoints: ApiPlaygroundEndpointConfig[]) {
   return endpoints.map((endpoint) => endpoint.path.split("?", 1)[0]);
 }
 
-// Zach (#2836): every write's snippet showed an Idempotency-Key and the "reuse
+// Regression: every write's snippet showed an Idempotency-Key and the "reuse
 // this key" note, even on routes that ignore the header.
 describe("API playground key contract", () => {
   it("gives every form, hand-authored ones too, its route's Idempotency-Key contract", () => {

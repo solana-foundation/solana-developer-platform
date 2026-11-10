@@ -1751,7 +1751,7 @@ describe("Payments routes — recurring", () => {
       });
     });
 
-    // Greptile (#2831): the active claim answered a generic CONFLICT.
+    // Regression: the active claim answered a generic CONFLICT.
     it("answers an active edit that loses its claim to a finished write with the version that won", async () => {
       const activated = await activateRecurringPaymentFixture({
         ...DEFAULT_RECURRING_FIXTURE,

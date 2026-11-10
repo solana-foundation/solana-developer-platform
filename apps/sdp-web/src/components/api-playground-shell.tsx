@@ -358,19 +358,29 @@ function parseUnsettledSend(raw: string): UnsettledSend | null {
  * otherwise a new one that replaces it. Returns the stored entry too, so the
  * answer settles only the entry this Send claimed, and whether storage kept it.
  */
-function keyForSend(request: string): { key: string; entry: string; persisted: boolean } {
+function keyForSend(request: string): {
+  key: string;
+  entry: string;
+  persisted: boolean;
+  outlived: boolean;
+} {
   const digest = storageFingerprint(request);
   const mint = () => JSON.stringify({ request: digest, key: crypto.randomUUID() });
   const kept = playgroundRetryKeys.claim(UNSETTLED_SEND, mint);
   const unsettled = parseUnsettledSend(kept.key);
   if (unsettled?.request === digest) {
-    return { key: unsettled.key, entry: kept.key, persisted: kept.persisted };
+    return {
+      key: unsettled.key,
+      entry: kept.key,
+      persisted: kept.persisted,
+      outlived: kept.outlived,
+    };
   }
   playgroundRetryKeys.release(UNSETTLED_SEND, kept.key);
   const claimed = playgroundRetryKeys.claim(UNSETTLED_SEND, mint);
   const minted = parseUnsettledSend(claimed.key);
   if (minted === null) throw new Error("playground retry key: minted an unreadable entry");
-  return { key: minted.key, entry: claimed.key, persisted: claimed.persisted };
+  return { key: minted.key, entry: claimed.key, persisted: claimed.persisted, outlived: false };
 }
 
 const MONEY_ROUTE_PATTERNS = IDEMPOTENCY_REQUIRED_ROUTES.map((route) => {
@@ -513,12 +523,16 @@ async function executePlaygroundRequest({
       : keyedBody,
   ]);
   const claimed = hasRequestBody(activeEndpoint.method) ? keyForSend(sendRequest) : undefined;
-  if (
-    claimed !== undefined &&
-    !claimed.persisted &&
-    isMoneyRouteRequest(activeEndpoint.method, resolvedPath)
-  ) {
+  const movesMoney = isMoneyRouteRequest(activeEndpoint.method, resolvedPath);
+  if (claimed !== undefined && !claimed.persisted && movesMoney) {
     onExecutionError(t("Shared.idempotency.keyNotPersisted"));
+    return;
+  }
+  // As the dashboard's own sends: a money route answers a kept key from its
+  // row however old it is, and any other write may have forgotten it.
+  if (claimed?.outlived && !movesMoney) {
+    playgroundRetryKeys.release(UNSETTLED_SEND, claimed.entry);
+    onExecutionError(t("Shared.idempotency.outcomeUnknownCheckList"));
     return;
   }
   const idempotencyKey = claimed?.key;
@@ -554,7 +568,7 @@ async function executePlaygroundRequest({
     if (claimed !== undefined) {
       settlePlaygroundKey({
         entry: claimed.entry,
-        movesMoney: isMoneyRouteRequest(activeEndpoint.method, resolvedPath),
+        movesMoney,
         response,
         text,
       });

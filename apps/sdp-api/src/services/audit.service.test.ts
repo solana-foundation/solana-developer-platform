@@ -167,7 +167,7 @@ describe("AuditService", () => {
     expect(execute.mock.invocationCallOrder[0]).toBeLessThan(firstRedisCall);
   });
 
-  // Zach (#2833): "no API key and no session" also matched invite acceptance
+  // Regression: "no API key and no session" also matched invite acceptance
   // and org signup, so those signed-in people lost their full IP. Only a writer
   // that marks its requester anonymous (/pay) coarsens it.
   it.each([

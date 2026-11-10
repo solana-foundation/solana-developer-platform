@@ -257,9 +257,9 @@ describe("sendTransferBatchUnderKey", () => {
 
   // A money movement never mints a fresh key while the original may have run:
   // the next press is answered under the same key.
-  // Greptile (#2834): retiring an outlived key also deleted the generated payout
-  // reference, so a resend on a later day named a new run and could pay twice.
-  it("keeps the generated reference when an outlived key stops a resend", async () => {
+  // The API answers a batch's key from the batch row after its 24-hour key
+  // record lapses, so a resend on a later day replays the same run.
+  it("resends a kept key and its generated reference however old they are", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date("2026-11-09T20:00:00.000Z"));
     const fetchMock = vi
@@ -270,19 +270,17 @@ describe("sendTransferBatchUnderKey", () => {
     await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toThrow("Failed to fetch");
     // A later UTC day, past the API's key record.
     vi.setSystemTime(Date.now() + KEPT_KEY_WINDOW_MS);
-    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toMatchObject({
-      code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN",
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
     await sendTransferBatchUnderKey(batchRequest(), t);
+
     const runs = fetchMock.mock.calls.map(
       ([, init]) =>
         z.object({ externalId: z.string() }).parse(JSON.parse(String(init?.body))).externalId
     );
-    // The same payout run, which the API recognizes and never pays twice.
+    // The same payout run under the same key, which the API never pays twice.
     expect(runs).toHaveLength(2);
     expect(runs[1]).toBe(runs[0]);
+    const [first, resent] = sentKeys(fetchMock);
+    expect(resent).toBe(first);
   });
 
   it("keeps the key on an unknown outcome and resends under it", async () => {

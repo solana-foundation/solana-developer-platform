@@ -583,7 +583,7 @@ describe("Clerk webhooks", () => {
     ).toEqual([{ provider: "clerk_deleted" }]);
   });
 
-  // Zach (#2833): a deletion before SDP ever linked the person left no
+  // Regression: a deletion before SDP ever linked the person left no
   // tombstone, so a retried user.created stored their details.
   it("ignores a user.created that arrives after the Clerk user's deletion, even never linked", async () => {
     stubClerkBackend(env);
@@ -624,7 +624,7 @@ describe("Clerk webhooks", () => {
     ).toEqual({ count: 0 });
   });
 
-  // Greptile (#2833): the deletion read the mapping before taking the lock, so
+  // Regression: the deletion read the mapping before taking the lock, so
   // a mapping committed while it waited was never cleaned up.
   it("cleans up a person whose mapping commits while the user.deleted waits for the lock", async () => {
     stubClerkBackend(env);
@@ -680,7 +680,7 @@ describe("Clerk webhooks", () => {
     });
   });
 
-  // Greptile (#2833): a new Clerk account read the person, then linked them
+  // Regression: a new Clerk account read the person, then linked them
   // after the old account's deletion had cleared them.
   it("links a new Clerk account to a fresh person when a deletion of the old one commits first", async () => {
     await seedKnownOrganization();
@@ -744,7 +744,7 @@ describe("Clerk webhooks", () => {
     ).toEqual({ email: pseudonym, status: "deleted" });
   });
 
-  // Greptile (#2833): sign-in wrote the mapping without the deletion's lock or check.
+  // Regression: sign-in wrote the mapping without the deletion's lock or check.
   it("refuses to link a Clerk user Clerk deleted, as a sign-in that raced its deletion would", async () => {
     await getDb(env).execute("INSERT INTO clerk_deleted_users (clerk_user_id) VALUES (?)", [
       "clerk_user_deleted_before_signin",
