@@ -1,12 +1,12 @@
 /*
- * Interfaces: the head, then the three ways in as the tabs of a code
+ * Interfaces: the head, then the two ways in as the tabs of a code
  * card showing the call and what answers it. On wide screens the head and the card span two of
  * the page's three columns and the ways take the third; on a phone the card comes first.
  */
 .section {
   --code-pad: clamp(22px, 2.2vw, 30px);
 
-  /* after the markets and privacy panel, and before the payments API, its neighbour */
+  /* between the markets panel and the builders */
   padding: calc(var(--pad) * 0.55) 0 calc(var(--pad) * 0.5);
 }
 
@@ -18,12 +18,17 @@
   align-items: end;
 }
 
+.headline {
+  text-wrap: balance;
+}
+
 .intro {
   margin: 0;
   max-width: 48ch;
   font: 500 clamp(16px, 1.3vw, 19px) / 1.45 var(--font);
   letter-spacing: -0.01em;
   color: var(--ink3);
+  text-wrap: pretty;
 }
 
 /* ── the grid ─────────────────────────────────────────────────────────── */
@@ -386,7 +391,7 @@
 }
 
 @media (max-width: 600px) {
-  /* the code first, the three modes under it: a tap shows its answer above the finger */
+  /* the code first, the two ways under it: a tap shows its answer above the finger */
   .req {
     order: -1;
   }

@@ -1,4 +1,7 @@
-import { supportsVaultProviderOrderWithdraw } from "@sdp/earn/capabilities";
+import {
+  supportsProviderRedemptionModes,
+  supportsVaultProviderOrderWithdraw,
+} from "@sdp/earn/capabilities";
 import { notImplemented } from "@sdp/earn/errors";
 import type {
   EarnVaultParRedemptionQuote,
@@ -332,12 +335,14 @@ async function resolveCustodyQueueTarget(
   };
 }
 
+type ReadOptions = Omit<EarnVaultWithdrawalOptions, "withdrawAuthority"> & {
+  withdrawAuthority: string | null;
+};
+
 export async function readOptions(
   c: AppContext,
   position: QueuedWithdrawalPosition
-): Promise<
-  Omit<EarnVaultWithdrawalOptions, "withdrawAuthority"> & { withdrawAuthority: string | null }
-> {
+): Promise<ReadOptions> {
   const deadline = createVaultDeadline();
   const withdrawalClient = resolveVaultWithdrawClient(c.env, position.provider, deadline);
   const providerOrder =
@@ -347,7 +352,7 @@ export async function readOptions(
   const parClient = resolveVaultParRedemptionClient(c.env, position.provider, deadline);
   if (!client && !parClient) {
     if (!withdrawalClient) throw notImplemented(position.provider, "vault withdrawals");
-    return {
+    const options: ReadOptions = {
       instant,
       providerOrder,
       queued: false,
@@ -356,6 +361,9 @@ export async function readOptions(
       queueAsset: null,
       parRedemption: null,
     };
+    if (withdrawalClient !== null && supportsProviderRedemptionModes(withdrawalClient))
+      options.providerRedemptionModes = withdrawalClient.getProviderRedemptionModes();
+    return options;
   }
   try {
     const runtime = earnRuntime(c.env);
@@ -364,7 +372,7 @@ export async function readOptions(
       client ? client.getWithdrawalOptions(runtime, reference) : Promise.resolve(null),
       parClient ? parClient.getParRedemptionOptions(runtime, reference) : Promise.resolve(null),
     ]);
-    return {
+    const options: ReadOptions = {
       instant: queueOptions ? instant && queueOptions.instant : instant,
       providerOrder,
       queued: queueOptions?.queued ?? false,
@@ -373,6 +381,9 @@ export async function readOptions(
       queueAsset: queueOptions?.queueAsset ?? null,
       parRedemption,
     };
+    if (withdrawalClient !== null && supportsProviderRedemptionModes(withdrawalClient))
+      options.providerRedemptionModes = withdrawalClient.getProviderRedemptionModes();
+    return options;
   } catch (error) {
     rethrowVaultProviderFailure(error);
   }

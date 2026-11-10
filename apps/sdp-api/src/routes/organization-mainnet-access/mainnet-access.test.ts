@@ -14,6 +14,7 @@ import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fi
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
+import { recordLoggedEvents } from "@/test/helpers/log-events";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -25,6 +26,25 @@ const ITERABLE_API_URL = "https://api.iterable.com";
 const ITERABLE_SEND_URL = `${ITERABLE_API_URL}/api/email/target`;
 const ITERABLE_TEST_KEY = "0123456789abcdef0123456789abcdef";
 const SUBMISSION = { countryCode: "SG", termsVersion: SDP_TERMS.version, acceptTerms: true };
+const MAINNET_ACCESS_EVENTS = [
+  "sdp_api_mainnet_access_requested",
+  "sdp_api_mainnet_access_request_notified",
+  "sdp_api_mainnet_access_request_notify_failed",
+];
+const REQUESTED_EVENT = [
+  "info",
+  {
+    event: "sdp_api_mainnet_access_requested",
+    organization_id: ORGANIZATION_ID,
+    user_id: TEST_USER.id,
+    country_code: "SG",
+    terms_version: SDP_TERMS.version,
+  },
+];
+const NOTIFIED_EVENT = [
+  "info",
+  { event: "sdp_api_mainnet_access_request_notified", organization_id: ORGANIZATION_ID },
+];
 
 let adminToken: string;
 let memberToken: string;
@@ -218,7 +238,8 @@ describe("Organization mainnet access (HOO-2427)", () => {
     expect(sentEmails()).toHaveLength(0);
   });
 
-  it("records jurisdiction and terms acceptance, emails the alias, and reads pending", async () => {
+  it("records jurisdiction and terms acceptance, emails the alias, logs both, and reads pending", async () => {
+    const loggedEvents = recordLoggedEvents(MAINNET_ACCESS_EVENTS);
     const response = await post(SUBMISSION);
     expect(response.status).toBe(201);
     const data = (await response.json()).data;
@@ -273,6 +294,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
     expect(html).toContain(">Organization ID</td>");
 
     expect((await (await get()).json()).data.state).toBe("pending");
+    expect(loggedEvents()).toEqual([REQUESTED_EVENT, NOTIFIED_EVENT]);
   });
 
   it("is a one-time request: a second submit is refused and sends nothing", async () => {
@@ -294,11 +316,24 @@ describe("Organization mainnet access (HOO-2427)", () => {
     expect(sentEmails()).toHaveLength(1);
   });
 
-  it("keeps a request whose email failed, for notify to send", async () => {
+  it("keeps a request whose email failed, for notify to send, logging the failure and the send", async () => {
+    const loggedEvents = recordLoggedEvents(MAINNET_ACCESS_EVENTS);
     const restore = failIterable();
     expect((await post(SUBMISSION)).status).toBe(503);
     expect((await storedRow())?.notified_at).toBeNull();
     expect((await (await get()).json()).data.request).toMatchObject({ notified: false });
+    expect(loggedEvents()).toEqual([
+      REQUESTED_EVENT,
+      [
+        "warn",
+        {
+          event: "sdp_api_mainnet_access_request_notify_failed",
+          organization_id: ORGANIZATION_ID,
+          error_name: "AppError",
+          error_code: "PROVIDER_UNAVAILABLE",
+        },
+      ],
+    ]);
     restore();
 
     expect((await post({ ...SUBMISSION, countryCode: "US" })).status).toBe(409);
@@ -309,6 +344,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
       request: { notified: true },
     });
     expect(sentEmails()).toHaveLength(2);
+    expect(loggedEvents().slice(2)).toEqual([NOTIFIED_EVENT]);
   });
 
   it("rebuilds the email on notify, so a renamed organization reads its new name", async () => {

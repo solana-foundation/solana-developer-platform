@@ -8,11 +8,10 @@
   --chart-ink: #fbfaf980;
 }
 
-/* privacy follows the chart closer than two sections apart */
 .layout {
   display: flex;
   flex-direction: column;
-  padding: var(--pad) 0 calc(var(--pad) * 0.65);
+  padding: var(--pad) 0;
 }
 
 /* the headline across two columns, the paragraph and its link in the third, on its first line */
@@ -44,6 +43,7 @@
   font: 500 clamp(16px, 1.3vw, 19px) / 1.45 var(--font);
   letter-spacing: -0.01em;
   color: var(--sub);
+  text-wrap: pretty;
 }
 
 /* the link under the paragraph; on a touch screen it keeps its top margin */

@@ -33,6 +33,7 @@ import {
 import { simulateSandboxTransferSchema as simulateSandboxTransferSchemaBase } from "@/routes/payments/ramps/schemas";
 import {
   createRecurringPaymentSchema as createRecurringPaymentSchemaBase,
+  expectedUpdatedAtSchema,
   listRecurringPaymentsQuerySchema as listRecurringPaymentsQuerySchemaBase,
   paymentRecurringPaymentStatusSchema as paymentRecurringPaymentStatusSchemaBase,
   recurringPaymentIdParamsSchema as recurringPaymentIdParamsSchemaBase,
@@ -520,15 +521,30 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
         },
       ],
     }),
-    options: withOpenApi(createTransferBatchSchemaBase.shape.options, {
-      description:
-        "Execution options for transaction chunking, priority fees, and preflight validation.",
-      example: {
-        maxRecipientsPerTransaction: 20,
-        priorityFee: "auto",
-        preflight: true,
-      },
-    }),
+    options: withOpenApi(
+      createTransferBatchSchemaBase.shape.options
+        .unwrap()
+        .extend({
+          priorityFee: withOpenApi(
+            createTransferBatchSchemaBase.shape.options.unwrap().shape.priorityFee,
+            {
+              description:
+                "Accepted for compatibility and ignored. No priority fee is applied, regardless of the selected value.",
+              example: "none",
+            }
+          ),
+        })
+        .optional(),
+      {
+        description:
+          "Execution options for transaction chunking and preflight validation. `priorityFee` is accepted for compatibility and ignored; no priority fee is applied.",
+        example: {
+          maxRecipientsPerTransaction: 20,
+          priorityFee: "none",
+          preflight: true,
+        },
+      }
+    ),
   })
   .openapi({
     description: "Create a custody-executed outbound transfer batch.",
@@ -927,8 +943,14 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
       "Creates an SDP-custody outbound recurring payment intent. Activation and collection are added by follow-up endpoints.",
   });
 
+const expectedUpdatedAtField = withOpenApi(expectedUpdatedAtSchema.optional(), {
+  description:
+    "Optional `updatedAt` of the version you reviewed, from the last read of this recurring payment. When the recurring payment has changed since, the request returns `409` `RECURRING_PAYMENT_CHANGED` with the current `updatedAt` in `error.details` and changes nothing: read it again and review the current terms.",
+});
+
 export const updateRecurringPaymentRequestSchema = updateRecurringPaymentSchemaBase
   .safeExtend({
+    expectedUpdatedAt: expectedUpdatedAtField,
     sourceCustodyWalletId: withOpenApi(
       updateRecurringPaymentSchemaBase.shape.sourceCustodyWalletId,
       {
@@ -984,6 +1006,10 @@ export const updateRecurringPaymentRequestSchema = updateRecurringPaymentSchemaB
     description:
       "Updates a recurring payment. Pending payments are edited directly. Active metadata or due-date updates are applied in place, while active term/source/destination/token updates create and authorize a replacement subscription before canceling the old one.",
   });
+
+export const activateRecurringPaymentRequestSchema = z
+  .strictObject({ expectedUpdatedAt: expectedUpdatedAtField })
+  .openapi({ description: "Optional precondition for activating a recurring payment." });
 
 export const paymentListRecurringPaymentsQuerySchema = listRecurringPaymentsQuerySchemaBase
   .extend({

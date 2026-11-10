@@ -30,7 +30,7 @@ export type BenchOptions = {
   reducedMotion: boolean;
   /** The reader's locale, for the figures' numbers. */
   locale: string;
-  /** The kind on the stage changed: the tabs and the bubble follow it. */
+  /** The kind on the stage changed: the tabs follow it. */
   onShow: (index: number) => void;
   /** Whether the walk is set to run (the play/pause control's state). */
   onPlayingChange: (playing: boolean) => void;

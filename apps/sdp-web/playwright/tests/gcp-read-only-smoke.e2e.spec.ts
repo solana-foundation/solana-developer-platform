@@ -1,8 +1,9 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types/payments";
 import type { ListProjectsResponse, Project, ProjectEnvironment } from "@sdp/types/projects";
 import type { TokenTransactionListItem } from "@sdp/types/tokens";
 import { parseDashboardPathname, projectHref } from "@/lib/dashboard-project-path";
+import { test } from "@/playwright/support/vercel-bypass";
 import {
   formatCurrencyAmount,
   resolveTotalBalance,

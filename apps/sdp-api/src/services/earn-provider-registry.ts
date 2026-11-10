@@ -14,6 +14,7 @@ import {
   assertNotPortfolioProvider as assertOndoNotPortfolioProvider,
   OndoVaultDirectClient,
 } from "@sdp/ondo/client";
+import { PlumeVaultDirectClient } from "@sdp/plume/client";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import {
@@ -65,6 +66,7 @@ assertJupiterLendNotPortfolioProvider(jupiterLend);
 
 const veda = new VedaVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
 assertVedaNotPortfolioProvider(veda);
+const plume = new PlumeVaultDirectClient(runVaultOperation);
 const wisdomtree = new WisdomTreeVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
 assertWisdomTreeNotPortfolioProvider(wisdomtree);
 
@@ -97,6 +99,7 @@ export const EARN_PROVIDER_CLIENTS = {
   ondo,
   hastra,
   wisdomtree,
+  plume,
 } as const satisfies Record<EarnProviderId, EarnVaultProvider>;
 
 export function resolveEarnProviderClient(provider: string): EarnVaultProvider {

@@ -3,6 +3,7 @@ import type { PaymentTransferBatchRequest, PaymentTransferBatchStatus } from "@s
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { MOVEMENT_POLL_INTERVAL_MS, resetMovementWatchesForTests } from "@/lib/dashboard-fetch";
+import { KEPT_KEY_WINDOW_MS } from "@/lib/idempotency-key-store";
 import { TransferBatchRequestError, type Translate } from "./payments-workspace.data";
 import {
   canonicalTransferBatchRequest,
@@ -256,6 +257,32 @@ describe("sendTransferBatchUnderKey", () => {
 
   // A money movement never mints a fresh key while the original may have run:
   // the next press is answered under the same key.
+  // The API answers a batch's key from the batch row after its 24-hour key
+  // record lapses, so a resend on a later day replays the same run.
+  it("resends a kept key and its generated reference however old they are", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-11-09T20:00:00.000Z"));
+    const fetchMock = vi
+      .fn<typeof fetch>(async () => recorded())
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toThrow("Failed to fetch");
+    // A later UTC day, past the API's key record.
+    vi.setSystemTime(Date.now() + KEPT_KEY_WINDOW_MS);
+    await sendTransferBatchUnderKey(batchRequest(), t);
+
+    const runs = fetchMock.mock.calls.map(
+      ([, init]) =>
+        z.object({ externalId: z.string() }).parse(JSON.parse(String(init?.body))).externalId
+    );
+    // The same payout run under the same key, which the API never pays twice.
+    expect(runs).toHaveLength(2);
+    expect(runs[1]).toBe(runs[0]);
+    const [first, resent] = sentKeys(fetchMock);
+    expect(resent).toBe(first);
+  });
+
   it("keeps the key on an unknown outcome and resends under it", async () => {
     const fetchMock = vi
       .fn<typeof fetch>(async () => recorded())

@@ -875,3 +875,99 @@ describe("redactCredentialString: credentials encoded inside strings", () => {
     }
   });
 });
+
+describe("scrubTelemetry on serialized JSON (HOO-2570)", () => {
+  it("redacts PII by key inside a provider error that echoes its body as text", () => {
+    const body = JSON.stringify({
+      beneficiaryName: "Jane Doe",
+      holderName: "Jane Doe",
+      line1: "1 Main St",
+      currency: "USD",
+    });
+    assert.deepEqual(JSON.parse(scrubTelemetryString(`${body}`)), {
+      beneficiaryName: "[REDACTED]",
+      holderName: "[REDACTED]",
+      line1: "[REDACTED]",
+      currency: "USD",
+    });
+  });
+
+  it("redacts PII nested in serialized JSON inside serialized JSON", () => {
+    const nested = JSON.stringify({ data: JSON.stringify({ firstName: "Jane", status: "x" }) });
+    const scrubbed = scrubTelemetry({ error: { body: nested } });
+    assert.deepEqual(JSON.parse(JSON.parse(scrubbed.error.body).data), {
+      firstName: "[REDACTED]",
+      status: "x",
+    });
+  });
+
+  it("keeps a number's digits when a sibling field is redacted", () => {
+    assert.equal(
+      scrubTelemetryString('{"email":"a@example.com","amount":12345678901234567890,"price":1.50}'),
+      '{"email":"[REDACTED]","amount":12345678901234567890,"price":1.50}'
+    );
+  });
+
+  it("restores many marked numbers in one pass", () => {
+    const amounts = Array.from({ length: 5_000 }, () => "1.50").join(",");
+    const text = `{"firstName":"Jane","amounts":[${amounts}]}`;
+    const started = performance.now();
+    const scrubbed = scrubTelemetryString(text);
+    assert.ok(performance.now() - started < 1_000);
+    assert.equal(scrubbed, `{"firstName":"[REDACTED]","amounts":[${amounts}]}`);
+  });
+
+  it("keeps an own __proto__ field", () => {
+    const text = '{"__proto__":{"x":1},"ok":true}';
+    assert.equal(scrubTelemetryString(text), text);
+    assert.equal(
+      scrubTelemetryString('{"__proto__":{"x":1},"firstName":"Jane"}'),
+      '{"__proto__":{"x":1},"firstName":"[REDACTED]"}'
+    );
+  });
+
+  it("scrubs a deeply nested serialized document without overflowing the stack", () => {
+    const deep = `${"[".repeat(10_000)}${"]".repeat(10_000)}`;
+    assert.doesNotThrow(() => scrubTelemetryString(deep));
+  });
+
+  it("keeps serialized JSON with nothing to redact exactly as written", () => {
+    const text = '{"ok": true,  "count": 2}';
+    assert.equal(scrubTelemetryString(text), text);
+  });
+});
+
+// Regression: the credential pass parsed JSON on its own and rounded a number
+// whenever a credential key in the same document needed redaction.
+describe("one JSON parse for every redaction pass", () => {
+  it("keeps a number's digits when a credential sibling is redacted", () => {
+    assert.equal(
+      redactCredentialString(
+        '{"apiKey":"sk_live_example","amount":12345678901234567890,"fee":1.50}'
+      ),
+      '{"apiKey":"[REDACTED]","amount":12345678901234567890,"fee":1.50}'
+    );
+  });
+
+  // Regression: a string or key spelled like a number mark became that number.
+  it("leaves strings and keys spelled like a number mark as they were", () => {
+    const lookalike = "\\u0000sdp-number-text:0";
+    assert.equal(
+      redactCredentialString(
+        `{"apiKey":"secret","amount":1.50,"label":"${lookalike}","${lookalike}":true}`
+      ),
+      `{"apiKey":"[REDACTED]","amount":1.50,"label":"${lookalike}","${lookalike}":true}`
+    );
+  });
+});
+
+// Regression: a document too deep for the number-keeping reviver fell back
+// to the text patterns, which cannot decode an escaped credential key.
+describe("redaction of a document too deep for the reviver", () => {
+  it("still redacts an escaped credential key by parsing the document plainly", () => {
+    const deep = `{"\\u0061piKey":"sk_live_secret","d":${"[".repeat(10_000)}${"]".repeat(10_000)}}`;
+    const redacted = redactCredentialString(deep);
+    assert.ok(!redacted.includes("sk_live_secret"));
+    assert.ok(redacted.startsWith('{"apiKey":"[REDACTED]"'));
+  });
+});

@@ -581,7 +581,6 @@ Source: https://platform.solana.com/docs/reference/api/wallets
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
-| `POST` | `/v1/wallets/initialize` | [Initialize wallet signing](/docs/reference/api/wallets/initialize-wallet-signing.md) |
 | `POST` | `/v1/wallets` | [Create wallet](/docs/reference/api/wallets/create-wallet.md) |
 | `DELETE` | `/v1/wallets` | [Delete wallet](/docs/reference/api/wallets/delete-wallet.md) |
 | `GET` | `/v1/wallets` | [List wallets](/docs/reference/api/wallets/list-wallets.md) |
@@ -594,240 +593,6 @@ Source: https://platform.solana.com/docs/reference/api/wallets
 
 ---
 
-### Initialize wallet signing
-Source: https://platform.solana.com/docs/reference/api/wallets/initialize-wallet-signing
-
-> Sets up Managed custody for the project's named provider by creating its active signing configuration and first wallet.
-
-`POST /v1/wallets/initialize`
-
-Production projects use BYOK only: there this returns 403 with details.reason custody_mode_not_allowed, and wallets are created in a Custody Connection with POST /v1/wallets and connectionId.
-
-Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallets.configure` action.
-
-## Headers
-
-- **`x-project-id`** · `string` · min length 1 · example `prj_example`
-
-  Required for dashboard sessions. API keys use their assigned project.
-
-- **`Idempotency-Key`** · `string`
-
-  Use a unique 1–255 printable ASCII key per operation. Reuse it with the same request on retries. An in-flight attempt returns `409`; a changed request returns `422`. [Retry and recovery rules](/docs/developing-with-sdp/idempotency).
-
-## Request body
-
-`application/json` · required
-
-Initialize wallet signing provider for the project resolved from the request context.
-
-One of:
-
-- **provider: "fireblocks"**
-
-  - **`provider`** · `string` · required · always `fireblocks`
-
-  - **`walletLabel`** · `string` · max length 100
-
-- **provider: "privy"**
-
-  - **`provider`** · `string` · required · always `privy`
-
-  - **`requestDelayMs`** · `integer` · min 0 · max 3000
-
-  - **`walletLabel`** · `string` · max length 100
-
-- **provider: "coinbase_cdp"**
-
-  - **`provider`** · `string` · required · always `coinbase_cdp`
-
-  - **`network`** · `string` · one of `solana`, `solana-devnet`
-
-  - **`accountPolicy`** · `string` · pattern `^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`
-
-  - **`walletLabel`** · `string` · max length 100
-
-- **provider: "para"**
-
-  - **`provider`** · `string` · required · always `para`
-
-  - **`requestDelayMs`** · `integer` · min 0 · max 3000
-
-  - **`walletLabel`** · `string` · max length 100
-
-- **provider: "turnkey"**
-
-  - **`provider`** · `string` · required · always `turnkey`
-
-  - **`requestDelayMs`** · `integer` · min 0 · max 3000
-
-  - **`walletLabel`** · `string` · max length 100
-
-- **provider: "dfns"**
-
-  - **`provider`** · `string` · required · always `dfns`
-
-  - **`network`** · `string` · one of `Solana`, `SolanaDevnet`
-
-  - **`walletLabel`** · `string` · max length 100
-
-- **provider: "ibm_haven"**
-
-  - **`provider`** · `string` · required · always `ibm_haven`
-
-  - **`network`** · `string` · one of `Solana`, `SolanaDevnet`
-
-  - **`walletLabel`** · `string` · max length 100
-
-- **provider: "anchorage"**
-
-  - **`provider`** · `string` · required · always `anchorage`
-
-  - **`walletLabel`** · `string` · max length 100
-
-  - **`network`** · `string` · one of `solana`, `solana-devnet`
-
-- **provider: "utila"**
-
-  - **`provider`** · `string` · required · always `utila`
-
-  - **`walletLabel`** · `string` · max length 100
-
-## Responses
-
-- **`201`** Wallet signing initialized
-
-  - **`configId`** · `string` · required · example `cfg_example`
-
-    Created wallet signing config ID.
-
-  - **`publicKey`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
-
-    Public key of the provisioned root wallet.
-
-  - **`walletId`** · `string` · required · min length 1 · example `privy_wallet_123`
-
-    Provider wallet ID of the provisioned root wallet.
-
-- **`400`** Bad Request
-
-  - **`error`** · `object` · required
-
-    Standard error payload.
-
-    - **`code`** · `string` · required
-
-      Machine-readable error code.
-
-    - **`message`** · `string` · required
-
-      Human-readable error message.
-
-    - **`details`** · `object`
-
-      Optional error details for debugging.
-
-      - **`*`** · `any`
-
-  - **`meta`** · `object`
-
-    - **`requestId`** · `string` · min length 1 · example `req_example`
-
-      Request identifier for tracing.
-
-- **`401`** Unauthorized
-
-  Same fields as `400`.
-
-- **`403`** Forbidden. Requires the `wallets.configure` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason. Forbidden: the caller lacks the route's action or the API key is wallet-scoped, or custody setup was refused. A refusal's details.reason names the failed check: custody_mode_not_allowed when a Production project names Managed custody (Production is BYOK only), custody_provider_not_in_release_channel, or provider_not_entitled.
-
-  Same fields as `400`.
-
-- **`404`** Not Found
-
-  Same fields as `400`.
-
-- **`409`** Conflict
-
-  Same fields as `400`.
-
-- **`422`** Unprocessable Entity
-
-  Same fields as `400`.
-
-- **`500`** Internal Server Error
-
-  Same fields as `400`.
-
-- **`503`** PROVIDER_NOT_CONFIGURED: the deployment holds no credentials for the provider in the project's environment (details.reason provider_not_configured).
-
-  Same fields as `400`.
-
-## Example request
-
-```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/wallets/initialize' \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "provider": "fireblocks"
-  }'
-```
-
-```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/wallets/initialize", {
-  method: "POST",
-  headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
-    "Content-Type": "application/json"
-  },
-  body: JSON.stringify({
-    "provider": "fireblocks"
-  })
-});
-```
-
-```python tab="Python"
-import os, requests, uuid
-
-r = requests.post("https://api.solana.com/v1/wallets/initialize",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
-  json={
-    "provider": "fireblocks"
-  })
-```
-
-## Example responses
-
-```json tab="201"
-{
-  "configId": "cfg_example",
-  "publicKey": "So11111111111111111111111111111111111111112",
-  "walletId": "privy_wallet_123"
-}
-```
-
-```json tab="403"
-{
-  "error": {
-    "code": "INSUFFICIENT_PERMISSIONS",
-    "message": "Missing action: wallets.configure",
-    "details": {
-      "action": "wallets.configure"
-    }
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-Error responses use the [standard error shape](/docs/reference/conventions/errors).
-
----
-
 ### Create wallet
 Source: https://platform.solana.com/docs/reference/api/wallets/create-wallet
 
@@ -837,9 +602,9 @@ Source: https://platform.solana.com/docs/reference/api/wallets/create-wallet
 
 A body naming both, or neither, is rejected with `400`.
 
-With an `Idempotency-Key`, SDP never records a second wallet for one key: a retry returns the wallet an earlier attempt recorded, even after the 24-hour key window. A provider that accepts a request id also receives one derived from the key, so it dedupes at the provider.
+With an `Idempotency-Key`, SDP never records a second wallet for one key: a retry returns the wallet an earlier attempt recorded, even after the 24-hour key window. A provider that accepts a request id also receives one derived from the key.
 
-A provider failure is stored as a `503`, and a new key is a new provider request. A `503` can mean the provider created the wallet before the error. With a provider that accepts no request id, a failure that left no SDP wallet row makes even the same key a new provider request after 24 hours. Before any retry after an ambiguous failure, whatever the key, check `GET /v1/wallets` and, if the wallet is not there, the provider account.
+On a provider that dedupes on the request id, a `5xx` is not stored: a same-key retry runs again and gets back the wallet the first attempt made, even when SDP failed to record it, for as long as the provider keeps the request id (permanently, or for 24 hours; the Idempotency guide lists each provider). On any other provider a failure is stored as a `503`, and a new key is a new provider request. A `503` can mean the provider created the wallet before the error. With a provider that accepts no request id, a failure that left no SDP wallet row makes even the same key a new provider request after 24 hours. Before any retry after an ambiguous failure, whatever the key, check `GET /v1/wallets` and, if the wallet is not there, the provider account.
 
 The provider request id and the recorded-wallet lookup both include the credential. After an API key rotation, once the key's 24-hour record has expired, the same key under the new credential is a new provider request and can create a second wallet: list wallets with `GET /v1/wallets` and check the provider account before retrying a create.
 
@@ -1054,9 +819,10 @@ Any of:
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/wallets' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "privy",
@@ -1066,11 +832,13 @@ curl -X POST 'https://api.solana.com/v1/wallets' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/wallets", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -1084,8 +852,10 @@ const res = await fetch("https://api.solana.com/v1/wallets", {
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/wallets",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "provider": "privy",
     "label": "Treasury wallet",
@@ -1253,9 +1023,10 @@ Delete wallet request body.
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X DELETE 'https://api.solana.com/v1/wallets' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "privy",
@@ -1264,11 +1035,13 @@ curl -X DELETE 'https://api.solana.com/v1/wallets' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/wallets", {
   method: "DELETE",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -1281,8 +1054,10 @@ const res = await fetch("https://api.solana.com/v1/wallets", {
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.delete("https://api.solana.com/v1/wallets",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "provider": "privy",
     "walletId": "privy_wallet_123"
@@ -2192,9 +1967,10 @@ walletId is the Provider wallet ID to check, required. Ambiguous Provider IDs ar
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/wallets/signer-check' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "walletId": "privy_wallet_123"
@@ -2202,11 +1978,13 @@ curl -X POST 'https://api.solana.com/v1/wallets/signer-check' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/wallets/signer-check", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -2218,8 +1996,10 @@ const res = await fetch("https://api.solana.com/v1/wallets/signer-check", {
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/wallets/signer-check",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "walletId": "privy_wallet_123"
   })
@@ -2698,9 +2478,10 @@ Update wallet request body.
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X PATCH 'https://api.solana.com/v1/wallets/privy_wallet_123' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "label": "Treasury signer"
@@ -2708,11 +2489,13 @@ curl -X PATCH 'https://api.solana.com/v1/wallets/privy_wallet_123' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/wallets/privy_wallet_123", {
   method: "PATCH",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -2724,8 +2507,10 @@ const res = await fetch("https://api.solana.com/v1/wallets/privy_wallet_123", {
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.patch("https://api.solana.com/v1/wallets/privy_wallet_123",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "label": "Treasury signer"
   })
@@ -2786,7 +2571,6 @@ Source: https://platform.solana.com/docs/reference/api/projects
 | --- | --- | --- |
 | `GET` | `/v1/projects` | [List projects](/docs/reference/api/projects/list-projects.md) |
 | `GET` | `/v1/projects/{projectId}` | [Get project](/docs/reference/api/projects/get-project.md) |
-| `PATCH` | `/v1/projects/{projectId}` | [Update project](/docs/reference/api/projects/update-project.md) |
 | `GET` | `/v1/projects/{projectId}/provider-availability` | [Get project provider availability](/docs/reference/api/projects/get-project-provider-availability.md) |
 | `GET` | `/v1/integrations` | [List project integrations](/docs/reference/api/projects/list-project-integrations.md) |
 
@@ -3186,261 +2970,6 @@ r = requests.get("https://api.solana.com/v1/projects/prj_example",
     "message": "Missing action: projects.read",
     "details": {
       "action": "projects.read"
-    }
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-Error responses use the [standard error shape](/docs/reference/conventions/errors).
-
----
-
-### Update project
-Source: https://platform.solana.com/docs/reference/api/projects/update-project
-
-> Updates project attributes.
-
-`PATCH /v1/projects/{projectId}`
-
-Requires an [API key](/docs/developing-with-sdp/authentication) with the `projects.manage` action.
-
-## Path parameters
-
-- **`projectId`** · `string` · required · min length 1 · example `prj_example`
-
-  Project identifier.
-
-## Request body
-
-`application/json` · required
-
-Update project request body.
-
-- **`name`** · `string` · min length 1 · max length 100 · example `Payments Updated`
-
-  Updated project name.
-
-- **`description`** · `string | null` · max length 500 · example `Updated project description.`
-
-  Updated description. Use null to clear.
-
-- **`settings`** · `object | null`
-
-  Updated project settings. Use null to clear.
-
-  - **`webhookUrl`** · `string` · format `uri`
-
-  - **`metadata`** · `object`
-
-    - **`*`** · `string`
-
-## Responses
-
-- **`200`** Project updated
-
-  - **`data`** · `object` · required
-
-    Project response payload.
-
-    - **`project`** · `object` · required
-
-      Project details.
-
-      - **`id`** · `string` · required · min length 1 · example `prj_example`
-
-        Project identifier.
-
-      - **`organizationId`** · `string` · required · min length 1 · example `org_example`
-
-        Organization identifier.
-
-      - **`name`** · `string` · required · example `Payments`
-
-        Project name.
-
-      - **`slug`** · `string` · required · example `payments`
-
-        URL-friendly slug.
-
-      - **`description`** · `string | null` · required · example `Payments workflow`
-
-        Optional project description.
-
-      - **`environment`** · `string` · required · one of `sandbox`, `beta`, `production` · example `sandbox`
-
-        Project environment.
-
-      - **`settings`** · `object | null` · required
-
-        Project settings, or null when none have been set.
-
-        - **`webhookUrl`** · `string` · format `uri` · example `https://example.com/webhook`
-
-          Webhook URL for event notifications.
-
-        - **`metadata`** · `object`
-
-          Arbitrary metadata key/value pairs.
-
-          - **`*`** · `string`
-
-      - **`status`** · `string` · required · one of `active`, `archived` · example `active`
-
-        Project status.
-
-      - **`createdBy`** · `string` · required · min length 1 · example `usr_example`
-
-        Identifier of the creator.
-
-      - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
-
-        Creation timestamp.
-
-      - **`updatedAt`** · `string` · required · format `date-time` · example `2025-01-02T00:00:00.000Z`
-
-        Last update timestamp.
-
-  - **`meta`** · `object` · required
-
-    Response metadata.
-
-    - **`requestId`** · `string` · required · min length 1 · example `req_example`
-
-      Request identifier for tracing.
-
-    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
-
-      ISO 8601 timestamp.
-
-- **`400`** Bad Request
-
-  - **`error`** · `object` · required
-
-    Standard error payload.
-
-    - **`code`** · `string` · required
-
-      Machine-readable error code.
-
-    - **`message`** · `string` · required
-
-      Human-readable error message.
-
-    - **`details`** · `object`
-
-      Optional error details for debugging.
-
-      - **`*`** · `any`
-
-  - **`meta`** · `object`
-
-    - **`requestId`** · `string` · min length 1 · example `req_example`
-
-      Request identifier for tracing.
-
-- **`401`** Unauthorized
-
-  Same fields as `400`.
-
-- **`403`** Forbidden. Requires the `projects.manage` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
-
-  Same fields as `400`.
-
-- **`404`** Not Found
-
-  Same fields as `400`.
-
-- **`500`** Internal Server Error
-
-  Same fields as `400`.
-
-## Example request
-
-```bash tab="cURL"
-curl -X PATCH 'https://api.solana.com/v1/projects/prj_example' \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Payments Updated",
-    "description": "Updated project description.",
-    "settings": {
-      "webhookUrl": "https://example.com/webhook"
-    }
-  }'
-```
-
-```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/projects/prj_example", {
-  method: "PATCH",
-  headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Content-Type": "application/json"
-  },
-  body: JSON.stringify({
-    "name": "Payments Updated",
-    "description": "Updated project description.",
-    "settings": {
-      "webhookUrl": "https://example.com/webhook"
-    }
-  })
-});
-```
-
-```python tab="Python"
-import os, requests
-
-r = requests.patch("https://api.solana.com/v1/projects/prj_example",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
-  json={
-    "name": "Payments Updated",
-    "description": "Updated project description.",
-    "settings": {
-      "webhookUrl": "https://example.com/webhook"
-    }
-  })
-```
-
-## Example responses
-
-```json tab="200"
-{
-  "data": {
-    "project": {
-      "id": "prj_example",
-      "organizationId": "org_example",
-      "name": "Payments",
-      "slug": "payments",
-      "description": "Payments workflow",
-      "environment": "sandbox",
-      "settings": {
-        "webhookUrl": "https://example.com/webhook",
-        "metadata": {
-          "region": "us"
-        }
-      },
-      "status": "active",
-      "createdBy": "usr_example",
-      "createdAt": "2025-01-01T00:00:00.000Z",
-      "updatedAt": "2025-01-02T00:00:00.000Z"
-    }
-  },
-  "meta": {
-    "requestId": "req_example",
-    "timestamp": "2025-01-01T00:00:00.000Z"
-  }
-}
-```
-
-```json tab="403"
-{
-  "error": {
-    "code": "INSUFFICIENT_PERMISSIONS",
-    "message": "Missing action: projects.manage",
-    "details": {
-      "action": "projects.manage"
     }
   },
   "meta": {
@@ -8261,9 +7790,10 @@ Direct token deployment request body.
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/deploy' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "signingCustodyWalletId": "cwlt_example",
@@ -8277,11 +7807,13 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/deploy' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/deploy", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -8299,8 +7831,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/d
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "signingCustodyWalletId": "cwlt_example",
     "authorityCustodyWalletIds": {
@@ -9896,9 +9430,10 @@ Mint request body.
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/mint' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "signingCustodyWalletId": "cwlt_example",
@@ -9915,11 +9450,13 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/mint' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/mint", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -9940,8 +9477,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/m
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/mint",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "signingCustodyWalletId": "cwlt_example",
     "mint": {
@@ -10590,9 +10129,10 @@ Burn request body.
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/burn' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "signingCustodyWalletId": "cwlt_example",
@@ -10609,11 +10149,13 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/burn' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/burn", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -10634,8 +10176,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/b
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/burn",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "signingCustodyWalletId": "cwlt_example",
     "burn": {
@@ -11305,9 +10849,10 @@ Seize (force transfer) request body.
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/seize' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "signingCustodyWalletId": "cwlt_example",
@@ -11326,11 +10871,13 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/seize' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/seize", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -11353,8 +10900,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/s
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/seize",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "signingCustodyWalletId": "cwlt_example",
     "seize": {
@@ -12013,9 +11562,10 @@ Force burn request body.
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/force-burn' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "signingCustodyWalletId": "cwlt_example",
@@ -12033,11 +11583,13 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/force-burn' 
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/force-burn", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -12059,8 +11611,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/f
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/force-burn",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "signingCustodyWalletId": "cwlt_example",
     "forceBurn": {
@@ -12323,9 +11877,10 @@ Pause token request body.
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/pause' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "signingCustodyWalletId": "cwlt_example"
@@ -12333,11 +11888,13 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/pause' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/pause", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -12349,8 +11906,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/p
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/pause",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "signingCustodyWalletId": "cwlt_example"
   })
@@ -12603,9 +12162,10 @@ Pause token request body.
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/unpause' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "signingCustodyWalletId": "cwlt_example"
@@ -12613,11 +12173,13 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/unpause' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/unpause", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -12629,8 +12191,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/u
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/unpause",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "signingCustodyWalletId": "cwlt_example"
   })
@@ -12843,9 +12407,10 @@ Freeze account request body.
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/freeze' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "accountAddress": "So11111111111111111111111111111111111111112",
@@ -12855,11 +12420,13 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/freeze' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/freeze", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -12873,8 +12440,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/f
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/freeze",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "accountAddress": "So11111111111111111111111111111111111111112",
     "reason": "Compliance hold",
@@ -13077,9 +12646,10 @@ Unfreeze account request body.
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/unfreeze' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "accountAddress": "So11111111111111111111111111111111111111112",
@@ -13088,11 +12658,13 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/unfreeze' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/unfreeze", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -13105,8 +12677,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/u
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/unfreeze",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "accountAddress": "So11111111111111111111111111111111111111112",
     "signingCustodyWalletId": "cwlt_example"
@@ -13927,9 +13501,10 @@ Update authority request body.
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/authority' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "signingCustodyWalletId": "cwlt_example",
@@ -13945,11 +13520,13 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/authority' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/authority", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -13969,8 +13546,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/a
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/authority",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "signingCustodyWalletId": "cwlt_example",
     "authority": {
@@ -16088,9 +15667,10 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/transfers' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "projectId": "prj_example",
@@ -16102,11 +15682,13 @@ curl -X POST 'https://api.solana.com/v1/payments/transfers' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/payments/transfers", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -16122,8 +15704,10 @@ const res = await fetch("https://api.solana.com/v1/payments/transfers", {
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/payments/transfers",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "projectId": "prj_example",
     "sourceCustodyWalletId": "cwlt_example",
@@ -17326,11 +16910,13 @@ Estimate transaction chunking and fees for a transfer batch.
 
 - **`options`** · `object`
 
-  Execution options for transaction chunking, priority fees, and preflight validation.
+  Execution options for transaction chunking and preflight validation. `priorityFee` is accepted for compatibility and ignored; no priority fee is applied.
 
   - **`maxRecipientsPerTransaction`** · `integer` · min 1 · max 64
 
-  - **`priorityFee`** · `string` · one of `none`, `low`, `medium`, `high`, `auto`
+  - **`priorityFee`** · `string` · one of `none`, `low`, `medium`, `high`, `auto` · example `none`
+
+    Accepted for compatibility and ignored. No priority fee is applied, regardless of the selected value.
 
   - **`preflight`** · `boolean`
 
@@ -17498,7 +17084,7 @@ curl -X POST 'https://api.solana.com/v1/payments/transfer-batches/estimate' \
     ],
     "options": {
       "maxRecipientsPerTransaction": 20,
-      "priorityFee": "auto",
+      "priorityFee": "none",
       "preflight": true
     },
     "externalId": "payroll_2026_06_30"
@@ -17526,7 +17112,7 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches/est
     ],
     "options": {
       "maxRecipientsPerTransaction": 20,
-      "priorityFee": "auto",
+      "priorityFee": "none",
       "preflight": true
     },
     "externalId": "payroll_2026_06_30"
@@ -17553,7 +17139,7 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches/estimate"
     ],
     "options": {
       "maxRecipientsPerTransaction": 20,
-      "priorityFee": "auto",
+      "priorityFee": "none",
       "preflight": True
     },
     "externalId": "payroll_2026_06_30"
@@ -17617,7 +17203,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/create-payment-t
 
 `POST /v1/payments/transfer-batches`
 
-Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`). A token batch is refused with 409 `SPONSORED_RENT_OVER_CAP` when one recipient's new token account costs more rent than the sponsor funds in a transaction (`details.recipientIndex`). A chunk the source wallet cannot fund fails its recipients and transfer with the reason in `error` (the wallet does not have enough funds); the batch still returns 200. An `externalId` already used by a batch on the same project and source wallet never pays again: the same request from the same credential returns that batch, and any other returns `409 TRANSFER_BATCH_RUN_EXISTS` with its `batchId` in `error.details`. To finish a batch after a partial failure, call `POST /v1/payments/transfer-batches/{batchId}/retry`: it sends only the batch's `failed` recipients. Never resend the whole batch under a new Idempotency-Key, which pays the recipients that succeeded again.
+Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`). A token batch is refused with 409 `SPONSORED_RENT_OVER_CAP` when one recipient's new token account costs more rent than the sponsor funds in a transaction (`details.recipientIndex`). A recipient's counterparty account archived while the batch is being prepared returns 404, and one whose address changed returns 409 `TRANSFER_BATCH_DESTINATION_CHANGED` (`details.counterpartyAccountIds`); either way nothing is written or sent, so the same request can be sent again. A chunk the source wallet cannot fund fails its recipients and transfer with the reason in `error` (the wallet does not have enough funds); the batch still returns 200. An `externalId` already used by a batch on the same project and source wallet never pays again: the same request from the same credential returns that batch, and any other returns `409 TRANSFER_BATCH_RUN_EXISTS` with its `batchId` in `error.details`. To finish a batch after a partial failure, call `POST /v1/payments/transfer-batches/{batchId}/retry`: it sends only the batch's `failed` recipients. Never resend the whole batch under a new Idempotency-Key, which pays the recipients that succeeded again.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `transfer_batches.execute` action.
 
@@ -17663,11 +17249,13 @@ Create a custody-executed outbound transfer batch.
 
 - **`options`** · `object`
 
-  Execution options for transaction chunking, priority fees, and preflight validation.
+  Execution options for transaction chunking and preflight validation. `priorityFee` is accepted for compatibility and ignored; no priority fee is applied.
 
   - **`maxRecipientsPerTransaction`** · `integer` · min 1 · max 64
 
-  - **`priorityFee`** · `string` · one of `none`, `low`, `medium`, `high`, `auto`
+  - **`priorityFee`** · `string` · one of `none`, `low`, `medium`, `high`, `auto` · example `none`
+
+    Accepted for compatibility and ignored. No priority fee is applied, regardless of the selected value.
 
   - **`preflight`** · `boolean`
 
@@ -18136,9 +17724,10 @@ Create a custody-executed outbound transfer batch.
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/transfer-batches' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "projectId": "prj_example",
@@ -18154,7 +17743,7 @@ curl -X POST 'https://api.solana.com/v1/payments/transfer-batches' \
     ],
     "options": {
       "maxRecipientsPerTransaction": 20,
-      "priorityFee": "auto",
+      "priorityFee": "none",
       "preflight": true
     },
     "externalId": "payroll_2026_06_30"
@@ -18162,11 +17751,13 @@ curl -X POST 'https://api.solana.com/v1/payments/transfer-batches' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/payments/transfer-batches", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -18183,7 +17774,7 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches", {
     ],
     "options": {
       "maxRecipientsPerTransaction": 20,
-      "priorityFee": "auto",
+      "priorityFee": "none",
       "preflight": true
     },
     "externalId": "payroll_2026_06_30"
@@ -18194,8 +17785,10 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches", {
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/payments/transfer-batches",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "projectId": "prj_example",
     "sourceCustodyWalletId": "cwlt_example",
@@ -18210,7 +17803,7 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches",
     ],
     "options": {
       "maxRecipientsPerTransaction": 20,
-      "priorityFee": "auto",
+      "priorityFee": "none",
       "preflight": True
     },
     "externalId": "payroll_2026_06_30"
@@ -19097,17 +18690,20 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/transfer-batches/xbatch_example/retry' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)"
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY"
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/payments/transfer-batches/xbatch_example/retry", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID()
+    "Idempotency-Key": idempotencyKey
   }
 });
 ```
@@ -19115,8 +18711,10 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches/xba
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/payments/transfer-batches/xbatch_example/retry",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key})
 ```
 
 ## Example responses
@@ -20159,9 +19757,10 @@ Creates an SDP-custody outbound recurring payment intent. Activation and collect
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/recurring-payments' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "sourceCustodyWalletId": "cwlt_example",
@@ -20176,11 +19775,13 @@ curl -X POST 'https://api.solana.com/v1/payments/recurring-payments' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/payments/recurring-payments", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -20199,8 +19800,10 @@ const res = await fetch("https://api.solana.com/v1/payments/recurring-payments",
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/payments/recurring-payments",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "sourceCustodyWalletId": "cwlt_example",
     "counterpartyId": "cpty_example",
@@ -20595,6 +20198,8 @@ Source: https://platform.solana.com/docs/reference/api/payments/update-payment-r
 
 Pending records are updated directly. Active metadata and due-date edits are applied in place, while active term, source, destination, or token edits create a replacement Solana subscription, authorize it, cancel the old subscription, and then swap the recurring payment to the replacement records.
 
+Send `expectedUpdatedAt` from the version you reviewed to make the edit apply to that version only: when the recurring payment has changed since, the edit returns `409` `RECURRING_PAYMENT_CHANGED` and changes nothing.
+
 Requires an `Idempotency-Key`, because an edit can sign and broadcast a replacement subscription. A same-key retry of a completed edit replays its answer. A retry of an interrupted edit gets `409` `IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After` until the attempt is stale, then resumes from the last step SDP recorded. If a step was sent but not yet recorded when the edit was interrupted, which is rare, the retry can fail or send that step again, so read the recurring payment with `GET` before editing it again.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurring.execute` action.
@@ -20620,6 +20225,10 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 `application/json` · required
 
 Updates a recurring payment. Pending payments are edited directly. Active metadata or due-date updates are applied in place, while active term/source/destination/token updates create and authorize a replacement subscription before canceling the old one.
+
+- **`expectedUpdatedAt`** · `string` · min length 1 · max length 64
+
+  Optional `updatedAt` of the version you reviewed, from the last read of this recurring payment. When the recurring payment has changed since, the request returns `409` `RECURRING_PAYMENT_CHANGED` with the current `updatedAt` in `error.details` and changes nothing: read it again and review the current terms.
 
 - **`sourceCustodyWalletId`** · `string` · min length 1 · example `cwlt_example`
 
@@ -20880,9 +20489,10 @@ Updates a recurring payment. Pending payments are edited directly. Active metada
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X PATCH 'https://api.solana.com/v1/payments/recurring-payments/prp_example' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "sourceCustodyWalletId": "cwlt_example",
@@ -20898,11 +20508,13 @@ curl -X PATCH 'https://api.solana.com/v1/payments/recurring-payments/prp_example
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/payments/recurring-payments/prp_example", {
   method: "PATCH",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -20922,8 +20534,10 @@ const res = await fetch("https://api.solana.com/v1/payments/recurring-payments/p
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.patch("https://api.solana.com/v1/payments/recurring-payments/prp_example",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "sourceCustodyWalletId": "cwlt_example",
     "counterpartyId": "cpty_example",
@@ -21334,6 +20948,8 @@ Source: https://platform.solana.com/docs/reference/api/payments/activate-payment
 
 `POST /v1/payments/recurring-payments/{id}/activate`
 
+A fresh activation signs the terms it read: when an edit lands while it runs, or `expectedUpdatedAt` names an earlier version, it returns `409` `RECURRING_PAYMENT_CHANGED` before claiming the schedule or signing.
+
 Both the counterparty and its account must be active before a fresh activation; an unavailable recipient returns `404` before claiming the schedule or signing. Recovery can confirm saved transactions, but cannot sign a new step for an unavailable recipient.
 
 The source wallet gives the Subscriptions program's authority for that token an approval of 0, and each collection approves exactly its own amount in the same transaction as the pull, so the token program's `Approve` instruction appears in activation and collection transactions. If your custody provider's wallet policy allowlists programs or instructions, allow `Approve` to that authority, or the provider refuses the collection and SDP pauses the recurring payment with `pausedReason` `custody_policy_refused`.
@@ -21355,6 +20971,16 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 - **`Idempotency-Key`** · `string` · required
 
   Use a unique 1–255 printable ASCII key per operation. Reuse it with the same request on retries. An in-flight attempt returns `409`; a changed request returns `422`. [Retry and recovery rules](/docs/developing-with-sdp/idempotency).
+
+## Request body
+
+`application/json`
+
+Optional precondition for activating a recurring payment.
+
+- **`expectedUpdatedAt`** · `string` · min length 1 · max length 64
+
+  Optional `updatedAt` of the version you reviewed, from the last read of this recurring payment. When the recurring payment has changed since, the request returns `409` `RECURRING_PAYMENT_CHANGED` with the current `updatedAt` in `error.details` and changes nothing: read it again and review the current terms.
 
 ## Responses
 
@@ -21579,26 +21205,36 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/recurring-payments/prp_example/activate' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)"
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/payments/recurring-payments/prp_example/activate", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID()
-  }
+    "Idempotency-Key": idempotencyKey,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({})
 });
 ```
 
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_example/activate",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
+  json={})
 ```
 
 ## Example responses
@@ -21926,17 +21562,20 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/recurring-payments/prp_example/cancel' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)"
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY"
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/payments/recurring-payments/prp_example/cancel", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID()
+    "Idempotency-Key": idempotencyKey
   }
 });
 ```
@@ -21944,8 +21583,10 @@ const res = await fetch("https://api.solana.com/v1/payments/recurring-payments/p
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_example/cancel",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key})
 ```
 
 ## Example responses
@@ -22028,7 +21669,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/collect-payment-
 
 `POST /v1/payments/recurring-payments/{id}/collect`
 
-Before a new collection, SDP requires an active counterparty and account in the schedule's project. If either is archived or unavailable, the schedule pauses with `pausedReason` `destination_unavailable` and the request returns `409` without signing. That `409`, and every later collect or resume while the recipient stays unavailable, tells the caller to cancel the schedule and create a new one. An earlier in-flight collection still recovers.
+When admitting a new collection, SDP requires an active counterparty and account in the schedule's project. Archival that commits before admission prevents a new collection from signing. If either recipient record is archived or unavailable, the schedule pauses with `pausedReason` `destination_unavailable` and the request returns `409` without signing. That `409`, and every later collect or resume while the recipient stays unavailable, tells the caller to cancel the schedule and create a new one. A collection admitted earlier may still finish or recover.
 
 If submission cannot be confirmed immediately, a `200` response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation.
 
@@ -22629,17 +22270,20 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/recurring-payments/prp_example/collect' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)"
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY"
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/payments/recurring-payments/prp_example/collect", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID()
+    "Idempotency-Key": idempotencyKey
   }
 });
 ```
@@ -22647,8 +22291,10 @@ const res = await fetch("https://api.solana.com/v1/payments/recurring-payments/p
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_example/collect",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key})
 ```
 
 ## Example responses
@@ -23060,17 +22706,20 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/recurring-payments/prp_example/resume' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)"
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY"
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/payments/recurring-payments/prp_example/resume", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID()
+    "Idempotency-Key": idempotencyKey
   }
 });
 ```
@@ -23078,8 +22727,10 @@ const res = await fetch("https://api.solana.com/v1/payments/recurring-payments/p
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_example/resume",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key})
 ```
 
 ## Example responses
@@ -23659,9 +23310,10 @@ Create payment request payload.
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/requests' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "walletId": "privy_wallet_123",
@@ -23672,11 +23324,13 @@ curl -X POST 'https://api.solana.com/v1/payments/requests' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/payments/requests", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -23691,8 +23345,10 @@ const res = await fetch("https://api.solana.com/v1/payments/requests", {
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/payments/requests",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "walletId": "privy_wallet_123",
     "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
@@ -24630,17 +24286,20 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `paymen
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/requests/preq_example/cancel' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)"
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY"
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/payments/requests/preq_example/cancel", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID()
+    "Idempotency-Key": idempotencyKey
   }
 });
 ```
@@ -24648,8 +24307,10 @@ const res = await fetch("https://api.solana.com/v1/payments/requests/preq_exampl
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/payments/requests/preq_example/cancel",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key})
 ```
 
 ## Example responses
@@ -24929,9 +24590,10 @@ Creates an SDP subscription plan record. Prepare the on-chain Solana subscriptio
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/subscription-plans' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "ownerWalletId": "wal_merchant",
@@ -24948,11 +24610,13 @@ curl -X POST 'https://api.solana.com/v1/payments/subscription-plans' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/payments/subscription-plans", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -24973,8 +24637,10 @@ const res = await fetch("https://api.solana.com/v1/payments/subscription-plans",
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/payments/subscription-plans",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "ownerWalletId": "wal_merchant",
     "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
@@ -26033,9 +25699,10 @@ Updates mutable SDP subscription plan fields.
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X PATCH 'https://api.solana.com/v1/payments/subscription-plans/psp_example' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "planPda": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
@@ -26045,11 +25712,13 @@ curl -X PATCH 'https://api.solana.com/v1/payments/subscription-plans/psp_example
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/payments/subscription-plans/psp_example", {
   method: "PATCH",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -26063,8 +25732,10 @@ const res = await fetch("https://api.solana.com/v1/payments/subscription-plans/p
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.patch("https://api.solana.com/v1/payments/subscription-plans/psp_example",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "planPda": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     "pullerWalletId": "wal_collector",
@@ -26312,9 +25983,10 @@ Creates a pending SDP subscription record tied to a counterparty. Lifecycle, sch
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/payments/subscriptions' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "planId": "psp_example",
@@ -26324,11 +25996,13 @@ curl -X POST 'https://api.solana.com/v1/payments/subscriptions' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/payments/subscriptions", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -26342,8 +26016,10 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions", {
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/payments/subscriptions",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "planId": "psp_example",
     "counterpartyId": "cpty_example",
@@ -29579,9 +29255,10 @@ Address compliance screening request payload.
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/compliance/address-screenings' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "address": "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
@@ -29591,11 +29268,13 @@ curl -X POST 'https://api.solana.com/v1/compliance/address-screenings' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/compliance/address-screenings", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -29609,8 +29288,10 @@ const res = await fetch("https://api.solana.com/v1/compliance/address-screenings
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/compliance/address-screenings",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "address": "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
     "network": "solana",
@@ -30216,9 +29897,10 @@ Create counterparty request body.
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/counterparties' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "externalId": "customer_42",
@@ -30228,11 +29910,13 @@ curl -X POST 'https://api.solana.com/v1/counterparties' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/counterparties", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -30246,8 +29930,10 @@ const res = await fetch("https://api.solana.com/v1/counterparties", {
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/counterparties",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "externalId": "customer_42",
     "entityType": "individual",
@@ -30651,9 +30337,10 @@ Update counterparty request body. At least one field must be provided.
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X PATCH 'https://api.solana.com/v1/counterparties/cpty_example' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "externalId": "customer_42",
@@ -30663,11 +30350,13 @@ curl -X PATCH 'https://api.solana.com/v1/counterparties/cpty_example' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example", {
   method: "PATCH",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -30681,8 +30370,10 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example",
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.patch("https://api.solana.com/v1/counterparties/cpty_example",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "externalId": "customer_42",
     "entityType": "business",
@@ -30818,17 +30509,20 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X DELETE 'https://api.solana.com/v1/counterparties/cpty_example' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)"
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY"
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example", {
   method: "DELETE",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID()
+    "Idempotency-Key": idempotencyKey
   }
 });
 ```
@@ -30836,8 +30530,10 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example",
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.delete("https://api.solana.com/v1/counterparties/cpty_example",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key})
 ```
 
 ## Example responses
@@ -31657,9 +31353,10 @@ Create counterparty account request body.
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/counterparties/cpty_example/accounts' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "accountKind": "crypto_wallet",
@@ -31673,11 +31370,13 @@ curl -X POST 'https://api.solana.com/v1/counterparties/cpty_example/accounts' \
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/accounts", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -31695,8 +31394,10 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/a
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/counterparties/cpty_example/accounts",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "accountKind": "crypto_wallet",
     "label": "USDC wallet",
@@ -32417,9 +32118,10 @@ Update counterparty account request body. At least one field must be provided.
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X PATCH 'https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "label": "Primary USDC wallet",
@@ -32432,11 +32134,13 @@ curl -X PATCH 'https://api.solana.com/v1/counterparties/cpty_example/accounts/cp
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example", {
   method: "PATCH",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -32453,8 +32157,10 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/a
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.patch("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "label": "Primary USDC wallet",
     "details": {
@@ -32601,17 +32307,20 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 ## Example request
 
 ```bash tab="cURL"
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X DELETE 'https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)"
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY"
 ```
 
 ```ts tab="TypeScript"
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example", {
   method: "DELETE",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID()
+    "Idempotency-Key": idempotencyKey
   }
 });
 ```
@@ -32619,8 +32328,10 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/a
 ```python tab="Python"
 import os, requests, uuid
 
+# Reuse this key when you retry this request.
+idempotency_key = str(uuid.uuid4())
 r = requests.delete("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key})
 ```
 
 ## Example responses
@@ -35462,9 +35173,10 @@ Every wallet names the provider account it lives under: `provider` for SDP's acc
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/wallets' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "privy",
@@ -35475,11 +35187,13 @@ curl -X POST 'https://api.solana.com/v1/wallets' \
 </Tab>
 <Tab value="TypeScript">
 ```typescript
+// Reuse this key when you retry this request.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch("https://api.solana.com/v1/wallets", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
+    "Idempotency-Key": idempotencyKey,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -36188,7 +35902,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 
 **Accepted.** The key is optional, and honored when sent.
 
-- Wallets: `POST /v1/wallets`, `POST /v1/wallets/initialize`, `POST /v1/wallets/signer-check`, `PATCH /v1/wallets/{walletId}`, `DELETE /v1/wallets`
+- Wallets: `POST /v1/wallets`, `POST /v1/wallets/signer-check`, `PATCH /v1/wallets/{walletId}`, `DELETE /v1/wallets`
 - Counterparties: `POST`, `PATCH` and `DELETE` on `/v1/counterparties` and on counterparty accounts
 - Payment requests: `POST /v1/payments/requests` and `POST /v1/payments/requests/{paymentRequestId}/cancel`
 
@@ -36199,7 +35913,7 @@ Modules with their own key handling say so on their pages, and each operation's 
 ## Choosing a key
 
 - A key is 1–255 printable ASCII characters. Anything else returns `400`.
-- Generate one key per logical operation (a UUIDv4 or UUIDv7 works well), store it with the operation before you send it, and send the same key on every retry of that operation.
+- Generate one key per logical operation (a UUIDv4 or UUIDv7 works well), store it with the operation before you send it, and send the same key on every retry of that operation. The API reference samples mint the key on its own line before the call: to retry, run the call again, not the line that mints the key.
 - A new operation needs a new key, even when its request is identical to an earlier one.
 - Keys are scoped to your organization, project, HTTP method and route, and bound to the credential that sent them. The same key value on two different routes is two separate keys.
 
@@ -36266,7 +35980,7 @@ Access is checked before the key on every request, so a retry passes exactly the
 | A recurring-payment action failed | An action refused before it sent anything leaves the schedule as it was, except that a collection with an unavailable counterparty or account pauses it with `pausedReason: "destination_unavailable"` and returns `409` without signing. If a cancel sent its transaction and confirming it then failed, SDP keeps the attempt and the schedule stays `canceling` until the attempt is recovered; poll `GET /v1/payments/recurring-payments/{id}`. A `400`, `401`, `403`, `409` or `429` (such as `TRANSACTION_FAILED`) is not stored, and a `5xx` is not replayed, so a same-key retry runs the action again. Any other `4xx`, such as `422 SIGNING_REJECTED` or `404`, is stored and replayed with `Idempotent-Replayed: true` for 24 hours; send a new key to try again sooner. |
 | A recurring-payment action meets another key's unfinished attempt on the schedule | Cancel and collect return `409` (already processing), not stored; read the schedule with `GET`. An interrupted collect finishes on its own from the transaction SDP saved before sending it. Resume sends nothing on chain and commits in one step, so it is never left half-done. An interrupted activate or cancel is resumed in the background from the last step SDP recorded; SDP first reads each step it may already have sent from the chain, and a step is not sent again when the chain shows it landed. An interrupted `PATCH` resumes only when that `PATCH` is retried with its key (see below). A `PATCH` may finish that attempt and then applies its own change. |
 | A keyed recurring-payment cancel, resume or `PATCH` changes nothing (such as canceling a canceled schedule) | It still records its attempt, so a same-key retry, even after 24 hours, is answered from it and never runs over a later change. |
-| Original returned a `5xx` | Stored and replayed: use a new key to try again. The routes that move money are the exception: a same-key retry runs again and answers from the record the first attempt wrote, so it never sends twice. That answer also carries `Idempotent-Replayed: true`. A same-key retry of a payment request cancel also runs again. |
+| Original returned a `5xx` | Stored and replayed: use a new key to try again. The routes that move money are the exception: a same-key retry runs again and answers from the record the first attempt wrote, so it never sends twice. That answer also carries `Idempotent-Replayed: true`. A same-key retry of a payment request cancel also runs again, and so does a `POST /v1/wallets` whose provider dedupes on the request ID (see [Creating wallets](#creating-wallets)). |
 
 "Same request" means the same path, query parameters, body and credential. Recipient order in a transfer batch, and `"1.0"` versus `"1"` for an amount, do not change the request.
 
@@ -36288,7 +36002,18 @@ Keys are kept for 24 hours after the original request. After that, a same-key re
 
 ## Creating wallets
 
-One `POST /v1/wallets` key maps to one recorded wallet. Same-key retries return it, even after 24 hours; a different request under that key returns `422`. A provider that accepts a request ID also receives one derived from the key, so it dedupes creation. A provider failure is stored as `503` for 24 hours. A new key is a new provider request.
+One `POST /v1/wallets` key maps to one recorded wallet. Same-key retries return it, even after 24 hours; a different request under that key returns `422`. A provider that accepts a request ID also receives one derived from the key.
+
+On the providers below, which dedupe on the request ID, a `5xx` is not stored. A same-key retry runs again and gets back the wallet the first attempt made, even when SDP failed to record it, for as long as the provider keeps the request ID:
+
+| Provider | Wallets | Same-key retry after a `5xx` returns the first wallet |
+| --- | --- | --- |
+| **Fireblocks** | Custody Connection (`connectionId`) | Within 24 hours of the first attempt |
+| **Privy** | Managed (`provider`) | Always |
+| **Privy** | Custody Connection (`connectionId`) | Always |
+| **Coinbase CDP** | Managed (`provider`) | Always |
+
+On any other provider, a provider failure is stored as `503` for 24 hours. A new key is a new provider request.
 
 An ambiguous `503` may mean the provider created a wallet before SDP received the result. Other providers do not dedupe on the request ID. If SDP wrote no wallet row, a same-key retry after 24 hours can create another wallet. Before retrying with any key, check `GET /v1/wallets` and, if needed, the provider account.
 
@@ -36309,7 +36034,7 @@ While a transfer, batch, or schedule remains `pending` or `processing`, Postman 
 - Send a key on every mutation that accepts one, not only where it is required.
 - Retry timeouts, connection errors and `409 IDEMPOTENCY_KEY_IN_FLIGHT` with backoff, reusing the key.
 - Treat `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` as final for that key: check with `GET`, then use a new key.
-- After a `5xx`, retry with the same key on the routes that move money; elsewhere, use a new key.
+- After a `5xx`, retry with the same key on the routes that move money, and on `POST /v1/wallets` when the provider dedupes on the request ID ([Creating wallets](#creating-wallets)); elsewhere, use a new key.
 - Outside a key rotation, treat `422 IDEMPOTENCY_KEY_REUSED` as a bug in your client: the key was attached to two different operations.
 - Persist the returned resource ID before moving to the next operation, so a restarted worker can resume without guessing.
 
@@ -36468,7 +36193,15 @@ The dashboard starts a key that holds any `execute` action on **Selected wallets
 
 A recurring payment is collected on schedule as its own mandate, not as the key or member that activated it. SDP checks that the payment is active, that it pays from its own source wallet, that its counterparty and account are active in the project, and that the organization may move money. Revoking or narrowing the key that activated it doesn't stop it, so rotating a key never interrupts a customer's schedule.
 
-Archiving the counterparty archives its active accounts too, and new transfers and batches can't use them. Before the next new collection, an unavailable counterparty or account pauses the recurring payment with `pausedReason: "destination_unavailable"`. Work already in flight still recovers, and earlier requests still replay their recorded outcomes. The dashboard shows the pause reason and offers Cancel. Paused schedules can't be edited, so cancel the schedule and create a new one with an active recipient.
+Archiving the counterparty archives its active accounts too, and new transfers
+and batches can't use them. Archival that commits before a new collection is
+admitted prevents it from signing and pauses the recurring payment with
+`pausedReason: "destination_unavailable"`. A collection admitted earlier may
+still finish or recover, and earlier requests still replay their recorded
+outcomes.
+
+The dashboard shows the pause reason and offers Cancel. Paused schedules can't
+be edited, so cancel the schedule and create a new one with an active recipient.
 
 ## Create a key
 
@@ -37072,7 +36805,7 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
   }'
 ```
 
-Each recipient names a counterparty account (`cpacct_…`) that is an active `crypto_wallet` account in the project. `counterpartyId` is optional; if you pass it, it must be that account's counterparty. An unknown, archived or mismatched account returns `404`. A batch takes up to 500 recipients.
+Each recipient names a counterparty account (`cpacct_…`) that is an active `crypto_wallet` account in the project. `counterpartyId` is optional; if you pass it, it must be that account's counterparty. An unknown, archived or mismatched account returns `404`. An account whose address changes while the batch is being prepared returns `409 TRANSFER_BATCH_DESTINATION_CHANGED` naming it in `error.details.counterpartyAccountIds`; nothing is sent, so send the request again. A batch takes up to 500 recipients.
 
 The two ids do different jobs:
 
@@ -37080,6 +36813,10 @@ The two ids do different jobs:
 - **`externalId`** (required: a batch without one returns `400`) identifies the payout run. Derive it from your own data, such as the pay period, so every attempt at the run carries the same value. See [One batch per payout run](#one-batch-per-payout-run).
 
 Use `GET /v1/payments/transfer-batches/{batchId}` to inspect recipient and chunk outcomes.
+
+Batch execution does not add a priority fee. `options.priorityFee` is accepted for
+compatibility and ignored, including `auto`, `low`, `medium`, and `high`. The
+estimate reports `priorityFeeLamports: "0"`.
 
 ### One batch per payout run
 
@@ -38870,9 +38607,10 @@ The token page has no screening action. When screening is enabled for your organ
 <Tab value="API">
 
 ```bash
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/compliance/address-screenings' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "address": "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
@@ -39000,9 +38738,10 @@ To resume, click **Resume** on the **Transfers** row and then **Resume transfers
 **Pause:**
 
 ```bash
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/pause' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "signingCustodyWalletId": "cwlt_example"
@@ -39012,9 +38751,10 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/pause' \
 **Unpause:**
 
 ```bash
+IDEMPOTENCY_KEY=$(uuidgen)
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/unpause' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "signingCustodyWalletId": "cwlt_example"
@@ -39943,11 +39683,18 @@ A failed request returns an error status and this body. The health checks are th
 
 Each operation's page lists its statuses and shows a success example. The OpenAPI spec carries every response schema.
 
+## Preconditions
+
+A write that should apply only to the version you last read takes an optional `expectedUpdatedAt` field in its request body: the `updatedAt` from your last read of the resource. When the resource has changed since, the write changes nothing and returns `409`, carrying the current `updatedAt` in `error.details`. The operation's page says whether it takes the field, and names the code it returns. Omit it to write whatever the current version is.
+
+The field is part of the body, so it is part of what an `Idempotency-Key` identifies: a retry under the same key must send the same value.
+
 ## Retrying
 
 - `400`, `401`, `403`, `404`, `413`, and `422`: fix the request before you send it again.
 - `422 CUSTODY_POLICY_REFUSED`: the wallet's policy at its custody provider refused to sign. The message names the provider. Review the policy there, or change the request, before you send it again.
 - `409 CONFLICT`: read the resource's current state, then decide.
+- `409` answering a stale `expectedUpdatedAt` (the code its operation's page names): the resource changed since the version you sent. Read it again, review what changed, then send the write with the new `updatedAt` and a new key.
 - `409 IDEMPOTENCY_KEY_IN_FLIGHT` and `429`: wait for `Retry-After`, then retry with the same `Idempotency-Key`.
 - `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`: final for that key. Read the resource with `GET` to see whether the request ran, then send it again with a new key.
 - `503 RPC_UNAVAILABLE`: `details.reason` says why Solana RPC was unavailable. `upstream_unavailable` is temporary: wait for `Retry-After`, then retry as the `5xx` rule below says. `not_configured` and `cluster_mismatch` are SDP configuration problems that a retry won't fix. Quote `meta.requestId` when you report one.

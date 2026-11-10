@@ -227,6 +227,8 @@ export async function issuePaymentRequestTransaction(
     // signs, so no reservation can exist without its audit record.
     const auditService = new AuditService(getDb(c.env));
     const auditIntent = await auditService.beginCritical(c, {
+      // The payer is an anonymous third party: keep their network only.
+      anonymousRequester: true,
       organizationId: request.organization_id,
       action: "sign",
       resourceType: "payment_request",

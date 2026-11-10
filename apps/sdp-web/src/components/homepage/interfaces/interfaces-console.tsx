@@ -67,7 +67,7 @@ function isStepKey(key: string): key is keyof typeof KEY_STEPS {
 }
 
 /**
- * The three ways in are the tabs of the call beside them. On a timer (the line under the chosen
+ * The two ways in are the tabs of the call beside them. On a timer (the line under the chosen
  * way filling over 6.2s) the tabs take turns; a way under the mouse holds while it is there, and a
  * tap, a click or the keyboard holds the chosen way until the block leaves the screen. Keyboard
  * focus on the tabs also holds, and nothing turns off screen, in a hidden tab or under reduced

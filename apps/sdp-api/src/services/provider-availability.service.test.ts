@@ -705,6 +705,7 @@ describe("provider-availability.service", () => {
       ondo: false,
       hastra: false,
       wisdomtree: false,
+      plume: false,
     });
   });
 

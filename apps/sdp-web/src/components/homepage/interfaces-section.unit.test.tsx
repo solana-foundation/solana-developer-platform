@@ -41,8 +41,7 @@ function escapeRegExp(literal: string): string {
 }
 
 const copy = {
-  execute: { title: "Execute mode", body: "Execute body", status: "200 · confirmed" },
-  prepare: { title: "Prepare mode", body: "Prepare body", status: "200 · ready to sign" },
+  api: { title: "REST API", body: "API body", status: "200 · confirmed" },
   dashboard: { title: "Dashboard", body: "Dashboard body", status: "200 · 1 pending" },
 };
 
@@ -89,21 +88,18 @@ describe("InterfacesSection", () => {
     const section = doc.querySelector("section#interfaces");
     expect(section?.getAttribute("data-ground")).toBe("paper");
     expect(doc.querySelectorAll("h2")).toHaveLength(1);
-    expect(doc.querySelector("h2")?.textContent).toContain("Call the API.");
+    expect(doc.querySelector("h2")?.textContent).toContain(
+      "Integrate directly via API or manage from a single dashboard"
+    );
 
     const tablist = doc.querySelector('[role="tablist"]');
     expect(tablist?.getAttribute("aria-label")).toBe("Ways to work with the platform");
     const tabs = [...doc.querySelectorAll('[role="tab"]')];
     expect(tabs.map((tab) => tab.querySelector("b")?.textContent)).toEqual([
-      "Execute mode",
-      "Prepare mode",
+      "REST API",
       "Dashboard",
     ]);
-    expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual([
-      "true",
-      "false",
-      "false",
-    ]);
+    expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual(["true", "false"]);
 
     const panel = doc.querySelector('[role="tabpanel"]');
     expect(panel?.getAttribute("aria-labelledby")).toBe(tabs[0]?.id);
@@ -126,15 +122,18 @@ describe("InterfacesSection", () => {
     expect(markup).not.toContain("aria-live");
   });
 
-  it("marks the Prepare tab coming soon on the stable channel, which holds subscriptions back", async () => {
+  it("shows both ways with no coming-soon badge on the stable channel", async () => {
     vi.stubEnv("SDP_RELEASE_CHANNEL", "stable");
     const view = document.createElement("div");
     view.innerHTML = renderToStaticMarkup(await InterfacesSection({ links }));
     const section = within(view);
 
-    expect(section.getByRole("tab", { name: /Coming soon/ })).toBe(
-      section.getByRole("tab", { name: /^Prepare mode/ })
-    );
+    expect(section.getAllByRole("tab").map((tab) => tab.querySelector("b")?.textContent)).toEqual([
+      "REST API",
+      "Dashboard",
+    ]);
+    expect(section.queryByRole("tab", { name: /Coming soon/ })).toBeNull();
+    expect(view.textContent).not.toContain("Coming soon");
   });
 });
 
@@ -207,18 +206,20 @@ describe("InterfacesConsole", () => {
   it("selects a way from the keyboard and holds it", () => {
     renderConsole();
     const tabs = screen.getAllByRole("tab");
-    expect(tabs.map((tab) => tab.tabIndex)).toEqual([0, -1, -1]);
+    expect(tabs.map((tab) => tab.tabIndex)).toEqual([0, -1]);
 
     act(() => tabs[0]?.focus());
     fireEvent.keyDown(tabs[0], { key: "ArrowDown" });
     expect(tabs[1]?.getAttribute("aria-selected")).toBe("true");
     expect(document.activeElement).toBe(tabs[1]);
     expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(tabs[1]?.id);
-    expect(screen.getByRole("tabpanel").textContent).toContain("prepare-collection");
+    expect(screen.getByRole("tabpanel").textContent).toContain("status=pending");
 
-    fireEvent.keyDown(tabs[1], { key: "End" });
-    expect(tabs[2]?.getAttribute("aria-selected")).toBe("true");
-    fireEvent.keyDown(tabs[2], { key: "ArrowDown" });
+    fireEvent.keyDown(tabs[1], { key: "Home" });
+    expect(tabs[0]?.getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(tabs[0], { key: "End" });
+    expect(tabs[1]?.getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(tabs[1], { key: "ArrowDown" });
     expect(tabs[0]?.getAttribute("aria-selected")).toBe("true");
     expect(activeBar().dataset.state).toBe("held");
   });

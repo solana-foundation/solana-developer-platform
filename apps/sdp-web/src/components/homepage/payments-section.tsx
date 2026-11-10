@@ -8,9 +8,7 @@ import { Rise } from "./rise";
 
 /**
  * Payments: the bench under issuance walks through the six kinds, drawing each one's payment as it
- * moves. Its words and bubble are the payments API section further down the page; the bench moves
- * that bubble through the page's PaymentKindProvider. Deposit tops up through a ramp, so it is
- * held back with ramps.
+ * moves. Deposit tops up through a ramp, so it is held back with ramps.
  */
 export function PaymentsSection() {
   const comingSoonKinds: PaymentKind[] = isComingSoon("ramps") ? ["deposit"] : [];

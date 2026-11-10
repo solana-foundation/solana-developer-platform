@@ -691,6 +691,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                 status = 'pending_activation'
                 OR (status = 'activating' AND ?::text IS NOT NULL AND updated_at <= ?)
               )
+              AND (?::text IS NULL OR updated_at = ?)
           RETURNING *`
         )
         .bind(
@@ -700,7 +701,9 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           params.organizationId,
           params.projectId,
           staleBefore,
-          staleBefore
+          staleBefore,
+          params.expectedUpdatedAt ?? null,
+          params.expectedUpdatedAt ?? null
         )
         .first<Record<string, unknown>>();
 

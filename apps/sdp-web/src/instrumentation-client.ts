@@ -9,7 +9,6 @@ const sentryDsn =
   process.env.NODE_ENV === "development" || process.env.NEXT_PUBLIC_DISABLE_SENTRY === "1"
     ? undefined
     : process.env.NEXT_PUBLIC_SENTRY_DSN;
-const initialFeedbackTheme = document.documentElement.classList.contains("dark") ? "dark" : "light";
 
 if (sentryDsn) {
   Sentry.init({
@@ -21,21 +20,6 @@ if (sentryDsn) {
       Sentry.replayIntegration({
         maskAllText: true,
         blockAllMedia: true,
-      }),
-      Sentry.feedbackIntegration({
-        autoInject: false,
-        showBranding: false,
-        enableScreenshot: true,
-        colorScheme: initialFeedbackTheme,
-        showName: false,
-        showEmail: false,
-        // No `useSentryUser` mapping: the Sentry user record is the Clerk user
-        // id and nothing else (see sentry-user-context.tsx), so there is no
-        // name or email to reuse. A report is traced back through that id.
-        formTitle: "Share feedback",
-        submitButtonLabel: "Send feedback",
-        messagePlaceholder: "Describe what you expected and what happened instead.",
-        successMessageText: "Thanks for your feedback!",
       }),
     ],
 

@@ -268,3 +268,38 @@ describe("API playground allowlist", () => {
 function paths(endpoints: ApiPlaygroundEndpointConfig[]) {
   return endpoints.map((endpoint) => endpoint.path.split("?", 1)[0]);
 }
+
+// Regression: every write's snippet showed an Idempotency-Key and the "reuse
+// this key" note, even on routes that ignore the header.
+describe("API playground key contract", () => {
+  it("gives every form, hand-authored ones too, its route's Idempotency-Key contract", () => {
+    const messages = getMessages("en");
+    const t = (
+      key: Parameters<typeof translate<typeof messages>>[1],
+      values?: Record<string, string | number>
+    ) => translate(messages, key, values);
+    const built = [
+      ...buildWalletsPlaygroundEndpointConfigs({ connectedProviders: [], wallets: [], t }),
+      ...buildPaymentsPlaygroundEndpointConfigs(
+        { transfers: [], wallets: [], rampProviders: [] },
+        t
+      ),
+      ...buildCounterpartyPlaygroundEndpointConfigs([], t),
+      ...buildIssuancePlaygroundEndpointConfigs({ templates: [], tokens: [], t }),
+    ];
+    const generated = new Map(
+      (["wallets", "payments", "counterparties", "issuance"] as const).flatMap((module) =>
+        getOpenApiPlaygroundEndpoints(module).map((endpoint) => [operationKey(endpoint), endpoint])
+      )
+    );
+    for (const endpoint of built) {
+      const reference = generated.get(operationKey(endpoint));
+      if (reference === undefined) continue;
+      expect([operationKey(endpoint), endpoint.takesIdempotencyKey]).toEqual([
+        operationKey(endpoint),
+        reference.takesIdempotencyKey,
+      ]);
+    }
+    expect(built.some((endpoint) => endpoint.takesIdempotencyKey === false)).toBe(true);
+  });
+});

@@ -56,14 +56,15 @@
   gap: 26px;
 }
 
-/* the SDP lockup; the dark one over night */
-/* a finger tall, without moving the bar */
+/* the full wordmark (1108:100), the dark one over night; the SDP mark alone stays in the partners
+   drawing. A finger tall, without moving the bar */
 .brand {
   position: relative;
   display: block;
   box-sizing: content-box;
-  width: 78px;
+  width: auto;
   height: 30px;
+  aspect-ratio: 1108 / 100;
   padding-block: 7px;
   margin-block: -7px;
   justify-self: start;
@@ -573,6 +574,19 @@
     width: 44px;
     height: 44px;
     margin-right: -10px;
+  }
+}
+
+/* on a phone the wordmark shrinks with the screen, at most 24px tall, so it fits the
+   band (100vw - 40px) beside the language button (36px), the burger (34px past its margin) and
+   the bar's: 120px in all */
+@media (max-width: 600px) {
+  .inner {
+    gap: 0;
+  }
+
+  .brand {
+    height: min(24px, calc((100vw - 120px) * 100 / 1108));
   }
 }
 

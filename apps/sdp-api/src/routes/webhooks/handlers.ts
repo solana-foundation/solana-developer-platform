@@ -23,8 +23,13 @@ import { ClerkOrganizationsService } from "@/services/clerk-organizations.servic
 import { verifiedPrimaryEmailFromClerkUser } from "@/services/clerk-users.service";
 import { applyStoredRampWebhookEvent } from "@/services/jobs/replay-ramp-webhook-events";
 import {
+  isDeletedClerkUser,
+  linkClerkIdentityWithin,
+  lockClerkUser,
   mirrorClerkMembershipDeletion,
   organizationsReachingPerson,
+  pseudonymizeDeletedPerson,
+  recordDeletedClerkUser,
 } from "@/services/organization-membership.service";
 import type { WebhookProcessor } from "@/services/ramps/webhooks/processor";
 import {
@@ -296,6 +301,8 @@ async function mirrorMembershipDeletion(c: AppContext, data: OrganizationMembers
  * through a membership or a pending invitation. A deleted Clerk user never
  * comes back, so Clerk lists none of their memberships, but the person may have
  * signed up again under a new Clerk user that holds one: that membership stays.
+ * Then the person's email and name are pseudonymized, unless another Clerk user
+ * is still linked to them (pseudonymizeDeletedPerson).
  *
  * @param c - The request context.
  * @param data - The deleted Clerk user.
@@ -304,7 +311,10 @@ async function mirrorUserDeletion(c: AppContext, data: DeletedObjectJSON) {
   if (!data.id) {
     throw badRequest("user.deleted event names no user");
   }
-  const userId = await findClerkUserMapping(c, data.id);
+  // Recorded first, under the Clerk user's lock, with the mapping read there:
+  // a mapping written while this waited is still found and cleaned up, and
+  // none can be written after (HOO-2303).
+  const userId = await recordDeletedClerkUser(getDb(c.env), data.id);
   if (userId === null) {
     logIgnoredClerkEvent(c, "user", data.id);
     return;
@@ -320,87 +330,74 @@ async function mirrorUserDeletion(c: AppContext, data: DeletedObjectJSON) {
       }),
     });
   }
+  await pseudonymizeDeletedPerson(getDb(c.env), { userId, deletedClerkUserId: data.id });
 }
 
 async function ensureUserMapping(
   c: AppContext,
   user: { id: string; email: string; name?: string | null }
-): Promise<string> {
-  const db = getDb(c.env);
-  const email = user.email.toLowerCase();
-  const existing = await db
-    .prepare(
-      `SELECT aui.user_id, u.email
-       FROM auth_user_identities aui
-       JOIN users u ON u.id = aui.user_id
-       WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
-    )
-    .bind(user.id)
-    .first<{ user_id: string; email: string }>();
-
-  if (existing?.user_id) {
-    const updates = ["status = 'active'"];
-    const params: (string | null)[] = [];
-    let identityEmail = existing.email;
-
-    const owner = await db
-      .prepare("SELECT id FROM users WHERE email = ?")
-      .bind(email)
-      .first<{ id: string }>();
-
-    if (!owner || owner.id === existing.user_id) {
-      updates.push("email = ?");
-      params.push(email);
-      identityEmail = email;
+): Promise<string | null> {
+  return getDb(c.env).transaction(async (tx) => {
+    // Under the Clerk user's lock, so a deletion that commits meanwhile is
+    // seen here: a late event for a Clerk user Clerk already deleted would
+    // restore, or recreate, the details its deletion removed (HOO-2303).
+    await lockClerkUser(tx, user.id);
+    if (await isDeletedClerkUser(tx, user.id)) {
+      logIgnoredClerkEvent(c, "user", user.id);
+      return null;
     }
+    const email = user.email.toLowerCase();
+    const existing = await tx
+      .prepare(
+        `SELECT aui.user_id, u.email
+         FROM auth_user_identities aui
+         JOIN users u ON u.id = aui.user_id
+         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
+      )
+      .bind(user.id)
+      .first<{ user_id: string; email: string }>();
 
-    if (user.name) {
-      updates.push("name = ?");
-      params.push(user.name);
-    }
+    if (existing?.user_id) {
+      const updates = ["status = 'active'"];
+      const params: (string | null)[] = [];
+      let identityEmail = existing.email;
 
-    params.push(existing.user_id);
-    await db.batch([
-      db.prepare(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`).bind(...params),
-      db
+      const owner = await tx
+        .prepare("SELECT id FROM users WHERE email = ?")
+        .bind(email)
+        .first<{ id: string }>();
+
+      if (!owner || owner.id === existing.user_id) {
+        updates.push("email = ?");
+        params.push(email);
+        identityEmail = email;
+      }
+
+      if (user.name) {
+        updates.push("name = ?");
+        params.push(user.name);
+      }
+
+      params.push(existing.user_id);
+      await tx
+        .prepare(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`)
+        .bind(...params)
+        .run();
+      await tx
         .prepare(
           `UPDATE auth_user_identities
            SET email = ?, updated_at = datetime('now')
            WHERE provider = 'clerk' AND provider_user_id = ?`
         )
-        .bind(identityEmail, user.id),
-    ]);
+        .bind(identityEmail, user.id)
+        .run();
 
-    return existing.user_id;
-  }
+      return existing.user_id;
+    }
 
-  const localUser = await db
-    .prepare("SELECT id FROM users WHERE email = ?")
-    .bind(email)
-    .first<{ id: string }>();
-  const userId = localUser?.id ?? `usr_${crypto.randomUUID()}`;
-
-  if (!localUser) {
-    await db
-      .prepare(
-        `INSERT INTO users (id, email, name, email_verified, status)
-         VALUES (?, ?, ?, 1, 'active')`
-      )
-      .bind(userId, email, user.name)
-      .run();
-  }
-
-  await db
-    .prepare(
-      `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
-       VALUES (?, 'clerk', ?, ?, ?)
-       ON CONFLICT (provider, provider_user_id)
-       DO UPDATE SET user_id = EXCLUDED.user_id, email = EXCLUDED.email, updated_at = datetime('now')`
-    )
-    .bind(`aui_${crypto.randomUUID()}`, user.id, userId, email)
-    .run();
-
-  return userId;
+    return (await linkClerkIdentityWithin(tx, { clerkUserId: user.id, email, name: user.name }))
+      .userId;
+  });
 }
 
 async function syncUser(c: AppContext, data: UserJSON) {

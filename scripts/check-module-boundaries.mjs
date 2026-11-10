@@ -35,6 +35,7 @@ const MODULE_METADATA = [
       "@sdp/jupiter-lend",
       "@sdp/ondo",
       "@sdp/payments",
+      "@sdp/plume",
       "@sdp/private-channels",
       "@sdp/redaction",
       "@sdp/rpc",
@@ -184,6 +185,12 @@ const MODULE_METADATA = [
     directory: "packages/sdp-jupiter-lend",
     purpose: "Jupiter Lend Earn USDT deposit/withdraw plans over the official SDK.",
     allowedDependencies: ["@sdp/earn", "@sdp/rpc", "@sdp/types"],
+  },
+  {
+    name: "@sdp/plume",
+    directory: "packages/sdp-plume",
+    purpose: "Plume RWA transaction admission, cross-chain settlement, and live positions.",
+    allowedDependencies: ["@sdp/earn", "@sdp/payments", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
   },
   {
     name: "@sdp/ondo",

@@ -281,6 +281,9 @@ export interface Env extends ManagedRpcEnv {
   UPSHIFT_SANDBOX_API_KEY?: string;
   PERENA_API_KEY?: string;
   PERENA_SANDBOX_API_KEY?: string;
+  // Separate document-reference encryption keys; never applicant answers/files.
+  EARN_ONBOARDING_ENCRYPTION_KEY?: string;
+  EARN_ONBOARDING_KMS_KEY_NAME?: string;
   // Packed JSON: {"clientId","clientSecret","username","password"} — the
   // OAuth2 password-grant quad WisdomTree Connect provisions. One value per
   // environment; format documented on EarnRuntimeEnvironment in @sdp/earn.
@@ -316,6 +319,8 @@ declare module "hono" {
     idempotencyCommitted?: boolean;
     // Set by replayFromRecord when the key's domain row records another request
     idempotencyRecordMismatch?: boolean;
+    // Set by markIdempotencyRerunnable() when running the request again is safe
+    idempotencyRerunnable?: boolean;
     apiKey?: {
       id: string;
       organizationId: string;
