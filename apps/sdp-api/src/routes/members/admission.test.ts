@@ -18,6 +18,7 @@ import {
 } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { readInvitationStatus, seedInvitation } from "@/test/helpers/invitations";
+import { recordLoggedEvents } from "@/test/helpers/log-events";
 import { organizationMember, seedOrganizationMembers } from "@/test/helpers/organization-members";
 import {
   archiveProject,
@@ -34,6 +35,7 @@ const INVITATION_ID = "inv_admission";
 const ADMIN = organizationMember("admission_admin", "admin");
 const INVITEE = organizationMember("admission_invitee", "member");
 let projects: SeededDefaultProjects;
+let loggedEvents: ReturnType<typeof recordLoggedEvents>;
 
 async function signIn(orgRole: "admin" | "member", clerkOrgId: string): Promise<Response> {
   const token = await signTestClerkJwt({
@@ -100,6 +102,19 @@ const ACCEPT_INVITE_AUDIT = {
   user_id: INVITEE.userId,
 };
 
+function invitationAcceptedEvent(role: OrganizationRole) {
+  return [
+    "info",
+    {
+      event: "sdp_api_invitation_accepted",
+      organization_id: ORGANIZATION.id,
+      user_id: INVITEE.userId,
+      invitation_id: INVITATION_ID,
+      role,
+    },
+  ];
+}
+
 async function inviteeProjectIds(): Promise<string[]> {
   const rows = await getDb(env).queryMany<{ project_id: string }>(
     "SELECT project_id FROM project_members WHERE user_id = ? ORDER BY project_id",
@@ -152,6 +167,7 @@ describe("sign-in admission", () => {
       createdBy: ADMIN.userId,
       members: [ADMIN.userId],
     });
+    loggedEvents = recordLoggedEvents(["sdp_api_invitation_accepted"]);
   });
 
   afterEach(async () => {
@@ -167,6 +183,7 @@ describe("sign-in admission", () => {
       "No pending invitation to this organization"
     );
     expect(await inviteeMembership()).toBeNull();
+    expect(loggedEvents()).toEqual([]);
   });
 
   it("expires an invitation past its expiry instead of admitting", async () => {
@@ -179,6 +196,7 @@ describe("sign-in admission", () => {
     );
     expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("expired");
     expect(await inviteeMembership()).toBeNull();
+    expect(loggedEvents()).toEqual([]);
   });
 
   it("reports an expired invitation as expired on every sign-in, not only the one that marked it", async () => {
@@ -252,7 +270,7 @@ describe("sign-in admission", () => {
     expect(await inviteeMembership()).toBeNull();
   });
 
-  it("admits at the invitation's role, never the Clerk role, into every project, audited", async () => {
+  it("admits at the invitation's role, never the Clerk role, into every project, audited and logged", async () => {
     await setInviteeMembership(null);
     await invite("admin", 7);
 
@@ -273,6 +291,7 @@ describe("sign-in admission", () => {
     expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("accepted");
     expect(await inviteeProjectIds()).toEqual([projects.production.id, projects.sandbox.id]);
     expect(await acceptInviteAudits()).toEqual([ACCEPT_INVITE_AUDIT]);
+    expect(loggedEvents()).toEqual([invitationAcceptedEvent("admin")]);
   });
 
   it("admits on a pending invitation stored in other letter case", async () => {
@@ -326,6 +345,7 @@ describe("sign-in admission", () => {
   it("does not restore an established member's missing project memberships", async () => {
     expect((await signIn("member", CLERK_ORG_ID)).status).toBe(200);
     expect(await inviteeProjectIds()).toEqual([]);
+    expect(loggedEvents()).toEqual([]);
   });
 
   it("rolls the claim, membership and audit back together when admission fails", async () => {
@@ -363,6 +383,7 @@ describe("sign-in admission", () => {
     expect(await inviteeMembership()).toMatchObject({ role: "member", status: "active" });
     expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("accepted");
     expect(await acceptInviteAudits()).toEqual([ACCEPT_INVITE_AUDIT]);
+    expect(loggedEvents()).toEqual([invitationAcceptedEvent("member")]);
   });
 
   it("answers the winner's role when a concurrent admission claims the invitation between its reads", async () => {

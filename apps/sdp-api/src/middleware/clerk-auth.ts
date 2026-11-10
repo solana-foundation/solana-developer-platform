@@ -21,6 +21,7 @@ import { AppError, badRequest, internalError, unauthorized } from "@/lib/errors"
 import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { organizationNotActive, readActiveOrganizationSettings } from "@/lib/organization-access";
 import { recordOrganizationEntitlements } from "@/lib/production-entitlement";
+import { logEvent } from "@/runtime/money-path-events";
 import { AuditService } from "@/services/audit.service";
 import {
   ClerkUsersService,
@@ -349,6 +350,13 @@ async function ensureMembership(
         },
         result: undefined,
       };
+    });
+    logEvent("info", {
+      event: "sdp_api_invitation_accepted",
+      organization_id: params.organizationId,
+      user_id: params.userId,
+      invitation_id: pendingInvite.id,
+      role,
     });
     return role;
   } catch (error) {
