@@ -9,6 +9,7 @@ import { FileTextIcon, ImageIcon, PaperclipIcon, SendIcon, XIcon } from "lucide-
 import Link from "next/link";
 import { type ChangeEvent, useId, useRef, useState, useTransition } from "react";
 import { z } from "zod";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useProjectHref } from "@/lib/use-dashboard-project";
@@ -30,7 +31,7 @@ const CATEGORY_LABEL_KEYS = {
   problem: "Feedback.categoryProblem",
   idea: "Feedback.categoryIdea",
   question: "Feedback.categoryQuestion",
-} as const;
+} as const satisfies Record<FeedbackCategory, MessageKey>;
 
 const HOME_HREF = "/dashboard";
 const MESSAGE_TOO_LONG = "Feedback.messageTooLong";
@@ -110,7 +111,6 @@ export function FeedbackForm({
           message: parsed.data.message,
           pageUrl,
           files,
-          toSentry: takesFiles,
         },
         sentryEvent
       );
@@ -306,7 +306,6 @@ interface FeedbackInput {
   message: string;
   pageUrl: string | undefined;
   files: readonly AttachedFile[];
-  toSentry: boolean;
 }
 
 /** What a Sentry event holds, so a retry can tell whether the last one still matches. */
@@ -329,7 +328,8 @@ async function sendFeedback(
   sentryEvent: { current: { signature: string; eventId: string } | null }
 ): Promise<SendResult> {
   let sentryEventId: string | undefined;
-  if (input.toSentry) {
+  // Files and the replay have somewhere to go only while the deployment runs Sentry.
+  if (Sentry.getClient() !== undefined) {
     const signature = sentrySignature(input);
     if (sentryEvent.current?.signature === signature) {
       sentryEventId = sentryEvent.current.eventId;

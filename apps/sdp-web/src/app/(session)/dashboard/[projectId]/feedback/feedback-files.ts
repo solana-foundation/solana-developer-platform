@@ -63,16 +63,21 @@ export function addFeedbackFiles(
 
 const FEEDBACK_FROM_MAX_LENGTH = 1024;
 
+/** A `from` value the screen takes: a path on the dashboard itself, never another site. */
+const FEEDBACK_FROM_SCHEMA = z
+  .string()
+  .max(FEEDBACK_FROM_MAX_LENGTH)
+  .startsWith("/dashboard/")
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what it refuses.
+  .refine((value) => !/[\\\u0000-\u001f\u007f]/.test(value) && !value.includes("//"));
+
 /**
  * The dashboard page a `from` value names, or none: only a path on the dashboard itself, so the
  * value can never point the email at another site.
  */
-export function feedbackFromPath(value: string | string[] | undefined): string | null {
-  if (typeof value !== "string" || value.length > FEEDBACK_FROM_MAX_LENGTH) return null;
-  if (!value.startsWith("/dashboard/")) return null;
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what it refuses.
-  if (/[\\\u0000-\u001f\u007f]/.test(value) || value.includes("//")) return null;
-  return value;
+export function feedbackFromPath(value: unknown): string | null {
+  const parsed = FEEDBACK_FROM_SCHEMA.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 export function feedbackFileSize(bytes: number): string {
