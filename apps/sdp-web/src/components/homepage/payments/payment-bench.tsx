@@ -13,7 +13,6 @@ import type { FigFonts } from "./figures/make-fig";
 import { FIGURE_WORDS, type FigureCopy } from "./figures/scene-input";
 import { PAYMENT_KINDS, type PaymentKind } from "./kinds";
 import styles from "./payment-bench.module.css";
-import { usePaymentKind } from "./payment-kind-context";
 
 /** The bench draws only once it is this near the screen. */
 const NEAR_MARGIN = "900px 0px";
@@ -39,7 +38,7 @@ function resolveFigureFonts(el: Element): FigFonts {
 export function PaymentBench({ comingSoonKinds }: { comingSoonKinds: readonly PaymentKind[] }) {
   const t = useTranslations();
   const locale = useLocale();
-  const { kind: current, show } = usePaymentKind();
+  const [current, setCurrent] = useState(0);
   const reducedMotion = useReducedMotion() ?? false;
   const arrived = useRiseArrived() ?? true;
   const [playing, setPlaying] = useState(true);
@@ -93,7 +92,7 @@ export function PaymentBench({ comingSoonKinds }: { comingSoonKinds: readonly Pa
       classes: { fig: styles.fig, on: styles.figOn, out: styles.figOut },
       reducedMotion,
       locale,
-      onShow: show,
+      onShow: setCurrent,
       onPlayingChange: setPlaying,
     });
     controllerRef.current = controller;
@@ -134,7 +133,7 @@ export function PaymentBench({ comingSoonKinds }: { comingSoonKinds: readonly Pa
       controllerRef.current = null;
     };
     /* the bench is built once; copy and labels are the catalog's, fixed for the page */
-  }, [reducedMotion, locale, show, copy, labels]);
+  }, [reducedMotion, locale, copy, labels]);
 
   useEffect(() => {
     if (!arrived) return;

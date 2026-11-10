@@ -1,5 +1,5 @@
 /*
- * "Settled everywhere, under a second.".
+ * "Sub-second finality meets enterprise throughput".
  * On the page's three columns: the paragraph takes the third and sits on the headline's first
  * line; the rails end with the second column and the list of settlements takes the third. It is a
  * dark panel (homepage.module.css `.panel`), its violet leaking in from the top right.
@@ -18,12 +18,17 @@
   margin-bottom: clamp(56px, 6vw, 88px);
 }
 
+.headline {
+  text-wrap: balance;
+}
+
 .intro {
   margin: 0 0 6px;
   max-width: 46ch;
   font: 500 clamp(16px, 1.3vw, 19px) / 1.45 var(--font);
   letter-spacing: -0.01em;
   color: var(--sub-n);
+  text-wrap: pretty;
 }
 
 /* the chosen phrase: a glass bubble with a soft violet glow inside */
