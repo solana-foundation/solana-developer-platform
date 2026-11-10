@@ -83,8 +83,6 @@ export const requestMainnetAccess = async (
   });
   logEvent("info", {
     event: "sdp_api_mainnet_access_requested",
-    organization_id: row.organization_id,
-    user_id: userId,
     country_code: row.country_code,
     terms_version: row.terms_version,
   });

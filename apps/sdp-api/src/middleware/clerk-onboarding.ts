@@ -8,6 +8,7 @@ import {
   verifyClerkSessionToken,
 } from "@/lib/clerk-token";
 import { unauthorized } from "@/lib/errors";
+import { runWithLogContext } from "@/runtime/logger";
 import { findClerkOrganizationMapping } from "@/services/clerk-organization-provisioning.service";
 import type { Env } from "@/types/env";
 
@@ -58,7 +59,9 @@ export function clerkOnboardingMiddleware() {
     });
 
     if (mapping) {
-      await runWithTenantDatabaseIdentity({ organizationId: mapping.organizationId }, next);
+      await runWithLogContext({ organization_id: mapping.organizationId }, () =>
+        runWithTenantDatabaseIdentity({ organizationId: mapping.organizationId }, next)
+      );
       return;
     }
 

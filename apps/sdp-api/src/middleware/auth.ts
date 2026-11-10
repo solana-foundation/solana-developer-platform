@@ -29,7 +29,7 @@ import { AppError } from "@/lib/errors";
 import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { type ApiKeyLookup, apiKeyRefusalKey, authorizeApiKey } from "@/lib/organization-access";
 import { recordOrganizationEntitlements } from "@/lib/production-entitlement";
-import { getLogger } from "@/runtime/logger";
+import { getLogger, runWithLogContext } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import {
   API_KEY_PRE_READ_MAX_REQUESTS,
@@ -80,8 +80,10 @@ function runAsAuthenticatedKey(
   key: Pick<ApiKeyContext, "id" | "organizationId">,
   next: Next
 ): Promise<void> {
-  return runWithTenantDatabaseIdentity({ organizationId: key.organizationId }, () =>
-    runAsMoneyPrincipal({ kind: "api_key", apiKeyId: key.id }, next)
+  return runWithLogContext({ organization_id: key.organizationId, api_key_id: key.id }, () =>
+    runWithTenantDatabaseIdentity({ organizationId: key.organizationId }, () =>
+      runAsMoneyPrincipal({ kind: "api_key", apiKeyId: key.id }, next)
+    )
   );
 }
 

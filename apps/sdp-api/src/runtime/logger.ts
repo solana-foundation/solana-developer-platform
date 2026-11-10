@@ -3,6 +3,11 @@ import { scrubTelemetry, scrubTelemetryString } from "@sdp/redaction/scrub";
 import pino, { type Logger, type LoggerOptions } from "pino";
 import { LOG_REDACTION_PATHS, REDACTION_CENSOR } from "./log-redaction";
 
+/**
+ * Merged into every line logged inside it, without passing through the scrubber: only values the
+ * server generated or registered (ids, a route pattern, a cron name), never an email, a name or
+ * anything a caller supplied. A field a line passes itself wins.
+ */
 export interface LogContext {
   request_id?: string;
   trace_id?: string;
@@ -11,6 +16,14 @@ export interface LogContext {
   route?: string;
   /** The Cron Definition whose slot is running. */
   cron?: string;
+  /** The organization the request is narrowed to. */
+  organization_id?: string;
+  /** The project the request acts on, on project-scoped routes. */
+  project_id?: string;
+  /** The signed-in person; absent on API-key requests. */
+  user_id?: string;
+  /** The authenticated API key; absent on signed-in requests. */
+  api_key_id?: string;
 }
 
 const store = new AsyncLocalStorage<LogContext>();

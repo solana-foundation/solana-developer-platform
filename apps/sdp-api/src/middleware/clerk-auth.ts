@@ -21,6 +21,7 @@ import { AppError, badRequest, internalError, unauthorized } from "@/lib/errors"
 import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { organizationNotActive, readActiveOrganizationSettings } from "@/lib/organization-access";
 import { recordOrganizationEntitlements } from "@/lib/production-entitlement";
+import { runWithLogContext } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { AuditService } from "@/services/audit.service";
 import {
@@ -487,8 +488,10 @@ function runAsSignedInMember(
   clerk: { userId: string; organizationId: string },
   next: Next
 ): Promise<void> {
-  return runWithTenantDatabaseIdentity({ organizationId: clerk.organizationId }, () =>
-    runAsMoneyPrincipal({ kind: "member", userId: clerk.userId }, next)
+  return runWithLogContext({ organization_id: clerk.organizationId, user_id: clerk.userId }, () =>
+    runWithTenantDatabaseIdentity({ organizationId: clerk.organizationId }, () =>
+      runAsMoneyPrincipal({ kind: "member", userId: clerk.userId }, next)
+    )
   );
 }
 
@@ -570,7 +573,7 @@ export function clerkSignupSessionMiddleware() {
       }
       const user = await ensureClerkUser(c.env, db, payload.sub, email);
       c.set("clerkSignup", { userId: user.userId, clerkUserId: payload.sub, email: user.email });
-      await next();
+      await runWithLogContext({ user_id: user.userId }, next);
     });
   };
 }
