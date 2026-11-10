@@ -16914,18 +16914,6 @@ Estimate transaction chunking and fees for a transfer batch.
 
   - **`amount`** · `string` · required
 
-- **`options`** · `object`
-
-  Execution options for transaction chunking and preflight validation. `priorityFee` is accepted for compatibility and ignored; no priority fee is applied.
-
-  - **`maxRecipientsPerTransaction`** · `integer` · min 1 · max 64
-
-  - **`priorityFee`** · `string` · one of `none`, `low`, `medium`, `high`, `auto` · example `none`
-
-    Accepted for compatibility and ignored. No priority fee is applied, regardless of the selected value.
-
-  - **`preflight`** · `boolean`
-
 - **`externalId`** · `string` · min length 1 · max length 256 · example `payroll_2026_06_30`
 
   Optional: an estimate moves nothing, so it names no payout run. Pass the run's `externalId` to estimate the batch you will create with it.
@@ -17088,11 +17076,6 @@ curl -X POST 'https://api.solana.com/v1/payments/transfer-batches/estimate' \
         "amount": "25.00"
       }
     ],
-    "options": {
-      "maxRecipientsPerTransaction": 20,
-      "priorityFee": "none",
-      "preflight": true
-    },
     "externalId": "payroll_2026_06_30"
   }'
 ```
@@ -17116,11 +17099,6 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches/est
         "amount": "25.00"
       }
     ],
-    "options": {
-      "maxRecipientsPerTransaction": 20,
-      "priorityFee": "none",
-      "preflight": true
-    },
     "externalId": "payroll_2026_06_30"
   })
 });
@@ -17143,11 +17121,6 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches/estimate"
         "amount": "25.00"
       }
     ],
-    "options": {
-      "maxRecipientsPerTransaction": 20,
-      "priorityFee": "none",
-      "preflight": True
-    },
     "externalId": "payroll_2026_06_30"
   })
 ```
@@ -17252,18 +17225,6 @@ Create a custody-executed outbound transfer batch.
   - **`counterpartyAccountId`** · `string` · required · min length 1
 
   - **`amount`** · `string` · required
-
-- **`options`** · `object`
-
-  Execution options for transaction chunking and preflight validation. `priorityFee` is accepted for compatibility and ignored; no priority fee is applied.
-
-  - **`maxRecipientsPerTransaction`** · `integer` · min 1 · max 64
-
-  - **`priorityFee`** · `string` · one of `none`, `low`, `medium`, `high`, `auto` · example `none`
-
-    Accepted for compatibility and ignored. No priority fee is applied, regardless of the selected value.
-
-  - **`preflight`** · `boolean`
 
 - **`externalId`** · `string` · required · min length 1 · max length 256 · example `payroll_2026_06_30`
 
@@ -17747,11 +17708,6 @@ curl -X POST 'https://api.solana.com/v1/payments/transfer-batches' \
         "amount": "25.00"
       }
     ],
-    "options": {
-      "maxRecipientsPerTransaction": 20,
-      "priorityFee": "none",
-      "preflight": true
-    },
     "externalId": "payroll_2026_06_30"
   }'
 ```
@@ -17778,11 +17734,6 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches", {
         "amount": "25.00"
       }
     ],
-    "options": {
-      "maxRecipientsPerTransaction": 20,
-      "priorityFee": "none",
-      "preflight": true
-    },
     "externalId": "payroll_2026_06_30"
   })
 });
@@ -17807,11 +17758,6 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches",
         "amount": "25.00"
       }
     ],
-    "options": {
-      "maxRecipientsPerTransaction": 20,
-      "priorityFee": "none",
-      "preflight": True
-    },
     "externalId": "payroll_2026_06_30"
   })
 ```
@@ -18205,7 +18151,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Retry a transfer batch's failed recipients
 Source: https://platform.solana.com/docs/reference/api/payments/retry-payment-transfer-batch
 
-> Sends the batch's failed recipients again, from the same source wallet with the batch's options, and no other recipient.
+> Sends the batch's failed recipients again, from the same source wallet, and no other recipient.
 
 `POST /v1/payments/transfer-batches/{batchId}/retry`
 
@@ -36820,16 +36766,15 @@ The two ids do different jobs:
 
 Use `GET /v1/payments/transfer-batches/{batchId}` to inspect recipient and chunk outcomes.
 
-Batch execution does not add a priority fee. `options.priorityFee` is accepted for
-compatibility and ignored, including `auto`, `low`, `medium`, and `high`. The
-estimate reports `priorityFeeLamports: "0"`.
+Batch execution does not add a priority fee. The estimate reports
+`priorityFeeLamports: "0"`.
 
 ### One batch per payout run
 
 The batch `externalId` names the payout run, and it is unique per project and source wallet. Whatever `Idempotency-Key` it carries, a batch with an `externalId` already used on that wallet never pays anyone again:
 
 - The same request, from the same API key, returns the existing batch as it stands. A worker that restarts with a fresh key gets the original run back.
-- Any other request (different recipients, amounts or options, or another API key) returns `409 TRANSFER_BATCH_RUN_EXISTS` with the existing batch in `error.details.batchId`. A replay only goes to the API key that sent the run, so after a key rotation the new key gets the 409: read the batch by its id instead of resending.
+- Any other request (different recipients or amounts, or another API key) returns `409 TRANSFER_BATCH_RUN_EXISTS` with the existing batch in `error.details.batchId`. A replay only goes to the API key that sent the run, so after a key rotation the new key gets the 409: read the batch by its id instead of resending.
 
 Derive the `externalId` from data you already have, so a worker that crashes and restarts computes the same value without storing anything: `payroll-2026-05`, `invoice-run-8812`. Never generate it at random: a random value is new on every attempt and protects nothing. New recipients go in a new run with a new `externalId`, never in a renamed copy of a run that was already sent.
 
@@ -36873,7 +36818,7 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches/{batchId}/retry
   -H "Idempotency-Key: 8b2e4f1c-7d3a-4e9b-a6c5-1f0d9e8c7b6a"
 ```
 
-The retry sends only the batch's `failed` recipients, to the addresses the batch recorded for them, from the same wallet with the batch's options, and returns the batch with those recipients `processing` again. Recipients still `pending` or `processing` may still land, so they are never sent again. Each resent recipient keeps its row in the batch and links to its new transfer.
+The retry sends only the batch's `failed` recipients, to the addresses the batch recorded for them, from the same wallet, and returns the batch with those recipients `processing` again. Recipients still `pending` or `processing` may still land, so they are never sent again. Each resent recipient keeps its row in the batch and links to its new transfer.
 
 - Use a new `Idempotency-Key` for each retry you mean to send. The same key never sends again, including after a timeout or a server error, so resend a lost answer under the same key. It returns the saved response while that is stored, which can still show recipients `processing`: read the batch with `GET /v1/payments/transfer-batches/{batchId}` for its current state. If recipients fail again later, a retry under that old key sends nothing.
 - Any API key that may send from the batch's wallet can retry it, not only the one that created it.

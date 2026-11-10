@@ -27,7 +27,6 @@ import { readSponsoredRentLimit } from "./sponsored-rent";
 import {
   buildInstructionGroups,
   chunkInstructionGroups,
-  DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
   type TransactionChunk,
 } from "./transaction";
 import type { Rpc } from "./types";
@@ -115,8 +114,6 @@ export async function estimateTransferBatch(
     feePayer,
     lifetime,
     sponsoredRent,
-    maxRecipientsPerTransaction:
-      body.options?.maxRecipientsPerTransaction ?? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
   });
   const [networkFeeLamports, rentShortfall] = await Promise.all([
     estimateNetworkFeeLamports(resolved.rpc, chunks),

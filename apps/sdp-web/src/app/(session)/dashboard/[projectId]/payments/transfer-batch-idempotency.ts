@@ -93,7 +93,6 @@ export function transferBatchRequestFingerprint(request: PaymentTransferBatchReq
       recipient.counterpartyAccountId,
       recipient.amount,
     ]),
-    canonical.options ?? null,
   ]);
 }
 
