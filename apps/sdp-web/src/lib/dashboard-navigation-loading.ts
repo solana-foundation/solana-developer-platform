@@ -64,6 +64,7 @@ export type DashboardLoadingRoute =
   | "api-key-edit"
   | "settings"
   | "account"
+  | "feedback"
   | "integrations"
   | "integration-detail"
   | "private-channels-setup"
@@ -114,6 +115,7 @@ function resolveOperationsLoadingRoute(pathname: string): DashboardLoadingRoute 
   if (/^\/dashboard\/api-keys\/[^/]+\/edit$/.test(pathname)) return "api-key-edit";
   if (pathname === "/dashboard/settings") return "settings";
   if (pathname === DASHBOARD_ACCOUNT_HREF) return "account";
+  if (pathname === DASHBOARD_FEEDBACK_HREF) return "feedback";
   return null;
 }
 

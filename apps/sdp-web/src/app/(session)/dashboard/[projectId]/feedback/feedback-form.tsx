@@ -8,17 +8,21 @@ import * as Sentry from "@sentry/nextjs";
 import { FileTextIcon, ImageIcon, PaperclipIcon, SendIcon, XIcon } from "lucide-react";
 import Link from "next/link";
 import { type ChangeEvent, useId, useRef, useState, useTransition } from "react";
+import { z } from "zod";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useProjectHref } from "@/lib/use-dashboard-project";
+import { useZodForm } from "@/lib/use-zod-form";
 import {
   type AttachedFile,
   addFeedbackFiles,
   FEEDBACK_CATEGORIES,
   FEEDBACK_FILE_TYPES,
   FEEDBACK_FILES_MAX,
+  FEEDBACK_MESSAGE_MAX_LENGTH,
   type FeedbackCategory,
   type FileRefusal,
+  feedbackCategoryOf,
   feedbackFileSize,
 } from "./feedback-files";
 
@@ -29,6 +33,13 @@ const CATEGORY_LABEL_KEYS = {
 } as const;
 
 const HOME_HREF = "/dashboard";
+const MESSAGE_TOO_LONG = "Feedback.messageTooLong";
+
+/** What is sent: an optional category and the message, within the API's limit. */
+const FEEDBACK_SCHEMA = z.object({
+  category: z.union([z.enum(FEEDBACK_CATEGORIES), z.literal("")]),
+  message: z.string().trim().min(1).max(FEEDBACK_MESSAGE_MAX_LENGTH, MESSAGE_TOO_LONG),
+});
 
 type Translate = ReturnType<typeof useTranslations>;
 
@@ -58,8 +69,9 @@ export function FeedbackForm({ organizationId }: { organizationId: string }) {
   const t = useTranslations();
   const projectHref = useProjectHref();
   const messageId = useId();
-  const [category, setCategory] = useState<FeedbackCategory | "">("");
-  const [message, setMessage] = useState("");
+  const form = useZodForm(FEEDBACK_SCHEMA, { category: "", message: "" }, (message) =>
+    message === MESSAGE_TOO_LONG ? t(MESSAGE_TOO_LONG) : message
+  );
   const [files, setFiles] = useState<AttachedFile[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -75,26 +87,20 @@ export function FeedbackForm({ organizationId }: { organizationId: string }) {
   };
 
   const submit = () => {
-    const trimmed = message.trim();
-    if (!trimmed || sending) return;
+    if (sending) return;
+    const parsed = form.validate();
+    if (!parsed.ok) return;
     setSendError(null);
     startSend(async () => {
       const result = await sendFeedback({
         organizationId,
-        category,
-        message: trimmed,
+        category: parsed.data.category,
+        message: parsed.data.message,
         files,
         toSentry: takesFiles,
       });
-      if (result.ok) {
-        setSentFiles(files.length);
-        return;
-      }
-      setSendError(
-        result.status === 503 || result.status === null
-          ? t("Feedback.unavailable")
-          : t("Feedback.submitFailed", { error: result.error })
-      );
+      if (result.kind === "sent") setSentFiles(files.length);
+      else setSendError(sendErrorText(result, t));
     });
   };
 
@@ -119,8 +125,8 @@ export function FeedbackForm({ organizationId }: { organizationId: string }) {
             value,
             label: t(CATEGORY_LABEL_KEYS[value]),
           }))}
-          value={category}
-          onChange={(value) => setCategory(value as FeedbackCategory)}
+          value={form.values.category}
+          onChange={(value) => form.setField("category", feedbackCategoryOf(value))}
           disabled={sending}
         />
       </div>
@@ -134,12 +140,19 @@ export function FeedbackForm({ organizationId }: { organizationId: string }) {
           id={messageId}
           autoFocus
           rows={6}
-          value={message}
-          onChange={(event) => setMessage(event.target.value)}
+          value={form.values.message}
+          onChange={(event) => form.setField("message", event.target.value)}
           placeholder={t("Feedback.messagePlaceholder")}
           disabled={sending}
+          aria-invalid={form.errors.message ? true : undefined}
+          aria-describedby={form.errors.message ? `${messageId}-error` : undefined}
           className="resize-y text-body"
         />
+        {form.errors.message ? (
+          <p id={`${messageId}-error`} className="text-meta text-error">
+            {form.errors.message}
+          </p>
+        ) : null}
       </div>
 
       <AttachedFileList
@@ -148,6 +161,7 @@ export function FeedbackForm({ organizationId }: { organizationId: string }) {
         onRemove={(key) => {
           setFiles(files.filter((entry) => entry.key !== key));
           setFileError(null);
+          setSendError(null);
         }}
       />
 
@@ -162,13 +176,19 @@ export function FeedbackForm({ organizationId }: { organizationId: string }) {
             <span />
           )}
           <div className="flex items-center gap-2">
-            <Button asChild variant="ghost">
-              <Link href={homeHref}>{t("Feedback.cancel")}</Link>
-            </Button>
+            {sending ? (
+              <Button type="button" variant="ghost" disabled>
+                {t("Feedback.cancel")}
+              </Button>
+            ) : (
+              <Button asChild variant="ghost">
+                <Link href={homeHref}>{t("Feedback.cancel")}</Link>
+              </Button>
+            )}
             <Button
               type="submit"
               loading={sending}
-              disabled={!message.trim()}
+              disabled={!form.values.message.trim()}
               iconLeft={<SendIcon aria-hidden="true" />}
             >
               {t("Feedback.submit")}
@@ -190,6 +210,44 @@ export function FeedbackForm({ organizationId }: { organizationId: string }) {
   );
 }
 
+type SendResult =
+  | { kind: "sent" }
+  | { kind: "unreadable"; name: string }
+  | { kind: "unavailable" }
+  | { kind: "failed"; error: string };
+
+function sendErrorText(result: Exclude<SendResult, { kind: "sent" }>, t: Translate): string {
+  switch (result.kind) {
+    case "unreadable":
+      return t("Feedback.attachUnreadable", { name: result.name });
+    case "unavailable":
+      return t("Feedback.unavailable");
+    case "failed":
+      return t("Feedback.submitFailed", { error: result.error });
+    default: {
+      const exhaustive: never = result;
+      throw new Error(`Unhandled feedback result: ${JSON.stringify(exhaustive)}`);
+    }
+  }
+}
+
+/** Reads each attached file; a file that can no longer be read is named, and nothing is sent. */
+async function readAttachments(files: readonly AttachedFile[]) {
+  const attachments: { filename: string; data: Uint8Array; contentType: string }[] = [];
+  for (const { file } of files) {
+    try {
+      attachments.push({
+        filename: file.name,
+        data: new Uint8Array(await file.arrayBuffer()),
+        contentType: file.type,
+      });
+    } catch {
+      return { ok: false as const, name: file.name };
+    }
+  }
+  return { ok: true as const, attachments };
+}
+
 /**
  * Files and the replay go to Sentry first, when the deployment runs it, so the email can name
  * the event that holds them; the words then go to the SDP team's inbox through the API.
@@ -200,17 +258,12 @@ async function sendFeedback(input: {
   message: string;
   files: readonly AttachedFile[];
   toSentry: boolean;
-}) {
+}): Promise<SendResult> {
   const url = window.location.href;
   let sentryEventId: string | undefined;
   if (input.toSentry) {
-    const attachments = await Promise.all(
-      input.files.map(async ({ file }) => ({
-        filename: file.name,
-        data: new Uint8Array(await file.arrayBuffer()),
-        contentType: file.type,
-      }))
-    );
+    const read = await readAttachments(input.files);
+    if (!read.ok) return { kind: "unreadable", name: read.name };
     sentryEventId = Sentry.captureFeedback(
       {
         message: input.message,
@@ -218,10 +271,10 @@ async function sendFeedback(input: {
         url,
         tags: input.category ? { feedback_category: input.category } : undefined,
       },
-      { includeReplay: true, attachments }
+      { includeReplay: true, attachments: read.attachments }
     );
   }
-  return dashboardFetch<unknown>(
+  const result = await dashboardFetch<unknown>(
     `/api/dashboard/organizations/${encodeURIComponent(input.organizationId)}/feedback`,
     {
       method: "POST",
@@ -234,21 +287,49 @@ async function sendFeedback(input: {
       },
     }
   );
+  if (result.ok) return { kind: "sent" };
+  if (result.status === 503 || result.status === null) return { kind: "unavailable" };
+  return { kind: "failed", error: result.error };
+}
+
+type SentBody =
+  | { kind: "noEmail" }
+  | { kind: "noFiles"; email: string }
+  | { kind: "oneFile"; email: string }
+  | { kind: "files"; email: string; count: number };
+
+function sentBodyOf(email: string | null, files: number): SentBody {
+  if (email === null) return { kind: "noEmail" };
+  if (files === 0) return { kind: "noFiles", email };
+  if (files === 1) return { kind: "oneFile", email };
+  return { kind: "files", email, count: files };
+}
+
+function sentBodyText(body: SentBody, t: Translate): string {
+  switch (body.kind) {
+    case "noEmail":
+      return t("Feedback.sentBodyNoEmail");
+    case "noFiles":
+      return t("Feedback.sentBody", { email: body.email });
+    case "oneFile":
+      return t("Feedback.sentBodyOneFile", { email: body.email });
+    case "files":
+      return t("Feedback.sentBodyFiles", { email: body.email, count: String(body.count) });
+    default: {
+      const exhaustive: never = body;
+      throw new Error(`Unhandled sent body: ${JSON.stringify(exhaustive)}`);
+    }
+  }
 }
 
 function FeedbackSent({ files, homeHref }: { files: number; homeHref: string }) {
   const t = useTranslations();
   const { user } = useUser();
   const email = user?.primaryEmailAddress?.emailAddress ?? null;
-  let body: string;
-  if (email === null) body = t("Feedback.sentBodyNoEmail");
-  else if (files === 0) body = t("Feedback.sentBody", { email });
-  else if (files === 1) body = t("Feedback.sentBodyOneFile", { email });
-  else body = t("Feedback.sentBodyFiles", { email, count: String(files) });
   return (
     <div className="flex flex-col items-start gap-3" role="status">
       <h2 className="text-lg font-medium text-primary">{t("Feedback.sentTitle")}</h2>
-      <p className="text-body text-secondary">{body}</p>
+      <p className="text-body text-secondary">{sentBodyText(sentBodyOf(email, files), t)}</p>
       <Button asChild variant="outline" className="mt-3">
         <Link href={homeHref}>{t("Feedback.backTo")}</Link>
       </Button>

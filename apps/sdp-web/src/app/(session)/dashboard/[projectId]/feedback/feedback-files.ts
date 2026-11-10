@@ -1,6 +1,9 @@
 export const FEEDBACK_CATEGORIES = ["problem", "idea", "question"] as const;
 export type FeedbackCategory = (typeof FEEDBACK_CATEGORIES)[number];
 
+/** The API's limit on the message (`FEEDBACK_MESSAGE_MAX_LENGTH` in sdp-api). */
+export const FEEDBACK_MESSAGE_MAX_LENGTH = 5000;
+
 export const FEEDBACK_FILE_TYPES = [
   "image/png",
   "image/jpeg",
@@ -8,12 +11,18 @@ export const FEEDBACK_FILE_TYPES = [
   "image/gif",
   "application/pdf",
 ] as const;
+const FEEDBACK_FILE_TYPE_SET: ReadonlySet<string> = new Set(FEEDBACK_FILE_TYPES);
 export const FEEDBACK_FILE_MAX_BYTES = 10 * 1024 * 1024;
 export const FEEDBACK_FILES_MAX = 5;
 
 export interface AttachedFile {
   key: string;
   file: File;
+}
+
+/** The category a segmented-control value names, or none for anything else. */
+export function feedbackCategoryOf(value: string): FeedbackCategory | "" {
+  return FEEDBACK_CATEGORIES.find((category) => category === value) ?? "";
 }
 
 /** Why a picked file was left out, naming it where the message does. */
@@ -33,7 +42,7 @@ export function addFeedbackFiles(
   const files = [...attached];
   let refusal: FileRefusal | null = null;
   for (const file of picked) {
-    if (!(FEEDBACK_FILE_TYPES as readonly string[]).includes(file.type)) {
+    if (!FEEDBACK_FILE_TYPE_SET.has(file.type)) {
       refusal = { reason: "type", name: file.name };
     } else if (file.size > FEEDBACK_FILE_MAX_BYTES) {
       refusal = { reason: "size", name: file.name };

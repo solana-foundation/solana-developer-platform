@@ -36,6 +36,7 @@ describe("dashboard loading route", () => {
     ["/dashboard/api-keys/key-1/edit", "api-key-edit"],
     ["/dashboard/settings", "settings"],
     ["/dashboard/account", "account"],
+    ["/dashboard/feedback", "feedback"],
     ["/dashboard/helius-rings", "helius-rings"],
     ["/dashboard/integrations", "integrations"],
     ["/dashboard/integrations/privy", "integration-detail"],
