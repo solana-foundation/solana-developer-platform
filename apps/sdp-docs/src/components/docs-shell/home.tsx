@@ -70,15 +70,9 @@ function PartnerRow({ label, partners }: { label: string; partners: readonly Par
 }
 
 const MODEL_ITEMS = [
-  { label: "Your app", detail: "Calls one API for everything it does on Solana." },
-  {
-    label: "SDP",
-    detail: "Connects your providers, enforces each key's access and keeps an audit trail.",
-  },
-  {
-    label: "Providers",
-    detail: "The custody, RPC and other services you choose, behind the same API.",
-  },
+  { label: "Build", detail: "Create wallets and move payments on devnet with test tokens." },
+  { label: "Control", detail: "Grant each key only what it needs; sensitive actions are logged." },
+  { label: "Launch", detail: "Go to mainnet with the same code once SDP approves you." },
 ] as const;
 
 const START_STEPS = [
@@ -157,11 +151,12 @@ export function DocsHome() {
 
       <section className="launch-home-system" aria-labelledby="launch-home-system-title">
         <div className="launch-home-section-heading">
-          <span className="launch-home-eyebrow">The model</span>
-          <h2 id="launch-home-system-title">The infrastructure layer for the Solana ecosystem.</h2>
+          <span className="launch-home-eyebrow">Why SDP</span>
+          <h2 id="launch-home-system-title">Ship on Solana without wiring up every provider.</h2>
           <p>
-            SDP sits between your app and the providers it runs on. Build on devnet, then go live on
-            mainnet with the same integration once SDP approves you.
+            Your app gets wallets, payments and the providers behind them through one integration,
+            with explicit access and an audit trail. The code you write on devnet is the code you
+            run on mainnet.
           </p>
         </div>
         <ul className="launch-home-model">
