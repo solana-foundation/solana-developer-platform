@@ -88,7 +88,7 @@
     "network": {
       "headlineHighlight": "Sub-second finality",
       "headlineEnd": " meets enterprise throughput",
-      "intro": "Settle transactions in 150ms for a fraction of a cent. Solana Developer Platform orchestrates your entire onchain infrastructure through a single, audited endpoint built for high‑throughput scale.",
+      "intro": "Settle transactions in 150ms for a fraction of a cent. Solana Developer Platform orchestrates your entire onchain infrastructure through a single endpoint built for high‑throughput scale.",
       "raceLabel": "The same payment on four rails: Solana settles in under a second while the others take days",
       "lanes": {
         "solana": { "name": "Solana Developer Platform", "time": "150ms" },
@@ -108,7 +108,7 @@
     },
     "issuance": {
       "title": "Full programmatic asset control with built-in compliance",
-      "body": "Deploy production‑ready SPL tokens in minutes with customized authority. Enforce granular policy controls including pause, freeze, burn, and automated address screening directly via SDK or web console.",
+      "body": "Deploy production‑ready SPL tokens in minutes with customized authority. Enforce granular policy controls including pause, freeze, burn, and automated address screening directly via the API using API keys, or from the dashboard.",
       "sandboxLink": "Open issuance in the sandbox",
       "sheet": {
         "asset": "USDx",
@@ -195,7 +195,7 @@
     "markets": {
       "titleLine1": "Earn on it.",
       "titleLine2": "Settle against it.",
-      "body": "Maximize capital efficiency across a single balance. Generate floor yield through tokenized treasuries, tap upside via curated DeFi, and settle trades atomically so cash and collateral clear together with zero counterparty risk.",
+      "body": "Maximize capital efficiency across a single balance. Generate floor yield through tokenized treasuries, tap upside via curated DeFi, and settle trades atomically, so cash and collateral clear together or not at all.",
       "sandboxLink": "Open markets in the sandbox",
       "chart": {
         "description": "Chart of the yield on one balance over time. While the balance is idle it earns close to nothing. Once it is deployed, tokenized treasuries rise to about 4.5% a year and curated DeFi climbs to up to 8% a year by today.",
