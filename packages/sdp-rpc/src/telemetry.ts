@@ -19,36 +19,23 @@ export interface RpcTelemetryEvent {
   outcome?: "succeeded" | "failed" | "aborted" | "http_success_unverified";
   status_code?: number;
   duration_ms?: number;
-  sample_weight?: number;
-  genesis_probe_required?: boolean;
+  socket_retry?: true;
 }
 
+/** A transport request the dead-socket re-send marks; kit's HTTP transport reads only `payload` and `signal`. */
+export type RpcAttemptRequest = Parameters<RpcTransport>[0] & { readonly socketRetry?: true };
+
 let rpcTelemetrySink: ((event: RpcTelemetryEvent) => void) | null = null;
-const successSequences = new Map<string, number>();
 
 /** The API supplies its structured logger; telemetry must never change an RPC outcome. */
 export function setRpcTelemetrySink(sink: ((event: RpcTelemetryEvent) => void) | null): void {
   rpcTelemetrySink = sink;
-  if (sink === null) successSequences.clear();
 }
 
-/** Emit every failure and pool decision; retain ten warmup successes per provider. */
+/** Hand every event to the sink unsampled: sampling is the sink's decision. */
 export function emitRpcTelemetry(event: RpcTelemetryEvent): void {
   const sink = rpcTelemetrySink;
   if (!sink) return;
-  if (event.event === "sdp_rpc_attempt") {
-    let weight = 1;
-    if (event.outcome === "succeeded") {
-      const key = `${event.surface}:${event.provider}:${event.cluster}:${event.method}`;
-      const sequence = successSequences.get(key) ?? 0;
-      successSequences.set(key, sequence < 19 ? sequence + 1 : 10);
-      if (sequence >= 10) {
-        if (sequence !== 19) return;
-        weight = 10;
-      }
-    }
-    event = { ...event, sample_weight: weight };
-  }
   try {
     sink(event);
   } catch {
@@ -297,6 +284,60 @@ export function withPinnedRpcTelemetry(transport: RpcTransport, endpointUrl: str
         startedAt,
         httpStatusOf(error)
       );
+      throw error;
+    }
+  };
+}
+
+type SettledAttempt = { ok: true; response: unknown } | { ok: false; error: unknown };
+
+function recordManagedAttempt(
+  endpoint: Readonly<{ provider: string; cluster: SolanaCluster }>,
+  request: RpcAttemptRequest,
+  startedAt: number,
+  settled: SettledAttempt
+): void {
+  try {
+    let outcome: NonNullable<RpcTelemetryEvent["outcome"]>;
+    if (settled.ok) {
+      outcome = rpcEnvelopeSchema.parse(settled.response).kind === "error" ? "failed" : "succeeded";
+    } else {
+      outcome = rpcFailureOutcome(request.signal);
+    }
+    emitRpcTelemetry({
+      event: "sdp_rpc_attempt",
+      surface: "managed_pool",
+      provider: endpoint.provider,
+      cluster: endpoint.cluster,
+      method: isJsonRpcPayload(request.payload) ? request.payload.method : "batch",
+      outcome,
+      status_code: settled.ok ? undefined : httpStatusOf(settled.error),
+      duration_ms: performance.now() - startedAt,
+      socket_retry: request.socketRetry,
+    });
+  } catch {
+    // The wrapped transport carries sends; recording one can never change its outcome.
+  }
+}
+
+/**
+ * One `sdp_rpc_attempt` per request this transport forwards. Sits directly around the raw
+ * transport, so genesis probes and dead-socket re-sends are each their own attempt and a request
+ * an outer wrapper refuses without sending logs nothing. The response and any error pass through
+ * unchanged.
+ */
+export function withAttemptTelemetry(
+  transport: RpcTransport,
+  endpoint: Readonly<{ provider: string; cluster: SolanaCluster }>
+): RpcTransport {
+  return async <TResponse>(request: RpcAttemptRequest) => {
+    const startedAt = performance.now();
+    try {
+      const response = await transport<TResponse>(request);
+      recordManagedAttempt(endpoint, request, startedAt, { ok: true, response });
+      return response;
+    } catch (error) {
+      recordManagedAttempt(endpoint, request, startedAt, { ok: false, error });
       throw error;
     }
   };

@@ -72,20 +72,25 @@ a shared or re-sent path.
 
 The API supplies `setRpcTelemetrySink` from `@sdp/rpc/telemetry`. Sink failures
 cannot change an RPC result. Events name the configured provider, cluster and
-method; they never include endpoint URLs or request payloads.
-- `managed_pool` counts one logical endpoint attempt, which may include a
-  genesis proof or socket retry. These are not billed request counts.
+method; they never include endpoint URLs or request payloads. The package
+passes every event through unsampled; sampling and caller attribution are the
+API sink's job (`apps/sdp-api/src/runtime/rpc-telemetry.ts`).
+- `managed_pool` counts each request sent: `withAttemptTelemetry` sits directly
+  around kit's transport in every pooled endpoint, so a genesis probe is its own
+  `getGenesisHash` attempt and a dead-socket re-send is its own attempt marked
+  `socket_retry: true`. A request refused from the key-refusal memo sends
+  nothing and logs nothing. The pool loop logs only `sdp_rpc_cooldown` and
+  `sdp_rpc_failover`.
 - `earn_pinned` counts physical transport calls inside
   `runWithPinnedRpcTelemetry`. Provider Kit transports pass their endpoint as
   the second argument to `withReadSocketRetry`; the fetch helper already
   instruments its calls. Outside the pinned scope those hooks do nothing.
-- Successes keep the first ten per surface/provider/cluster/method, then
-  every tenth with `sample_weight: 10`. Failures, failovers, cooldowns and
-  unverified HTTP successes remain exact. Queries must use the weights.
+- Successes are sampled per caller and carry `sample_weight`; queries sum the
+  weights.
 - HTTP 200 can carry a JSON-RPC error. Fetch classification reads a clone
   bounded to 64 KiB and one second without blocking the SDK. An unreadable
   result is `http_success_unverified`, never a confirmed success. Exclude
-  those and genesis-proof attempts from successful latency percentiles.
+  those and `getGenesisHash` attempts from successful latency percentiles.
 - Kit and fetch responses use the same Zod envelope parser and outcome
   classifier. Results stay opaque; the caller receives the original response.
 - Caller cancellations and caller deadlines use `outcome: aborted`, retained

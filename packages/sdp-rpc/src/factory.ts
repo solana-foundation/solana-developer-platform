@@ -44,9 +44,8 @@ import {
 import {
   emitRpcTelemetry,
   markRpcAttemptDeadline,
-  type RpcTelemetryEvent,
-  rpcFailureOutcome,
   rpcProviderForEndpoint,
+  withAttemptTelemetry,
 } from "./telemetry";
 import { isTransientJsonRpcError, isTransientRpcError } from "./transient";
 
@@ -445,48 +444,23 @@ interface RpcEndpoint {
   transport: RpcTransport;
   provider: string;
   cluster: SolanaCluster;
-  genesisProofKey: string;
 }
 
-function emitAttemptTelemetry<TResponse>(
+/** The pool's own decisions after an attempt; the attempt itself is logged by its transport. */
+function emitPoolDecisions(
   endpoint: RpcEndpoint,
   rpcRequest: Parameters<RpcTransport>[0],
-  outcome: AttemptOutcome<TResponse>,
   verdict: AttemptVerdict,
-  hasNext: boolean,
-  startedAt: number,
-  genesisProbeRequired: boolean
+  hasNext: boolean
 ): void {
-  let telemetryOutcome: RpcTelemetryEvent["outcome"];
-  if (outcome.ok) {
-    telemetryOutcome = servedJsonRpcError(outcome.response) === null ? "succeeded" : "failed";
-  } else {
-    telemetryOutcome = rpcFailureOutcome(rpcRequest.signal);
-  }
-  const statusCode =
-    !outcome.ok && isSolanaError(outcome.cause, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR)
-      ? outcome.cause.context.statusCode
-      : undefined;
   const common = {
+    surface: "managed_pool",
     provider: endpoint.provider,
     cluster: endpoint.cluster,
     method: isJsonRpcPayload(rpcRequest.payload) ? rpcRequest.payload.method : "batch",
-  };
-  emitRpcTelemetry({
-    event: "sdp_rpc_attempt",
-    surface: "managed_pool",
-    ...common,
-    outcome: telemetryOutcome,
-    status_code: statusCode,
-    duration_ms: performance.now() - startedAt,
-    genesis_probe_required: genesisProbeRequired,
-  });
-  if (verdict.cooldown) {
-    emitRpcTelemetry({ event: "sdp_rpc_cooldown", surface: "managed_pool", ...common });
-  }
-  if (verdict.tryNext && hasNext) {
-    emitRpcTelemetry({ event: "sdp_rpc_failover", surface: "managed_pool", ...common });
-  }
+  } as const;
+  if (verdict.cooldown) emitRpcTelemetry({ event: "sdp_rpc_cooldown", ...common });
+  if (verdict.tryNext && hasNext) emitRpcTelemetry({ event: "sdp_rpc_failover", ...common });
 }
 
 /**
@@ -511,21 +485,10 @@ function createPoolTransport(endpoints: readonly RpcEndpoint[]) {
     for (let attempt = 0; ; attempt += 1) {
       const endpointIndex = attemptOrder[attempt];
       const endpoint = endpoints[endpointIndex];
-      const genesisProbeRequired =
-        (genesisProofExpiry.get(endpoint.genesisProofKey) ?? 0) <= Date.now();
-      const startedAt = performance.now();
       const outcome = await attemptEndpoint<TResponse>(endpoint.transport, rpcRequest);
       const verdict = judgeAttempt(outcome, rpcRequest);
       const isLastEndpoint = attempt === attemptOrder.length - 1;
-      emitAttemptTelemetry(
-        endpoint,
-        rpcRequest,
-        outcome,
-        verdict,
-        !isLastEndpoint,
-        startedAt,
-        genesisProbeRequired
-      );
+      emitPoolDecisions(endpoint, rpcRequest, verdict, !isLastEndpoint);
       if (verdict.cooldown) lastFailedAt[endpointIndex] = Date.now();
       const cause = outcome.ok ? undefined : unwrapUnsent(outcome.cause);
       everyEndpointRefusedKey &&= isKeyRefusal(cause);
@@ -964,7 +927,8 @@ export async function proveEarnClusterEndpoint(
 
 /**
  * One memoized pool transport per cluster and ordered endpoint list, within one family: every
- * endpoint behind the key-refusal memo, per-attempt deadline, read socket retry and genesis guard.
+ * endpoint behind the key-refusal memo, per-attempt deadline, read socket retry and genesis guard,
+ * with attempt telemetry innermost so each request sent is logged once.
  *
  * @param cluster - The cluster every endpoint must serve.
  * @param endpointUrls - The endpoints in failover order.
@@ -987,11 +951,15 @@ function pooledClusterTransport(
     return {
       provider,
       cluster,
-      genesisProofKey: `${cluster} ${endpointUrl}`,
       transport: withKeyRefusalMemo(
         withTransportDeadline(
           withGenesisGuard(
-            withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl })),
+            withReadSocketRetry(
+              withAttemptTelemetry(createDefaultRpcTransport({ url: endpointUrl }), {
+                provider,
+                cluster,
+              })
+            ),
             cluster,
             endpointUrl
           ),
