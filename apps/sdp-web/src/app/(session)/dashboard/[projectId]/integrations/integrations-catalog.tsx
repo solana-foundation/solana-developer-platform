@@ -82,17 +82,17 @@ function IntegrationRowItem({ row, t }: { row: IntegrationRow; t: Translate }) {
         <p className="truncate text-xs leading-4 text-secondary">{row.description}</p>
       </div>
       <span className="hidden truncate text-xs text-secondary md:block">{row.category}</span>
-      <span className="flex justify-end text-xs">
+      <span className={cn("flex justify-end text-xs", row.href === null && "col-span-2")}>
         <StateLabel state={row.state} t={t} />
       </span>
-      <span className="flex justify-end">
-        {row.href === null ? null : (
+      {row.href === null ? null : (
+        <span className="flex justify-end">
           <ChevronRightIcon
             aria-hidden
             className="size-4 text-tertiary transition-transform group-hover:translate-x-0.5 group-hover:text-secondary motion-reduce:transition-none"
           />
-        )}
-      </span>
+        </span>
+      )}
     </li>
   );
 }

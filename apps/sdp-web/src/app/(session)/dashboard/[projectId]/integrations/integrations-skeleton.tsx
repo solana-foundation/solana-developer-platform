@@ -2,6 +2,7 @@ import { cn } from "@sdp/ui/cn";
 import type { DashboardFlags } from "@/flags/dashboard";
 import { INTEGRATION_ROW_COLUMNS } from "./integration-sections";
 import {
+  familyRowsHaveChevron,
   type IntegrationsSkeletonSection,
   integrationsSkeletonSections,
   UNFLAGGED_SECTIONS,
@@ -26,27 +27,35 @@ export function IntegrationsSkeleton({
 }) {
   return (
     <div className="w-full animate-pulse space-y-10">
-      {sections.map((section) => (
-        <div key={section.family} className="space-y-2">
-          <div className="flex h-6 items-center">
-            <div className="h-5 w-28 rounded bg-fill-subtle" />
+      {sections.map((section) => {
+        const hasChevron = familyRowsHaveChevron(section.family);
+        return (
+          <div key={section.family} className="space-y-2">
+            <div className="flex h-6 items-center">
+              <div className="h-5 w-28 rounded bg-fill-subtle" />
+            </div>
+            <ul className="divide-y divide-border-subtle">
+              {Array.from({ length: section.rows }, (_, index) => index).map((row) => (
+                <li key={row} className={cn(INTEGRATION_ROW_COLUMNS, "py-3")}>
+                  <div className="size-10 rounded-full bg-fill-subtle" />
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <div className="h-4 w-32 rounded bg-fill-subtle" />
+                    <div className="h-3 w-56 max-w-full rounded bg-fill-subtle" />
+                  </div>
+                  <div className="hidden h-3 w-20 rounded bg-fill-subtle md:block" />
+                  <div
+                    className={cn(
+                      "ml-auto h-3 w-24 rounded bg-fill-subtle",
+                      !hasChevron && "col-span-2"
+                    )}
+                  />
+                  {hasChevron ? <div /> : null}
+                </li>
+              ))}
+            </ul>
           </div>
-          <ul className="divide-y divide-border-subtle">
-            {Array.from({ length: section.rows }, (_, index) => index).map((row) => (
-              <li key={row} className={cn(INTEGRATION_ROW_COLUMNS, "py-3")}>
-                <div className="size-10 rounded-full bg-fill-subtle" />
-                <div className="flex min-w-0 flex-col gap-1">
-                  <div className="h-4 w-32 rounded bg-fill-subtle" />
-                  <div className="h-3 w-56 max-w-full rounded bg-fill-subtle" />
-                </div>
-                <div className="hidden h-3 w-20 rounded bg-fill-subtle md:block" />
-                <div className="ml-auto h-3 w-24 rounded bg-fill-subtle" />
-                <div />
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
