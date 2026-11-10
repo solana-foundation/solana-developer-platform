@@ -1,11 +1,12 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { scrubTelemetry, scrubTelemetryString } from "@sdp/redaction/scrub";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import pino, { type Logger, type LoggerOptions } from "pino";
 import { LOG_REDACTION_PATHS, REDACTION_CENSOR } from "./log-redaction";
 
 /**
  * Merged into every line logged inside it, without passing through the scrubber: only values the
- * server generated or registered (ids, a route pattern, a cron name), never an email, a name or
+ * server generated or registered (ids, an environment, a route pattern, a cron name), never an email, a name or
  * anything a caller supplied. A field a line passes itself wins.
  */
 export interface LogContext {
@@ -20,6 +21,8 @@ export interface LogContext {
   organization_id?: string;
   /** The project the request acts on, on project-scoped routes. */
   project_id?: string;
+  /** That project's environment, which decides the cluster: sandbox is devnet, production mainnet. */
+  environment?: SdpEnvironment;
   /** The signed-in person; absent on API-key requests. */
   user_id?: string;
   /** The authenticated API key; absent on signed-in requests. */

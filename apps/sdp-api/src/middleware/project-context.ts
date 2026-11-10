@@ -59,7 +59,7 @@ export function projectContextMiddleware(options: ProjectContextOptions = {}) {
 
     c.set("projectId", scope.projectId);
     c.set("projectEnvironment", scope.environment);
-    await runWithLogContext({ project_id: scope.projectId }, () =>
+    await runWithLogContext({ project_id: scope.projectId, environment: scope.environment }, () =>
       runInClusterScope({ projectId: scope.projectId, environment: scope.environment }, next)
     );
   };

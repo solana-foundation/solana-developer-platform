@@ -167,7 +167,11 @@ describe("projectContextMiddleware", () => {
     });
   });
 
-  const scoped = { organization_id: TEST_ORG.id, project_id: TEST_PROJECT.id };
+  const scoped = {
+    organization_id: TEST_ORG.id,
+    project_id: TEST_PROJECT.id,
+    environment: TEST_PROJECT.environment,
+  };
   const keyIdentity = { ...scoped, api_key_id: TEST_API_KEY.id };
   const memberIdentity = { ...scoped, user_id: TEST_USER.id };
   const key = () => ({ Authorization: `Bearer ${TEST_API_KEY.raw}` });
