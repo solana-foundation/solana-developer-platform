@@ -50,17 +50,26 @@ const GENESIS_PROOF_TTL_MS = 30_000;
 /** The probe's own deadline; it never runs under a caller's signal, since its result is shared. */
 const GENESIS_PROBE_TIMEOUT_MS = 10_000;
 
-/** `<cluster> <endpointUrl>` to the time its last genesis match expires; only matches are recorded. */
-const genesisProofExpiry = new Map<string, number>();
-
-/** `<cluster> <endpointUrl>` to the probe in flight, so concurrent requests share one probe. */
-const genesisProbes = new Map<string, Promise<void>>();
-
 /**
- * `<cluster> <endpointUrl>` to a genesis mismatch and when it expires, so an endpoint serving another
- * cluster is probed once per `ENDPOINT_COOLDOWN_MS`, not on every request.
+ * Where one endpoint stands on serving its configured cluster. No entry, or an expired one, means
+ * unproven. A probe in flight is shared by every request that needs it; a mismatch is remembered
+ * for `ENDPOINT_COOLDOWN_MS` so an endpoint serving another cluster is not probed on every request.
  */
-const genesisMismatches = new Map<string, { error: RpcUnavailableError; expiresAt: number }>();
+type GenesisProof =
+  | { state: "probing"; probe: Promise<void> }
+  | { state: "proven"; expiresAt: number }
+  | { state: "mismatched"; error: RpcUnavailableError; expiresAt: number };
+
+/** `<cluster> <endpointUrl>` to its genesis proof. Only `proveGenesis` writes it. */
+const genesisProofs = new Map<string, GenesisProof>();
+
+/** The endpoint's live genesis proof, or `null` when it is unproven or its last result expired. */
+function liveGenesisProof(genesisProofKey: string): GenesisProof | null {
+  const proof = genesisProofs.get(genesisProofKey);
+  if (proof === undefined) return null;
+  if (proof.state !== "probing" && proof.expiresAt <= Date.now()) return null;
+  return proof;
+}
 
 /**
  * `<cluster> <endpointUrl>` to the provider's last 401/403 and when it expires, so a refused key is
@@ -160,33 +169,53 @@ function proveGenesis(
   cluster: SolanaCluster,
   genesisProofKey: string
 ): Promise<void> {
-  const mismatch = genesisMismatches.get(genesisProofKey);
-  if (mismatch !== undefined && mismatch.expiresAt > Date.now())
-    return Promise.reject(mismatch.error);
-  const probeInFlight = genesisProbes.get(genesisProofKey);
-  if (probeInFlight) return probeInFlight;
-  const probe = (async () => {
-    const servedGenesisHash = await createSolanaRpcFromTransport(
+  const proof = liveGenesisProof(genesisProofKey);
+  if (proof !== null) {
+    switch (proof.state) {
+      case "proven":
+        return Promise.resolve();
+      case "probing":
+        return proof.probe;
+      case "mismatched":
+        return Promise.reject(proof.error);
+      default: {
+        const unreachable: never = proof;
+        return unreachable;
+      }
+    }
+  }
+  // The settle handlers run after the `probing` entry below is written, so they always replace it.
+  const probe = (async () =>
+    createSolanaRpcFromTransport(
       withTransportDeadline(endpointTransport, GENESIS_PROBE_TIMEOUT_MS, "attempt")
     )
       .getGenesisHash()
-      .send();
-    if (servedGenesisHash !== GENESIS_HASH_BY_CLUSTER[cluster]) {
-      const error = new RpcUnavailableError(
-        "cluster_mismatch",
-        `An RPC endpoint configured for ${cluster} serves a different cluster`,
-        { cluster, genesisHash: servedGenesisHash }
-      );
-      genesisMismatches.set(genesisProofKey, {
-        error,
-        expiresAt: Date.now() + ENDPOINT_COOLDOWN_MS,
+      .send())().then(
+    (servedGenesisHash) => {
+      if (servedGenesisHash !== GENESIS_HASH_BY_CLUSTER[cluster]) {
+        const error = new RpcUnavailableError(
+          "cluster_mismatch",
+          `An RPC endpoint configured for ${cluster} serves a different cluster`,
+          { cluster, genesisHash: servedGenesisHash }
+        );
+        genesisProofs.set(genesisProofKey, {
+          state: "mismatched",
+          error,
+          expiresAt: Date.now() + ENDPOINT_COOLDOWN_MS,
+        });
+        throw error;
+      }
+      genesisProofs.set(genesisProofKey, {
+        state: "proven",
+        expiresAt: Date.now() + GENESIS_PROOF_TTL_MS,
       });
-      throw error;
+    },
+    (cause: unknown) => {
+      genesisProofs.delete(genesisProofKey);
+      throw cause;
     }
-    genesisMismatches.delete(genesisProofKey);
-    genesisProofExpiry.set(genesisProofKey, Date.now() + GENESIS_PROOF_TTL_MS);
-  })().finally(() => genesisProbes.delete(genesisProofKey));
-  genesisProbes.set(genesisProofKey, probe);
+  );
+  genesisProofs.set(genesisProofKey, { state: "probing", probe });
   return probe;
 }
 
@@ -210,8 +239,9 @@ function withGenesisGuard(
 ): RpcTransport {
   const genesisProofKey = `${cluster} ${endpointUrl}`;
   return async <TResponse>(rpcRequest: Parameters<RpcTransport>[0]) => {
-    const proofExpiresAt = genesisProofExpiry.get(genesisProofKey);
-    if (proofExpiresAt === undefined || proofExpiresAt <= Date.now()) {
+    // A proven endpoint sends at once, with no await before the request.
+    const proof = liveGenesisProof(genesisProofKey);
+    if (proof === null || proof.state !== "proven") {
       try {
         await getAbortablePromise(
           proveGenesis(endpointTransport, cluster, genesisProofKey),
@@ -916,13 +946,10 @@ export async function proveEarnClusterEndpoint(
       { cluster }
     );
   }
-  const genesisProofKey = `${cluster} ${endpointUrl}`;
-  const proofExpiresAt = genesisProofExpiry.get(genesisProofKey);
-  if (proofExpiresAt !== undefined && proofExpiresAt > Date.now()) return;
   await proveGenesis(
     withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl }), endpointUrl),
     cluster,
-    genesisProofKey
+    `${cluster} ${endpointUrl}`
   );
 }
 
