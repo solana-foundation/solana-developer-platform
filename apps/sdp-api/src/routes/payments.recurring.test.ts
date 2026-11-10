@@ -722,7 +722,12 @@ async function narrowWhileClaiming(input: {
 
 /** Waits until a claim's share lock on a row of `table` is blocked behind another transaction. */
 async function untilWaitingOnRowLock(
-  table: "api_keys" | "organization_members" | "project_members"
+  table:
+    | "api_keys"
+    | "organization_members"
+    | "project_members"
+    | "counterparties"
+    | "counterparty_accounts"
 ): Promise<void> {
   for (let attempt = 0; attempt < 250; attempt++) {
     const waiting = await getDb(env).queryOne<{ count: number }>(
@@ -3517,6 +3522,117 @@ describe("Payments routes — recurring", () => {
       expect(recurringExecutionCallCounts()).toEqual(calls);
     }
   );
+
+  it.each([
+    { target: "counterparty", source: "manual" },
+    { target: "account", source: "manual" },
+    { target: "counterparty", source: "automated" },
+    { target: "account", source: "automated" },
+  ] as const)(
+    "pauses $source collection when $target archival wins before its claim",
+    async ({ target, source }) => {
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      await setRecurringCollectionDue({
+        recurringPaymentId: activated.id,
+        subscriptionId: activated.subscriptionId,
+        dueAt: new Date(Date.now() - 60_000).toISOString(),
+      });
+      const table = target === "counterparty" ? "counterparties" : "counterparty_accounts";
+      const rowId =
+        target === "counterparty" ? activated.counterpartyId : activated.counterpartyAccountId;
+      const locked = deferred<void>();
+      const releaseArchive = deferred<void>();
+      const archive = getDb(env).transaction(async (tx) => {
+        await tx.execute(`SELECT id FROM ${table} WHERE id = ? FOR UPDATE`, [rowId]);
+        locked.resolve();
+        await releaseArchive.promise;
+        await tx.execute(`UPDATE ${table} SET status = 'archived' WHERE id = ?`, [rowId]);
+      });
+      await locked.promise;
+      const calls = recurringExecutionCallCounts();
+      const collect =
+        source === "manual"
+          ? Promise.resolve(
+              app.request(
+                `/v1/payments/recurring-payments/${activated.id}/collect`,
+                { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+                env
+              )
+            )
+          : collectDueRecurringPaymentsIn("sandbox", new Date());
+      try {
+        // The initial recipient resolver read the active committed row. Its
+        // claim now waits behind the archival transaction's exclusive lock.
+        await untilWaitingOnRowLock(table);
+        releaseArchive.resolve();
+        await archive;
+        const result = await collect;
+        if (result instanceof Response) {
+          expect(result.status).toBe(409);
+        } else {
+          expect(result).toMatchObject({ collected: 0, skipped: 1, failed: 0 });
+        }
+      } finally {
+        releaseArchive.resolve();
+        await Promise.allSettled([archive, collect]);
+      }
+      const read = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}`,
+        { headers: RECURRING_HEADERS },
+        env
+      );
+      expect((await parseRecurringResponse(read)).data.recurringPayment).toMatchObject({
+        status: "paused",
+        pausedReason: "destination_unavailable",
+      });
+      expect(await collectionAttempts(activated.subscriptionId)).toEqual([]);
+      expect(await failedCollectionAttempts(activated.id)).toBe(0);
+      expect(recurringExecutionCallCounts()).toEqual(calls);
+    }
+  );
+
+  it("does not pause or sign when the recipient claim lock times out", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+    const locked = deferred<void>();
+    const release = deferred<void>();
+    const holding = getDb(env).transaction(async (tx) => {
+      await tx.execute("SELECT id FROM counterparties WHERE id = ? FOR UPDATE", [
+        activated.counterpartyId,
+      ]);
+      locked.resolve();
+      await release.promise;
+    });
+    await locked.promise;
+    const db = getDb(env);
+    const transaction = db.transaction.bind(db);
+    const timeout = vi.spyOn(db, "transaction").mockImplementation((callback) =>
+      transaction(async (tx) => {
+        await tx.execute("SET LOCAL lock_timeout = '10ms'");
+        return callback(tx);
+      })
+    );
+    const calls = recurringExecutionCallCounts();
+    try {
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/collect`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+      expect(response.status).toBe(500);
+    } finally {
+      timeout.mockRestore();
+      release.resolve();
+      await holding;
+    }
+    expect((await recurringPaymentDueAt(activated.id)).status).toBe("active");
+    expect(await collectionAttempts(activated.subscriptionId)).toEqual([]);
+    expect(recurringExecutionCallCounts()).toEqual(calls);
+  });
 
   it("does not pause or sign when the recipient lookup fails", async () => {
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
