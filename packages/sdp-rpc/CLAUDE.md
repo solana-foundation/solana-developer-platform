@@ -60,7 +60,8 @@ keep-alive socket the server closed as it was reused.
 
 A provider read transport must compose, innermost first:
 
-raw transport -> pinned telemetry (Earn scope) -> `withReadSocketRetry`
+raw transport -> attempt telemetry (`withAttemptTelemetry` in the managed
+pool, pinned telemetry in an Earn scope) -> `withReadSocketRetry`
 -> in-flight dedup -> `withRpcReadContext` -> deadline
 
 Put the re-send below the dedup, so one re-send serves every joiner, and below

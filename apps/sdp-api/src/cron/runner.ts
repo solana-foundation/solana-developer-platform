@@ -151,8 +151,8 @@ function registrationEnvironments(definition: CronDefinition): readonly (SdpEnvi
 /**
  * Run one slot of a definition's work in a log context naming the definition, under the system
  * database identity (reconciliation is cross-tenant, and row-level security denies an undeclared
- * workload) and, for a `cluster` registration, inside that Environment's cluster scope. Logs the slot's outcome and rethrows
- * a failure so the background runner records it.
+ * workload) and, for a `cluster` registration, inside that Environment's cluster scope. Logs the
+ * slot's outcome and rethrows a failure so the background runner records it.
  *
  * @param definition - The definition whose slot fired.
  * @param registration - The registration the slot belongs to.

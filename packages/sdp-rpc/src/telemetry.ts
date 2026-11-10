@@ -22,7 +22,10 @@ export interface RpcTelemetryEvent {
   socket_retry?: true;
 }
 
-/** A transport request the dead-socket re-send marks; kit's HTTP transport reads only `payload` and `signal`. */
+/**
+ * A transport request the dead-socket re-send marks. Kit's HTTP transport reads only `payload` and
+ * `signal`, so the mark never reaches the provider.
+ */
 export type RpcAttemptRequest = Parameters<RpcTransport>[0] & { readonly socketRetry?: true };
 
 let rpcTelemetrySink: ((event: RpcTelemetryEvent) => void) | null = null;
