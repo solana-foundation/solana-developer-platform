@@ -33,11 +33,13 @@ const keyAcceptedHeaders = projectScopeWithDeclaredIdempotencyHeaders({
   key: "accepted",
   serverErrors: "store",
 });
-// Wallet create also mounts `replayFromRecord`: `recovery: "record"`.
+// Wallet create also mounts `replayFromRecord`: `recovery: "record"`, and its
+// authorize step reruns a 5xx on a provider that dedupes on the request id.
 const walletCreateKeyHeaders = projectScopeWithDeclaredIdempotencyHeaders({
   key: "accepted",
   serverErrors: "store",
   recovery: "record",
+  rerunsWhenProviderDedupes: true,
 });
 
 /**
@@ -91,8 +93,8 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     operationId: "createWallet",
     description:
       "Provisions a new wallet under exactly one provider account: the project's Managed config for `provider`, or the Custody Connection named by `connectionId`. A body naming both, or neither, is rejected with `400`.\n\n" +
-      "With an `Idempotency-Key`, SDP never records a second wallet for one key: a retry returns the wallet an earlier attempt recorded, even after the 24-hour key window. A provider that accepts a request id also receives one derived from the key, so it dedupes at the provider.\n\n" +
-      "On a provider that accepts a request id, a `5xx` is not stored: a same-key retry runs again and gets back the wallet the first attempt made, even when SDP failed to record it. On any other provider a failure is stored as a `503`, and a new key is a new provider request. A `503` can mean the provider created the wallet before the error. With a provider that accepts no request id, a failure that left no SDP wallet row makes even the same key a new provider request after 24 hours. Before any retry after an ambiguous failure, whatever the key, check `GET /v1/wallets` and, if the wallet is not there, the provider account.\n\n" +
+      "With an `Idempotency-Key`, SDP never records a second wallet for one key: a retry returns the wallet an earlier attempt recorded, even after the 24-hour key window. A provider that accepts a request id also receives one derived from the key.\n\n" +
+      "On a provider that dedupes on the request id, a `5xx` is not stored: a same-key retry runs again and gets back the wallet the first attempt made, even when SDP failed to record it, for as long as the provider keeps the request id (permanently, or for 24 hours; the Idempotency guide lists each provider). On any other provider a failure is stored as a `503`, and a new key is a new provider request. A `503` can mean the provider created the wallet before the error. With a provider that accepts no request id, a failure that left no SDP wallet row makes even the same key a new provider request after 24 hours. Before any retry after an ambiguous failure, whatever the key, check `GET /v1/wallets` and, if the wallet is not there, the provider account.\n\n" +
       "The provider request id and the recorded-wallet lookup both include the credential. After an API key rotation, once the key's 24-hour record has expired, the same key under the new credential is a new provider request and can create a second wallet: list wallets with `GET /v1/wallets` and check the provider account before retrying a create.",
     security: [{ apiKeyAuth: [] }],
     request: {

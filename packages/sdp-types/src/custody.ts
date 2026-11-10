@@ -46,6 +46,44 @@ export function isByokCustodyProvider(provider: string): provider is ByokCustody
 }
 
 /**
+ * How long a wallet create keeps returning the same wallet for the same request
+ * id: `permanent` when the provider also keeps a lasting id (Privy's
+ * `external_id`, Coinbase CDP's account name), `24h` when only its idempotency
+ * window does (Fireblocks). A provider missing from its mode makes a new
+ * wallet on every call.
+ */
+export type WalletCreateDedupe = "permanent" | "24h";
+
+/**
+ * The custody providers whose wallet create dedupes on SDP's request id, by
+ * custody mode. A keyed create on one of them releases its key after a 5xx,
+ * so the same-key retry gets back the wallet the first attempt made (HOO-2565).
+ */
+export const WALLET_CREATE_DEDUPE = {
+  managed: { privy: "permanent", coinbase_cdp: "permanent" },
+  byok: { privy: "permanent", fireblocks: "24h" },
+} as const satisfies {
+  managed: Partial<Record<CustodyProvider, WalletCreateDedupe>>;
+  byok: Partial<Record<ByokCustodyProvider, WalletCreateDedupe>>;
+};
+
+/**
+ * Whether, and for how long, a wallet create on `provider` in `mode` returns
+ * the same wallet for the same request id.
+ *
+ * @param provider - The custody provider the create runs on.
+ * @param mode - `managed` for a custody config, `byok` for a custody connection.
+ * @returns The dedupe window, or null when every call makes a new wallet.
+ */
+export function walletCreateDedupe(
+  provider: CustodyProvider,
+  mode: CustodyMode
+): WalletCreateDedupe | null {
+  const table: Partial<Record<CustodyProvider, WalletCreateDedupe>> = WALLET_CREATE_DEDUPE[mode];
+  return table[provider] ?? null;
+}
+
+/**
  * Which custody modes a project may set up, by its environment. Production
  * projects hold mainnet funds, so SDP's hosted deployment never holds their
  * keys under its own provider accounts (ADR 0006).

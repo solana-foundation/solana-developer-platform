@@ -501,6 +501,43 @@ describe("Custody wallet owner contract", () => {
       }
     );
 
+    // Zach's review of #2842: the rerun is decided before the key step, so a
+    // 5xx from the replay lookup itself is not stored either.
+    it.each([
+      ["Managed", { provider: "privy", label: "Treasury" }],
+      ["BYOK", { connectionId: CONNECTION_ID, label: "Settlement" }],
+    ])(
+      "runs a %s create again on a same-key retry after its replay lookup failed",
+      async (_kind, body) => {
+        provisionPrivyWalletMock.mockResolvedValue({
+          walletId: "keyed_after_lookup",
+          address: CREATED_PUBLIC_KEY,
+        });
+        const db = getDb(env);
+        const prepare = db.prepare.bind(db);
+        let lookups = 0;
+        const prepareSpy = vi.spyOn(db, "prepare").mockImplementation((sql) => {
+          if (sql.includes("WHERE w.idempotency_request_id = ?") && lookups++ === 0) {
+            throw new Error("simulated replay lookup failure");
+          }
+          return prepare(sql);
+        });
+        onTestFinished(() => {
+          prepareSpy.mockRestore();
+          provisionPrivyWalletMock.mockReset();
+        });
+
+        const failed = await createWallet(body, KEY);
+        expect(failed.status).toBeGreaterThanOrEqual(500);
+        expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+        const retry = await createWallet(body, KEY);
+
+        expect(retry.status).toBe(201);
+        expect(retry.headers.get("Idempotent-Replayed")).toBeNull();
+        expect(provisionPrivyWalletMock).toHaveBeenCalledTimes(1);
+      }
+    );
+
     // Privy dedupes on the request id, so the loser usually gets the winner's
     // own wallet back, and its insert can fail on the owner-and-wallet unique
     // constraint rather than the request id's.
