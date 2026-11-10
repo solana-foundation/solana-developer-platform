@@ -43,6 +43,14 @@ describe("decimal amount range", () => {
         error.message === "Amount is out of range"
     );
   });
+
+  it("refuses a sum past the range as a bad request", () => {
+    const half = "170141183460469231731687303715884105728";
+    assert.throws(
+      () => sumDecimalAmounts([half, half]),
+      (error) => error instanceof SdpPaymentsError && error.statusCode === 400
+    );
+  });
 });
 
 describe("subtractDecimalAmounts", () => {
@@ -81,6 +89,14 @@ describe("multiplyDecimalAmounts", () => {
         error instanceof SdpPaymentsError &&
         error.statusCode === 400 &&
         error.message === "Amount is out of range"
+    );
+  });
+
+  it("refuses a product past the range as a bad request", () => {
+    const root = "18446744073709551616";
+    assert.throws(
+      () => multiplyDecimalAmounts(root, root),
+      (error) => error instanceof SdpPaymentsError && error.statusCode === 400
     );
   });
 });
