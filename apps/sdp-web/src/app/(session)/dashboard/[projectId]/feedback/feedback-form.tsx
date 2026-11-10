@@ -65,7 +65,14 @@ function refusalMessage(refusal: FileRefusal, t: Translate): string {
  * whose event id the email carries. Without Sentry there is nowhere to keep files, so the screen
  * takes none.
  */
-export function FeedbackForm({ organizationId }: { organizationId: string }) {
+export function FeedbackForm({
+  organizationId,
+  fromPath,
+}: {
+  organizationId: string;
+  /** The dashboard page the person opened the screen from, when the link carried it. */
+  fromPath: string | null;
+}) {
   const t = useTranslations();
   const projectHref = useProjectHref();
   const messageId = useId();
@@ -75,8 +82,11 @@ export function FeedbackForm({ organizationId }: { organizationId: string }) {
   const [files, setFiles] = useState<AttachedFile[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
-  const [sentFiles, setSentFiles] = useState<number | null>(null);
+  const [sent, setSent] = useState<{ files: number; withPage: boolean } | null>(null);
   const [sending, startSend] = useTransition();
+  // A retry after a failed send names the Sentry event the first try made, while what it
+  // holds is unchanged, instead of uploading the files again as a second event.
+  const sentryEvent = useRef<{ signature: string; eventId: string } | null>(null);
   const homeHref = projectHref(HOME_HREF);
   const takesFiles = Sentry.getClient() !== undefined;
 
@@ -91,20 +101,25 @@ export function FeedbackForm({ organizationId }: { organizationId: string }) {
     const parsed = form.validate();
     if (!parsed.ok) return;
     setSendError(null);
+    const pageUrl = feedbackPageUrl(fromPath);
     startSend(async () => {
-      const result = await sendFeedback({
-        organizationId,
-        category: parsed.data.category,
-        message: parsed.data.message,
-        files,
-        toSentry: takesFiles,
-      });
-      if (result.kind === "sent") setSentFiles(files.length);
+      const result = await sendFeedback(
+        {
+          organizationId,
+          category: parsed.data.category,
+          message: parsed.data.message,
+          pageUrl,
+          files,
+          toSentry: takesFiles,
+        },
+        sentryEvent
+      );
+      if (result.kind === "sent") setSent({ files: files.length, withPage: pageUrl !== undefined });
       else setSendError(sendErrorText(result, t));
     });
   };
 
-  if (sentFiles !== null) return <FeedbackSent files={sentFiles} homeHref={homeHref} />;
+  if (sent !== null) return <FeedbackSent {...sent} homeHref={homeHref} />;
 
   return (
     <form
@@ -278,31 +293,60 @@ async function readAttachments(files: readonly AttachedFile[]): Promise<Attachme
   return { ok: true, attachments };
 }
 
-/**
- * Files and the replay go to Sentry first, when the deployment runs it, so the email can name
- * the event that holds them; the words then go to the SDP team's inbox through the API.
- */
-async function sendFeedback(input: {
+/** The full address of the page the person came from, on this dashboard's own origin. */
+function feedbackPageUrl(fromPath: string | null): string | undefined {
+  if (fromPath === null) return undefined;
+  const url = new URL(fromPath, window.location.origin);
+  return url.origin === window.location.origin ? url.href : undefined;
+}
+
+interface FeedbackInput {
   organizationId: string;
   category: FeedbackCategory | "";
   message: string;
+  pageUrl: string | undefined;
   files: readonly AttachedFile[];
   toSentry: boolean;
-}): Promise<SendResult> {
-  const url = window.location.href;
+}
+
+/** What a Sentry event holds, so a retry can tell whether the last one still matches. */
+function sentrySignature(input: FeedbackInput): string {
+  return JSON.stringify([
+    input.category,
+    input.message,
+    input.pageUrl ?? null,
+    input.files.map((entry) => entry.key),
+  ]);
+}
+
+/**
+ * Files and the replay go to Sentry first, when the deployment runs it, so the email can name
+ * the event that holds them; the words then go to the SDP team's inbox through the API. A retry
+ * of the same feedback reuses the event the first try made.
+ */
+async function sendFeedback(
+  input: FeedbackInput,
+  sentryEvent: { current: { signature: string; eventId: string } | null }
+): Promise<SendResult> {
   let sentryEventId: string | undefined;
   if (input.toSentry) {
-    const read = await readAttachments(input.files);
-    if (!read.ok) return { kind: "unreadable", name: read.name };
-    sentryEventId = Sentry.captureFeedback(
-      {
-        message: input.message,
-        source: "dashboard",
-        url,
-        tags: input.category ? { feedback_category: input.category } : undefined,
-      },
-      { includeReplay: true, attachments: read.attachments }
-    );
+    const signature = sentrySignature(input);
+    if (sentryEvent.current?.signature === signature) {
+      sentryEventId = sentryEvent.current.eventId;
+    } else {
+      const read = await readAttachments(input.files);
+      if (!read.ok) return { kind: "unreadable", name: read.name };
+      sentryEventId = Sentry.captureFeedback(
+        {
+          message: input.message,
+          source: "dashboard",
+          url: input.pageUrl,
+          tags: input.category ? { feedback_category: input.category } : undefined,
+        },
+        { includeReplay: true, attachments: read.attachments }
+      );
+      sentryEvent.current = { signature, eventId: sentryEventId };
+    }
   }
   const result = await dashboardFetch<unknown>(
     `/api/dashboard/organizations/${encodeURIComponent(input.organizationId)}/feedback`,
@@ -311,7 +355,7 @@ async function sendFeedback(input: {
       body: {
         category: input.category || undefined,
         message: input.message,
-        pageUrl: url,
+        pageUrl: input.pageUrl,
         attachmentCount: input.files.length,
         sentryEventId,
       },
@@ -322,46 +366,41 @@ async function sendFeedback(input: {
   return { kind: "failed", error: result.error };
 }
 
-const SENT_BODY_SCHEMA = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("noEmail") }),
-  z.object({ kind: z.literal("noFiles"), email: z.string() }),
-  z.object({ kind: z.literal("oneFile"), email: z.string() }),
-  z.object({ kind: z.literal("files"), email: z.string(), count: z.number().int() }),
-]);
-type SentBody = z.infer<typeof SENT_BODY_SCHEMA>;
-
-function sentBodyOf(email: string | null, files: number): SentBody {
-  if (email === null) return { kind: "noEmail" };
-  if (files === 0) return { kind: "noFiles", email };
-  if (files === 1) return { kind: "oneFile", email };
-  return { kind: "files", email, count: files };
-}
-
-function sentBodyText(body: SentBody, t: Translate): string {
-  switch (body.kind) {
-    case "noEmail":
-      return t("Feedback.sentBodyNoEmail");
-    case "noFiles":
-      return t("Feedback.sentBody", { email: body.email });
-    case "oneFile":
-      return t("Feedback.sentBodyOneFile", { email: body.email });
-    case "files":
-      return t("Feedback.sentBodyFiles", { email: body.email, count: String(body.count) });
-    default: {
-      const exhaustive: never = body;
-      throw new Error(`Unhandled sent body: ${JSON.stringify(exhaustive)}`);
-    }
+/** What went with the words: the page they came from, when known, and the files. */
+function sentWithText(withPage: boolean, files: number, t: Translate): string | null {
+  const count = String(files);
+  if (withPage) {
+    if (files === 0) return t("Feedback.sentPage");
+    if (files === 1) return t("Feedback.sentPageOneFile");
+    return t("Feedback.sentPageFiles", { count });
   }
+  if (files === 0) return null;
+  if (files === 1) return t("Feedback.sentOneFile");
+  return t("Feedback.sentFiles", { count });
 }
 
-function FeedbackSent({ files, homeHref }: { files: number; homeHref: string }) {
+function FeedbackSent({
+  files,
+  withPage,
+  homeHref,
+}: {
+  files: number;
+  withPage: boolean;
+  homeHref: string;
+}) {
   const t = useTranslations();
   const { user } = useUser();
   const email = user?.primaryEmailAddress?.emailAddress ?? null;
+  const body = [
+    sentWithText(withPage, files, t),
+    email === null ? null : t("Feedback.sentReply", { email }),
+  ]
+    .filter((part) => part !== null)
+    .join(" ");
   return (
     <div className="flex flex-col items-start gap-3" role="status">
       <h2 className="text-lg font-medium text-primary">{t("Feedback.sentTitle")}</h2>
-      <p className="text-body text-secondary">{sentBodyText(sentBodyOf(email, files), t)}</p>
+      {body ? <p className="text-body text-secondary">{body}</p> : null}
       <Button asChild variant="outline" className="mt-3">
         <Link href={homeHref}>{t("Feedback.backTo")}</Link>
       </Button>

@@ -74,8 +74,9 @@ describe("SidebarUserMenu", () => {
     expect(screen.getByRole("menuitem", { name: "Account settings" }).getAttribute("href")).toBe(
       `/dashboard/${PRODUCTION_PROJECT.id}/account`
     );
+    // The link carries the page the person is on, for the email to name.
     expect(screen.getByRole("menuitem", { name: "Send feedback" }).getAttribute("href")).toBe(
-      `/dashboard/${PRODUCTION_PROJECT.id}/feedback`
+      `/dashboard/${PRODUCTION_PROJECT.id}/feedback?from=%2Fdashboard%2F${PRODUCTION_PROJECT.id}%2Fpayments`
     );
   });
 

@@ -26,6 +26,7 @@ import {
   UserRoundIcon,
 } from "lucide-react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { docsHref } from "@/components/dashboard-nav";
 import { UserAvatar } from "@/components/user-avatar";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -35,6 +36,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import {
   DASHBOARD_ACCOUNT_HREF,
+  DASHBOARD_FEEDBACK_FROM_PARAM,
   DASHBOARD_FEEDBACK_HREF,
 } from "@/lib/dashboard-navigation-loading";
 import { useProjectHref } from "@/lib/use-dashboard-project";
@@ -52,6 +54,13 @@ export function SidebarUserMenu({ collapsed }: { collapsed: boolean }) {
   const { signOut } = useClerk();
   // Viewers cannot send feedback (`feedback.execute`), so the item is not offered to them.
   const canSendFeedback = useDashboardWorkspace().dashboardAccess.capabilities.canSendFeedback;
+  // The screen opens in place of the page, so the link carries the page for the email to name.
+  const pathname = usePathname();
+  const feedbackHref = projectHref(DASHBOARD_FEEDBACK_HREF);
+  const feedbackLink =
+    pathname === feedbackHref
+      ? feedbackHref
+      : `${feedbackHref}?${new URLSearchParams({ [DASHBOARD_FEEDBACK_FROM_PARAM]: pathname })}`;
   if (!isLoaded) {
     return (
       <div
@@ -127,7 +136,7 @@ export function SidebarUserMenu({ collapsed }: { collapsed: boolean }) {
         <ThemeMenuItem />
         {canSendFeedback ? (
           <DropdownMenuItem asChild className={MENU_ITEM_CLASS}>
-            <Link href={projectHref(DASHBOARD_FEEDBACK_HREF)}>
+            <Link href={feedbackLink}>
               <MessageSquareIcon className="size-4 shrink-0 text-secondary" />
               {t("Feedback.label")}
             </Link>

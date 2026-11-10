@@ -53,10 +53,26 @@ export function addFeedbackFiles(
     } else if (files.length >= FEEDBACK_FILES_MAX) {
       refusal = { reason: "count" };
     } else {
-      files.push({ key: `${file.name}-${file.size}-${file.lastModified}`, file });
+      // The same file picked twice is kept once: its key names it, and a list keys by it.
+      const key = `${file.name}-${file.size}-${file.lastModified}`;
+      if (!files.some((entry) => entry.key === key)) files.push({ key, file });
     }
   }
   return { files, refusal };
+}
+
+const FEEDBACK_FROM_MAX_LENGTH = 1024;
+
+/**
+ * The dashboard page a `from` value names, or none: only a path on the dashboard itself, so the
+ * value can never point the email at another site.
+ */
+export function feedbackFromPath(value: string | string[] | undefined): string | null {
+  if (typeof value !== "string" || value.length > FEEDBACK_FROM_MAX_LENGTH) return null;
+  if (!value.startsWith("/dashboard/")) return null;
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what it refuses.
+  if (/[\\\u0000-\u001f\u007f]/.test(value) || value.includes("//")) return null;
+  return value;
 }
 
 export function feedbackFileSize(bytes: number): string {

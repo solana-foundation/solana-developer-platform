@@ -13,6 +13,8 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
 export const DASHBOARD_ACCOUNT_HREF = "/dashboard/account";
 
 export const DASHBOARD_FEEDBACK_HREF = "/dashboard/feedback";
+/** The query parameter the Send feedback link carries: the dashboard page the person was on. */
+export const DASHBOARD_FEEDBACK_FROM_PARAM = "from";
 
 export const DASHBOARD_MARKETS_SUBNAV_HREFS = {
   treasurySolutions: "/dashboard/markets/treasury-solutions",

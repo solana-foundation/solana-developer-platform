@@ -42,9 +42,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function renderForm() {
+const FROM_PATH = `/dashboard/${PRODUCTION_PROJECT.id}/payments`;
+
+function renderForm(fromPath: string | null = FROM_PATH) {
   setDashboardUrl(`/dashboard/${PRODUCTION_PROJECT.id}/feedback`, {});
-  return render(<FeedbackForm organizationId="org_1" />, { wrapper: EnglishI18n });
+  return render(<FeedbackForm organizationId="org_1" fromPath={fromPath} />, {
+    wrapper: EnglishI18n,
+  });
 }
 
 function fileInput(container: HTMLElement): HTMLInputElement {
@@ -85,10 +89,64 @@ describe("FeedbackForm", () => {
       body: {
         category: "idea",
         message: "Show the fee first",
+        pageUrl: `${window.location.origin}${FROM_PATH}`,
         attachmentCount: 1,
         sentryEventId: EVENT_ID,
       },
     });
+  });
+
+  it("names no page when the screen was opened without one", async () => {
+    dashboardFetch.mockResolvedValue({ ok: true, data: {}, status: 201 });
+    const user = userEvent.setup();
+    renderForm(null);
+
+    await user.type(messageBox(), "Hello");
+    await user.click(send());
+
+    expect(
+      await screen.findByText("A reply, if there is one, goes to jane@example.com.")
+    ).toBeDefined();
+    const [, request] = dashboardFetch.mock.calls[0] ?? [];
+    expect(request).toMatchObject({ body: { message: "Hello", pageUrl: undefined } });
+  });
+
+  it("names the same Sentry event when a failed send is retried unchanged", async () => {
+    dashboardFetch
+      .mockResolvedValueOnce({ ok: false, status: 500, error: "Internal error", body: null })
+      .mockResolvedValueOnce({ ok: true, data: {}, status: 201 });
+    const user = userEvent.setup();
+    const { container } = renderForm();
+
+    await user.type(messageBox(), "Hello");
+    await user.upload(fileInput(container), new File(["png"], "shot.png", { type: "image/png" }));
+    await user.click(send());
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Couldn’t send your feedback: Internal error"
+    );
+    await user.click(send());
+
+    expect(await screen.findByText("Sent to the SDP team")).toBeDefined();
+    expect(captureFeedback).toHaveBeenCalledTimes(1);
+    const [, retry] = dashboardFetch.mock.calls[1] ?? [];
+    expect(retry).toMatchObject({ body: { sentryEventId: EVENT_ID } });
+  });
+
+  it("records a new Sentry event when the feedback changed before the retry", async () => {
+    dashboardFetch
+      .mockResolvedValueOnce({ ok: false, status: 500, error: "Internal error", body: null })
+      .mockResolvedValueOnce({ ok: true, data: {}, status: 201 });
+    const user = userEvent.setup();
+    renderForm();
+
+    await user.type(messageBox(), "Hello");
+    await user.click(send());
+    await screen.findByRole("alert");
+    await user.type(messageBox(), " again");
+    await user.click(send());
+
+    expect(await screen.findByText("Sent to the SDP team")).toBeDefined();
+    expect(captureFeedback).toHaveBeenCalledTimes(2);
   });
 
   it("keeps Send disabled until there is something to send", async () => {
@@ -194,6 +252,19 @@ describe("FeedbackForm", () => {
     expect(screen.getByRole("alert").textContent).toBe("notes.txt isn’t a picture or a PDF.");
     expect(screen.getByText("spec.pdf")).toBeDefined();
     expect(screen.queryByText("notes.txt")).toBeNull();
+  });
+
+  it("keeps a file picked twice once", async () => {
+    const user = userEvent.setup();
+    const { container } = renderForm();
+    const shot = new File(["png"], "shot.png", { type: "image/png", lastModified: 1 });
+
+    await user.upload(fileInput(container), shot);
+    await user.upload(fileInput(container), shot);
+
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Remove shot.png" }));
+    expect(screen.queryByRole("listitem")).toBeNull();
   });
 
   it("takes five files at most", async () => {

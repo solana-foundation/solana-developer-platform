@@ -12,7 +12,10 @@ inventory.
 - **Send feedback** in the sidebar user menu opens the feedback screen
   (`/dashboard/{projectId}/feedback`). It asks what the feedback is about
   (something's broken, an idea, a question), what the user would change (up to
-  5,000 characters), and up to five screenshots or PDFs, 10 MB each.
+  5,000 characters), and up to five screenshots or PDFs, 10 MB each. The link
+  carries the page the user was on (`?from=`, dashboard paths only), which the
+  email names under **Page**; opened any other way, the email names no page.
+  A retry of unchanged feedback reuses the first try's Sentry event.
 - The global error page captures the exception and opens Sentry's report
   dialog with that event ID when the user selects **Report this issue**.
 
