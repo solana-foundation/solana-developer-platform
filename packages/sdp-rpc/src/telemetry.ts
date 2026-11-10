@@ -292,35 +292,44 @@ export function withPinnedRpcTelemetry(transport: RpcTransport, endpointUrl: str
   };
 }
 
+type AttemptEndpoint = Readonly<{ provider: string; cluster: SolanaCluster }>;
+
 type SettledAttempt = { ok: true; response: unknown } | { ok: false; error: unknown };
 
+function managedResponseOutcome(
+  response: unknown,
+  method: string,
+  cluster: SolanaCluster
+): "succeeded" | "failed" {
+  const envelope = rpcEnvelopeSchema.parse(response);
+  if (envelope.kind === "error") return "failed";
+  const servesOtherCluster =
+    method === "getGenesisHash" &&
+    envelope.kind === "result" &&
+    envelope.result !== GENESIS_HASH_BY_CLUSTER[cluster];
+  return servesOtherCluster ? "failed" : "succeeded";
+}
+
 function recordManagedAttempt(
-  endpoint: Readonly<{ provider: string; cluster: SolanaCluster }>,
+  endpoint: AttemptEndpoint,
   request: RpcAttemptRequest,
   startedAt: number,
   settled: SettledAttempt
 ): void {
-  try {
-    let outcome: NonNullable<RpcTelemetryEvent["outcome"]>;
-    if (settled.ok) {
-      outcome = rpcEnvelopeSchema.parse(settled.response).kind === "error" ? "failed" : "succeeded";
-    } else {
-      outcome = rpcFailureOutcome(request.signal);
-    }
-    emitRpcTelemetry({
-      event: "sdp_rpc_attempt",
-      surface: "managed_pool",
-      provider: endpoint.provider,
-      cluster: endpoint.cluster,
-      method: isJsonRpcPayload(request.payload) ? request.payload.method : "batch",
-      outcome,
-      status_code: settled.ok ? undefined : httpStatusOf(settled.error),
-      duration_ms: performance.now() - startedAt,
-      socket_retry: request.socketRetry,
-    });
-  } catch {
-    // The wrapped transport carries sends; recording one can never change its outcome.
-  }
+  const method = isJsonRpcPayload(request.payload) ? request.payload.method : "batch";
+  emitRpcTelemetry({
+    event: "sdp_rpc_attempt",
+    surface: "managed_pool",
+    provider: endpoint.provider,
+    cluster: endpoint.cluster,
+    method,
+    outcome: settled.ok
+      ? managedResponseOutcome(settled.response, method, endpoint.cluster)
+      : rpcFailureOutcome(request.signal),
+    status_code: settled.ok ? undefined : httpStatusOf(settled.error),
+    duration_ms: performance.now() - startedAt,
+    socket_retry: request.socketRetry,
+  });
 }
 
 /**
@@ -331,7 +340,7 @@ function recordManagedAttempt(
  */
 export function withAttemptTelemetry(
   transport: RpcTransport,
-  endpoint: Readonly<{ provider: string; cluster: SolanaCluster }>
+  endpoint: AttemptEndpoint
 ): RpcTransport {
   return async <TResponse>(request: RpcAttemptRequest) => {
     const startedAt = performance.now();
