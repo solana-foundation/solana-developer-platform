@@ -854,7 +854,9 @@ async function hasRecentCollectionFailure(
  * they sign, one transaction writes the attempt (carrying the request's
  * Idempotency-Key, HOO-1918) and the transfer it will submit, linked. Every
  * keyed attempt therefore has a transfer, and a same-key retry is answered
- * from them. Returns null when the cycle moved on or another attempt holds it.
+ * from them. Recipient locks order the claim against archival: an archive that
+ * commits first pauses the schedule; one after admission leaves the attempt
+ * recoverable. Returns null when the cycle moved on or another attempt holds it.
  */
 async function claimCollectionUnderRecurringLock(input: {
   env: Env;
@@ -872,8 +874,22 @@ async function claimCollectionUnderRecurringLock(input: {
   transfer: PaymentTransferRow;
 } | null> {
   const { recurringPayment } = input;
-  return getDb(input.env).transaction(async (tx) => {
+  const outcome = await getDb(input.env).transaction(async (tx) => {
+    const destinationAvailable = await lockCollectionDestination(tx, input);
     if (!(await lockOpenCollectionCycle(tx, input))) return null;
+    if (!destinationAvailable) {
+      const paused = await createPostgresPaymentRecurringPaymentsRepository(
+        tx
+      ).pauseRecurringPayment({
+        recurringPaymentId: recurringPayment.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        reason: "destination_unavailable",
+        updatedAt: input.attemptedAt,
+      });
+      if (!paused) throw conflict("Recurring payment changed before it could be paused");
+      return { kind: "destination_unavailable" as const };
+    }
 
     const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
     if (input.enforceCooldown && (await hasRecentCollectionFailure(subscriptionsRepo, input))) {
@@ -944,8 +960,14 @@ async function claimCollectionUnderRecurringLock(input: {
     if (!attempt || attempt.transfer_id !== transfer.id) {
       throw internalError("Failed to link collection attempt to transfer");
     }
-    return { attempt, transfer };
+    return { kind: "claimed" as const, attempt, transfer };
   });
+  if (outcome === null) return null;
+  if (outcome.kind === "destination_unavailable") {
+    logCollectionDestinationPause(input);
+    throw recipientUnavailable();
+  }
+  return { attempt: outcome.attempt, transfer: outcome.transfer };
 }
 
 /**
@@ -1914,6 +1936,59 @@ function refuseCanceledCollection(
   }
 }
 
+/**
+ * Locks the parent before its account, matching parent archival's write order.
+ * The claim holds both shared locks until its attempt and transfer commit, so
+ * archival cannot slip between active-recipient admission and the claim.
+ */
+async function lockCollectionDestination(
+  tx: DatabaseExecutor,
+  input: {
+    organizationId: string;
+    projectId: string;
+    recurringPayment: RecurringPaymentCollectionCycleRow;
+  }
+): Promise<boolean> {
+  const counterparty = await tx
+    .prepare(
+      `SELECT id FROM counterparties
+        WHERE id = ? AND organization_id = ? AND project_id = ? AND status = 'active'
+        FOR SHARE`
+    )
+    .bind(input.recurringPayment.counterparty_id, input.organizationId, input.projectId)
+    .first<{ id: string }>();
+  if (!counterparty) return false;
+  const account = await tx
+    .prepare(
+      `SELECT id FROM counterparty_accounts
+        WHERE id = ? AND counterparty_id = ? AND organization_id = ? AND project_id = ?
+          AND status = 'active'
+        FOR SHARE`
+    )
+    .bind(
+      input.recurringPayment.counterparty_account_id,
+      input.recurringPayment.counterparty_id,
+      input.organizationId,
+      input.projectId
+    )
+    .first<{ id: string }>();
+  return account !== null;
+}
+
+function logCollectionDestinationPause(input: {
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+}): void {
+  logEvent("warn", {
+    event: "sdp_recurring_payment_paused",
+    reason: "destination_unavailable",
+    organization_id: input.organizationId,
+    project_id: input.projectId,
+    recurring_payment_id: input.recurringPayment.id,
+  });
+}
+
 /** Re-check the recipient for a new cycle, after recovery and before signing. */
 async function admitCollectionDestination(input: {
   env: Env;
@@ -1950,13 +2025,7 @@ async function admitCollectionDestination(input: {
     });
   });
   if (paused) {
-    logEvent("warn", {
-      event: "sdp_recurring_payment_paused",
-      reason: "destination_unavailable",
-      organization_id: input.organizationId,
-      project_id: input.projectId,
-      recurring_payment_id: input.recurringPayment.id,
-    });
+    logCollectionDestinationPause(input);
   }
   throw recipientUnavailable();
 }

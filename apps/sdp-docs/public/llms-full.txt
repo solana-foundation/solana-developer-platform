@@ -16910,11 +16910,13 @@ Estimate transaction chunking and fees for a transfer batch.
 
 - **`options`** · `object`
 
-  Execution options for transaction chunking, priority fees, and preflight validation.
+  Execution options for transaction chunking and preflight validation. `priorityFee` is accepted for compatibility and ignored; no priority fee is applied.
 
   - **`maxRecipientsPerTransaction`** · `integer` · min 1 · max 64
 
-  - **`priorityFee`** · `string` · one of `none`, `low`, `medium`, `high`, `auto`
+  - **`priorityFee`** · `string` · one of `none`, `low`, `medium`, `high`, `auto` · example `none`
+
+    Accepted for compatibility and ignored. No priority fee is applied, regardless of the selected value.
 
   - **`preflight`** · `boolean`
 
@@ -17082,7 +17084,7 @@ curl -X POST 'https://api.solana.com/v1/payments/transfer-batches/estimate' \
     ],
     "options": {
       "maxRecipientsPerTransaction": 20,
-      "priorityFee": "auto",
+      "priorityFee": "none",
       "preflight": true
     },
     "externalId": "payroll_2026_06_30"
@@ -17110,7 +17112,7 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches/est
     ],
     "options": {
       "maxRecipientsPerTransaction": 20,
-      "priorityFee": "auto",
+      "priorityFee": "none",
       "preflight": true
     },
     "externalId": "payroll_2026_06_30"
@@ -17137,7 +17139,7 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches/estimate"
     ],
     "options": {
       "maxRecipientsPerTransaction": 20,
-      "priorityFee": "auto",
+      "priorityFee": "none",
       "preflight": True
     },
     "externalId": "payroll_2026_06_30"
@@ -17247,11 +17249,13 @@ Create a custody-executed outbound transfer batch.
 
 - **`options`** · `object`
 
-  Execution options for transaction chunking, priority fees, and preflight validation.
+  Execution options for transaction chunking and preflight validation. `priorityFee` is accepted for compatibility and ignored; no priority fee is applied.
 
   - **`maxRecipientsPerTransaction`** · `integer` · min 1 · max 64
 
-  - **`priorityFee`** · `string` · one of `none`, `low`, `medium`, `high`, `auto`
+  - **`priorityFee`** · `string` · one of `none`, `low`, `medium`, `high`, `auto` · example `none`
+
+    Accepted for compatibility and ignored. No priority fee is applied, regardless of the selected value.
 
   - **`preflight`** · `boolean`
 
@@ -17739,7 +17743,7 @@ curl -X POST 'https://api.solana.com/v1/payments/transfer-batches' \
     ],
     "options": {
       "maxRecipientsPerTransaction": 20,
-      "priorityFee": "auto",
+      "priorityFee": "none",
       "preflight": true
     },
     "externalId": "payroll_2026_06_30"
@@ -17770,7 +17774,7 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches", {
     ],
     "options": {
       "maxRecipientsPerTransaction": 20,
-      "priorityFee": "auto",
+      "priorityFee": "none",
       "preflight": true
     },
     "externalId": "payroll_2026_06_30"
@@ -17799,7 +17803,7 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches",
     ],
     "options": {
       "maxRecipientsPerTransaction": 20,
-      "priorityFee": "auto",
+      "priorityFee": "none",
       "preflight": True
     },
     "externalId": "payroll_2026_06_30"
@@ -21665,7 +21669,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/collect-payment-
 
 `POST /v1/payments/recurring-payments/{id}/collect`
 
-Before a new collection, SDP requires an active counterparty and account in the schedule's project. If either is archived or unavailable, the schedule pauses with `pausedReason` `destination_unavailable` and the request returns `409` without signing. That `409`, and every later collect or resume while the recipient stays unavailable, tells the caller to cancel the schedule and create a new one. An earlier in-flight collection still recovers.
+When admitting a new collection, SDP requires an active counterparty and account in the schedule's project. Archival that commits before admission prevents a new collection from signing. If either recipient record is archived or unavailable, the schedule pauses with `pausedReason` `destination_unavailable` and the request returns `409` without signing. That `409`, and every later collect or resume while the recipient stays unavailable, tells the caller to cancel the schedule and create a new one. A collection admitted earlier may still finish or recover.
 
 If submission cannot be confirmed immediately, a `200` response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation.
 
@@ -36189,7 +36193,15 @@ The dashboard starts a key that holds any `execute` action on **Selected wallets
 
 A recurring payment is collected on schedule as its own mandate, not as the key or member that activated it. SDP checks that the payment is active, that it pays from its own source wallet, that its counterparty and account are active in the project, and that the organization may move money. Revoking or narrowing the key that activated it doesn't stop it, so rotating a key never interrupts a customer's schedule.
 
-Archiving the counterparty archives its active accounts too, and new transfers and batches can't use them. Before the next new collection, an unavailable counterparty or account pauses the recurring payment with `pausedReason: "destination_unavailable"`. Work already in flight still recovers, and earlier requests still replay their recorded outcomes. The dashboard shows the pause reason and offers Cancel. Paused schedules can't be edited, so cancel the schedule and create a new one with an active recipient.
+Archiving the counterparty archives its active accounts too, and new transfers
+and batches can't use them. Archival that commits before a new collection is
+admitted prevents it from signing and pauses the recurring payment with
+`pausedReason: "destination_unavailable"`. A collection admitted earlier may
+still finish or recover, and earlier requests still replay their recorded
+outcomes.
+
+The dashboard shows the pause reason and offers Cancel. Paused schedules can't
+be edited, so cancel the schedule and create a new one with an active recipient.
 
 ## Create a key
 
@@ -36801,6 +36813,10 @@ The two ids do different jobs:
 - **`externalId`** (required: a batch without one returns `400`) identifies the payout run. Derive it from your own data, such as the pay period, so every attempt at the run carries the same value. See [One batch per payout run](#one-batch-per-payout-run).
 
 Use `GET /v1/payments/transfer-batches/{batchId}` to inspect recipient and chunk outcomes.
+
+Batch execution does not add a priority fee. `options.priorityFee` is accepted for
+compatibility and ignored, including `auto`, `low`, `medium`, and `high`. The
+estimate reports `priorityFeeLamports: "0"`.
 
 ### One batch per payout run
 
