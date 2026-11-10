@@ -294,14 +294,15 @@ export function withPinnedRpcTelemetry(transport: RpcTransport, endpointUrl: str
 
 type AttemptEndpoint = Readonly<{ provider: string; cluster: SolanaCluster }>;
 
-type SettledAttempt = { ok: true; response: unknown } | { ok: false; error: unknown };
+type SettledAttempt =
+  | { ok: true; envelope: z.infer<typeof rpcEnvelopeSchema> }
+  | { ok: false; cause: unknown };
 
 function managedResponseOutcome(
-  response: unknown,
+  envelope: z.infer<typeof rpcEnvelopeSchema>,
   method: string,
   cluster: SolanaCluster
 ): "succeeded" | "failed" {
-  const envelope = rpcEnvelopeSchema.parse(response);
   if (envelope.kind === "error") return "failed";
   const servesOtherCluster =
     method === "getGenesisHash" &&
@@ -324,9 +325,9 @@ function recordManagedAttempt(
     cluster: endpoint.cluster,
     method,
     outcome: settled.ok
-      ? managedResponseOutcome(settled.response, method, endpoint.cluster)
+      ? managedResponseOutcome(settled.envelope, method, endpoint.cluster)
       : rpcFailureOutcome(request.signal),
-    status_code: settled.ok ? undefined : httpStatusOf(settled.error),
+    status_code: settled.ok ? undefined : httpStatusOf(settled.cause),
     duration_ms: performance.now() - startedAt,
     socket_retry: request.socketRetry,
   });
@@ -346,11 +347,12 @@ export function withAttemptTelemetry(
     const startedAt = performance.now();
     try {
       const response = await transport<TResponse>(request);
-      recordManagedAttempt(endpoint, request, startedAt, { ok: true, response });
+      const envelope = rpcEnvelopeSchema.parse(response);
+      recordManagedAttempt(endpoint, request, startedAt, { ok: true, envelope });
       return response;
-    } catch (error) {
-      recordManagedAttempt(endpoint, request, startedAt, { ok: false, error });
-      throw error;
+    } catch (cause) {
+      recordManagedAttempt(endpoint, request, startedAt, { ok: false, cause });
+      throw cause;
     }
   };
 }
