@@ -294,10 +294,6 @@ export function withPinnedRpcTelemetry(transport: RpcTransport, endpointUrl: str
 
 type AttemptEndpoint = Readonly<{ provider: string; cluster: SolanaCluster }>;
 
-type SettledAttempt =
-  | { ok: true; envelope: z.infer<typeof rpcEnvelopeSchema> }
-  | { ok: false; cause: unknown };
-
 function managedResponseOutcome(
   envelope: z.infer<typeof rpcEnvelopeSchema>,
   method: string,
@@ -311,23 +307,22 @@ function managedResponseOutcome(
   return servesOtherCluster ? "failed" : "succeeded";
 }
 
-function recordManagedAttempt(
+function emitManagedAttempt(
   endpoint: AttemptEndpoint,
   request: RpcAttemptRequest,
+  method: string,
+  outcome: NonNullable<RpcTelemetryEvent["outcome"]>,
   startedAt: number,
-  settled: SettledAttempt
+  statusCode?: number
 ): void {
-  const method = isJsonRpcPayload(request.payload) ? request.payload.method : "batch";
   emitRpcTelemetry({
     event: "sdp_rpc_attempt",
     surface: "managed_pool",
     provider: endpoint.provider,
     cluster: endpoint.cluster,
     method,
-    outcome: settled.ok
-      ? managedResponseOutcome(settled.envelope, method, endpoint.cluster)
-      : rpcFailureOutcome(request.signal),
-    status_code: settled.ok ? undefined : httpStatusOf(settled.cause),
+    outcome,
+    status_code: statusCode,
     duration_ms: performance.now() - startedAt,
     socket_retry: request.socketRetry,
   });
@@ -344,14 +339,20 @@ export function withAttemptTelemetry(
   endpoint: AttemptEndpoint
 ): RpcTransport {
   return async <TResponse>(request: RpcAttemptRequest) => {
+    const method = isJsonRpcPayload(request.payload) ? request.payload.method : "batch";
     const startedAt = performance.now();
     try {
       const response = await transport<TResponse>(request);
-      const envelope = rpcEnvelopeSchema.parse(response);
-      recordManagedAttempt(endpoint, request, startedAt, { ok: true, envelope });
+      const outcome = managedResponseOutcome(
+        rpcEnvelopeSchema.parse(response),
+        method,
+        endpoint.cluster
+      );
+      emitManagedAttempt(endpoint, request, method, outcome, startedAt);
       return response;
     } catch (cause) {
-      recordManagedAttempt(endpoint, request, startedAt, { ok: false, cause });
+      const outcome = rpcFailureOutcome(request.signal);
+      emitManagedAttempt(endpoint, request, method, outcome, startedAt, httpStatusOf(cause));
       throw cause;
     }
   };
