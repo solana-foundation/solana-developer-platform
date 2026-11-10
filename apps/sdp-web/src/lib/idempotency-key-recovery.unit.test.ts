@@ -47,6 +47,35 @@ describe("unresolved Treasury intent identity", () => {
     expect(store.claim("same-intent").key).not.toBe(original);
   });
 
+  it("keeps a key when a replayed answer is unreadable, as the key's store does", () => {
+    const store = createIdempotencyKeyStore("test:unreadable-replay");
+    const original = store.claim("same-intent").key;
+    // A replay whose body nobody could read says nothing the form can act on:
+    // the retry under the kept key is answered by the API's replay again,
+    // where a readable one retires it. A fresh key here would move money a
+    // second time on the next press.
+    const unreadableReplay = fetchResultAnswer({
+      ok: false,
+      status: 500,
+      replayed: true,
+      code: null,
+      unreadable: true,
+    });
+    expect(unreadableReplay).toEqual({ status: null, replayed: false, code: null });
+    expect(settleIdempotencyKey(store, "same-intent", original, unreadableReplay)).toBe(false);
+    expect(store.claim("same-intent").key).toBe(original);
+    // The same response, readable: the replay mark retires the key.
+    const readableReplay = fetchResultAnswer({
+      ok: false,
+      status: 500,
+      replayed: true,
+      code: null,
+    });
+    expect(readableReplay.replayed).toBe(true);
+    expect(settleIdempotencyKey(store, "same-intent", original, readableReplay)).toBe(true);
+    expect(store.claim("same-intent").key).not.toBe(original);
+  });
+
   it("does not replace an unresolved intent just because fifteen minutes elapsed", () => {
     vi.useFakeTimers();
     const store = createIdempotencyKeyStore("test:treasury-recovery");

@@ -202,7 +202,10 @@ export function isOutcomeUnknownAnswer(answer: ApiAnswer): boolean {
 /**
  * The answer a `dashboardFetch`-shaped result carries. A failure below 400 (a
  * followed redirect, a body nobody could read) or one marked `unreadable` is
- * no answer from sdp-api, so it reads as a lost one.
+ * no answer from sdp-api, so it reads as a lost one — the replay mark
+ * included: an unreadable body says nothing about the write even when the
+ * header names a stored answer, so it keeps the key exactly as the store's
+ * own `answerOf` does for the same response.
  */
 export function fetchResultAnswer(result: {
   ok: boolean;
@@ -215,7 +218,7 @@ export function fetchResultAnswer(result: {
     result.unreadable !== true && (result.ok || (result.status !== null && result.status >= 400));
   return {
     status: answered ? result.status : null,
-    replayed: result.replayed === true,
+    replayed: answered && result.replayed === true,
     code: answered && !result.ok && result.code !== undefined ? result.code : null,
   };
 }
