@@ -409,10 +409,11 @@ describe("createClusterRpc", () => {
     const rpc = runInClusterScope(SANDBOX, createClusterRpc);
 
     assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
-    await assert.rejects(
+    const [send] = await Promise.allSettled([
       rpc.sendTransaction(WIRE_TRANSACTION, { encoding: "base64" }).send(),
-      (error: unknown) => error === refused
-    );
+    ]);
+    assert.ok(send.status === "rejected");
+    assert.equal(send.reason, refused);
   });
 
   it("refuses to build a client outside a cluster scope", () => {
