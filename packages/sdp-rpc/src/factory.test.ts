@@ -805,6 +805,20 @@ describe("createClusterRpc", () => {
     ]);
   });
 
+  it("probes an endpoint again after its genesis probe failed transiently and answers the next read", async () => {
+    const url = "https://devnet-probe-recovers.example.test";
+    configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: url });
+    const endpoints = { [url]: GENESIS_PROBE_FETCH_FAILS };
+    const calls = stubEndpoints(endpoints);
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    await assert.rejects(rpc.getSlot().send(), { name: "TypeError", message: "fetch failed" });
+    endpoints[url] = SERVES_DEVNET;
+
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(calls, [genesisProbe(url), genesisProbe(url), slotRead(url)]);
+  });
+
   it("fails over on a can't-serve-yet body and surfaces the last endpoint's as kit's error", async (t) => {
     const behind = "https://devnet-behind.example.test";
     const unhealthy = "https://devnet-unhealthy.example.test";
