@@ -18,16 +18,20 @@ vi.mock("@clerk/nextjs", () => ({
 }));
 
 // Whether Sentry runs is a deployment constant (its DSN), and the SDK's ESM namespace cannot be
-// spied on, so the SDK is the one module this test swaps: a client or none, and the event id.
+// spied on, so the SDK is the one module this test swaps: a client or none, and whether Sentry
+// accepts the upload.
 const sentry = vi.hoisted(() => ({
   client: true,
-  captureFeedback: vi.fn((..._args: unknown[]) => "0123456789abcdef0123456789abcdef"),
+  sendFeedback: vi.fn(
+    async (..._args: unknown[]): Promise<string> => "0123456789abcdef0123456789abcdef"
+  ),
 }));
 vi.mock("@sentry/nextjs", () => ({
   getClient: () => (sentry.client ? {} : undefined),
-  captureFeedback: sentry.captureFeedback,
+  withScope: <T,>(callback: () => T): T => callback(),
+  sendFeedback: sentry.sendFeedback,
 }));
-const captureFeedback = sentry.captureFeedback;
+const sendSentryFeedback = sentry.sendFeedback;
 
 let dashboardFetch: MockInstance<typeof dashboardFetchModule.dashboardFetch>;
 
@@ -38,7 +42,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  captureFeedback.mockClear();
+  sendSentryFeedback.mockReset();
+  sendSentryFeedback.mockResolvedValue(EVENT_ID);
   vi.restoreAllMocks();
 });
 
@@ -77,7 +82,7 @@ describe("FeedbackForm", () => {
         "With the page you were on and 1 file. A reply, if there is one, goes to jane@example.com."
       )
     ).toBeDefined();
-    const [, hint] = captureFeedback.mock.calls[0] ?? [];
+    const [, hint] = sendSentryFeedback.mock.calls[0] ?? [];
     expect(hint).toMatchObject({
       includeReplay: true,
       attachments: [{ filename: "shot.png", contentType: "image/png" }],
@@ -127,9 +132,45 @@ describe("FeedbackForm", () => {
     await user.click(send());
 
     expect(await screen.findByText("Sent to the SDP team")).toBeDefined();
-    expect(captureFeedback).toHaveBeenCalledTimes(1);
+    expect(sendSentryFeedback).toHaveBeenCalledTimes(1);
     const [, retry] = dashboardFetch.mock.calls[1] ?? [];
     expect(retry).toMatchObject({ body: { sentryEventId: EVENT_ID } });
+  });
+
+  it("sends nothing when Sentry refuses the files, and uploads them again on retry", async () => {
+    sendSentryFeedback.mockRejectedValueOnce(new Error("Unable to send feedback"));
+    dashboardFetch.mockResolvedValue({ ok: true, data: {}, status: 201 });
+    const user = userEvent.setup();
+    const { container } = renderForm();
+
+    await user.type(messageBox(), "Hello");
+    await user.upload(fileInput(container), new File(["png"], "shot.png", { type: "image/png" }));
+    await user.click(send());
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Your files couldn’t be uploaded, so nothing was sent. Send again, or remove the files to send just the message."
+    );
+    expect(dashboardFetch).not.toHaveBeenCalled();
+    await user.click(send());
+
+    expect(await screen.findByText("Sent to the SDP team")).toBeDefined();
+    expect(sendSentryFeedback).toHaveBeenCalledTimes(2);
+    const [, request] = dashboardFetch.mock.calls[0] ?? [];
+    expect(request).toMatchObject({ body: { attachmentCount: 1, sentryEventId: EVENT_ID } });
+  });
+
+  it("still emails the team when Sentry refuses feedback without files, naming no event", async () => {
+    sendSentryFeedback.mockRejectedValueOnce(new Error("Unable to send feedback"));
+    dashboardFetch.mockResolvedValue({ ok: true, data: {}, status: 201 });
+    const user = userEvent.setup();
+    renderForm();
+
+    await user.type(messageBox(), "Hello");
+    await user.click(send());
+
+    expect(await screen.findByText("Sent to the SDP team")).toBeDefined();
+    const [, request] = dashboardFetch.mock.calls[0] ?? [];
+    expect(request).toMatchObject({ body: { attachmentCount: 0, sentryEventId: undefined } });
   });
 
   it("records a new Sentry event when the feedback changed before the retry", async () => {
@@ -146,7 +187,7 @@ describe("FeedbackForm", () => {
     await user.click(send());
 
     expect(await screen.findByText("Sent to the SDP team")).toBeDefined();
-    expect(captureFeedback).toHaveBeenCalledTimes(2);
+    expect(sendSentryFeedback).toHaveBeenCalledTimes(2);
   });
 
   it("keeps Send disabled until there is something to send", async () => {
@@ -203,7 +244,7 @@ describe("FeedbackForm", () => {
     await user.click(send());
 
     expect(await screen.findByText("Sent to the SDP team")).toBeDefined();
-    expect(captureFeedback).not.toHaveBeenCalled();
+    expect(sendSentryFeedback).not.toHaveBeenCalled();
     const [, request] = dashboardFetch.mock.calls[0] ?? [];
     expect(request).toMatchObject({ body: { message: "Hello", sentryEventId: undefined } });
   });
@@ -235,7 +276,7 @@ describe("FeedbackForm", () => {
     expect((await screen.findByRole("alert")).textContent).toBe(
       "gone.png can’t be read any more. Remove it and send again."
     );
-    expect(captureFeedback).not.toHaveBeenCalled();
+    expect(sendSentryFeedback).not.toHaveBeenCalled();
     expect(dashboardFetch).not.toHaveBeenCalled();
     expect(messageBox()).toHaveProperty("value", "Hello");
   });

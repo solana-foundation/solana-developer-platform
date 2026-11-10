@@ -228,6 +228,7 @@ export function FeedbackForm({
 const SEND_RESULT_SCHEMA = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("sent") }),
   z.object({ kind: z.literal("unreadable"), name: z.string() }),
+  z.object({ kind: z.literal("filesRefused") }),
   z.object({ kind: z.literal("unavailable") }),
   z.object({ kind: z.literal("failed"), error: z.string() }),
 ]);
@@ -237,6 +238,8 @@ function sendErrorText(result: Exclude<SendResult, { kind: "sent" }>, t: Transla
   switch (result.kind) {
     case "unreadable":
       return t("Feedback.attachUnreadable", { name: result.name });
+    case "filesRefused":
+      return t("Feedback.attachUploadFailed");
     case "unavailable":
       return t("Feedback.unavailable");
     case "failed":
@@ -319,9 +322,37 @@ function sentrySignature(input: FeedbackInput): string {
 }
 
 /**
+ * Records the feedback in Sentry and waits for Sentry to accept it: `captureFeedback` returns an
+ * id before the upload runs, so only an accepted upload names an event the files are on. The
+ * tags go on a scope of their own, since `sendFeedback` sets them on the scope it runs in.
+ */
+async function uploadToSentry(
+  input: FeedbackInput,
+  attachments: Extract<AttachmentsResult, { ok: true }>["attachments"]
+): Promise<string | null> {
+  try {
+    return await Sentry.withScope(() =>
+      Sentry.sendFeedback(
+        {
+          message: input.message,
+          source: "dashboard",
+          url: input.pageUrl,
+          tags: input.category ? { feedback_category: input.category } : undefined,
+        },
+        { includeReplay: true, attachments }
+      )
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Files and the replay go to Sentry first, when the deployment runs it, so the email can name
- * the event that holds them; the words then go to the SDP team's inbox through the API. A retry
- * of the same feedback reuses the event the first try made.
+ * the event that holds them; the words then go to the SDP team's inbox through the API. Files
+ * Sentry refuses stop the send, so the team never gets an email naming files it cannot find;
+ * without files the email goes anyway, naming no event. A retry of the same feedback reuses an
+ * event Sentry accepted.
  */
 async function sendFeedback(
   input: FeedbackInput,
@@ -336,16 +367,12 @@ async function sendFeedback(
     } else {
       const read = await readAttachments(input.files);
       if (!read.ok) return { kind: "unreadable", name: read.name };
-      sentryEventId = Sentry.captureFeedback(
-        {
-          message: input.message,
-          source: "dashboard",
-          url: input.pageUrl,
-          tags: input.category ? { feedback_category: input.category } : undefined,
-        },
-        { includeReplay: true, attachments: read.attachments }
-      );
-      sentryEvent.current = { signature, eventId: sentryEventId };
+      const accepted = await uploadToSentry(input, read.attachments);
+      if (accepted === null && input.files.length > 0) return { kind: "filesRefused" };
+      if (accepted !== null) {
+        sentryEventId = accepted;
+        sentryEvent.current = { signature, eventId: accepted };
+      }
     }
   }
   const result = await dashboardFetch<unknown>(

@@ -39,6 +39,7 @@
     "attachTooLarge": "{name} is over 10 MB.",
     "attachTooMany": "Up to {max} files.",
     "attachUnreadable": "{name} can’t be read any more. Remove it and send again.",
+    "attachUploadFailed": "Your files couldn’t be uploaded, so nothing was sent. Send again, or remove the files to send just the message.",
     "removeAttachment": "Remove {name}",
     "cancel": "Cancel",
     "submit": "Send feedback",

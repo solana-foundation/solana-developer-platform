@@ -32,10 +32,12 @@ Nothing is stored. Without that configuration the API answers 503 and the
 screen says SDP isn't answering.
 
 Sentry is optional. With a Sentry client the screen first records the feedback
-with `Sentry.captureFeedback`, tagged `feedback_category`, with the session's
-replay and the attachments, and the email carries that event ID under
-**Sentry event**. Without one the screen hides **Attach files** and still sends
-the email.
+with `Sentry.sendFeedback`, tagged `feedback_category`, with the session's
+replay and the attachments, and waits for Sentry to accept it; the email then
+carries that event ID under **Sentry event**. If Sentry refuses an upload with
+files, nothing is sent and the screen asks the user to send again or remove the
+files; without files the email goes anyway, naming no event. Without a Sentry
+client the screen hides **Attach files** and still sends the email.
 
 ## Identity and privacy
 
