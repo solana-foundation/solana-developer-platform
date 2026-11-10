@@ -48,6 +48,7 @@ export async function MainnetAccessSection() {
       record={
         <MainnetAccessRecord
           organizationId={loaded.organizationId}
+          organizationName={loaded.organizationName}
           access={loaded.access}
           locale={locale}
           timeZone={timeZone}
@@ -62,18 +63,21 @@ type Translate = Awaited<ReturnType<typeof getTranslations>>;
 
 function MainnetAccessRecord({
   organizationId,
+  organizationName,
   access,
   locale,
   timeZone,
   t,
 }: {
   organizationId: string;
+  organizationName: string;
   access: MainnetAccess;
   locale: string;
   timeZone: string;
   t: Translate;
 }) {
   const unsent = access.state === "pending" && access.request?.notified === false;
+  const organization = { organization: organizationName };
   const requestedOn = access.request
     ? formatDate(locale, timeZone, access.request.requestedAt)
     : null;
@@ -90,16 +94,30 @@ function MainnetAccessRecord({
             ) : undefined
           }
         />
+      ) : access.state === "pending" ? (
+        <RecordStateBand
+          state={t("Shared.mainnetAccess.statusPending")}
+          tone="progress"
+          why={t("Shared.mainnetAccess.pendingBody", organization)}
+        />
       ) : null}
       <RecordList>
-        <RecordRow label={t("Shared.mainnetAccess.statusLabel")} help={statusHelp(access, t)}>
-          {t(STATUS_LABEL_KEYS[access.state])}
-        </RecordRow>
+        {access.state === "pending" ? null : (
+          <RecordRow
+            label={t("Shared.mainnetAccess.statusLabel")}
+            help={statusHelp(access, organizationName, t)}
+          >
+            {t(STATUS_LABEL_KEYS[access.state])}
+          </RecordRow>
+        )}
         {requestedOn === null ? null : (
           <RecordRow label={t("Shared.mainnetAccess.requestedLabel")}>{requestedOn}</RecordRow>
         )}
         {access.countryCode ? (
-          <RecordRow label={t("Shared.mainnetAccess.jurisdictionLabel")}>
+          <RecordRow
+            label={t("Shared.mainnetAccess.jurisdictionLabel")}
+            help={t("Shared.mainnetAccess.jurisdictionHelp", organization)}
+          >
             {countryLabel(access.countryCode)}
           </RecordRow>
         ) : null}
@@ -141,15 +159,15 @@ const STATUS_LABEL_KEYS = {
   approved: "Shared.mainnetAccess.statusApproved",
 } as const satisfies Record<MainnetAccess["state"], MessageKey>;
 
-function statusHelp(access: MainnetAccess, t: Translate): string {
+function statusHelp(access: MainnetAccess, organization: string, t: Translate): string {
   switch (access.state) {
     case "approved":
-      return t("Shared.mainnetAccess.approvedBody");
+      return t("Shared.mainnetAccess.approvedBody", { organization });
     case "pending":
-      return t("Shared.mainnetAccess.pendingBody");
+      return t("Shared.mainnetAccess.pendingBody", { organization });
     case "not_requested":
       return access.available
-        ? t("Shared.mainnetAccess.description")
+        ? t("Shared.mainnetAccess.description", { organization })
         : t("Shared.mainnetAccess.unavailableBody");
     default: {
       const exhaustive: never = access.state;

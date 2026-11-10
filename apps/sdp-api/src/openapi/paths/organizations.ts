@@ -4,6 +4,7 @@ import { errorResponseSchema, orgIdParamSchema } from "@/openapi/schemas/base";
 import {
   createOrganizationRequestSchema,
   requestMainnetAccessRequestSchema,
+  sendFeedbackRequestSchema,
   updateOrganizationRequestSchema,
 } from "@/openapi/schemas/organizations";
 import { errorResponses, jsonContent } from "./helpers";
@@ -11,6 +12,7 @@ import {
   createOrganizationResponse,
   mainnetAccessResponse,
   organizationResponse,
+  sendFeedbackResponse,
 } from "./responses";
 
 export function registerOrganizationPaths(registry: OpenAPIRegistry) {
@@ -131,6 +133,25 @@ export function registerOrganizationPaths(registry: OpenAPIRegistry) {
     responses: {
       200: { description: "Request sent", content: jsonContent(mainnetAccessResponse) },
       ...errorResponses(errorResponseSchema, [401, 403, 409, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/organizations/{orgId}/feedback",
+    tags: ["Organizations"],
+    summary: "Send feedback",
+    operationId: "sendFeedback",
+    description:
+      "Emails feedback from the dashboard to the SDP team, replying to the sender's email. Nothing is stored. A signed-in person in any role, never an API key. Refused with 503 when this deployment sends no email, and with 429 past ten sends a minute per person or thirty a minute per organization.",
+    security: [{ clerkBearerAuth: [] }],
+    request: {
+      params: z.object({ orgId: orgIdParamSchema }),
+      body: { required: true, content: jsonContent(sendFeedbackRequestSchema) },
+    },
+    responses: {
+      201: { description: "Feedback sent", content: jsonContent(sendFeedbackResponse) },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
     },
   });
 }

@@ -12,6 +12,8 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
 
 export const DASHBOARD_ACCOUNT_HREF = "/dashboard/account";
 
+export const DASHBOARD_FEEDBACK_HREF = "/dashboard/feedback";
+
 export const DASHBOARD_MARKETS_SUBNAV_HREFS = {
   treasurySolutions: "/dashboard/markets/treasury-solutions",
   earnProgram: "/dashboard/markets/embedded-yield",

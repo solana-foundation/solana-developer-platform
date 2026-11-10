@@ -22,7 +22,32 @@
     "goHome": "Go home"
   },
   "Feedback": {
-    "label": "Send feedback"
+    "label": "Send feedback",
+    "title": "Send feedback",
+    "backToHome": "Home",
+    "categoryLabel": "What is it about?",
+    "categoryProblem": "Something’s broken",
+    "categoryIdea": "An idea",
+    "categoryQuestion": "A question",
+    "messageLabel": "What would you change?",
+    "messagePlaceholder": "I expected the payout to show the fee before I sent it.",
+    "attachedFiles": "Attached files",
+    "attach": "Attach files",
+    "attachHint": "Screenshots or PDFs, up to 10 MB",
+    "attachWrongType": "{name} isn’t a picture or a PDF.",
+    "attachTooLarge": "{name} is over 10 MB.",
+    "attachTooMany": "Up to {max} files.",
+    "removeAttachment": "Remove {name}",
+    "cancel": "Cancel",
+    "submit": "Send feedback",
+    "unavailable": "SDP isn’t answering, so nothing can be sent right now.",
+    "submitFailed": "Couldn’t send your feedback: {error}",
+    "sentTitle": "Sent to the SDP team",
+    "sentBody": "With the page you were on. A reply, if there is one, goes to {email}.",
+    "sentBodyOneFile": "With the page you were on and 1 file. A reply, if there is one, goes to {email}.",
+    "sentBodyFiles": "With the page you were on and {count} files. A reply, if there is one, goes to {email}.",
+    "sentBodyNoEmail": "With the page you were on.",
+    "backTo": "Back to Home"
   },
   "Error": {
     "tryAgain": "Try again",

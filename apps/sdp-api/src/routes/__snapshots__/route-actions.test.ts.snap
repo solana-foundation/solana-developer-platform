@@ -184,6 +184,7 @@ exports[`route actions > pins each route's action 1`] = `
   "organizations.manage POST /v1/organizations/:orgId/mainnet-access/notify",
   "organizations.read GET /v1/organizations/:orgId",
   "organizations.read GET /v1/organizations/:orgId/provider-access",
+  "organizations.read POST /v1/organizations/:orgId/feedback",
   "payment_requests.manage GET /v1/payments/requests/:paymentRequestId/link",
   "payment_requests.manage POST /v1/payments/requests",
   "payment_requests.manage POST /v1/payments/requests/:paymentRequestId/cancel",

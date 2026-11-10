@@ -11,7 +11,6 @@ import { SidebarUserMenu } from "./sidebar-user-menu";
 const clerk = vi.hoisted(() => ({ loaded: true }));
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
-vi.mock("@sentry/nextjs", () => ({ getFeedback: () => undefined }));
 vi.mock("@clerk/nextjs", () => ({
   useUser: () => ({
     isLoaded: clerk.loaded,
@@ -62,6 +61,9 @@ describe("SidebarUserMenu", () => {
     ).toEqual(["Account settings", "Theme", "Send feedback", "API docs", "Sign out"]);
     expect(screen.getByRole("menuitem", { name: "Account settings" }).getAttribute("href")).toBe(
       `/dashboard/${PRODUCTION_PROJECT.id}/account`
+    );
+    expect(screen.getByRole("menuitem", { name: "Send feedback" }).getAttribute("href")).toBe(
+      `/dashboard/${PRODUCTION_PROJECT.id}/feedback`
     );
   });
 });

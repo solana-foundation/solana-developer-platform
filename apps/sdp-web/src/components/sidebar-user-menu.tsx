@@ -11,7 +11,6 @@ import {
 } from "@sdp/ui/dropdown-menu";
 import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { ToggleSwitch } from "@sdp/ui/toggle-switch";
-import * as Sentry from "@sentry/nextjs";
 import {
   ArrowUpRightIcon,
   BookOpenIcon,
@@ -27,14 +26,16 @@ import {
   UserRoundIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef } from "react";
 import { docsHref } from "@/components/dashboard-nav";
 import { UserAvatar } from "@/components/user-avatar";
 import { useNetworkDebug } from "@/contexts/network-debug-context";
 import { THEME_PREFERENCES, type ThemePreference, useTheme } from "@/contexts/theme-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { DASHBOARD_ACCOUNT_HREF } from "@/lib/dashboard-navigation-loading";
+import {
+  DASHBOARD_ACCOUNT_HREF,
+  DASHBOARD_FEEDBACK_HREF,
+} from "@/lib/dashboard-navigation-loading";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { userDisplayName } from "@/lib/user-display-name";
 
@@ -48,13 +49,6 @@ export function SidebarUserMenu({ collapsed }: { collapsed: boolean }) {
   const projectHref = useProjectHref();
   const { user, isLoaded } = useUser();
   const { signOut } = useClerk();
-  const { theme } = useTheme();
-
-  useEffect(() => {
-    const feedback = Sentry.getFeedback();
-    feedback?.setTheme(theme);
-  }, [theme]);
-
   if (!isLoaded) {
     return (
       <div
@@ -128,7 +122,12 @@ export function SidebarUserMenu({ collapsed }: { collapsed: boolean }) {
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <ThemeMenuItem />
-        <FeedbackMenuItem />
+        <DropdownMenuItem asChild className={MENU_ITEM_CLASS}>
+          <Link href={projectHref(DASHBOARD_FEEDBACK_HREF)}>
+            <MessageSquareIcon className="size-4 shrink-0 text-secondary" />
+            {t("Feedback.label")}
+          </Link>
+        </DropdownMenuItem>
         <DropdownMenuItem asChild className={MENU_ITEM_CLASS}>
           <a href={docsHref} target="_blank" rel="noopener noreferrer">
             <BookOpenIcon className="size-4 shrink-0 text-secondary" />
@@ -149,28 +148,6 @@ export function SidebarUserMenu({ collapsed }: { collapsed: boolean }) {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-// Sentry's feedback widget wires its dialog to a DOM node, so the item hands it
-// its own element. The item mounts with the menu content, which is when the
-// attachment needs to exist; letting the menu close on select is fine — the
-// dialog Sentry opened outlives the node it was attached to.
-function FeedbackMenuItem() {
-  const t = useTranslations();
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const feedback = Sentry.getFeedback();
-    if (!feedback || !ref.current) return;
-    return feedback.attachTo(ref.current);
-  }, []);
-
-  return (
-    <DropdownMenuItem ref={ref} className={MENU_ITEM_CLASS}>
-      <MessageSquareIcon className="size-4 shrink-0 text-secondary" />
-      {t("Feedback.label")}
-    </DropdownMenuItem>
   );
 }
 
