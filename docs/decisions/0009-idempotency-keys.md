@@ -184,11 +184,13 @@ answered from.
 
 Custody wallet creation (`POST /v1/wallets`) moves no money but creates a provider wallet before its
 row, so it has no row to write first and stays `serverErrors: "store"`, except where the provider
-dedupes on the request id: there the handler calls `markIdempotencyRerunnable`, so a 5xx (the
-provider made the wallet and saving its row failed, or its answer was lost) releases the key and a
-same-key retry runs again and adopts that wallet, where a stored 5xx would push the client to a new
-key and the provider to a second wallet (HOO-2565). That is a keyed Managed create on Privy or
-Coinbase CDP (`walletCreateDedupesOnRequestId`) and every keyed Connection wallet create. A keyed create derives a
+dedupes on the request id: there its authorize step calls `markIdempotencyRerunnable`, before the
+key is claimed, so a 5xx (the provider made the wallet and saving its row failed, its answer was
+lost, or the replay lookup failed) releases the key and a same-key retry runs again and adopts that
+wallet, where a stored 5xx would push the client to a new key and the provider to a second wallet
+(HOO-2565). `WALLET_CREATE_DEDUPE` in `@sdp/types/custody` lists those providers by custody mode:
+Managed Privy and Coinbase CDP, and Connection Privy, permanently; Connection Fireblocks only within
+its 24-hour idempotency window. A keyed create derives a
 request id from the key, scoped by organization, project and credential (the raw key never reaches
 a provider), and records it with the fingerprint on the `custody_wallets` row (migration 0136). A
 retry the key cannot answer (a takeover, or past 24 hours) is answered from that row by

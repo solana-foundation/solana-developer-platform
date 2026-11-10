@@ -29,11 +29,7 @@ import {
 import { deriveProviderRequestId } from "@/lib/idempotency";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
-import {
-  getIdempotencyClaim,
-  markIdempotencyRecordMismatch,
-  markIdempotencyRerunnable,
-} from "@/middleware/idempotency";
+import { getIdempotencyClaim, markIdempotencyRecordMismatch } from "@/middleware/idempotency";
 import type { RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, parseBooleanQueryParam, resolveActor } from "@/routes/custody/context";
@@ -56,7 +52,6 @@ import {
   CustodyRuntimeTargets,
   type CustodyRuntimeWalletProjection,
 } from "@/services/domain/signing/custody-runtime-target";
-import { walletCreateDedupesOnRequestId } from "@/services/domain/signing/provider-wallet-lifecycle";
 import * as signingServiceModule from "@/services/domain/signing.service";
 import {
   aggregateTrackedWalletBalances,
@@ -299,19 +294,6 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
 
   const body = c.req.valid("json");
   const idempotency = custodyWalletIdempotency(c);
-  // A keyed create whose provider returns the same wallet for the same request
-  // id runs again on its retry instead of replaying a stored 5xx: after the
-  // provider made the wallet and saving its row failed, the retry adopts that
-  // wallet, where a new key would make a second one (HOO-2565). A Connection
-  // wallet is Privy's or Fireblocks', and both get the request id.
-  if (
-    idempotency !== null &&
-    (body.connectionId !== undefined ||
-      (body.provider !== undefined && walletCreateDedupesOnRequestId(body.provider)))
-  ) {
-    markIdempotencyRerunnable(c);
-  }
-
   const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
 
   try {
