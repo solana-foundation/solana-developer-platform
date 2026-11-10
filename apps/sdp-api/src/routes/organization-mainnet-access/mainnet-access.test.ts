@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { correctMainnetAccess } from "@/services/mainnet-access.service";
+import * as mainnetAccessEmail from "@/services/mainnet-access-email";
 import { syncProviderAccessFromClerk } from "@/services/provider-availability.service";
 import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -27,19 +28,20 @@ const MAINNET_ACCESS_EVENTS = [
   "sdp_api_mainnet_access_request_notified",
   "sdp_api_mainnet_access_request_notify_failed",
 ];
+const ADMIN_IDENTITY = { organization_id: ORGANIZATION_ID, user_id: TEST_USER.id };
 const REQUESTED_EVENT = [
   "info",
   {
     event: "sdp_api_mainnet_access_requested",
-    organization_id: ORGANIZATION_ID,
-    user_id: TEST_USER.id,
     country_code: "SG",
     terms_version: SDP_TERMS.version,
   },
+  ADMIN_IDENTITY,
 ];
 const NOTIFIED_EVENT = [
   "info",
-  { event: "sdp_api_mainnet_access_request_notified", organization_id: ORGANIZATION_ID },
+  { event: "sdp_api_mainnet_access_request_notified" },
+  ADMIN_IDENTITY,
 ];
 
 let adminToken: string;
@@ -324,10 +326,10 @@ describe("Organization mainnet access (HOO-2427)", () => {
         "warn",
         {
           event: "sdp_api_mainnet_access_request_notify_failed",
-          organization_id: ORGANIZATION_ID,
           error_name: "AppError",
           error_code: "PROVIDER_UNAVAILABLE",
         },
+        ADMIN_IDENTITY,
       ],
     ]);
     restore();
@@ -341,6 +343,17 @@ describe("Organization mainnet access (HOO-2427)", () => {
     });
     expect(sentEmails()).toHaveLength(2);
     expect(loggedEvents().slice(2)).toEqual([NOTIFIED_EVENT]);
+  });
+
+  it("logs an unexpected handler error inside the admin's identity", async () => {
+    const loggedEvents = recordLoggedEvents(["sdp_api_internal_error"]);
+    vi.spyOn(mainnetAccessEmail, "sendMainnetAccessRequestEmail").mockRejectedValue(
+      new Error("template failed")
+    );
+    expect((await post(SUBMISSION)).status).toBe(500);
+    expect(loggedEvents().map(([, payload, identity]) => [payload.event, identity])).toEqual([
+      ["sdp_api_internal_error", ADMIN_IDENTITY],
+    ]);
   });
 
   it("rebuilds the email on notify, so a renamed organization reads its new name", async () => {

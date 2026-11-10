@@ -1,12 +1,14 @@
 import { hashString } from "@sdp/payments/hash";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import { Hono } from "hono";
+import { Hono, type MiddlewareHandler } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { AppError } from "@/lib/errors";
-import { appErrorResponse } from "@/lib/response";
-import { unifiedAuthMiddleware } from "@/middleware/auth";
+import { appErrorResponse, mapErrorStatusCode } from "@/lib/response";
+import { optionalAuth, unifiedAuthMiddleware } from "@/middleware/auth";
+import { optionalClerkAuth } from "@/middleware/clerk-auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
+import { getLogContext, type LogContext } from "@/runtime/logger";
 import { TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
@@ -40,6 +42,21 @@ function buildApp() {
     }
     // Like the real app: anything unexpected is a 500.
     return c.json({ error: { code: "INTERNAL_ERROR" } }, 500);
+  });
+  return app;
+}
+
+type Auth = MiddlewareHandler<{ Bindings: Env }>;
+
+function logContextApp(auth: Auth) {
+  const app = new Hono<{ Bindings: Env }>();
+  app.use("*", kvStoreMiddleware());
+  app.use("*", auth);
+  app.use("*", projectContextMiddleware());
+  app.get("/context", (c) => c.json(getLogContext()));
+  app.onError((error, c) => {
+    if (!(error instanceof AppError)) throw error;
+    return c.json(getLogContext(), mapErrorStatusCode(error.statusCode));
   });
   return app;
 }
@@ -148,6 +165,28 @@ describe("projectContextMiddleware", () => {
       projectId: TEST_SEEDED_API_KEY.projectId,
       projectEnvironment: TEST_SEEDED_API_KEY.environment,
     });
+  });
+
+  const scoped = { organization_id: TEST_ORG.id, project_id: TEST_PROJECT.id };
+  const keyIdentity = { ...scoped, api_key_id: TEST_API_KEY.id };
+  const memberIdentity = { ...scoped, user_id: TEST_USER.id };
+  const key = () => ({ Authorization: `Bearer ${TEST_API_KEY.raw}` });
+  const member = () => actor.headers(TEST_PROJECT.id);
+  const unverified = () => ({ Authorization: "Bearer not-a-jwt" });
+  const lenientClerkAuth = optionalClerkAuth({ rejectInvalid: false });
+
+  it.each<[string, Auth, () => Record<string, string>, number, LogContext]>([
+    ["an API key", unifiedAuthMiddleware(), key, 200, keyIdentity],
+    ["an API key on optional auth", optionalAuth(), key, 200, keyIdentity],
+    ["a signed-in member", unifiedAuthMiddleware(), member, 200, memberIdentity],
+    ["a signed-in member on optional auth", optionalClerkAuth(), member, 200, memberIdentity],
+    ["no credential", unifiedAuthMiddleware(), () => ({}), 401, {}],
+    ["an unverifiable token on lenient auth", lenientClerkAuth, unverified, 401, {}],
+  ])("scopes %s's log context to its identity", async (_, auth, headers, status, context) => {
+    const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
+    await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
+    const res = await logContextApp(auth).request("/context", { headers: headers() }, env);
+    expect({ status: res.status, context: await res.json() }).toEqual({ status, context });
   });
 
   it("returns 401 without authentication", async () => {

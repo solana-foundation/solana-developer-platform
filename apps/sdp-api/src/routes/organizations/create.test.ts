@@ -232,6 +232,7 @@ describe("POST /v1/organizations", () => {
           organization_id: created.id,
           user_id: created.created_by_user_id,
         },
+        { user_id: created.created_by_user_id },
       ],
     ]);
   });

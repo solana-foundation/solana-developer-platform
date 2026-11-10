@@ -13,9 +13,12 @@
  */
 
 import type { InvitationStatus, MemberStatus } from "@sdp/types/organizations";
+import { Hono } from "hono";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
+import { clerkOnboardingMiddleware } from "@/middleware/clerk-onboarding";
+import { getLogContext, type LogContext } from "@/runtime/logger";
 import {
   ensureTestClerkIssuer,
   seedClerkIdentity,
@@ -25,6 +28,7 @@ import { env } from "@/test/helpers/env";
 import { seedInvitation } from "@/test/helpers/invitations";
 import { organizationMember, seedActiveMemberships } from "@/test/helpers/organization-members";
 import { seedTestDatabase } from "@/test/mocks/db";
+import type { Env } from "@/types/env";
 import { ONBOARDING_VERSION } from "./state";
 
 const ORGANIZATION_ID = "org_onboarding_isolation";
@@ -130,6 +134,22 @@ describe("onboarding status under database tenant isolation", () => {
     expect(body.data.linked).toBe(true);
     expect(body.data.organization?.id).toBe(ORGANIZATION_ID);
     expect(body.data.setup).not.toBeNull();
+  });
+
+  it.each<[string, LogContext]>([
+    [CLERK_ORG_ID, { organization_id: ORGANIZATION_ID }],
+    ["org_clerk_never_linked", {}],
+  ])("scopes the onboarding log context under %s", async (clerkOrgId, context) => {
+    await ensureTestClerkIssuer(env);
+    const token = await signTestClerkClaims(clerkPayload(clerkOrgId), 300);
+    const headers = { Authorization: `Bearer ${token}` };
+    const probe = new Hono<{ Bindings: Env }>();
+    probe.use("*", clerkOnboardingMiddleware());
+    probe.get("/context", (c) => c.json(getLogContext()));
+
+    const res = await probe.request("/context", { headers }, env);
+
+    expect({ status: res.status, context: await res.json() }).toEqual({ status: 200, context });
   });
 
   it("reports unlinked for a Clerk organization with no mapping", async () => {

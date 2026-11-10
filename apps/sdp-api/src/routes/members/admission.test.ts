@@ -112,6 +112,7 @@ function invitationAcceptedEvent(role: OrganizationRole) {
       invitation_id: INVITATION_ID,
       role,
     },
+    {},
   ];
 }
 

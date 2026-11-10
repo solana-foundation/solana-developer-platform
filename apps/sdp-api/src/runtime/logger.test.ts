@@ -45,6 +45,46 @@ describe("logger context", () => {
     expect(records[0]).not.toHaveProperty("trace_id");
   });
 
+  it("puts the identity each nested context adds to its parent's on the line", () => {
+    const { logger, records } = captureLogger();
+
+    runWithLogContext({ request_id: "req_4", organization_id: "org_4", api_key_id: "key_4" }, () =>
+      runWithLogContext({ project_id: "prj_4" }, () => logger.info("settled"))
+    );
+
+    expect(records).toEqual([
+      {
+        level: 30,
+        severity: "INFO",
+        time: expect.any(Number),
+        request_id: "req_4",
+        organization_id: "org_4",
+        api_key_id: "key_4",
+        project_id: "prj_4",
+        message: "settled",
+      },
+    ]);
+  });
+
+  it("lets a field the line passes win over the same field in the context", () => {
+    const { logger, records } = captureLogger();
+
+    runWithLogContext({ organization_id: "org_context", user_id: "usr_5" }, () => {
+      logger.info({ organization_id: "org_line" }, "created");
+    });
+
+    expect(records).toEqual([
+      {
+        level: 30,
+        severity: "INFO",
+        time: expect.any(Number),
+        organization_id: "org_line",
+        user_id: "usr_5",
+        message: "created",
+      },
+    ]);
+  });
+
   it("keeps transfer_id queryable as a field, not embedded in the message", () => {
     const { logger, records } = captureLogger();
 
