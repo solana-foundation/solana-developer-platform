@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { expandDocsBlocks, stripMdxEsm } from "@/lib/docs-blocks";
 import { renderDocsIndexMarkdown } from "@/lib/docs-index-markdown";
-import { aiLlmsUrl, aiSkillUrl, getDocsMarkdownUrl } from "@/lib/site";
+import { aiLlmsUrl, aiSkillUrl, getDocsMarkdownUrl, getDocsPagePath } from "@/lib/site";
 import { source } from "@/lib/source";
 
 export const runtime = "nodejs";
@@ -46,24 +46,15 @@ function markdownResponse(body: string, pageUrl: string): Response {
   });
 }
 
-/** The home renders `DocsHome`, so it has no MDX body to serve; its Markdown is the nav. */
-function homeMarkdown(): Response {
-  const home = source.getPage([]);
-  if (!home) {
-    return new Response("Not Found", { status: 404 });
-  }
+/** Every published page, which the home's Markdown closes with: `/docs.md` is the docs index. */
+function docsIndexMarkdown(): string {
   const descriptions = new Map(source.getPages().map((page) => [page.url, page.data.description]));
-  const body = renderDocsIndexMarkdown(home.data, source.pageTree, (url) => descriptions.get(url));
-  return markdownResponse(body, "/docs");
+  return renderDocsIndexMarkdown(source.pageTree, (url) => descriptions.get(url));
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ slug?: string[] }> }) {
-  const { slug } = await params;
-
   // No segments is the docs home: `/docs.md`, or `/docs` asking for Markdown.
-  if (slug === undefined) {
-    return homeMarkdown();
-  }
+  const { slug = [] } = await params;
 
   if (!slug.every(isSafeSlugSegment)) {
     return new Response("Not Found", { status: 404 });
@@ -84,5 +75,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug?: 
 
   const raw = await readFile(filePath, "utf8");
   const body = stripMdxShell(expandDocsBlocks(raw, filePath), filePath);
-  return markdownResponse(pageMarkdown(page.data, body), `/docs/${slug.join("/")}`);
+  const markdown = pageMarkdown(page.data, body);
+  return markdownResponse(
+    slug.length === 0 ? `${markdown}\n\n${docsIndexMarkdown()}` : markdown,
+    getDocsPagePath(slug.join("/"))
+  );
 }

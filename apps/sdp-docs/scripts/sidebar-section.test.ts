@@ -18,7 +18,7 @@ describe("sidebar section by path", () => {
   });
 
   it("never makes the home a section", () => {
-    assert.equal(sectionByPath(topLevelUrls, "/docs/introduction"), undefined);
+    assert.equal(sectionByPath(topLevelUrls, "/docs/get-started"), undefined);
   });
 
   it("holds a path only under a whole segment", () => {
@@ -35,7 +35,7 @@ describe("sidebar top-level URLs", () => {
     const tree: Root = {
       name: "Docs",
       children: [
-        { type: "page", name: "Get started", url: "/docs" },
+        { type: "page", name: "What is SDP?", url: "/docs" },
         { type: "separator", name: "Modules" },
         { type: "page", name: "Payments", url: "/docs/payments" },
         {
@@ -56,7 +56,7 @@ describe("sidebar section overrides", () => {
     const pages = [
       { url: "/docs/guides/setup-wallets", section: "/docs/wallet-operations" },
       { url: "/docs/payments/send-basic-payment", section: "/docs/payments" },
-      { url: "/docs/introduction", section: undefined },
+      { url: "/docs/get-started", section: undefined },
     ];
     assert.deepEqual(sectionOverridesOf(pages, [...topLevelUrls, "/docs/wallet-operations"]), {
       "/docs/guides/setup-wallets": "/docs/wallet-operations",

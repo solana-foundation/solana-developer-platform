@@ -29,7 +29,7 @@
 - Asset Profiles: https://api.solana.com/v1/issuance
 
 ## Start here
-- [What is SDP?](https://platform.solana.com/docs/introduction): One API for building on Solana with your chosen providers, from devnet to mainnet.
+- [What is SDP?](https://platform.solana.com/docs): One API for building on Solana with your chosen providers, from devnet to mainnet.
 - [Set up your workspace](https://platform.solana.com/docs/guides/setup-organization): Create your account and organization, which comes with a Sandbox and a Production project.
 - [Create a wallet](https://platform.solana.com/docs/guides/setup-wallets): Set up a custody provider and create wallets for signing transactions.
 - [Go to mainnet](https://platform.solana.com/docs/guides/go-to-mainnet): Request mainnet access, connect your own custody account, and go live.

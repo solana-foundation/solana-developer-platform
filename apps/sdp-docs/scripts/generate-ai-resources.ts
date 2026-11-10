@@ -71,7 +71,7 @@ const FEATURE_SUMMARY = DOCS_MODULES.filter(
 ).map((entry) => entry.capability);
 
 const KEY_PAGE_SLUGS = [
-  "introduction",
+  "index",
   "guides/setup-organization",
   "guides/setup-wallets",
   "guides/go-to-mainnet",
@@ -277,9 +277,6 @@ function buildSections(
     currentSection = { title: "Docs", pages: [] };
   };
 
-  // The full AI corpus keeps the overview even though the sidebar links to it
-  // only from the home page.
-  visit("introduction", "", null);
   for (const entry of meta.pages || []) {
     visit(entry, "", null);
   }

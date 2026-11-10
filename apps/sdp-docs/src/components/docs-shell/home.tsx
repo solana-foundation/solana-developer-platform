@@ -144,7 +144,7 @@ export function DocsHome() {
         <Link href="/docs/guides/setup-organization" className="launch-home-cta-primary">
           Get started
         </Link>
-        <Link href="/docs/introduction" className="launch-home-cta-secondary">
+        <Link href="/docs" className="launch-home-cta-secondary">
           Learn more about SDP
         </Link>
       </div>

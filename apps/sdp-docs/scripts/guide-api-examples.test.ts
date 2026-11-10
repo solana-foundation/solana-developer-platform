@@ -34,7 +34,7 @@ describe("guide API examples", () => {
   it("uses the shared TypeScript snippet when requested", () => {
     const markdown = expandDocsBlocks(
       '<ApiExample operation="create-wallet" language="ts" />\n',
-      "content/docs/introduction.mdx"
+      "content/docs/index.mdx"
     );
     assert.match(markdown, /^```typescript\n/);
     assert.match(markdown, /const idempotencyKey = crypto\.randomUUID\(\);/);
@@ -78,14 +78,10 @@ describe("guide API examples", () => {
     );
     assert.throws(
       () =>
-        expandDocsBlocks(
-          '<ApiExample operation="get-token" />\n',
-          "content/docs/introduction.mdx",
-          {
-            surface: stable,
-            examples,
-          }
-        ),
+        expandDocsBlocks('<ApiExample operation="get-token" />\n', "content/docs/index.mdx", {
+          surface: stable,
+          examples,
+        }),
       /get-token is not in this channel's public API/
     );
   });

@@ -4,8 +4,8 @@ Use this file as the quick reference for answering tokenization questions on top
 
 ## Public source of truth
 
-- Product overview: `apps/sdp-docs/content/docs/introduction.mdx`
-- Getting started: `apps/sdp-docs/content/docs/index.mdx`
+- Product overview: `apps/sdp-docs/content/docs/index.mdx`
+- Getting started: `apps/sdp-docs/content/docs/get-started.mdx`
 - Organization setup: `apps/sdp-docs/content/docs/guides/setup-organization.mdx`
 - Wallet setup: `apps/sdp-docs/content/docs/guides/setup-wallets.mdx`
 - API keys: `apps/sdp-docs/content/docs/developing-with-sdp/manage-api-keys.mdx`
