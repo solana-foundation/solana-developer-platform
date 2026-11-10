@@ -152,6 +152,6 @@ While a transfer, batch, or schedule remains `pending` or `processing`, Postman 
 - Send a key on every mutation that accepts one, not only where it is required.
 - Retry timeouts, connection errors and `409 IDEMPOTENCY_KEY_IN_FLIGHT` with backoff, reusing the key.
 - Treat `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` as final for that key: check with `GET`, then use a new key.
-- After a `5xx`, retry with the same key on the routes that move money; elsewhere, use a new key.
+- After a `5xx`, retry with the same key on the routes that move money, and on `POST /v1/wallets` when the provider dedupes on the request ID ([Creating wallets](#creating-wallets)); elsewhere, use a new key.
 - Outside a key rotation, treat `422 IDEMPOTENCY_KEY_REUSED` as a bug in your client: the key was attached to two different operations.
 - Persist the returned resource ID before moving to the next operation, so a restarted worker can resume without guessing.

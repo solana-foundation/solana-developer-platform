@@ -18,6 +18,7 @@ import {
   normalizeUtilaWalletId,
 } from "@sdp/custody/provider-wallet-ids";
 import { SigningError } from "@sdp/custody/signing";
+import type { CustodyProvider } from "@sdp/types/custody";
 import {
   deleteAnchorageWallet,
   provisionAnchorageWallet,
@@ -70,10 +71,21 @@ export function privyWalletExternalId(requestId: string): string {
  * name), so a failed keyed create is safe to run again. Any other provider
  * makes a new wallet on every call.
  */
-const WALLET_CREATE_DEDUPES_ON_REQUEST_ID: ReadonlySet<string> = new Set(["privy", "coinbase_cdp"]);
+const WALLET_CREATE_DEDUPES_ON_REQUEST_ID = {
+  local: false,
+  fireblocks: false,
+  privy: true,
+  coinbase_cdp: true,
+  para: false,
+  turnkey: false,
+  dfns: false,
+  ibm_haven: false,
+  anchorage: false,
+  utila: false,
+} as const satisfies Record<CustodyProvider, boolean>;
 
-export function walletCreateDedupesOnRequestId(provider: string): boolean {
-  return WALLET_CREATE_DEDUPES_ON_REQUEST_ID.has(provider);
+export function walletCreateDedupesOnRequestId(provider: CustodyProvider): boolean {
+  return WALLET_CREATE_DEDUPES_ON_REQUEST_ID[provider];
 }
 
 type WalletDeleteContext<TParsed extends ProviderConfigRecord = ProviderConfigRecord> = {
