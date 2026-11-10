@@ -43,9 +43,7 @@ describe("MarketsSection", () => {
 
     const heading = doc.querySelector("h2");
     expect(heading?.querySelector(".sr-only")?.textContent).toBe("Earn on it. Settle against it.");
-    expect(doc.body.textContent).toContain(
-      "cash and collateral clear together or not at all."
-    );
+    expect(doc.body.textContent).toContain("cash and collateral clear together or not at all.");
 
     const link = doc.querySelector("a");
     expect(link?.textContent).toBe("Open markets in the sandbox");

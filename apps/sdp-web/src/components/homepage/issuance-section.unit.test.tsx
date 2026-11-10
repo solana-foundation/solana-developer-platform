@@ -52,7 +52,9 @@ describe("IssuanceSection", () => {
     expect(heading?.querySelector(".sr-only")?.textContent).toBe(
       "Full programmatic asset control with built-in compliance"
     );
-    expect(doc.body.textContent).toContain("directly via the API using API keys, or from the dashboard.");
+    expect(doc.body.textContent).toContain(
+      "directly via the API using API keys, or from the dashboard."
+    );
 
     const link = doc.querySelector("a");
     expect(link?.textContent).toBe("Open issuance in the sandbox");
