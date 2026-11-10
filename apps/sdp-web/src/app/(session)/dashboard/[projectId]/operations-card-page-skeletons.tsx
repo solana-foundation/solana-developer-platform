@@ -43,6 +43,26 @@ export function AccountPageSkeleton() {
   );
 }
 
+/** The Send feedback form: the category control, the message box and the action row. */
+export function FeedbackPageSkeleton() {
+  return (
+    <div className="flex w-full flex-col gap-6" data-loading-layout="feedback" aria-busy="true">
+      <div className="flex flex-col gap-2">
+        <SkeletonBlock className="h-4 w-32" />
+        <SkeletonBlock className="h-9 w-80 max-w-full rounded-control" />
+      </div>
+      <div className="flex flex-col gap-2">
+        <SkeletonBlock className="h-4 w-40" />
+        <SkeletonBlock className="h-36 w-full rounded-xl" />
+      </div>
+      <div className="flex justify-end gap-2">
+        <SkeletonBlock className="h-9 w-20" />
+        <SkeletonBlock className="h-9 w-36" />
+      </div>
+    </div>
+  );
+}
+
 function SettingsSectionSkeleton({
   titleWidth,
   aside,
