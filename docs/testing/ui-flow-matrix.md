@@ -15,6 +15,7 @@ or with an explicit `GAP`.
 | -------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | account        | profile, security, and preferences           | GAP                                                                                                |
 | allowlist      | manage the address allowlist                 | GAP                                                                                                |
+| feedback       | send feedback to the SDP team                | GAP                                                                                                |
 | api-keys       | create, reveal, and revoke API keys          | api-keys.e2e.spec.ts                                                                               |
 | helius-rings   | ring configuration                           | GAP                                                                                                |
 | integrations   | connect and manage integrations              | GAP                                                                                                |
