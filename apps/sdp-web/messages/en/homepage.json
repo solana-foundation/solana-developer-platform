@@ -1,7 +1,7 @@
 {
   "Homepage": {
     "metadata": {
-      "description": "Connect to 30+ enterprise custody, fiat ramp, and compliance partners through a single unified interface. Ship on Solana in days and swap providers without rebuilding your stack."
+      "description": "Connect to 30+ enterprise custody, fiat ramp, and infrastructure partners through a single unified interface. Ship on Solana in days and swap providers without rebuilding your stack."
     },
     "cta": {
       "createAccount": "Create account",
@@ -43,7 +43,7 @@
         "secondLead": "to",
         "chosen": "onchain finance"
       },
-      "lede": "Connect to 30+ enterprise custody, fiat ramp, and compliance partners through a single unified interface. Ship on Solana in days and swap providers without rebuilding your stack.",
+      "lede": "Connect to 30+ enterprise custody, fiat ramp, and infrastructure partners through a single unified interface. Ship on Solana in days and swap providers without rebuilding your stack.",
       "globe": {
         "label": "Payments crossing the network",
         "from": "from {city}",
@@ -57,21 +57,20 @@
     },
     "stack": {
       "title": "Modular, institutional-grade infrastructure",
-      "sub": "Assemble your regulatory, custody, and payments stack from 30+ vetted partners. Plug in custody, KYC/AML compliance, fiat rails, and dedicated RPC nodes with zero bespoke integration work and upgrade providers with zero downtime.",
+      "sub": "Assemble your custody, payments, and infrastructure stack from 30+ vetted partners. Plug in custody, fiat rails, dedicated RPC nodes, and wallets with zero bespoke integration work and upgrade providers with zero downtime.",
       "labels": {
         "partners": "Partner APIs",
         "sdp": "Solana Developer Platform",
         "product": "Your product"
       },
       "aria": {
-        "partners": "Partner APIs: custody, compliance, ramps, nodes, wallets",
-        "partnersComingSoon": "Partner APIs: custody, compliance, ramps, nodes, wallets. Coming soon: {services}",
+        "partners": "Partner APIs: custody, ramps, nodes, wallets",
+        "partnersComingSoon": "Partner APIs: custody, ramps, nodes, wallets. Coming soon: {services}",
         "sdp": "Solana Developer Platform",
         "product": "Your product: a wallet, checkout, payroll, treasury"
       },
       "services": {
         "custody": "Custody",
-        "compliance": "Compliance",
         "ramps": "Ramps",
         "nodes": "Nodes",
         "wallets": "Wallets"
@@ -101,13 +100,16 @@
       "feedSlot": "slot {slot}",
       "stats": {
         "finality": { "value": "{count}ms", "label": "Finality with zero network bottlenecks" },
-        "partners": { "value": "{count}+", "label": "Custody, compliance, and payment partners" },
+        "partners": {
+          "value": "{count}+",
+          "label": "Custody, payment, and infrastructure partners"
+        },
         "currencies": { "value": "{count}+", "label": "fiat currencies, on and off ramp" },
         "contract": { "value": "{count}", "label": "API contract: REST, OpenAPI, llms.txt" }
       }
     },
     "issuance": {
-      "title": "Full programmatic asset control with built-in compliance",
+      "title": "Full programmatic asset control, from mint to freeze",
       "body": "Deploy production‑ready SPL tokens in minutes with customized authority. Enforce granular policy controls including pause, freeze, burn, and automated address screening directly via the API using API keys, or from the dashboard.",
       "sandboxLink": "Open issuance in the sandbox",
       "sheet": {
