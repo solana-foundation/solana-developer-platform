@@ -138,7 +138,7 @@ A guide's `<Tabs>` panel is a card. A panel holding only a code block (` ```lang
 
 **Do not add new navigation patterns outside the page tree.** Navigation is auto-generated from `source.pageTree` via Fumadocs. To add pages to the sidebar, add MDX files to `content/docs/` and update `meta.json`.
 
-The root `meta.json` pins Get started and Go to mainnet first, then groups direct
+The root `meta.json` pins Get started, What is SDP? and Go to mainnet first, then groups direct
 links under Learn, Modules and Resources. Keep other detailed guides linked from
 their section landing pages and searchable; `generate:ai` includes every
 published page in `llms-full.txt` whether or not it appears in the sidebar.

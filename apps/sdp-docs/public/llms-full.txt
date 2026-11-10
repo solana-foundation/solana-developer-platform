@@ -11,6 +11,15 @@
 
 ## Docs
 
+### Get started
+Source: https://platform.solana.com/docs
+
+> Access the entire Solana ecosystem through one dashboard and a unified API.
+
+<DocsHome />
+
+---
+
 ### What is SDP?
 Source: https://platform.solana.com/docs/introduction
 
@@ -44,15 +53,6 @@ This deployment publishes these modules:
 | **Asset profiles** | Issued-asset identity and metadata, and the public token metadata URI |
 
 [Get started](/docs) on devnet, or [browse the API reference](/docs/reference/api).
-
----
-
-### Get started
-Source: https://platform.solana.com/docs
-
-> Build on Solana with one dashboard and REST API, from devnet to mainnet.
-
-<DocsHome />
 
 ---
 
