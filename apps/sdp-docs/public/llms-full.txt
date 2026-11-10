@@ -14,7 +14,7 @@
 ### Get started
 Source: https://platform.solana.com/docs
 
-> Build on Solana with one dashboard and REST API, from devnet to mainnet.
+> Access the entire Solana Ecosystem through one dashboard and one API.
 
 <DocsHome />
 
