@@ -8,6 +8,8 @@ export interface DashboardCapabilities {
   canManageCustody: boolean;
   canManageOrgSettings: boolean;
   canManagePaymentRequests: boolean;
+  /** Admins and members email the SDP team from Send feedback; viewers do not. */
+  canSendFeedback: boolean;
   canManageTokenAdmin: boolean;
   canManageTokenWrite: boolean;
   canUseWalletSignerCheck: boolean;
@@ -38,6 +40,7 @@ export function resolveDashboardAccess(role: OrganizationRole): DashboardAccess 
       canManageCustody: mayPerform("wallets.configure"),
       canManageOrgSettings: mayPerform("organizations.manage"),
       canManagePaymentRequests: mayPerform("payment_requests.manage"),
+      canSendFeedback: mayPerform("feedback.execute"),
       canManageTokenAdmin: mayPerform("issuance.enforce"),
       canManageTokenWrite: mayPerform("issuance.manage"),
       // Current dashboard implementation creates a short-lived API key before signer check.

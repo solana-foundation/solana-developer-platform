@@ -8,6 +8,7 @@
 
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import { type ScheduledTask, schedule } from "node-cron";
+import { accountPiiCron } from "@/cron/account-pii";
 import { adminAlertEmailsCron } from "@/cron/admin-alert-emails";
 import { dvpTradesCron } from "@/cron/dvp-trades";
 import { earnCatalogueSyncCron } from "@/cron/earn-catalogue-sync";
@@ -34,6 +35,7 @@ import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { productionProjectsAllowed } from "@/lib/production-entitlement";
 import type { BackgroundRunner } from "@/runtime/background";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
+import { runWithLogContext } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import type { CronDefinition } from "./define-cron";
 import { type CronRegistration, logCronRun } from "./run-event";
@@ -68,6 +70,7 @@ export const CRON_DEFINITIONS: readonly CronDefinition[] = [
   secretRetirementsCron,
   providerCredentialSecretCleanupCron,
   idempotencyKeyPruneCron,
+  accountPiiCron,
   earnCatalogueSyncCron,
   earnMetricsRefreshCron,
   adminAlertEmailsCron,
@@ -160,10 +163,10 @@ function registrationEnvironments(
 }
 
 /**
- * Run one slot of a definition's work under the system database identity (reconciliation is
- * cross-tenant, and row-level security denies an undeclared workload) and, for a `cluster`
- * registration, inside that Environment's cluster scope. Logs the slot's outcome and rethrows
- * a failure so the background runner records it.
+ * Run one slot of a definition's work in a log context naming the definition, under the system
+ * database identity (reconciliation is cross-tenant, and row-level security denies an undeclared
+ * workload) and, for a `cluster` registration, inside that Environment's cluster scope. Logs the
+ * slot's outcome and rethrows a failure so the background runner records it.
  *
  * @param definition - The definition whose slot fired.
  * @param registration - The registration the slot belongs to.
@@ -178,10 +181,12 @@ async function runSlot(
   const startedAt = Date.now();
   const environment = registration.environment;
   try {
-    await runWithSystemDatabaseIdentity(`cron:${definition.name}`, () =>
-      environment === null
-        ? definition.run(env)
-        : runInEnvironmentClusterScope(environment, () => definition.run(env))
+    await runWithLogContext({ cron: definition.name }, () =>
+      runWithSystemDatabaseIdentity(`cron:${definition.name}`, () =>
+        environment === null
+          ? definition.run(env)
+          : runInEnvironmentClusterScope(environment, () => definition.run(env))
+      )
     );
   } catch (error) {
     logCronRun(registration, { status: "error", durationMs: Date.now() - startedAt, cause: error });

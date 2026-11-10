@@ -8,9 +8,18 @@ import {
   actionVerbOf,
 } from "@sdp/types/actions";
 import type { RateLimitTier } from "@sdp/types/api-keys";
-import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types/custody";
+import {
+  CUSTODY_MODES,
+  CUSTODY_PROVIDERS,
+  type CustodyMode,
+  type CustodyProvider,
+  type ManagedCustodyProvider,
+  type WalletCreateDedupe,
+  walletCreateDedupe,
+} from "@sdp/types/custody";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import {
+  isCustodyProviderInReleaseChannel,
   SDP_MODULES,
   SDP_RELEASE_CHANNELS,
   type SdpModule,
@@ -396,6 +405,12 @@ export type PublicSurfaceManifest = {
   modules: SdpModule[];
   rampProviders: RampProviderId[];
   custodyProviders: CustodyProvider[];
+  /** The published custody provider and mode pairs whose wallet create dedupes on the request id. */
+  walletCreateDedupe: {
+    provider: ManagedCustodyProvider;
+    mode: CustodyMode;
+    window: WalletCreateDedupe;
+  }[];
   grantableActions: { module: ActionModule; verbs: ActionVerb[] }[];
   allModules: SdpModule[];
   allRampProviders: RampProviderId[];
@@ -416,6 +431,17 @@ export function createPublicSurfaceManifest(
     modules: SDP_MODULES.filter((module) => modules.has(module)),
     rampProviders: RAMP_PROVIDERS.filter(published),
     custodyProviders: CUSTODY_PROVIDERS.filter(published),
+    // Local signing is never published, so the rows name only Managed providers.
+    walletCreateDedupe: CUSTODY_PROVIDERS.filter(
+      (provider): provider is ManagedCustodyProvider => provider !== "local" && published(provider)
+    ).flatMap((provider) =>
+      CUSTODY_MODES.flatMap((mode) => {
+        const window = walletCreateDedupe(provider, mode);
+        return window !== null && isCustodyProviderInReleaseChannel(releaseChannel, provider, mode)
+          ? [{ provider, mode, window }]
+          : [];
+      })
+    ),
     grantableActions: ACTION_MODULE_NAMES.map((module) => ({
       module,
       verbs: actionsInModule(module)

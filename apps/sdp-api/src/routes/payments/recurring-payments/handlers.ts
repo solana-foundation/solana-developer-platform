@@ -3,7 +3,9 @@ import {
   RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS,
 } from "@sdp/payments/recurring-payment-lifecycle";
 import {
+  isEditableRecurringPaymentStatus,
   isInFlightRecurringPaymentAttemptStatus,
+  isPendingActivationRecurringPaymentStatus,
   type ListPaymentRecurringPaymentsResponse,
   type PaymentRecurringPayment,
   type PaymentRecurringPaymentCollectionResponse,
@@ -356,15 +358,36 @@ export const createRecurringPayment = async (
   return created(c, response);
 };
 
+/**
+ * Refuses (409 `RECURRING_PAYMENT_CHANGED`) an edit or activation of a version
+ * the caller no longer holds (HOO-2562): `expectedUpdatedAt` names the version
+ * it reviewed, and authorize read the current one. Only a row at rest is
+ * compared. A row mid-operation is this key's own interrupted run, which
+ * resumes, or another run, which the operation refuses as in flight.
+ */
+function assertReviewedVersion(
+  recurringPayment: PaymentRecurringPaymentRow,
+  expectedUpdatedAt: string | undefined,
+  isAtRest: (status: PaymentRecurringPaymentRow["status"]) => boolean
+): void {
+  if (expectedUpdatedAt === undefined || !isAtRest(recurringPayment.status)) return;
+  if (expectedUpdatedAt === recurringPayment.updated_at) return;
+  throw new AppError("RECURRING_PAYMENT_CHANGED", undefined, {
+    recurringPaymentId: recurringPayment.id,
+    updatedAt: recurringPayment.updated_at,
+  });
+}
+
 export const updateRecurringPayment = async (
   c: ValidatedBodyContext<typeof updateRecurringPaymentSchema>
 ) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
-  const body = c.req.valid("json");
+  const { expectedUpdatedAt, ...body } = c.req.valid("json");
   const authorized = getAuthorized<AuthorizedRecurringPaymentUpdate>(c);
   const { recurringPayment, nextSourceWallet } = authorized;
+  assertReviewedVersion(recurringPayment, expectedUpdatedAt, isEditableRecurringPaymentStatus);
   const sourceWallet = pinnedSourceWallet(authorized);
   // Authorize resolves the named wallet whatever its status; moving a
   // schedule onto it needs an active one.
@@ -405,6 +428,11 @@ export const activateRecurringPayment = async (
 
   const authorized = getAuthorized<AuthorizedRecurringPayment>(c);
   const { recurringPayment } = authorized;
+  assertReviewedVersion(
+    recurringPayment,
+    c.req.valid("json").expectedUpdatedAt,
+    isPendingActivationRecurringPaymentStatus
+  );
   const sourceWallet = pinnedSourceWallet(authorized);
 
   const activated = await activateRecurringPaymentRecord({

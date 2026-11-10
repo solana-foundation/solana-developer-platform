@@ -9,6 +9,7 @@ import { productionProjectsAllowed } from "@/lib/production-entitlement";
 import { created } from "@/lib/response";
 import { requireClerkSignup } from "@/middleware/clerk-auth";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { logEvent } from "@/runtime/money-path-events";
 import { AuditService } from "@/services/audit.service";
 import {
   ensureUniqueSlug,
@@ -265,7 +266,7 @@ async function activateOrganization(
   c: AppContext,
   params: { organizationId: string; creatorUserId: string }
 ): Promise<void> {
-  await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
+  const activated = await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
     const current = await tx
       .prepare("SELECT status FROM organizations WHERE id = ? FOR UPDATE")
       .bind(params.organizationId)
@@ -276,7 +277,7 @@ async function activateOrganization(
     const { status } = organizationStatusSchema.parse(current);
     // A concurrent attempt activated it first.
     if (status !== "provisioning") {
-      return { entry: null, result: undefined };
+      return { entry: null, result: false };
     }
     await tx
       .prepare(
@@ -332,7 +333,14 @@ async function activateOrganization(
         organizationId: params.organizationId,
         userId: params.creatorUserId,
       },
-      result: undefined,
+      result: true,
     };
   });
+  if (activated) {
+    logEvent("info", {
+      event: "sdp_api_organization_created",
+      organization_id: params.organizationId,
+      user_id: params.creatorUserId,
+    });
+  }
 }

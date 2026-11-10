@@ -16,7 +16,7 @@ import {
 } from "@/db/identity";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { getOptionalAuth } from "@/lib/auth";
-import { getClientIp } from "@/lib/client-ip";
+import { getClientIp, truncateClientIp } from "@/lib/client-ip";
 import { forbidden } from "@/lib/errors";
 import type { KVStore } from "@/runtime/kv";
 import { createAuditLedgerCheckpointStore } from "@/runtime/kv-redis";
@@ -120,6 +120,12 @@ export type ResourceType =
   | "audit_ledger";
 
 export interface AuditLogEntry {
+  /**
+   * The request comes from someone SDP cannot identify (a `/pay` payer): the
+   * record keeps their network, not their address, and no user agent
+   * (SDP-022 PA-6, HOO-2345). Set by the writer, never inferred.
+   */
+  anonymousRequester?: true;
   organizationId?: string;
   userId?: string;
   apiKeyId?: string;
@@ -529,12 +535,13 @@ const AUDIT_LEDGER_DATABASE_IDENTITY = { kind: "system", component: "audit-ledge
 function requestActor(c: Context<{ Bindings: Env }>, entry: AuditLogEntry): AuditActor {
   const auth = c.get("apiKey");
   const clerk = c.get("clerk");
+  const anonymous = entry.anonymousRequester === true;
   return {
     organizationId: entry.organizationId || auth?.organizationId || clerk?.organizationId || null,
     userId: entry.userId || clerk?.userId || null,
     apiKeyId: entry.apiKeyId || auth?.id || null,
-    ipAddress: getClientIp(c),
-    userAgent: c.req.header("user-agent") || null,
+    ipAddress: anonymous ? truncateClientIp(getClientIp(c)) : getClientIp(c),
+    userAgent: anonymous ? null : c.req.header("user-agent") || null,
     requestId: c.get("requestId"),
   };
 }
@@ -629,6 +636,7 @@ function assertIntentOrganization(c: Context<{ Bindings: Env }>, entry: AuditLog
 /** The ledger record that admits the critical operation `entry` describes under `intentId`. */
 function criticalIntentRecord(entry: AuditLogEntry, intentId: string): AuditLogEntry {
   return {
+    anonymousRequester: entry.anonymousRequester,
     organizationId: entry.organizationId,
     action: "maintenance",
     resourceType: "audit_ledger",
@@ -1053,7 +1061,8 @@ export class AuditService {
           // else identifying — names, phone, date of birth, street, bank
           // instrument, whole identity blobs — goes. `ip_address` and
           // `user_agent` are unaffected: they are dedicated columns and part of
-          // the security record, not caller-supplied metadata.
+          // the security record, not caller-supplied metadata (an anonymous
+          // caller's are already coarsened in requestActor).
           const metadata = entry.metadata ? scrubAuditMetadata(entry.metadata) : null;
           const currentHead = await tx.queryOne<AuditLedgerHead>(
             `SELECT ledger.ledger_sequence,

@@ -7,6 +7,7 @@ import {
   inviteSchema as inviteSchemaBase,
   updateMemberRoleSchema as updateMemberRoleSchemaBase,
 } from "@/routes/members/schemas";
+import { sendFeedbackSchema as sendFeedbackSchemaBase } from "@/routes/organization-feedback/schemas";
 import { requestMainnetAccessSchema as requestMainnetAccessSchemaBase } from "@/routes/organization-mainnet-access/schemas";
 import {
   createOrganizationSchema as createOrganizationSchemaBase,
@@ -321,3 +322,19 @@ export const mainnetAccessSchema = z
     contactEmail: z.string().nullable(),
   })
   .openapi("MainnetAccess", { description: "The organization's mainnet access request." });
+
+export const sendFeedbackRequestSchema = sendFeedbackSchemaBase.openapi("SendFeedbackRequest", {
+  description:
+    "Feedback from the dashboard's Send feedback screen: what it is about, what the sender would change, the page they sent it from, and how many files they attached. The files and the session replay go to Sentry; `sentryEventId` names that Sentry feedback event.",
+  example: {
+    category: "idea",
+    message: "I expected the payout to show the fee before I sent it.",
+    pageUrl: "https://platform.solana.com/dashboard/proj_123/payments/pay",
+    attachmentCount: 1,
+    sentryEventId: "0123456789abcdef0123456789abcdef",
+  },
+});
+
+export const sendFeedbackResultSchema = z
+  .object({ sent: z.literal(true) })
+  .openapi("SendFeedbackResult", { description: "The feedback reached the SDP team's inbox." });

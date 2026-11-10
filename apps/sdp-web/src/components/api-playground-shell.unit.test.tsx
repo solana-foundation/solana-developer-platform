@@ -10,6 +10,7 @@ import * as playgroundCatalog from "@/lib/api-playground-openapi-catalog";
 import { MOVEMENT_POLL_INTERVAL_MS } from "@/lib/dashboard-fetch";
 import {
   createIdempotencyKeyStore,
+  KEPT_KEY_WINDOW_MS,
   resetIdempotencyKeyStoresForTests,
 } from "@/lib/idempotency-key-store";
 import { PRODUCTION_PROJECT } from "@/test/projects";
@@ -302,6 +303,59 @@ describe("ApiPlaygroundShell", () => {
     expect(sentKey(1)).toBe(sentKey(0));
     expect(sentKey(2)).toBe(sentKey(0));
     expect(sentKey(3)).not.toBe(sentKey(2));
+  });
+
+  it.each([
+    ["refuses to resend on any other write", "/v1/counterparties", false],
+    ["resends on a transfer", "/v1/payments/transfers", true],
+  ])("%s a lost POST's key past the key record's window", async (_case, path, resent) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
+      const fetchMock = vi
+        .fn(async (_input: RequestInfo | URL, _init: RequestInit) => new Response("{}"))
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"));
+      vi.stubGlobal("fetch", fetchMock);
+      const postEndpoint: ApiPlaygroundEndpointConfig = {
+        ...endpoint,
+        id: "post-outlived",
+        method: "POST",
+        path,
+      };
+      const view = render(
+        <I18nProvider locale="en" messages={getMessages("en")}>
+          <ApiPlaygroundShell endpoints={[postEndpoint]} productName="Test product" />
+        </I18nProvider>
+      );
+      const run = async () => {
+        await waitFor(() =>
+          expect(view.getByRole("button", { name: "Run" }).hasAttribute("disabled")).toBe(false)
+        );
+        fireEvent.click(view.getByRole("button", { name: "Run" }));
+      };
+      const sentKey = (call: number) =>
+        new Headers(fetchMock.mock.calls[call]?.[1].headers).get("Idempotency-Key");
+
+      await run();
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      vi.setSystemTime(Date.now() + KEPT_KEY_WINDOW_MS);
+      await run();
+
+      if (resent) {
+        // A money route answers the key from the movement's row.
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+        expect(sentKey(1)).toBe(sentKey(0));
+        return;
+      }
+      // Only the key record answers it, so the old key could run again.
+      expect(await view.findByText(/check the list before trying again/)).toBeTruthy();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await run();
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      expect(sentKey(1)).not.toBe(sentKey(0));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // any 2xx retired a transfer's key, even one still processing, so

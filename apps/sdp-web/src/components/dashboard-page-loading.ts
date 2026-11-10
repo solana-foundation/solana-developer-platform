@@ -28,6 +28,7 @@ import {
 } from "@/app/(session)/dashboard/[projectId]/markets/markets-route-skeletons";
 import {
   AccountPageSkeleton,
+  FeedbackPageSkeleton,
   SettingsPageSkeleton,
 } from "@/app/(session)/dashboard/[projectId]/operations-card-page-skeletons";
 import CounterpartyDirectoryLoading from "@/app/(session)/dashboard/[projectId]/payments/counterparty/loading";
@@ -145,6 +146,8 @@ function resolveCurrentPageLoadingComponent(
       return SettingsPageSkeleton;
     case "account":
       return AccountPageSkeleton;
+    case "feedback":
+      return FeedbackPageSkeleton;
     case "helius-rings":
       return HeliusRingsSkeleton;
     case "allowlist":

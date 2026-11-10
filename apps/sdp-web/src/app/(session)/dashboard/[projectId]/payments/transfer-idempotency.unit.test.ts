@@ -77,9 +77,10 @@ describe("sendTransferUnderKey", () => {
     expect(calls.map((call) => call.amount)).toEqual(["1", "1"]);
   });
 
-  // Zach (#2834): a kept key had no age limit, so a retry a day later went out
-  // under a key the API had forgotten and could pay again.
-  it("sends nothing under a kept key older than the API keeps it, and the next send is new", async () => {
+  // The API answers a transfer's key from the transfer row after its 24-hour
+  // key record lapses, so the old key replays the first transfer; a new key
+  // would pay again.
+  it("resends a kept key however old it is", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const fetchMock = vi
       .fn<typeof fetch>(async () =>
@@ -90,18 +91,13 @@ describe("sendTransferUnderKey", () => {
 
     await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow("Failed to fetch");
     vi.setSystemTime(Date.now() + KEPT_KEY_WINDOW_MS);
-    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toMatchObject({
-      code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN",
-      message: "Shared.idempotency.outcomeUnknownCheckList",
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
     await sendTransferUnderKey(SUBMISSION, t);
+
     const keys = fetchMock.mock.calls.map(([, init]) =>
       new Headers(init?.headers).get("Idempotency-Key")
     );
     expect(keys).toHaveLength(2);
-    expect(keys[1]).not.toBe(keys[0]);
+    expect(keys[1]).toBe(keys[0]);
   });
 
   /** The key the request actually carried. */

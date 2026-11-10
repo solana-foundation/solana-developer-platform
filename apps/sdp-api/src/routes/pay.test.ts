@@ -962,6 +962,39 @@ describe("Public payment request routes", () => {
       });
     });
 
+    it("keeps only the payer's network, and no user agent, on the grant's audit rows (PA-6)", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+
+      const response = await app.request(
+        `/pay/${request.public_token}/tx`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Payer Phone)",
+            "X-Forwarded-For": "203.0.113.77",
+          },
+          body: JSON.stringify({ account: TEST_SOLANA_ADDRESSES.wallet2 }),
+        },
+        { ...env, TRUST_PROXY_HEADERS: "true" }
+      );
+      expect(response.status).toBe(200);
+
+      const rows = await getDb(env)
+        .prepare(
+          `SELECT ip_address, user_agent FROM audit_logs
+            WHERE (resource_type = 'payment_request' AND resource_id = ?)
+               OR (resource_type = 'audit_ledger' AND metadata::jsonb -> 'target' ->> 'resourceId' = ?)`
+        )
+        .bind(request.id, request.id)
+        .all<{ ip_address: string | null; user_agent: string | null }>();
+      expect(rows.results).toHaveLength(2);
+      expect(rows.results).toEqual(
+        Array(2).fill({ ip_address: "203.0.113.0/24", user_agent: null })
+      );
+    });
+
     it("files a fresh grant's audit intent under its tenant with the message digest and mint", async () => {
       stubSponsorship();
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);

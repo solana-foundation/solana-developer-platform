@@ -1,6 +1,10 @@
 // biome-ignore-all lint/security/noSecrets: Solana JSON-RPC method names, not credentials.
 import { isJsonRpcPayload, type RpcTransport } from "@solana/kit";
-import { fetchWithPinnedRpcTelemetry, withPinnedRpcTelemetry } from "./telemetry";
+import {
+  fetchWithPinnedRpcTelemetry,
+  type RpcAttemptRequest,
+  withPinnedRpcTelemetry,
+} from "./telemetry";
 
 /**
  * Solana JSON-RPC methods that only read, so sending one twice is harmless.
@@ -84,7 +88,7 @@ function isSocketDeathBeforeResponse(error: unknown): boolean {
  * Sends a JSON-RPC read once more, at once and to the same URL, when its socket
  * died before any response: a pooled keep-alive socket the server closed just
  * as it was reused. Every other failure, and every non-read method, surfaces
- * unchanged.
+ * unchanged. The re-send carries `socketRetry: true` for the attempt telemetry below it.
  */
 export function withReadSocketRetry(transport: RpcTransport, endpointUrl?: string): RpcTransport {
   const send = endpointUrl ? withPinnedRpcTelemetry(transport, endpointUrl) : transport;
@@ -99,7 +103,8 @@ export function withReadSocketRetry(transport: RpcTransport, endpointUrl?: strin
       ) {
         throw error;
       }
-      return await send<TResponse>(config);
+      const resend: RpcAttemptRequest = { ...config, socketRetry: true };
+      return await send<TResponse>(resend);
     }
   };
 }

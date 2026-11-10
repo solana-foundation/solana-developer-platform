@@ -38,6 +38,10 @@ The two ids do different jobs:
 
 Use `GET /v1/payments/transfer-batches/{batchId}` to inspect recipient and chunk outcomes.
 
+Batch execution does not add a priority fee. `options.priorityFee` is accepted for
+compatibility and ignored, including `auto`, `low`, `medium`, and `high`. The
+estimate reports `priorityFeeLamports: "0"`.
+
 ### One batch per payout run
 
 The batch `externalId` names the payout run, and it is unique per project and source wallet. Whatever `Idempotency-Key` it carries, a batch with an `externalId` already used on that wallet never pays anyone again:

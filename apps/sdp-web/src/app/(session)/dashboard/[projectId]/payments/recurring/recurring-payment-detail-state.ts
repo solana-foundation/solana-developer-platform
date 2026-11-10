@@ -4,6 +4,7 @@ import {
   type PaymentsDashboardWallet,
 } from "@sdp/types/payments";
 import { IdempotencyOutcomeUnknownError } from "@/lib/idempotency";
+import { RecurringPaymentChangedError } from "./recurring-payments.data";
 
 /**
  * What the detail page shows when its schedule can't be read. A 404 says there is no such
@@ -64,8 +65,14 @@ export function getRecurringPaymentDetailState({
 /**
  * After a failed recurring action: an unknown outcome or a reused key (the
  * action may have run) refreshes the page, so its status and controls show
- * what happened.
+ * what happened, and so does a refusal of a version the page no longer shows,
+ * so the next try acts on the current one.
  */
 export function refreshIfOutcomeUnknown(cause: unknown, refresh: () => void): void {
-  if (cause instanceof IdempotencyOutcomeUnknownError) refresh();
+  if (
+    cause instanceof IdempotencyOutcomeUnknownError ||
+    cause instanceof RecurringPaymentChangedError
+  ) {
+    refresh();
+  }
 }

@@ -328,6 +328,8 @@ declare module "hono" {
     idempotencyCommitted?: boolean;
     // Set by replayFromRecord when the key's domain row records another request
     idempotencyRecordMismatch?: boolean;
+    // Set by markIdempotencyRerunnable() when running the request again is safe
+    idempotencyRerunnable?: boolean;
     apiKey?: {
       id: string;
       organizationId: string;

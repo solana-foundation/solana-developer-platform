@@ -17,6 +17,8 @@ import {
   stubClerkBackend,
 } from "@/test/helpers/clerk-backend";
 import { env } from "@/test/helpers/env";
+import { recordLoggedEvents } from "@/test/helpers/log-events";
+import { holdTransaction, untilLockWaiters } from "@/test/helpers/row-locks";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
 
@@ -218,6 +220,39 @@ describe("POST /v1/organizations", () => {
       { method: "GET", path: `${MEMBERSHIPS_PATH}?user_id=${CLERK_USER_ID}`, body: null },
     ]);
     expect(await storedState(created.id)).toEqual(activeState(created));
+  });
+
+  it("logs the creation once, from whichever of two concurrent retries activates it, and never on a finished retry", async () => {
+    const loggedEvents = recordLoggedEvents(["sdp_api_organization_created"]);
+    clerk.answer(FIRST_SIGN_IN, CLERK_ORGANIZATION, membershipsPage(0), {
+      status: 500,
+      body: { errors: [{ code: "internal_clerk_error" }] },
+    });
+    const headers = await signupHeaders();
+    expect((await postOrganization(headers, NAME)).status).toBe(500);
+    const created = await createdRow();
+    clerk.answer(membershipsPage(1), membershipsPage(1));
+    const blocker = await holdTransaction(getDb(env), async (tx) => {
+      await tx.execute("SELECT id FROM organizations WHERE id = ? FOR UPDATE", [created.id]);
+    });
+
+    const retrying = Promise.all([NAME, NAME].map((name) => postOrganization(headers, name)));
+    await untilLockWaiters(getDb(env), { fragment: "FOR UPDATE", count: 2 });
+    await blocker.commit();
+    const retries = await retrying;
+    const finished = await postOrganization(headers, NAME);
+
+    expect([...retries, finished].map((response) => response.status)).toEqual([201, 201, 201]);
+    expect(loggedEvents()).toEqual([
+      [
+        "info",
+        {
+          event: "sdp_api_organization_created",
+          organization_id: created.id,
+          user_id: created.created_by_user_id,
+        },
+      ],
+    ]);
   });
 
   it("returns a finished organization again on the same name, writing nothing in Clerk or SDP", async () => {

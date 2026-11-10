@@ -57,7 +57,7 @@ describe("MainnetAccessRequestHost", () => {
     const user = userEvent.setup();
     renderHost();
 
-    await user.click(screen.getByRole("button", { name: "Request mainnet access" }));
+    await user.click(screen.getByRole("button", { name: "Request mainnet access…" }));
     const proceed = screen.getByRole("button", { name: "Continue" });
     expect(proceed).toHaveProperty("disabled", true);
 
@@ -101,7 +101,7 @@ describe("MainnetAccessRequestHost", () => {
       const user = userEvent.setup();
       renderHost();
 
-      await user.click(screen.getByRole("button", { name: "Request mainnet access" }));
+      await user.click(screen.getByRole("button", { name: "Request mainnet access…" }));
       await user.click(screen.getByRole("button", { name: /Country or region/ }));
       await user.type(screen.getByPlaceholderText("Search countries"), "Singa");
       await user.keyboard("{Enter}");

@@ -26,6 +26,7 @@ import { startEgressGate } from "@/runtime/egress-gate";
 import { createNodeHttpApp } from "@/runtime/http-node";
 import { getLogger } from "@/runtime/logger";
 import { installOutboundDispatcher } from "@/runtime/outbound-dispatcher";
+import { installRpcTelemetrySink } from "@/runtime/rpc-telemetry";
 import { shutdown } from "@/runtime/shutdown-node";
 import { assertSigningProviderAllowed } from "@/services/adapters/signing";
 import { assertCustodyEncryptionScheme } from "@/services/custody-cipher/cipher-router";
@@ -137,6 +138,7 @@ export function assertRequiredEnv(env: Env): void {
 
 async function main(): Promise<void> {
   installOutboundDispatcher();
+  installRpcTelemetrySink();
   const env = getProcessEnv();
   assertRequiredEnv(env);
   warnIfCustodySigningBudgetCapped(env);

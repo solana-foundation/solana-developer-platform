@@ -27,6 +27,7 @@ import type { DashboardCapabilities } from "@/lib/dashboard-access";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import {
   DASHBOARD_ACCOUNT_HREF,
+  DASHBOARD_FEEDBACK_HREF,
   DASHBOARD_MARKETS_SUBNAV_HREFS,
 } from "@/lib/dashboard-navigation-loading";
 import {
@@ -1348,6 +1349,14 @@ export function getDashboardPageConfig(
         hideOnMobile: false,
       },
     };
+  }
+  if (pathname === DASHBOARD_FEEDBACK_HREF) {
+    return actionPageConfig({
+      title: t("Feedback.title"),
+      backHref: "/dashboard",
+      backLabel: t("Feedback.backToHome"),
+      contentWidthClass: PAGE_WIDTH,
+    });
   }
   if (pathname.startsWith("/dashboard/allowlist")) {
     return { title: t("Shared.dashboardShell.allowlist") };

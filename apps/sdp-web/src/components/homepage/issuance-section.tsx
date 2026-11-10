@@ -26,15 +26,7 @@ export async function IssuanceSection() {
           {comingSoon ? (
             <ComingSoon label={t("Homepage.comingSoon")} className={shared.soonHead} />
           ) : null}
-          <FormHeadline
-            as="h2"
-            className={styles.title}
-            parts={[
-              t("Homepage.issuance.titleLine1"),
-              { lineBreak: true },
-              t("Homepage.issuance.titleLine2"),
-            ]}
-          />
+          <FormHeadline as="h2" className={styles.title} parts={[t("Homepage.issuance.title")]} />
           <p className={styles.body}>{t("Homepage.issuance.body")}</p>
           {comingSoon ? null : (
             <MoreLink href={SECTION_LINKS.issuance}>{t("Homepage.issuance.sandboxLink")}</MoreLink>
