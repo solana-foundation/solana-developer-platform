@@ -165,6 +165,10 @@ are walked only for the traces that are actually sampled.
 
 ### Runtime access and retention
 
+Account deletion and the shared per-data-element retention table are in
+[data retention](data-retention.md). Proposed age-based periods remain dry-run
+until approved; sealed audit rows keep the existing indefinite retention.
+
 - **Sentry** — retention and project membership are configured in the Sentry organization,
   not in this repo. Both are outside version control and need periodic review; the checklist
   below is the part that must hold for this policy to mean anything in production.

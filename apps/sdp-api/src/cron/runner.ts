@@ -8,6 +8,7 @@
 
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import { type ScheduledTask, schedule } from "node-cron";
+import { accountPiiCron } from "@/cron/account-pii";
 import { adminAlertEmailsCron } from "@/cron/admin-alert-emails";
 import { dvpTradesCron } from "@/cron/dvp-trades";
 import { earnCatalogueSyncCron } from "@/cron/earn-catalogue-sync";
@@ -67,6 +68,7 @@ export const CRON_DEFINITIONS: readonly CronDefinition[] = [
   secretRetirementsCron,
   providerCredentialSecretCleanupCron,
   idempotencyKeyPruneCron,
+  accountPiiCron,
   earnCatalogueSyncCron,
   earnMetricsRefreshCron,
   adminAlertEmailsCron,
