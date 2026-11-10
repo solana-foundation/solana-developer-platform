@@ -1595,6 +1595,8 @@ export async function syncProviderAccessFromClerk(
   params: {
     organizationId: string;
     clerkOrganization: ClerkOrganizationWithMetadata;
+    /** False on a deployment that admits no production project: the entitlement is never stored. */
+    productionProjectsAllowed: boolean;
   }
 ): Promise<{
   tier: OrganizationTier;
@@ -1603,6 +1605,8 @@ export async function syncProviderAccessFromClerk(
   productionEntitlementChanged: boolean;
 }> {
   const clerkMetadata = parseClerkOrganizationTierMetadata(params.clerkOrganization);
+  const enableProductionProject =
+    params.productionProjectsAllowed && clerkMetadata.enableProductionProject;
 
   // Settings are one JSON column patched by read-merge-write; the row lock keeps
   // this sync from clobbering a concurrent dashboard settings update (and vice
@@ -1628,7 +1632,7 @@ export async function syncProviderAccessFromClerk(
       ...(clerkMetadata.providerOverrides
         ? { providerOverrides: clerkMetadata.providerOverrides }
         : {}),
-      ...(clerkMetadata.enableProductionProject ? { enableProductionProject: true } : {}),
+      ...(enableProductionProject ? { enableProductionProject: true } : {}),
     };
 
     const persisted = hasOwnEntries(nextSettings as Record<string, unknown>) ? nextSettings : null;
@@ -1646,13 +1650,12 @@ export async function syncProviderAccessFromClerk(
   });
 
   const wasProductionEnabled = existingSettings?.enableProductionProject === true;
-  const productionEntitlementChanged =
-    wasProductionEnabled !== clerkMetadata.enableProductionProject;
+  const productionEntitlementChanged = wasProductionEnabled !== enableProductionProject;
   if (productionEntitlementChanged) {
     logEvent("info", {
       event: "sdp_api_organization_production_enablement_changed",
       organization_id: params.organizationId,
-      enable_production_project: clerkMetadata.enableProductionProject,
+      enable_production_project: enableProductionProject,
     });
   }
 

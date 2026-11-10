@@ -502,6 +502,10 @@ Public: this route takes no API key.
 
     Git commit the serving image was built from, or `local` when the image carries none.
 
+  - **`releaseChannel`** · `string` · required · one of `experimental`, `beta`, `stable` · example `stable`
+
+    Release channel: which modules this deployment runs.
+
   - **`checks`** · `object` · required
 
     Dependency health checks.
@@ -548,6 +552,7 @@ r = requests.get("https://api.solana.com/health/ready")
   "timestamp": "2025-01-01T00:00:00.000Z",
   "revision": "sdp-prod-api-public-00042-abc",
   "commit": "0123456789abcdef0123456789abcdef01234567",
+  "releaseChannel": "stable",
   "checks": {
     "database": "ok",
     "redis": "ok",
@@ -562,6 +567,7 @@ r = requests.get("https://api.solana.com/health/ready")
   "timestamp": "2025-01-01T00:00:00.000Z",
   "revision": "sdp-prod-api-public-00042-abc",
   "commit": "0123456789abcdef0123456789abcdef01234567",
+  "releaseChannel": "stable",
   "checks": {
     "database": "ok",
     "redis": "error",

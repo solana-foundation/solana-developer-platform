@@ -52,11 +52,13 @@ describe("Health routes", () => {
         status: string;
         revision: string;
         commit: string;
+        releaseChannel: string;
         checks: { database: string; redis: string };
       };
       expect(body.status).toBe("ready");
       expect(body.revision).toBe("local");
       expect(body.commit).toBe("local");
+      expect(body.releaseChannel).toBe("experimental");
       expect(body.checks.database).toBe("ok");
       expect(body.checks.redis).toBe("ok");
     });

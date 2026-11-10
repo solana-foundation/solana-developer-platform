@@ -18,6 +18,7 @@ import type {
   RampPaymentTransferRow,
 } from "@/db/repositories/payments.repository";
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
+import { productionProjectsAllowed } from "@/lib/production-entitlement";
 import { logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import { rampRuntimeFor, resolveManagedRampCredentials } from "@/services/ramps/runtime";
 import type { WebhookProcessor } from "@/services/ramps/webhooks/processor";
@@ -291,8 +292,11 @@ async function sweepProvider(
   };
   // A mode's rows are pulled and expired only while SDP holds that mode's keys.
   // A pull needs no webhook secret, so it keeps settling while webhooks can't verify.
+  // A devnet-only deployment never pulls a production row.
   const environments = SDP_ENVIRONMENTS.filter(
-    (environment) => resolveManagedRampCredentials(env, provider, environment).ok
+    (environment) =>
+      (environment !== "production" || productionProjectsAllowed(env)) &&
+      resolveManagedRampCredentials(env, provider, environment).ok
   );
   if (environments.length === 0) {
     return result;
