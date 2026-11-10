@@ -4,7 +4,6 @@ import type { Context, Next } from "hono";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import { badRequest, forbidden, notFound, unauthorized } from "@/lib/errors";
 import { isProductionEntitled, productionNotEnabled } from "@/lib/production-entitlement";
-import { runWithLogContext } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
 const PROJECT_HEADER = "x-project-id";
@@ -59,9 +58,7 @@ export function projectContextMiddleware(options: ProjectContextOptions = {}) {
 
     c.set("projectId", scope.projectId);
     c.set("projectEnvironment", scope.environment);
-    await runWithLogContext({ project_id: scope.projectId, environment: scope.environment }, () =>
-      runInClusterScope({ projectId: scope.projectId, environment: scope.environment }, next)
-    );
+    await runInClusterScope({ projectId: scope.projectId, environment: scope.environment }, next);
   };
 }
 

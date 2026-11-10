@@ -1,14 +1,12 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { scrubTelemetry, scrubTelemetryString } from "@sdp/redaction/scrub";
+import { activeClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import pino, { type Logger, type LoggerOptions } from "pino";
+import { currentDatabaseIdentity } from "@/db/identity";
+import { currentMoneyPrincipal } from "@/lib/money-principal";
 import { LOG_REDACTION_PATHS, REDACTION_CENSOR } from "./log-redaction";
 
-/**
- * Merged into every line logged inside it, without passing through the scrubber: only values the
- * server generated or registered (ids, an environment, a route pattern, a cron name), never an
- * email, a name or anything a caller supplied. A field a line passes itself wins.
- */
 export interface LogContext {
   request_id?: string;
   trace_id?: string;
@@ -17,16 +15,6 @@ export interface LogContext {
   route?: string;
   /** The Cron Definition whose slot is running. */
   cron?: string;
-  /** The organization the request is narrowed to. */
-  organization_id?: string;
-  /** The project the request acts on, on project-scoped routes. */
-  project_id?: string;
-  /** That project's environment, which decides the cluster: sandbox is devnet, production mainnet. */
-  environment?: SdpEnvironment;
-  /** The signed-in person; absent on API-key requests. */
-  user_id?: string;
-  /** The authenticated API key; absent on signed-in requests. */
-  api_key_id?: string;
 }
 
 const store = new AsyncLocalStorage<LogContext>();
@@ -38,6 +26,34 @@ export function runWithLogContext<T>(context: LogContext, fn: () => T): T {
 
 export function getLogContext(): LogContext {
   return store.getStore() ?? {};
+}
+
+/**
+ * Who the work runs as, read from the scopes authentication already opened: the tenant database
+ * identity, the money principal and the cluster scope. Each ends with the middleware that opened
+ * it, so a line written after it returns (the request's timing line) carries none of this.
+ */
+interface AmbientIdentity {
+  organization_id?: string;
+  project_id?: string;
+  environment?: SdpEnvironment;
+  api_key_id?: string;
+  user_id?: string;
+}
+
+function ambientIdentity(): AmbientIdentity {
+  const identity: AmbientIdentity = {};
+  const database = currentDatabaseIdentity();
+  if (database?.kind === "tenant") identity.organization_id = database.organizationId;
+  const cluster = activeClusterScope();
+  if (cluster) {
+    identity.environment = cluster.environment;
+    if (cluster.projectId) identity.project_id = cluster.projectId;
+  }
+  const principal = currentMoneyPrincipal();
+  if (principal?.kind === "api_key") identity.api_key_id = principal.apiKeyId;
+  if (principal?.kind === "member") identity.user_id = principal.userId;
+  return identity;
 }
 
 function serializeError(value: unknown): unknown {
@@ -91,15 +107,15 @@ export function baseLoggerOptions(): LoggerOptions {
     // merged object, message, interpolation arguments — goes through it. The
     // `mixin` context bypasses hooks but only holds generated ids, a hash of a
     // strictly validated, server-generated web id, the HTTP method with the
-    // registered route pattern, a Cron Definition name, and a project's
-    // environment.
+    // registered route pattern, a Cron Definition name, and the ids and
+    // environment `ambientIdentity` reads. A field the line passes itself wins.
     hooks: {
       logMethod(args, method) {
         method.apply(this, args.map((argument) => scrubTelemetry(argument)) as typeof args);
       },
     },
     redact: { paths: [...LOG_REDACTION_PATHS], censor: REDACTION_CENSOR },
-    mixin: () => ({ ...getLogContext() }),
+    mixin: () => ({ ...ambientIdentity(), ...getLogContext() }),
     ...(process.env.LOG_FORMAT === "pretty" ? { transport: { target: "pino-pretty" } } : {}),
   };
 }

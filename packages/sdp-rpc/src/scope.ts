@@ -68,3 +68,8 @@ export function currentClusterScope(): ClusterScope {
   }
   return openScope;
 }
+
+/** The scope the caller runs under, or null outside one, for code that only reports it. */
+export function activeClusterScope(): ClusterScope | null {
+  return scopes.getStore() ?? null;
+}

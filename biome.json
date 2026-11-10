@@ -286,7 +286,11 @@
               "options": {
                 "paths": {
                   "@sdp/rpc/scope": {
-                    "allowImportNames": ["currentClusterScope", "ClusterScope"],
+                    "allowImportNames": [
+                      "currentClusterScope",
+                      "activeClusterScope",
+                      "ClusterScope"
+                    ],
                     "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, /pay context) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
                   },
                   "@sdp/rpc/factory": {
@@ -333,6 +337,7 @@
                   "@sdp/rpc/scope": {
                     "allowImportNames": [
                       "currentClusterScope",
+                      "activeClusterScope",
                       "ClusterScope",
                       "runInClusterScope"
                     ],
