@@ -4,7 +4,6 @@ import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import { createDefaultRpcTransport } from "@solana/kit";
 import { fetchWithReadSocketRetry, withReadSocketRetry } from "./socket-retry";
 import {
-  emitRpcTelemetry,
   markRpcAttemptDeadline,
   pinRpcTelemetryEndpoint,
   type RpcTelemetryEvent,
@@ -25,59 +24,6 @@ afterEach(() => {
 });
 
 describe("RPC telemetry", () => {
-  it("retains low-volume successes and every failure, then weights steady traffic", () => {
-    const events: RpcTelemetryEvent[] = [];
-    setRpcTelemetrySink((event) => events.push(event));
-    const attempt: RpcTelemetryEvent = {
-      event: "sdp_rpc_attempt",
-      surface: "managed_pool",
-      provider: "triton",
-      cluster: "devnet",
-      method: "getSlot",
-      outcome: "succeeded",
-    };
-    for (let index = 0; index < 30; index++) emitRpcTelemetry(attempt);
-    emitRpcTelemetry({ ...attempt, outcome: "failed", status_code: 429 });
-    emitRpcTelemetry({ ...attempt, provider: "helius" });
-
-    assert.deepEqual(
-      events
-        .filter((event) => event.provider === "triton" && event.outcome === "succeeded")
-        .map((event) => event.sample_weight),
-      [...Array.from({ length: 10 }, () => 1), 10, 10]
-    );
-    assert.deepEqual(
-      events
-        .filter((event) => event.provider === "triton" && event.outcome === "failed")
-        .map((event) => [event.status_code, event.sample_weight]),
-      [[429, 1]]
-    );
-    assert.equal(events.at(-1)?.provider, "helius");
-    assert.equal(events.at(-1)?.sample_weight, 1);
-  });
-
-  it("samples each RPC method even when methods repeat in a fixed order", () => {
-    const events: RpcTelemetryEvent[] = [];
-    setRpcTelemetrySink((event) => events.push(event));
-    for (let index = 0; index < 40; index++) {
-      emitRpcTelemetry({
-        event: "sdp_rpc_attempt",
-        surface: "managed_pool",
-        provider: "triton",
-        cluster: "devnet",
-        method: index % 2 === 0 ? "getSlot" : "getAccountInfo",
-        outcome: "succeeded",
-      });
-    }
-
-    for (const method of ["getSlot", "getAccountInfo"]) {
-      assert.deepEqual(
-        events.filter((event) => event.method === method).map((event) => event.sample_weight),
-        [...Array.from({ length: 10 }, () => 1), 10]
-      );
-    }
-  });
-
   it("counts physical pinned Kit proof attempts and transport errors without logging URLs", async () => {
     process.env[envKey] = endpointUrl;
     const events: RpcTelemetryEvent[] = [];
@@ -97,10 +43,10 @@ describe("RPC telemetry", () => {
     });
 
     assert.deepEqual(
-      events.map((event) => [event.provider, event.outcome, event.sample_weight]),
+      events.map((event) => [event.provider, event.outcome]),
       [
-        ["triton", "failed", 1],
-        ["triton", "succeeded", 1],
+        ["triton", "failed"],
+        ["triton", "succeeded"],
       ]
     );
     assert.ok(!JSON.stringify(events).includes("private"));
@@ -123,8 +69,8 @@ describe("RPC telemetry", () => {
     });
 
     assert.deepEqual(
-      events.map((event) => [event.method, event.status_code, event.sample_weight]),
-      [["getSlot", 429, 1]]
+      events.map((event) => [event.method, event.status_code]),
+      [["getSlot", 429]]
     );
   });
 
@@ -210,8 +156,8 @@ describe("RPC telemetry", () => {
 
         assert.equal(calls, 1);
         assert.deepEqual(
-          events.map((event) => [event.outcome, event.sample_weight]),
-          [["aborted", 1]]
+          events.map((event) => event.outcome),
+          ["aborted"]
         );
       });
     }
@@ -319,20 +265,13 @@ describe("RPC telemetry", () => {
 
     assert.deepEqual(await response.json(), body);
     assert.deepEqual(
-      (({ provider, method, outcome, status_code, sample_weight }) => ({
+      (({ provider, method, outcome, status_code }) => ({
         provider,
         method,
         outcome,
         status_code,
-        sample_weight,
       }))(await event),
-      {
-        provider: "triton",
-        method: "getSlot",
-        outcome: "failed",
-        status_code: 200,
-        sample_weight: 1,
-      }
+      { provider: "triton", method: "getSlot", outcome: "failed", status_code: 200 }
     );
   });
 
