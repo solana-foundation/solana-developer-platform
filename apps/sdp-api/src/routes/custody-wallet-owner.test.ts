@@ -1,6 +1,6 @@
 import { SigningError } from "@sdp/custody/signing";
 import { hashString } from "@sdp/payments/hash";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { deriveCustodyWalletCreateRequestId } from "@/routes/custody/handlers/wallets";
@@ -428,7 +428,7 @@ describe("Custody wallet owner contract", () => {
       }
     });
 
-    it("answers a Managed provider failure with a stored 503, not a 400", async () => {
+    it("answers a Managed provider failure with a 503, not a 400, and leaves the key free for its retry", async () => {
       provisionPrivyWalletMock.mockRejectedValueOnce(
         new SigningError("Privy API error: 500 - upstream", "NETWORK_ERROR")
       );
@@ -437,13 +437,69 @@ describe("Custody wallet owner contract", () => {
 
       expect(response.status).toBe(503);
       expect(await response.json()).toMatchObject({ error: { code: "PROVIDER_UNAVAILABLE" } });
+      // Privy returns the same wallet for the same request id, so the retry
+      // runs again rather than replay the 503.
       expect(
         await getDb(env).queryOne(
           "SELECT status, response_status FROM idempotency_keys WHERE idempotency_key = ?",
           [KEY]
         )
-      ).toEqual({ status: "completed", response_status: 503 });
+      ).not.toMatchObject({ status: "completed" });
     });
+
+    // HOO-2565: the wallet existed at Privy but its row did not, and a stored
+    // 5xx pushed the client to a new key, which made a second wallet.
+    it.each([
+      ["Managed", { provider: "privy", label: "Treasury" }],
+      ["BYOK", { connectionId: CONNECTION_ID, label: "Settlement" }],
+    ])(
+      "adopts the Privy wallet on a same-key retry after saving its %s row failed",
+      async (_kind, body) => {
+        // Privy returns the wallet the request id made, on both attempts.
+        provisionPrivyWalletMock.mockResolvedValue({
+          walletId: "keyed_adopted",
+          address: CREATED_PUBLIC_KEY,
+        });
+        // The first insert of the wallet row fails; a sequence counts attempts
+        // outside the rolled-back transaction.
+        const db = getDb(env);
+        await db.execute("CREATE SEQUENCE IF NOT EXISTS test_wallet_insert_attempts");
+        await db.execute(`CREATE OR REPLACE FUNCTION test_fail_first_wallet_insert() RETURNS trigger
+          LANGUAGE plpgsql AS $$
+          BEGIN
+            IF nextval('test_wallet_insert_attempts') = 1 THEN
+              RAISE EXCEPTION 'simulated wallet row failure';
+            END IF;
+            RETURN NEW;
+          END $$`);
+        await db.execute(`CREATE TRIGGER test_fail_first_wallet_insert BEFORE INSERT ON custody_wallets
+          FOR EACH ROW EXECUTE FUNCTION test_fail_first_wallet_insert()`);
+        onTestFinished(async () => {
+          provisionPrivyWalletMock.mockReset();
+          await db.execute(
+            "DROP TRIGGER IF EXISTS test_fail_first_wallet_insert ON custody_wallets"
+          );
+          await db.execute("DROP FUNCTION IF EXISTS test_fail_first_wallet_insert()");
+          await db.execute("DROP SEQUENCE IF EXISTS test_wallet_insert_attempts");
+        });
+
+        const failed = await createWallet(body, KEY);
+        expect(failed.status).toBeGreaterThanOrEqual(500);
+        const retry = await createWallet(body, KEY);
+
+        expect(retry.status).toBe(201);
+        expect(provisionPrivyWalletMock).toHaveBeenCalledTimes(2);
+        expect(provisionPrivyWalletMock.mock.calls[1]?.[1]).toEqual(
+          provisionPrivyWalletMock.mock.calls[0]?.[1]
+        );
+        expect(
+          await db.queryOne(
+            "SELECT count(*)::int AS count FROM custody_wallets WHERE wallet_id = ?",
+            ["privy_keyed_adopted"]
+          )
+        ).toEqual({ count: 1 });
+      }
+    );
 
     // Privy dedupes on the request id, so the loser usually gets the winner's
     // own wallet back, and its insert can fail on the owner-and-wallet unique
