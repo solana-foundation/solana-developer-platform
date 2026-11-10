@@ -44,6 +44,7 @@ import {
   listDvpInboundTradesResponseSchema,
   listDvpTradesResponseSchema,
 } from "@/openapi/schemas/dvp";
+import { projectIntegrationsResponseSchema } from "@/openapi/schemas/integrations";
 import {
   executeBurnResponseSchema,
   executeForceBurnResponseSchema,
@@ -79,6 +80,7 @@ import {
   mainnetAccessSchema,
   memberRoleSchema,
   organizationSchema,
+  sendFeedbackResultSchema,
 } from "@/openapi/schemas/organizations";
 import {
   createdPaymentRequestSchema,
@@ -117,6 +119,7 @@ import {
 
 export const organizationResponse = successResponseSchema(organizationSchema);
 export const mainnetAccessResponse = successResponseSchema(mainnetAccessSchema);
+export const sendFeedbackResponse = successResponseSchema(sendFeedbackResultSchema);
 export const createOrganizationResponse = successResponseSchema(createOrganizationResponseSchema);
 
 export const listMembersResponse = successResponseSchema(listMembersResponseSchema);
@@ -164,6 +167,7 @@ export const projectResponse = successResponseSchema(projectResponseSchema);
 export const listProjectsResponse = successResponseSchema(listProjectsResponseSchema);
 export const listProjectMembersResponse = successResponseSchema(listProjectMembersResponseSchema);
 export const listProjectApiKeysResponse = successResponseSchema(listProjectApiKeysResponseSchema);
+export const projectIntegrationsResponse = successResponseSchema(projectIntegrationsResponseSchema);
 /**
  * The project provider availability envelope, with or without the Earn family.
  *

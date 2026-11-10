@@ -173,11 +173,11 @@ and queued intents; ADR 0003 records the unresolved collision and rollout gate.
 
 Every queue route, custody and external-wallet alike, requires a credential,
 so every share escrow has the durable status and recovery surface the public
-contract promises. The custody cancel takes `earn.manage`, the action its
-movement (`earn.queued_withdraw_cancel`) needs at the custody signer, so a key
-without it is refused before sponsorship, a build and a simulation.
-Cancellation is an exit-recovery path: no gate strands it, and a caller with
-write access to the exact org-owned custody wallet may recover a request whose
+contract promises. All cancel routes take `earn.manage` at the edge, so a key
+without it is refused before sponsorship, a build or simulation. Its movement
+is an exit: signing admission retains credential and wallet checks without
+requiring permission to start new movements. A caller with write access to
+the exact org-owned custody wallet may recover a request whose
 initiating project was deleted; list/detail history remains exact-project
 scoped.
 
@@ -190,20 +190,51 @@ event stays `closed_or_unknown`; missing signature history never proves that a
 live obligation failed. See ADR 0003 for the solver-queue state machine and
 `docs/earn/hastra-prime-inventory.md` for the operator-redemption differences.
 
-Only finalized action errors can fail an async action. Unknown requested or
+Nonfinal action errors never fail an async action. Unknown requested or
 submitted actions rebroadcast their original signed bytes while their
 blockhash is valid; confirmed actions remain open when RPC history is absent.
 Provider observations cannot reopen eligibility while a cancel action remains
 active. Atomic failed-action recovery owns that transition. A rejected create
 may leave `closed_or_unknown` as failed only before provider existence is
-established by a nonce or creation timestamp.
+established by a nonce, creation timestamp or durable provider observation.
 
-Each tick first deletes abandoned external request/cancel builds whose
-blockhash expired, against the block height of the build's OWN environment's
-cluster pool, and reads that height only when the environment holds an
-unconsumed build (`hasUnconsumedExternalBuilds`, the DELETE's own predicate), so
-an idle tick asks no cluster anything. A cluster without a pool defers its
-cleanup; it never borrows the other cluster's height.
+After finalized blockhash expiry, creates with no provider PDA, authenticated
+close event or finalized transaction need two complete observations at least
+30 seconds apart before atomic failure releases their occupancy. Migration
+0212 separates this evidence from older status-cache misses and retains
+`provider_state_observed` after an open account disappears. New creates start
+false; provider-proven states set true; null legacy history stays protected
+unless its row is still creating. A database trigger retains observations from
+the previous image during a rolling deployment. Provider-proven requests and
+incomplete history remain unknown. Both requested and submitted creates use
+this rule, including a crash after persistence but before send.
+
+Each tick releases expired external request reservations using the finalized
+height of their own cluster. It retains unsigned builds, including cancellation
+builds, for independently broadcast transactions. A late verified submit may
+reclaim a missing or replaced transient lease only after the exact transaction
+succeeded at finality; it cannot replace durable occupancy. Queue submits add
+no chain read; reclaim adds one finalized transaction read and skips broadcast.
+Unconsumed par submits add one finalized creation read. A missing creation
+adds one confirmed-height read and refuses expired builds with 503, retaining
+the signed intent for retry. A known successful creation scans closing
+history (one page of at most 16 signatures plus each candidate's transaction,
+at most 18 RPC calls including creation). An
+unresolved full page defers to operator recovery rather than scanning more.
+A same-or-later close refuses adoption of that historical cycle, even while
+its old lease remains. Consumed builds replay directly from the ledger
+without RPC.
+Known finalized failures return `400 TRANSACTION_FAILED` during late recovery
+for both mechanisms. Unknown execution retains the original intent.
+Recovery RPC outages use `vault-refusals.ts` and return a sanitized
+`503 PROVIDER_UNAVAILABLE`, preserving the original intent. This error mapping
+adds no RPC calls or retries.
+Absent-create recovery adds one transaction read after provider history, reused
+for lifecycle projection if found. Hastra rent routing adds no RPC.
+
+The cleanup height is read only while the environment holds an unconsumed
+build reservation, so retained metadata adds no idle RPC. Missing cluster
+configuration defers cleanup; it never borrows the other cluster's height.
 
 Open requests are a durable due queue, not a full-table poll.
 `next_check_at` is both the next useful provider read and a two-minute claim
@@ -1084,7 +1115,7 @@ finalized height that proved expiry: the sweep reads height and slot together
 request pool failover can answer the batch statuses from an endpoint behind the
 one that answered the height; a failed re-read leaves those rows unjudged and
 fails the tick. The queued-withdrawal sweep applies the same rule at its
-confirmed height before any expired request or cancel recovery; both share
+finalized height before any expired request or cancel recovery; both share
 `reReadExpiredStatuses` (`@sdp/rpc/solana`) with the payments settlement tracker.
 
 When neither status nor history observes the transaction past its window, a
@@ -1262,8 +1293,9 @@ request before broadcast and can guarantee durable status and recovery
   - **Expiry does not reject authenticated signed intent.** An owner may have
     already broadcast the transaction. Verify the exact stored message and
     every signature, then consume the build and record the original bytes even
-    past `last_valid_block_height`. Direct and queued submits follow this rule;
-    replay and consumed-build conflicts still apply. Reconciliation resolves
+    past `last_valid_block_height`. Async requests additionally apply the
+    finalized lease and par-cycle checks documented above. Replay and
+    consumed-build conflicts still apply. Reconciliation resolves
     the recorded signature without asking for a replacement transaction.
   - **A preflight `BlockhashNotFound` leaves the movement reconcilable**, even
     past its window. `broadcastRecordedVaultMovement` shares this behavior
@@ -1287,8 +1319,8 @@ request before broadcast and can guarantee durable status and recovery
   provider's plan does not encode (Kamino's kvault withdraw takes only a share
   amount, so `plan.accepted.minAmountOut` is absent) is a **400**, never
   stored: recording it would claim a protection nothing on chain enforces.
-- `POST /external-wallet/withdrawals`: the submit, mirrored, including the
-  `409 TRANSACTION_EXPIRED` pre-record refusal.
+- `POST /external-wallet/withdrawals`: the submit mirror; expired signed bytes
+  still establish durable intent for possible independent broadcasts.
 - **NO requestGate and no wallet scope, deliberately** — this is not the
   vault-deposit cautionary tale repeating. A key's wallet scope governs the org's own
   custody at `createOrgSignerForCustodyWallet`; these routes never resolve a signer and
@@ -1490,9 +1522,11 @@ plus a per-key advisory lock) and, for program withdrawals, the custodial
 guards.
 
 **External signed submits.** Verify the exact stored message and signatures,
-then record intent even if the build's blockhash expired. The owner may have
-broadcast independently. A send error retains the signed bytes and original
-signature for reconciliation; do not instruct the client to sign a new intent.
+then preserve intent even if the build's blockhash expired. The owner may have
+broadcast independently. Asynchronous requests follow the finalized lease and
+par-cycle admission rules above. A send error retains the signed bytes and
+original signature for reconciliation; do not instruct the client to sign a
+new intent.
 
 ## Metered quotas
 
@@ -1558,6 +1592,10 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
 
 ## Gate asymmetry — DO NOT BREAK (ADR 0002 exit-safety)
 
+- **Cancellation**: all routes require `earn.manage`; the movement is an exit,
+  including after production access is removed or starts are disabled.
+  Organization suspension still denies authentication. Credential grants,
+  project ownership and wallet scope remain enforced.
 - **Money-in** (`POST /programs`, `PUT /programs/:programId`):
   `assertProviderAvailable` (entitlement + enablement + credentials).
 - **New positions only** (`POST /programs`, vault deposits): surfacing, the
@@ -1604,8 +1642,8 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   `isEarnExitOrRead` (exits.ts) allows: every GET plus an explicit list of
   withdrawal POSTs. It is an allowlist, so a new route is refused until filed;
   `production-exits.test.ts` forces every state-changing route to be filed as
-  an exit or an entry. `exits.ts` also files the starts (deposits,
-  cancellations), and `movement-actions.test.ts` fails any route filed with a
+  an exit or an entry. `exits.ts` also files the starts (deposits),
+  and `movement-actions.test.ts` fails any route filed with a
   start whose declared action that start's `actions` do not admit (HOO-2099).
 - Route tests in `../earn-program.test.ts` encode the asymmetry: the money-in
   half (create and re-target both refused when the organization is not entitled
@@ -1634,10 +1672,9 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   fails an Earn route or service that imports `resolveSdpEnvironment` or
   `CLUSTER_BY_SDP_ENVIRONMENT`. A production-project dashboard session
   therefore drives provider production.
-- `EARN_ENABLED` gates the whole family (index.ts), and Earn is a sub-module of
-  Markets — `isEarnEnabled` also requires the parent `MARKETS_ENABLED`, so
-  clearing that one flag darkens every Markets API surface. Both default off.
-  Never re-check Markets in a handler; the hierarchy lives in `isEarnEnabled`.
+- The release channel gates the whole family: `requireModule("earn")` in
+  `app.ts`. Background work outside a request asks `isEarnEnabled`, the same
+  check. Never add a second gate in a handler.
 - Zod schemas in schemas.ts; parse/paginate/envelope helpers in
   handlers/shared.ts — don't hand-roll either.
 - Capability gating: `supportsPortfolioWallets(client)` → NOT_IMPLEMENTED for

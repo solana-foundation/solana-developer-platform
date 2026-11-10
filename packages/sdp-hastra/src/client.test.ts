@@ -524,6 +524,8 @@ describe("Hastra DEX withdrawal", () => {
       125_000_000n
     );
     expect(Buffer.from(plan.instructions[7]?.data ?? "", "base64")[0]).toBe(9);
+    expect(plan.instructions[3]?.accounts[0]?.address).toBe(PAYER);
+    expect(plan.instructions[7]?.accounts[1]?.address).toBe(PAYER);
     expect(plan.accepted).toEqual({ shares: "100", minAmountOut: "120" });
     expect(plan.lookupTables).toEqual(["9xQeWvG816bUx9EPfEZNeXhBCZDxwxVjC9LK9ZQHLuL7"]);
   });
@@ -537,6 +539,36 @@ describe("Hastra DEX withdrawal", () => {
       })
     ).rejects.toMatchObject({ code: "INVALID_AMOUNT" });
   });
+
+  it.each([
+    { rentPayer: OWNER, rentRefundTo: PAYER },
+    { rentPayer: PAYER, rentRefundTo: OWNER },
+  ])(
+    "refunds new transient rent to $rentPayer despite historical payer metadata",
+    async (funding) => {
+      const fixture = fixtureState();
+      fixture.accounts.set(ata(OWNER, DEPLOYMENT.primeMint), {
+        owner: TOKEN_PROGRAM,
+        data: tokenAccountData(DEPLOYMENT.primeMint, OWNER, 1_000_000_000n),
+      });
+      stubRpc(fixture.accounts);
+      const plan = await makeClient().buildVaultWithdrawal(CTX, {
+        providerReference: DEPLOYMENT.primeMint,
+        owner: OWNER,
+        shares: "100",
+        minAmountOut: "120",
+        ...funding,
+      });
+      const create = plan.instructions.find(
+        (ix) => ix.programAddress === "11111111111111111111111111111111"
+      );
+      const close = plan.instructions.find(
+        (ix) => ix.programAddress === TOKEN_PROGRAM && Buffer.from(ix.data, "base64")[0] === 9
+      );
+      expect(create?.accounts[0]?.address).toBe(funding.rentPayer);
+      expect(close?.accounts[1]?.address).toBe(funding.rentPayer);
+    }
+  );
 
   it("refuses when Jupiter cannot guarantee the approved floor", async () => {
     const fixture = fixtureState();

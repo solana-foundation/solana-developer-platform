@@ -166,7 +166,7 @@ function createAllowedInternalPaths(docSlugs: Iterable<string>): Set<string> {
     "/llms.txt",
     "/llms-full.txt",
     "/robots.txt",
-    "/sitemap.xml",
+    "/docs/sitemap.xml",
   ]);
 
   // Every page also serves as Markdown at its `.md`, which the Markdown forms link (a family's

@@ -17,6 +17,7 @@ export const earnBalanceReadContextSchema = z.object({
 export const earnVaultDepositSchema: z.ZodType<EarnVaultDeposit> = z.object({
   positionId: z.string(),
   movementId: z.string(),
+  settlementOutcome: z.enum(["delivered", "cancelled"]).optional(),
   status: z.enum(EARN_VAULT_MOVEMENT_STATUSES),
   signature: z.string(),
   failureReason: z.string().nullable(),
@@ -32,6 +33,7 @@ export const earnVaultDepositSchema: z.ZodType<EarnVaultDeposit> = z.object({
 
 export const earnVaultDepositRecordSchema: z.ZodType<EarnVaultDepositRecord> = z.object({
   movementId: z.string(),
+  settlementOutcome: z.enum(["delivered", "cancelled"]).optional(),
   positionId: z.string(),
   provider: z.string(),
   providerReference: z.string(),
@@ -44,10 +46,13 @@ export const earnVaultDepositRecordSchema: z.ZodType<EarnVaultDepositRecord> = z
 });
 
 export const earnVaultWithdrawalSchema: z.ZodType<EarnVaultWithdrawal> = z.object({
+  redemptionMode: z.enum(["standard", "instant"]).optional(),
   movementId: z.string(),
+  settlementOutcome: z.enum(["delivered", "cancelled"]).optional(),
   positionId: z.string(),
   provider: z.string(),
   providerReference: z.string(),
+  ownerAddress: z.string().nullable(),
   status: z.enum(EARN_MOVEMENT_STATUSES.vault_direct),
   signature: z.string(),
   shares: z.string(),

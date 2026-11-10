@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { PageFeedback } from "./page-feedback";
 import { PageNav } from "./page-nav";
 import { TableOfContents } from "./toc";
 
@@ -52,7 +51,6 @@ export function DocsBody({ children, prev, next, bare, apiReference }: DocsBodyP
   return (
     <div className={apiReference ? "launch-docs-body is-api-reference" : "launch-docs-body"}>
       {children}
-      {!bare && <PageFeedback />}
       {!bare && <PageNav prev={prev} next={next} />}
     </div>
   );

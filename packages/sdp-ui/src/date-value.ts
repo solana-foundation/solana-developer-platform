@@ -86,24 +86,3 @@ export function displayValue(value: string, locale: string, includeTime: boolean
     ...(includeTime ? { timeStyle: "short" } : {}),
   }).format(date);
 }
-
-/**
- * Formats a stored range for display in the trigger.
- *
- * @param from - The stored range start.
- * @param to - The stored range end.
- * @param locale - The active locale code.
- * @param endPlaceholder - The label shown while the end date is unset.
- * @returns The localized range label, or null when the start is absent or invalid.
- */
-export function displayRangeValue(
-  from: string,
-  to: string,
-  locale: string,
-  endPlaceholder: string
-): string | null {
-  const fromLabel = displayValue(from, locale, false);
-  if (!fromLabel) return null;
-  const toLabel = displayValue(to, locale, false);
-  return `${fromLabel} – ${toLabel ?? endPlaceholder}`;
-}

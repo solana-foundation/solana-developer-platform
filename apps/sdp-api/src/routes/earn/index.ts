@@ -1,13 +1,13 @@
 import { type Context, Hono, type Next } from "hono";
 import { presentsApiKey } from "@/lib/api-key-format";
 import { AppError } from "@/lib/errors";
-import { isEarnEnabled } from "@/lib/feature-flags";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requestGate } from "@/middleware/request-gate";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
+import { createEarnOnboardingRoutes } from "@/routes/earn-onboarding";
 import type { Env } from "@/types/env";
 import { isEarnExitOrRead } from "./exits";
 import {
@@ -73,6 +73,7 @@ import {
   listEarnVaultWithdrawals,
 } from "./handlers/vault";
 import { getEarnVaultShareReconciliation } from "./handlers/vault-reconciliation";
+import { providerActions } from "./provider-actions";
 import {
   earnExternalWalletDepositTransactionSchema,
   earnExternalWalletQueuedWithdrawalPreviewSchema,
@@ -98,19 +99,6 @@ import {
 
 export const earnRoutes = new Hono<{ Bindings: Env }>();
 const earn = new Hono<{ Bindings: Env }>();
-
-// Gate the whole family behind the Earn feature flag until it is ready for
-// prime time. Off by default; enable per-environment with EARN_ENABLED plus its
-// parent MARKETS_ENABLED — isEarnEnabled owns that hierarchy, so no separate
-// markets check belongs here.
-async function requireEarnFeature(c: Context<{ Bindings: Env }>, next: Next) {
-  if (!isEarnEnabled(c.env)) {
-    throw new AppError("FORBIDDEN", "Earn is not enabled for this environment");
-  }
-  await next();
-}
-
-earnRoutes.use("*", requireEarnFeature);
 
 const earnProjectContextOptions = {
   allowUnentitledProduction: (c: Context<{ Bindings: Env }>) =>
@@ -164,6 +152,8 @@ earn.use("*", projectContextMiddleware(earnProjectContextOptions));
 //
 // Money-IN carries no such rule, so the deposit quote and the external-wallet
 // deposit build are metered.
+earn.route("/provider-actions", providerActions);
+
 // Strategy catalogue (source: DB, admitted only by the sync cron), read in
 // the caller's project environment.
 earn.get("/strategies", requireAction("earn.read"), cacheEarnCatalogue, listEarnStrategies);
@@ -445,7 +435,7 @@ earn.post(
 );
 earn.post(
   "/external-wallet/withdrawal-request-cancellations",
-  requireAction("earn.execute"),
+  requireAction("earn.manage"),
   validateBody(earnExternalWalletSubmitSchema),
   createEarnExternalWalletWithdrawalRequestCancellation
 );
@@ -527,4 +517,5 @@ earn.get(
   getEarnProgramWithdrawal
 );
 
+earn.route("/onboarding/wisdomtree", createEarnOnboardingRoutes("wisdomtree"));
 earnRoutes.route("/", earn);

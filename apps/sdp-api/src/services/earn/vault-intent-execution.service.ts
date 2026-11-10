@@ -10,12 +10,15 @@ import {
 import { badRequest, internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
+import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 import type { VaultDeadline } from "./vault-deadline";
 import {
+  assertVaultSignaturesPreserved,
   broadcastVaultTransaction,
   type PreparedVaultPlanExecution,
   type SignedVaultTransaction,
+  signVaultOwnerOnly,
   signVaultPlan,
   simulateVaultPlan,
 } from "./vault-execution.service";
@@ -184,6 +187,9 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
     if (signer.address !== input.walletPublicKey) {
       throw badRequest(input.signerMismatchMessage);
     }
+    if (input.plan.providerTransaction !== undefined && input.fee.kind === "sponsored") {
+      return executeSponsoredProviderIntent(input, signer, prepared);
+    }
     signed = await signVaultPlan({
       deadline: input.deadline,
       expectedAssetIdentity: input.expectedAssetIdentity,
@@ -266,4 +272,76 @@ export async function broadcastRecordedVaultMovement(
   throw internalError(
     `Vault ${input.operation} was broadcast but its ledger transition could not be verified`
   );
+}
+
+async function executeSponsoredProviderIntent<TResult extends SignedVaultIntentResult>(
+  input: ExecuteSignedVaultIntentInput<TResult>,
+  signer: Parameters<typeof signVaultOwnerOnly>[0]["owner"],
+  prepared: PreparedVaultPlanExecution
+): Promise<TResult> {
+  const { env, operation } = input;
+  if (input.fee.kind !== "sponsored") throw internalError("Expected sponsored provider intent");
+  const payment = input.fee.feePayment;
+  if (
+    !("prepareOwnedSubmission" in payment) ||
+    typeof payment.prepareOwnedSubmission !== "function"
+  ) {
+    throw internalError("Provider transactions require owned sponsorship");
+  }
+  // SAFETY: the canonical sponsorship factory supplies this lifecycle;
+  // the runtime guard keeps narrower fee-payment adapters out of this path.
+  const ownedPayment = payment as SponsorshipFeePayment;
+  const ownerSigned = await signVaultOwnerOnly({ ...input, owner: signer, prepared });
+  let recorded: TResult | undefined;
+  let signed: SignedVaultTransaction | undefined;
+  let persistenceUnknown = false;
+  try {
+    await ownedPayment.prepareOwnedSubmission(ownerSigned.bytes, {
+      async persistSigned(submission) {
+        assertVaultSignaturesPreserved(ownerSigned.bytes, submission.signedTransaction);
+        signed = {
+          bytes: submission.signedTransaction,
+          signature: submission.signature,
+          lastValidBlockHeight: ownerSigned.lastValidBlockHeight,
+        };
+        try {
+          recorded = await input.persist(getDb(env), signed);
+        } catch (cause) {
+          // A commit whose reply was lost still leaves recorded bytes the shared
+          // reconciler can send. Swallowing keeps the sponsorship reservation that
+          // spending must stay accountable to instead of releasing it to a possibly
+          // sent transaction; the error surfaces once this callback has returned.
+          persistenceUnknown = true;
+          getLogger().error(
+            { error: cause, operation },
+            `vault ${operation}: persistence outcome unknown after signing`
+          );
+        }
+        if (recorded?.replayed) throw new Error("Vault intent already recorded");
+      },
+      async markStarted() {
+        // The ledger owns these bytes from persistSigned onward. Its
+        // reconciler can also send them, so every later refusal remains
+        // ambiguous and must never release a possibly spent reservation.
+      },
+    });
+    if (persistenceUnknown)
+      throw internalError(
+        `Vault ${operation} intent could not be recorded durably; its outcome is ambiguous`
+      );
+  } catch (cause) {
+    if (recorded?.replayed) return recorded;
+    throw cause;
+  }
+  if (recorded === undefined || signed === undefined)
+    throw internalError("Sponsored vault intent was not recorded");
+  const movement = await broadcastRecordedVaultMovement(env, {
+    operation,
+    organizationId: input.organizationId,
+    deadline: input.deadline,
+    bytes: signed.bytes,
+    signature: signed.signature,
+    movement: recorded.movement,
+  });
+  return { ...recorded, movement };
 }

@@ -111,8 +111,7 @@ not by hand-maintained inserts.
 
 **Add.** Nothing manual on the happy path: the catalogue-sync cron
 (`apps/sdp-api/src/cron/earn-catalogue-sync.ts`, hourly, registered in
-`cron/runner.ts` behind `isEarnEnabled` — `MARKETS_ENABLED` **and**
-`EARN_ENABLED`, both off by default) calls each provider's
+`cron/runner.ts` behind `isEarnEnabled`, which the release channel decides) calls each provider's
 `listStrategies` per environment, validates every snapshot against the
 provider's `declaredSupport` (fail-closed — out-of-envelope snapshots are
 warn-logged and skipped, not persisted), and upserts via `upsertStrategy`
@@ -120,8 +119,8 @@ warn-logged and skipped, not persisted), and upserts via `upsertStrategy`
 starts reporting appears on the next run; one provider failing (or still
 being a `NOT_IMPLEMENTED` stub) never sinks the others' pass.
 
-**Local dev.** Use sandbox provider credentials and enable both
-`MARKETS_ENABLED` and `EARN_ENABLED` before starting the API. The hourly
+**Local dev.** Use sandbox provider credentials; the local `experimental`
+release channel runs Earn. The hourly
 catalogue sync is the only admitting writer, so a fresh database stays empty
 until a live provider pass succeeds. Do not insert catalogue rows by hand: that
 bypasses the provider's declared-support checks and leaves rows the delist pass
@@ -507,11 +506,9 @@ it resolves, the provider is `configured: false` and every call fails closed
 with `PROVIDER_NOT_CONFIGURED` (tests never hit the network, so they don't
 care).
 
-**Reaching Earn at all needs both module flags:** `MARKETS_ENABLED` (parent)
-and `EARN_ENABLED` (child) are off by default in _every_ environment, local dev
-included — there is no development default-on. Without both, `/v1/earn` answers
-403 and the dashboard segment `notFound()`s. Set them for `sdp-api` **and**
-`sdp-web` (same unprefixed names; see each app's `.env.local.example`).
+**Reaching Earn at all needs a release channel that runs it** (`beta` or
+`experimental`; local dev runs `experimental`). Outside it, `/v1/earn` answers
+403 and the dashboard segment `notFound()`s.
 
 ## 4c. Implementing the live-metrics capability — fresh rates
 

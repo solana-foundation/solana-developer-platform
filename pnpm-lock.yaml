@@ -154,6 +154,9 @@ importers:
       '@sdp/payments':
         specifier: workspace:*
         version: link:../../packages/sdp-payments
+      '@sdp/plume':
+        specifier: workspace:*
+        version: link:../../packages/sdp-plume
       '@sdp/private-channels':
         specifier: workspace:*
         version: link:../../packages/sdp-private-channels
@@ -691,6 +694,9 @@ importers:
       '@sdp/types':
         specifier: workspace:*
         version: link:../sdp-types
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
     devDependencies:
       '@types/node':
         specifier: 26.6.5
@@ -986,6 +992,43 @@ importers:
       typescript:
         specifier: 6.0.3
         version: 6.0.3
+
+  packages/sdp-plume:
+    dependencies:
+      '@sdp/earn':
+        specifier: workspace:*
+        version: link:../sdp-earn
+      '@sdp/payments':
+        specifier: workspace:*
+        version: link:../sdp-payments
+      '@sdp/rpc':
+        specifier: workspace:*
+        version: link:../sdp-rpc
+      '@sdp/solana':
+        specifier: workspace:*
+        version: link:../sdp-solana
+      '@sdp/types':
+        specifier: workspace:*
+        version: link:../sdp-types
+      '@solana-program/token':
+        specifier: 'catalog:'
+        version: 0.16.1(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))
+      '@solana/kit':
+        specifier: 'catalog:'
+        version: 7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: 26.6.2
+        version: 26.6.2
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 4.1.12
+        version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(@vitest/coverage-istanbul@4.1.12)(@vitest/coverage-v8@4.1.12)(jsdom@30.1.3(@noble/hashes@2.4.0))(vite@7.3.7(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/sdp-private-channels:
     dependencies:
@@ -5690,6 +5733,9 @@ packages:
   '@types/node@18.19.130':
     resolution: {integrity: sha512-GRaXQx6jGfL8sKfaIDD6OupbIHBr9jv7Jnaml9tB7l4v068PAOXqfcujMMo5PhbIs6ggR1XODELqahT2R8v0fg==}
 
+  '@types/node@26.6.2':
+    resolution: {integrity: sha512-X1P21scMv4zGKLYqjdGjaKa7COa0RKVYYZZN/NfvLQ1JegxFhdhpZG/Lyn8AXx6CDUavKAd11v6BvfpkDByK8g==}
+
   '@types/node@26.6.5':
     resolution: {integrity: sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg==}
 
@@ -6154,6 +6200,11 @@ packages:
 
   base64-js@1.5.1:
     resolution: {integrity: sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==}
+
+  baseline-browser-mapping@2.11.32:
+    resolution: {integrity: sha512-UvuxFU9P3hM29LrQdwu0cD6w6/+SFr+UlB9s/knI7+O2rK9xFxKUwSDWxGdbbqQ9/V7BJ5s0NI5nQAE4uJp3gQ==}
+    engines: {node: '>=6.0.0'}
+    hasBin: true
 
   baseline-browser-mapping@2.11.33:
     resolution: {integrity: sha512-yiVKDX+qCMRKBE084lXvq9EcwFUhKZ2nU8TK1EQQuOgPNR/lmbGxXOeDdlGUqC2Zz11Cs9rk1d/8NfgBmlkt0w==}
@@ -14133,6 +14184,10 @@ snapshots:
     dependencies:
       undici-types: 5.26.5
 
+  '@types/node@26.6.2':
+    dependencies:
+      undici-types: 8.9.0
+
   '@types/node@26.6.5':
     dependencies:
       undici-types: 8.9.0
@@ -14287,6 +14342,14 @@ snapshots:
       '@vitest/utils': 4.1.12
       chai: 6.2.2
       tinyrainbow: 3.1.1
+
+  '@vitest/mocker@4.1.12(vite@7.3.7(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))':
+    dependencies:
+      '@vitest/spy': 4.1.12
+      estree-walker: 3.0.3
+      magic-string: 0.30.21
+    optionalDependencies:
+      vite: 7.3.7(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
 
   '@vitest/mocker@4.1.12(vite@7.3.7(@types/node@26.6.5)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))':
     dependencies:
@@ -14636,6 +14699,8 @@ snapshots:
 
   base64-js@1.5.1: {}
 
+  baseline-browser-mapping@2.11.32: {}
+
   baseline-browser-mapping@2.11.33: {}
 
   bcrypt-pbkdf@1.0.2:
@@ -14678,7 +14743,7 @@ snapshots:
 
   browserslist@4.29.4:
     dependencies:
-      baseline-browser-mapping: 2.11.33
+      baseline-browser-mapping: 2.11.32
       caniuse-lite: 1.0.30001819
       electron-to-chromium: 1.5.464
       node-releases: 2.0.60
@@ -17634,6 +17699,23 @@ snapshots:
       '@types/unist': 3.0.3
       vfile-message: 4.0.3
 
+  vite@7.3.7(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1):
+    dependencies:
+      esbuild: 0.28.1
+      fdir: 6.5.0(picomatch@4.0.7)
+      picomatch: 4.0.7
+      postcss: 8.5.31
+      rollup: 4.65.0
+      tinyglobby: 0.2.17
+    optionalDependencies:
+      '@types/node': 26.6.2
+      fsevents: 2.3.3
+      jiti: 2.7.0
+      lightningcss: 1.32.0
+      terser: 5.51.2
+      tsx: 4.23.15
+      yaml: 2.9.1
+
   vite@7.3.7(@types/node@26.6.5)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1):
     dependencies:
       esbuild: 0.28.1
@@ -17650,6 +17732,37 @@ snapshots:
       terser: 5.51.2
       tsx: 4.23.15
       yaml: 2.9.1
+
+  vitest@4.1.12(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(@vitest/coverage-istanbul@4.1.12)(@vitest/coverage-v8@4.1.12)(jsdom@30.1.3(@noble/hashes@2.4.0))(vite@7.3.7(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)):
+    dependencies:
+      '@vitest/expect': 4.1.12
+      '@vitest/mocker': 4.1.12(vite@7.3.7(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+      '@vitest/pretty-format': 4.1.12
+      '@vitest/runner': 4.1.12
+      '@vitest/snapshot': 4.1.12
+      '@vitest/spy': 4.1.12
+      '@vitest/utils': 4.1.12
+      es-module-lexer: 2.3.2
+      expect-type: 1.4.0
+      magic-string: 0.30.21
+      obug: 2.1.4
+      pathe: 2.0.3
+      picomatch: 4.0.7
+      std-env: 4.2.0
+      tinybench: 2.9.0
+      tinyexec: 1.3.1
+      tinyglobby: 0.2.17
+      tinyrainbow: 3.1.1
+      vite: 7.3.7(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
+      why-is-node-running: 2.3.0
+    optionalDependencies:
+      '@opentelemetry/api': 1.9.1
+      '@types/node': 26.6.2
+      '@vitest/coverage-istanbul': 4.1.12(vitest@4.1.12)
+      '@vitest/coverage-v8': 4.1.12(vitest@4.1.12)
+      jsdom: 30.1.3(@noble/hashes@2.4.0)
+    transitivePeerDependencies:
+      - msw
 
   vitest@4.1.12(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/coverage-istanbul@4.1.12)(@vitest/coverage-v8@4.1.12)(jsdom@30.1.3(@noble/hashes@2.4.0))(vite@7.3.7(@types/node@26.6.5)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)):
     dependencies:

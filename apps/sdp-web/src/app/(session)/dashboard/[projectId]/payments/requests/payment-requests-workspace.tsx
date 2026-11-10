@@ -15,7 +15,7 @@ import { Table, TableBody, TableRow } from "@solana/design-system/table";
 import { CopyIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type KeyboardEvent, useMemo, useState, useTransition } from "react";
+import { type KeyboardEvent, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { shortenAddress } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
 import {
@@ -28,14 +28,15 @@ import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspac
 import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
+import { copyPendingText } from "@/lib/copy-pending-text";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
-import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import {
   PAYMENT_REQUEST_NEW_HREF,
   PAYMENT_REQUESTS_HREF,
   paymentRequestHref,
 } from "@/lib/payments-routes";
-import { useProjectHref } from "@/lib/use-dashboard-project";
+import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
 import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
 import {
   deriveTokenOptions,
@@ -91,8 +92,9 @@ function PaymentRequestsTable({
   onCopyLink: ((request: PaymentRequest) => void) | null;
 }) {
   const t = useTranslations();
+  const timeZone = useTimeZone();
   return (
-    <div className="overflow-x-auto refresh:-mx-3">
+    <div className="overflow-x-auto -mx-3">
       <Table className="min-w-[760px] rounded-none border-0">
         <PaymentsTableHeader
           columns={[
@@ -149,7 +151,7 @@ function PaymentRequestsTable({
               <TableCell
                 className={cn(PAYMENTS_TABLE_CELL, "whitespace-nowrap text-secondary tabular-nums")}
               >
-                {formatDateTime(request.createdAt, locale)}
+                {formatDateTime(request.createdAt, locale, timeZone)}
               </TableCell>
               {onCopyLink ? (
                 <TableCell className="text-right whitespace-nowrap">
@@ -394,11 +396,20 @@ export function PaymentRequestsWorkspace({
   listState,
 }: PaymentRequestsWorkspaceProps) {
   const t = useTranslations();
-  const demo = usePaymentsDemo();
   const locale = useLocale();
   const amountLabel = usePaymentRequestAmountLabel();
   const router = useRouter();
   const projectHref = useProjectHref();
+  const projectId = useProjectId();
+  // The Project this list shows while it is mounted, so a link read that
+  // answers after the dashboard moved elsewhere copies nothing.
+  const copyScope = useRef({ projectId, mounted: true });
+  useEffect(() => {
+    copyScope.current = { projectId, mounted: true };
+    return () => {
+      copyScope.current = { projectId, mounted: false };
+    };
+  }, [projectId]);
   const canWrite = useDashboardWorkspace().dashboardAccess.capabilities.canWrite;
   const [isPending, startTransition] = useTransition();
   // TODO(api): send the search to GET /v1/payments/requests once it can search. The API lists
@@ -422,31 +433,30 @@ export function PaymentRequestsWorkspace({
   const listIsEmpty = total === 0 && listState.status === null && listState.search === null;
 
   const copyLink = (row: PaymentRequest) => {
-    // A demo request lives in this browser only, so the public pay page can't open its link.
-    if (demo) {
-      toast.info(t("DashboardPayments.demo.noPayLink"));
-      return;
-    }
     // Reads never carry the pay link (APE-849); the link read returns it only to a
-    // member whose role may manage payment requests. Safari lets a clipboard
-    // write start only inside the click, so the write starts now with the link
-    // read as its pending contents.
+    // member whose role may manage payment requests.
     let refusal: string | null = null;
+    let leftScope = false;
+    const pressedIn = projectId;
     const link = dashboardFetch<{ data: PaymentRequestLink }>(
       `/api/dashboard/payments/requests/${encodeURIComponent(row.id)}/link`
     ).then((res) => {
+      if (!copyScope.current.mounted || copyScope.current.projectId !== pressedIn) {
+        leftScope = true;
+        throw new Error("The dashboard left this Project while the link was read");
+      }
       if (!res.ok) {
         refusal =
           res.status === 403 ? t("DashboardPayments.requests.paymentLinkNotPermitted") : res.error;
         throw new Error(refusal);
       }
-      const url = `${window.location.origin}/pay/${res.data.data.publicToken}`;
-      return new Blob([url], { type: "text/plain" });
+      return `${window.location.origin}/pay/${res.data.data.publicToken}`;
     });
-    navigator.clipboard.write([new ClipboardItem({ "text/plain": link })]).then(
-      () => toast.success(t("DashboardPayments.requests.paymentLinkCopied")),
-      () => toast.error(refusal ?? t("DashboardPayments.requests.paymentLinkCopyFailed"))
-    );
+    void copyPendingText(link).then((copied) => {
+      if (leftScope) return;
+      if (copied) toast.success(t("DashboardPayments.requests.paymentLinkCopied"));
+      else toast.error(refusal ?? t("DashboardPayments.requests.paymentLinkCopyFailed"));
+    });
   };
 
   return (

@@ -1,9 +1,9 @@
 ---
 title: Payouts and disbursements
-description: Run batched outbound transfers, deduplicate retries, and reconcile a payout batch with SDP.
+description: Pay many recipients in one batch, retry without paying anyone twice, and reconcile a payout run with SDP.
 ---
 
-A payout run is a batch of outbound transfers — marketplace seller payouts, payroll, affiliate disbursements, royalty distributions. Use `POST /v1/payments/transfer-batches` when recipients are registered counterparty accounts. For arbitrary Solana addresses, call `POST /v1/payments/transfers` once per recipient and reconcile the returned transfer IDs.
+A payout run pays many recipients at once: marketplace sellers, payroll, affiliates, royalties. Use `POST /v1/payments/transfer-batches` when every recipient is a saved counterparty account. To pay arbitrary Solana addresses, call `POST /v1/payments/transfers` once per recipient and reconcile the transfer ids it returns.
 
 ## Native transfer batches
 
@@ -21,20 +21,26 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
     "recipients": [
       {
         "externalId": "row_4837",
-        "counterpartyId": "cp_4837",
-        "counterpartyAccountId": "cpa_4837",
+        "counterpartyId": "cpty_4837",
+        "counterpartyAccountId": "cpacct_4837",
         "amount": "150.00"
       }
     ]
   }'
 ```
 
+Each recipient names a counterparty account (`cpacct_…`) that is an active `crypto_wallet` account in the project. `counterpartyId` is optional; if you pass it, it must be that account's counterparty. An unknown, archived or mismatched account returns `404`. An account whose address changes while the batch is being prepared returns `409 TRANSFER_BATCH_DESTINATION_CHANGED` naming it in `error.details.counterpartyAccountIds`; nothing is sent, so send the request again. A batch takes up to 500 recipients.
+
 The two ids do different jobs:
 
 - **`Idempotency-Key`** (required) identifies this one request. Reuse it to retry that exact request after a timeout; recipient order does not change the request. Any unique value works, such as a UUID.
-- **`externalId`** (required) identifies the payout run. Derive it from your own data, such as the pay period, so every attempt at the run carries the same value; see [One batch per payout run](#one-batch-per-payout-run).
+- **`externalId`** (required: a batch without one returns `400`) identifies the payout run. Derive it from your own data, such as the pay period, so every attempt at the run carries the same value. See [One batch per payout run](#one-batch-per-payout-run).
 
 Use `GET /v1/payments/transfer-batches/{batchId}` to inspect recipient and chunk outcomes.
+
+Batch execution does not add a priority fee. `options.priorityFee` is accepted for
+compatibility and ignored, including `auto`, `low`, `medium`, and `high`. The
+estimate reports `priorityFeeLamports: "0"`.
 
 ### One batch per payout run
 
@@ -75,8 +81,6 @@ if (response.ok) {
 }
 ```
 
-`externalId` is required, and a batch without one is refused with `400`. It only protects you if every attempt at the run sends the same value, so derive it rather than generating it.
-
 ### Recovering from a partial failure
 
 A batch with `failed` recipients paid some recipients and not others. A `failed` recipient was not paid: its transaction never reached the network, or the network rejected it. Its `error` says why; when the source wallet could not cover the amount, it reads "The wallet used for this payment does not have enough funds", so fund the wallet before you retry. To finish the run, retry the batch:
@@ -113,28 +117,26 @@ SDP funds new recipient token accounts up to a per-transaction rent limit. A chu
 
 ## Paying recipients one transfer at a time
 
-For destinations that are not registered counterparty accounts, a run can send one transfer per recipient instead of a batch. A typical pattern:
+To pay destinations that are not saved counterparty accounts, send one transfer per recipient instead of a batch:
 
-1. **Resolve recipients** in your application — list (or stream) the rows to be paid, with destination address and amount per row.
-2. **Pick a batch identifier** you control (`payout_2026-05-14_marketplace_sellers`).
-3. **Iterate** — for each recipient, call `POST /v1/payments/transfers` with the destination, amount, token, and a memo that encodes the batch ID and a per-row identifier (`payout_2026-05-14_marketplace_sellers/row_4837`).
-4. **Capture** the returned `Transfer.id` and `Transfer.status`. Persist the SDP transfer ID alongside the recipient row so you can re-poll status later.
-5. **Reconcile** — once the batch is fully submitted, run `GET /v1/payments/transfers?direction=outbound&from=…&to=…` and confirm every row in your application has a matching `finalized` transfer.
+1. **Resolve recipients** in your application: the rows to pay, each with a destination address and an amount.
+2. **Pick a run id** you control, such as `payout_2026-05-14_marketplace_sellers`.
+3. **Send** each recipient a `POST /v1/payments/transfers` with the destination, amount, token, and a memo that holds the run id and the row (`payout_2026-05-14_marketplace_sellers/row_4837`).
+4. **Store** the returned transfer `id` and `status` with the recipient row, so you can read the status again later.
+5. **Reconcile** once every row is sent: list `GET /v1/payments/transfers?direction=outbound&from=…&to=…` and check that every row has a matching `finalized` transfer.
 
 Send transfers sequentially or in modest concurrency (4–8 in flight); high concurrency increases the chance of priority-fee contention and blockhash expiry without much throughput gain.
 
-To tie a single transfer to a registered counterparty account, pass `counterpartyAccountId` with it. See [Pay a counterparty](/docs/payments/send-basic-payment#pay-a-counterparty).
+To tie a single transfer to a saved counterparty account, pass `counterpartyAccountId` with it. See [Pay a counterparty](/docs/payments/send-basic-payment#pay-a-counterparty).
 
 ### Dedup and retries for single transfers
 
-Two layers protect a run of single transfers against double-spends if a worker dies mid-run:
+Two layers keep a worker that dies mid-run from paying anyone twice:
 
-1. **Idempotency keys** — `POST /v1/payments/transfers` requires an `Idempotency-Key`. Generate one stable key per recipient row and reuse it for retries. A retry with the same key and request returns the original transfer; reusing the key for a different request returns `422 IDEMPOTENCY_KEY_REUSED`, and a retry while the original is still running returns `409 IDEMPOTENCY_KEY_IN_FLIGHT`.
-2. **Application mapping** — persist the SDP transfer ID for each recipient row before moving to the next row. On restart, replay with the same idempotency key or skip rows that already have an associated `Transfer.id`.
+1. **Idempotency keys**: `POST /v1/payments/transfers` requires an `Idempotency-Key`. Give each recipient row one stable key and reuse it for retries. A retry with the same key and request returns the original transfer. Reusing the key for a different request returns `422 IDEMPOTENCY_KEY_REUSED`, and a retry while the original is still running returns `409 IDEMPOTENCY_KEY_IN_FLIGHT`.
+2. **Application mapping**: store each row's transfer `id` before you move to the next row. On restart, retry with the row's same key, or skip rows that already have a transfer `id`.
 
-The on-chain `signature` is unique across SDP transfers once populated. Use it as a cross-indexer integrity check, not as the retry mechanism.
-
-Using a fresh idempotency key creates a new transfer intent, even if the payload is otherwise identical.
+A new key is a new payment, even with an identical body. The `signature` is unique across SDP transfers once set: use it to cross-check another indexer, not to retry.
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -239,20 +241,20 @@ async function* listOutboundTransfers(from: string, to: string) {
 </Tab>
 </Tabs>
 
-Filter the returned transfers on `memo.startsWith(batchId)` (or whatever convention you chose) to scope to the batch. Cross-reference each recipient row by SDP `Transfer.id`.
+To scope the list to one run, add `search=<run id>`, which matches part of the memo, or filter on `memo.startsWith(runId)` yourself. Match each recipient row by its transfer `id`.
 
 ## Failure modes
 
-Per-transfer outcomes you should expect to handle:
+Handle these outcomes for each transfer:
 
-- **`failed`** — the transaction was built and submitted but the network rejected it (insufficient funds, frozen account, expired blockhash). The `error` field on the transfer record explains what reached the chain. The recipient was not paid; you can retry by submitting a new transfer.
-- **`pending` past the expected confirmation window** — usually a backend or RPC hiccup. Re-poll with `GET /v1/payments/transfers/{id}` rather than re-submitting; you only want a new transfer if `status` settles to `failed`.
-- **Mid-run worker crash** — resume with each row's original `Idempotency-Key`; persist the returned `Transfer.id` before advancing.
-- **Source wallet runs out of SOL for fees** — submissions start failing with fee-related errors. If SDP is configured to sponsor fees this won't happen; otherwise top up the source wallet's SOL balance before continuing.
+- **`failed`**: the transfer never reached the network, or the network rejected it (insufficient funds, frozen account, expired blockhash). `error` says why. The recipient was not paid; to retry, send a new transfer with a new `Idempotency-Key`.
+- **`processing` for longer than you expect**: the request stopped waiting before the chain settled the transfer. Read it with `GET /v1/payments/transfers/{transferId}` instead of sending it again, and send a new transfer only once `status` is `failed`.
+- **Mid-run worker crash**: resume with each row's original `Idempotency-Key`, and store the returned transfer `id` before you move on.
+- **Fee sponsor unavailable**: SDP pays the network fee on every transfer it signs, so the source wallet never needs SOL for fees. When the sponsor can't pay, SDP refuses the transfer without charging the source wallet.
 
 ## Related
 
-- [Basic payment](/docs/payments/send-basic-payment) — the underlying transfer endpoint.
-- [Payment with memo](/docs/payments/send-payment-with-memo) — the memo field used above to tag a batch.
-- [Indexing and reconciliation](/docs/payments/accept-indexing) — the same list endpoint, used inbound.
-- [Manage API keys](/docs/developing-with-sdp/manage-api-keys#grants-by-module) — limit a payout key to the actions payouts need.
+- [Basic payment](/docs/payments/send-basic-payment): the transfer endpoint.
+- [Payment with memo](/docs/payments/send-payment-with-memo): the memo field that tags a run.
+- [Indexing and reconciliation](/docs/payments/accept-indexing): the same list endpoint, used for inbound payments.
+- [Manage API keys](/docs/developing-with-sdp/manage-api-keys#grants-by-module): limit a payout key to the actions payouts need.

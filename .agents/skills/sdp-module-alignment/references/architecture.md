@@ -34,8 +34,8 @@ two 0007s), so cite the file name and the bold bullet, for example
   `api/routes/route-modules.ts`, and the router is mounted behind
   `requireModule("<module>")` in `api/app.ts`, ahead of any kill switch. The
   kill switch is whatever the module's gate function reads in
-  `api/lib/feature-flags.ts` (DvP's `isDvpEnabled` reads the shared
-  `MARKETS_ENABLED`); it never decides the release channel itself.
+  `api/lib/feature-flags.ts` (Markets, Earn and DvP have none: the release
+  channel alone decides them); it never decides the release channel itself.
 - **Dashboard gate:** the module's flag in `web/flags/definitions.ts`, and every
   nav item, tab, landing tile, filter or list that names the module comes from
   the channel-capped flags (`enabledTransactionModules(flags)`,

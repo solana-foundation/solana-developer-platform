@@ -4,26 +4,24 @@ title: Tokenize an Asset
 description: Map a real-world asset to the right SDP token model, authorities, and implementation flow.
 ---
 
-Use this page when you want to issue a stablecoin, tokenized security, loyalty token, or any other asset through Solana Developer Platform. It walks you from business decision to the first API call.
+Issue a stablecoin, a tokenized security, a loyalty token or any other asset through SDP. This page takes you from choosing a model to your first API call.
 
 ## Choose a token model
 
-Pick the **Tokenization Template** that matches your asset's compliance and operational requirements:
+Pick the **Tokenization Template** that matches the asset's compliance and operating needs:
 
-| Asset model | Template | Typical controls |
+| Asset model | Template | Default controls |
 | --- | --- | --- |
-| Fiat-backed stablecoin | `stablecoin` | Mint authority, freeze authority, pausable, permanent delegate |
-| Tokenized security or RWA | `tokenized-security` | Allowlist required, freeze authority, pausable, permanent delegate |
-| Loyalty, rewards, or utility token | `custom` | Manually selected extensions |
-| Non-standard asset | `custom` | Manually selected extensions |
+| Fiat-backed stablecoin | `stablecoin` | Freeze, pause, permanent delegate, blocklist |
+| Tokenized security or RWA | `tokenized-security` | Freeze, pause, permanent delegate, allowlist |
+| Loyalty, rewards or utility token | `custom` | Extensions you choose |
+| Any other asset | `custom` | Extensions you choose |
 
-**Custody wallets** hold your token's authorities by default, so SDP can execute deploy, mint, and compliance actions without external signing.
+At deploy, SDP gives every authority to the custody wallet that signs the deploy, unless you assign other custody wallets. While a custody wallet holds an authority, SDP signs the operations that authority controls, with no external signing. [Tokenization Templates](/docs/reference/issuance-token-types) lists each template's defaults.
 
 ## Compliance enforced onchain
 
-Create tokens from pre-built templates (stablecoin, tokenized security) or configure your own using Token-2022 extensions. Deploy, mint, burn, and manage supply through the dashboard or API.
-
-Those same extensions are what make compliance enforceable onchain. Freeze individual accounts, pause token activity, seize tokens, and manage each token's **Token Access Control** list for regulated issuance flows. Selected compliance actions accept reason or memo fields for audit trails. Every enforcement action is one POST on the same token surface.
+Token-2022 extensions make compliance enforceable onchain. Freeze one holder's account, pause the token, seize or force-burn tokens, and manage the token's **Token Access Control** list. Freeze takes a `reason`; seize and force burn take a `memo`. Every token operation is one `POST` on the token:
 
 <Tabs items={["JavaScript", "Python", "curl"]}>
 <Tab value="JavaScript">
@@ -69,61 +67,58 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
 
 ## Audit trail
 
-Issuance and compliance actions are recorded in the organization's audit log alongside every other sensitive operation (see [What is SDP?](/docs/introduction)):
+SDP records every issuance and compliance action in its audit log. Read one token's history with `GET /v1/issuance/tokens/{tokenId}/audit`, or on the token's **Activity** tab in the dashboard.
 
-| Area                    | Recorded events                                                                    |
-| ----------------------- | ---------------------------------------------------------------------------------- |
-| Token issuance          | Deploy, mint, burn, force-burn, supply changes, and authority updates              |
-| Compliance actions      | Freeze, unfreeze, pause, unpause, seize, and Token Access Control changes          |
-| Asset profiles          | Asset profile changes                                                              |
+| Area | Recorded events |
+| --- | --- |
+| Token issuance | Create, edit, deploy, mint, burn, supply refresh and authority updates |
+| Compliance | Freeze, unfreeze, pause, unpause, seize, force burn and access list changes |
+| Asset profiles | Profile create, edit and delete |
 
 ## Idempotency
 
-Execute-mode issuance operations consume the `Idempotency-Key` header ([Idempotency](/docs/developing-with-sdp/idempotency)) in a namespace of their own:
+The calls that sign and send (deploy, mint, burn, force burn, freeze, unfreeze, pause, unpause, seize and authority updates) take an `Idempotency-Key` ([Idempotency](/docs/developing-with-sdp/idempotency)). A retry with the same key and body replays the first result instead of running again.
 
-| Domain | Operations | Key namespace |
-| --- | --- | --- |
-| Issuance | Execute-mode deploy, mint, burn, force-burn, freeze, thaw, pause, unpause, seize, and authority transfer | Per organization, shared across **all** issuance operations and tokens |
-
-The issuance namespace is organization-wide: reusing a key for a different issuance operation, even on a different token, returns 409.
+Issuance keys share one namespace across every operation and token in your organization. Reusing a key for a different request, even on another token, returns `409`. Create, edit and access list calls take no key.
 
 ## Implementation sequence
 
-Each step links to its own guide with UI and API instructions:
+Each step links to its guide, with dashboard and API instructions:
 
-1. [Set Up Your Organization & Projects](/docs/guides/setup-organization)
-2. [Set Up Wallets](/docs/guides/setup-wallets)
-3. [Manage API Keys](/docs/developing-with-sdp/manage-api-keys)
-4. [Create a Token](/docs/tokens/create-a-token)
-5. [Deploy a Token](/docs/tokens/deploy-a-token)
-6. [Mint and Burn](/docs/tokens/mint-and-burn)
-7. [Basic payment](/docs/payments/send-basic-payment) — transfer tokens between wallets
-8. [Allowlists](/docs/tokens/allowlists) — Token Access Control, required for `tokenized-security`
-9. [Manage Token Settings](/docs/tokens/manage-token-settings) — freeze, pause, seize for compliance workflows
+1. [Set up your organization and projects](/docs/guides/setup-organization)
+2. [Create a wallet](/docs/guides/setup-wallets)
+3. [Manage API keys](/docs/developing-with-sdp/manage-api-keys)
+4. [Create a token](/docs/tokens/create-a-token)
+5. [Deploy a token](/docs/tokens/deploy-a-token)
+6. [Mint and burn](/docs/tokens/mint-and-burn)
+7. [Send a basic payment](/docs/payments/send-basic-payment): transfer tokens between wallets
+8. [Allowlists](/docs/tokens/allowlists): the access list, on by default for `tokenized-security`
+9. [Freeze and compliance](/docs/tokens/freeze-and-compliance): screen, freeze, pause and seize
+10. [Manage token settings](/docs/tokens/manage-token-settings): move or revoke authorities and edit metadata
 
 ## Core API endpoints
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `GET` | `/v1/issuance/templates` | List available token templates |
-| `POST` | `/v1/issuance/tokens` | Create a token definition |
+| `GET` | `/v1/issuance/templates` | List token templates |
+| `POST` | `/v1/issuance/tokens` | Create a token draft |
 | `POST` | `/v1/issuance/tokens/{tokenId}/deploy` | Deploy to Solana |
 | `POST` | `/v1/issuance/tokens/{tokenId}/mint` | Mint new supply |
 | `POST` | `/v1/issuance/tokens/{tokenId}/burn` | Reduce supply |
-| `POST` | `/v1/issuance/tokens/{tokenId}/allowlist` | Add a Token Access Control entry |
+| `POST` | `/v1/issuance/tokens/{tokenId}/allowlist` | Add an address to the access list |
 | `POST` | `/v1/issuance/tokens/{tokenId}/freeze` | Freeze an account |
 | `POST` | `/v1/issuance/tokens/{tokenId}/pause` | Pause all transfers |
 | `POST` | `/v1/payments/transfers` | Transfer tokens |
 
-See the full schema in the [Issuance API reference](/docs/reference/api/issuance) and [Payments API reference](/docs/reference/api/payments).
+See the full schemas in the [Issuance API reference](/docs/reference/api/issuance) and the [Payments API reference](/docs/reference/api/payments).
 
 ## Operational constraints
 
-- A token must be **created** before deployment, and **deployed** before minting or transfer.
-- If the token is paused, minting and transfer operations are unavailable until it is unpaused.
-- Freeze and unfreeze flows accept a holder wallet address; SDP derives the associated token account automatically.
-- SDP operations require the relevant authority on a custody wallet. If an authority has been rotated outside SDP, rotate it back to a controlled wallet before deploying, minting, or running compliance actions.
+- Create a token before you deploy it, and deploy it before you mint or transfer it.
+- While a token is paused, SDP refuses mint, burn, seize and force burn with `400 TOKEN_PAUSED`, and the pausable extension stops transfers onchain.
+- Freeze and unfreeze take a holder's wallet address; SDP finds the token account.
+- SDP signs only with authorities that a custody wallet in the project holds. An operation whose authority no custody wallet holds returns `409`. If an authority moves to a wallet outside SDP custody, its holder has to move it back.
 
 ## For AI agents
 
-If you are driving SDP through an agent workflow, start from [Documentation for AI](/docs/reference/docs-for-ai). That page links the machine-readable SDP discovery files and keeps AI-facing guidance grounded in the supported public API surface.
+Driving SDP from an agent? Start from [Documentation for AI](/docs/reference/docs-for-ai), which links the machine-readable discovery files grounded in the public API.

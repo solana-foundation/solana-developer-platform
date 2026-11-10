@@ -260,6 +260,11 @@ export function registerEarnTreasuryPaths(
       body: requests.earnVaultWithdrawalRequestCancelSchema.omit({ requestId: true }),
       idempotency: "required",
       signs: true,
+      description:
+        "Requires earn.manage and write access to the custody wallet. Cancellation returns " +
+        "escrowed shares or delegated intermediate tokens to their owner and remains available " +
+        "without production entitlement or when Earn is disabled. Organization suspension " +
+        "still blocks authentication.",
     }
   );
   route(

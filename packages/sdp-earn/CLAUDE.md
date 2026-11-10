@@ -62,10 +62,9 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
 
 ### 2. Secrets and flags
 
-- **Module flags** must be set explicitly — both default to `false` and there is
-  no dev-only default-on: `MARKETS_ENABLED=true` and `EARN_ENABLED=true`, needed
-  by **both** apps (same unprefixed names). Under the Doppler wrapper, plain
-  shell exports are ignored unless named in `DOPPLER_PRESERVE_ENV`.
+- **Module gate**: the release channel decides Earn; the local `experimental`
+  channel runs it. Under the Doppler wrapper, plain shell exports are ignored
+  unless named in `DOPPLER_PRESERVE_ENV`.
 - **Environment** comes from the credential's project: an API key's, or the
   dashboard session's selected project.
 - **Sponsored vault movements** (`EARN_VAULT_FEE_SPONSORSHIP_ENABLED=true`, API
@@ -86,19 +85,17 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
 ### 3. Run it
 
 ```bash
-DOPPLER_PRESERVE_ENV=DATABASE_URL,REDIS_URL,MARKETS_ENABLED,EARN_ENABLED \
+DOPPLER_PRESERVE_ENV=DATABASE_URL,REDIS_URL \
   DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp \
   REDIS_URL=redis://127.0.0.1:6380 \
-  MARKETS_ENABLED=true EARN_ENABLED=true \
   pnpm dev:api          # API on :8787
 # add EARN_VAULT_FEE_SPONSORSHIP_ENABLED to BOTH the preserve list and the
 # exports above to sponsor vault movements, or put it in
 # apps/sdp-api/.env.local, which run-with-config.sh overlays on top of Doppler
 # and which its own comment calls the intended local override path.
 
-DOPPLER_PRESERVE_ENV=NEXT_PUBLIC_SDP_API_BASE_URL,MARKETS_ENABLED,EARN_ENABLED \
+DOPPLER_PRESERVE_ENV=NEXT_PUBLIC_SDP_API_BASE_URL \
   NEXT_PUBLIC_SDP_API_BASE_URL=http://127.0.0.1:8787 \
-  MARKETS_ENABLED=true EARN_ENABLED=true \
   pnpm dev:web                # web on :3000
 ```
 
@@ -107,7 +104,7 @@ runner. Doppler supplies Clerk keys, so the dashboard needs `doppler login`.
 
 ### 4. Get catalogue data — live provider sync
 
-With sandbox provider credentials set and both flags on, the catalogue-sync
+With sandbox provider credentials set, the catalogue-sync
 cron populates `earn_strategies` from live provider sources. It runs once when
 the cron Worker starts (`pnpm dev`'s `dev:worker`; through the slotted
 `runEarnCatalogueSyncIfDue`, so restarts inside the hour skip) and then on the
@@ -145,7 +142,7 @@ Practical notes:
 ### 5. The last gate: org entitlement
 
 Flags control _visibility_; earn access is **override-only per organization**
-(`providerOverrides.earn.<provider>`). With flags on, a key set, and no override,
+(`providerOverrides.earn.<provider>`). With a key set and no override,
 the UI reaches the flow and the API refuses with "requires manual activation" —
 that is correct, not a bug. Grant the override in the **local** DB to proceed.
 
@@ -175,8 +172,8 @@ ADR 0002's 2026-08-14 addendum.
 | No "Set up Earn"/"Add strategy"/"Change strategy" buttons; `/deposit` shows a notice                            | correct today: no registered provider is portfolio-capable, so the custodial (program) affordances hide (§5b). The `vault_direct` deposit path is separate and unaffected                                                                                                                                                                                                                                                                                                                                                                          |
 | `POST /v1/earn/programs` → 403 "is not currently offered"                                                       | the surfacing gate, not entitlement — no `providerOverrides` lifts it (§5b)                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Every request 500s                                                                                              | Redis missing/wrong port (rate limiter)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `/v1/earn/*` → 403                                                                                              | `MARKETS_ENABLED` or `EARN_ENABLED` unset/false                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `/dashboard/markets/embedded-yield` → 404                                                                       | same flags, web side (segment guards); legacy `/dashboard/markets/earn/*` redirects here                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `/v1/earn/*` → 403                                                                                              | the release channel does not run Earn (`stable`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `/dashboard/markets/embedded-yield` → 404                                                                       | same channel, web side (segment guards); legacy `/dashboard/markets/earn/*` redirects here                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Dashboard "provider not configured" (503)                                                                       | the named provider has no credentials in this environment                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | "requires manual activation"                                                                                    | org lacks the earn provider override                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | API waits then dies on boot                                                                                     | `DATABASE_URL` not preserved → Doppler's Cloud SQL URL won                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -185,7 +182,7 @@ ADR 0002's 2026-08-14 addendum.
 | `GET /v1/earn/programs` → `programs: []` with the dev API key                                                   | that key is the test org's, which has no program by design (§4b)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | A key you minted yourself returns `strategies: []` **and** `programs: []`                                       | the key inherited the **production** environment. An API key has no environment column — it comes from `projects.environment` (the JOIN in `middleware/auth.ts`), and every org has both a `default-sandbox` and a `default-production` project. A key on the production project sees no sandbox catalogue and no sandbox programs, which reads as "everything is missing" rather than as a scoping error. Mint against the sandbox project, and refuse anything else: a production key would drive a provider's **production** API from a laptop. |
 | `POST /v1/earn/programs` → 400 "needs an idempotency key"                                                       | creation is key-REQUIRED since PRO-1670: send exactly one of body `requestId` (UUIDv4) or the `Idempotency-Key` header — never both                                                                                                                                                                                                                                                                                                                                                                                                                |
-| Catalogue empty right after boot                                                                                | the sync runs on Worker start and then once per hourly slot; verify flags, provider credentials, and scheduler registration, then wait for a live pass                                                                                                                                                                                                                                                                                                                                                                                             |
+| Catalogue empty right after boot                                                                                | the sync runs on Worker start and then once per hourly slot; verify the release channel, provider credentials, and scheduler registration, then wait for a live pass                                                                                                                                                                                                                                                                                                                                                                               |
 | Kamino rows appear disabled in the dashboard                                                                    | read the row's badge: since PRO-1692 SDP HAS a `vault_direct` deposit path (`POST /v1/earn/vault-deposits`, signed from an org custody wallet), so sandbox devnet rows are depositable once the org holds the earn override (§5). `earnVaultDepositAvailability` (sdp-web `earn-surfacing.ts`) names the gate per row; since PRO-1986 Kamino deposits open in production too, while Veda stays `environment_unavailable` there until PRO-1777                                                                                                      |
 | Kamino APY is blank in sandbox                                                                                  | correct: the metrics endpoint is mainnet's and 404s for devnet pubkeys, so `listStrategyMetrics` returns `[]` outside production and the row renders "—" rather than a fabricated rate                                                                                                                                                                                                                                                                                                                                                             |
 | Kamino APY looks stale in production                                                                            | the 5-minute metrics refresh is a separate cron — check it registered (`isEarnEnabled`), not the hourly sync                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -652,7 +649,6 @@ checklist.
   is a data change; do not introduce closed curator unions anywhere.
 - Env credential names follow `<PROVIDER>_API_KEY` / `<PROVIDER>_SANDBOX_API_KEY`;
   a drift test in apps/sdp-api asserts turbo.json + secret-keys.mjs carry them.
-- Module gating is not this package's job. `MARKETS_ENABLED` (parent) and
-  `EARN_ENABLED` (child, requires the parent) are read only by the API gate
-  (`isEarnEnabled`) and the web flags — a client here gates on credentials
-  alone and must never read a feature flag.
+- Module gating is not this package's job. The release channel decides Earn,
+  read only by the API gate (`isEarnEnabled`) and the web flags — a client here
+  gates on credentials alone and must never read a feature flag.

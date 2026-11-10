@@ -42,6 +42,8 @@ export function requestTracingMiddleware() {
         request_id: requestId,
         trace_id: traceId,
         web_trace_hash: webTraceHash ?? undefined,
+        // Hono matches the whole route list before dispatch, so the last match is final here.
+        route: `${c.req.method} ${routePath(c, -1)}`,
       },
       async () => {
         try {

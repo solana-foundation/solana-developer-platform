@@ -1,0 +1,3 @@
+ALTER TABLE earn_onboarding_customers VALIDATE CONSTRAINT earn_onboarding_customer_parent_fk;
+ALTER TABLE earn_onboarding_documents VALIDATE CONSTRAINT earn_onboarding_document_parent_fk;
+ALTER TABLE earn_onboarding_wallets VALIDATE CONSTRAINT earn_onboarding_wallet_parent_fk;

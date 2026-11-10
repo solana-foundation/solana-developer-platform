@@ -23,7 +23,6 @@ import {
   type IdempotencyKeyStore,
   idempotencyKeyScope,
 } from "./idempotency-key-store";
-import { TAB_DEMO_HEADER_NAME } from "./payments-demo/demo-cookie";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 
 export type DashboardFetchResult<T> =
@@ -61,18 +60,6 @@ export interface DashboardFetchOptions {
   headers?: HeadersInit;
   body?: unknown;
   signal?: AbortSignal;
-}
-
-let tabShowsDemo = false;
-
-/**
- * Set by the dashboard shell: whether this tab is showing Payments demo mode, so the calls it
- * makes say so (see {@link TAB_DEMO_HEADER_NAME}).
- *
- * @param on - True while the tab shows demo mode.
- */
-export function setTabShowsDemo(on: boolean): void {
-  tabShowsDemo = on;
 }
 
 /**
@@ -150,7 +137,7 @@ function isApiAnswer(response: Response): boolean {
  * key, so the retry is answered by the API's replay instead of running again
  * under a new key.
  */
-function answerOf(response: Response, text: string): ApiAnswer | null {
+export function answerOf(response: Response, text: string): ApiAnswer | null {
   if (!isApiAnswer(response)) return null;
   const replayed = response.headers.get("Idempotent-Replayed") === "true";
   if (isBodylessHttpStatus(response.status)) {
@@ -186,56 +173,48 @@ function retiresKey(response: Response, body: ArrayBuffer, movesMoney: boolean):
 
 /**
  * The GET path that shows when a kept money answer's movement is final, or
- * `null` for none. The only money routes keyed here are recurring (transfers
- * and batches keep their own keys). A collect is final when its collection's
+ * `null` for none. The dashboard keys recurring routes here; the API
+ * playground keys every money route. A collect is final when its collection's
  * own transfer is, so it reads that transfer (`transfer.id`, else the
  * attempt's `transferId`); with neither, nothing the dashboard can read shows
  * the attempt's status, so the key simply stays kept. Any other recurring
- * answer reads its schedule.
+ * answer reads its schedule, a batch its batch, and a transfer its transfer.
+ *
+ * @param text - The answer's body.
  */
-function inFlightMovementReadPath(body: ArrayBuffer): string | null {
+export function inFlightMovementReadPath(text: string): string | null {
   let json: unknown;
   try {
-    json = JSON.parse(new TextDecoder().decode(body));
+    json = JSON.parse(text);
   } catch {
     return null;
   }
   const parsed = keptMovementBodySchema.safeParse(json);
   if (!parsed.success || !isMovementInFlight(movementStatusOf(json))) return null;
-  const { transfer, collectionAttempt, recurringPayment } = parsed.data.data;
+  const { transfer, batch, collectionAttempt, recurringPayment } = parsed.data.data;
   if (collectionAttempt !== undefined) {
     const transferId = transfer?.id ?? collectionAttempt.transferId;
     return transferId ? MOVEMENT_READ_PATHS.transfer(transferId) : null;
   }
-  return recurringPayment === undefined
-    ? null
-    : MOVEMENT_READ_PATHS.recurringPayment(recurringPayment.id);
+  if (recurringPayment !== undefined) {
+    return MOVEMENT_READ_PATHS.recurringPayment(recurringPayment.id);
+  }
+  if (batch !== undefined) return MOVEMENT_READ_PATHS.batch(batch.id);
+  return transfer === undefined ? null : MOVEMENT_READ_PATHS.transfer(transfer.id);
 }
 
-function sendWithProject(
-  path: string,
-  init: RequestInit,
-  headers: Headers,
-  demo: boolean = tabShowsDemo
-): Promise<Response> {
+function sendWithProject(path: string, init: RequestInit, headers: Headers): Promise<Response> {
   const { projectId } = parseDashboardPathname(window.location.pathname);
   if (projectId !== null) {
     headers.set(PROJECT_HEADER_NAME, projectId);
   }
-  if (demo) {
-    headers.set(TAB_DEMO_HEADER_NAME, "1");
-  }
   return fetch(path, { ...init, headers });
 }
 
-/**
- * The action a submit stands for: Project, demo or live mode, method, path and
- * body. The mode is part of it, so a live submit never joins a demo request of
- * the same body, or reuses its key.
- */
-function actionMaterial(path: string, init: RequestInit, demo: boolean): string {
+/** The action a submit stands for: Project, method, path and body. */
+function actionMaterial(path: string, init: RequestInit): string {
   const { projectId } = parseDashboardPathname(window.location.pathname);
-  return JSON.stringify([projectId, demo, init.method, path, init.body ?? ""]);
+  return JSON.stringify([projectId, init.method, path, init.body ?? ""]);
 }
 
 function abortable(response: Promise<Response>, signal: AbortSignal | null | undefined) {
@@ -269,9 +248,7 @@ async function sendUnderActionKey(
   if (init.signal?.aborted) {
     throw init.signal.reason;
   }
-  // The mode is fixed at submit, and the request is sent in that mode.
-  const demo = tabShowsDemo;
-  const material = actionMaterial(path, init, demo);
+  const material = actionMaterial(path, init);
   // Joined only within the signed-in user and org: after a switch in this tab,
   // the same submit is the new user's own request, never the first one's answer.
   const joinKey = JSON.stringify([idempotencyKeyScope(), material]);
@@ -286,10 +263,21 @@ async function sendUnderActionKey(
     // memory only: retries in this page still reuse it, but a reload cannot. A
     // money movement refuses to send then, since a reload and retry could move
     // it twice; any other mutation sends, as a duplicate costs at most a replay.
-    const { key, persisted } = keys.claim(fingerprint);
+    const { key, persisted, outlived } = keys.claim(fingerprint);
+    const movesMoney = requiresPersistedKey(init.method ?? "GET", path);
+    // A money route answers a kept key from its own row however old it is,
+    // and a new key could move the money twice, so the key goes out.
+    if (outlived && !movesMoney) {
+      // Only the key record answers this route, and the API may have
+      // forgotten a key this old, so a retry under it could run as a second
+      // request. Nothing is sent: the user checks what the first attempt did,
+      // and the next submit is a new action.
+      keys.release(fingerprint, key);
+      return keyOutlivedResponse();
+    }
     headers.set(IDEMPOTENCY_KEY_HEADER, key);
     if (!persisted) {
-      if (requiresPersistedKey(init.method ?? "GET", path)) {
+      if (movesMoney) {
         // Only a key this call minted is dropped: a kept one belongs to an
         // earlier attempt that may have written, and its retry still needs it.
         if (!kept) keys.release(fingerprint, key);
@@ -297,15 +285,14 @@ async function sendUnderActionKey(
       }
       console.warn("Idempotency-Key not persisted; a reload will not recover it");
     }
-    sent = sendWithProject(path, shared, headers, demo).then(async (response) => {
+    sent = sendWithProject(path, shared, headers).then(async (response) => {
       // The answer only counts once its body has arrived: a download that
       // fails leaves the key pinned, so the retry recovers the first result.
       const body = await response.arrayBuffer();
-      const movesMoney = requiresPersistedKey(init.method ?? "GET", path);
       if (retiresKey(response, body, movesMoney)) {
         keys.release(fingerprint, key);
       } else if (movesMoney && response.ok) {
-        const readPath = inFlightMovementReadPath(body);
+        const readPath = inFlightMovementReadPath(new TextDecoder().decode(body));
         if (readPath !== null) {
           settleWhenMovementFinal(readPath, () => keys.release(fingerprint, key));
         }
@@ -333,13 +320,12 @@ async function sendUnderActionKey(
 const UNKEYED_PREFIXES = ["/api/playground/", "/api/dashboard/markets/dvp/"] as const;
 
 /**
- * Read-like POSTs, never keyed: an estimate, a quote or a simulation (the
- * ramps sandbox's `/simulate` included) writes nothing a retry could repeat,
- * and they fire as the user types, so each would leave an unanswered key
- * behind that never expires. The ramp quotes are the exception
+ * Read-like POSTs, never keyed: an estimate or a quote writes nothing a retry
+ * could repeat, and they fire as the user types, so each would leave an
+ * unanswered key behind that never expires. The ramp quotes are the exception
  * ({@link RAMP_QUOTE_PATHS}).
  */
-const READ_LIKE_POST = /\/(estimate|quote|simulate)$/;
+const READ_LIKE_POST = /\/(estimate|quote)$/;
 
 /**
  * Ramp quotes, keyed like any mutation: each creates the transfer the wizard
@@ -368,6 +354,25 @@ function takesActionKey(path: string, init: RequestInit, headers: Headers): bool
       Object.values(RAMP_QUOTE_PATHS).some((quotePath) => quotePath === pathname)) &&
     !headers.has(IDEMPOTENCY_KEY_HEADER) &&
     (init.body === undefined || init.body === null || typeof init.body === "string")
+  );
+}
+
+/**
+ * The answer for a retry whose kept key is older than the API's key record
+ * keeps it (`KEPT_KEY_WINDOW_MS`), on a route nothing else answers it on: the
+ * outcome-unknown answer, which every caller already reads as "check the list"
+ * and which retires the key.
+ */
+function keyOutlivedResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      error: {
+        code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN",
+        message:
+          "The first attempt of this request is too old to retry safely. Check whether it went through before sending it again.",
+      },
+    }),
+    { status: 409, headers: { "content-type": "application/json" } }
   );
 }
 
@@ -527,6 +532,7 @@ export function settleWhenMovementFinal(
 const keptMovementBodySchema = z.object({
   data: z.object({
     transfer: z.object({ id: z.string() }).optional(),
+    batch: z.object({ id: z.string() }).optional(),
     collectionAttempt: z.object({ transferId: z.string().nullish() }).optional(),
     recurringPayment: z.object({ id: z.string() }).optional(),
   }),

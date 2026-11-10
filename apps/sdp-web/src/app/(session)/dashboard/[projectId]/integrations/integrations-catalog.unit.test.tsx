@@ -1,173 +1,204 @@
 // @vitest-environment jsdom
 
-import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
-import { cleanup, render, screen } from "@testing-library/react";
+import type { ProjectIntegrations } from "@sdp/types/integrations";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
+import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  resolveComplianceIntegrations,
-  resolveCustodyIntegrations,
-  resolveRampIntegrations,
-} from "@/app/(session)/dashboard/[projectId]/integrations/integrations-status";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
-import {
-  availableComplianceProviders,
-  availableCustodyProviders,
-  availableRampProviders,
-} from "@/lib/provider-availability";
+  DashboardHeaderTabsHideContext,
+  DashboardHeaderTabsTrailingContext,
+} from "@/components/dashboard-header-tabs-trailing-context";
+import { setDashboardUrl } from "@/test/dashboard-navigation";
+import { EnglishI18n } from "@/test/i18n";
 import { SANDBOX_PROJECT } from "@/test/projects";
-import { projectProviderAvailability } from "@/test/provider-availability";
 import { IntegrationsCatalog } from "./integrations-catalog";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
-const urlState = vi.hoisted(() => ({ tab: null as string | null }));
-vi.mock("@/lib/dashboard-url-state", () => ({
-  useDashboardTab: () => urlState.tab,
-}));
-
-const AVAILABILITY = projectProviderAvailability({
-  project: SANDBOX_PROJECT,
-  custody: [
-    { provider: "privy", modes: ["managed", "byok"] },
-    { provider: "para", modes: ["managed"] },
+const INTEGRATIONS: ProjectIntegrations = {
+  projectId: SANDBOX_PROJECT.id,
+  environment: "sandbox",
+  families: [
+    {
+      family: "custody",
+      integrations: [
+        { provider: "privy", category: "server", state: { status: "connected", mode: "byok" } },
+        {
+          provider: "fireblocks",
+          category: "institutional",
+          state: { status: "not_configured", modes: ["byok"] },
+        },
+      ],
+    },
+    {
+      family: "rpc",
+      integrations: [
+        { provider: "helius", state: { status: "provided", modes: [] } },
+        { provider: "triton", state: { status: "provided", modes: [] } },
+      ],
+    },
+    {
+      family: "ramps",
+      integrations: [{ provider: "moonpay", state: { status: "provided", modes: [] } }],
+    },
+    {
+      family: "private_channels",
+      integrations: [
+        {
+          provider: "private_channels",
+          state: { status: "not_configured", modes: ["managed"] },
+        },
+      ],
+    },
   ],
-  compliance: ["range"],
-  ramps: ["moonpay", "stripe"],
-  earn: [],
-});
+};
 
-function renderCatalog(overrides: Partial<Parameters<typeof IntegrationsCatalog>[0]>) {
-  return render(
-    <I18nProvider locale="en" messages={getMessages("en")}>
-      <IntegrationsCatalog
-        custody={
-          overrides.custody !== undefined
-            ? overrides.custody
-            : resolveCustodyIntegrations({
-                connectedProviders: ["privy"],
-                custodyAvailability: availableCustodyProviders(AVAILABILITY),
-              })
-        }
-        ramps={resolveRampIntegrations(availableRampProviders(AVAILABILITY), RAMP_PROVIDERS)}
-        compliance={resolveComplianceIntegrations(availableComplianceProviders(AVAILABILITY))}
-        privacy={overrides.privacy}
-        enabledFamilies={overrides.enabledFamilies}
-      />
-    </I18nProvider>
-  );
+function renderCatalog(): void {
+  render(<IntegrationsCatalog integrations={INTEGRATIONS} />, { wrapper: EnglishI18n });
 }
 
-function visibleRowLabels(): string[] {
-  return screen
-    .getAllByRole("listitem")
-    .map((row) => row.querySelector("a.text-base, span.text-base")?.textContent ?? "");
+function sectionTitles(): (string | null)[] {
+  return screen.queryAllByRole("heading", { level: 2 }).map((heading) => heading.textContent);
+}
+
+function section(title: string): HTMLElement {
+  const container = screen.getByRole("heading", { level: 2, name: title }).closest("section");
+  assert(container !== null);
+  return container;
+}
+
+function row(sectionTitle: string, label: string): HTMLElement {
+  const item = within(section(sectionTitle)).getByText(label).closest("li");
+  assert(item !== null);
+  return item;
 }
 
 describe("IntegrationsCatalog", () => {
   beforeEach(() => {
+    setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/integrations`, {});
+    renderCatalog();
+  });
+
+  afterEach(() => {
     cleanup();
-    urlState.tab = null;
   });
 
-  it("uses a category hub on the landing page without status filters", () => {
-    renderCatalog({});
-
-    expect(document.querySelector("[data-integrations-hub='true']")).toBeTruthy();
-    expect(document.querySelectorAll("[data-integration-hub-action]")).toHaveLength(4);
-    expect(screen.queryAllByRole("listitem")).toHaveLength(0);
-    expect(screen.queryByRole("searchbox")).toBeNull();
-    expect(screen.queryByText("All")).toBeNull();
-    for (const removed of ["All", "Connected", "Not connected"]) {
-      expect(screen.queryByRole("button", { name: removed })).toBeNull();
-    }
+  it("renders one section per family in the response, in its order", () => {
+    expect(sectionTitles()).toEqual(["Custody", "RPC", "Ramps", "Privacy"]);
   });
 
-  it("shows a provider catalog only for the sidebar category that is selected", () => {
-    urlState.tab = "ramps";
-    renderCatalog({});
-
-    expect(visibleRowLabels()).toEqual(["MoonPay", "Stripe"]);
-    expect(document.querySelector("[data-integrations-hub='true']")).toBeNull();
-    expect(screen.getByRole("searchbox")).toBeTruthy();
+  it("labels each row with its state", () => {
+    expect(within(row("Custody", "Privy")).getByText("Connected")).toBeTruthy();
+    expect(within(row("Custody", "Fireblocks")).getByText("Not configured")).toBeTruthy();
+    expect(within(row("RPC", "Helius")).getByText("Provided by SDP")).toBeTruthy();
+    expect(within(row("Ramps", "MoonPay")).getByText("Provided by SDP")).toBeTruthy();
+    expect(within(row("Privacy", "Private Channels")).getByText("Not configured")).toBeTruthy();
   });
 
-  it("lists only the providers the project can use in each category", () => {
-    urlState.tab = "custody";
-    renderCatalog({});
-    expect(visibleRowLabels()).toEqual(["Privy", "Para"]);
+  it("counts connected rows only on sections with something to configure", () => {
+    expect(within(section("Custody")).getByText("1 of 2 connected")).toBeTruthy();
+    expect(within(section("Privacy")).getByText("0 of 1 connected")).toBeTruthy();
+    expect(within(section("Ramps")).queryByText(/connected$/)).toBeNull();
+  });
+
+  it("shows each custody provider's category", () => {
+    expect(within(row("Custody", "Privy")).getByText("API")).toBeTruthy();
+    expect(within(row("Custody", "Fireblocks")).getByText("Institutional")).toBeTruthy();
+  });
+
+  it("links only the rows a project can configure, each to its page in this project", () => {
+    expect(
+      screen.getAllByRole("link").map((link) => [link.textContent, link.getAttribute("href")])
+    ).toEqual([
+      ["Privy", `/dashboard/${SANDBOX_PROJECT.id}/integrations/privy`],
+      ["Fireblocks", `/dashboard/${SANDBOX_PROJECT.id}/integrations/fireblocks`],
+      [
+        "Private Channels",
+        `/dashboard/${SANDBOX_PROJECT.id}/integrations/private-channels/overview`,
+      ],
+    ]);
+  });
+});
+
+describe("IntegrationsCatalog tabs and search", () => {
+  const catalogUrl = `/dashboard/${SANDBOX_PROJECT.id}/integrations`;
+  let slot: HTMLDivElement;
+  const hideTabs = vi.fn<(tabIds: readonly string[] | null) => void>();
+
+  function openCatalog(search: string): void {
+    window.history.replaceState(null, "", `${catalogUrl}${search}`);
+    setDashboardUrl(`${catalogUrl}${search}`, {});
+    render(<IntegrationsCatalog integrations={INTEGRATIONS} />, {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <EnglishI18n>
+          <DashboardHeaderTabsHideContext.Provider value={hideTabs}>
+            <DashboardHeaderTabsTrailingContext.Provider value={slot}>
+              {children}
+            </DashboardHeaderTabsTrailingContext.Provider>
+          </DashboardHeaderTabsHideContext.Provider>
+        </EnglishI18n>
+      ),
+    });
+  }
+
+  beforeEach(() => {
+    hideTabs.mockClear();
+    slot = document.createElement("div");
+    document.body.append(slot);
+  });
+
+  afterEach(() => {
     cleanup();
-
-    urlState.tab = "compliance";
-    renderCatalog({});
-    expect(visibleRowLabels()).toEqual(["Range"]);
+    slot.remove();
+    window.history.replaceState(null, "", "/");
   });
 
-  it("returns disabled and unknown categories to the hub", () => {
-    urlState.tab = "custody";
-    renderCatalog({ enabledFamilies: ["ramps"] });
+  it("shows only the section a family tab names", () => {
+    openCatalog("?tab=ramps");
 
-    expect(document.querySelectorAll("[data-integration-hub-action]")).toHaveLength(1);
-    expect(document.querySelector("[data-integration-hub-action='ramps']")).toBeTruthy();
+    expect(sectionTitles()).toEqual(["Ramps"]);
   });
 
-  it("searches within the selected category", async () => {
+  it("hides the tab of every family with nothing for the project while it is mounted", () => {
+    openCatalog("");
+    expect(hideTabs).toHaveBeenLastCalledWith(["compliance"]);
+
+    cleanup();
+    expect(hideTabs).toHaveBeenLastCalledWith(null);
+  });
+
+  it("lands on All when a family tab names a family with nothing for the project", () => {
+    openCatalog("?tab=compliance");
+
+    expect(sectionTitles()).toEqual(["Custody", "RPC", "Ramps", "Privacy"]);
+  });
+
+  it("filters rows by provider name or id, hiding sections without a match", async () => {
     const user = userEvent.setup();
-    urlState.tab = "ramps";
-    renderCatalog({});
+    openCatalog("");
+    const search = screen.getByRole("searchbox", { name: "Search integrations" });
 
-    await user.type(screen.getByRole("searchbox"), "stripe");
-    expect(visibleRowLabels()).toEqual(["Stripe"]);
+    await user.type(search, "fire");
+    expect(sectionTitles()).toEqual(["Custody"]);
+    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      expect.stringContaining("Fireblocks"),
+    ]);
 
-    await user.clear(screen.getByRole("searchbox"));
-    expect(visibleRowLabels()).toEqual(["MoonPay", "Stripe"]);
+    await user.clear(search);
+    await user.type(search, "private_channels");
+    expect(sectionTitles()).toEqual(["Privacy"]);
   });
 
-  it("offers an empty state with a reset when nothing matches", async () => {
+  it("offers to clear a search nothing matches, restoring every section", async () => {
     const user = userEvent.setup();
-    urlState.tab = "ramps";
-    renderCatalog({});
+    openCatalog("");
 
-    await user.type(screen.getByRole("searchbox"), "zzz-no-such-provider");
-
+    await user.type(screen.getByRole("searchbox"), "no-such-provider");
+    expect(sectionTitles()).toEqual([]);
     expect(screen.getByText("No integrations match")).toBeTruthy();
-    const resets = screen.getAllByRole("button", { name: "Clear filters" });
-    await user.click(resets[resets.length - 1] as HTMLElement);
-    expect(screen.queryByText("No integrations match")).toBeNull();
-  });
 
-  it("keeps cards action-free: browsing here, acting on the detail page", () => {
-    urlState.tab = "custody";
-    renderCatalog({});
-
-    expect(screen.queryAllByRole("link", { name: "Change in Settings" })).toHaveLength(0);
-    expect(screen.queryAllByRole("link", { name: "Manage" })).toHaveLength(0);
-    expect(screen.queryAllByRole("link", { name: "Configure" })).toHaveLength(0);
-    const privy = screen.getByRole("link", { name: "Privy" });
-    expect(privy.getAttribute("href")).toBe(`/dashboard/${SANDBOX_PROJECT.id}/integrations/privy`);
-  });
-
-  it("fills every row with a description instead of dead space", () => {
-    urlState.tab = "ramps";
-    renderCatalog({});
-
-    expect(screen.getByText("Card and bank fiat onramp and offramp.")).toBeTruthy();
-  });
-
-  it("keeps the custody-unknown alert off other family tabs", () => {
-    urlState.tab = "ramps";
-    renderCatalog({ custody: null });
-
-    expect(screen.queryByRole("alert")).toBeNull();
-  });
-
-  it("renders the custody-unknown alert in the custody catalog", () => {
-    urlState.tab = "custody";
-    renderCatalog({ custody: null });
-
-    expect(screen.getByRole("alert").textContent).toContain(
-      "Custody connection state is unavailable"
-    );
+    await user.click(screen.getByRole("button", { name: "Clear search" }));
+    expect(sectionTitles()).toEqual(["Custody", "RPC", "Ramps", "Privacy"]);
   });
 });

@@ -1,8 +1,8 @@
 "use client";
 
+import useSWR from "swr";
 import { z } from "zod";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
-import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { homeActivityRowSchema, todaysVolumeSchema } from "./home-page.data";
 import { homeQueryKeys } from "./home-query-key";
 
@@ -20,10 +20,6 @@ export type HomeActivitySnapshot = z.infer<typeof homeActivityResponseSchema>["d
 
 /** Once a minute: every read fans out per wallet, and focus re-reads on return to the tab. */
 const HOME_ACTIVITY_REFRESH_MS = 60_000;
-const HOME_ACTIVITY_CACHE_TTL_MS = 60_000;
-/** The saved snapshot's shape: bump it with any change to the route's answer, so a browser
- * holding the old shape drops it instead of drawing it. */
-const HOME_ACTIVITY_SNAPSHOT_VERSION = 3;
 
 /**
  * Home's activity list and today's volume, from the one route that builds both. Parsed, not
@@ -52,17 +48,8 @@ export async function fetchHomeActivity(
  * the volume is on screen, and nothing is read or polled.
  */
 export function useHomeActivitySnapshot(enabled: boolean) {
-  return usePersistedDashboardSWR(
-    enabled ? homeQueryKeys.activity() : null,
-    () => fetchHomeActivity(),
-    {
-      revalidateOnFocus: true,
-      refreshInterval: HOME_ACTIVITY_REFRESH_MS,
-    },
-    {
-      key: "home-activity",
-      ttlMs: HOME_ACTIVITY_CACHE_TTL_MS,
-      version: HOME_ACTIVITY_SNAPSHOT_VERSION,
-    }
-  );
+  return useSWR(enabled ? homeQueryKeys.activity() : null, () => fetchHomeActivity(), {
+    revalidateOnFocus: true,
+    refreshInterval: HOME_ACTIVITY_REFRESH_MS,
+  });
 }

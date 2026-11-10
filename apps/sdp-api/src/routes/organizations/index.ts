@@ -8,6 +8,7 @@ import { clerkSignupSessionMiddleware } from "@/middleware/clerk-auth";
 import { requireHumanSession } from "@/middleware/human-session";
 import { publicRoute, requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
+import { organizationFeedback } from "@/routes/organization-feedback";
 import { organizationMainnetAccess } from "@/routes/organization-mainnet-access";
 import type { Env } from "@/types/env";
 import { createOrganization } from "./create";
@@ -48,3 +49,4 @@ organizations.patch(
 );
 
 organizations.route("/:orgId/mainnet-access", organizationMainnetAccess);
+organizations.route("/:orgId/feedback", organizationFeedback);

@@ -1,8 +1,14 @@
+import {
+  type CustodyProvider,
+  isByokCustodyProvider,
+  walletCreateDedupe,
+} from "@sdp/types/custody";
 import { getDb } from "@/db/client";
 import { getAuth, requireProjectId, walletAccessAllows } from "@/lib/auth";
-import { AppError, badRequest } from "@/lib/errors";
+import { AppError, badRequest, internalError } from "@/lib/errors";
 import { assertCallerWalletInScope } from "@/lib/money-admission";
 import type { AuthorizeInput } from "@/middleware/authorize";
+import { markIdempotencyRerunnable } from "@/middleware/idempotency";
 import { findProjectOperationalWallet } from "@/routes/custody/handlers/wallets";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import type { AppContext } from "./context";
@@ -63,19 +69,40 @@ async function assertCustodyWalletInProject(
   }
 }
 
-/** Wallet create: any named connection belongs to the project. */
+/**
+ * Wallet create: any named connection belongs to the project. It also decides,
+ * before the Idempotency-Key step, whether a 5xx is safe to run again: on a
+ * provider that returns the same wallet for the same request id, storing the
+ * 5xx would push the client to a new key and the provider to a second wallet
+ * (HOO-2565). Deciding it here covers a 5xx from the replay lookup too, and
+ * reuses the connection read for its provider.
+ */
 export async function authorizeCreateWallet(c: AppContext, input: AuthorizeInput): Promise<void> {
   const auth = getAuth(c);
-  const { connectionId } = body<{ connectionId?: string }>(input);
-  if (connectionId === undefined) return;
+  const { connectionId, provider } = body<{ connectionId?: string; provider?: CustodyProvider }>(
+    input
+  );
+  if (connectionId === undefined) {
+    if (provider !== undefined && walletCreateDedupe(provider, "managed") !== null) {
+      markIdempotencyRerunnable(c);
+    }
+    return;
+  }
   const connection = await getDb(c.env)
     .prepare(
-      `SELECT id FROM custody_connections WHERE id = ? AND organization_id = ? AND project_id = ?`
+      `SELECT provider FROM custody_connections WHERE id = ? AND organization_id = ? AND project_id = ?`
     )
     .bind(connectionId, auth.organizationId, requireProjectId(c))
-    .first<{ id: string }>();
+    .first<{ provider: string }>();
   if (!connection) {
     throw new AppError("NOT_FOUND", "Custody connection not found");
+  }
+  // The column is TEXT: parse it at the read, as the runtime target does.
+  if (!isByokCustodyProvider(connection.provider)) {
+    throw internalError("Custody Connection provider is unsupported");
+  }
+  if (walletCreateDedupe(connection.provider, "byok") !== null) {
+    markIdempotencyRerunnable(c);
   }
 }
 

@@ -19,12 +19,13 @@ export type ErrorCode =
   | "PAYLOAD_TOO_LARGE"
   | "SERVICE_UNAVAILABLE"
   | "INTERNAL_ERROR"
+  // A provider operation SDP does not support yet
+  | "NOT_IMPLEMENTED"
   | "NOT_ALLOWLISTED"
   | "INVALID_API_KEY"
   | "EXPIRED_API_KEY"
   | "REVOKED_API_KEY"
   | "INSUFFICIENT_PERMISSIONS"
-  | "OPERATION_NOT_ALLOWED"
   | "INVALID_TOKEN"
   // Token issuance errors
   | "TOKEN_NOT_FOUND"
@@ -50,6 +51,8 @@ export type ErrorCode =
   | "TRANSACTION_EXPIRED"
   | "SIGNING_FAILED"
   | "SIGNING_REJECTED"
+  // A custody provider block that is not a confirmed policy refusal
+  | "SIGNING_BLOCKED"
   | "CUSTODY_POLICY_REFUSED"
   | "PROVIDER_NOT_CONFIGURED"
   | "PROVIDER_UNAVAILABLE"
@@ -68,6 +71,8 @@ export type ErrorCode =
   | "TRANSFER_BATCH_DESTINATION_CHANGED"
   // A recipient token account whose rent exceeds the sponsor's per-transaction cap (HOO-2024)
   | "SPONSORED_RENT_OVER_CAP"
+  // A recurring payment edit or activation of a version the caller no longer holds (HOO-2562)
+  | "RECURRING_PAYMENT_CHANGED"
   // Idempotency-Key (HOO-1918, draft-ietf-httpapi-idempotency-key-header)
   | IdempotencyErrorCode;
 
@@ -91,12 +96,12 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   PAYLOAD_TOO_LARGE: 413,
   SERVICE_UNAVAILABLE: 503,
   INTERNAL_ERROR: 500,
+  NOT_IMPLEMENTED: 501,
   NOT_ALLOWLISTED: 403,
   INVALID_API_KEY: 401,
   EXPIRED_API_KEY: 401,
   REVOKED_API_KEY: 401,
   INSUFFICIENT_PERMISSIONS: 403,
-  OPERATION_NOT_ALLOWED: 403,
   INVALID_TOKEN: 401,
   // Token issuance errors
   TOKEN_NOT_FOUND: 404,
@@ -124,6 +129,9 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   TRANSACTION_EXPIRED: 409,
   SIGNING_FAILED: 400,
   SIGNING_REJECTED: 422,
+  // Nothing was signed, and a retry is blocked the same way until the
+  // provider's setup changes.
+  SIGNING_BLOCKED: 400,
   // Policy refusals need a policy review or request change before retrying.
   CUSTODY_POLICY_REFUSED: 422,
   PROVIDER_NOT_CONFIGURED: 503,
@@ -145,6 +153,7 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   TRANSFER_BATCH_RETRY_CLAIMED: 409,
   TRANSFER_BATCH_DESTINATION_CHANGED: 409,
   SPONSORED_RENT_OVER_CAP: 409,
+  RECURRING_PAYMENT_CHANGED: 409,
   // Idempotency-Key (HOO-1918)
   IDEMPOTENCY_KEY_REQUIRED: 400,
   IDEMPOTENCY_KEY_REUSED: 422,
@@ -164,12 +173,12 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   PAYLOAD_TOO_LARGE: "Request body is too large",
   SERVICE_UNAVAILABLE: "Service temporarily unavailable",
   INTERNAL_ERROR: PUBLIC_INTERNAL_ERROR_MESSAGE,
+  NOT_IMPLEMENTED: "This operation is not implemented yet",
   NOT_ALLOWLISTED: "Email or domain not on allowlist",
   INVALID_API_KEY: "Invalid API key",
   EXPIRED_API_KEY: "API key has expired",
   REVOKED_API_KEY: "API key has been revoked",
   INSUFFICIENT_PERMISSIONS: "Insufficient permissions for this action",
-  OPERATION_NOT_ALLOWED: "Operation not allowed for this API key",
   INVALID_TOKEN: "Invalid or expired token",
   // Token issuance errors
   TOKEN_NOT_FOUND: "Token not found",
@@ -196,6 +205,7 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   TRANSACTION_EXPIRED: "The transaction's blockhash expired before it was submitted",
   SIGNING_FAILED: "Transaction signing failed",
   SIGNING_REJECTED: "The signing provider rejected this transaction",
+  SIGNING_BLOCKED: "The custody provider blocked this signing request",
   CUSTODY_POLICY_REFUSED:
     "Your custody provider refused to sign this request because of a wallet policy. Review the wallet's policy or adjust the request before retrying.",
   PROVIDER_NOT_CONFIGURED: "Payment provider is not configured for this environment",
@@ -218,6 +228,8 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
     "A failed recipient's counterparty account changed its address since the batch was sent",
   SPONSORED_RENT_OVER_CAP:
     "A recipient's token account would cost more rent than the sponsor funds in one transaction",
+  RECURRING_PAYMENT_CHANGED:
+    "This recurring payment changed since it was read. Read it again and review the current terms",
   // Idempotency-Key (HOO-1918)
   IDEMPOTENCY_KEY_REQUIRED: "This operation requires an Idempotency-Key header",
   IDEMPOTENCY_KEY_REUSED: "This Idempotency-Key was already used for a different request",
@@ -231,6 +243,13 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
 export function isErrorCode(value: unknown): value is ErrorCode {
   return typeof value === "string" && Object.hasOwn(ERROR_STATUS_CODES, value);
 }
+
+/**
+ * Every `ErrorCode`, in `ERROR_STATUS_CODES` order. The OpenAPI error envelope
+ * lists exactly these, so a code added here is documented with no second list.
+ */
+export const ERROR_CODES: readonly ErrorCode[] =
+  Object.keys(ERROR_STATUS_CODES).filter(isErrorCode);
 
 export class AppError extends Error {
   public readonly code: ErrorCode;

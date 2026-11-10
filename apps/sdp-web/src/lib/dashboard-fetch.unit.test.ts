@@ -8,10 +8,12 @@ import {
   MOVEMENT_POLL_INTERVAL_MS,
   MOVEMENT_READ_PATHS,
   resetMovementWatchesForTests,
-  setTabShowsDemo,
 } from "./dashboard-fetch";
-import { resetIdempotencyKeyStoresForTests, setIdempotencyKeyScope } from "./idempotency-key-store";
-import { TAB_DEMO_HEADER_NAME } from "./payments-demo/demo-cookie";
+import {
+  KEPT_KEY_WINDOW_MS,
+  resetIdempotencyKeyStoresForTests,
+  setIdempotencyKeyScope,
+} from "./idempotency-key-store";
 
 function noContentFetchMock() {
   return vi.fn(
@@ -60,7 +62,7 @@ afterEach(() => {
 
 describe("dashboardFetch", () => {
   it("merges explicitly supplied headers with the JSON content type", async () => {
-    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/markets/earn`);
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/markets/embedded-yield`);
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>
         new Response(JSON.stringify({ data: { ok: true } }), {
@@ -83,7 +85,7 @@ describe("dashboardFetch", () => {
   });
 
   it("does not overwrite an explicitly selected content type", async () => {
-    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/custody`);
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/wallets`);
     const fetchMock = noContentFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -293,6 +295,56 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
       body: { amount: "1" },
     });
     expect(result).toMatchObject({ ok: false, status: 400, replayed: true });
+  });
+
+  // A money route answers its key from the movement's row after the 24-hour
+  // key record lapses, so the old key replays the first attempt.
+  it("resends a kept key on a money route however old it is", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+      const fetchMock = vi
+        .fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse(201))
+        .mockRejectedValueOnce(new TypeError("network down"));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(submit()).rejects.toThrow("network down");
+      vi.setSystemTime(Date.now() + KEPT_KEY_WINDOW_MS);
+      await submit();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Elsewhere only the key record answers, so a key past it could run again.
+  it("sends nothing under an outlived key on another write, and the next submit is new", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+      const fetchMock = vi
+        .fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse(201))
+        .mockRejectedValueOnce(new TypeError("network down"));
+      vi.stubGlobal("fetch", fetchMock);
+      const submit = () =>
+        dashboardRequest("/api/dashboard/counterparties", { method: "POST", body: '{"name":"A"}' });
+
+      await expect(submit()).rejects.toThrow("network down");
+      vi.setSystemTime(Date.now() + KEPT_KEY_WINDOW_MS);
+      const stopped = await submit();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(stopped.status).toBe(409);
+      expect(await stopped.json()).toMatchObject({
+        error: { code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN" },
+      });
+
+      await submit();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(keyOfCall(fetchMock, 1)).not.toBe(keyOfCall(fetchMock, 0));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("holds the key when the request never got an answer", async () => {
@@ -631,27 +683,6 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  // Greptile (#2252): a live submit must never join a demo request of the same
-  // body, or it would receive the demo's canned answer.
-  it("keeps demo and live submits of the same body apart", async () => {
-    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
-    const fetchMock = statusFetchMock(201, 201);
-    vi.stubGlobal("fetch", fetchMock);
-
-    setTabShowsDemo(true);
-    const demo = submit();
-    setTabShowsDemo(false);
-    const live = submit();
-    await Promise.all([demo, live]);
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const demoHeaders = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
-    const liveHeaders = new Headers(fetchMock.mock.calls[1]?.[1]?.headers);
-    expect(demoHeaders.get(TAB_DEMO_HEADER_NAME)).toBe("1");
-    expect(liveHeaders.get(TAB_DEMO_HEADER_NAME)).toBeNull();
-    expect(keyOfCall(fetchMock, 0)).not.toBe(keyOfCall(fetchMock, 1));
-  });
-
   it("gives a different action its own key", async () => {
     openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const fetchMock = statusFetchMock(502, 502);
@@ -683,26 +714,20 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
 
   // They fire as the user types; keyed, each would leave an unanswered key
   // behind that never expires.
-  it("leaves read-like POSTs (estimates, simulations, other quotes) unkeyed", async () => {
+  it("leaves read-like POSTs (estimates, other quotes) unkeyed", async () => {
     openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments`);
-    const fetchMock = statusFetchMock(200, 200, 200, 200);
+    const fetchMock = statusFetchMock(200, 200, 200);
     vi.stubGlobal("fetch", fetchMock);
 
     for (const path of [
       "/api/dashboard/payments/transfers/batch/estimate",
       "/api/dashboard/payments/ramps/offramp/estimate?draft=1",
-      "/api/dashboard/payments/ramps/sandbox/simulate",
       "/api/test/quote",
     ]) {
       await dashboardRequest(path, { method: "POST", body: "{}" });
     }
 
-    expect([0, 1, 2, 3].map((index) => keyOfCall(fetchMock, index))).toEqual([
-      null,
-      null,
-      null,
-      null,
-    ]);
+    expect([0, 1, 2].map((index) => keyOfCall(fetchMock, index))).toEqual([null, null, null]);
   });
 
   // APE-689: a ramp quote creates the transfer (and a Stripe session), so the

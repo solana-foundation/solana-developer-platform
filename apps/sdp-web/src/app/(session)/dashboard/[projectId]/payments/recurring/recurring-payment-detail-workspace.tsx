@@ -16,7 +16,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/custody/wallet-address-copy-button";
 import {
   formatDisplayAmount,
   isHttpUrl,
@@ -29,6 +28,7 @@ import {
   formatDecimalAmount,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
 import { usePaymentsActionWallets } from "@/app/(session)/dashboard/[projectId]/payments/ramps/hooks/use-payments-action-wallets";
+import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import {
@@ -41,6 +41,7 @@ import {
 } from "@/components/refresh-record";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { explorerAddressUrl } from "@/lib/explorer";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
@@ -386,6 +387,7 @@ function statusBand({
   lastRunError,
   scheduleLabel,
   locale,
+  timeZone,
   t,
 }: {
   recurringPayment: PaymentRecurringPayment;
@@ -395,6 +397,7 @@ function statusBand({
   lastRunError: string | null;
   scheduleLabel: string;
   locale: string;
+  timeZone: string;
   t: Translate;
 }): Band {
   const state = t(STATUS_TRANSLATION_KEYS[recurringPayment.status]);
@@ -422,7 +425,7 @@ function statusBand({
           ),
         };
       }
-      const next = formatDateTime(recurringPayment.nextCollectionDueAt, locale);
+      const next = formatDateTime(recurringPayment.nextCollectionDueAt, locale, timeZone);
       return {
         tone: "ok",
         state,
@@ -469,15 +472,20 @@ function statusBand({
 }
 
 /** When the next run is, or why there is none. */
-function nextRunLabel(recurringPayment: PaymentRecurringPayment, locale: string, t: Translate) {
+function nextRunLabel(
+  recurringPayment: PaymentRecurringPayment,
+  locale: string,
+  timeZone: string,
+  t: Translate
+) {
   if (recurringPayment.nextCollectionDueAt) {
-    return formatDateTime(recurringPayment.nextCollectionDueAt, locale);
+    return formatDateTime(recurringPayment.nextCollectionDueAt, locale, timeZone);
   }
   if (recurringPayment.status !== "pending_activation") {
     return t("DashboardPayments.recurring.nothingScheduled");
   }
   return recurringPayment.firstCollectionAt
-    ? formatDateTime(recurringPayment.firstCollectionAt, locale)
+    ? formatDateTime(recurringPayment.firstCollectionAt, locale, timeZone)
     : t("DashboardPayments.recurring.firstRunAfterActivation");
 }
 
@@ -522,6 +530,7 @@ function SchedulePlan({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const custodyEnabled = useDashboardWorkspace().flags.custody;
   const projectHref = useProjectHref();
   const sourceWalletLabel = walletLabel(wallet, recurringPayment.sourceProviderWalletId);
@@ -567,7 +576,7 @@ function SchedulePlan({
       </RecordLine>
       <RecordLine label={t("DashboardPayments.recurring.repeats")}>{scheduleLabel}</RecordLine>
       <RecordLine label={t("DashboardPayments.recurring.nextRun")}>
-        {nextRunLabel(recurringPayment, locale, t)}
+        {nextRunLabel(recurringPayment, locale, timeZone, t)}
       </RecordLine>
       {lapsed ? null : (
         <RecordLine label={t("DashboardPayments.recurring.ends")}>
@@ -587,6 +596,7 @@ function SchedulePlan({
 function ScheduleDetails({ recurringPayment }: { recurringPayment: PaymentRecurringPayment }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const cluster = useSolanaCluster();
   const { subscriptionPda, metadataUri } = recurringPayment;
   return (
@@ -641,10 +651,10 @@ function ScheduleDetails({ recurringPayment }: { recurringPayment: PaymentRecurr
       </dl>
       <dl>
         <RecordLine label={t("DashboardPayments.recurring.created")}>
-          {formatDateTime(recurringPayment.createdAt, locale)}
+          {formatDateTime(recurringPayment.createdAt, locale, timeZone)}
         </RecordLine>
         <RecordLine label={t("DashboardPayments.recurring.updated")}>
-          {formatDateTime(recurringPayment.updatedAt, locale)}
+          {formatDateTime(recurringPayment.updatedAt, locale, timeZone)}
         </RecordLine>
       </dl>
     </RecordColumns>
@@ -795,6 +805,7 @@ export function RecurringPaymentDetailWorkspace({
 }: RecurringPaymentDetailWorkspaceProps) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const router = useRouter();
   const [pendingAction, setPendingAction] = useState<RecurringPaymentAction | null>(null);
   const [actionError, setActionError] = useState<DetailActionError | null>(null);
@@ -856,7 +867,9 @@ export function RecurringPaymentDetailWorkspace({
       position: "bottom-right",
     });
     try {
-      await runRecurringPaymentAction(recurringPayment.id, action, undefined, t);
+      await runRecurringPaymentAction(recurringPayment.id, action, undefined, t, {
+        expectedUpdatedAt: recurringPayment.updatedAt,
+      });
       toast.success(actionSuccessLabel(action, t), { id: toastId, position: "bottom-right" });
       router.refresh();
     } catch (error) {
@@ -897,6 +910,7 @@ export function RecurringPaymentDetailWorkspace({
       lastRunError,
       scheduleLabel,
       locale,
+      timeZone,
       t,
     });
   const canEdit = canWrite && isEditable && !controlsDisabled && !editing;

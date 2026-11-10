@@ -16,7 +16,6 @@ import { seedProjectApiKey, type TestApiKeyMaterial } from "@/test/helpers/api-k
 import { clerkHeadersWithoutProject } from "@/test/helpers/clerk";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
-import { EARN_ENABLED_FLAGS, EARN_FLAG_OFF_CASES } from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
 import {
   archiveProject,
@@ -147,6 +146,7 @@ const EARN_AVAILABILITY: ProjectProviderAvailabilityEntry[] = [
   { family: "earn", provider: "ondo", available: false, reason: "provider_not_entitled" },
   { family: "earn", provider: "hastra", available: false, reason: "provider_not_offered" },
   { family: "earn", provider: "wisdomtree", available: false, reason: "provider_not_offered" },
+  { family: "earn", provider: "plume", available: false, reason: "provider_not_offered" },
 ];
 const SANDBOX_AVAILABILITY: ProjectProviderAvailability = {
   projectId: PROJECT_IDS.sandbox,
@@ -297,7 +297,7 @@ const PROJECT_NOT_FOUND_BODY = {
 let otherProjects: SeededDefaultProjects;
 
 function deploymentEnv(overrides: Partial<Env>): Env {
-  return { ...env, ...DEPLOYMENT_CREDENTIALS, ...EARN_ENABLED_FLAGS, ...overrides };
+  return { ...env, ...DEPLOYMENT_CREDENTIALS, ...overrides };
 }
 
 function apiKeyHeaders(key: TestApiKeyMaterial): Record<string, string> {
@@ -514,7 +514,7 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     }
   );
 
-  it.each(["stable", "beta", "experimental"] as const)(
+  it.each(["beta", "experimental"] as const)(
     "advertises the actual Fireblocks BYOK stage to the dashboard in %s",
     async (channel) => {
       await setProviderOverrides({ custody: { fireblocks: true } });
@@ -525,38 +525,43 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
       const fireblocks = availability.providers.find(
         (entry) => entry.family === "custody" && entry.provider === "fireblocks"
       );
-      expect(fireblocks).toMatchObject({
-        modes: channel === "stable" ? [] : ["byok"],
-        unavailableModes: expect.arrayContaining(
-          channel === "stable"
-            ? [{ mode: "byok", reason: "custody_provider_not_in_release_channel" }]
-            : []
-        ),
-      });
+      expect(fireblocks).toMatchObject({ modes: ["byok"] });
     }
   );
 
-  it.for(EARN_FLAG_OFF_CASES)(
-    "reports every Earn provider as outside the release channel while $flag is off",
-    async ({ flags }) => {
-      const availability = await readAvailability("sandbox", deploymentEnv(flags));
+  // The public document names a custody provider only while the channel offers it
+  // in some custody mode (openapi/release-channel-values.ts), so stable lists Privy alone.
+  it("omits custody providers the release channel offers in no custody mode", async () => {
+    await setProviderOverrides({ custody: { fireblocks: true } });
 
-      expect(availability).toEqual({
-        ...SANDBOX_AVAILABILITY,
-        providers: SANDBOX_AVAILABILITY.providers.map(
-          (entry): ProjectProviderAvailabilityEntry =>
-            entry.family === "earn"
-              ? {
-                  family: "earn",
-                  provider: entry.provider,
-                  available: false,
-                  reason: "provider_not_in_release_channel",
-                }
-              : entry
-        ),
-      });
-    }
-  );
+    const availability = await readAvailability(
+      "sandbox",
+      deploymentEnv({ SDP_RELEASE_CHANNEL: "stable" })
+    );
+
+    expect(
+      availability.providers.flatMap((entry) =>
+        entry.family === "custody" ? [entry.provider] : []
+      )
+    ).toEqual(["privy"]);
+  });
+
+  it("lists a custody provider the release channel offers for BYOK alone", async () => {
+    await setProviderOverrides({ custody: { fireblocks: true } });
+    custodyReleaseChannel.stageOverride = { provider: "fireblocks", mode: "byok", stage: "stable" };
+
+    const availability = await readAvailability(
+      "sandbox",
+      deploymentEnv({ SDP_RELEASE_CHANNEL: "stable" })
+    );
+
+    expect(availability.providers).toContainEqual({
+      family: "custody",
+      provider: "fireblocks",
+      modes: ["byok"],
+      unavailableModes: [{ mode: "managed", reason: "custody_provider_not_in_release_channel" }],
+    });
+  });
 
   it("reports providers the organization is not entitled to as unavailable", async () => {
     await setProviderOverrides({

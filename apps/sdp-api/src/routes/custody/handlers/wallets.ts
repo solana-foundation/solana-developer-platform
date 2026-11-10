@@ -294,7 +294,6 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
 
   const body = c.req.valid("json");
   const idempotency = custodyWalletIdempotency(c);
-
   const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
 
   try {

@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { test } from "@/playwright/support/vercel-bypass";
 import { getE2EEnv } from "../env";
 import { gotoProjectPage } from "../support/local-dashboard-bootstrap";
 
@@ -6,8 +7,7 @@ const READ_ONLY_PAGES = [
   "/dashboard/tokens",
   "/dashboard/payments/counterparty",
   "/dashboard/api-keys",
-  "/dashboard/members",
-  "/dashboard/custody",
+  "/dashboard/wallets",
   "/dashboard/settings",
 ];
 

@@ -4,7 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { getRequestLocale, getTranslations } from "@/i18n/server";
+import { getRequestLocale, getRequestTimeZone, getTranslations } from "@/i18n/server";
 import { parseAllowedIps } from "@/lib/ip-allowlist-input";
 import { createSdpApiClient, requestProjectHref, requestProjectId } from "@/lib/sdp-api";
 import {
@@ -32,19 +32,24 @@ async function setFlash(flash: ApiKeyFlash) {
   // (encrypted) and bound to the Clerk session that created it. Without an
   // authenticated session there is nobody to deliver it to — fail closed
   // rather than write anything readable to the browser.
-  const { sessionId, userId } = await auth();
-  if (!sessionId || !userId) {
+  const { sessionId, userId, orgId } = await auth();
+  if (!sessionId || !userId || !orgId) {
     return;
   }
 
+  const projectId = await requestProjectId();
   const maxAge = apiKeyFlashMaxAgeSeconds(flash);
-  const sealed = await sealApiKeyFlash(flash, { sessionId, userId }, maxAge);
+  const sealed = await sealApiKeyFlash(
+    flash,
+    { sessionId, userId, organizationId: orgId, projectId },
+    maxAge
+  );
   if (!sealed) {
     return;
   }
 
   const jar = await cookies();
-  jar.set(API_KEY_FLASH_COOKIE, sealed, apiKeyFlashCookieOptions(await requestProjectId(), maxAge));
+  jar.set(API_KEY_FLASH_COOKIE, sealed, apiKeyFlashCookieOptions(projectId, maxAge));
 }
 
 function extractErrorMessage(error: unknown): string {
@@ -276,8 +281,11 @@ export async function saveApiKeyAuthoringAction(
 }
 
 export async function rotateApiKeyAction(formData: FormData) {
-  const t = await getTranslations();
-  const locale = await getRequestLocale();
+  const [t, locale, timeZone] = await Promise.all([
+    getTranslations(),
+    getRequestLocale(),
+    getRequestTimeZone(),
+  ]);
   const keyId = String(formData.get("keyId") ?? "").trim();
   const gracePeriodHours = Math.min(168, Math.max(0, parsePositiveInt(formData.get("grace"), 24)));
 
@@ -310,7 +318,9 @@ export async function rotateApiKeyAction(formData: FormData) {
     await setFlash({
       level: "success",
       message: t("DashboardCustody.apiKeyRotated", {
-        deadline: new Date(response.previousKey.rotationDeadline).toLocaleString(locale),
+        deadline: new Date(response.previousKey.rotationDeadline).toLocaleString(locale, {
+          timeZone,
+        }),
       }),
       key: response.apiKey.key,
       keyPrefix: response.apiKey.keyPrefix,

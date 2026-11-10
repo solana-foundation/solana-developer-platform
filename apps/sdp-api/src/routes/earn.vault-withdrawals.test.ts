@@ -126,8 +126,6 @@ const WALLET_ADDRESS = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const CUSTODY_WALLET_ID = "cwlt_earn_vw";
 const CONNECTION_ID = "cconn_earn_vw";
 
-let originalMarketsEnabled: string | undefined;
-let originalEarnEnabled: string | undefined;
 let originalEncryptionKey: string | undefined;
 
 async function seedAuth(): Promise<void> {
@@ -387,11 +385,7 @@ function getWithdrawal(pathSuffix: string, apiKey = TEST_API_KEY.raw) {
 }
 
 beforeEach(async () => {
-  originalMarketsEnabled = env.MARKETS_ENABLED;
-  originalEarnEnabled = env.EARN_ENABLED;
   originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
-  env.MARKETS_ENABLED = "true";
-  env.EARN_ENABLED = "true";
   surfacingEnabled.value = true;
   custodyReleaseChannel.outOfChannelMode = null;
   await seedTestDatabase(env);
@@ -405,8 +399,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  env.MARKETS_ENABLED = originalMarketsEnabled;
-  env.EARN_ENABLED = originalEarnEnabled;
   env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
   vaultWithdrawClientOverride.current = null;
   vi.restoreAllMocks();
@@ -1045,17 +1037,28 @@ describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
     const list = await getWithdrawal("");
     expect(list.status).toBe(200);
     const page = (await list.json()) as {
-      data: { withdrawals: Array<{ movementId: string; shares: string; shareMint: string }> };
+      data: {
+        withdrawals: Array<{
+          movementId: string;
+          shares: string;
+          shareMint: string;
+          ownerAddress: string | null;
+        }>;
+      };
     };
     expect(page.data.withdrawals).toHaveLength(1);
+    // Custody rows record no owner — the wire names the wallet the movement
+    // pays, so equal-sized orders from different wallets stay distinguishable.
+    expect(page.data.withdrawals[0]?.ownerAddress).toBe(WALLET_ADDRESS);
 
     const detail = await getWithdrawal(`/${recorded.movement.id}`);
     expect(detail.status).toBe(200);
     const body = (await detail.json()) as {
-      data: { withdrawal: { movementId: string; signature: string } };
+      data: { withdrawal: { movementId: string; signature: string; ownerAddress: string | null } };
     };
     expect(body.data.withdrawal.movementId).toBe(recorded.movement.id);
     expect(body.data.withdrawal.signature).toBe(recorded.movement.signature);
+    expect(body.data.withdrawal.ownerAddress).toBe(WALLET_ADDRESS);
     expect(reconcileEarnVaultMovementReadThrough).toHaveBeenCalledWith(
       env,
       expect.objectContaining({ id: recorded.movement.id })

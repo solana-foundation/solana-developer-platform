@@ -29,6 +29,7 @@ import {
 import {
   findPendingInvitation,
   invitationExpired,
+  linkClerkIdentity,
   uninvitedRefusal,
 } from "@/services/organization-membership.service";
 import type { Env } from "@/types/env";
@@ -203,42 +204,13 @@ async function ensureClerkUser(
   if (!normalizedEmail) {
     throw unauthorized("Clerk primary email must be verified");
   }
-  let user = await db
-    .prepare("SELECT id, email FROM users WHERE email = ?")
-    .bind(normalizedEmail)
-    .first<{ id: string; email: string }>();
-
-  if (!user) {
-    const userId = `usr_${crypto.randomUUID()}`;
-    await db
-      .prepare(
-        `INSERT INTO users (id, email, email_verified, status)
-         VALUES (?, ?, 1, 'active')
-         ON CONFLICT (email) DO NOTHING`
-      )
-      .bind(userId, normalizedEmail)
-      .run();
-    user = await db
-      .prepare("SELECT id, email FROM users WHERE email = ?")
-      .bind(normalizedEmail)
-      .first<{ id: string; email: string }>();
+  // Under the Clerk user's lock, with its deletion checked there: a sign-in
+  // that raced the user's deletion stores nothing (HOO-2303).
+  const linked = await linkClerkIdentity(db, { clerkUserId, email: normalizedEmail });
+  if (linked === null) {
+    throw unauthorized("This Clerk user was deleted");
   }
-
-  if (!user) {
-    throw internalError("Unable to resolve Clerk user");
-  }
-
-  await db
-    .prepare(
-      `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
-       VALUES (?, 'clerk', ?, ?, ?)
-       ON CONFLICT (provider, provider_user_id)
-       DO UPDATE SET user_id = EXCLUDED.user_id, email = EXCLUDED.email, updated_at = sdp_datetime_now()`
-    )
-    .bind(`aui_${crypto.randomUUID()}`, clerkUserId, user.id, normalizedEmail)
-    .run();
-
-  return { userId: user.id, email: user.email };
+  return linked;
 }
 
 async function ensureMembership(

@@ -1,10 +1,9 @@
 import { ONCHAIN_TRANSFER_STATUSES } from "@sdp/types/payments";
 import { describe, expect, it } from "vitest";
-
-import { buildWalletsPlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/custody/wallets-playground-config";
 import { buildIssuancePlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-playground-config";
 import { buildCounterpartyPlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-playground-config";
 import { buildPaymentsPlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/payments/payments-playground-config";
+import { buildWalletsPlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/wallets/wallets-playground-config";
 import type { ApiPlaygroundEndpointConfig } from "@/components/api-playground-shell";
 import { getMessages } from "@/i18n/messages";
 import { translate } from "@/i18n/translate";
@@ -128,6 +127,20 @@ describe("API playground release channel", () => {
     const body = wallet?.bodyFields.find((field) => field.key === "$body")?.defaultValue ?? "";
     expect(body).not.toMatch(/mint_authority/);
     expect(JSON.parse(body)).toMatchObject({ provider: expect.any(String) });
+  });
+
+  it("offers only the custody providers the channel publishes", () => {
+    const providersIn = (releaseChannel: "stable" | "experimental") =>
+      filterPlaygroundEndpointsToReleaseChannel(
+        getOpenApiPlaygroundEndpoints("wallets"),
+        releaseChannel
+      )
+        .find((endpoint) => endpoint.id === "list-wallets")
+        ?.pathFields.find((field) => field.key === "provider")
+        ?.options?.map((option) => option.value);
+    expect(providersIn("stable")).toEqual(["privy"]);
+    expect(providersIn("experimental")).toContain("fireblocks");
+    expect(providersIn("experimental")).not.toContain("local");
   });
 
   it("uses the channel's generated transfer fields and response examples", () => {
@@ -255,3 +268,38 @@ describe("API playground allowlist", () => {
 function paths(endpoints: ApiPlaygroundEndpointConfig[]) {
   return endpoints.map((endpoint) => endpoint.path.split("?", 1)[0]);
 }
+
+// Regression: every write's snippet showed an Idempotency-Key and the "reuse
+// this key" note, even on routes that ignore the header.
+describe("API playground key contract", () => {
+  it("gives every form, hand-authored ones too, its route's Idempotency-Key contract", () => {
+    const messages = getMessages("en");
+    const t = (
+      key: Parameters<typeof translate<typeof messages>>[1],
+      values?: Record<string, string | number>
+    ) => translate(messages, key, values);
+    const built = [
+      ...buildWalletsPlaygroundEndpointConfigs({ connectedProviders: [], wallets: [], t }),
+      ...buildPaymentsPlaygroundEndpointConfigs(
+        { transfers: [], wallets: [], rampProviders: [] },
+        t
+      ),
+      ...buildCounterpartyPlaygroundEndpointConfigs([], t),
+      ...buildIssuancePlaygroundEndpointConfigs({ templates: [], tokens: [], t }),
+    ];
+    const generated = new Map(
+      (["wallets", "payments", "counterparties", "issuance"] as const).flatMap((module) =>
+        getOpenApiPlaygroundEndpoints(module).map((endpoint) => [operationKey(endpoint), endpoint])
+      )
+    );
+    for (const endpoint of built) {
+      const reference = generated.get(operationKey(endpoint));
+      if (reference === undefined) continue;
+      expect([operationKey(endpoint), endpoint.takesIdempotencyKey]).toEqual([
+        operationKey(endpoint),
+        reference.takesIdempotencyKey,
+      ]);
+    }
+    expect(built.some((endpoint) => endpoint.takesIdempotencyKey === false)).toBe(true);
+  });
+});

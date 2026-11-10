@@ -5,6 +5,7 @@ import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { MOVEMENT_POLL_INTERVAL_MS, resetMovementWatchesForTests } from "@/lib/dashboard-fetch";
+import { KEPT_KEY_WINDOW_MS } from "@/lib/idempotency-key-store";
 import type { Translate } from "./payments-workspace.data";
 import {
   claimTransferIdempotencyKey,
@@ -74,6 +75,29 @@ describe("sendTransferUnderKey", () => {
     expect(calls).toHaveLength(2);
     expect(calls[1]?.key).toBe(calls[0]?.key);
     expect(calls.map((call) => call.amount)).toEqual(["1", "1"]);
+  });
+
+  // The API answers a transfer's key from the transfer row after its 24-hour
+  // key record lapses, so the old key replays the first transfer; a new key
+  // would pay again.
+  it("resends a kept key however old it is", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const fetchMock = vi
+      .fn<typeof fetch>(async () =>
+        Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } })
+      )
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow("Failed to fetch");
+    vi.setSystemTime(Date.now() + KEPT_KEY_WINDOW_MS);
+    await sendTransferUnderKey(SUBMISSION, t);
+
+    const keys = fetchMock.mock.calls.map(([, init]) =>
+      new Headers(init?.headers).get("Idempotency-Key")
+    );
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
   });
 
   /** The key the request actually carried. */

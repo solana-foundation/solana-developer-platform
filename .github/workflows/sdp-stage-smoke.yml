@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 20
     if: github.repository == 'solana-foundation/solana-developer-platform'
     env:
-      DOPPLER_PRESERVE_ENV: PLAYWRIGHT_API_URL,PLAYWRIGHT_BASE_URL,E2E_CLERK_TICKET_AUTH,PLAYWRIGHT_USE_EXTERNAL_API,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,NEXT_PUBLIC_SENTRY_DSN,NODE_ENV,SENTRY_AUTH_TOKEN,VERCEL_ENV,SDP_FLAG_HOMEPAGE_OPEN_SIGNUP,ISSUANCE_ENABLED,SDP_FLAG_ASSET_PROFILES,PRIVATE_CHANNELS_ENABLED,HELIUS_RINGS_ENABLED,MARKETS_ENABLED,EARN_ENABLED
+      DOPPLER_PRESERVE_ENV: PLAYWRIGHT_API_URL,PLAYWRIGHT_BASE_URL,E2E_CLERK_TICKET_AUTH,PLAYWRIGHT_USE_EXTERNAL_API,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,NEXT_PUBLIC_SENTRY_DSN,NODE_ENV,SENTRY_AUTH_TOKEN,VERCEL_ENV,SDP_FLAG_HOMEPAGE_OPEN_SIGNUP,ISSUANCE_ENABLED,SDP_FLAG_ASSET_PROFILES,PRIVATE_CHANNELS_ENABLED,HELIUS_RINGS_ENABLED
       SMOKE_TARGET: stage
       E2E_CLERK_TICKET_AUTH: "1"
       PLAYWRIGHT_API_URL: https://api-preview.solana.com
@@ -76,12 +76,20 @@ jobs:
       - name: Install Playwright browser
         run: pnpm --filter sdp-web exec playwright install chromium
 
+      # Vercel Bot Protection challenges non-browser clients with a 429. The probe and
+      # the smoke send SDP_CANARY_BYPASS_TOKEN (Doppler stg_ci) as x-sdp-canary, which a
+      # Vercel Firewall custom rule bypasses; playwright/support/vercel-bypass.ts.
       - name: Probe dashboard readiness
+        env:
+          DOPPLER_CONFIG: stg_ci
         run: |
-          set -euo pipefail
-          STATUS=$(curl -sS -o /dev/null -m 15 -w '%{http_code}' "${PLAYWRIGHT_BASE_URL}/sign-in")
-          echo "GET ${PLAYWRIGHT_BASE_URL}/sign-in -> ${STATUS}"
-          [ "$STATUS" = "200" ]
+          scripts/doppler/run-with-config.sh bash -c '
+            set -euo pipefail
+            : "${SDP_CANARY_BYPASS_TOKEN:?SDP_CANARY_BYPASS_TOKEN missing from Doppler stg_ci}"
+            STATUS=$(curl -sS -o /dev/null -m 15 -w "%{http_code}" -H "x-sdp-canary: ${SDP_CANARY_BYPASS_TOKEN}" "${PLAYWRIGHT_BASE_URL}/sign-in")
+            echo "GET ${PLAYWRIGHT_BASE_URL}/sign-in -> ${STATUS}"
+            [ "$STATUS" = "200" ]
+          '
 
       - name: Run GCP read-only smoke
         id: smoke

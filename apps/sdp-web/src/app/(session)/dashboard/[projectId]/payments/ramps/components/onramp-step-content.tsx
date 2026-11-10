@@ -2,10 +2,8 @@
 
 import type { OnrampWizard } from "@/app/(session)/dashboard/[projectId]/payments/ramps/hooks/use-onramp-wizard";
 import { useTranslations } from "@/i18n/provider";
-import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import { ContactCombobox, type ContactControls } from "./contact-combobox";
-import { DemoProviderCheckout } from "./demo-provider-checkout";
 import { MemoStepContent } from "./memo-step-content";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { OnrampReview } from "./onramp-review";
@@ -53,13 +51,7 @@ function DepositStep({ wizard, contact }: StepContentProps) {
 
   return (
     <div className="space-y-6">
-      {contact ? (
-        <ContactCombobox
-          {...contact}
-          value={fields.counterpartyId}
-          hint={t("DashboardPayments.depositMethod.contactHint")}
-        />
-      ) : null}
+      {contact ? <ContactCombobox {...contact} value={fields.counterpartyId} /> : null}
       <RampPairProviderSelector
         direction="onramp"
         enabledRampProviders={enabledRampProviders}
@@ -117,7 +109,6 @@ function HostedQuoteStep({ quote }: { quote: HostedQuoteRecord }) {
  * quote's own surface (a hosted frame, a widget, bank instructions).
  */
 function QuoteStep({ wizard, quote }: { wizard: OnrampWizard; quote: OnrampQuote }) {
-  const demo = usePaymentsDemo();
   const { transferStatus } = wizard;
 
   if (wizard.showCompleteScreen) {
@@ -125,19 +116,6 @@ function QuoteStep({ wizard, quote }: { wizard: OnrampWizard; quote: OnrampQuote
       return <RampQuoteSkeleton />;
     }
     return <RampCompleteScreen direction="onramp" quote={quote} transfer={transferStatus} />;
-  }
-
-  // A provider's own checkout can't open on sample data; the demo stands in for it.
-  if (demo) {
-    return (
-      <div className="space-y-6">
-        <DemoProviderCheckout
-          direction="onramp"
-          provider={quote.provider}
-          transfer={transferStatus}
-        />
-      </div>
-    );
   }
 
   if (quote.provider === "stripe") {

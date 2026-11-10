@@ -1,5 +1,6 @@
 import * as solanaRpc from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { OrganizationStatus } from "@sdp/types/organizations";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
   address,
@@ -206,6 +207,44 @@ describe("Public payment request routes", () => {
       expect(rpc.calls).toEqual([]);
     }
   );
+
+  it("withholds the Solana Pay link while the request's organization is suspended (HOO-2009)", async () => {
+    const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+    const setStatus = (status: OrganizationStatus) =>
+      getDb(env)
+        .prepare("UPDATE organizations SET status = ? WHERE id = ?")
+        .bind(status, TEST_ORG.id)
+        .run();
+    const read = async () => {
+      const response = await app.request(`/pay/${request.public_token}`, {}, env);
+      expect(response.status).toBe(200);
+      return z
+        .object({ status: z.string(), solanaPayUrl: z.string().nullable() })
+        .parse(await response.json());
+    };
+
+    await setStatus("suspended");
+    expect(await read()).toEqual({ status: "awaiting_payment", solanaPayUrl: null });
+
+    await setStatus("active");
+    expect((await read()).solanaPayUrl).toMatch(/^solana:/);
+  });
+
+  it("withholds the Solana Pay link the transaction request would refuse: production without the entitlement", async () => {
+    const request = await createAwaitingPaymentRequest(await seedProductionRequestWallet());
+    const read = async () => {
+      const response = await app.request(`/pay/${request.public_token}`, {}, env);
+      expect(response.status).toBe(200);
+      return z.object({ solanaPayUrl: z.string().nullable() }).parse(await response.json());
+    };
+    expect((await read()).solanaPayUrl).toMatch(/^solana:/);
+
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = NULL WHERE id = ?")
+      .bind(TEST_ORG.id)
+      .run();
+    expect((await read()).solanaPayUrl).toBeNull();
+  });
 
   it("refuses to build a transaction for a canceled request", async () => {
     const sponsorship = stubSponsorship();
@@ -903,6 +942,39 @@ describe("Public payment request routes", () => {
       expect(sponsoredGrantMetadataSchema.parse(JSON.parse(entry.metadata))).toMatchObject({
         sponsoredAccount: TEST_SOLANA_ADDRESSES.wallet2,
       });
+    });
+
+    it("keeps only the payer's network, and no user agent, on the grant's audit rows (PA-6)", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+
+      const response = await app.request(
+        `/pay/${request.public_token}/tx`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Payer Phone)",
+            "X-Forwarded-For": "203.0.113.77",
+          },
+          body: JSON.stringify({ account: TEST_SOLANA_ADDRESSES.wallet2 }),
+        },
+        { ...env, TRUST_PROXY_HEADERS: "true" }
+      );
+      expect(response.status).toBe(200);
+
+      const rows = await getDb(env)
+        .prepare(
+          `SELECT ip_address, user_agent FROM audit_logs
+            WHERE (resource_type = 'payment_request' AND resource_id = ?)
+               OR (resource_type = 'audit_ledger' AND metadata::jsonb -> 'target' ->> 'resourceId' = ?)`
+        )
+        .bind(request.id, request.id)
+        .all<{ ip_address: string | null; user_agent: string | null }>();
+      expect(rows.results).toHaveLength(2);
+      expect(rows.results).toEqual(
+        Array(2).fill({ ip_address: "203.0.113.0/24", user_agent: null })
+      );
     });
 
     it("files a fresh grant's audit intent under its tenant with the message digest and mint", async () => {

@@ -4,8 +4,10 @@ import {
   decimalFixedPoint,
   decimalFixedPointToString,
   divideDecimalFixedPoint,
+  multiplyDecimalFixedPoint,
   subtractDecimalFixedPoint,
 } from "@solana/fixed-points";
+import { isSolanaError, SOLANA_ERROR__FIXED_POINTS__ARITHMETIC_OVERFLOW } from "@solana/kit";
 import { badRequest } from "./errors";
 
 /**
@@ -16,6 +18,18 @@ import { badRequest } from "./errors";
  */
 const DECIMAL_BITS = 128;
 const DIVISION_DECIMALS = 9;
+
+/** A result past `DECIMAL_BITS` means the caller's amounts are too large: a bad request, not a fault. */
+function withinAmountRange<T>(compute: () => T): T {
+  try {
+    return compute();
+  } catch (cause) {
+    if (isSolanaError(cause, SOLANA_ERROR__FIXED_POINTS__ARITHMETIC_OVERFLOW)) {
+      throw badRequest("Amount is out of range");
+    }
+    throw cause;
+  }
+}
 
 function parseAmount(value: string, decimals: number) {
   const normalized = value.trim();
@@ -57,7 +71,9 @@ export function sumDecimalAmounts(amounts: string[]): string {
     return "0";
   }
   const scale = amounts.reduce((max, amount) => Math.max(max, decimalScale(amount)), 0);
-  const total = amounts.map((amount) => parseAmount(amount, scale)).reduce(addDecimalFixedPoint);
+  const total = amounts
+    .map((amount) => parseAmount(amount, scale))
+    .reduce((sum, amount) => withinAmountRange(() => addDecimalFixedPoint(sum, amount)));
   return decimalFixedPointToString(total);
 }
 
@@ -81,6 +97,19 @@ export function divideDecimalAmounts(numerator: string, denominator: string): st
 
 export function addDecimalAmounts(left: string, right: string): string {
   return sumDecimalAmounts([left, right]);
+}
+
+/** Exact multiplication for valuing token shares at a provider-reported NAV. */
+export function multiplyDecimalAmounts(left: string, right: string): string {
+  // The product lands at the left operand's scale and the library refuses
+  // an inexact rescale, so the left operand carries the two inputs'
+  // combined precision: every product of a d1- and a d2-scale decimal is
+  // exact at d1+d2 fractional digits.
+  const scaledLeft = parseAmount(left, decimalScale(left) + decimalScale(right));
+  const scaledRight = parseAmount(right, decimalScale(right));
+  return decimalFixedPointToString(
+    withinAmountRange(() => multiplyDecimalFixedPoint(scaledLeft, scaledRight))
+  );
 }
 
 /**

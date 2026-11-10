@@ -4,20 +4,15 @@ import {
   type PaymentsDashboardWallet,
 } from "@sdp/types/payments";
 import { IdempotencyOutcomeUnknownError } from "@/lib/idempotency";
-import { isDemoRecordId } from "@/lib/payments-demo/demo-cookie";
+import { RecurringPaymentChangedError } from "./recurring-payments.data";
 
 /**
  * What the detail page shows when its schedule can't be read. A 404 says there is no such
- * schedule: a demo schedule's page, once demo mode is off, goes back to the list, since that
- * schedule only ever existed in the demo; any other id is not found. Anything else (a 5xx, a
- * network failure, a body that doesn't parse) is a failure to find out, not an absence.
+ * schedule. Anything else (a 5xx, a network failure, a body that doesn't parse) is a failure
+ * to find out, not an absence.
  */
-export function recurringPaymentReadFailureOutcome(
-  recurringPaymentId: string,
-  status: number | null
-): "list" | "not_found" | "failed" {
-  if (status !== 404) return "failed";
-  return isDemoRecordId(recurringPaymentId) ? "list" : "not_found";
+export function recurringPaymentReadFailureOutcome(status: number | null): "not_found" | "failed" {
+  return status === 404 ? "not_found" : "failed";
 }
 
 export function getRecurringPaymentDetailState({
@@ -70,8 +65,14 @@ export function getRecurringPaymentDetailState({
 /**
  * After a failed recurring action: an unknown outcome or a reused key (the
  * action may have run) refreshes the page, so its status and controls show
- * what happened.
+ * what happened, and so does a refusal of a version the page no longer shows,
+ * so the next try acts on the current one.
  */
 export function refreshIfOutcomeUnknown(cause: unknown, refresh: () => void): void {
-  if (cause instanceof IdempotencyOutcomeUnknownError) refresh();
+  if (
+    cause instanceof IdempotencyOutcomeUnknownError ||
+    cause instanceof RecurringPaymentChangedError
+  ) {
+    refresh();
+  }
 }

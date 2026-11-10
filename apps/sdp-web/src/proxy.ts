@@ -2,9 +2,8 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { SDP_TERMS_PATH } from "@sdp/types/site";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/clerk-config";
+import { SIGN_IN_PATH, SIGN_UP_PATH, signInHref } from "@/lib/clerk-config";
 import { parseDashboardPathname } from "@/lib/dashboard-project-path";
-import { isDemoSessionCookie } from "@/lib/payments-demo/demo-cookie";
 import {
   PROJECT_COOKIE_NAME,
   PROJECT_COOKIE_OPTIONS,
@@ -79,25 +78,8 @@ function isCrossSiteWrite(req: NextRequest): boolean {
   return ["cross-site", "same-site"].includes(fetchSite);
 }
 
-/**
- * The demo session's cookies to forget on this request: all of them on a full page load (a
- * refresh, a new tab, the demo switched on or off), none on the app's own navigations and
- * fetches. Demo changes live for one page load, as a browser tab's memory would.
- */
-export function demoSessionCookiesToDrop(req: NextRequest): string[] {
-  if (req.headers.get("sec-fetch-dest") !== "document") {
-    return [];
-  }
-  return req.cookies
-    .getAll()
-    .map((cookie) => cookie.name)
-    .filter(isDemoSessionCookie);
-}
-
 function getUnauthenticatedUrl(req: NextRequest): string {
-  const signInUrl = new URL(SIGN_IN_PATH, req.url);
-  signInUrl.searchParams.set("redirect_url", `${req.nextUrl.pathname}${req.nextUrl.search}`);
-  return signInUrl.toString();
+  return new URL(signInHref(`${req.nextUrl.pathname}${req.nextUrl.search}`), req.url).toString();
 }
 
 export const proxy = clerkMiddleware(
@@ -113,26 +95,9 @@ export const proxy = clerkMiddleware(
       });
     }
 
-    // A project-less page URL (old bookmarks, emailed links) matches no route under
-    // `[projectId]` once it is nested, so it is resolved before routing: the bare
-    // landing picks the Project and returns to the same page and query inside it.
     const { projectId } = parseDashboardPathname(req.nextUrl.pathname);
-    if (projectId === null && /^\/dashboard\/[^/]/.test(req.nextUrl.pathname)) {
-      const landingUrl = new URL("/dashboard", req.url);
-      landingUrl.searchParams.set("return_to", `${req.nextUrl.pathname}${req.nextUrl.search}`);
-      return NextResponse.redirect(landingUrl);
-    }
-
     const requestHeaders = new Headers(req.headers);
     requestHeaders.set("x-sdp-pathname", req.nextUrl.pathname);
-    const droppedDemoCookies = demoSessionCookiesToDrop(req);
-    if (droppedDemoCookies.length > 0) {
-      // Filter the raw header, so every other cookie reaches the page byte for byte.
-      const kept = (req.headers.get("cookie") ?? "")
-        .split(";")
-        .filter((pair) => !isDemoSessionCookie(pair.split("=", 1)[0]?.trim() ?? ""));
-      requestHeaders.set("cookie", kept.join(";").trim());
-    }
 
     // The request's Project is the one its tab renders: page renders and server
     // actions (Next posts actions to the tab's URL) take it from this URL, browser
@@ -151,10 +116,6 @@ export const proxy = clerkMiddleware(
         headers: requestHeaders,
       },
     });
-
-    for (const name of droppedDemoCookies) {
-      response.cookies.set(name, "", { path: "/", maxAge: 0 });
-    }
 
     if (
       (req.nextUrl.pathname === SIGN_IN_PATH ||

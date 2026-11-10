@@ -3,7 +3,10 @@
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
 import { type ReactNode, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { DashboardHeaderTabsTrailingContext } from "@/components/dashboard-header-tabs-trailing-context";
+import {
+  DashboardHeaderTabsHideContext,
+  DashboardHeaderTabsTrailingContext,
+} from "@/components/dashboard-header-tabs-trailing-context";
 import type { DashboardCapabilities } from "@/lib/dashboard-access";
 import {
   selectActiveDashboardTab,
@@ -23,6 +26,11 @@ export interface DashboardHeaderTabsConfig {
    * unavailable on small screens; content tab sets keep their tabs visible.
    */
   hideOnMobile: boolean;
+  /**
+   * The page narrows the tabs to the ones it has content for (`useHiddenHeaderTabs`); the
+   * shell shows a placeholder strip until the page has said, so no tab flashes and leaves.
+   */
+  filteredByPage?: boolean;
 }
 
 /**
@@ -82,12 +90,12 @@ export function DashboardHeaderTabs({ tabs, hideOnMobile }: DashboardHeaderTabsC
           replaceSearchParams({ tab: value === defaultTabId ? null : value, page: null });
         }}
       >
-        {/* A refresh tab never wraps: the design's phone keeps "Card or bank through a provider"
+        {/* A tab never wraps: the design's phone keeps "Card or bank through a provider"
           on one line and lets the strip scroll if it must. */}
-        {/* From md, 14px under a refresh label to its underline, 3px more than above it, as drawn;
+        {/* From md, 14px under a tab label to its underline, 3px more than above it, as drawn;
           a phone draws 8px above and 11px under. The tab sets its padding inline, hence the
           important. */}
-        <TabList className="[&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)] refresh:gap-6.5 refresh:[&>*]:whitespace-nowrap max-md:refresh:[&_[role=tab]]:!pt-2 md:refresh:[&_[role=tab]]:!pb-3.5">
+        <TabList className="[&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)] gap-6.5 [&>*]:whitespace-nowrap max-md:[&_[role=tab]]:!pt-2 md:[&_[role=tab]]:!pb-3.5">
           {tabs.map((tab) => (
             <Tab key={tab.id} value={tab.id}>
               {tab.label}
@@ -107,4 +115,15 @@ export function DashboardHeaderTabs({ tabs, hideOnMobile }: DashboardHeaderTabsC
 export function DashboardHeaderTabsTrailing({ children }: { children: ReactNode }) {
   const slot = useContext(DashboardHeaderTabsTrailingContext);
   return slot ? createPortal(children, slot) : null;
+}
+
+/** Hides the named header tabs while the calling page is mounted. */
+export function useHiddenHeaderTabs(tabIds: readonly string[]) {
+  const setHiddenTabIds = useContext(DashboardHeaderTabsHideContext);
+  const hiddenKey = tabIds.join(" ");
+  useEffect(() => {
+    if (setHiddenTabIds === null) return;
+    setHiddenTabIds(hiddenKey === "" ? [] : hiddenKey.split(" "));
+    return () => setHiddenTabIds(null);
+  }, [setHiddenTabIds, hiddenKey]);
 }

@@ -70,7 +70,22 @@ Things that will bite:
 - **Provider reads cannot reopen an active cancellation.** Normal request
   advancement to an eligible state excludes active cancel actions. Only atomic
   action-failure recovery may reopen it. A failed create cannot discard a
-  request once its nonce or creation timestamp establishes provider existence.
+  request once its nonce, creation timestamp or durable provider observation
+  establishes existence.
+- **Expired external builds remain recovery records.** Cleanup releases their
+  reservations, retaining the unsigned message, tenant, owner and terms. A
+  late submit verifies the signed message before consuming the build, and only
+  finalized execution can reclaim a released transient lease. Occupied leases
+  remain authoritative across tenants.
+- **Absent creates need separate evidence.** Migration 0212's
+  `absent_creation_observed_at` excludes older status-only observations.
+  Requested and submitted creates need two complete observations at least
+  30 seconds apart. Action failure, request failure and occupied-lease release
+  commit atomically, and provider-proven requests cannot fail by absence.
+  `provider_state_observed` stays true after an observed open account closes.
+  Null legacy history remains protected unless its row is still creating.
+  Migration 0212's status trigger captures the previous image's observations
+  too; do not replace it with a flag only the new service writes.
 - **Retained par intermediate excludes redeemed or reserved amounts.**
   Reconciliation adds intermediate from cancelled share-sourced requests and
   subtracts fulfilled or open zero-share requests for the same position and mint,
@@ -259,8 +274,8 @@ A removed ramp provider's id moves from `RAMP_PROVIDERS` to
   `ramp-support:generate` only** (not `currencies:discover`, which needs
   Doppler and re-pulls live provider snapshots). Fiat currencies only it
   offered leave `RAMP_FIAT_CURRENCIES`, so request validation narrows with it.
-- **Re-key tests that used it as the stand-in provider** (demo mode,
-  release-channel and integration gates) to a live provider that runs the same
+- **Re-key tests that used it as the stand-in provider** (release-channel
+  and integration gates) to a live provider that runs the same
   pair in the regenerated support table. Tests that pick "a currency provider X
   doesn't list" from `RAMP_FIAT_CURRENCIES` can run out of candidates.
 - **Drain check only once real money has moved.** Ramp traffic so far ran on

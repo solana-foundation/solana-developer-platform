@@ -62,6 +62,7 @@ export function EarnVaultAsyncWithdrawModal({
           onMovementUpdated={onMovementUpdated}
           onWithdrawn={onWithdrawn}
           settlement="provider_order"
+          redemptionMode={route.redemptionModes?.includes("standard") ? "standard" : undefined}
         />
       );
     case "operator_redemption":

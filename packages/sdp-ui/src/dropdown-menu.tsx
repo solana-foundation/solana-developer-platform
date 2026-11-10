@@ -1,10 +1,9 @@
 "use client";
 
-import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react";
+import { ChevronRightIcon, CircleIcon } from "lucide-react";
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 import type * as React from "react";
 import { cn } from "./cn";
-import { useThemeScopeAttributes } from "./theme-scope";
 
 function DropdownMenu({ ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
   return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />;
@@ -22,11 +21,9 @@ function DropdownMenuContent({
   align = "end",
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
-  const themeScopeAttributes = useThemeScopeAttributes();
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
-        {...themeScopeAttributes}
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
         align={align}
@@ -71,7 +68,7 @@ function DropdownMenuSeparator({
   return (
     <DropdownMenuPrimitive.Separator
       data-slot="dropdown-menu-separator"
-      className={cn("my-1 h-px bg-fill-strong", className)}
+      className={cn("-mx-1.5 my-1 h-px bg-fill-strong", className)}
       {...props}
     />
   );
@@ -92,32 +89,6 @@ function DropdownMenuLabel({
       )}
       {...props}
     />
-  );
-}
-
-function DropdownMenuCheckboxItem({
-  className,
-  children,
-  checked,
-  ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.CheckboxItem>) {
-  return (
-    <DropdownMenuPrimitive.CheckboxItem
-      data-slot="dropdown-menu-checkbox-item"
-      className={cn(
-        "relative flex items-center gap-2 rounded-[var(--select-item-radius)] py-2 pr-2 pl-8 text-sm font-medium text-primary outline-none select-none focus:bg-[var(--select-item-highlight-bg)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-        className
-      )}
-      checked={checked}
-      {...props}
-    >
-      <span className="absolute left-2 flex size-4 items-center justify-center">
-        <DropdownMenuPrimitive.ItemIndicator>
-          <CheckIcon className="size-4" />
-        </DropdownMenuPrimitive.ItemIndicator>
-      </span>
-      {children}
-    </DropdownMenuPrimitive.CheckboxItem>
   );
 }
 
@@ -181,11 +152,9 @@ function DropdownMenuSubContent({
   className,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.SubContent>) {
-  const themeScopeAttributes = useThemeScopeAttributes();
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.SubContent
-        {...themeScopeAttributes}
         data-slot="dropdown-menu-sub-content"
         className={cn(
           "z-50 min-w-44 overflow-hidden rounded-[var(--select-popup-radius)] border border-[var(--select-popup-border)] bg-[var(--select-popup-bg)] p-1.5 shadow-[var(--select-popup-shadow)]",
@@ -201,7 +170,6 @@ function DropdownMenuSubContent({
 
 export {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,

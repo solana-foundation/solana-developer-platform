@@ -26,12 +26,6 @@ import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/desi
 import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, InfoIcon, RefreshCwIcon } from "lucide-react";
 import Link from "next/link";
 import { type ReactNode, useMemo, useState } from "react";
-import {
-  formatCustodyProviderName,
-  isKnownCustodyProvider,
-} from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
-import { formatWalletPurposeLabel } from "@/app/(session)/dashboard/[projectId]/custody/wallet-format-utils";
-import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/custody/wallet-provider-mark";
 import type { EarnFundingWallet } from "@/app/(session)/dashboard/[projectId]/markets/earn/deposit/earn-funding-wallets";
 import {
   compareUnsignedDecimals,
@@ -60,6 +54,7 @@ import {
   EarnRowIdentity,
   EarnSummary,
 } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-page-blocks";
+import { EarnProviderOrdersCard } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-provider-orders-card";
 import {
   type EarnProviderAccess,
   earnVaultDepositAvailability,
@@ -87,6 +82,12 @@ import {
   PAYMENTS_TABLE_CELL,
   PAYMENTS_TABLE_HEAD,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-table";
+import {
+  formatCustodyProviderName,
+  isKnownCustodyProvider,
+} from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
+import { formatWalletPurposeLabel } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-format-utils";
+import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
 import { RecordBlock, RecordStack } from "@/components/refresh-record";
 import { useCanWrite, useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -1719,6 +1720,7 @@ export function TreasuryWorkspaceContent({
         withdrawals={vaultWithdrawals}
       />
       <EarnVaultWithdrawalRequestsCard onChanged={onHoldingsChanged} />
+      <EarnProviderOrdersCard onChanged={onHoldingsChanged} />
       <TreasuryStrategies
         devnetFailed={devnetCatalogueFailed}
         devnetLoading={devnetCatalogueLoading}

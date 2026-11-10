@@ -9,14 +9,6 @@ import { SANDBOX_PROJECT } from "@/test/projects";
 import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 import { fetchHomeActivity, useHomeActivitySnapshot } from "./home-workspace.data";
 
-// The saved snapshot is scoped to the viewer's workspace.
-vi.mock("@/contexts/dashboard-workspace-context", () => ({
-  useDashboardWorkspace: () => ({
-    dashboardCacheScope: { userId: "user_home", orgId: "org_home" },
-    selectedProjectId: "prj_home",
-  }),
-}));
-
 const ACTIVITY_PATH = "/api/dashboard/home/activity";
 const ADDRESS = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
 const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
@@ -55,7 +47,6 @@ function respond(status: number, body: unknown) {
 }
 
 beforeEach(() => {
-  window.localStorage.clear();
   setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}`);
 });
 

@@ -1,3 +1,9 @@
+import {
+  RpcHttpStatusError,
+  RpcTimeoutError,
+  RpcUnavailableError,
+  SdpRpcError,
+} from "@sdp/rpc/errors";
 import { describe, expect, it } from "vitest";
 import { rethrowVaultProviderFailure } from "./vault-refusals";
 
@@ -63,5 +69,26 @@ describe("rethrowVaultProviderFailure", () => {
   it("preserves unknown failures for the global error boundary", () => {
     const cause = new TestProviderError("NEW_PROVIDER_FAILURE", "unexpected provider failure");
     expect(() => rethrowVaultProviderFailure(cause)).toThrow(cause);
+  });
+
+  it.each([
+    new RpcUnavailableError("not_configured", "Private endpoint is unavailable", {
+      cluster: "devnet",
+    }),
+    new RpcTimeoutError(100),
+    new RpcHttpStatusError(503, "Private RPC endpoint returned 503"),
+  ])("maps a raw $name to a sanitized retryable 503", (error) => {
+    expect(() => rethrowVaultProviderFailure(error)).toThrow(
+      expect.objectContaining({
+        code: "PROVIDER_UNAVAILABLE",
+        statusCode: 503,
+        message: "Earn provider is temporarily unavailable. Try again.",
+      })
+    );
+  });
+
+  it("preserves missing cluster scope as an internal fault", () => {
+    const error = new SdpRpcError("CLUSTER_SCOPE_MISSING", "Cluster scope is missing");
+    expect(() => rethrowVaultProviderFailure(error)).toThrow(error);
   });
 });

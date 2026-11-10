@@ -4,11 +4,21 @@ import { isPaymentRequestPayableAt, type PaymentRequest } from "@sdp/types/payme
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
+import { cn } from "@sdp/ui/cn";
 import { Modal } from "@sdp/ui/modal";
-import { CopyIcon, DownloadIcon, Share2Icon } from "lucide-react";
+import { playMark } from "@sdp/ui/motion";
+import { CheckIcon, CopyIcon, DownloadIcon, Share2Icon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { shortenAddress } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
@@ -28,11 +38,12 @@ import { RecordFact, RecordFactColumns } from "@/components/refresh-record";
 import { SolanaQrCode } from "@/components/solana-qr-code";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
+import { useTimeZone } from "@/i18n/time-zone";
 import { transactionHref } from "@/lib/payments-routes";
 import { downloadSolanaQrCode } from "@/lib/solana-qr";
 import { useClientNow } from "@/lib/use-client-now";
 import { useProjectHref } from "@/lib/use-dashboard-project";
+import { createdRequestLinkCopied, forgetCreatedRequestLink } from "./created-request-link";
 import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
 import {
   cancelPaymentRequest,
@@ -69,6 +80,7 @@ function requestWhy(
   expires: string | null,
   canceler: PaymentRequestCanceler | null,
   locale: string,
+  timeZone: string,
   t: Translate
 ): string {
   const status = request.status;
@@ -82,7 +94,7 @@ function requestWhy(
     case "expired":
       return t("DashboardPayments.requestDetail.why.expired");
     case "canceled":
-      return canceledWhy(request, canceler, locale, t);
+      return canceledWhy(request, canceler, locale, timeZone, t);
     default: {
       const unhandled: never = status;
       throw new Error(`Unhandled payment request status: ${String(unhandled)}`);
@@ -95,10 +107,11 @@ function canceledWhy(
   request: PaymentRequest,
   canceler: PaymentRequestCanceler | null,
   locale: string,
+  timeZone: string,
   t: Translate
 ): string {
   const actor = cancelerLabel(request, canceler, t);
-  const date = request.canceledAt ? formatDateTime(request.canceledAt, locale) : null;
+  const date = request.canceledAt ? formatDateTime(request.canceledAt, locale, timeZone) : null;
   if (actor && date) {
     return t("DashboardPayments.requestDetail.why.canceledByOn", { actor, date });
   }
@@ -110,50 +123,117 @@ function canceledWhy(
     : t("DashboardPayments.requestDetail.why.canceled");
 }
 
+/** The page's origin never changes while it is open, so there is nothing to subscribe to. */
+function subscribeToNothing(): () => void {
+  return () => {};
+}
+
+function readOrigin(): string {
+  return window.location.origin;
+}
+
+/** The server render's origin: none, so it never guesses one the browser would contradict. */
+function noOrigin(): string {
+  return "";
+}
+
+/** How long Copy link reads Copied: the design's done state, as long as the link's mark. */
+const COPIED_MS = 1400;
+
+/**
+ * Whether Copy link reads Copied: for 1.4s after `flash`, and from the first frame when the
+ * new-request page copied the link on its way here.
+ *
+ * @param copiedOnArrival - Whether the link was copied before this page opened.
+ * @returns Whether it reads Copied, and `flash`, which starts the 1.4s again.
+ */
+function useCopiedFlash(copiedOnArrival: boolean): [boolean, () => void] {
+  const [copied, setCopied] = useState(copiedOnArrival);
+  const timer = useRef<number | undefined>(undefined);
+  const flash = useCallback(() => {
+    setCopied(true);
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setCopied(false), COPIED_MS);
+  }, []);
+  useEffect(() => {
+    if (copiedOnArrival) flash();
+  }, [copiedOnArrival, flash]);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  return [copied, flash];
+}
+
+/** One of Copy link's two faces: the button's gap, and its icon at the button's icon size. */
+const COPY_LINK_FACE =
+  "col-start-1 row-start-1 inline-flex items-center gap-[var(--button-gap-md)] [&_svg]:size-[var(--icon-size)] [&_svg]:shrink-0";
+
+/**
+ * Copy link's icon and words, or a check and Copied once it has copied. Both faces sit in one
+ * grid cell with the other hidden, so the button keeps the wider one's width with the shown face
+ * centred in it, as the design's done state is, and the buttons beside it never move.
+ */
+function CopyLinkContent({ copied }: { copied: boolean }) {
+  const t = useTranslations();
+  return (
+    <span className="grid justify-items-center">
+      <span aria-hidden={copied} className={cn(COPY_LINK_FACE, copied && "invisible")}>
+        <CopyIcon />
+        {t("Shared.SharedComponents.copyLink")}
+      </span>
+      <span aria-hidden={!copied} className={cn(COPY_LINK_FACE, !copied && "invisible")}>
+        <CheckIcon />
+        {t("DashboardPayments.record.copied")}
+      </span>
+    </span>
+  );
+}
+
 /**
  * The request's pay link on this origin, as the design lays it out: its QR code on a 128px tile,
- * the link beside it, and the copy, share and QR download under the link. A demo request lives
- * in this browser only, so it shows no code or link that would open a page that cannot find it,
- * and its actions say so instead of handing out a link nobody can open. It shows only while the
- * request can be paid.
+ * the link beside it, and the copy, share and QR download under the link. It shows only while the
+ * request can be paid. Opened by the new-request page, the link is marked and Copy link reads
+ * Copied; when that copy failed, a line under the buttons says so until Copy link copies it.
  */
 function RequestPaymentLink({
   request,
   publicToken,
   symbol,
+  linkCopiedOnCreate,
 }: {
   request: PaymentRequest;
   publicToken: string;
   symbol: string;
+  linkCopiedOnCreate: boolean | null;
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const demo = usePaymentsDemo();
-  // The link is on this origin; read after mount so the server render does not guess it.
-  const [origin, setOrigin] = useState("");
-  useEffect(() => setOrigin(window.location.origin), []);
+  // The link is on this origin. The server render does not guess it, so a page it rendered gets
+  // the link once hydrated; a page opened in the browser has it from its first frame, so the
+  // link and its mark never arrive a frame apart.
+  const origin = useSyncExternalStore(subscribeToNothing, readOrigin, noOrigin);
   const payLink = origin ? `${origin}/pay/${publicToken}` : "";
   const amount = `${formatDecimalAmount(request.amount, locale)} ${symbol}`;
-
-  const demoOnly = () => toast.info(t("DashboardPayments.demo.noPayLink"));
+  const [copied, flashCopied] = useCopiedFlash(linkCopiedOnCreate === true);
+  // A copy that failed on the way here is said under the buttons until Copy link copies it.
+  const [arrivalCopyFailed, setArrivalCopyFailed] = useState(linkCopiedOnCreate === false);
+  const linkRef = useRef<HTMLSpanElement>(null);
+  // Before paint, so the mark never shows a frame of the bare link first.
+  useLayoutEffect(() => {
+    if (linkCopiedOnCreate !== null && linkRef.current !== null) playMark(linkRef.current);
+  }, [linkCopiedOnCreate]);
 
   async function copyLink() {
-    if (demo) return demoOnly();
     try {
       await navigator.clipboard.writeText(payLink);
     } catch {
       toast.error(t("DashboardPayments.record.copyFailed"));
       return;
     }
-    toast.success(t("DashboardPayments.requestDetail.linkCopied"), {
-      id: `request-link-${request.id}`,
-      description: t("DashboardPayments.requestDetail.linkCopiedDescription", { amount }),
-    });
+    setArrivalCopyFailed(false);
+    flashCopied();
   }
 
   // The browser's share sheet where there is one; copying stands in elsewhere.
   async function shareLink() {
-    if (demo) return demoOnly();
     if (typeof navigator.share !== "function") return copyLink();
     try {
       await navigator.share({
@@ -169,39 +249,35 @@ function RequestPaymentLink({
   }
 
   async function downloadQrCode() {
-    if (demo) return demoOnly();
     await downloadSolanaQrCode({ url: payLink, fileName: `payment-request-${request.id}` });
   }
 
   return (
     // On a phone the tile sits over the link, so the link and its actions keep the full width.
     <div className="flex flex-col gap-4 border-t border-border-default pt-4 sm:flex-row sm:items-start sm:gap-6">
-      {/* The design's 128px tile: a 96px code on white with a 16px quiet zone; a demo request has
-          no link to draw. */}
-      {demo ? null : (
-        <div className="size-32 shrink-0 rounded-xs bg-white p-4">
-          {payLink ? (
-            <SolanaQrCode
-              url={payLink}
-              size={96}
-              label={t("DashboardPayments.requestDetail.qrCodeAlt")}
-            />
-          ) : (
-            <div className="size-full animate-pulse rounded-xs bg-fill" />
-          )}
-        </div>
-      )}
+      {/* The design's 128px tile: a 96px code on white with a 16px quiet zone. */}
+      <div className="size-32 shrink-0 rounded-xs bg-white p-4">
+        {payLink ? (
+          <SolanaQrCode
+            url={payLink}
+            size={96}
+            label={t("DashboardPayments.requestDetail.qrCodeAlt")}
+          />
+        ) : (
+          <div className="size-full animate-pulse rounded-xs bg-fill" />
+        )}
+      </div>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <span className="text-meta text-secondary">
           {t("DashboardPayments.requestDetail.paymentLink")}
         </span>
-        {demo ? (
-          <p className="text-body text-secondary">{t("DashboardPayments.demo.noPayLink")}</p>
-        ) : (
-          <span className="min-w-0 truncate font-mono text-body text-primary">
-            {payLink || null}
-          </span>
-        )}
+        {/* Padded out to the mark's box and pulled back by as much, so the text stays put. */}
+        <span
+          ref={linkRef}
+          className="-mx-3 -my-1.5 min-w-0 truncate rounded-sm px-3 py-1.5 font-mono text-body text-primary"
+        >
+          {payLink || null}
+        </span>
         {/* 16px to the design's 30px buttons, 8px apart; the copy is filled while the request
             can still be paid. */}
         <div className="mt-2.5 flex flex-wrap items-center gap-2 [&_button]:[--button-height-md:1.875rem]">
@@ -209,12 +285,14 @@ function RequestPaymentLink({
             type="button"
             variant="default"
             size="sm"
-            iconLeft={<CopyIcon />}
             disabled={!origin}
             onClick={() => void copyLink()}
           >
-            {t("Shared.SharedComponents.copyLink")}
+            <CopyLinkContent copied={copied} />
           </Button>
+          <span className="sr-only" aria-live="polite">
+            {copied ? t("DashboardPayments.record.copied") : ""}
+          </span>
           <Button
             type="button"
             variant="outline"
@@ -236,6 +314,12 @@ function RequestPaymentLink({
             {t("DashboardPayments.requestDetail.downloadQrCode")}
           </Button>
         </div>
+        {/* Under the buttons, so clearing it moves nothing a press is aimed at. */}
+        {arrivalCopyFailed ? (
+          <p className="text-body text-secondary">
+            {t("DashboardPayments.requests.paymentLinkCopyFailed")}
+          </p>
+        ) : null}
       </div>
     </div>
   );
@@ -338,15 +422,12 @@ const PAYMENT_WATCH_INTERVAL_MS = 10_000;
 
 /**
  * The request as the API holds it now. An open one is read again until it is paid, canceled or
- * expired, in a visible tab, and never in demo mode, whose requests are fixtures. The newer of
- * this read and the server's wins, so a cancel's refresh shows at once.
+ * expired, in a visible tab. The newer of this read and the server's wins, so a cancel's
+ * refresh shows at once.
  */
 function useWatchedPaymentRequest(served: PaymentRequest): PaymentRequest {
-  const demo = usePaymentsDemo();
   const { data } = useSWR(
-    demo || served.status !== "awaiting_payment"
-      ? null
-      : paymentsQueryKeys.paymentRequestWatch(served.id),
+    served.status !== "awaiting_payment" ? null : paymentsQueryKeys.paymentRequestWatch(served.id),
     ([, requestId]: readonly [string, string]) => fetchPaymentRequestFromBrowser(requestId),
     {
       // A fresh function each render re-arms SWR's timer with the latest read. Before the first
@@ -392,6 +473,12 @@ export function PaymentRequestDetailWorkspace({
 }: PaymentRequestDetailWorkspaceProps) {
   const t = useTranslations();
   const router = useRouter();
+  // The new-request page's note is read once, on arrival, and dropped, so a reload or a later
+  // visit says nothing about a copy made earlier.
+  const [linkCopiedOnCreate] = useState(() =>
+    request === null ? null : createdRequestLinkCopied(request.id)
+  );
+  useEffect(forgetCreatedRequestLink, []);
 
   if (!request) {
     return (
@@ -410,6 +497,7 @@ export function PaymentRequestDetailWorkspace({
       publicToken={publicToken}
       walletName={walletName}
       canceler={canceler}
+      linkCopiedOnCreate={linkCopiedOnCreate}
     />
   );
 }
@@ -420,11 +508,14 @@ function PaymentRequestRecord({
   publicToken,
   walletName,
   canceler,
+  linkCopiedOnCreate,
 }: {
   request: PaymentRequest;
   publicToken: string | null;
   walletName: string | null;
   canceler: PaymentRequestCanceler | null;
+  /** Whether the new-request page that opened this page copied the link; null otherwise. */
+  linkCopiedOnCreate: boolean | null;
 }) {
   const request = useWatchedPaymentRequest(served);
   const router = useRouter();
@@ -437,6 +528,7 @@ function PaymentRequestRecord({
   const t = useTranslations();
   const projectHref = useProjectHref();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const { sdpEnvironment, dashboardAccess } = useDashboardWorkspace();
   // Whether it is still payable depends on the clock, so it is decided only in the browser: the
   // server render and the first client render both leave Cancel out, and agree.
@@ -456,7 +548,7 @@ function PaymentRequestRecord({
     request.status === "awaiting_payment" &&
     (now === null || isPaymentRequestPayableAt(request, now));
   const symbol = tokenSymbolByMint.get(request.token) ?? shortenAddress(request.token);
-  const expires = request.expiresAt ? formatDateTime(request.expiresAt, locale) : null;
+  const expires = request.expiresAt ? formatDateTime(request.expiresAt, locale, timeZone) : null;
 
   return (
     <DashboardWorkspaceOverviewPanel>
@@ -466,7 +558,7 @@ function PaymentRequestRecord({
         <RecordStateBand
           state={t(REQUEST_STATUS_TRANSLATION_KEYS[request.status])}
           tone={REQUEST_STATUS_TONE[request.status]}
-          why={requestWhy(request, expires, canceler, locale, t)}
+          why={requestWhy(request, expires, canceler, locale, timeZone, t)}
           action={
             request.status === "paid" && request.fulfilledByTransferId ? (
               <Button asChild variant="outline" size="sm">
@@ -487,7 +579,12 @@ function PaymentRequestRecord({
               says so, so the page stops handing it out: the server and first client render go by
               the status, then the clock decides an expiry the API has not reported yet. */}
           {publicToken && linkLive ? (
-            <RequestPaymentLink request={request} publicToken={publicToken} symbol={symbol} />
+            <RequestPaymentLink
+              request={request}
+              publicToken={publicToken}
+              symbol={symbol}
+              linkCopiedOnCreate={linkCopiedOnCreate}
+            />
           ) : null}
         </section>
 
@@ -520,7 +617,7 @@ function PaymentRequestRecord({
                 {expires ?? t("DashboardPayments.requests.noExpiry")}
               </RecordFact>
               <RecordFact label={t("DashboardPayments.recurring.created")}>
-                {formatDateTime(request.createdAt, locale) ?? request.createdAt}
+                {formatDateTime(request.createdAt, locale, timeZone) ?? request.createdAt}
               </RecordFact>
             </dl>
           </RecordFactColumns>

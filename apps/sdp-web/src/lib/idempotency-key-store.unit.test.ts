@@ -9,6 +9,7 @@ import {
   createActionMemo,
   createFloorMemo,
   createIdempotencyKeyStore,
+  KEPT_KEY_WINDOW_MS,
   resetIdempotencyKeyStoresForTests,
   setIdempotencyKeyScope,
   settleMoneyIdempotencyKey,
@@ -30,7 +31,7 @@ describe("claim", () => {
   it("mints and keeps a key, and hands the kept one to every retry until it is released", () => {
     expect(store.has(fingerprint)).toBe(false);
     const first = store.claim(fingerprint);
-    expect(first).toEqual({ key: expect.any(String), persisted: true });
+    expect(first).toEqual({ key: expect.any(String), persisted: true, outlived: false });
     expect(store.has(fingerprint)).toBe(true);
     expect(store.claim(fingerprint).key).toBe(first.key);
 
@@ -48,6 +49,55 @@ describe("claim", () => {
     // The first attempt's late answer settles nothing the user has not sent yet.
     store.release(fingerprint, first);
     expect(store.claim(fingerprint).key).toBe(second);
+  });
+
+  it("reports a kept key outlived once it is as old as the API keeps it", () => {
+    vi.useFakeTimers();
+    try {
+      const first = store.claim(fingerprint);
+      vi.setSystemTime(Date.now() + KEPT_KEY_WINDOW_MS - 1);
+      expect(store.claim(fingerprint)).toMatchObject({ key: first.key, outlived: false });
+      vi.setSystemTime(Date.now() + 1);
+      expect(store.claim(fingerprint)).toMatchObject({ key: first.key, outlived: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ages out an entry an earlier build wrote without a claim time", () => {
+    vi.useFakeTimers();
+    try {
+      const first = store.claim(fingerprint);
+      const [name] = Object.keys(sessionStorage);
+      if (name === undefined) throw new Error("the claim stored no entry");
+      const entries = z
+        .array(z.object({ id: z.string(), value: z.string() }))
+        .parse(JSON.parse(sessionStorage.getItem(name) ?? "[]"));
+      // As the earlier build wrote it: no claimedAt.
+      sessionStorage.setItem(name, JSON.stringify(entries.map(({ id, value }) => ({ id, value }))));
+
+      expect(store.claim(fingerprint)).toMatchObject({ key: first.key, outlived: false });
+      vi.setSystemTime(Date.now() + KEPT_KEY_WINDOW_MS);
+      expect(store.claim(fingerprint)).toMatchObject({ key: first.key, outlived: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still reports an earlier build's stored key as kept when stamping it is refused", () => {
+    const first = store.claim(fingerprint);
+    const [name] = Object.keys(sessionStorage);
+    if (name === undefined) throw new Error("the claim stored no entry");
+    const entries = z
+      .array(z.object({ id: z.string(), value: z.string() }))
+      .parse(JSON.parse(sessionStorage.getItem(name) ?? "[]"));
+    sessionStorage.setItem(name, JSON.stringify(entries.map(({ id, value }) => ({ id, value }))));
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota exceeded", "QuotaExceededError");
+    });
+
+    // The key is in storage already, so a money route may still send it.
+    expect(store.claim(fingerprint)).toMatchObject({ key: first.key, persisted: true });
   });
 
   it("reports a key the browser would not store, and still keeps it for this page", () => {

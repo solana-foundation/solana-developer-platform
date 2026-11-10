@@ -209,8 +209,26 @@ export async function resolveSourceTokenAccountOrAta(
   return {
     tokenAccount,
     decimals: paymentMint.decimals,
-    exists: tokenAccountInfo !== null,
+    exists: holdsTokenAccount(tokenAccountInfo),
   };
+}
+
+const SYSTEM_PROGRAM_ID = address("11111111111111111111111111111111");
+
+/**
+ * Whether the owner's ATA address holds its token account. Only
+ * the ATA program can put a token account at that address, so an account an
+ * SPL token program owns is it. Anyone can send lamports to the address
+ * first, leaving a system-owned account there: that is no token account, and
+ * the idempotent ATA create adopts it. An account any other program owns is
+ * refused rather than treated as the source.
+ */
+function holdsTokenAccount(info: Awaited<ReturnType<typeof getAccountInfo>>): boolean {
+  if (info === null || info.owner === SYSTEM_PROGRAM_ID) return false;
+  if (SPL_TOKEN_PROGRAM_IDS.some((programId) => programId === info.owner)) return true;
+  throw badRequest(
+    "The source wallet's token account address holds an account another program owns"
+  );
 }
 
 /**

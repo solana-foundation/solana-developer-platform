@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { stubClipboard } from "@/test/clipboard";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { PaymentRequestsWorkspace } from "./payment-requests-workspace";
 
@@ -169,6 +170,7 @@ describe("PaymentRequestsWorkspace pager", () => {
 describe("PaymentRequestsWorkspace copy link", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("starts the clipboard write in the click, with the link read as its contents", async () => {
@@ -183,34 +185,50 @@ describe("PaymentRequestsWorkspace copy link", () => {
       )
     );
     const copied = vi.spyOn(toast, "success");
-    const written: Promise<Blob>[] = [];
-    class StubClipboardItem {
-      constructor(readonly items: Record<string, Promise<Blob>>) {}
-    }
-    vi.stubGlobal("ClipboardItem", StubClipboardItem);
-    const write = vi.fn(async (items: StubClipboardItem[]) => {
-      const [item] = items;
-      if (!item) throw new Error("nothing to write");
-      const text = item.items["text/plain"];
-      if (!text) throw new Error("no text/plain");
-      written.push(text);
-      await text;
-    });
     renderWorkspace();
-    // user-event installs its own clipboard on setup; this one goes in after it.
     const user = userEvent.setup();
-    Object.defineProperty(navigator, "clipboard", { value: { write }, configurable: true });
+    const clipboard = stubClipboard("writes");
 
     const [copy] = screen.getAllByRole("button", { name: "Copy link" });
     if (!copy) throw new Error("no Copy link button");
     await user.click(copy);
 
     // Called before the link read has answered.
-    expect(write).toHaveBeenCalledTimes(1);
+    expect(clipboard.writes).toHaveLength(1);
     answerLink(Response.json({ data: { id: "preq_1", publicToken: "tok_1" } }));
-    const [pending] = written;
+    const [pending] = clipboard.writes;
     if (!pending) throw new Error("no clipboard contents");
     await expect((await pending).text()).resolves.toBe(`${window.location.origin}/pay/tok_1`);
     await waitFor(() => expect(copied).toHaveBeenCalledWith("Payment link copied"));
+  });
+
+  it("copies nothing and says nothing when the list leaves the page before the link answers", async () => {
+    let answerLink: (response: Response) => void = () => {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(
+        () =>
+          new Promise((resolve) => {
+            answerLink = resolve;
+          })
+      )
+    );
+    const copied = vi.spyOn(toast, "success");
+    const failed = vi.spyOn(toast, "error");
+    const { unmount } = renderWorkspace();
+    const user = userEvent.setup();
+    const clipboard = stubClipboard("writes");
+
+    const [copy] = screen.getAllByRole("button", { name: "Copy link" });
+    if (!copy) throw new Error("no Copy link button");
+    await user.click(copy);
+    unmount();
+    answerLink(Response.json({ data: { id: "preq_1", publicToken: "tok_1" } }));
+
+    const [pending] = clipboard.writes;
+    if (!pending) throw new Error("no clipboard write started");
+    await expect(pending).rejects.toThrow();
+    expect(copied).not.toHaveBeenCalled();
+    expect(failed).not.toHaveBeenCalled();
   });
 });

@@ -10,8 +10,6 @@ import { createContext, type ReactNode, useContext, useMemo } from "react";
 export type UiMessageKey =
   | "Shared.SharedComponents.chooseDate"
   | "Shared.SharedComponents.chooseDateAndTime"
-  | "Shared.SharedComponents.chooseDateRange"
-  | "Shared.SharedComponents.chooseEndDate"
   | "Shared.SharedComponents.clear"
   | "Shared.SharedComponents.closeModal"
   | "Shared.SharedComponents.done"

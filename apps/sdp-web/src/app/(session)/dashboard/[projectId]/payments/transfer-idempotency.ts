@@ -85,6 +85,8 @@ async function performTransferUnderKey(
   fingerprint: string,
   providerSession: boolean
 ): Promise<TransferSendResult> {
+  // However old the kept key is, the API answers it from the transfer's own
+  // row (`IDEMPOTENCY_REQUIRED_ROUTES`), so it goes out: a new key could pay again.
   const { key, persisted } = store.claim(fingerprint);
   let transfer: TransferRecord;
   try {

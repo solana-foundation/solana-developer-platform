@@ -9,14 +9,14 @@ steps:
   - Remove an address
 ---
 
-**Token Access Control** gates who may hold or receive your token. This page covers its `allowlist` mode: tokens created with `requiresAllowlist: true` enforce a list of approved destination addresses on allowlist-aware issuance flows such as minting and administrative transfers, and it's required for `tokenized-security` tokens.
+**Token Access Control** decides who may hold or receive your token. This page covers its `allowlist` mode (`requiresAllowlist: true`): only listed addresses can receive mints and force transfers. It's on by default for `tokenized-security` tokens.
 
-This is distinct from an API key's [grants](/docs/developing-with-sdp/manage-api-keys#grants-by-module), which limit what a key may do, and from the Platform Allowlist (deployment admission).
+The token's list is separate from an API key's [grants](/docs/developing-with-sdp/manage-api-keys#grants-by-module), which limit what the key may do.
 
 ## Prerequisites
 
-- A token created with `requiresAllowlist` enabled
-- The `issuance.enforce` grant on the API key (`issuance.read` to list entries)
+- A token with `requiresAllowlist` on
+- The `issuance.enforce` grant to add or remove entries, or `issuance.read` to list them
 
 ## How it works
 
@@ -24,24 +24,22 @@ This is distinct from an API key's [grants](/docs/developing-with-sdp/manage-api
 
 <Step number={1} title="Enable the allowlist">
 
-The allowlist is configured at token creation time. Decide before creating whether your token requires one — it cannot be changed after deployment.
+Choose the access list before you deploy. You can change `requiresAllowlist` on a draft, but after deployment the API refuses the change with `400`.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In the five-step **Create token** flow, open **Token settings** and toggle **Allowlist** on.
+In **Create a draft**, on **What this token can do**, set **Access list** to **Allowlist · only named addresses may hold**. A stablecoin offers **Blocklist** or **Allowlist**; a non-security digital token offers **Allowlist** or **Off**.
 
-For `tokenized-security` tokens, the allowlist toggle is pre-enabled and locked.
+On the token page, the **Compliance** tab shows **Approved recipients**, with the entry count and the frozen accounts.
 
-The **Operations** tab on the token detail page shows **Approved recipients**, with Address and Label fields and a Control Lists sidebar tracking entry and frozen account counts.
-
-![Operational settings form showing the Allowlist toggle during token creation](/images/tokens/token-create-settings.png)
+<img src="/docs/images/tokens/token-create-settings.png" alt="What this token can do step with every control on and Access list set to Allowlist" width="693" height="594" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
 </Tab>
 <Tab value="API">
 
-Set `requiresAllowlist: true` when creating the token:
+Set `requiresAllowlist: true` when you create the token. `tokenized-security` turns it on by default; with `false`, that template uses a blocklist instead.
 
 ```typescript title="enable-allowlist.ts"
 body: JSON.stringify({
@@ -55,7 +53,7 @@ body: JSON.stringify({
 }),
 ```
 
-Once deployed, the allowlist is enforced automatically on issuance flows.
+SDP creates the onchain list when the token deploys and enforces it from then on.
 
 </Tab>
 </Tabs>
@@ -65,23 +63,24 @@ Once deployed, the allowlist is enforced automatically on issuance flows.
 
 <Step number={2} title="Add an address">
 
-Add a wallet address to the allowlist before minting to it or using it as an administrative transfer destination.
+Add an address before you force-transfer tokens to it. Mints check the list as follows:
+
+- With an onchain list, a mint to an unlisted address adds it to the list first. An address you removed is refused with `403 DESTINATION_REVOKED`.
+- With a list kept only in SDP, a mint to an unlisted address fails with `403 NOT_ON_TOKEN_ALLOWLIST`.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Open the token detail page, go to **Operations**, then select **Approved recipients**.
+On the token page, open **Compliance**. Under **Add an address**, enter the **Address** and an optional **Label**, then click **Add entry**.
 
-Enter the wallet address and an optional label, then click **Add allowlist entry**. The address is enforced on the next allowlist-checked operation.
+For an onchain list, SDP signs with the list's authority wallet. If several custody wallets match, choose the signer in the dialog. A list kept only in SDP needs no signer.
 
-For an on-chain list, SDP uses its authority wallet automatically when there is one matching wallet. If several custody records match, select the signer in the confirmation dialog. Database-only lists need no signer.
+![Compliance tab with no approved recipients yet and an empty Add an address form](/images/tokens/allowlist-empty.png)
 
-![Approved recipients section with empty address and label fields, ready to add a new entry](/images/tokens/allowlist-empty.png)
+The entry appears under **Approved recipients**, with a trash button that removes it.
 
-After adding, the entry appears below the form with a **Remove entry** button.
-
-![Allowlist entry added and visible in the list](/images/tokens/allowlist-entry-added.png)
+![Approved recipients listing the Treasury wallet with its label, the date added and a trash button](/images/tokens/allowlist-entry-added.png)
 
 </Tab>
 <Tab value="API">
@@ -108,10 +107,11 @@ const res = await fetch(
     body: JSON.stringify({ address: "7xKXz...9fGh", label: "Treasury wallet" }),
   }
 );
-// res.data.entry.id — save this to remove the entry later
+const { data } = await res.json();
+// data.entry.id: keep it to remove the entry later
 ```
 
-For on-chain additions, the JSON body accepts optional `signingCustodyWalletId` (an exact `cwlt_…` record ID). It must control the list's current authority, which may differ from the token's freeze authority. Without the selector, multiple matching custody records return `409`. Selecting a wallet does not bypass permissions or runtime availability checks.
+For an onchain list, the body takes an optional `signingCustodyWalletId` (a `cwlt_…` id). It must control the list's current authority, which can differ from the token's freeze authority. Without it, several matching custody wallets return `409`. Naming a wallet doesn't skip permission or availability checks.
 
 </Tab>
 </Tabs>
@@ -121,15 +121,13 @@ For on-chain additions, the JSON body accepts optional `signingCustodyWalletId` 
 
 <Step number={3} title="Review the list">
 
-Check which addresses are currently approved. Useful before minting to a new destination or during a compliance audit.
+Check which addresses are approved, before minting to a new destination or during a compliance audit.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-The **Approved recipients** section shows all approved addresses, their labels, and when they were added.
-
-Use the search field to find a specific address by label or public key.
+**Compliance** lists each address with its **Label** and the date it was **Added**, 25 per page.
 
 </Tab>
 <Tab value="API">
@@ -141,19 +139,19 @@ curl "https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist?search=So1&
 
 ```typescript title="list-allowlist.ts"
 const { data, meta } = await res.json();
+// data: the entries
 // meta: { total, page, pageSize, hasMore }
 ```
 
 Query parameters:
 
-- `page`, `pageSize` — pagination (`pageSize` max 500, default 50).
-- `search` — contains-style match over the entry address **and** label. A blank value is treated as no filter.
-- `label` — restrict to entries with this exact label.
+- `page`, `pageSize`: pagination (`pageSize` defaults to 50, max 500)
+- `search`: contains-style match over the address **and** the label, 1 to 100 characters
+- `label`: only entries with exactly this label
 
-Search and the label filter run server-side over the whole list, so results aren't limited to the current page.
+Search and the label filter run over the whole list, not just the current page.
 
-To populate a label filter, fetch the distinct labels in use. The response
-returns `data.labels` and the unfiltered `data.total` for a summary display:
+To fill a label filter, fetch the labels in use. The response returns `data.labels` and the unfiltered `data.total`:
 
 <ApiExample operation="list-token-allowlist-labels" />
 
@@ -165,22 +163,22 @@ returns `data.labels` and the unfiltered `data.total` for a summary display:
 
 <Step number={4} title="Remove an address">
 
-Remove an address when a holder's compliance status changes. Existing token holdings are unaffected — only future allowlist-enforced flows are blocked.
+Remove an address when the holder's compliance status changes. Existing holdings are unaffected; the address just can't receive the token through mints or force transfers.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In **Operations → Approved recipients**, click **Remove entry** next to the address. For an on-chain list with multiple matching wallets, choose the signer in the confirmation dialog. After successful removal, the list and its count refresh.
+On **Compliance**, click the trash button beside the address. For an onchain list with several matching wallets, choose the signer in the dialog. The list and its count refresh.
 
 </Tab>
 <Tab value="API">
 
 <ApiExample operation="remove-token-allowlist-entry" />
 
-Use the `entry.id` returned when the address was added.
+Use the entry `id` (`tal_…`) from the add response. A removal returns `204`. If the onchain removal fails, the entry stays active and you can retry.
 
-For an on-chain removal, pass the optional exact signer as a query parameter: `?signingCustodyWalletId=cwlt_example`. To discover the current list authority, request `GET /v1/issuance/tokens/{tokenId}?includeAllowlistAuthority=true` and read `data.allowlistAuthority` (`null` for a database-only list). Match that address against your wallets; do not infer it from the token's freeze authority.
+For an onchain list, pass the signer as a query parameter: `?signingCustodyWalletId=cwlt_example`. To find the list's current authority, request `GET /v1/issuance/tokens/{tokenId}?includeAllowlistAuthority=true` and read `data.allowlistAuthority` (`null` for a list kept only in SDP). Match that address against your wallets; don't infer it from the freeze authority.
 
 </Tab>
 </Tabs>
@@ -192,9 +190,9 @@ For an on-chain removal, pass the optional exact signer as a query parameter: `?
 
 ## Typical workflow for a tokenized security
 
-1. Create the token with `requiresAllowlist: true` and template `tokenized-security`
-2. [Deploy the token](/docs/tokens/deploy-a-token)
-3. Collect wallet addresses from KYC-verified investors
-4. Add each verified address to the allowlist
-5. [Mint tokens](/docs/tokens/mint-and-burn) to allowlisted addresses
-6. Remove addresses when compliance status changes
+1. Create the token with template `tokenized-security`; the allowlist is on by default.
+2. [Deploy the token](/docs/tokens/deploy-a-token).
+3. Collect wallet addresses from KYC-verified investors.
+4. Add each verified address to the allowlist.
+5. [Mint tokens](/docs/tokens/mint-and-burn) to listed addresses.
+6. Remove addresses when their compliance status changes.

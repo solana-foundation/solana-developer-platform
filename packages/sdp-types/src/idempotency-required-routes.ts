@@ -3,6 +3,11 @@
  * that move money (HOO-1918, ADR 0009). One list, asserted by the API's route
  * inventory and mapped by the dashboard, which refuses to send on these when it
  * cannot persist the key.
+ *
+ * Each one also answers a retried key from its own domain row
+ * (`recovery: "record"`), after the 24-hour key record too, so a kept key is
+ * always safe to resend on them: the dashboard resends one however old, since
+ * a new key could move the money twice. The route inventory pins this.
  */
 export const IDEMPOTENCY_REQUIRED_ROUTES = [
   "POST /v1/payments/transfers",

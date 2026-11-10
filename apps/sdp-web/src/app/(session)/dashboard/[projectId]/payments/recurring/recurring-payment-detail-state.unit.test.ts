@@ -6,6 +6,7 @@ import {
   recurringPaymentReadFailureOutcome,
   refreshIfOutcomeUnknown,
 } from "./recurring-payment-detail-state";
+import { RecurringPaymentChangedError } from "./recurring-payments.data";
 
 describe("getRecurringPaymentDetailState", () => {
   it("allows pending edits and cancellation while signing is unavailable", () => {
@@ -115,16 +116,19 @@ describe("refreshIfOutcomeUnknown", () => {
     refreshIfOutcomeUnknown(new IdempotencyOutcomeUnknownError("check the list"), refresh);
     expect(refresh).toHaveBeenCalledTimes(1);
   });
+
+  // Regression: a failed activation's reset moves the version, and without a
+  // refresh every Activate retry was refused as stale until a manual reload.
+  it("refreshes the page when the API refuses a version the page no longer shows", () => {
+    const refresh = vi.fn();
+    refreshIfOutcomeUnknown(new RecurringPaymentChangedError("changed"), refresh);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("recurringPaymentReadFailureOutcome", () => {
   it("is not found when the API has no such schedule", () => {
-    expect(recurringPaymentReadFailureOutcome("prp_unknown", 404)).toBe("not_found");
-  });
-
-  it("goes back to the list for a demo schedule once demo mode is off", () => {
-    expect(recurringPaymentReadFailureOutcome("demo_rp_northwind_supply", 404)).toBe("list");
-    expect(recurringPaymentReadFailureOutcome("demo_new_rp_0123456789ab", 404)).toBe("list");
+    expect(recurringPaymentReadFailureOutcome(404)).toBe("not_found");
   });
 
   it.each([
@@ -132,7 +136,6 @@ describe("recurringPaymentReadFailureOutcome", () => {
     ["a rate limit", 429],
     ["a failed request", null],
   ])("keeps the error boundary for %s", (_case, status) => {
-    expect(recurringPaymentReadFailureOutcome("prp_unknown", status)).toBe("failed");
-    expect(recurringPaymentReadFailureOutcome("demo_rp_northwind_supply", status)).toBe("failed");
+    expect(recurringPaymentReadFailureOutcome(status)).toBe("failed");
   });
 });

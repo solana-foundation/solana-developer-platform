@@ -2,6 +2,7 @@ import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
 import { OFFRAMP_CRYPTO_RAILS, ONRAMP_CRYPTO_RAILS } from "@sdp/types/payment-rails";
 import {
   PAYMENT_REQUEST_STATUSES,
+  type PaymentRampQuote,
   paymentSubscriptionCollectionAttemptMetadataSchema,
   paymentTransferBatchEstimateWarningSchema,
   RAMP_DELIVERY_MISMATCH_REASONS,
@@ -14,7 +15,11 @@ import { PERSISTED_RAMP_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-ac
 import { UNIFIED_TRANSACTION_MODULE_CONTRACTS } from "@sdp/types/unified-transactions";
 import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
-import { MODULE_GATE, TRANSFER_STATUS_GATE } from "@/openapi/release-channel-values";
+import {
+  CUSTODY_PROVIDER_GATE,
+  MODULE_GATE,
+  TRANSFER_STATUS_GATE,
+} from "@/openapi/release-channel-values";
 import {
   createPaymentRequestSchema as createPaymentRequestSchemaBase,
   listPaymentRequestsQuerySchema as listPaymentRequestsQuerySchemaBase,
@@ -28,6 +33,7 @@ import {
 import { simulateSandboxTransferSchema as simulateSandboxTransferSchemaBase } from "@/routes/payments/ramps/schemas";
 import {
   createRecurringPaymentSchema as createRecurringPaymentSchemaBase,
+  expectedUpdatedAtSchema,
   listRecurringPaymentsQuerySchema as listRecurringPaymentsQuerySchemaBase,
   paymentRecurringPaymentStatusSchema as paymentRecurringPaymentStatusSchemaBase,
   recurringPaymentIdParamsSchema as recurringPaymentIdParamsSchemaBase,
@@ -329,6 +335,7 @@ export const transferSchema = z
       })
       .optional()
       .openapi({
+        [CUSTODY_PROVIDER_GATE]: "fireblocks",
         description:
           "Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.",
       }),
@@ -433,7 +440,7 @@ export const transferSchema = z
       .openapi({
         [MODULE_GATE]: "ramps",
         description:
-          "Ramp delivery mode. Hosted flows require the customer to complete a provider-hosted UI; manual instructions require the customer to fund displayed instructions; session widgets use a provider SDK session.",
+          "How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `session_widget` in a provider SDK session. `manual_instructions` appears only on a retired provider's records.",
         example: "session_widget",
       }),
     fiatCurrency: z
@@ -514,15 +521,30 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
         },
       ],
     }),
-    options: withOpenApi(createTransferBatchSchemaBase.shape.options, {
-      description:
-        "Execution options for transaction chunking, priority fees, and preflight validation.",
-      example: {
-        maxRecipientsPerTransaction: 20,
-        priorityFee: "auto",
-        preflight: true,
-      },
-    }),
+    options: withOpenApi(
+      createTransferBatchSchemaBase.shape.options
+        .unwrap()
+        .extend({
+          priorityFee: withOpenApi(
+            createTransferBatchSchemaBase.shape.options.unwrap().shape.priorityFee,
+            {
+              description:
+                "Accepted for compatibility and ignored. No priority fee is applied, regardless of the selected value.",
+              example: "none",
+            }
+          ),
+        })
+        .optional(),
+      {
+        description:
+          "Execution options for transaction chunking and preflight validation. `priorityFee` is accepted for compatibility and ignored; no priority fee is applied.",
+        example: {
+          maxRecipientsPerTransaction: 20,
+          priorityFee: "none",
+          preflight: true,
+        },
+      }
+    ),
   })
   .openapi({
     description: "Create a custody-executed outbound transfer batch.",
@@ -921,8 +943,14 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
       "Creates an SDP-custody outbound recurring payment intent. Activation and collection are added by follow-up endpoints.",
   });
 
+const expectedUpdatedAtField = withOpenApi(expectedUpdatedAtSchema.optional(), {
+  description:
+    "Optional `updatedAt` of the version you reviewed, from the last read of this recurring payment. When the recurring payment has changed since, the request returns `409` `RECURRING_PAYMENT_CHANGED` with the current `updatedAt` in `error.details` and changes nothing: read it again and review the current terms.",
+});
+
 export const updateRecurringPaymentRequestSchema = updateRecurringPaymentSchemaBase
   .safeExtend({
+    expectedUpdatedAt: expectedUpdatedAtField,
     sourceCustodyWalletId: withOpenApi(
       updateRecurringPaymentSchemaBase.shape.sourceCustodyWalletId,
       {
@@ -978,6 +1006,10 @@ export const updateRecurringPaymentRequestSchema = updateRecurringPaymentSchemaB
     description:
       "Updates a recurring payment. Pending payments are edited directly. Active metadata or due-date updates are applied in place, while active term/source/destination/token updates create and authorize a replacement subscription before canceling the old one.",
   });
+
+export const activateRecurringPaymentRequestSchema = z
+  .strictObject({ expectedUpdatedAt: expectedUpdatedAtField })
+  .openapi({ description: "Optional precondition for activating a recurring payment." });
 
 export const paymentListRecurringPaymentsQuerySchema = listRecurringPaymentsQuerySchemaBase
   .extend({
@@ -1487,7 +1519,7 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
   .extend({
     provider: withOpenApi(createOnrampQuoteSchemaBase.shape.provider, {
       description:
-        "Ramp provider identifier. Hosted providers return a URL, manual providers return funding instructions, and Stripe returns a session widget secret.",
+        "Ramp provider to quote with. The response's `quote.deliveryMode` says how that provider hands off: a hosted URL or a session widget.",
       example: "moonpay",
     }),
     counterpartyId: withOpenApi(createOnrampQuoteSchemaBase.shape.counterpartyId, {
@@ -1522,7 +1554,7 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
   })
   .openapi({
     description:
-      "Create an on-ramp quote. The response uses `deliveryMode` to indicate whether the client should display manual instructions, open a hosted provider flow, or mount a provider session widget.",
+      "Create an on-ramp quote. The response's `quote.deliveryMode` says whether to open a provider-hosted page (`hosted`) or mount a provider session widget (`session_widget`).",
     example: {
       provider: "moonpay",
       counterpartyId: "cpty_example",
@@ -1536,14 +1568,12 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
 export const simulateSandboxTransferRequestSchema = simulateSandboxTransferSchemaBase
   .extend({
     transferId: withOpenApi(simulateSandboxTransferSchemaBase.shape.transferId, {
-      description:
-        "ID of an on-ramp transfer that is awaiting payment. The provider, quote reference, counterparty, and fiat amount are read from the transfer; each transfer can be simulated once.",
+      description: "ID of a sandbox on-ramp transfer that is awaiting payment.",
       example: "xfr_example",
     }),
   })
   .openapi({
-    description:
-      "Sandbox-only helper that simulates the fiat pay-in for a persisted on-ramp quote. Only the transfer ID is accepted; every provider-specific value is derived from the transfer.",
+    description: "Names the sandbox on-ramp transfer. Only the transfer ID is accepted.",
   });
 
 export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
@@ -1664,14 +1694,17 @@ const onrampQuoteSchema = z
       description: "Provider that created the quote.",
       example: "moonpay",
     }),
-    status: z
-      .enum(["pending", "processing", "completed", "failed"])
-      .openapi({ description: "Quote status.", example: "pending" }),
+    // `satisfies` keeps each documented value to the ones a provider's quote can carry.
+    status: z.literal("pending").openapi({
+      description:
+        "Always `pending`: a quote opens its transfer before the customer pays, and SDP never updates the quote. Follow the transfer for progress.",
+      example: "pending",
+    }) satisfies z.ZodType<PaymentRampQuote["status"]>,
     deliveryMode: z.enum(["hosted", "session_widget"]).openapi({
       description:
         "`hosted` means open `hostedUrl`; `session_widget` means mount the provider SDK session.",
       example: "hosted",
-    }),
+    }) satisfies z.ZodType<PaymentRampQuote["deliveryMode"]>,
     hostedUrl: z
       .string()
       .url()
