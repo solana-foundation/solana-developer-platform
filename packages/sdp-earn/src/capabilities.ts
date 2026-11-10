@@ -1,10 +1,15 @@
 import type {
   EarnDepositEligibilityProvider,
   EarnLiveMetricsProvider,
+  EarnOnboardingProvider,
   EarnPortfolioWalletProvider,
+  EarnProviderOrderCancellationProvider,
+  EarnProviderRedemptionModesProvider,
+  EarnProviderSettlementProvider,
   EarnVaultDepositQuoteProvider,
   EarnVaultDirectProvider,
   EarnVaultParRedemptionProvider,
+  EarnVaultPreparationProvider,
   EarnVaultProvider,
   EarnVaultProviderOrderWithdrawProvider,
   EarnVaultQueuedWithdrawProvider,
@@ -12,6 +17,45 @@ import type {
   EarnVaultWithdrawQuoteProvider,
   EarnWithdrawalApprovalProvider,
 } from "./types";
+
+export function supportsProviderSettlement(
+  client: EarnVaultProvider
+): client is EarnProviderSettlementProvider {
+  // SAFETY: the capability is narrowed only after testing its method's presence.
+  return (
+    typeof (client as Partial<EarnProviderSettlementProvider>).readProviderSettlement === "function"
+  );
+}
+
+export function supportsProviderRedemptionModes(
+  client: EarnVaultProvider
+): client is EarnProviderRedemptionModesProvider {
+  // SAFETY: method presence is the optional capability contract.
+  return (
+    typeof (client as Partial<EarnProviderRedemptionModesProvider>).getProviderRedemptionModes ===
+    "function"
+  );
+}
+
+export function supportsVaultPreparation(
+  client: EarnVaultProvider
+): client is EarnVaultPreparationProvider {
+  // SAFETY: optional capability narrowing by method presence.
+  return (
+    typeof (client as Partial<EarnVaultPreparationProvider>).buildVaultPreparation === "function"
+  );
+}
+export function supportsProviderOrderCancellation(
+  client: EarnVaultProvider
+): client is EarnProviderOrderCancellationProvider {
+  // SAFETY: both halves of the cancellation lifecycle must be implemented.
+  const candidate = client as Partial<EarnProviderOrderCancellationProvider>;
+  return (
+    supportsProviderSettlement(client) &&
+    typeof candidate.buildProviderOrderCancellation === "function" &&
+    typeof candidate.readProviderOrderCancellation === "function"
+  );
+}
 
 /**
  * `satisfies` pins this list to the capability's method names: renaming a
@@ -275,4 +319,36 @@ const LIVE_METRICS_METHODS = ["listStrategyMetrics"] as const satisfies readonly
 export function supportsLiveMetrics(client: EarnVaultProvider): client is EarnLiveMetricsProvider {
   const candidate = client as Partial<Record<(typeof LIVE_METRICS_METHODS)[number], unknown>>;
   return LIVE_METRICS_METHODS.every((method) => typeof candidate[method] === "function");
+}
+
+const ONBOARDING_METHODS = [
+  "getOnboardingModerator",
+  "getOnboardingForm",
+  "onboardingApplicationFields",
+  // biome-ignore lint/security/noSecrets: capability method name, not a secret.
+  "saveOnboardingApplication",
+  // biome-ignore lint/security/noSecrets: capability method name, not a secret.
+  "getOnboardingCustomerDetail",
+  // biome-ignore lint/security/noSecrets: capability method name, not a secret.
+  "uploadOnboardingDocument",
+  "answerOnboardingCorrection",
+  "registerOnboardingWallet",
+  "walletRegistrationMessage",
+  "onboardingRecoveryReferences",
+] as const satisfies readonly Exclude<keyof EarnOnboardingProvider, keyof EarnVaultProvider>[];
+
+/**
+ * Capability discovery for the optional KYC/KYB onboarding contract — same
+ * all-or-nothing method-presence rule as the guards above. Onboarding without
+ * its whole surface is worse than none: a customer claimed but never
+ * submittable, or a wallet provable but not registrable, is a half-built
+ * identity SDP cannot reconcile. Kept separate from every money capability by
+ * design: onboarding feeds the eligibility gate, it never implies one.
+ */
+export function supportsOnboarding(client: EarnVaultProvider): client is EarnOnboardingProvider {
+  // SAFETY: the cast only builds a presence probe for the optional capability
+  // methods; every ONBOARDING_METHODS key is typeof-checked below, and the
+  // client is narrowed only when all of them are functions.
+  const candidate = client as Partial<Record<(typeof ONBOARDING_METHODS)[number], unknown>>;
+  return ONBOARDING_METHODS.every((method) => typeof candidate[method] === "function");
 }

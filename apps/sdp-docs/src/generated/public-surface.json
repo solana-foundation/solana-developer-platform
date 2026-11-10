@@ -25,6 +25,28 @@
     "anchorage",
     "utila"
   ],
+  "walletCreateDedupe": [
+    {
+      "provider": "fireblocks",
+      "mode": "byok",
+      "window": "24h"
+    },
+    {
+      "provider": "privy",
+      "mode": "managed",
+      "window": "permanent"
+    },
+    {
+      "provider": "privy",
+      "mode": "byok",
+      "window": "permanent"
+    },
+    {
+      "provider": "coinbase_cdp",
+      "mode": "managed",
+      "window": "permanent"
+    }
+  ],
   "grantableActions": [
     {
       "module": "transfers",

@@ -1,12 +1,15 @@
 import { currentClusterScope, runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type {
-  EarnVaultWithdrawalRequestActionRow,
-  EarnVaultWithdrawalRequestRow,
-  EarnVaultWithdrawalRequestsRepository,
+import {
+  type CreateSignedQueuedWithdrawalRequestInput,
+  type EarnVaultWithdrawalRequestActionRow,
+  type EarnVaultWithdrawalRequestRow,
+  type EarnVaultWithdrawalRequestsRepository,
+  QueuedWithdrawalLeaseConflictError,
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
+import { recordSignedExternalQueuedRequest } from "./vault-queued-withdraw.service";
 import {
   assertClosingIdentity,
   findClosingEventInHistoryPage,
@@ -66,6 +69,7 @@ function request(
     discount_bps: 25,
     nonce: null,
     creation_timestamp: null,
+    provider_state_observed: false,
     maturity_timestamp: "1700000060",
     deadline_timestamp: "1700000120",
     client_request_id: "request-key",
@@ -134,6 +138,59 @@ function parRequest(
   });
 }
 
+function signedRequestInput(
+  current: EarnVaultWithdrawalRequestRow
+): CreateSignedQueuedWithdrawalRequestInput {
+  return {
+    requestId: current.id,
+    actionId: action().id,
+    organizationId: current.organization_id,
+    projectId: "prj_test",
+    environment: current.environment,
+    provider: current.provider,
+    positionId: current.position_id,
+    ownerAddress: current.owner_address,
+    vaultAddress: current.vault_address,
+    tokenMint: current.token_mint,
+    shareMint: current.share_mint,
+    requestAddress: current.request_address,
+    mechanism: current.mechanism,
+    shares: current.shares,
+    quotedAssets: current.quoted_assets,
+    shareDecimals: current.share_decimals,
+    assetDecimals: current.asset_decimals,
+    intermediateMint: current.intermediate_mint,
+    intermediateAmount: current.intermediate_amount,
+    discountBps: current.discount_bps,
+    maturityTimestamp: current.maturity_timestamp,
+    deadlineTimestamp: current.deadline_timestamp,
+    signature: "request-signature",
+    signedTransaction: "AQ==",
+    lastValidBlockHeight: "1",
+    clientRequestId: current.client_request_id,
+    idempotencyFingerprint: current.idempotency_fingerprint,
+    pdaLeaseToken: "external-build",
+    externalWalletTransactionId: "external-build",
+  };
+}
+
+function historicalTransaction(blockTime = 1_700_000_000, err: string | null = null) {
+  return {
+    slot: 123,
+    blockTime,
+    transaction: { message: { accountKeys: [], instructions: [] }, signatures: [] },
+    meta: {
+      err,
+      logMessages: ["authenticated provider log"],
+      fee: 5_000,
+      preBalances: [],
+      postBalances: [],
+      preTokenBalances: [],
+      postTokenBalances: [],
+    },
+  };
+}
+
 function fakeLedger(current: EarnVaultWithdrawalRequestRow) {
   return {
     getById: vi.fn().mockResolvedValue(current),
@@ -161,6 +218,218 @@ describe("queued withdrawal reconciliation", () => {
     vi.clearAllMocks();
     provider.client = null;
     parProvider.client = null;
+  });
+
+  describe.each([true, false])("late par submissions with own lease held: %s", (leaseHeld) => {
+    it.each([
+      null,
+      "1699999800",
+      "1700000001",
+      "busy",
+      "failed",
+      "not_landed",
+      "expired_unknown",
+    ] as const)(
+      "checks finalized closing history %s before claiming a reusable PDA",
+      async (closedAt) => {
+        const current = parRequest();
+        const input = signedRequestInput(current);
+        const write = vi
+          .fn<EarnVaultWithdrawalRequestsRepository["createSignedRequest"]>()
+          .mockResolvedValue({ request: current, action: action(), replayed: false });
+        if (!leaseHeld) write.mockRejectedValueOnce(new QueuedWithdrawalLeaseConflictError());
+        clusterRpc.respond("getTransaction", ({ params }) => ({
+          result:
+            closedAt === "not_landed" || closedAt === "expired_unknown"
+              ? null
+              : historicalTransaction(
+                  params[0] === "closing" ? Number(closedAt) : 1_700_000_000,
+                  closedAt === "failed" ? "AccountNotFound" : null
+                ),
+        }));
+        clusterRpc.answer("getBlockHeight", closedAt === "expired_unknown" ? 2 : 1);
+        let history: Array<{ signature: string; err: null }>;
+        let transactionReads: number;
+        switch (closedAt) {
+          case "busy":
+            history = Array.from({ length: 16 }, (_, index) => ({
+              signature: `mention-${index}`,
+              err: null,
+            }));
+            transactionReads = 17;
+            break;
+          case null:
+          case "failed":
+          case "not_landed":
+          case "expired_unknown":
+            history = [];
+            transactionReads = 1;
+            break;
+          case "1699999800":
+          case "1700000001":
+            history = [{ signature: "closing", err: null }];
+            transactionReads = 2;
+            break;
+          default: {
+            const exhaustive: never = closedAt;
+            throw new Error(`Unexpected recovery case ${exhaustive}`);
+          }
+        }
+        clusterRpc.answer("getSignaturesForAddress", history);
+        parProvider.client = {
+          decodeParRedemptionLifecycleEvents: vi.fn().mockResolvedValue(
+            closedAt === "busy"
+              ? []
+              : [
+                  {
+                    kind: "redemptionCancelled",
+                    requestAddress: PAR_REQUEST_ADDRESS,
+                    owner: OWNER,
+                    intermediateMint: INTERMEDIATE_MINT,
+                    intermediateAmount: "10.25",
+                    occurredAt: closedAt,
+                  },
+                ]
+          ),
+        };
+        const pending = inSandboxScope(() =>
+          recordSignedExternalQueuedRequest(env, { createSignedRequest: write }, input)
+        );
+        if (closedAt === "failed" || closedAt === "expired_unknown") {
+          await expect(pending).rejects.toMatchObject({
+            code: closedAt === "failed" ? "TRANSACTION_FAILED" : "SERVICE_UNAVAILABLE",
+          });
+          expect(write).not.toHaveBeenCalled();
+          expect(clusterRpc.calls.filter((call) => call.method === "getTransaction")).toHaveLength(
+            1
+          );
+          return;
+        }
+        if (closedAt === "not_landed") {
+          if (leaseHeld) {
+            await expect(pending).resolves.toMatchObject({ alreadyFinalized: false });
+          } else {
+            await expect(pending).rejects.toMatchObject({ code: "CONFLICT" });
+          }
+          expect(write).toHaveBeenCalledTimes(1);
+          expect(clusterRpc.calls.filter((call) => call.method === "getTransaction")).toHaveLength(
+            1
+          );
+          return;
+        }
+        if (closedAt === "1700000001" || closedAt === "busy") {
+          await expect(pending).rejects.toMatchObject({
+            code: closedAt === "busy" ? "SERVICE_UNAVAILABLE" : "CONFLICT",
+          });
+          expect(write).not.toHaveBeenCalled();
+        } else {
+          await expect(pending).resolves.toMatchObject({ alreadyFinalized: true });
+          expect(write).toHaveBeenCalledTimes(leaseHeld ? 1 : 2);
+        }
+        const read = clusterRpc.requests.find(
+          (request) => request.method === "getSignaturesForAddress"
+        );
+        expect(read?.params).toEqual([
+          PAR_REQUEST_ADDRESS,
+          expect.objectContaining({ until: "request-signature", limit: 16 }),
+        ]);
+        expect(clusterRpc.calls.filter((call) => call.method === "getTransaction")).toHaveLength(
+          transactionReads
+        );
+      }
+    );
+  });
+
+  it.each([
+    { name: "missing", result: null, code: "CONFLICT", statusCode: 409 },
+    {
+      name: "unknown execution",
+      result: { ...historicalTransaction(), meta: null },
+      code: "CONFLICT",
+      statusCode: 409,
+    },
+    {
+      name: "finalized failure",
+      result: historicalTransaction(1_700_000_000, "AccountNotFound"),
+      code: "TRANSACTION_FAILED",
+      statusCode: 400,
+    },
+    { name: "finalized success", result: historicalTransaction(), code: null, statusCode: 200 },
+  ])("classifies $name before reclaiming a queue build", async ({ result, code, statusCode }) => {
+    const current = request();
+    const input = signedRequestInput(current);
+    const write = vi
+      .fn<EarnVaultWithdrawalRequestsRepository["createSignedRequest"]>()
+      .mockRejectedValueOnce(new QueuedWithdrawalLeaseConflictError())
+      .mockResolvedValue({ request: current, action: action(), replayed: false });
+    clusterRpc.respond("getTransaction", () => ({ result }));
+
+    const pending = inSandboxScope(() =>
+      recordSignedExternalQueuedRequest(env, { createSignedRequest: write }, input)
+    );
+    if (code !== null) {
+      await expect(pending).rejects.toMatchObject({ code, statusCode });
+      expect(write).toHaveBeenCalledTimes(1);
+    } else {
+      await expect(pending).resolves.toMatchObject({ alreadyFinalized: true });
+      expect(write).toHaveBeenCalledTimes(2);
+      expect(write).toHaveBeenLastCalledWith({ ...input, recoverFinalizedExternalBuild: true });
+    }
+    expect(clusterRpc.requests.filter((call) => call.method === "getTransaction")).toHaveLength(1);
+  });
+
+  it.each([
+    "par_creation",
+    "queue_creation",
+    "par_history",
+    "par_closing_transaction",
+    "par_height",
+  ] as const)("sanitizes a %s RPC outage without reclaiming the build", async (stage) => {
+    const current = stage === "queue_creation" ? request() : parRequest();
+    const input = signedRequestInput(current);
+    const write = vi
+      .fn<EarnVaultWithdrawalRequestsRepository["createSignedRequest"]>()
+      .mockResolvedValue({ request: current, action: action(), replayed: false });
+    if (stage === "queue_creation") {
+      write.mockRejectedValueOnce(new QueuedWithdrawalLeaseConflictError());
+    }
+    const unavailable = { error: { code: -32603, message: "Private RPC endpoint is unavailable" } };
+    clusterRpc.respond("getTransaction", ({ params }) => {
+      switch (stage) {
+        case "par_creation":
+        case "queue_creation":
+          return unavailable;
+        case "par_height":
+          return { result: null };
+        case "par_history":
+          return { result: historicalTransaction() };
+        case "par_closing_transaction":
+          return params[0] === "closing" ? unavailable : { result: historicalTransaction() };
+        default: {
+          const exhaustive: never = stage;
+          throw new Error(`Unexpected recovery stage ${exhaustive}`);
+        }
+      }
+    });
+    clusterRpc.respond("getSignaturesForAddress", () =>
+      stage === "par_history" ? unavailable : { result: [{ signature: "closing", err: null }] }
+    );
+    clusterRpc.respond("getBlockHeight", () => unavailable);
+    parProvider.client = { decodeParRedemptionLifecycleEvents: vi.fn().mockResolvedValue([]) };
+
+    await expect(
+      inSandboxScope(() =>
+        recordSignedExternalQueuedRequest(env, { createSignedRequest: write }, input)
+      )
+    ).rejects.toMatchObject({
+      code: "PROVIDER_UNAVAILABLE",
+      statusCode: 503,
+      message: "Earn provider is temporarily unavailable. Try again.",
+    });
+    expect(write).toHaveBeenCalledTimes(stage === "queue_creation" ? 1 : 0);
+    expect(write).not.toHaveBeenCalledWith(
+      expect.objectContaining({ recoverFinalizedExternalBuild: true })
+    );
   });
 
   it("backs pending provider reads off without adding delay past maturity", () => {
@@ -337,6 +606,199 @@ describe("queued withdrawal reconciliation", () => {
     expect(ledger.advanceAction).not.toHaveBeenCalled();
     expect(ledger.advanceRequest).not.toHaveBeenCalled();
   });
+
+  describe.each(["solver_queue", "operator_redemption"] as const)(
+    "expired %s creates",
+    (mechanism) => {
+      function absentRequest(overrides: Partial<EarnVaultWithdrawalRequestRow> = {}) {
+        const current =
+          mechanism === "operator_redemption"
+            ? parRequest(overrides)
+            : request({ request_address: PAR_REQUEST_ADDRESS, ...overrides });
+        const lookup = {
+          requestAddress: current.request_address,
+          status: "closedOrUnknown",
+          request: null,
+        };
+        if (mechanism === "operator_redemption") {
+          parProvider.client = {
+            readParRedemptionRequest: vi.fn().mockResolvedValue(lookup),
+            decodeParRedemptionLifecycleEvents: vi.fn().mockResolvedValue([]),
+          };
+        } else {
+          provider.client = {
+            readQueuedWithdrawalRequest: vi.fn().mockResolvedValue(lookup),
+            decodeQueuedWithdrawalLifecycleEvents: vi.fn().mockResolvedValue([]),
+          };
+        }
+        return current;
+      }
+
+      function absentHistory() {
+        return {
+          getTransaction: vi.fn().mockReturnValue({ send: vi.fn().mockResolvedValue(null) }),
+          getSignaturesForAddress: vi.fn().mockReturnValue({ send: vi.fn().mockResolvedValue([]) }),
+        };
+      }
+
+      it.each(["requested", "submitted"] as const)(
+        "releases a never-broadcast %s create after two corroborated observations",
+        async (status) => {
+          const current = absentRequest();
+          const ledger = fakeLedger(current);
+          vi.mocked(ledger.observeExpiredUnknownSignature)
+            .mockResolvedValueOnce("first")
+            .mockResolvedValueOnce("repeat");
+          vi.mocked(ledger.failActionAndRecoverRequest).mockResolvedValue({
+            action: action({ status: "failed" }),
+            request: { ...current, status: "failed" },
+          });
+          const rpc = absentHistory();
+          const chain = { rpc, currentHeight: 2n };
+          await expect(reconcileAction(env, ledger, action({ status }), null, chain)).resolves.toBe(
+            "unchanged"
+          );
+          expect(ledger.failActionAndRecoverRequest).not.toHaveBeenCalled();
+          await expect(reconcileAction(env, ledger, action({ status }), null, chain)).resolves.toBe(
+            "failed"
+          );
+          expect(rpc.getTransaction).toHaveBeenCalledTimes(2);
+          expect(rpc.getSignaturesForAddress).toHaveBeenCalledTimes(2);
+          expect(ledger.failActionAndRecoverRequest).toHaveBeenCalledTimes(1);
+          expect(broadcast).not.toHaveBeenCalled();
+        }
+      );
+
+      it("defers a history outage without recording negative evidence", async () => {
+        const ledger = fakeLedger(absentRequest());
+        const rpc = absentHistory();
+        rpc.getTransaction.mockReturnValue({
+          send: vi.fn().mockRejectedValue(new Error("history unavailable")),
+        });
+        await expect(
+          reconcileAction(env, ledger, action(), null, { rpc, currentHeight: 2n })
+        ).rejects.toThrow("history unavailable");
+        expect(ledger.observeExpiredUnknownSignature).not.toHaveBeenCalled();
+        expect(ledger.failActionAndRecoverRequest).not.toHaveBeenCalled();
+      });
+
+      it("keeps provider-proven requests when both PDA and history are unavailable", async () => {
+        const ledger = fakeLedger(absentRequest({ creation_timestamp: "1700000000" }));
+        const rpc = absentHistory();
+        await expect(
+          reconcileAction(env, ledger, action(), null, { rpc, currentHeight: 2n })
+        ).resolves.toBe("unchanged");
+        expect(ledger.observeExpiredUnknownSignature).not.toHaveBeenCalled();
+        expect(ledger.failActionAndRecoverRequest).not.toHaveBeenCalled();
+      });
+
+      it.each([true, null] as const)(
+        "retains a closed request with provider-observation state %s",
+        async (providerStateObserved) => {
+          const ledger = fakeLedger(
+            absentRequest({
+              status: "closed_or_unknown",
+              provider_state_observed: providerStateObserved,
+            })
+          );
+          const rpc = absentHistory();
+          await expect(
+            reconcileAction(env, ledger, action(), null, { rpc, currentHeight: 2n })
+          ).resolves.toBe("unchanged");
+          expect(ledger.observeExpiredUnknownSignature).not.toHaveBeenCalled();
+          expect(ledger.failActionAndRecoverRequest).not.toHaveBeenCalled();
+        }
+      );
+
+      it("does not count incomplete closing history as negative evidence", async () => {
+        const ledger = fakeLedger(absentRequest());
+        const rpc = absentHistory();
+        rpc.getSignaturesForAddress.mockReturnValue({
+          send: vi.fn().mockResolvedValue([{ signature: "unreadable-history", err: null }]),
+        });
+        await expect(
+          reconcileAction(env, ledger, action(), null, { rpc, currentHeight: 2n })
+        ).rejects.toThrow(/no readable finalized/);
+        expect(ledger.observeExpiredUnknownSignature).not.toHaveBeenCalled();
+        expect(ledger.failActionAndRecoverRequest).not.toHaveBeenCalled();
+      });
+
+      it("does not fail a historical transaction whose execution result is missing", async () => {
+        const ledger = fakeLedger(absentRequest());
+        const rpc = absentHistory();
+        rpc.getTransaction.mockReturnValue({ send: vi.fn().mockResolvedValue({ meta: null }) });
+        await expect(
+          reconcileAction(env, ledger, action(), null, { rpc, currentHeight: 2n })
+        ).rejects.toThrow("no historical execution result");
+        expect(ledger.observeExpiredUnknownSignature).not.toHaveBeenCalled();
+        expect(ledger.failActionAndRecoverRequest).not.toHaveBeenCalled();
+      });
+
+      it("recovers successful finalized creation history with one transaction read", async () => {
+        const current = absentRequest();
+        const ledger = fakeLedger(current);
+        const closed = {
+          requestAddress: current.request_address,
+          status: "closedOrUnknown",
+          request: null,
+        };
+        if (mechanism === "operator_redemption") {
+          parProvider.client = {
+            readParRedemptionRequest: vi.fn().mockResolvedValue(closed),
+            decodeParRedemptionLifecycleEvents: vi.fn().mockResolvedValue([
+              {
+                kind: "redemptionRequested",
+                requestAddress: current.request_address,
+                owner: OWNER,
+                intermediateMint: INTERMEDIATE_MINT,
+                intermediateAmount: "10.25",
+                occurredAt: "1700000000",
+              },
+            ]),
+          };
+        } else {
+          provider.client = {
+            readQueuedWithdrawalRequest: vi.fn().mockResolvedValue(closed),
+            decodeQueuedWithdrawalLifecycleEvents: vi.fn().mockResolvedValue([
+              {
+                kind: "withdrawalRequested",
+                requestAddress: current.request_address,
+                owner: OWNER,
+                nonce: "7",
+                assetMint: TOKEN_MINT,
+                shares: "10",
+                assets: "9.8",
+                creationTimestamp: "1700000000",
+                maturityTimestamp: "1700000060",
+                deadlineTimestamp: "1700000120",
+              },
+            ]),
+          };
+        }
+        const rpc = absentHistory();
+        rpc.getTransaction.mockReturnValue({
+          send: vi.fn().mockResolvedValue({
+            blockTime: 1_700_000_000,
+            meta: { err: null, logMessages: ["authenticated creation"] },
+          }),
+        });
+        await expect(
+          reconcileAction(env, ledger, action({ status: "submitted" }), null, {
+            rpc,
+            currentHeight: 2n,
+          })
+        ).resolves.toBe("advanced");
+        expect(rpc.getTransaction).toHaveBeenCalledTimes(1);
+        expect(ledger.advanceAction).toHaveBeenCalledWith(
+          expect.objectContaining({ toStatus: "finalized" })
+        );
+        expect(ledger.advanceRequest).toHaveBeenCalledWith(
+          expect.objectContaining({ creationTimestamp: "1700000000" })
+        );
+        expect(ledger.failActionAndRecoverRequest).not.toHaveBeenCalled();
+      });
+    }
+  );
 
   it("recovers a submitted cancel that disappeared from signature history", async () => {
     const current = request({ status: "cancelling", nonce: "7" });

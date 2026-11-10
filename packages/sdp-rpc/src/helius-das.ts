@@ -1,5 +1,5 @@
 import { RpcUnavailableError } from "./errors";
-import { MANAGED_RPC_ENV_KEYS } from "./managed-rpc-env-keys";
+import { MANAGED_RPC_ENV_KEYS, managedRpcSlotUrl } from "./managed-rpc-env-keys";
 import { currentClusterScope } from "./scope";
 
 /**
@@ -10,7 +10,9 @@ import { currentClusterScope } from "./scope";
  * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  */
 export function isHeliusDasConfigured(): boolean {
-  return Boolean(process.env[MANAGED_RPC_ENV_KEYS[currentClusterScope().cluster].helius]);
+  return (
+    managedRpcSlotUrl(MANAGED_RPC_ENV_KEYS[currentClusterScope().cluster].helius) !== undefined
+  );
 }
 
 /**
@@ -25,7 +27,7 @@ export function isHeliusDasConfigured(): boolean {
  */
 export function fetchHeliusDas(init: RequestInit): Promise<Response> {
   const { cluster } = currentClusterScope();
-  const endpointUrl = process.env[MANAGED_RPC_ENV_KEYS[cluster].helius];
+  const endpointUrl = managedRpcSlotUrl(MANAGED_RPC_ENV_KEYS[cluster].helius);
   if (!endpointUrl) {
     throw new RpcUnavailableError(
       "not_configured",

@@ -139,6 +139,15 @@ describe("idempotency route inventory", () => {
     );
   });
 
+  // The dashboard resends a kept key on these however old it is, so each must
+  // answer that key from its domain row once the 24-hour key record lapses.
+  it("answers a retried key from the domain row on every route that requires the key", () => {
+    const unrecoverable = IDEMPOTENCY_REQUIRED_ROUTES.filter(
+      (route) => routes.get(route)?.recovery !== "record"
+    );
+    expect(unrecoverable).toEqual([]);
+  });
+
   it("runs an access check before the idempotency step on every idempotent route", () => {
     const unchecked = idempotent
       .filter(([, steps]) => steps.authorizeAt === -1 || steps.authorizeAt > steps.idempotentAt)

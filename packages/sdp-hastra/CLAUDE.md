@@ -82,6 +82,8 @@ transaction fee; the separate 50 bps DEX tolerance is only a slippage bound.
   exact snapshotted amount into the canonical wYLDS ATA, then closes the fresh
   account. A lower live output fails the transfer and a higher one fails the
   close, so neither direction can consume or strand unrelated canonical funds.
+  The fresh account's close refunds its current `rentPayer`. A historical
+  share-account funder never receives rent paid for a new transient account.
   See `docs/earn/hastra-prime-inventory.md`.
 - `RedemptionRequest` has no cycle nonce. Before reusing its owner-derived PDA,
   prove it absent at both confirmed and finalized state, find the latest

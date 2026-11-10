@@ -7,15 +7,15 @@ import styles from "./network/network.module.css";
 import { SpeedRace } from "./network/speed-race";
 import { Rise } from "./rise";
 
-/** The figures under the race; `count` marks the ones that count up, into the catalog's `{count}`. */
+/** The figures under the race, counting up into the catalog's `{count}`. */
 const STATS = [
-  { key: "finality" },
+  { key: "finality", count: 150 },
   { key: "partners", count: 30 },
   { key: "currencies", count: 200 },
   { key: "contract", count: 1 },
-] as const satisfies readonly { key: string; count?: number }[];
+] as const satisfies readonly { key: string; count: number }[];
 
-/** "Settled everywhere, under a second.": the speed race and the figures behind it. */
+/** "Sub-second finality meets enterprise throughput": the speed race and the figures behind it. */
 export async function NetworkSection() {
   const t = await getTranslations();
 
@@ -27,8 +27,6 @@ export async function NetworkSection() {
             as="h2"
             className={cn(shared.display, styles.headline)}
             parts={[
-              t("Homepage.network.headlineLine1"),
-              { lineBreak: true },
               { text: t("Homepage.network.headlineHighlight"), className: styles.selN },
               t("Homepage.network.headlineEnd"),
             ]}
@@ -40,23 +38,14 @@ export async function NetworkSection() {
         </Rise>
         <Rise index={2} fade className={styles.statsBlock}>
           <ul className={styles.stats}>
-            {STATS.map((stat) => {
-              return (
-                <li key={stat.key} className={styles.stat}>
-                  <b>
-                    {"count" in stat ? (
-                      <CountUp
-                        to={stat.count}
-                        message={`Homepage.network.stats.${stat.key}.value`}
-                      />
-                    ) : (
-                      t(`Homepage.network.stats.${stat.key}.value`)
-                    )}
-                  </b>
-                  <span>{t(`Homepage.network.stats.${stat.key}.label`)}</span>
-                </li>
-              );
-            })}
+            {STATS.map((stat) => (
+              <li key={stat.key} className={styles.stat}>
+                <b>
+                  <CountUp to={stat.count} message={`Homepage.network.stats.${stat.key}.value`} />
+                </b>
+                <span>{t(`Homepage.network.stats.${stat.key}.label`)}</span>
+              </li>
+            ))}
           </ul>
         </Rise>
       </div>

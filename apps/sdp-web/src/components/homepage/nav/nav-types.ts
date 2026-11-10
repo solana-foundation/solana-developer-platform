@@ -16,7 +16,6 @@ type NavFeature = NavLink & { body: string };
 /** The groups' panel ids (unique on the page), in the bar's order. */
 export const NAV_GROUP_IDS = {
   platform: "homepage-nav-platform",
-  builders: "homepage-nav-builders",
   docs: "homepage-nav-docs",
 } as const satisfies Record<string, string>;
 

@@ -286,6 +286,8 @@ export async function sendTransferBatchUnderKey(
 ): Promise<CreateTransferBatchResult> {
   const canonical = nameTransferBatchRequest(request);
   const fingerprint = transferBatchRequestFingerprint(canonical);
+  // However old the kept key is, the API answers it from the batch's own row
+  // (`IDEMPOTENCY_REQUIRED_ROUTES`), so it goes out: a new key could pay again.
   const { key, persisted } = store.claim(fingerprint);
   const settleKey = () => {
     store.release(fingerprint, key);

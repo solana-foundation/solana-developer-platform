@@ -744,6 +744,10 @@
         "label": "Organization",
         "description": "Organization settings and provider access."
       },
+      "feedback": {
+        "label": "Feedback",
+        "description": "Feedback to the SDP team from the dashboard."
+      },
       "onramp": {
         "label": "On-ramp",
         "description": "On-ramp currencies, estimates and quotes."

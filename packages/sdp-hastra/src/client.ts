@@ -2099,11 +2099,7 @@ export class HastraVaultDirectClient
           config,
           owner
         );
-        if (
-          legacyTicket &&
-          input.rentRefundTo !== undefined &&
-          input.rentRefundTo !== input.owner
-        ) {
+        if (legacyTicket && input.rentRefundTo !== undefined && !rentRefundTo.equals(owner)) {
           throw new SdpHastraError(
             "WITHDRAW_REFUSED",
             "This wallet has a legacy Hastra ticket whose program-hardcoded rent refund goes to " +
@@ -2116,7 +2112,7 @@ export class HastraVaultDirectClient
           owner,
           mint: wylds,
           destination: userWylds,
-          refundTo: rentRefundTo,
+          refundTo: rentPayer,
           amount: wyldsAtoms,
         });
         const leg = await this.buildLegWithFloor({

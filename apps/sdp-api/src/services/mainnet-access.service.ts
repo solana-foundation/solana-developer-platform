@@ -15,6 +15,7 @@ import {
   type MainnetAccessRow,
 } from "@/db/repositories/mainnet-access.repository";
 import { conflict } from "@/lib/errors";
+import { describeError, logEvent } from "@/runtime/money-path-events";
 import { createSystemAuditService } from "@/services/audit.service";
 import {
   type MainnetAccessRequestEmail,
@@ -116,12 +117,21 @@ export async function notifyMainnetAccessRequest(
       requestEmail(claim.row, await repository.emailContext(claim.row))
     );
   } catch (error) {
+    logEvent("warn", {
+      event: "sdp_api_mainnet_access_request_notify_failed",
+      organization_id: organizationId,
+      ...describeError(error),
+    });
     await repository.releaseSend(claim);
     throw error;
   }
 
   const notified = await repository.markNotified(claim);
   if (!notified) throw conflict("The mainnet access request changed while it was being sent");
+  logEvent("info", {
+    event: "sdp_api_mainnet_access_request_notified",
+    organization_id: organizationId,
+  });
   return notified;
 }
 

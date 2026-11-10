@@ -457,6 +457,38 @@ export class CustodyConfigStore implements SigningConfigStore {
   }
 
   /**
+   * Find a single active connection-owned (BYOK) wallet by public key under
+   * one of the organization's active project connections. Connection wallets
+   * share the custody_wallets table with config-owned wallets but hang off a
+   * custody connection instead, so config lookups never see them. Mirrors
+   * {@link findActiveWalletByPublicKey}'s organization, project and
+   * active-state checks on the connection side.
+   */
+  async findActiveConnectionWalletByPublicKey(
+    orgId: string,
+    projectId: string,
+    publicKey: string
+  ): Promise<{ id: string; custodyConnectionId: string } | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT w.id, w.custody_connection_id
+         FROM custody_wallets w
+         JOIN custody_connections c ON c.id = w.custody_connection_id
+         WHERE c.organization_id = ?
+           AND c.project_id = ?
+           AND c.status = 'active'
+           AND w.status = 'active'
+           AND w.public_key = ?
+         ORDER BY c.updated_at DESC, c.id DESC
+         LIMIT 1`
+      )
+      .bind(orgId, projectId, publicKey)
+      .first<{ id: string; custody_connection_id: string }>();
+
+    return row ? { id: row.id, custodyConnectionId: row.custody_connection_id } : null;
+  }
+
+  /**
    * Find a single active wallet by public key under one of the project's
    * active configs. Several active records can hold one key (HOO-2099): the
    * named record comes first, then the record the named Rings wallet links

@@ -50,17 +50,17 @@ export function NavShell({
           <Link className={styles.brand} href="/" aria-label={copy.home}>
             <Image
               className={styles.onLight}
-              src="/homepage/v6/logo-sdp-lockup-on-light.svg"
+              src="/homepage/v6/logo-sdp-wordmark-on-light.svg"
               alt=""
-              width={78}
+              width={332}
               height={30}
               preload
             />
             <Image
               className={styles.onDark}
-              src="/homepage/v6/logo-sdp-lockup-on-dark.svg"
+              src="/homepage/v6/logo-sdp-wordmark-on-dark.svg"
               alt=""
-              width={78}
+              width={332}
               height={30}
             />
           </Link>

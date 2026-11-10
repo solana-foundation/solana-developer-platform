@@ -44,10 +44,10 @@ describe("HomepageFooter", () => {
     expect(headings.map((h) => h.textContent)).toEqual(["Platform", "Developers", "Ecosystem"]);
   });
 
-  it("links home through the lockup, named for screen readers", async () => {
+  it("links home through the wordmark, named for screen readers", async () => {
     const doc = await renderFooter();
     const brand = doc.querySelector('a[href="/"]');
-    expect(brand?.getAttribute("aria-label")).toBe("SDP home");
+    expect(brand?.getAttribute("aria-label")).toBe("Solana Developer Platform home");
     expect(brand?.querySelector("img")?.getAttribute("alt")).toBe("");
   });
 
@@ -58,9 +58,8 @@ describe("HomepageFooter", () => {
     );
     expect(hrefs).toEqual({
       Issuance: "#issuance",
-      Payments: "#payments-api",
+      Payments: "#payments",
       Markets: "#markets",
-      Privacy: "#privacy",
       Interfaces: "#interfaces",
       Docs: links.docs,
       OpenAPI: links.openapi,

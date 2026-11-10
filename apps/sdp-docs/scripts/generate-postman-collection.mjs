@@ -101,11 +101,14 @@ function buildExampleFromSchema(spec, schema, visitedRefs = new Set()) {
 
   if (schemaType === "object") {
     const properties = resolvedSchema.properties ?? {};
+    const required = new Set(resolvedSchema.required ?? []);
     return Object.fromEntries(
-      Object.entries(properties).map(([key, value]) => [
-        key,
-        buildExampleFromSchema(spec, value, new Set(visitedRefs)),
-      ])
+      Object.entries(properties)
+        // An optional field the document gives no example or default is left
+        // out, as the API reference samples leave it: a placeholder such as
+        // "" is a value the API may refuse (an empty `expectedUpdatedAt`).
+        .filter(([key, value]) => required.has(key) || hasDocumentedSample(spec, value))
+        .map(([key, value]) => [key, buildExampleFromSchema(spec, value, new Set(visitedRefs))])
     );
   }
 
@@ -287,6 +290,23 @@ function idempotencyKeyEvents() {
       },
     },
   ];
+}
+
+/** Whether a property's schema names a value of its own: an example, a default or an enum. */
+function hasDocumentedSample(spec, schema) {
+  const resolved = resolveSchemaRef(spec, schema);
+  if (!resolved || typeof resolved !== "object") return false;
+  if (resolved.example !== undefined || resolved.default !== undefined) return true;
+  if (Array.isArray(resolved.enum) && resolved.enum.length > 0) return true;
+  const branches = [
+    ...(resolved.oneOf ?? []),
+    ...(resolved.anyOf ?? []),
+    ...(resolved.allOf ?? []),
+  ];
+  if (branches.some((branch) => hasDocumentedSample(spec, branch))) return true;
+  if (resolved.type === "object" || resolved.properties) return true;
+  if (resolved.type === "array") return true;
+  return false;
 }
 
 function getRequestBody(spec, operation) {

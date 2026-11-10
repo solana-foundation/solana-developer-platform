@@ -19,36 +19,26 @@ export interface RpcTelemetryEvent {
   outcome?: "succeeded" | "failed" | "aborted" | "http_success_unverified";
   status_code?: number;
   duration_ms?: number;
-  sample_weight?: number;
-  genesis_probe_required?: boolean;
+  socket_retry?: true;
 }
 
+/**
+ * A transport request the dead-socket re-send marks. Kit's HTTP transport reads only `payload` and
+ * `signal`, so the mark never reaches the provider.
+ */
+export type RpcAttemptRequest = Parameters<RpcTransport>[0] & { readonly socketRetry?: true };
+
 let rpcTelemetrySink: ((event: RpcTelemetryEvent) => void) | null = null;
-const successSequences = new Map<string, number>();
 
 /** The API supplies its structured logger; telemetry must never change an RPC outcome. */
 export function setRpcTelemetrySink(sink: ((event: RpcTelemetryEvent) => void) | null): void {
   rpcTelemetrySink = sink;
-  if (sink === null) successSequences.clear();
 }
 
-/** Emit every failure and pool decision; retain ten warmup successes per provider. */
+/** Hand every event to the sink unsampled: sampling is the sink's decision. */
 export function emitRpcTelemetry(event: RpcTelemetryEvent): void {
   const sink = rpcTelemetrySink;
   if (!sink) return;
-  if (event.event === "sdp_rpc_attempt") {
-    let weight = 1;
-    if (event.outcome === "succeeded") {
-      const key = `${event.surface}:${event.provider}:${event.cluster}:${event.method}`;
-      const sequence = successSequences.get(key) ?? 0;
-      successSequences.set(key, sequence < 19 ? sequence + 1 : 10);
-      if (sequence >= 10) {
-        if (sequence !== 19) return;
-        weight = 10;
-      }
-    }
-    event = { ...event, sample_weight: weight };
-  }
   try {
     sink(event);
   } catch {
@@ -298,6 +288,72 @@ export function withPinnedRpcTelemetry(transport: RpcTransport, endpointUrl: str
         httpStatusOf(error)
       );
       throw error;
+    }
+  };
+}
+
+type AttemptEndpoint = Readonly<{ provider: string; cluster: SolanaCluster }>;
+
+function managedResponseOutcome(
+  envelope: z.infer<typeof rpcEnvelopeSchema>,
+  method: string,
+  cluster: SolanaCluster
+): "succeeded" | "failed" {
+  if (envelope.kind === "error") return "failed";
+  const servesOtherCluster =
+    method === "getGenesisHash" &&
+    envelope.kind === "result" &&
+    envelope.result !== GENESIS_HASH_BY_CLUSTER[cluster];
+  return servesOtherCluster ? "failed" : "succeeded";
+}
+
+function emitManagedAttempt(
+  endpoint: AttemptEndpoint,
+  request: RpcAttemptRequest,
+  method: string,
+  outcome: NonNullable<RpcTelemetryEvent["outcome"]>,
+  startedAt: number,
+  statusCode?: number
+): void {
+  emitRpcTelemetry({
+    event: "sdp_rpc_attempt",
+    surface: "managed_pool",
+    provider: endpoint.provider,
+    cluster: endpoint.cluster,
+    method,
+    outcome,
+    status_code: statusCode,
+    duration_ms: performance.now() - startedAt,
+    socket_retry: request.socketRetry,
+  });
+}
+
+/**
+ * One `sdp_rpc_attempt` per request this transport forwards. Sits directly around the raw
+ * transport, so genesis probes and dead-socket re-sends are each their own attempt and a request
+ * an outer wrapper refuses without sending logs nothing. The response and any error pass through
+ * unchanged.
+ */
+export function withAttemptTelemetry(
+  transport: RpcTransport,
+  endpoint: AttemptEndpoint
+): RpcTransport {
+  return async <TResponse>(request: RpcAttemptRequest) => {
+    const method = isJsonRpcPayload(request.payload) ? request.payload.method : "batch";
+    const startedAt = performance.now();
+    try {
+      const response = await transport<TResponse>(request);
+      const outcome = managedResponseOutcome(
+        rpcEnvelopeSchema.parse(response),
+        method,
+        endpoint.cluster
+      );
+      emitManagedAttempt(endpoint, request, method, outcome, startedAt);
+      return response;
+    } catch (cause) {
+      const outcome = rpcFailureOutcome(request.signal);
+      emitManagedAttempt(endpoint, request, method, outcome, startedAt, httpStatusOf(cause));
+      throw cause;
     }
   };
 }

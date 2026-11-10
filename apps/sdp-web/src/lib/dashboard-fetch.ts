@@ -137,7 +137,7 @@ function isApiAnswer(response: Response): boolean {
  * key, so the retry is answered by the API's replay instead of running again
  * under a new key.
  */
-function answerOf(response: Response, text: string): ApiAnswer | null {
+export function answerOf(response: Response, text: string): ApiAnswer | null {
   if (!isApiAnswer(response)) return null;
   const replayed = response.headers.get("Idempotent-Replayed") === "true";
   if (isBodylessHttpStatus(response.status)) {
@@ -173,30 +173,34 @@ function retiresKey(response: Response, body: ArrayBuffer, movesMoney: boolean):
 
 /**
  * The GET path that shows when a kept money answer's movement is final, or
- * `null` for none. The only money routes keyed here are recurring (transfers
- * and batches keep their own keys). A collect is final when its collection's
+ * `null` for none. The dashboard keys recurring routes here; the API
+ * playground keys every money route. A collect is final when its collection's
  * own transfer is, so it reads that transfer (`transfer.id`, else the
  * attempt's `transferId`); with neither, nothing the dashboard can read shows
  * the attempt's status, so the key simply stays kept. Any other recurring
- * answer reads its schedule.
+ * answer reads its schedule, a batch its batch, and a transfer its transfer.
+ *
+ * @param text - The answer's body.
  */
-function inFlightMovementReadPath(body: ArrayBuffer): string | null {
+export function inFlightMovementReadPath(text: string): string | null {
   let json: unknown;
   try {
-    json = JSON.parse(new TextDecoder().decode(body));
+    json = JSON.parse(text);
   } catch {
     return null;
   }
   const parsed = keptMovementBodySchema.safeParse(json);
   if (!parsed.success || !isMovementInFlight(movementStatusOf(json))) return null;
-  const { transfer, collectionAttempt, recurringPayment } = parsed.data.data;
+  const { transfer, batch, collectionAttempt, recurringPayment } = parsed.data.data;
   if (collectionAttempt !== undefined) {
     const transferId = transfer?.id ?? collectionAttempt.transferId;
     return transferId ? MOVEMENT_READ_PATHS.transfer(transferId) : null;
   }
-  return recurringPayment === undefined
-    ? null
-    : MOVEMENT_READ_PATHS.recurringPayment(recurringPayment.id);
+  if (recurringPayment !== undefined) {
+    return MOVEMENT_READ_PATHS.recurringPayment(recurringPayment.id);
+  }
+  if (batch !== undefined) return MOVEMENT_READ_PATHS.batch(batch.id);
+  return transfer === undefined ? null : MOVEMENT_READ_PATHS.transfer(transfer.id);
 }
 
 function sendWithProject(path: string, init: RequestInit, headers: Headers): Promise<Response> {
@@ -259,10 +263,21 @@ async function sendUnderActionKey(
     // memory only: retries in this page still reuse it, but a reload cannot. A
     // money movement refuses to send then, since a reload and retry could move
     // it twice; any other mutation sends, as a duplicate costs at most a replay.
-    const { key, persisted } = keys.claim(fingerprint);
+    const { key, persisted, outlived } = keys.claim(fingerprint);
+    const movesMoney = requiresPersistedKey(init.method ?? "GET", path);
+    // A money route answers a kept key from its own row however old it is,
+    // and a new key could move the money twice, so the key goes out.
+    if (outlived && !movesMoney) {
+      // Only the key record answers this route, and the API may have
+      // forgotten a key this old, so a retry under it could run as a second
+      // request. Nothing is sent: the user checks what the first attempt did,
+      // and the next submit is a new action.
+      keys.release(fingerprint, key);
+      return keyOutlivedResponse();
+    }
     headers.set(IDEMPOTENCY_KEY_HEADER, key);
     if (!persisted) {
-      if (requiresPersistedKey(init.method ?? "GET", path)) {
+      if (movesMoney) {
         // Only a key this call minted is dropped: a kept one belongs to an
         // earlier attempt that may have written, and its retry still needs it.
         if (!kept) keys.release(fingerprint, key);
@@ -274,11 +289,10 @@ async function sendUnderActionKey(
       // The answer only counts once its body has arrived: a download that
       // fails leaves the key pinned, so the retry recovers the first result.
       const body = await response.arrayBuffer();
-      const movesMoney = requiresPersistedKey(init.method ?? "GET", path);
       if (retiresKey(response, body, movesMoney)) {
         keys.release(fingerprint, key);
       } else if (movesMoney && response.ok) {
-        const readPath = inFlightMovementReadPath(body);
+        const readPath = inFlightMovementReadPath(new TextDecoder().decode(body));
         if (readPath !== null) {
           settleWhenMovementFinal(readPath, () => keys.release(fingerprint, key));
         }
@@ -340,6 +354,25 @@ function takesActionKey(path: string, init: RequestInit, headers: Headers): bool
       Object.values(RAMP_QUOTE_PATHS).some((quotePath) => quotePath === pathname)) &&
     !headers.has(IDEMPOTENCY_KEY_HEADER) &&
     (init.body === undefined || init.body === null || typeof init.body === "string")
+  );
+}
+
+/**
+ * The answer for a retry whose kept key is older than the API's key record
+ * keeps it (`KEPT_KEY_WINDOW_MS`), on a route nothing else answers it on: the
+ * outcome-unknown answer, which every caller already reads as "check the list"
+ * and which retires the key.
+ */
+function keyOutlivedResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      error: {
+        code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN",
+        message:
+          "The first attempt of this request is too old to retry safely. Check whether it went through before sending it again.",
+      },
+    }),
+    { status: 409, headers: { "content-type": "application/json" } }
   );
 }
 
@@ -499,6 +532,7 @@ export function settleWhenMovementFinal(
 const keptMovementBodySchema = z.object({
   data: z.object({
     transfer: z.object({ id: z.string() }).optional(),
+    batch: z.object({ id: z.string() }).optional(),
     collectionAttempt: z.object({ transferId: z.string().nullish() }).optional(),
     recurringPayment: z.object({ id: z.string() }).optional(),
   }),

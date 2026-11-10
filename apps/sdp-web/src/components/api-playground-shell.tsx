@@ -13,14 +13,19 @@ import { useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
 import { filterPlaygroundEndpointsToReleaseChannel } from "@/lib/api-playground-openapi-catalog";
 import { PLAYGROUND_PROXY_PREFIX, playgroundResponseHeaders } from "@/lib/api-playground-proxy";
-import { dashboardRequest } from "@/lib/dashboard-fetch";
+import {
+  answerOf,
+  dashboardRequest,
+  inFlightMovementReadPath,
+  settleWhenMovementFinal,
+} from "@/lib/dashboard-fetch";
 import { parseDashboardPathname } from "@/lib/dashboard-project-path";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import {
   answerRetiresKey,
-  apiErrorCode,
   canonicalizeAmounts,
   IDEMPOTENCY_KEY_HEADER,
+  moneyAnswerRetiresKey,
   parseJsonValue,
   storageFingerprint,
 } from "@/lib/idempotency";
@@ -58,6 +63,11 @@ export interface ApiPlaygroundEndpointConfig {
   expectedResponse: unknown;
   /** The API family this endpoint belongs to, grouping the endpoint picker when set. */
   group?: string;
+  /**
+   * Whether the route takes an Idempotency-Key, from the public reference; a hand-authored form
+   * inherits it when merged. Unset, the snippets show a key on every write.
+   */
+  takesIdempotencyKey?: boolean;
 }
 
 export interface ApiPlaygroundMessage {
@@ -348,19 +358,29 @@ function parseUnsettledSend(raw: string): UnsettledSend | null {
  * otherwise a new one that replaces it. Returns the stored entry too, so the
  * answer settles only the entry this Send claimed, and whether storage kept it.
  */
-function keyForSend(request: string): { key: string; entry: string; persisted: boolean } {
+function keyForSend(request: string): {
+  key: string;
+  entry: string;
+  persisted: boolean;
+  outlived: boolean;
+} {
   const digest = storageFingerprint(request);
   const mint = () => JSON.stringify({ request: digest, key: crypto.randomUUID() });
   const kept = playgroundRetryKeys.claim(UNSETTLED_SEND, mint);
   const unsettled = parseUnsettledSend(kept.key);
   if (unsettled?.request === digest) {
-    return { key: unsettled.key, entry: kept.key, persisted: kept.persisted };
+    return {
+      key: unsettled.key,
+      entry: kept.key,
+      persisted: kept.persisted,
+      outlived: kept.outlived,
+    };
   }
   playgroundRetryKeys.release(UNSETTLED_SEND, kept.key);
   const claimed = playgroundRetryKeys.claim(UNSETTLED_SEND, mint);
   const minted = parseUnsettledSend(claimed.key);
   if (minted === null) throw new Error("playground retry key: minted an unreadable entry");
-  return { key: minted.key, entry: claimed.key, persisted: claimed.persisted };
+  return { key: minted.key, entry: claimed.key, persisted: claimed.persisted, outlived: false };
 }
 
 const MONEY_ROUTE_PATTERNS = IDEMPOTENCY_REQUIRED_ROUTES.map((route) => {
@@ -377,6 +397,38 @@ const MONEY_ROUTE_PATTERNS = IDEMPOTENCY_REQUIRED_ROUTES.map((route) => {
 function isMoneyRouteRequest(method: ApiPlaygroundMethod, resolvedPath: string): boolean {
   const path = resolvedPath.split("?")[0] ?? resolvedPath;
   return MONEY_ROUTE_PATTERNS.some((route) => route.method === method && route.pattern.test(path));
+}
+
+/**
+ * Settles the key a Send claimed, on its answer. Only an answer to the write
+ * itself settles it; a keyless read (say, a GET checking whether the lost write
+ * landed) leaves it for the retry. A money route's 2xx whose movement is still
+ * in flight keeps it, as the dashboard's own sends do, so a resend cannot pay
+ * twice. The API replays that first 2xx verbatim, so a Run under
+ * the key keeps showing `processing`: the movement's own state settles it.
+ */
+function settlePlaygroundKey({
+  entry,
+  movesMoney,
+  response,
+  text,
+}: {
+  entry: string;
+  movesMoney: boolean;
+  response: Response;
+  text: string;
+}): void {
+  // The dashboard's own reading of an answer, so the two never drift.
+  const answer = answerOf(response, text);
+  if (answer === null) return;
+  if (movesMoney ? moneyAnswerRetiresKey(answer) : answerRetiresKey(answer)) {
+    playgroundRetryKeys.release(UNSETTLED_SEND, entry);
+    return;
+  }
+  const readPath = movesMoney && response.ok ? inFlightMovementReadPath(text) : null;
+  if (readPath !== null) {
+    settleWhenMovementFinal(readPath, () => playgroundRetryKeys.release(UNSETTLED_SEND, entry));
+  }
 }
 
 interface ExecutePlaygroundRequestOptions {
@@ -471,12 +523,16 @@ async function executePlaygroundRequest({
       : keyedBody,
   ]);
   const claimed = hasRequestBody(activeEndpoint.method) ? keyForSend(sendRequest) : undefined;
-  if (
-    claimed !== undefined &&
-    !claimed.persisted &&
-    isMoneyRouteRequest(activeEndpoint.method, resolvedPath)
-  ) {
+  const movesMoney = isMoneyRouteRequest(activeEndpoint.method, resolvedPath);
+  if (claimed !== undefined && !claimed.persisted && movesMoney) {
     onExecutionError(t("Shared.idempotency.keyNotPersisted"));
+    return;
+  }
+  // As the dashboard's own sends: a money route answers a kept key from its
+  // row however old it is, and any other write may have forgotten it.
+  if (claimed?.outlived && !movesMoney) {
+    playgroundRetryKeys.release(UNSETTLED_SEND, claimed.entry);
+    onExecutionError(t("Shared.idempotency.outcomeUnknownCheckList"));
     return;
   }
   const idempotencyKey = claimed?.key;
@@ -509,17 +565,13 @@ async function executePlaygroundRequest({
     const body = text ? parseResponseBody(text) : {};
     const responseHeaders = playgroundResponseHeaders(response.headers);
 
-    // Only an answer to the write itself settles its key; a keyless read (say,
-    // a GET checking whether the lost write landed) leaves it for the retry.
-    if (
-      claimed !== undefined &&
-      answerRetiresKey({
-        status: response.status,
-        replayed: responseHeaders["idempotent-replayed"] === "true",
-        code: response.ok ? null : apiErrorCode(text),
-      })
-    ) {
-      playgroundRetryKeys.release(UNSETTLED_SEND, claimed.entry);
+    if (claimed !== undefined) {
+      settlePlaygroundKey({
+        entry: claimed.entry,
+        movesMoney,
+        response,
+        text,
+      });
     }
 
     onResult({
@@ -651,8 +703,9 @@ function useApiPlaygroundState({
             : null,
         // Keep existing dashboard snippets stable; the docs use each route's auth metadata.
         auth: "apiKey",
-        // Send keys every write; the displayed snippets keep their existing body rule.
-        takesIdempotencyKey: hasRequestBody(activeEndpoint?.method ?? "GET"),
+        // Every write is sent with a key; the snippet shows one only where the route takes it.
+        takesIdempotencyKey:
+          activeEndpoint?.takesIdempotencyKey ?? hasRequestBody(activeEndpoint?.method ?? "GET"),
       }),
     [activeEndpoint, effectiveApiBaseUrl, requestBody, resolvedPath]
   );

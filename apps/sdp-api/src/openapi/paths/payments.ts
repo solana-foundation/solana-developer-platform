@@ -4,6 +4,7 @@ import { z } from "zod";
 import { errorResponseSchema } from "@/openapi/schemas/base";
 
 import {
+  activateRecurringPaymentRequestSchema,
   createOnrampQuoteRequestSchema,
   createPaymentRequestRequestSchema,
   createRecurringPaymentRequestSchema,
@@ -254,7 +255,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create transfer batch",
     operationId: "createPaymentTransferBatch",
     description:
-      "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`). A token batch is refused with 409 `SPONSORED_RENT_OVER_CAP` when one recipient's new token account costs more rent than the sponsor funds in a transaction (`details.recipientIndex`). " +
+      "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`). A token batch is refused with 409 `SPONSORED_RENT_OVER_CAP` when one recipient's new token account costs more rent than the sponsor funds in a transaction (`details.recipientIndex`). A recipient's counterparty account archived while the batch is being prepared returns 404, and one whose address changed returns 409 `TRANSFER_BATCH_DESTINATION_CHANGED` (`details.counterpartyAccountIds`); either way nothing is written or sent, so the same request can be sent again. " +
       "A chunk the source wallet cannot fund fails its recipients and transfer with the reason in `error` (the wallet does not have enough funds); the batch still returns 200. " +
       "An `externalId` already used by a batch on the same project and source wallet never pays again: the same request from the same credential returns that batch, and any other returns `409 TRANSFER_BATCH_RUN_EXISTS` with its `batchId` in `error.details`. " +
       "To finish a batch after a partial failure, call `POST /v1/payments/transfer-batches/{batchId}/retry`: it sends only the batch's `failed` recipients. Never resend the whole batch under a new Idempotency-Key, which pays the recipients that succeeded again.",
@@ -403,6 +404,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     operationId: "updatePaymentRecurringPayment",
     description:
       "Updates an SDP-custody recurring payment. Pending records are updated directly. Active metadata and due-date edits are applied in place, while active term, source, destination, or token edits create a replacement Solana subscription, authorize it, cancel the old subscription, and then swap the recurring payment to the replacement records.\n\n" +
+      "Send `expectedUpdatedAt` from the version you reviewed to make the edit apply to that version only: when the recurring payment has changed since, the edit returns `409` `RECURRING_PAYMENT_CHANGED` and changes nothing.\n\n" +
       "Requires an `Idempotency-Key`, because an edit can sign and broadcast a replacement subscription. A same-key retry of a completed edit replays its answer. A retry of an interrupted edit gets `409` `IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After` until the attempt is stale, then resumes from the last step SDP recorded. If a step was sent but not yet recorded when the edit was interrupted, which is rare, the retry can fail or send that step again, so read the recurring payment with `GET` before editing it again.",
     security: [{ apiKeyAuth: [] }],
     request: {
@@ -431,12 +433,17 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     operationId: "activatePaymentRecurringPayment",
     description:
       "Activates a pending SDP-custody recurring payment by creating the Solana subscriptions plan, authorizing the subscription, and storing the resulting on-chain identifiers and signatures.\n\n" +
+      "A fresh activation signs the terms it read: when an edit lands while it runs, or `expectedUpdatedAt` names an earlier version, it returns `409` `RECURRING_PAYMENT_CHANGED` before claiming the schedule or signing.\n\n" +
       "Both the counterparty and its account must be active before a fresh activation; an unavailable recipient returns `404` before claiming the schedule or signing. Recovery can confirm saved transactions, but cannot sign a new step for an unavailable recipient.\n\n" +
       "The source wallet gives the Subscriptions program's authority for that token an approval of 0, and each collection approves exactly its own amount in the same transaction as the pull, so the token program's `Approve` instruction appears in activation and collection transactions. If your custody provider's wallet policy allowlists programs or instructions, allow `Approve` to that authority, or the provider refuses the collection and SDP pauses the recurring payment with `pausedReason` `custody_policy_refused`.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyRequiredRerunHeaders,
       params: paymentRecurringPaymentIdParamsSchema,
+      body: {
+        required: false,
+        content: jsonContent(activateRecurringPaymentRequestSchema),
+      },
     },
     responses: {
       200: {
@@ -598,7 +605,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     operationId: "collectPaymentRecurringPayment",
     description:
       "Manually starts a due active SDP-custody recurring payment collection, creating a linked payment transfer and collection attempt.\n\n" +
-      "Before a new collection, SDP requires an active counterparty and account in the schedule's project. If either is archived or unavailable, the schedule pauses with `pausedReason` `destination_unavailable` and the request returns `409` without signing. That `409`, and every later collect or resume while the recipient stays unavailable, tells the caller to cancel the schedule and create a new one. An earlier in-flight collection still recovers.\n\n" +
+      "When admitting a new collection, SDP requires an active counterparty and account in the schedule's project. Archival that commits before admission prevents a new collection from signing. If either recipient record is archived or unavailable, the schedule pauses with `pausedReason` `destination_unavailable` and the request returns `409` without signing. That `409`, and every later collect or resume while the recipient stays unavailable, tells the caller to cancel the schedule and create a new one. A collection admitted earlier may still finish or recover.\n\n" +
       "If submission cannot be confirmed immediately, a `200` response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation.\n\n" +
       "When the source wallet cannot cover the amount, the request returns `400` `TRANSACTION_FAILED`, and the failed collection attempt and its transfer record the same reason in `error`, so the collection history shows why.",
     security: [{ apiKeyAuth: [] }],

@@ -11,7 +11,7 @@ import {
 import type { MovementId } from "@sdp/types/movements";
 import { address, type TransactionPartialSigner } from "@solana/kit";
 import { Context } from "hono";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, aroundEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { runAsMoneyPrincipal } from "@/lib/money-principal";
@@ -24,6 +24,7 @@ import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime
 import { createSigningService } from "@/services/domain/signing.service";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { inSandboxScope } from "@/test/helpers/cluster-rpc";
 import { insertTestCustodyWalletRow, seedTestCustodyRows } from "@/test/helpers/custody";
 import {
   insertTestCustodyConnection,
@@ -44,6 +45,8 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
     await importOriginal<typeof import("@sdp/types/release-channels")>()
   );
 });
+
+aroundEach((runTest) => inSandboxScope(runTest));
 
 const ORGANIZATION_ID = "org_runtime_targets";
 const PROJECT_ID = "prj_runtime_targets";
@@ -173,16 +176,17 @@ describe("CustodyRuntimeTargets", () => {
       details: { reason: "runtime_execution_unavailable" },
     });
     expect(warn).toHaveBeenCalledWith(
-      {
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
+      expect.objectContaining({
+        event: "sdp_api_custody_runtime_target_unavailable",
+        organization_id: ORGANIZATION_ID,
+        project_id: PROJECT_ID,
         provider: "privy",
-        targetKind: "config",
-        targetId: config.id,
-        custodyWalletId,
+        custody_mode: "managed",
+        target_id: config.id,
+        custody_wallet_id: custodyWalletId,
         reason: "runtime_execution_unavailable",
-      },
-      "custody_runtime_target_unavailable"
+      }),
+      "sdp_api_custody_runtime_target_unavailable"
     );
   });
 
@@ -268,13 +272,14 @@ describe("CustodyRuntimeTargets", () => {
     ).rejects.toMatchObject({ code: "NOT_FOUND", statusCode: 404 });
     expect(read).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
-      {
-        organizationId: ORGANIZATION_ID,
-        projectId,
-        custodyWalletId,
+      expect.objectContaining({
+        event: "sdp_api_custody_runtime_target_unavailable",
+        organization_id: ORGANIZATION_ID,
+        project_id: projectId,
+        custody_wallet_id: custodyWalletId,
         reason: "exact_wallet_not_found",
-      },
-      "custody_runtime_target_unavailable"
+      }),
+      "sdp_api_custody_runtime_target_unavailable"
     );
   });
 
@@ -368,13 +373,14 @@ describe("CustodyRuntimeTargets", () => {
       )
     ).rejects.toMatchObject({ code: "WALLET_NOT_FOUND" });
     expect(warn).toHaveBeenCalledWith(
-      {
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        custodyWalletId: "cwlt_missing",
+      expect.objectContaining({
+        event: "sdp_api_custody_runtime_target_unavailable",
+        organization_id: ORGANIZATION_ID,
+        project_id: PROJECT_ID,
+        custody_wallet_id: "cwlt_missing",
         reason: "exact_wallet_not_found",
-      },
-      "custody_runtime_target_unavailable"
+      }),
+      "sdp_api_custody_runtime_target_unavailable"
     );
   });
 
@@ -419,16 +425,17 @@ describe("CustodyRuntimeTargets", () => {
       });
       expect(read).not.toHaveBeenCalled();
       expect(warn).toHaveBeenCalledWith(
-        {
-          organizationId: ORGANIZATION_ID,
-          projectId: PROJECT_ID,
+        expect.objectContaining({
+          event: "sdp_api_custody_runtime_target_unavailable",
+          organization_id: ORGANIZATION_ID,
+          project_id: PROJECT_ID,
           provider: "privy",
-          targetKind: "connection",
-          targetId: connection.id,
-          custodyWalletId: `cwlt_${connection.id}`,
+          custody_mode: "byok",
+          target_id: connection.id,
+          custody_wallet_id: `cwlt_${connection.id}`,
           reason: "connection_unusable",
-        },
-        "custody_runtime_target_unavailable"
+        }),
+        "sdp_api_custody_runtime_target_unavailable"
       );
     }
   );
@@ -1283,16 +1290,17 @@ describe("CustodyRuntimeTargets", () => {
       expect(getConfigAdapter).not.toHaveBeenCalled();
       expect(fetch).not.toHaveBeenCalled();
       expect(warn).toHaveBeenCalledWith(
-        {
-          organizationId: ORGANIZATION_ID,
-          projectId: PROJECT_ID,
+        expect.objectContaining({
+          event: "sdp_api_custody_runtime_target_unavailable",
+          organization_id: ORGANIZATION_ID,
+          project_id: PROJECT_ID,
           provider: "privy",
-          targetKind: owner,
-          targetId,
-          custodyWalletId,
+          custody_mode: mode,
+          target_id: targetId,
+          custody_wallet_id: custodyWalletId,
           reason: "not_in_release_channel",
-        },
-        "custody_runtime_target_unavailable"
+        }),
+        "sdp_api_custody_runtime_target_unavailable"
       );
     }
   );
