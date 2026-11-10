@@ -64,7 +64,7 @@ describe("NetworkSection", () => {
         `<span aria-hidden="true">${value}</span><span class="sr-only">${value}</span>`
       );
     }
-    expect(markup).toContain("Custody, compliance, and payment partners");
+    expect(markup).toContain("Custody, payment, and infrastructure partners");
     expect(markup.match(/<li class="[^"]*_stat_/g)).toHaveLength(4);
   });
 });
