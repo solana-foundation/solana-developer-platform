@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 export const FEEDBACK_CATEGORIES = ["problem", "idea", "question"] as const;
 export type FeedbackCategory = (typeof FEEDBACK_CATEGORIES)[number];
 
@@ -26,10 +28,12 @@ export function feedbackCategoryOf(value: string): FeedbackCategory | "" {
 }
 
 /** Why a picked file was left out, naming it where the message does. */
-export type FileRefusal =
-  | { reason: "type"; name: string }
-  | { reason: "size"; name: string }
-  | { reason: "count" };
+const FILE_REFUSAL_SCHEMA = z.discriminatedUnion("reason", [
+  z.object({ reason: z.literal("type"), name: z.string() }),
+  z.object({ reason: z.literal("size"), name: z.string() }),
+  z.object({ reason: z.literal("count") }),
+]);
+export type FileRefusal = z.infer<typeof FILE_REFUSAL_SCHEMA>;
 
 /**
  * Adds the picked files the screen takes, in order, and reports the last one it left out: not a

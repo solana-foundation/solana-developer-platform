@@ -210,11 +210,13 @@ export function FeedbackForm({ organizationId }: { organizationId: string }) {
   );
 }
 
-type SendResult =
-  | { kind: "sent" }
-  | { kind: "unreadable"; name: string }
-  | { kind: "unavailable" }
-  | { kind: "failed"; error: string };
+const SEND_RESULT_SCHEMA = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("sent") }),
+  z.object({ kind: z.literal("unreadable"), name: z.string() }),
+  z.object({ kind: z.literal("unavailable") }),
+  z.object({ kind: z.literal("failed"), error: z.string() }),
+]);
+type SendResult = z.infer<typeof SEND_RESULT_SCHEMA>;
 
 function sendErrorText(result: Exclude<SendResult, { kind: "sent" }>, t: Translate): string {
   switch (result.kind) {
@@ -231,21 +233,49 @@ function sendErrorText(result: Exclude<SendResult, { kind: "sent" }>, t: Transla
   }
 }
 
-/** Reads each attached file; a file that can no longer be read is named, and nothing is sent. */
-async function readAttachments(files: readonly AttachedFile[]) {
-  const attachments: { filename: string; data: Uint8Array; contentType: string }[] = [];
-  for (const { file } of files) {
-    try {
-      attachments.push({
-        filename: file.name,
-        data: new Uint8Array(await file.arrayBuffer()),
-        contentType: file.type,
-      });
-    } catch {
-      return { ok: false as const, name: file.name };
-    }
+const READ_RESULT_SCHEMA = z.discriminatedUnion("ok", [
+  z.object({
+    ok: z.literal(true),
+    attachment: z.object({
+      filename: z.string(),
+      data: z.instanceof(Uint8Array),
+      contentType: z.string(),
+    }),
+  }),
+  z.object({ ok: z.literal(false), name: z.string() }),
+]);
+type ReadResult = z.infer<typeof READ_RESULT_SCHEMA>;
+
+const ATTACHMENTS_RESULT_SCHEMA = z.discriminatedUnion("ok", [
+  z.object({
+    ok: z.literal(true),
+    attachments: z.array(READ_RESULT_SCHEMA.options[0].shape.attachment),
+  }),
+  READ_RESULT_SCHEMA.options[1],
+]);
+type AttachmentsResult = z.infer<typeof ATTACHMENTS_RESULT_SCHEMA>;
+
+async function readAttachment(file: File): Promise<ReadResult> {
+  try {
+    const data = new Uint8Array(await file.arrayBuffer());
+    return { ok: true, attachment: { filename: file.name, data, contentType: file.type } };
+  } catch {
+    return { ok: false, name: file.name };
   }
-  return { ok: true as const, attachments };
+}
+
+/**
+ * Reads the attached files together (five at most, all local); a file that can no longer be read
+ * is named, and nothing is sent.
+ */
+async function readAttachments(files: readonly AttachedFile[]): Promise<AttachmentsResult> {
+  const read = await Promise.all(files.map(({ file }) => readAttachment(file)));
+  const attachments = [];
+  for (const entry of read) {
+    if (!entry.ok) return entry;
+    attachments.push(entry.attachment);
+  }
+  return { ok: true, attachments };
 }
 
 /**
@@ -292,11 +322,13 @@ async function sendFeedback(input: {
   return { kind: "failed", error: result.error };
 }
 
-type SentBody =
-  | { kind: "noEmail" }
-  | { kind: "noFiles"; email: string }
-  | { kind: "oneFile"; email: string }
-  | { kind: "files"; email: string; count: number };
+const SENT_BODY_SCHEMA = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("noEmail") }),
+  z.object({ kind: z.literal("noFiles"), email: z.string() }),
+  z.object({ kind: z.literal("oneFile"), email: z.string() }),
+  z.object({ kind: z.literal("files"), email: z.string(), count: z.number().int() }),
+]);
+type SentBody = z.infer<typeof SENT_BODY_SCHEMA>;
 
 function sentBodyOf(email: string | null, files: number): SentBody {
   if (email === null) return { kind: "noEmail" };
