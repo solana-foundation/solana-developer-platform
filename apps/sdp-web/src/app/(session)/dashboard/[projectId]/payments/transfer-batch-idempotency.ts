@@ -93,6 +93,10 @@ export function transferBatchRequestFingerprint(request: PaymentTransferBatchReq
       recipient.counterpartyAccountId,
       recipient.amount,
     ]),
+    // A fixed slot where batch options used to be. Stored keys, saved run names and the run name
+    // another operator's browser derives are all read from this exact string, so its shape never
+    // changes: a different string names a new run for a batch that may already have paid.
+    null,
   ]);
 }
 
