@@ -11,8 +11,17 @@
 
 ## Docs
 
-### What is SDP?
+### Get started
 Source: https://platform.solana.com/docs
+
+> Build on Solana with one dashboard and REST API, from devnet to mainnet.
+
+<DocsHome />
+
+---
+
+### What is SDP?
+Source: https://platform.solana.com/docs/introduction
 
 > One API for building on Solana with your chosen providers, from devnet to mainnet.
 
@@ -43,16 +52,7 @@ This deployment publishes these modules:
 | **Compliance** | Screen wallets and transactions against your regulatory program |
 | **Asset profiles** | Issued-asset identity and metadata, and the public token metadata URI |
 
-[Get started](/docs/get-started) on devnet, or [browse the API reference](/docs/reference/api).
-
----
-
-### Get started
-Source: https://platform.solana.com/docs/get-started
-
-> Build on Solana with one dashboard and REST API, from devnet to mainnet.
-
-<DocsHome />
+[Get started](/docs) on devnet, or [browse the API reference](/docs/reference/api).
 
 ---
 

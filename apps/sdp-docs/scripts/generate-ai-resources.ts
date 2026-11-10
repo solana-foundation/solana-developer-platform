@@ -71,7 +71,7 @@ const FEATURE_SUMMARY = DOCS_MODULES.filter(
 ).map((entry) => entry.capability);
 
 const KEY_PAGE_SLUGS = [
-  "index",
+  "introduction",
   "guides/setup-organization",
   "guides/setup-wallets",
   "guides/go-to-mainnet",

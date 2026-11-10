@@ -3,17 +3,25 @@ import type { Item, Node, Root } from "fumadocs-core/page-tree";
 type Describe = (url: string) => string | undefined;
 
 /**
- * Every docs page as one Markdown section, which closes the home's Markdown
- * at `/docs.md`: each page under its folder and separator headings, with the
- * page's description.
+ * The docs home as Markdown, served at `/docs.md`. The home page renders
+ * `DocsHome` and has no Markdown body, so this is its title and description
+ * followed by the navigation it leads into: every page under its folder and
+ * separator headings, with the page's description.
  *
+ * @param home - The home page's frontmatter title and description.
  * @param tree - The docs page tree, already narrowed to the release channel.
  * @param describe - The description of the page at a URL, if it has one.
- * @returns The Markdown section.
+ * @returns The Markdown document.
  */
-export function renderDocsIndexMarkdown(tree: Root, describe: Describe): string {
-  const lines = ["## All pages", ""];
-  appendNodes(lines, tree.children, 3, describe);
+export function renderDocsIndexMarkdown(
+  home: { title?: string; description?: string },
+  tree: Root,
+  describe: Describe
+): string {
+  const lines: string[] = [];
+  if (home.title) lines.push(`# ${singleLine(home.title)}`, "");
+  if (home.description) lines.push(singleLine(home.description), "");
+  appendNodes(lines, tree.children, 2, describe);
   const markdown = lines
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")

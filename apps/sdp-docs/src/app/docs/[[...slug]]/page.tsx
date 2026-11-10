@@ -91,7 +91,7 @@ export default async function Page({ params }: DocsPageProps) {
       <DocsPage
         toc={toc}
         // An API operation's page takes the full width beside its samples (globals.css).
-        full={data.full === true || data.apiReference === true}
+        full={isHome || data.full === true || data.apiReference === true}
       >
         <div className="launch-docs-header">
           {!data.hideTitle && <DocsTitle>{data.title}</DocsTitle>}

@@ -6,7 +6,7 @@ import { renderDocsIndexMarkdown } from "@/lib/docs-index-markdown";
 const TREE: Root = {
   name: "Docs",
   children: [
-    { type: "page", name: "What is SDP?", url: "/docs" },
+    { type: "page", name: "What is SDP?", url: "/docs/introduction" },
     {
       type: "folder",
       name: "Payments",
@@ -30,30 +30,38 @@ const TREE: Root = {
   ],
 };
 
-const DESCRIPTIONS = new Map([["/docs", "One API in front of\ninterchangeable providers."]]);
+const DESCRIPTIONS = new Map([
+  ["/docs/introduction", "One API in front of\ninterchangeable providers."],
+]);
 
 describe("docs index Markdown", () => {
   it("lists every nav page under its folder and separator headings", () => {
-    const markdown = renderDocsIndexMarkdown(TREE, (url) => DESCRIPTIONS.get(url));
+    const markdown = renderDocsIndexMarkdown(
+      { title: "Ship anything onchain\nwith SDP", description: "A dashboard and REST API." },
+      TREE,
+      (url) => DESCRIPTIONS.get(url)
+    );
 
     assert.equal(
       markdown,
       [
-        "## All pages",
+        "# Ship anything onchain with SDP",
         "",
-        "- [What is SDP?](/docs): One API in front of interchangeable providers.",
+        "A dashboard and REST API.",
         "",
-        "### Payments",
+        "- [What is SDP?](/docs/introduction): One API in front of interchangeable providers.",
+        "",
+        "## Payments",
         "",
         "- [Overview](/docs/payments)",
         "",
-        "#### Send Payments",
+        "### Send Payments",
         "",
         "- [Basic payment](/docs/payments/send-basic-payment)",
         "",
-        "### Reference",
+        "## Reference",
         "",
-        "#### API",
+        "### API",
         "",
         "- [Wallets](/docs/reference/api/wallets)",
         "",
