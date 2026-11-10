@@ -132,6 +132,8 @@ async function createActiveOrganization() {
 }
 
 describe("POST /v1/organizations", () => {
+  const loggedEvents = recordLoggedEvents(["sdp_api_organization_created"]);
+
   beforeEach(async () => {
     await seedTestDatabase(env);
     await ensureTestClerkIssuer(env);
@@ -204,7 +206,6 @@ describe("POST /v1/organizations", () => {
   });
 
   it("logs the creation once, from whichever of two concurrent retries activates it, and never on a finished retry", async () => {
-    const loggedEvents = recordLoggedEvents(["sdp_api_organization_created"]);
     clerk.answer(FIRST_SIGN_IN, CLERK_ORGANIZATION, membershipsPage(0), {
       status: 500,
       body: { errors: [{ code: "internal_clerk_error" }] },
@@ -225,15 +226,12 @@ describe("POST /v1/organizations", () => {
 
     expect([...retries, finished].map((response) => response.status)).toEqual([201, 201, 201]);
     expect(loggedEvents()).toEqual([
-      [
-        "info",
-        {
-          event: "sdp_api_organization_created",
-          organization_id: created.id,
-          user_id: created.created_by_user_id,
-        },
-        { user_id: created.created_by_user_id },
-      ],
+      {
+        severity: "INFO",
+        event: "sdp_api_organization_created",
+        organization_id: created.id,
+        user_id: created.created_by_user_id,
+      },
     ]);
   });
 

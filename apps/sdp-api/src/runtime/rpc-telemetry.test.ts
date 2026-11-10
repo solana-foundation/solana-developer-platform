@@ -8,6 +8,8 @@ import {
   getAccountInfoMock,
   installPaymentsRouteTestHooks,
   TEST_API_KEY,
+  TEST_ORG,
+  TEST_PROJECT,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
 
@@ -67,6 +69,10 @@ describe("managed pool RPC log lines through the app", () => {
       outcome: "succeeded",
       duration_ms: expect.any(Number),
       sample_weight: 1,
+      organization_id: TEST_ORG.id,
+      api_key_id: TEST_API_KEY.id,
+      project_id: TEST_PROJECT.id,
+      environment: "sandbox",
     });
   });
 

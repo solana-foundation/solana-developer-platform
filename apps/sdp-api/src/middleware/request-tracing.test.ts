@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as logger from "@/runtime/logger";
+import { TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
+import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { TEST_PROJECT } from "@/test/fixtures/tokens";
+import { recordLoggedEvents } from "@/test/helpers/log-events";
 import type { Env } from "@/types/env";
 import { localRateLimit } from "./local-rate-limit";
 import { requestIdMiddleware } from "./request-id";
@@ -127,6 +131,95 @@ describe("requestTracingMiddleware", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("X-SDP-Trace-ID")).toBe(response.headers.get("X-Request-ID"));
+  });
+
+  describe("the settled identity on the timing line", () => {
+    const loggedEvents = recordLoggedEvents(["sdp_api_request_timing"]);
+    const session = {
+      clerkUserId: "user_clerk_timing",
+      clerkOrgId: "org_clerk_timing",
+      orgSlug: null,
+      email: TEST_USER.email,
+    };
+    const onProject = (c: Context<{ Bindings: Env }>) => {
+      c.set("projectId", TEST_PROJECT.id);
+      c.set("projectEnvironment", TEST_PROJECT.environment);
+    };
+    const project = {
+      organization_id: TEST_ORG.id,
+      project_id: TEST_PROJECT.id,
+      environment: TEST_PROJECT.environment,
+    };
+
+    it.each<[string, (c: Context<{ Bindings: Env }>) => void, Record<string, string | null>]>([
+      [
+        "a signed-in member",
+        (c) => {
+          c.set("clerk", {
+            ...session,
+            userId: TEST_USER.id,
+            organizationId: TEST_ORG.id,
+            role: "admin",
+          });
+          onProject(c);
+        },
+        { ...project, user_id: TEST_USER.id, api_key_id: null, auth_type: "clerk" },
+      ],
+      [
+        "an API key",
+        (c) => {
+          c.set("apiKey", {
+            id: TEST_API_KEY.id,
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT.id,
+            grants: TEST_SEEDED_API_KEY.grants,
+            environment: TEST_PROJECT.environment,
+            walletAccess: { scope: "all" },
+          });
+          onProject(c);
+        },
+        { ...project, user_id: null, api_key_id: TEST_API_KEY.id, auth_type: "api_key" },
+      ],
+      [
+        "a signup session",
+        (c) =>
+          c.set("clerkSignup", {
+            userId: TEST_USER.id,
+            clerkUserId: session.clerkUserId,
+            email: TEST_USER.email,
+          }),
+        { user_id: TEST_USER.id },
+      ],
+      [
+        "an onboarding session",
+        (c) => c.set("clerkOnboarding", { ...session, organizationId: TEST_ORG.id }),
+        { organization_id: TEST_ORG.id },
+      ],
+      ["an unauthenticated request", () => undefined, {}],
+    ])("carries what %s settled", async (_, settle, identity) => {
+      const app = new Hono<{ Bindings: Env }>();
+      app.use("*", requestIdMiddleware());
+      app.use("*", requestTracingMiddleware());
+      app.use("*", async (c, next) => {
+        settle(c);
+        await next();
+      });
+      app.get("/settled", (c) => c.text("ok"));
+
+      expect((await app.request("https://example.test/settled")).status).toBe(200);
+      expect(loggedEvents()).toEqual([
+        {
+          severity: "INFO",
+          event: "sdp_api_request_timing",
+          source: "unknown",
+          method: "GET",
+          path: "/settled",
+          status: 200,
+          duration_ms: expect.any(Number),
+          ...identity,
+        },
+      ]);
+    });
   });
 
   it("keeps unmatched path and query secrets out of timing and rate-limit logs", async () => {

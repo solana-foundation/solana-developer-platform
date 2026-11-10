@@ -18,7 +18,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { clerkOnboardingMiddleware } from "@/middleware/clerk-onboarding";
-import { getLogContext, type LogContext } from "@/runtime/logger";
+import { logEvent } from "@/runtime/money-path-events";
 import {
   ensureTestClerkIssuer,
   seedClerkIdentity,
@@ -26,6 +26,7 @@ import {
 } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { seedInvitation } from "@/test/helpers/invitations";
+import { recordLoggedEvents } from "@/test/helpers/log-events";
 import { organizationMember, seedActiveMemberships } from "@/test/helpers/organization-members";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
@@ -91,6 +92,8 @@ type StatusBody = {
 };
 
 describe("onboarding status under database tenant isolation", () => {
+  const loggedEvents = recordLoggedEvents(["test_request_line"]);
+
   beforeEach(async () => {
     await seedTestDatabase(env);
 
@@ -136,20 +139,26 @@ describe("onboarding status under database tenant isolation", () => {
     expect(body.data.setup).not.toBeNull();
   });
 
-  it.each<[string, LogContext]>([
+  it.each<[string, Record<string, string>]>([
     [CLERK_ORG_ID, { organization_id: ORGANIZATION_ID }],
     ["org_clerk_never_linked", {}],
-  ])("scopes the onboarding log context under %s", async (clerkOrgId, context) => {
+  ])("puts the onboarding identity under %s on the line", async (clerkOrgId, identity) => {
     await ensureTestClerkIssuer(env);
     const token = await signTestClerkClaims(clerkPayload(clerkOrgId), 300);
     const headers = { Authorization: `Bearer ${token}` };
     const probe = new Hono<{ Bindings: Env }>();
     probe.use("*", clerkOnboardingMiddleware());
-    probe.get("/context", (c) => c.json(getLogContext()));
+    probe.get("/line", (c) => {
+      logEvent("info", { event: "test_request_line" });
+      return c.text("ok");
+    });
 
-    const res = await probe.request("/context", { headers }, env);
+    const res = await probe.request("/line", { headers }, env);
 
-    expect({ status: res.status, context: await res.json() }).toEqual({ status: 200, context });
+    expect({ status: res.status, lines: loggedEvents() }).toEqual({
+      status: 200,
+      lines: [{ severity: "INFO", event: "test_request_line", ...identity }],
+    });
   });
 
   it("reports unlinked for a Clerk organization with no mapping", async () => {

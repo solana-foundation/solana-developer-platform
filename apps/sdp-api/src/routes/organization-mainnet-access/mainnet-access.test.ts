@@ -23,26 +23,19 @@ const ITERABLE_API_URL = "https://api.iterable.com";
 const ITERABLE_SEND_URL = `${ITERABLE_API_URL}/api/email/target`;
 const ITERABLE_TEST_KEY = "0123456789abcdef0123456789abcdef";
 const SUBMISSION = { countryCode: "SG", termsVersion: SDP_TERMS.version, acceptTerms: true };
-const MAINNET_ACCESS_EVENTS = [
-  "sdp_api_mainnet_access_requested",
-  "sdp_api_mainnet_access_request_notified",
-  "sdp_api_mainnet_access_request_notify_failed",
-];
 const ADMIN_IDENTITY = { organization_id: ORGANIZATION_ID, user_id: TEST_USER.id };
-const REQUESTED_EVENT = [
-  "info",
-  {
-    event: "sdp_api_mainnet_access_requested",
-    country_code: "SG",
-    terms_version: SDP_TERMS.version,
-  },
-  ADMIN_IDENTITY,
-];
-const NOTIFIED_EVENT = [
-  "info",
-  { event: "sdp_api_mainnet_access_request_notified" },
-  ADMIN_IDENTITY,
-];
+const REQUESTED_EVENT = {
+  severity: "INFO",
+  event: "sdp_api_mainnet_access_requested",
+  country_code: "SG",
+  terms_version: SDP_TERMS.version,
+  ...ADMIN_IDENTITY,
+};
+const NOTIFIED_EVENT = {
+  severity: "INFO",
+  event: "sdp_api_mainnet_access_request_notified",
+  ...ADMIN_IDENTITY,
+};
 
 let adminToken: string;
 let memberToken: string;
@@ -179,6 +172,13 @@ function sentEmails() {
 }
 
 describe("Organization mainnet access (HOO-2427)", () => {
+  const loggedEvents = recordLoggedEvents([
+    "sdp_api_mainnet_access_requested",
+    "sdp_api_mainnet_access_request_notified",
+    "sdp_api_mainnet_access_request_notify_failed",
+    "sdp_api_internal_error",
+  ]);
+
   beforeEach(async () => {
     await seedTestDatabase(env);
     await seedOrganization();
@@ -237,7 +237,6 @@ describe("Organization mainnet access (HOO-2427)", () => {
   });
 
   it("records jurisdiction and terms acceptance, emails the alias, logs both, and reads pending", async () => {
-    const loggedEvents = recordLoggedEvents(MAINNET_ACCESS_EVENTS);
     const response = await post(SUBMISSION);
     expect(response.status).toBe(201);
     const data = (await response.json()).data;
@@ -315,22 +314,19 @@ describe("Organization mainnet access (HOO-2427)", () => {
   });
 
   it("keeps a request whose email failed, for notify to send, logging the failure and the send", async () => {
-    const loggedEvents = recordLoggedEvents(MAINNET_ACCESS_EVENTS);
     const restore = failIterable();
     expect((await post(SUBMISSION)).status).toBe(503);
     expect((await storedRow())?.notified_at).toBeNull();
     expect((await (await get()).json()).data.request).toMatchObject({ notified: false });
     expect(loggedEvents()).toEqual([
       REQUESTED_EVENT,
-      [
-        "warn",
-        {
-          event: "sdp_api_mainnet_access_request_notify_failed",
-          error_name: "AppError",
-          error_code: "PROVIDER_UNAVAILABLE",
-        },
-        ADMIN_IDENTITY,
-      ],
+      {
+        severity: "WARNING",
+        event: "sdp_api_mainnet_access_request_notify_failed",
+        error_name: "AppError",
+        error_code: "PROVIDER_UNAVAILABLE",
+        ...ADMIN_IDENTITY,
+      },
     ]);
     restore();
 
@@ -346,14 +342,18 @@ describe("Organization mainnet access (HOO-2427)", () => {
   });
 
   it("logs an unexpected handler error inside the admin's identity", async () => {
-    const loggedEvents = recordLoggedEvents(["sdp_api_internal_error"]);
     vi.spyOn(mainnetAccessEmail, "sendMainnetAccessRequestEmail").mockRejectedValue(
       new Error("template failed")
     );
     expect((await post(SUBMISSION)).status).toBe(500);
-    expect(loggedEvents().map(([, payload, identity]) => [payload.event, identity])).toEqual([
-      ["sdp_api_internal_error", ADMIN_IDENTITY],
-    ]);
+    expect(loggedEvents().at(-1)).toEqual({
+      severity: "ERROR",
+      event: "sdp_api_internal_error",
+      method: "POST",
+      path: "/v1/organizations/:orgId/mainnet-access",
+      error_name: "Error",
+      ...ADMIN_IDENTITY,
+    });
   });
 
   it("rebuilds the email on notify, so a renamed organization reads its new name", async () => {

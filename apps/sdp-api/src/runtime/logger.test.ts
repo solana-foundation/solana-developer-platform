@@ -1,5 +1,8 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import pino from "pino";
 import { describe, expect, it } from "vitest";
+import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
+import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { baseLoggerOptions, getLogContext, runWithLogContext } from "./logger";
 
 function captureLogger() {
@@ -45,33 +48,60 @@ describe("logger context", () => {
     expect(records[0]).not.toHaveProperty("trace_id");
   });
 
-  it("puts the identity each nested context adds to its parent's on the line", () => {
+  const inTenant = (log: () => void) =>
+    runWithTenantDatabaseIdentity({ organizationId: "org_scope" }, log);
+  const asMember = (log: () => void) =>
+    runAsMoneyPrincipal({ kind: "member", userId: "usr_scope" }, log);
+
+  it.each<[string, (log: () => void) => void, Record<string, string>]>([
+    [
+      "a member's tenant request on a project",
+      (log) =>
+        inTenant(() =>
+          asMember(() =>
+            runInClusterScope({ projectId: "prj_scope", environment: "production" }, log)
+          )
+        ),
+      {
+        organization_id: "org_scope",
+        user_id: "usr_scope",
+        project_id: "prj_scope",
+        environment: "production",
+      },
+    ],
+    [
+      "an API key's tenant request",
+      (log) => inTenant(() => runAsMoneyPrincipal({ kind: "api_key", apiKeyId: "key_scope" }, log)),
+      { organization_id: "org_scope", api_key_id: "key_scope" },
+    ],
+    [
+      "a cluster scope with no project",
+      (log) => runInClusterScope({ projectId: null, environment: "sandbox" }, log),
+      { environment: "sandbox" },
+    ],
+    [
+      "a system job collecting a mandate",
+      (log) =>
+        runWithSystemDatabaseIdentity("job:scope", () =>
+          runAsMoneyPrincipal({ kind: "mandate", recurringPaymentId: "rp_scope" }, log)
+        ),
+      {},
+    ],
+    ["no scope", (log) => log(), {}],
+  ])("puts the identity of %s on the line", (_, scopes, identity) => {
     const { logger, records } = captureLogger();
 
-    runWithLogContext({ request_id: "req_4", organization_id: "org_4", api_key_id: "key_4" }, () =>
-      runWithLogContext({ project_id: "prj_4" }, () => logger.info("settled"))
-    );
+    scopes(() => logger.info("scoped"));
 
     expect(records).toEqual([
-      {
-        level: 30,
-        severity: "INFO",
-        time: expect.any(Number),
-        request_id: "req_4",
-        organization_id: "org_4",
-        api_key_id: "key_4",
-        project_id: "prj_4",
-        message: "settled",
-      },
+      { level: 30, severity: "INFO", time: expect.any(Number), message: "scoped", ...identity },
     ]);
   });
 
-  it("lets a field the line passes win over the same field in the context", () => {
+  it("lets a field the line passes win over the same field from a scope", () => {
     const { logger, records } = captureLogger();
 
-    runWithLogContext({ organization_id: "org_context", user_id: "usr_5" }, () => {
-      logger.info({ organization_id: "org_line" }, "created");
-    });
+    inTenant(() => asMember(() => logger.info({ organization_id: "org_line" }, "created")));
 
     expect(records).toEqual([
       {
@@ -79,7 +109,7 @@ describe("logger context", () => {
         severity: "INFO",
         time: expect.any(Number),
         organization_id: "org_line",
-        user_id: "usr_5",
+        user_id: "usr_scope",
         message: "created",
       },
     ]);

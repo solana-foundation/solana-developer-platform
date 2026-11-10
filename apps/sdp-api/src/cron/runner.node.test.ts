@@ -419,7 +419,7 @@ describe("a slot's RPC lines", () => {
   const rpc = installClusterRpcStub();
   const lines = installLogLineCapture();
 
-  it("carry the definition's name and no route", async () => {
+  it("carry the definition's name and environment, and no route or caller", async () => {
     rpc.answer("getBlockHeight", 900);
     const worker = await startWorker();
     vi.mocked(pendingTransfersCron.run).mockImplementationOnce(async () => {
@@ -430,10 +430,24 @@ describe("a slot's RPC lines", () => {
     await run;
 
     expect(
-      lines
-        .filter((line) => line.event === "sdp_rpc_attempt" && line.method === "getBlockHeight")
-        .map((line) => ({ cron: line.cron, route: line.route, sample_weight: line.sample_weight }))
-    ).toEqual([{ cron: pendingTransfersCron.name, sample_weight: 1 }]);
+      lines.filter((line) => line.event === "sdp_rpc_attempt" && line.method === "getBlockHeight")
+    ).toEqual([
+      {
+        level: 30,
+        severity: "INFO",
+        time: expect.any(Number),
+        cron: pendingTransfersCron.name,
+        event: "sdp_rpc_attempt",
+        surface: "managed_pool",
+        provider: "default",
+        cluster: "devnet",
+        method: "getBlockHeight",
+        outcome: "succeeded",
+        duration_ms: expect.any(Number),
+        sample_weight: 1,
+        environment: "sandbox",
+      },
+    ]);
   });
 });
 

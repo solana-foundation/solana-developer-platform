@@ -35,7 +35,6 @@ const INVITATION_ID = "inv_admission";
 const ADMIN = organizationMember("admission_admin", "admin");
 const INVITEE = organizationMember("admission_invitee", "member");
 let projects: SeededDefaultProjects;
-let loggedEvents: ReturnType<typeof recordLoggedEvents>;
 
 async function signIn(orgRole: "admin" | "member", clerkOrgId: string): Promise<Response> {
   const token = await signTestClerkJwt({
@@ -103,17 +102,14 @@ const ACCEPT_INVITE_AUDIT = {
 };
 
 function invitationAcceptedEvent(role: OrganizationRole) {
-  return [
-    "info",
-    {
-      event: "sdp_api_invitation_accepted",
-      organization_id: ORGANIZATION.id,
-      user_id: INVITEE.userId,
-      invitation_id: INVITATION_ID,
-      role,
-    },
-    {},
-  ];
+  return {
+    severity: "INFO",
+    event: "sdp_api_invitation_accepted",
+    organization_id: ORGANIZATION.id,
+    user_id: INVITEE.userId,
+    invitation_id: INVITATION_ID,
+    role,
+  };
 }
 
 async function inviteeProjectIds(): Promise<string[]> {
@@ -145,6 +141,8 @@ async function expectUnauthorized(response: Response, message: string): Promise<
 }
 
 describe("sign-in admission", () => {
+  const loggedEvents = recordLoggedEvents(["sdp_api_invitation_accepted"]);
+
   beforeEach(async () => {
     await seedTestDatabase(env);
     await ensureTestClerkIssuer(env);
@@ -168,7 +166,6 @@ describe("sign-in admission", () => {
       createdBy: ADMIN.userId,
       members: [ADMIN.userId],
     });
-    loggedEvents = recordLoggedEvents(["sdp_api_invitation_accepted"]);
   });
 
   afterEach(async () => {
