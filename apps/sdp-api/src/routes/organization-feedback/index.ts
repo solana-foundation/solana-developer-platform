@@ -8,8 +8,8 @@ import { sendFeedback } from "./handlers";
 import { sendFeedbackSchema } from "./schemas";
 
 // Mounted under /organizations/:orgId/feedback; the parent router applies auth.
-// Feedback is the dashboard's Send feedback screen (PRO-2421): a signed-in person in any role,
-// never an API key, so it takes the read every role holds.
+// Feedback is the dashboard's Send feedback screen (PRO-2421): it sends an email, so it is an
+// `execute` that admins and members hold and viewers do not, and API keys can never hold it.
 export const organizationFeedback = new Hono<{ Bindings: Env }>();
 
 // Each send is one email to the SDP alias through Iterable.
@@ -17,8 +17,8 @@ const sendQuota = meteredQuota({ name: "feedback", actorMax: 10, orgMax: 30 });
 
 organizationFeedback.post(
   "/",
-  requireAction("organizations.read"),
   requireHumanSession(),
+  requireAction("feedback.execute"),
   sendQuota,
   validateBody(sendFeedbackSchema),
   sendFeedback

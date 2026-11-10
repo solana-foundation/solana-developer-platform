@@ -28,6 +28,7 @@ import {
 import Link from "next/link";
 import { docsHref } from "@/components/dashboard-nav";
 import { UserAvatar } from "@/components/user-avatar";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useNetworkDebug } from "@/contexts/network-debug-context";
 import { THEME_PREFERENCES, type ThemePreference, useTheme } from "@/contexts/theme-context";
 import type { MessageKey } from "@/i18n/messages";
@@ -49,6 +50,8 @@ export function SidebarUserMenu({ collapsed }: { collapsed: boolean }) {
   const projectHref = useProjectHref();
   const { user, isLoaded } = useUser();
   const { signOut } = useClerk();
+  // Viewers cannot send feedback (`feedback.execute`), so the item is not offered to them.
+  const canSendFeedback = useDashboardWorkspace().dashboardAccess.capabilities.canSendFeedback;
   if (!isLoaded) {
     return (
       <div
@@ -122,12 +125,14 @@ export function SidebarUserMenu({ collapsed }: { collapsed: boolean }) {
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <ThemeMenuItem />
-        <DropdownMenuItem asChild className={MENU_ITEM_CLASS}>
-          <Link href={projectHref(DASHBOARD_FEEDBACK_HREF)}>
-            <MessageSquareIcon className="size-4 shrink-0 text-secondary" />
-            {t("Feedback.label")}
-          </Link>
-        </DropdownMenuItem>
+        {canSendFeedback ? (
+          <DropdownMenuItem asChild className={MENU_ITEM_CLASS}>
+            <Link href={projectHref(DASHBOARD_FEEDBACK_HREF)}>
+              <MessageSquareIcon className="size-4 shrink-0 text-secondary" />
+              {t("Feedback.label")}
+            </Link>
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuItem asChild className={MENU_ITEM_CLASS}>
           <a href={docsHref} target="_blank" rel="noopener noreferrer">
             <BookOpenIcon className="size-4 shrink-0 text-secondary" />

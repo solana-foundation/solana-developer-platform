@@ -12,6 +12,7 @@ import { clearKVStores } from "@/test/mocks/kv";
 
 const ORGANIZATION_ID = TEST_SEEDED_API_KEY.organizationId;
 const PATH = `/v1/organizations/${ORGANIZATION_ID}/feedback`;
+const MEMBER = { id: "usr_feedback_member", email: "member@example.com", name: "Mo Member" };
 const VIEWER = { id: "usr_feedback_viewer", email: "viewer@example.com", name: "Vera Viewer" };
 const ITERABLE_API_URL = "https://api.iterable.com";
 const ITERABLE_SEND_URL = `${ITERABLE_API_URL}/api/email/target`;
@@ -23,6 +24,7 @@ const FEEDBACK = {
   sentryEventId: "0123456789abcdef0123456789abcdef",
 };
 
+let memberToken: string;
 let viewerToken: string;
 let iterable: MockInstance<typeof fetch>;
 
@@ -32,30 +34,36 @@ async function seedOrganization(): Promise<void> {
     .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
     .bind(ORGANIZATION_ID, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
     .run();
-  await db
-    .prepare("INSERT INTO users (id, email, name, status) VALUES (?, ?, ?, 'active')")
-    .bind(VIEWER.id, VIEWER.email, VIEWER.name)
-    .run();
-  await db
-    .prepare(
-      "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, 'viewer', 'active')"
-    )
-    .bind(`mem_${VIEWER.id}`, ORGANIZATION_ID, VIEWER.id)
-    .run();
+  for (const [user, role] of [
+    [MEMBER, "member"],
+    [VIEWER, "viewer"],
+  ] as const) {
+    await db
+      .prepare("INSERT INTO users (id, email, name, status) VALUES (?, ?, ?, 'active')")
+      .bind(user.id, user.email, user.name)
+      .run();
+    await db
+      .prepare(
+        "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, ?, 'active')"
+      )
+      .bind(`mem_${user.id}`, ORGANIZATION_ID, user.id, role)
+      .run();
+  }
   await seedDefaultProjects(db, {
     organizationId: ORGANIZATION_ID,
-    createdBy: VIEWER.id,
-    members: [VIEWER.id],
+    createdBy: MEMBER.id,
+    members: [MEMBER.id, VIEWER.id],
     productionEntitled: false,
   });
   await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
     ...TEST_SEEDED_API_KEY,
     grants: ALL_API_KEY_GRANTS,
   });
+  memberToken = await signSeededClerkMember(env, db, MEMBER.id, ORGANIZATION_ID);
   viewerToken = await signSeededClerkMember(env, db, VIEWER.id, ORGANIZATION_ID);
 }
 
-function post(body: unknown, authorization = `Bearer ${viewerToken}`, path = PATH) {
+function post(body: unknown, authorization = `Bearer ${memberToken}`, path = PATH) {
   return app.request(
     path,
     {
@@ -100,7 +108,7 @@ describe("POST /v1/organizations/:orgId/feedback", () => {
     await clearKVStores(env);
   });
 
-  it("emails the SDP alias from any role, replying to the sender", async () => {
+  it("emails the SDP alias for a member, replying to the sender", async () => {
     const response = await post(FEEDBACK);
 
     expect(response.status).toBe(201);
@@ -108,11 +116,11 @@ describe("POST /v1/organizations/:orgId/feedback", () => {
     const [email] = sentEmails();
     expect(email?.recipientEmail).toBe("team@example.org");
     expect(email?.dataFields.subject).toBe(`An idea: ${TEST_ORG.name}`);
-    expect(email?.dataFields.replyTo).toBe(VIEWER.email);
+    expect(email?.dataFields.replyTo).toBe(MEMBER.email);
     expect(email?.dataFields.body).toContain(
       "I expected the payout to show the fee before I sent it."
     );
-    expect(email?.dataFields.body).toContain(`${VIEWER.name} (${VIEWER.email})`);
+    expect(email?.dataFields.body).toContain(`${MEMBER.name} (${MEMBER.email})`);
     expect(email?.dataFields.body).toContain(FEEDBACK.pageUrl);
     expect(email?.dataFields.body).toContain(FEEDBACK.sentryEventId);
   });
@@ -139,10 +147,19 @@ describe("POST /v1/organizations/:orgId/feedback", () => {
     expect(sentEmails()).toHaveLength(0);
   });
 
+  it("refuses a viewer, who does not hold feedback.execute", async () => {
+    const response = await post(FEEDBACK, `Bearer ${viewerToken}`);
+
+    expect(response.status).toBe(403);
+    expect((await response.json()).error.details.action).toBe("feedback.execute");
+    expect(sentEmails()).toHaveLength(0);
+  });
+
   it("refuses an API key, even one holding every grant", async () => {
     const response = await post(FEEDBACK, `Bearer ${TEST_API_KEY.raw}`);
 
     expect(response.status).toBe(403);
+    expect((await response.json()).error.details.reason).toBe("human_session_required");
     expect(sentEmails()).toHaveLength(0);
   });
 

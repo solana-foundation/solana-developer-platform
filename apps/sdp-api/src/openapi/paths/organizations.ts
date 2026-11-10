@@ -143,7 +143,7 @@ export function registerOrganizationPaths(registry: OpenAPIRegistry) {
     summary: "Send feedback",
     operationId: "sendFeedback",
     description:
-      "Emails feedback from the dashboard to the SDP team, replying to the sender's email. Nothing is stored. A signed-in person in any role, never an API key. Refused with 503 when this deployment sends no email, and with 429 past ten sends a minute per person or thirty a minute per organization.",
+      "Emails feedback from the dashboard to the SDP team, replying to the sender's email. Nothing is stored. Needs `feedback.execute`, which admins and members hold and viewers do not; never an API key. Refused with 503 when this deployment sends no email, and with 429 past ten sends a minute per person or thirty a minute per organization.",
     security: [{ clerkBearerAuth: [] }],
     request: {
       params: z.object({ orgId: orgIdParamSchema }),

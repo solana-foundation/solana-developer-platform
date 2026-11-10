@@ -1060,7 +1060,11 @@ describe("OpenAPI spec", () => {
   });
 
   it("names the hidden families' actions in no channel's document or surface manifest", () => {
-    expect([...hiddenValues()].sort()).toEqual(["organizations.manage", "organizations.read"]);
+    expect([...hiddenValues()].sort()).toEqual([
+      "feedback.execute",
+      "organizations.manage",
+      "organizations.read",
+    ]);
     for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
       const published = JSON.stringify(createPublicOpenApiDocument({ releaseChannel }));
       const manifest = createPublicSurfaceManifest(releaseChannel);
