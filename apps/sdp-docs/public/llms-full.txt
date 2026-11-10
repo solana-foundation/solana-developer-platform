@@ -14,7 +14,7 @@
 ### Get started
 Source: https://platform.solana.com/docs
 
-> Access the entire Solana Ecosystem through one dashboard and a unified API.
+> Access the entire Solana ecosystem through one dashboard and a unified API.
 
 <DocsHome />
 
