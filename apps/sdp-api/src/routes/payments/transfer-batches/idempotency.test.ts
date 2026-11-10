@@ -15,7 +15,7 @@ describe("canonicalizeTransferBatchBody", () => {
     );
   });
 
-  it("spells recipient amounts canonically and drops empty options", () => {
+  it("spells recipient amounts canonically", () => {
     const body = {
       sourceCustodyWalletId: "cwlt_1",
       token: SOL_MINT,
@@ -23,55 +23,10 @@ describe("canonicalizeTransferBatchBody", () => {
     };
     const respelled = {
       ...body,
-      options: {},
       recipients: [{ counterpartyAccountId: "cpa_a", amount: "01.000" }],
     };
 
     expect(canonicalizeTransferBatchBody(respelled)).toEqual(canonicalizeTransferBatchBody(body));
-    expect(canonicalizeTransferBatchBody({ ...body, options: { preflight: false } })).toEqual({
-      ...body,
-      options: { preflight: false },
-    });
-  });
-
-  it("treats options sent at their default as omitted (APE-665)", () => {
-    const body = {
-      sourceCustodyWalletId: "cwlt_1",
-      token: SOL_MINT,
-      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
-    };
-
-    expect(
-      canonicalizeTransferBatchBody({
-        ...body,
-        options: { maxRecipientsPerTransaction: 20, preflight: true },
-      })
-    ).toEqual(canonicalizeTransferBatchBody(body));
-    expect(
-      canonicalizeTransferBatchBody({
-        ...body,
-        options: { maxRecipientsPerTransaction: 20, preflight: false },
-      })
-    ).toEqual({ ...body, options: { preflight: false } });
-    expect(
-      canonicalizeTransferBatchBody({ ...body, options: { maxRecipientsPerTransaction: 8 } })
-    ).toEqual({ ...body, options: { maxRecipientsPerTransaction: 8 } });
-  });
-
-  it("treats an omitted priority fee as none (APE SOLA9-765)", () => {
-    const body = {
-      sourceCustodyWalletId: "cwlt_1",
-      token: SOL_MINT,
-      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
-    };
-
-    expect(canonicalizeTransferBatchBody({ ...body, options: { priorityFee: "none" } })).toEqual(
-      canonicalizeTransferBatchBody(body)
-    );
-    expect(canonicalizeTransferBatchBody({ ...body, options: { priorityFee: "high" } })).toEqual({
-      ...body,
-      options: { priorityFee: "high" },
-    });
   });
 
   it("fingerprints the token as the mint the batch executes as (APE SOLA9-695)", () => {
@@ -91,12 +46,11 @@ describe("canonicalizeTransferBatchBody", () => {
     });
   });
 
-  it("keeps the pre-APE-665 form, options as sent, for keys saved before it", () => {
+  it("keeps the token as sent in the previous form, for keys saved under it", () => {
     const body = {
       sourceCustodyWalletId: "cwlt_1",
       token: "SOL",
       recipients: [{ counterpartyAccountId: "cpa_a", amount: "1.0" }],
-      options: { maxRecipientsPerTransaction: 20 },
     };
     expect(previousCanonicalTransferBatchBody(body)).toEqual({
       ...body,
@@ -107,7 +61,9 @@ describe("canonicalizeTransferBatchBody", () => {
     );
   });
 
-  it("leaves a body without a recipients array untouched for validation to refuse", () => {
+  it("leaves what is not a recipient untouched for validation to refuse", () => {
+    const body = { token: SOL_MINT, recipients: [], options: {} };
+    expect(canonicalizeTransferBatchBody(body)).toEqual(body);
     expect(canonicalizeTransferBatchBody({ recipients: "nope" })).toEqual({ recipients: "nope" });
     expect(canonicalizeTransferBatchBody(["unparsed", "{"])).toEqual(["unparsed", "{"]);
   });

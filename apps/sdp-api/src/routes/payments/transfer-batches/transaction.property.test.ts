@@ -33,6 +33,7 @@ import { propertyParameters } from "@/test/helpers/property";
 import {
   buildInstructionGroups,
   chunkInstructionGroups,
+  MAX_RECIPIENTS_PER_TRANSACTION,
   type RecipientInstructionGroup,
   type SponsoredRentLimit,
 } from "./transaction";
@@ -59,6 +60,7 @@ const addressDecoder = getAddressDecoder();
 const addressArb: fc.Arbitrary<Address> = fc
   .uint8Array({ minLength: 32, maxLength: 32 })
   .map((bytes) => addressDecoder.decode(bytes));
+const SHARED_DESTINATION = addressDecoder.decode(new Uint8Array(32).fill(7));
 
 const tokenContextArb: fc.Arbitrary<TokenContext> = fc.oneof(
   fc.constant<TokenContext>({
@@ -101,10 +103,13 @@ const amountArb = fc.oneof(
 /** Recipients as `resolveBatchRecipients` hands them over: amounts canonical at the mint's decimals. */
 function recipientsArb(decimals: number): fc.Arbitrary<ResolvedRecipient[]> {
   return fc
-    .array(fc.record({ destination: addressArb, amount: amountArb }), {
-      minLength: 1,
-      maxLength: 45,
-    })
+    .array(
+      fc.record({
+        destination: fc.oneof(addressArb, fc.constant(SHARED_DESTINATION)),
+        amount: amountArb,
+      }),
+      { minLength: 1, maxLength: 45, size: "medium" }
+    )
     .map((entries) =>
       entries.map(({ destination, amount }, index) => ({
         index,
@@ -122,7 +127,6 @@ const batchArb = tokenContextArb.chain((tokenContext) =>
   fc.record({
     tokenContext: fc.constant(tokenContext),
     recipients: recipientsArb(tokenContext.decimals),
-    maxRecipientsPerTransaction: fc.integer({ min: 1, max: 25 }),
   })
 );
 
@@ -226,17 +230,12 @@ function build(params: {
 /** A batch that creates no token account, so only the count and size limits pack it. */
 const NO_SPONSORED_RENT: SponsoredRentLimit = { rentByTokenAccount: new Map(), capLamports: null };
 
-function chunk(
-  groups: RecipientInstructionGroup[],
-  maxRecipientsPerTransaction: number,
-  sponsoredRent: SponsoredRentLimit = NO_SPONSORED_RENT
-) {
+function chunk(groups: RecipientInstructionGroup[], sponsoredRent: SponsoredRentLimit) {
   return chunkInstructionGroups({
     groups,
     sourceSigner,
     feePayer: FEE_PAYER,
     lifetime: LIFETIME,
-    maxRecipientsPerTransaction,
     sponsoredRent,
   });
 }
@@ -291,22 +290,19 @@ describe("batch transfer builder (property)", () => {
 
   it("packs every recipient exactly once, in order, within the cap and the size limit", async () => {
     await fc.assert(
-      fc.asyncProperty(
-        batchArb,
-        async ({ tokenContext, recipients, maxRecipientsPerTransaction }) => {
-          const groups = await build({ tokenContext, recipients });
-          const chunks = chunk(groups, maxRecipientsPerTransaction);
+      fc.asyncProperty(batchArb, async ({ tokenContext, recipients }) => {
+        const groups = await build({ tokenContext, recipients });
+        const chunks = chunk(groups, NO_SPONSORED_RENT);
 
-          expect(chunks.flatMap((c) => c.recipientIndexes)).toEqual(
-            recipients.map((recipient) => recipient.index)
-          );
-          for (const c of chunks) {
-            expect(c.recipientIndexes.length).toBeGreaterThan(0);
-            expect(c.recipientIndexes.length).toBeLessThanOrEqual(maxRecipientsPerTransaction);
-            expect(isTransactionWithinSizeLimit(compileTransaction(c.message))).toBe(true);
-          }
+        expect(chunks.flatMap((c) => c.recipientIndexes)).toEqual(
+          recipients.map((recipient) => recipient.index)
+        );
+        for (const c of chunks) {
+          expect(c.recipientIndexes.length).toBeGreaterThan(0);
+          expect(c.recipientIndexes.length).toBeLessThanOrEqual(MAX_RECIPIENTS_PER_TRANSACTION);
+          expect(isTransactionWithinSizeLimit(compileTransaction(c.message))).toBe(true);
         }
-      ),
+      }),
       propertyParameters({ numRuns: 50 })
     );
   });
@@ -318,12 +314,7 @@ describe("batch transfer builder (property)", () => {
         fc.infiniteStream(fc.boolean()),
         fc.bigInt({ min: 1_000_000n, max: 2_000_000n }),
         fc.bigInt({ min: 0n, max: 8_000_000n }),
-        async (
-          { tokenContext, recipients, maxRecipientsPerTransaction },
-          missing,
-          rent,
-          headroom
-        ) => {
+        async ({ tokenContext, recipients }, missing, rent, headroom) => {
           const groups = await build({ tokenContext, recipients });
           const rentByTokenAccount = new Map<Address, bigint>();
           for (const group of groups) {
@@ -334,10 +325,7 @@ describe("batch transfer builder (property)", () => {
           }
           // At least one account's rent, so every recipient fits a chunk on its own.
           const capLamports = rent + headroom;
-          const chunks = chunk(groups, maxRecipientsPerTransaction, {
-            rentByTokenAccount,
-            capLamports,
-          });
+          const chunks = chunk(groups, { rentByTokenAccount, capLamports });
 
           expect(chunks.flatMap((c) => c.recipientIndexes)).toEqual(
             recipients.map((recipient) => recipient.index)
@@ -352,7 +340,7 @@ describe("batch transfer builder (property)", () => {
               })
             );
             expect(BigInt(created.size) * rent).toBeLessThanOrEqual(capLamports);
-            expect(c.recipientIndexes.length).toBeLessThanOrEqual(maxRecipientsPerTransaction);
+            expect(c.recipientIndexes.length).toBeLessThanOrEqual(MAX_RECIPIENTS_PER_TRANSACTION);
           }
         }
       ),
@@ -362,47 +350,44 @@ describe("batch transfer builder (property)", () => {
 
   it("conserves value: each chunk moves exactly its recorded amount, the batch exactly its total", async () => {
     await fc.assert(
-      fc.asyncProperty(
-        batchArb,
-        async ({ tokenContext, recipients, maxRecipientsPerTransaction }) => {
-          const groups = await build({ tokenContext, recipients });
-          const expected = new Map(
-            await Promise.all(
-              recipients.map(
-                async (recipient) =>
-                  [
-                    recipient.index,
-                    {
-                      destination: await expectedLanding(recipient, tokenContext),
-                      amount: recipient.amountBaseUnits,
-                    },
-                  ] as const
-              )
+      fc.asyncProperty(batchArb, async ({ tokenContext, recipients }) => {
+        const groups = await build({ tokenContext, recipients });
+        const expected = new Map(
+          await Promise.all(
+            recipients.map(
+              async (recipient) =>
+                [
+                  recipient.index,
+                  {
+                    destination: await expectedLanding(recipient, tokenContext),
+                    amount: recipient.amountBaseUnits,
+                  },
+                ] as const
             )
-          );
-          const chunks = chunk(groups, maxRecipientsPerTransaction);
+          )
+        );
+        const chunks = chunk(groups, NO_SPONSORED_RENT);
 
-          let batchMoved = 0n;
-          for (const c of chunks) {
-            const transfers = decodeTransfers(c.instructions, tokenContext);
-            // The signed message carries the same instructions the chunk records.
-            expect(c.message.instructions).toEqual(c.instructions);
-            expect(transfers).toEqual(
-              c.recipientIndexes.map((index) => {
-                const transfer = expected.get(index);
-                if (transfer === undefined) throw new Error(`unknown recipient ${index}`);
-                return transfer;
-              })
-            );
-            const moved = transfers.reduce((sum, transfer) => sum + transfer.amount, 0n);
-            expect(parseDecimalAmount(c.amount, tokenContext.decimals)).toBe(moved);
-            batchMoved += moved;
-          }
-          expect(batchMoved).toBe(
-            recipients.reduce((sum, recipient) => sum + recipient.amountBaseUnits, 0n)
+        let batchMoved = 0n;
+        for (const c of chunks) {
+          const transfers = decodeTransfers(c.instructions, tokenContext);
+          // The signed message carries the same instructions the chunk records.
+          expect(c.message.instructions).toEqual(c.instructions);
+          expect(transfers).toEqual(
+            c.recipientIndexes.map((index) => {
+              const transfer = expected.get(index);
+              if (transfer === undefined) throw new Error(`unknown recipient ${index}`);
+              return transfer;
+            })
           );
+          const moved = transfers.reduce((sum, transfer) => sum + transfer.amount, 0n);
+          expect(parseDecimalAmount(c.amount, tokenContext.decimals)).toBe(moved);
+          batchMoved += moved;
         }
-      ),
+        expect(batchMoved).toBe(
+          recipients.reduce((sum, recipient) => sum + recipient.amountBaseUnits, 0n)
+        );
+      }),
       propertyParameters({ numRuns: 50 })
     );
   });
@@ -416,7 +401,7 @@ describe("batch transfer builder (property)", () => {
             fc.shuffledSubarray(batch.recipients, { minLength: batch.recipients.length })
           )
         ),
-        async ([{ tokenContext, recipients, maxRecipientsPerTransaction }, shuffled]) => {
+        async ([{ tokenContext, recipients }, shuffled]) => {
           const first = await build({ tokenContext, recipients });
           const again = await build({ tokenContext, recipients });
           const reordered = await build({ tokenContext, recipients: shuffled });
@@ -426,8 +411,8 @@ describe("batch transfer builder (property)", () => {
           for (const group of first) expect(byIndex.get(group.index)).toEqual(groupWireForm(group));
 
           // Chunking is deterministic too, apart from the per-chunk uniqueness memo.
-          const chunksA = chunk(first, maxRecipientsPerTransaction);
-          const chunksB = chunk(again, maxRecipientsPerTransaction);
+          const chunksA = chunk(first, NO_SPONSORED_RENT);
+          const chunksB = chunk(again, NO_SPONSORED_RENT);
           expect(chunksB.map((c) => c.recipientIndexes)).toEqual(
             chunksA.map((c) => c.recipientIndexes)
           );
