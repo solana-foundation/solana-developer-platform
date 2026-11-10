@@ -5,7 +5,6 @@ import type {
   CounterpartyAccountSummary,
   PaymentsDashboardWallet,
   PaymentTransferBatchEstimateWarning,
-  PaymentTransferBatchRequest,
 } from "@sdp/types/payments";
 import {
   isWellKnownTokenSymbol,
@@ -40,6 +39,7 @@ import {
 import { walletBalanceAssetOptions } from "@/app/(session)/dashboard/[projectId]/payments/ramps/wallet-options";
 import {
   canonicalTransferBatchRequest,
+  type DashboardTransferBatchRequest,
   isTransferBatchSendOutcomeUnknown,
   nameTransferBatchRequest,
   retryTransferBatchUnderKey,
@@ -50,7 +50,7 @@ import { useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
 import { MOVEMENT_POLL_INTERVAL_MS } from "@/lib/dashboard-fetch";
 import { isMovementInFlight } from "@/lib/idempotency";
-import { useProjectHref } from "@/lib/use-dashboard-project";
+import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard";
 
@@ -340,6 +340,7 @@ export function useBatchSendWizard({
 }: UseBatchSendWizardProps) {
   const router = useRouter();
   const href = useProjectHref();
+  const projectId = useProjectId();
   const t = useTranslations();
   const steps = getBatchSendSteps(t);
   const [stepIndex, setStepIndex] = useState(0);
@@ -354,7 +355,9 @@ export function useBatchSendWizard({
   // The batch as sent when its answer left the outcome unknown. Until the API
   // answers for it, the wizard only sends these same bytes again, under the
   // same key and payout run, so an edit can never start a second run.
-  const [unconfirmedSend, setUnconfirmedSend] = useState<PaymentTransferBatchRequest | null>(null);
+  const [unconfirmedSend, setUnconfirmedSend] = useState<DashboardTransferBatchRequest | null>(
+    null
+  );
   const recovering = unconfirmedSend !== null;
 
   const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
@@ -497,6 +500,7 @@ export function useBatchSendWizard({
   const request = useMemo(
     () =>
       canonicalTransferBatchRequest({
+        projectId,
         ...(trimmedExternalId.length > 0 ? { externalId: trimmedExternalId } : {}),
         sourceCustodyWalletId: walletId,
         token: asset,
@@ -506,7 +510,7 @@ export function useBatchSendWizard({
           amount: r.amount,
         })),
       }),
-    [walletId, asset, recipients, trimmedExternalId]
+    [projectId, walletId, asset, recipients, trimmedExternalId]
   );
   const recipientsValid = batchSendSchema.safeParse({
     walletId,
