@@ -550,7 +550,7 @@ describe("payment transfer batches", () => {
     );
     expect(archived.status).toBe(204);
     const response = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers,
@@ -622,7 +622,7 @@ describe("payment transfer batches", () => {
     }
   );
 
-  it.each(["/v1/payments/transfer-batches", "/v1/payments/transfer-batches/estimate"])(
+  it.each(["/v1/payments/transfer-batches/execute", "/v1/payments/transfer-batches/estimate"])(
     "refuses a body that sends options at %s with 400, writing nothing",
     async (endpoint) => {
       const counterpartyId = await seedCounterparty("batch_options_refused");

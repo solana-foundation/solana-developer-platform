@@ -80,7 +80,6 @@ export const INTERFACE_SNIPPETS: readonly InterfaceSnippet[] = [
     ],
   },
   {
-  {
     mode: "dashboard",
     method: "GET",
     path: "/v1/payments/transfers",
