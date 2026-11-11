@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.89.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.88.0...v0.89.0) (2026-11-11)
+
+### ⚠ BREAKING CHANGES
+
+* **payments:** batch payouts take no execution options ([#2848](https://github.com/solana-foundation/solana-developer-platform/pull/2848)) ([645a68b](https://github.com/solana-foundation/solana-developer-platform/commit/645a68bda8ac30d0f89423a0f987aa980ac0eb7f))
+
+### Features
+
+* **earn:** publish docs through standard release channels ([#2821](https://github.com/solana-foundation/solana-developer-platform/pull/2821)) ([7bd8577](https://github.com/solana-foundation/solana-developer-platform/commit/7bd8577e3391f8e14612ccfbd869b667a28c807d))
+* **api:** guard a devnet-only deployment ([#2714](https://github.com/solana-foundation/solana-developer-platform/pull/2714)) ([aee503b](https://github.com/solana-foundation/solana-developer-platform/commit/aee503b2b3de6258df202e2e5936e3040f888a2c))
+
+### Bug Fixes
+
+* **ops:** read execution logs through the job-scoped log view ([#2688](https://github.com/solana-foundation/solana-developer-platform/pull/2688)) ([24ebe11](https://github.com/solana-foundation/solana-developer-platform/commit/24ebe11f49662c4a4405e5a6748651022375e39e))
+* **payments:** batch payouts take no execution options ([#2848](https://github.com/solana-foundation/solana-developer-platform/pull/2848)) ([645a68b](https://github.com/solana-foundation/solana-developer-platform/commit/645a68bda8ac30d0f89423a0f987aa980ac0eb7f))
+* **web:** drop compliance wording from the homepage ([#2860](https://github.com/solana-foundation/solana-developer-platform/pull/2860)) ([70ae562](https://github.com/solana-foundation/solana-developer-platform/commit/70ae562e777aa24d1c2c5ea06c8f6ca18410f885))
+
+### Documentation
+
+* add Fireblocks BYOK setup guide ([#2862](https://github.com/solana-foundation/solana-developer-platform/pull/2862)) ([af670e4](https://github.com/solana-foundation/solana-developer-platform/commit/af670e46889ed7964a708301dfa5129f25f20f04))
+
 ## [0.88.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.87.0...v0.88.0) (2026-11-10)
 
 ### Features
