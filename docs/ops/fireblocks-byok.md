@@ -136,6 +136,17 @@ Before submission, SDP durably stores the intent and atomically claims a single 
 The SDP transfer ID is Fireblocks' permanent `externalTxId`; transaction creation does not
 send Fireblocks' time-limited `Idempotency-Key` header. SDP separately deduplicates the caller's
 request using its own idempotency key.
+
+New direct transfers also record `initiated_by_principal` from the authenticated
+money context before proposing. It uses the canonical `MoneyPrincipal` identity
+(for example, `{kind: "member", userId: "..."}`), without role or grant snapshots.
+The field is internal and stays unchanged on retries, status reads and settlement;
+`initiated_by_key_id` remains separate audit evidence. Migration `0226` leaves
+historical rows null and accepts writes from the previous API revision. Never
+reconstruct their authority from the ambiguous audit ID. Worker restoration and
+D4 re-admission/cancellation follow this persistence slice of PRO-2435; neither
+is enabled by this change.
+
 The payment goes through the same custody waist as every signed payment (ADR 0007). The
 waist resolves a Fireblocks BYOK wallet to a proposer rather than a signer
 (`services/domain/signing/admitted-proposer.ts`), with the same checks at resolution: runtime

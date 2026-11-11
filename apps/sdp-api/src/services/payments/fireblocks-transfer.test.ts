@@ -8,6 +8,7 @@ import { getDb } from "@/db/client";
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
+import type { MoneyPrincipal } from "@/lib/money-principal";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { internalCustody } from "@/routes/internal-custody";
 import { AuditService } from "@/services/audit.service";
@@ -496,6 +497,124 @@ describe("native Fireblocks BYOK payment routes", () => {
     expect(await refresh(transfer.id)).toMatchObject({ status: "confirmed", signature: SIG });
     expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
+  it.each(["member", "api_key"] as const)(
+    "records the initiating %s before the provider POST and keeps it on replay",
+    async (kind) => {
+      const mock = await ready();
+      const db = getDb(env);
+      const apiKeyId = "key_fireblocks_principal";
+      const principal: MoneyPrincipal =
+        kind === "member" ? { kind: "member", userId: USER_ID } : { kind: "api_key", apiKeyId };
+      if (kind === "api_key") {
+        const raw = `sk_test_${crypto.randomUUID().replaceAll("-", "")}`;
+        await seedProjectApiKey(db, testEnv, {
+          key: { id: apiKeyId, raw, prefix: raw.slice(0, 16) },
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          createdBy: USER_ID,
+          grants: ["transfers.execute"],
+        });
+        token = raw;
+      }
+      let principalAtSubmission: MoneyPrincipal | null | undefined;
+      const provider = mock.getMockImplementation();
+      if (!provider) throw new Error("Expected Fireblocks provider mock");
+      mock.mockImplementation(async (url, init) => {
+        if (String(url).endsWith("/v1/transactions") && init?.method === "POST") {
+          const proposal = z
+            .object({ externalTxId: z.string() })
+            .parse(JSON.parse(String(init.body)));
+          const row = await db.queryOne<{ initiated_by_principal: MoneyPrincipal | null }>(
+            "SELECT initiated_by_principal FROM payment_transfers WHERE id = ?",
+            [proposal.externalTxId]
+          );
+          principalAtSubmission = row?.initiated_by_principal;
+        }
+        return provider(url, init);
+      });
+      const key = `fireblocks-principal-${kind}`;
+      const response = await send(key);
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(principalAtSubmission).toEqual(principal);
+      const raw = await response.text();
+      const transfer = z
+        .object({ data: z.object({ transfer: z.object({ id: z.string() }) }) })
+        .parse(JSON.parse(raw)).data.transfer;
+      expect(raw).not.toContain('"initiated_by_principal"');
+      expect(raw).not.toContain('"initiatedByPrincipal"');
+
+      await expireIdempotencyKey(key);
+      const replay = await send(key);
+      expect(replay.status, await replay.clone().text()).toBe(200);
+      const replayRaw = await replay.text();
+      expect(JSON.parse(replayRaw).data.transfer.id).toBe(transfer.id);
+      expect(replayRaw).not.toContain('"initiated_by_principal"');
+      expect(replayRaw).not.toContain('"initiatedByPrincipal"');
+      const row = await db.queryOne<{ initiated_by_principal: MoneyPrincipal | null }>(
+        "SELECT initiated_by_principal FROM payment_transfers WHERE id = ?",
+        [transfer.id]
+      );
+      expect(row?.initiated_by_principal).toEqual(principal);
+      expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    }
+  );
+
+  it.each(["initiatedByPrincipal", "initiated_by_principal"])(
+    "rejects a caller-supplied %s before creating a transfer",
+    async (field) => {
+      const mock = await ready();
+      const response = await send("fireblocks-spoofed-principal", {
+        [field]: { kind: "api_key", apiKeyId: "another-principal" },
+      });
+      expect(response.status).toBe(400);
+      expect(mock).not.toHaveBeenCalled();
+      const row = await getDb(env).queryOne<{ count: number }>(
+        "SELECT COUNT(*)::int AS count FROM payment_transfers WHERE organization_id = ?",
+        [ORGANIZATION_ID]
+      );
+      expect(row?.count).toBe(0);
+    }
+  );
+
+  it("keeps the original principal private and unchanged when another principal reads the transfer", async () => {
+    const mock = await ready();
+    const response = await send("fireblocks-principal-viewer");
+    expect(response.status, await response.clone().text()).toBe(200);
+    const id = (await response.json()).data.transfer.id;
+    const db = getDb(env);
+    const raw = `sk_test_${crypto.randomUUID().replaceAll("-", "")}`;
+    await seedProjectApiKey(db, testEnv, {
+      key: { id: "key_fireblocks_viewer", raw, prefix: raw.slice(0, 16) },
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      createdBy: USER_ID,
+      grants: ["transfers.read"],
+    });
+    token = raw;
+    const detail = await refresh(id);
+    expect(detail.id).toBe(id);
+    expect(detail).not.toHaveProperty("initiated_by_principal");
+    expect(detail).not.toHaveProperty("initiatedByPrincipal");
+    const listed = await paymentApp.request(
+      `/v1/payments/transfers?custodyWalletId=${walletId}`,
+      { headers: { Authorization: `Bearer ${token}`, "X-Project-ID": PROJECT_ID } },
+      testEnv
+    );
+    expect(listed.status, await listed.clone().text()).toBe(200);
+    const listRaw = await listed.text();
+    expect(JSON.parse(listRaw).data).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id })])
+    );
+    expect(listRaw).not.toContain('"initiated_by_principal"');
+    expect(listRaw).not.toContain('"initiatedByPrincipal"');
+    const row = await db.queryOne<{ initiated_by_principal: MoneyPrincipal | null }>(
+      "SELECT initiated_by_principal FROM payment_transfers WHERE id = ?",
+      [id]
+    );
+    expect(row?.initiated_by_principal).toEqual({ kind: "member", userId: USER_ID });
+    expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
   it("maps USDC by exact mint and network and rejects unsupported assets and precision", async () => {
     const mock = await ready();
     const response = await send("usdc", { token: USDC, amount: "0.123456" });

@@ -67,6 +67,7 @@ import {
   transactionFailed,
 } from "@/lib/errors";
 import { assertCallerMaySignWith } from "@/lib/money-admission";
+import { currentMoneyPrincipal } from "@/lib/money-principal";
 import { appErrorResponse, paginated, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
@@ -197,6 +198,10 @@ async function createTransferRecord(
   }
 ): Promise<{ row: TransferRow; replayed: boolean }> {
   const idempotencyKey = input.idempotency?.key ?? null;
+  const principal = currentMoneyPrincipal();
+  if (!principal) {
+    throw internalError("A new transfer requires an authenticated money principal");
+  }
   try {
     const db = getDb(c.env);
     const repository = createPostgresPaymentsRepository(db, getRequestTenantScope(c));
@@ -227,6 +232,7 @@ async function createTransferRecord(
       slot: null,
       fee: input.fee ?? null,
       initiatedByKeyId: input.initiatedByKeyId ?? null,
+      initiatedByPrincipal: principal,
       idempotencyKey,
       idempotencyFingerprint: input.idempotency?.fingerprint ?? null,
     });

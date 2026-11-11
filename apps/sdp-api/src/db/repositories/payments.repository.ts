@@ -10,6 +10,8 @@ import type {
 import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
 import type { PaymentTransactionKind } from "@sdp/types/unified-transactions";
 
+import type { MoneyPrincipal } from "@/lib/money-principal";
+
 export type PaymentTransferDirection = "inbound" | "outbound";
 type PaymentTransferDeliveryMode = "hosted" | "manual_instructions" | "session_widget";
 
@@ -51,6 +53,8 @@ export interface PaymentTransferRow {
   fee: number | null;
   error: string | null;
   initiated_by_key_id: string | null;
+  /** Effective authority at creation, never inferred from the audit key/user id. */
+  initiated_by_principal: MoneyPrincipal | null;
   idempotency_key: string | null;
   idempotency_fingerprint: string | null;
   confirmed_at: string | null;
@@ -109,6 +113,8 @@ export interface CreatePaymentTransferInput {
   /** The network fee the source wallet pays, in lamports, when known at creation. */
   fee?: number | null;
   initiatedByKeyId: string | null;
+  /** Server-authenticated identity; absent on historical or observation-only records. */
+  initiatedByPrincipal?: MoneyPrincipal | null;
   idempotencyKey?: string | null;
   idempotencyFingerprint?: string | null;
 }
