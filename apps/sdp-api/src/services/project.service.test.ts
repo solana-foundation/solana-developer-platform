@@ -39,14 +39,8 @@ describe("ProjectService", () => {
     projectService = new ProjectService(db);
 
     // Clear projects tables
-    await db
-      .prepare("DELETE FROM project_members")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM projects")
-      .run()
-      .catch(() => {});
+    await db.prepare("DELETE FROM project_members").run();
+    await db.prepare("DELETE FROM projects").run();
 
     // Seed org and user
     await db

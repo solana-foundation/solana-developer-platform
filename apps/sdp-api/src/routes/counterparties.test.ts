@@ -49,26 +49,11 @@ describe("Counterparties Routes", () => {
       await kv.rateLimits.delete(key.name);
     }
 
-    await db
-      .prepare("DELETE FROM counterparty_provider_accounts")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM counterparties")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM api_keys")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM project_members")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM projects")
-      .run()
-      .catch(() => {});
+    await db.prepare("DELETE FROM counterparty_provider_accounts").run();
+    await db.prepare("DELETE FROM counterparties").run();
+    await db.prepare("DELETE FROM api_keys").run();
+    await db.prepare("DELETE FROM project_members").run();
+    await db.prepare("DELETE FROM projects").run();
     await db
       .prepare(
         "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
