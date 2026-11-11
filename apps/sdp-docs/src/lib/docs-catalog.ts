@@ -56,6 +56,12 @@ export const DOCS_MODULES: readonly ModuleEntry[] = [
     capability: "Fiat on-ramps and off-ramps",
   },
   {
+    module: "earn",
+    name: "Earn",
+    summary: "Discover DeFi and RWA strategies for customer-wallet deposits and withdrawals",
+    capability: "DeFi and RWA strategies, customer-signed transactions, and positions",
+  },
+  {
     module: "compliance",
     name: "Compliance",
     summary: "Screen wallets and transactions against your regulatory program",

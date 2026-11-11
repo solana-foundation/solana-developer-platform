@@ -26,7 +26,9 @@ function documentOperations(document: OpenAPIObject): Map<string, string[]> {
 }
 
 const errorExampleSchema = z.object({
-  error: z.object({ code: z.custom<ErrorCode>((value) => isErrorCode(value)) }),
+  error: z.object({
+    code: z.custom<ErrorCode>(isErrorCode),
+  }),
 });
 
 /** A document with one operation, for the shapes the published documents do not exercise. */
@@ -132,6 +134,39 @@ describe("buildApiReference", () => {
       });
     });
   }
+
+  it("builds the Earn reference with every documented response, including shared 501 errors", () => {
+    const document = createPublicOpenApiDocument({
+      releaseChannel: "experimental",
+    });
+    const reference = apiReferenceSchema.parse(buildApiReference(document));
+    const earn = reference.families.find((family) => family.name === "Earn");
+    if (!earn) throw new Error("The Earn family is missing");
+    const documented = new Map(
+      [...documentOperations(document)].filter(([operation]) => operation.includes("/v1/earn/"))
+    );
+    expect(
+      earn.operations.map((operation) => `${operation.method} ${operation.path}`).sort()
+    ).toEqual([...documented.keys()].sort());
+    let missingCapabilityExamples = 0;
+    for (const operation of earn.operations) {
+      expect(operation.responses.map((response) => response.status).sort()).toEqual(
+        documented.get(`${operation.method} ${operation.path}`)?.sort()
+      );
+      for (const response of operation.responses) {
+        if (!/^[45]/.test(response.status)) continue;
+        expect(response.body.kind).toBe("json");
+        if (response.body.kind !== "json") continue;
+        const { error } = errorExampleSchema.parse(response.body.example);
+        expect(String(new AppError(error.code).statusCode)).toBe(response.status);
+        if (response.status === "501") {
+          expect(response.body.example).toMatchObject(new AppError("NOT_IMPLEMENTED").toResponse());
+          missingCapabilityExamples += 1;
+        }
+      }
+    }
+    expect(missingCapabilityExamples).toBeGreaterThan(0);
+  });
 
   it("keys a write's samples by the header the route declares, not by its method", () => {
     const operations = buildApiReference(
@@ -393,7 +428,19 @@ describe("buildApiReference", () => {
 
 describe("exampleErrorCode", () => {
   it("picks, for each status, a code the API answers with that status", () => {
-    for (const status of ["400", "401", "403", "404", "409", "422", "429", "500", "502", "503"]) {
+    for (const status of [
+      "400",
+      "401",
+      "403",
+      "404",
+      "409",
+      "422",
+      "429",
+      "500",
+      "501",
+      "502",
+      "503",
+    ]) {
       for (const takesIdempotencyKey of [true, false]) {
         const code = exampleErrorCode(status, takesIdempotencyKey, "test");
         expect(String(new AppError(code).statusCode)).toBe(status);

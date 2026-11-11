@@ -1,6 +1,5 @@
 import {
   type ProjectProviderAvailabilityEntry,
-  projectProviderAvailabilityEntrySchema,
   projectProviderAvailabilitySchema,
 } from "@sdp/types/provider-access";
 import { z } from "zod";
@@ -123,47 +122,21 @@ const PROJECT_PROVIDER_AVAILABILITY_EXAMPLE_PROVIDERS = [
   },
   { family: "compliance", provider: "range", available: true },
   { family: "ramps", provider: "moonpay", available: false, reason: "provider_not_entitled" },
+  { family: "earn", provider: "kamino", available: false, reason: "provider_not_entitled" },
 ] as const satisfies readonly ProjectProviderAvailabilityEntry[];
 
-/**
- * The documented project provider availability, with or without the Earn
- * family. While `EARN_PUBLIC_SURFACE_PUBLISHED` is false the public document
- * leaves Earn out and the runtime response omits Earn entries to match it. The
- * description names no family a release channel can leave out, since the public
- * document prunes those per channel (openapi/release-channel-values.ts).
- *
- * @param publishEarn - Whether the document carries the Earn family.
- * @returns The response schema and its example, matching `publishEarn`.
- */
-export function projectProviderAvailabilityResponseSchema(publishEarn: boolean) {
-  const [custodyEntry, complianceEntry, rampsEntry] =
-    projectProviderAvailabilityEntrySchema.options;
-  const schema = publishEarn
-    ? projectProviderAvailabilitySchema
-    : projectProviderAvailabilitySchema.extend({
-        providers: z.array(
-          z.discriminatedUnion("family", [custodyEntry, complianceEntry, rampsEntry])
-        ),
-      });
-  return withOpenApi(schema, {
+/** Provider availability; the public document prunes families outside its release channel. */
+export const projectProviderAvailabilityResponseSchema = withOpenApi(
+  projectProviderAvailabilitySchema,
+  {
     description: `Every provider this deployment's release channel publishes, with whether this project can use it; a provider the channel leaves out is omitted, matching this document. Custody entries list the custody modes the project can set the provider up in (empty when none) in \`modes\`, and each refused mode with the first failed check in \`unavailableModes\`; every other entry carries \`available\`, plus \`reason\` naming the first failed check when unavailable. A provider is available only when the deployment's release channel includes it, SDP currently offers it, the organization is entitled to it, and the deployment holds its credentials for the project's environment; the release channel offers the same providers to Sandbox and Production projects. Custody \`modes\` include \`managed\` only in a Sandbox project whose deployment holds the provider's credentials; \`byok\` runs on the organization's own credentials and is the only mode a Production project can use.`,
     example: {
       projectId: "prj_example",
       environment: "production",
-      providers: publishEarn
-        ? [
-            ...PROJECT_PROVIDER_AVAILABILITY_EXAMPLE_PROVIDERS,
-            {
-              family: "earn",
-              provider: "kamino",
-              available: false,
-              reason: "provider_not_entitled",
-            },
-          ]
-        : PROJECT_PROVIDER_AVAILABILITY_EXAMPLE_PROVIDERS,
+      providers: PROJECT_PROVIDER_AVAILABILITY_EXAMPLE_PROVIDERS,
     },
-  });
-}
+  }
+);
 
 export const updateProjectRequestSchema = updateProjectSchemaBase
   .extend({

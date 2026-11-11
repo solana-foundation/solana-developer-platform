@@ -118,30 +118,13 @@ const OPENAPI_TAG = {
   ONBOARDING: { name: "Onboarding", description: "Clerk organization sync status." },
 } as const;
 
-/**
- * Whether the public OpenAPI document carries the Earn family. Everything
- * partner-facing derives from that document, built per release channel: api.solana.com/openapi.json and
- * Swagger UI, the generated API reference, the Postman collection, the
- * playground catalog and the AI discovery files. Held false until launch
- * (PRO-2038): Earn is feature-complete but not announced, so partners must not
- * discover it yet. The internal document and the runtime are unaffected, except
- * project provider availability, which omits Earn entries to match this document.
- * Flipping this back is a PRO-1872 security sign-off PR (routes/earn/CLAUDE.md,
- * "Public OpenAPI promotion"); spec.test.ts pins both states.
- */
-export const EARN_PUBLIC_SURFACE_PUBLISHED = false;
-
 export type PublicOpenApiDocumentOptions = {
   /**
    * The deployment's release channel. The document publishes only routes whose
    * module runs in it, so a deployment never documents a route it refuses with
-   * 403: production (`stable`) documents less than dev (`experimental`). A
-   * narrower filter on top of `publishEarn`, never a way around it: Earn is
-   * published only when both allow it.
+   * 403: production (`stable`) documents less than dev (`experimental`).
    */
   releaseChannel: SdpReleaseChannel;
-  /** Include the Earn family. Defaults to `EARN_PUBLIC_SURFACE_PUBLISHED`. */
-  publishEarn?: boolean;
 };
 
 /**
@@ -186,11 +169,8 @@ const PUBLIC_OPENAPI_TAGS = [
   OPENAPI_TAG.COMPLIANCE,
   OPENAPI_TAG.COUNTERPARTIES,
   OPENAPI_TAG.ASSET_PROFILES,
+  OPENAPI_TAG.PUBLIC_EARN,
 ];
-
-function publicOpenApiTags(publishEarn: boolean) {
-  return publishEarn ? [...PUBLIC_OPENAPI_TAGS, OPENAPI_TAG.PUBLIC_EARN] : PUBLIC_OPENAPI_TAGS;
-}
 
 const OPENAPI_TAGS = [
   OPENAPI_TAG.HEALTH,
@@ -239,13 +219,11 @@ function registerInternalSecuritySchemes(registry: OpenAPIRegistry) {
 
 // Key, member and organization administration answer a signed-in person only
 // (HOO-2099), so the public document, which an API key calls, omits them.
-function registerPublicPaths(registry: OpenAPIRegistry, publishEarn: boolean) {
+function registerPublicPaths(registry: OpenAPIRegistry) {
   registerHealthPaths(registry);
   registerCustodyPaths(registry);
-  if (publishEarn) {
-    registerPublicEarnPaths(registry);
-  }
-  registerProjectPaths(registry, publishEarn);
+  registerPublicEarnPaths(registry);
+  registerProjectPaths(registry);
   registerIntegrationPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
@@ -264,7 +242,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerCustodyPaths(registry);
   registerEarnPaths(registry);
   registerDvpPaths(registry);
-  registerProjectPaths(registry, true);
+  registerProjectPaths(registry);
   registerIntegrationPaths(registry);
   registerProjectAdministrationPaths(registry);
   registerIssuancePaths(registry);
@@ -322,11 +300,9 @@ function describeActionRefusals(document: OpenAPIObject): void {
 
 function createDocument({
   publicOnly,
-  publishEarn,
   releaseChannel,
 }: {
   publicOnly: boolean;
-  publishEarn: boolean;
   releaseChannel?: SdpReleaseChannel;
 }): OpenAPIObject {
   const registry = new OpenAPIRegistry();
@@ -334,7 +310,7 @@ function createDocument({
   registerApiKeyAuth(registry);
 
   if (publicOnly) {
-    registerPublicPaths(registry, publishEarn);
+    registerPublicPaths(registry);
   } else {
     registerInternalSecuritySchemes(registry);
     registerAllPaths(registry);
@@ -355,7 +331,7 @@ function createDocument({
         ? "Public OpenAPI spec generated from supported API schemas and routes. API versioning is path-based: /v1 is the current contract, and breaking changes are introduced under a new path major (for example /v2). The OpenAPI info.version tracks spec/document revision for the current path contract."
         : "Production-only OpenAPI spec generated from API schemas and routes. API versioning is path-based: /v1 is the current contract, and breaking changes are introduced under a new path major (for example /v2). The OpenAPI info.version tracks spec/document revision for the current path contract.",
     },
-    tags: publicOnly ? publicOpenApiTags(publishEarn) : OPENAPI_TAGS,
+    tags: publicOnly ? PUBLIC_OPENAPI_TAGS : OPENAPI_TAGS,
     servers: [
       {
         url: "http://localhost:8787",
@@ -371,22 +347,19 @@ function createDocument({
   if (!publicOnly || releaseChannel === undefined) {
     return document;
   }
-  const published = pruneUnpublishedValues(document, releaseChannel, publishEarn);
+  const published = pruneUnpublishedValues(document, releaseChannel);
   published.tags = usedTags(published, published.tags ?? []);
   return published;
 }
 
 export function createOpenApiDocument(): OpenAPIObject {
-  return createDocument({ publicOnly: false, publishEarn: true });
+  return createDocument({ publicOnly: false });
 }
 
 export function createPublicOpenApiDocument(options: PublicOpenApiDocumentOptions): OpenAPIObject {
   const { releaseChannel } = options;
   return createDocument({
     publicOnly: true,
-    publishEarn:
-      (options.publishEarn ?? EARN_PUBLIC_SURFACE_PUBLISHED) &&
-      SDP_RELEASE_CHANNELS[releaseChannel].includes("earn"),
     releaseChannel,
   });
 }
@@ -394,7 +367,7 @@ export function createPublicOpenApiDocument(options: PublicOpenApiDocumentOption
 /**
  * What a release channel's public surfaces may name, for consumers that cannot
  * load this package (the docs site's MDX pipeline): the modules and ramp
- * providers the public document publishes, Earn's hold included, the custody
+ * providers the public document publishes, the custody
  * providers it names (in any mode), the actions
  * an API key may be granted in it (per module, in registry order), the
  * full vocabularies to validate tags against, and the rate limits every
@@ -424,7 +397,7 @@ export type PublicSurfaceManifest = {
 export function createPublicSurfaceManifest(
   releaseChannel: SdpReleaseChannel
 ): PublicSurfaceManifest {
-  const modules = publishedModules(releaseChannel, EARN_PUBLIC_SURFACE_PUBLISHED);
+  const modules = publishedModules(releaseChannel);
   const published = (value: string) => isValuePublished(value, modules, releaseChannel);
   return {
     releaseChannel,

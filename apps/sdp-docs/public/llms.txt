@@ -15,6 +15,7 @@
 - API key management and projects
 - Payments, transfers, and recurring payments
 - Fiat on-ramps and off-ramps
+- DeFi and RWA strategies, customer-signed transactions, and positions
 - Compliance screening
 - Asset profiles and public token metadata
 
@@ -27,6 +28,7 @@
 - Compliance: https://api.solana.com/v1/compliance
 - Counterparties: https://api.solana.com/v1/counterparties
 - Asset Profiles: https://api.solana.com/v1/issuance
+- Earn: https://api.solana.com/v1/earn
 
 ## Start here
 - [What is SDP?](https://platform.solana.com/docs/introduction): One API for building on Solana with your chosen providers, from devnet to mainnet.
@@ -55,6 +57,11 @@
 - [Compliance](https://platform.solana.com/docs/reference/api/compliance): Risk and compliance screening endpoints.
 - [Counterparties](https://platform.solana.com/docs/reference/api/counterparties): A counterparty is a person or business you pay or get paid by. You save their details and payment accounts once, then reuse them in payments.
 - [Asset Profiles](https://platform.solana.com/docs/reference/api/asset-profiles): Issued-asset identity and metadata profiles, plus the public token metadata URI.
+- [Earn](https://platform.solana.com/docs/reference/api/earn): Strategy reads, previews, withdrawal-route discovery, unsigned builds, submission, queued actions, and tenant tracking. Availability follows the deployment's release channel.
+- [Earn](https://platform.solana.com/docs/earn): Offer stablecoin yield in your app, from your customers' own wallets, through one API.
+- [Quickstart](https://platform.solana.com/docs/earn/quickstart): Deposit test USDC into a strategy from a sandbox wallet, then read the position, in about ten minutes.
+- [How Earn works](https://platform.solana.com/docs/earn/concepts): Strategies, positions and shares, who signs, and how each deposit and withdrawal settles.
+- [Embedded Yield](https://platform.solana.com/docs/guides/embedded-yield): Build customer-signed deposits, balances, and withdrawals into your app, from first request to go-live.
 
 ## AI guide
 - [Docs for AI](https://platform.solana.com/docs/reference/docs-for-ai): Human-readable landing page for machine-readable SDP docs resources, usage guidance, and public AI scope.

@@ -14,7 +14,7 @@ import generatedSurface from "@/generated/public-surface.json";
 
 /**
  * What this docs build may publish: the modules and ramp providers of the
- * deployment's release channel, Earn's publication hold included. The API
+ * deployment's release channel. The API
  * decides it (`createPublicSurfaceManifest` in apps/sdp-api/src/openapi/spec.ts,
  * written by `openapi:generate` from `SDP_RELEASE_CHANNEL`) and `generate:api`
  * copies it to src/generated/public-surface.json, committed at `experimental`.

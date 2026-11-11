@@ -1,7 +1,8 @@
 "use client";
 
 import { AlignLeft } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { observeTableOfContents } from "@/lib/table-of-contents-observer";
 
 type TocItem = {
   title: ReactNode;
@@ -10,42 +11,32 @@ type TocItem = {
 };
 
 export function TableOfContents({ items, children }: { items: TocItem[]; children?: ReactNode }) {
+  const ref = useRef<HTMLElement>(null);
   const [activeId, setActiveId] = useState("");
+  const [visibleItems, setVisibleItems] = useState(items);
 
   useEffect(() => {
-    const ids = items.map((item) => item.url.slice(1));
-    const elements = ids
-      .map((id) => document.getElementById(id))
-      .filter((el): el is HTMLElement => el !== null);
-
-    if (elements.length === 0) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setActiveId(`#${entry.target.id}`);
-            return;
-          }
-        }
+    const article = ref.current?.closest(".launch-docs-page")?.querySelector("article");
+    if (!article) return;
+    return observeTableOfContents(
+      article,
+      items,
+      (visible) => {
+        setVisibleItems(visible);
+        setActiveId((current) => (visible.some((item) => item.url === current) ? current : ""));
       },
-      { rootMargin: "0px 0px -60% 0px", threshold: 0 }
+      setActiveId
     );
-
-    elements.forEach((el) => {
-      observer.observe(el);
-    });
-    return () => observer.disconnect();
   }, [items]);
 
   return (
-    <aside className="launch-docs-toc" aria-label="On this page">
+    <aside ref={ref} className="launch-docs-toc" aria-label="On this page">
       <div className="launch-docs-toc-title">
         <AlignLeft size={13} aria-hidden="true" />
         On this page
       </div>
       <nav>
-        {items.map((item) => (
+        {visibleItems.map((item) => (
           <a
             key={item.url}
             href={item.url}

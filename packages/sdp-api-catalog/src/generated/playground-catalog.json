@@ -10,7 +10,8 @@
       "Payments": 41,
       "Compliance": 1,
       "Counterparties": 13,
-      "Asset Profiles": 7
+      "Asset Profiles": 7,
+      "Earn": 21
     },
     "modules": {
       "wallets": 9,
@@ -4137,6 +4138,10 @@
               {
                 "label": "payments",
                 "value": "payments"
+              },
+              {
+                "label": "earn",
+                "value": "earn"
               },
               {
                 "label": "dvp",
@@ -9716,6 +9721,10 @@
               {
                 "label": "payments",
                 "value": "payments"
+              },
+              {
+                "label": "earn",
+                "value": "earn"
               }
             ]
           },

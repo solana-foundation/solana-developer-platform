@@ -9,6 +9,7 @@
     "compliance",
     "issuance",
     "markets",
+    "earn",
     "dvp",
     "private_channels",
     "helius_rings"
@@ -102,6 +103,10 @@
     },
     {
       "module": "dvp",
+      "verbs": ["read", "manage", "execute"]
+    },
+    {
+      "module": "earn",
       "verbs": ["read", "manage", "execute"]
     },
     {

@@ -1,0 +1,184 @@
+---
+module: earn
+title: Balances and earnings
+description: Show each customer's live positions, movement history, and exact earnings, and never show a missing value as zero.
+---
+
+Read balances from live positions and history from recorded movements. Each
+per-wallet read takes the customer's wallet as `ownerAddress`, so your
+backend decides which wallet a signed-in customer may see. The examples read
+it from `OWNER_ADDRESS`, as in [Deposit funds](/docs/earn/deposits#before-you-begin).
+
+Set `SDP_API_URL` and `SDP_API_KEY` as shown in the
+[Quickstart](/docs/earn/quickstart#before-you-begin).
+
+## Positions
+
+[`GET /v1/earn/external-wallet/positions`](/docs/reference/api/earn/list-earn-external-wallet-positions)
+returns the wallet's live positions.
+
+```bash title="Terminal"
+curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/positions" \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  --data-urlencode "ownerAddress=$OWNER_ADDRESS"
+```
+
+| Field | Show it as |
+| --- | --- |
+| `id` | The position ID. Withdrawals name it. |
+| `label` | The strategy's display name. |
+| `shares` | The wallet's live share balance. |
+| `withdrawableShares` | The shares that can leave right now. |
+| `tokenValue` | The live value in the deposit token (`tokenMint`). Every Earn deposit token is a USD stablecoin, so at par this reads as dollars. |
+| `unlockTimestamp` | When locked shares become withdrawable, in Unix seconds. Null or absent when nothing is locked. |
+
+Positions come newest first, and repeat deposits into one strategy add to the
+same position.
+
+- **A missing live value is unavailable.** When the provider read fails,
+  `shares`, `withdrawableShares`, and `tokenValue` are left out. Show
+  "Unavailable" and disable withdrawals until a fresh read succeeds. Never
+  show zero or an old quote.
+- **A wallet with no positions returns an empty list,** not `404`. A fully
+  withdrawn position drops out of the list.
+- **An open withdrawal request holds shares outside the position.** They
+  leave `shares` and `tokenValue` until the request pays out or is canceled,
+  so show its `quotedAssets` as an expected payout.
+- **`parIntermediate`** appears while the wallet holds an operator
+  redemption's intermediate token outside an open request. It keeps the
+  position open and counts toward earnings' `currentValue`. See
+  [Operator redemptions](/docs/earn/withdrawals#operator-redemptions).
+
+## Movements
+
+Each deposit and withdrawal is a movement. Read one with
+[`GET /v1/earn/external-wallet/movements/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement),
+or list a wallet's history, newest first, with
+[`GET /v1/earn/external-wallet/movements`](/docs/reference/api/earn/list-earn-external-wallet-movements).
+
+```bash title="Terminal"
+curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/movements" \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  --data-urlencode "ownerAddress=$OWNER_ADDRESS"
+```
+
+```json title="Response (trimmed)"
+{
+  "data": {
+    "ownerAddress": "HM4yQMRMc3gd6TwgraU7r4f4zpJRZmDomzkSPDWmmfi8",
+    "movements": [
+      {
+        "movementId": "earn_movement_a6aed3f5-4f89-4dc6-9d4b-0864021bd80d",
+        "direction": "deposit",
+        "status": "finalized",
+        "settlement": "atomic",
+        "amount": "25",
+        "denomination": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "tokenAmount": "25",
+        "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "createdAt": "2026-11-06T18:17:55.220Z",
+        "confirmedAt": "2026-11-06T18:17:55.374Z",
+        "settledAt": "2026-11-06T18:17:58.425Z"
+      }
+    ],
+    "hasMore": false,
+    "nextCursor": null
+  }
+}
+```
+
+Show `tokenAmount` in `tokenMint` units for both directions. On a withdrawal,
+`amount` is the share quantity, not the payout, and `tokenAmount` stays null
+until SDP observes the payout. `confirmedAt` is when the network confirmed
+the movement, and `settledAt` is when it finalized. Label requested amounts
+and expected queue payouts as such.
+[How a movement settles](/docs/earn/concepts#how-a-movement-settles) explains
+each status and `settlement`.
+
+## Earnings
+
+[`GET /v1/earn/external-wallet/earnings`](/docs/reference/api/earn/get-earn-external-wallet-earnings)
+returns the wallet's balance and earnings for each deposit token.
+
+```bash title="Terminal"
+curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/earnings" \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  --data-urlencode "ownerAddress=$OWNER_ADDRESS"
+```
+
+```json title="Response (trimmed)"
+{
+  "data": {
+    "earnings": {
+      "ownerAddress": "HM4yQMRMc3gd6TwgraU7r4f4zpJRZmDomzkSPDWmmfi8",
+      "positionCount": 1,
+      "unavailablePositionCount": 0,
+      "totalsByToken": [
+        {
+          "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+          "currentValue": "25",
+          "totalDeposited": "25",
+          "totalWithdrawn": "0",
+          "earned": "0"
+        }
+      ]
+    }
+  }
+}
+```
+
+`currentValue` is the sum of the positions' `tokenValue`, plus any
+intermediate tokens. `earned` is
+`currentValue + totalWithdrawn - totalDeposited`, and it appears only when it
+is exact. It can be negative: right after a deposit, the strategy's share
+rounding can leave it slightly below zero. When it is left out,
+`earnedUnavailableReason` says why:
+
+| Reason | Meaning |
+| --- | --- |
+| `live_value_unavailable` | A position's live value could not be read. |
+| `movements_pending` | A deposit or withdrawal is still settling. |
+| `withdrawals_pending` | An open withdrawal request holds shares that have not paid out yet. |
+| `deposits_not_valued` | SDP did not observe a finalized deposit's amount. |
+| `withdrawals_not_valued` | SDP did not observe a finalized withdrawal's payout. |
+
+Show a dash, never `$0`, while `earned` is missing. Three limits apply:
+
+- **Only held positions count.** A fully withdrawn position drops out of
+  earnings but stays in the movement history.
+- **Outside transfers count.** The live value reads the wallet's whole balance
+  in the strategy, including shares acquired outside SDP, while deposits and
+  withdrawals come only from SDP's records.
+- **It is not an accounting ledger.** It gives no lifetime realized returns or
+  daily accrual history. Reconcile against your own records for statements.
+
+## Position totals
+
+[`GET /v1/earn/external-wallet/positions/summary`](/docs/reference/api/earn/get-earn-external-wallet-position-summary)
+returns live totals across every customer wallet in your project, by token and
+by strategy. It takes no `ownerAddress`.
+
+```bash title="Terminal"
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/positions/summary" \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
+Wallet addresses are personal data, so they are left out unless you pass
+`includeOwnerAddresses=true`. Add `includePositions=true` to also get each
+wallet's positions; it requires the address opt-in, or the request returns
+`400`.
+
+Never send this summary, or your API key, to a customer's browser.
+
+## Paginate every list
+
+| List | Paging |
+| --- | --- |
+| Strategies | `page` and `pageSize` (default 20, up to 100), until you have `total`. |
+| Positions, movements, withdrawal requests | `limit` (default 20, up to 100) and `before`, set to the previous page's `nextCursor`, until `hasMore` is `false`. |
+
+Treat a missing or repeated cursor as an error: a silently short list hides a
+customer's money. Earn lists differ from the shared
+[Pagination](/docs/reference/conventions/pagination) conventions: the catalog
+returns `total`, `page`, and `pageSize` inside `data`, and the cursor lists
+take their cursor as `before`.

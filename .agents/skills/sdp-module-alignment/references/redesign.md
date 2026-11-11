@@ -146,8 +146,8 @@ Rewrite the composition, keep data hooks and trackers single-copy.
   `apps/sdp-api/scripts/generate-playground-catalog.ts`), which reads the public
   OpenAPI document; the playground proxy 404s anything outside the catalog.
 - **Verify:** scanner B7.
-- **Done:** either the tab ships with the family, or the module's notes say why
-  it is blocked (Earn: held from the public OpenAPI until PRO-2038).
+- **Done:** either the tab ships with the family, or the module's notes record
+  the current blocker. Earn's public catalog follows its `beta` maturity.
 
 ## B8 Tests, smoke specs and doc sync
 

@@ -3,7 +3,9 @@ import { earnProviderActionSchema } from "@sdp/types/earn-provider-orders";
 import { z } from "zod";
 import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
 import * as requests from "@/routes/earn/provider-actions/schemas";
+import { EARN_GROUPS } from "./earn-groups";
 import {
+  DOCS_GROUP,
   errorResponses,
   jsonContent,
   projectScopeHeaders,
@@ -67,6 +69,7 @@ export function registerEarnProviderActionPaths(
       operationId,
       summary,
       tags: ["Earn"],
+      [DOCS_GROUP]: EARN_GROUPS.providerActions,
       security,
       description: `Requires ${action} and an Idempotency-Key. Reuse the same key and payload after uncertain outcomes. Builds return a base64 VersionedTransaction requiring the owner and optional fee payer signatures. Submit the exact message with all existing protocol signatures preserved. Preparation must be finalized or not_required before a sponsored first mint. Cancellation uses the recorded original order and cancels the provider's aggregate pending standard redemption for that wallet and vault; finalization requires verified share return. A confirmed source transaction alone never proves fulfillment.`,
       request: {
@@ -84,6 +87,7 @@ export function registerEarnProviderActionPaths(
     operationId: "getEarnProviderAction",
     summary: "Read a provider action",
     tags: ["Earn"],
+    [DOCS_GROUP]: EARN_GROUPS.providerActions,
     security,
     description:
       "Requires earn.read. Scoped to the authenticated project and environment. Preparation is not_required when its share account already exists, otherwise finalizes at Solana finality; cancellation awaits a verified share return. No additional claim transaction is required.",

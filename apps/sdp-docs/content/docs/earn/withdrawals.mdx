@@ -1,0 +1,284 @@
+---
+module: earn
+title: Withdraw funds
+description: Choose a live withdrawal route, withdraw instantly or by request, and confirm the payout reached the customer's wallet.
+---
+
+A withdrawal spends shares from a position and pays the deposit token back to
+the wallet that owns it. Some routes pay in the same transaction; others pay
+later. Read the live routes first, then follow the one your customer chooses.
+
+Set `SDP_API_URL` and `SDP_API_KEY` as shown in the
+[Quickstart](/docs/earn/quickstart#before-you-begin).
+
+## 1. Choose a route
+
+[`POST /v1/earn/external-wallet/withdrawal-options`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-options)
+reads each route from live provider state.
+
+```bash title="Terminal"
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/withdrawal-options" \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc"}'
+```
+
+```json title="Response (trimmed)"
+{
+  "data": {
+    "positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc",
+    "instant": true,
+    "providerOrder": false,
+    "queued": true,
+    "queueAsset": {
+      "assetMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+      "allowWithdrawals": true,
+      "secondsToMaturity": 3600,
+      "minimumSecondsToDeadline": 60,
+      "maximumSecondsToDeadline": 7776000,
+      "minimumDiscountBps": 0,
+      "maximumDiscountBps": 100,
+      "minimumShares": "0.000001",
+      "shareDecimals": 6
+    },
+    "parRedemption": null
+  }
+}
+```
+
+| Route | When it is offered | Pays out |
+| --- | --- | --- |
+| Instant withdrawal | `instant: true` | In the same transaction. |
+| Provider order | `providerOrder: true` | Later, when the provider completes the order. |
+| Solver queue | `queued: true`, with live terms in `queueAsset` | Later, at a discount, when a solver fulfills the request. |
+| Operator redemption | `parRedemption` is present | Later, at par, when the operator settles the request. |
+
+A position offers an instant withdrawal or a provider order, never both, and
+the same withdrawal endpoints build whichever it offers. When more than one
+route is offered, let your customer choose, and keep their choice. Never infer
+a route from the strategy's `liquidityTerm`. A failed read or missing terms
+means the route is unavailable, not that it pays zero.
+
+## 2. Withdraw instantly
+
+An instant withdrawal works like a deposit: preview, build, sign, submit, and
+track. Withdraw at most the position's live `withdrawableShares`: a preview
+does not check the wallet's balance.
+
+| Step | Request |
+| --- | --- |
+| Preview | [`POST /v1/earn/external-wallet/withdrawal-previews`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-preview) |
+| Build | [`POST /v1/earn/external-wallet/withdrawal-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-transaction) |
+| Submit | [`POST /v1/earn/external-wallet/withdrawals`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal), with an `Idempotency-Key` |
+| Track | [`GET /v1/earn/external-wallet/movements/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement) |
+
+The example uses the Quickstart's `earn-api.ts` and `test-wallet.ts`, and
+`floor.ts` from [Slippage floors](/docs/earn/integration-details#slippage-floors).
+Call `withdraw` with the `positionId` and `withdrawalSlippage` saved in your
+backend after the deposit, plus the share amount your customer chose:
+
+```typescript title="withdraw.ts"
+import { randomUUID } from "node:crypto";
+import { earnRequest, waitForMovement } from "./earn-api";
+import { floorForTolerance } from "./floor";
+import { ownerAddress, signWithTestWallet } from "./test-wallet";
+
+type SavedPosition = {
+  positionId: string;
+  withdrawalSlippage: { defaultToleranceBps: number } | null;
+};
+type Position = { id: string; withdrawableShares?: string };
+
+export async function withdraw(savedPosition: SavedPosition, shares: string) {
+  let position: Position | undefined;
+  let before: string | null = null;
+  do {
+    const query = new URLSearchParams({ ownerAddress, limit: "100" });
+    if (before !== null) query.set("before", before);
+    const page: { positions: Position[]; nextCursor: string | null } = await earnRequest(
+      `/v1/earn/external-wallet/positions?${query}`,
+    );
+    position = page.positions.find((p) => p.id === savedPosition.positionId);
+    before = page.nextCursor;
+  } while (!position && before !== null);
+  if (!position || position.withdrawableShares === undefined) {
+    throw new Error("The saved position cannot withdraw right now");
+  }
+
+  const preview = await earnRequest("/v1/earn/external-wallet/withdrawal-previews", {
+    positionId: position.id,
+    shares,
+  });
+  if (preview.blockingIssues.length > 0) {
+    throw new Error(`Preview blocked: ${JSON.stringify(preview.blockingIssues)}`);
+  }
+
+  // Send a floor only when the saved policy takes one; never require a catalog listing to exit.
+  const policy = savedPosition.withdrawalSlippage;
+  const minAmountOut = policy
+    ? floorForTolerance(preview.assetsOut, preview.assetDecimals, policy.defaultToleranceBps)
+    : undefined;
+
+  const { transaction: built } = await earnRequest(
+    "/v1/earn/external-wallet/withdrawal-transactions",
+    { positionId: position.id, shares, minAmountOut },
+  );
+  const signedTransaction = await signWithTestWallet(built.transaction);
+
+  const { withdrawal } = await earnRequest(
+    "/v1/earn/external-wallet/withdrawals",
+    { transactionId: built.transactionId, signedTransaction },
+    randomUUID(),
+  );
+  return waitForMovement(withdrawal.movementId);
+}
+```
+
+```json title="Preview response"
+{
+  "data": {
+    "positionId": "earn_position_e3053c7b-e41e-4f21-b4dc-e229ab95f40b",
+    "assetsOut": "10",
+    "assetDecimals": 6,
+    "blockingIssues": []
+  }
+}
+```
+
+The preview quotes the payout; it does not reserve it. The build requires
+`minAmountOut` when the strategy's `withdrawalSlippage` is not null, and
+refuses it when the policy is null. The position supplies the vault and mints,
+so a delisted strategy stays exitable. Keep the deposit-time policy with the
+position; do not require the strategy to appear in today's catalog.
+
+If the build reports that the floor policy changed, refresh the policy with
+your SDP contact before retrying. Never guess a policy from a missing catalog
+row.
+
+At `finalized`, `tokenAmount` is the payout SDP observed. Check the customer's
+token balance onchain if you need independent proof, then refresh
+[balances](/docs/earn/balances).
+
+## Provider orders
+
+A provider order takes an exact share amount and pays out after the provider
+prices and settles it. Its preview may return `501`, which does not block the
+build. No floor can bound a later price, so omit `minAmountOut` when the
+policy is null.
+
+The withdrawal's `settlement` is `provider_order`. Confirmation proves the
+order transaction, not the payout: the movement stays `confirmed` until the
+provider completes the order. Show it as pending until it reaches `finalized`;
+see [How a movement settles](/docs/earn/concepts#how-a-movement-settles).
+
+## Asynchronous withdrawals
+
+A solver queue or an operator redemption creates a withdrawal request. The
+request transaction moves shares, never the payout, so track the request until
+it pays out or is canceled.
+
+### Solver queues
+
+The request escrows shares. After `secondsToMaturity`, a solver may fulfill it
+at the agreed discount until the deadline. Before the customer confirms, show
+the live terms from `queueAsset`: minimum shares, the discount range, maturity,
+and the deadline range.
+
+Send `shares`, `discountBps`, and `deadlineSeconds`, each inside the live
+terms; `mechanism` defaults to `solverQueue`. The deadline counts from
+maturity, not from creation, and both run on the cluster's clock:
+`maturityTimestamp` and `deadlineTimestamp` are onchain Unix times.
+
+- **The discount is your customer's cost.** A larger `discountBps` makes a
+  solver more likely to fill the request, and the customer receives that much
+  less.
+- **The deadline is how long solvers have.** A longer `deadlineSeconds` gives
+  them more time, but keeps the shares escrowed longer if none fills it.
+- **Open requests leave the balance.** Escrowed shares drop out of the
+  position's `shares` and earnings' `currentValue`, and earnings report
+  `withdrawals_pending`. Show the request's `quotedAssets` as an expected
+  payout.
+
+### Operator redemptions
+
+The request converts shares into an intermediate token and authorizes the
+operator to settle it for the deposit token at par. Read the live
+`parRedemption` terms: minimum shares, `intermediateMint`, `assetMint`, and
+whether cancellation is allowed.
+
+Send `mechanism: "operatorRedemption"` with either `shares` or
+`intermediateAmount` from an existing `parIntermediate` holding, never both.
+A null `minimumShares` means the conversion rate is unavailable: the preview
+reports a blocking issue.
+
+### Create a request
+
+| Step | Request |
+| --- | --- |
+| Preview | [`POST /v1/earn/external-wallet/queued-withdrawal-previews`](/docs/reference/api/earn/create-earn-external-wallet-queued-withdrawal-preview) |
+| Build | [`POST /v1/earn/external-wallet/withdrawal-request-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-transaction) |
+| Submit | [`POST /v1/earn/external-wallet/withdrawal-requests`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request), with an `Idempotency-Key` |
+
+Resolve every `blockingIssues` entry in the preview, then build, sign, and
+submit as for an instant withdrawal. Save the returned `withdrawalRequestId`.
+
+Keep the signed request and its idempotency key until the request resolves.
+The wallet may already have broadcast it, so SDP accepts it even after its
+build expires:
+
+| Submit answer | What to do |
+| --- | --- |
+| `409 CONFLICT` on a late request | SDP released the build's reservation and accepts the request once the exact transaction is finalized. Retry the same bytes and key. For an operator redemption whose cycle already closed, contact support instead. |
+| `400 TRANSACTION_FAILED` | The transaction finalized as failed. Build a new request. |
+| `503` | SDP could not finish checking the request's history. Retry the same bytes and key, and contact support if it persists. |
+
+### Track a request
+
+Poll [`GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-request)
+every minute or two. Status values spell it `cancelled`.
+
+| Status | Meaning | What to show |
+| --- | --- | --- |
+| `creating` | SDP recorded the signed request; its chain outcome is unresolved. | Pending. |
+| `pending` | Waiting for maturity or for the operator. | Pending, with the expected timing. |
+| `fulfillable` | A solver may fulfill it now. | Pending. |
+| `expiredCancelable` | The solver deadline passed without fulfillment. | Offer cancellation. |
+| `cancelling` | A cancellation was submitted; a fulfillment can still race it. | Canceling. |
+| `closedOrUnknown` | The request closed, and SDP has not yet proved a payout or a cancellation. | Pending; keep tracking. |
+| `fulfilled` | SDP observed the payout. `assetsPaid` holds the amount. | Done. |
+| `cancelled` | SDP observed the cancellation. | Canceled; refresh holdings. |
+| `failed` | It did not happen: SDP decides that only after repeated checks find no trace of it. `failureReason` says why. | Failed. |
+
+Only `fulfilled`, `cancelled`, and `failed` are final, and only `fulfilled`
+pays out. Never credit `quotedAssets`, a request transaction, or a
+cancellation as received funds. A solver queue request that no solver takes
+stays `fulfillable` until its deadline, then becomes `expiredCancelable`, and
+its shares stay escrowed until the customer cancels it.
+
+On startup and after reconnecting, restore every open request:
+[`GET /v1/earn/external-wallet/withdrawal-requests?ownerAddress=<wallet>&settled=false`](/docs/reference/api/earn/list-earn-external-wallet-withdrawal-requests),
+reading every page.
+
+<Callout type="warn">
+Sign withdrawal requests and cancellations without broadcasting them, and
+submit them through SDP promptly. If a wallet broadcasts one itself and SDP
+first sees it after the build expires, SDP may not be able to track it.
+</Callout>
+
+### Cancel a request
+
+Offer cancellation for a solver queue request only at `expiredCancelable`,
+never from a client clock; building one earlier returns `409 CONFLICT`. An
+operator redemption can be canceled while `pending` if its live terms allow
+it. Refresh the request first: a fulfillment can race the cancellation.
+
+| Step | Request |
+| --- | --- |
+| Build | [`POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancel-transaction) |
+| Submit | [`POST /v1/earn/external-wallet/withdrawal-request-cancellations`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancellation) |
+
+Both steps take `earn.manage`, and cancellation stays available after
+production access is removed or new deposits are disabled. Use a new
+`Idempotency-Key` for the cancellation. A canceled solver request returns
+the escrowed shares; a canceled operator redemption leaves the intermediate
+token, not the original shares. Refresh holdings before another withdrawal.

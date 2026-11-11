@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
+import { SDP_RELEASE_CHANNELS } from "@sdp/types/release-channels";
 import { structure } from "fumadocs-core/mdx-plugins/remark-structure";
 import remarkGfm from "remark-gfm";
 import remarkMdx from "remark-mdx";
@@ -96,6 +97,23 @@ describe("docs follow the release channel", () => {
       () => isPagePublished({ module: "issuence" }, "p", STABLE),
       /module must be one of/
     );
+  });
+
+  it("publishes Earn pages and shared listings through the ordinary module gate", () => {
+    for (const [releaseChannel, published] of [
+      ["stable", false],
+      ["beta", true],
+      ["experimental", true],
+    ] as const) {
+      const surface: PublicSurface = {
+        ...EXPERIMENTAL,
+        releaseChannel,
+        modules: SDP_RELEASE_CHANNELS[releaseChannel],
+      };
+      assert.equal(isPagePublished({ module: "earn" }, "earn/index.mdx", surface), published);
+      const modules = expandDocsBlocks("<ModuleTable />\n", "introduction.mdx", { surface });
+      assert.equal(modules.includes("**Earn**"), published);
+    }
   });
 
   it("renders generated blocks for what the build publishes, in text", () => {

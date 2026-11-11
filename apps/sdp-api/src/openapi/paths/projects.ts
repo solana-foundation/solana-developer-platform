@@ -21,10 +21,8 @@ import {
  * Registers the projects family's paths.
  *
  * @param registry - The OpenAPI registry being built.
- * @param publishEarn - Whether the document carries the Earn family; when false,
- *   the provider availability path documents no Earn entries.
  */
-export function registerProjectPaths(registry: OpenAPIRegistry, publishEarn: boolean) {
+export function registerProjectPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
     method: "get",
     path: "/v1/projects",
@@ -86,7 +84,7 @@ export function registerProjectPaths(registry: OpenAPIRegistry, publishEarn: boo
     responses: {
       200: {
         description: "Project provider availability",
-        content: jsonContent(projectProviderAvailabilityResponse(publishEarn)),
+        content: jsonContent(projectProviderAvailabilityResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },

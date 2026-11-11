@@ -9,12 +9,11 @@ What a module exposes beyond its code, and where it runs. `api/` =
   `createPublicOpenApiDocument({ releaseChannel })` (`api/openapi/spec.ts`),
   which drops routes of modules outside the channel; shared schemas drop their
   enum values and `oneOf` branches in `api/openapi/release-channel-values.ts`.
-  Never hand-maintain a list of the module's routes anywhere else. A family is
-  held out of the public document in one of two ways: a flag
-  (`EARN_PUBLIC_SURFACE_PUBLISHED = false`), or omission of its tag from
-  `PUBLIC_OPENAPI_TAGS` in the same file (DvP, Private Channels). Lifting either
-  hold, or promoting any route into the public document, is a
-  security-relevant scope change that needs a named sign-off.
+  Never hand-maintain a list of the module's routes anywhere else. A family's
+  public registration and release-channel maturity decide whether it appears.
+  Internal families omit their tag from `PUBLIC_OPENAPI_TAGS` in the same file
+  (DvP, Private Channels). Promoting an internal route into the public document
+  is a security-relevant scope change that needs a named sign-off.
 - **Verify:** scanner D1 prints the internal paths file and whether the tag is
   public. In the fix PR (these write files), regenerate and diff:
   `pnpm -C apps/sdp-api openapi:generate`, `pnpm -C apps/sdp-api
@@ -32,8 +31,9 @@ What a module exposes beyond its code, and where it runs. `api/` =
 - **Condition:** a page about one module takes `module: <module>` frontmatter
   (or `rampProvider:`); shared pages never name a module and use the generated
   blocks (`<ModuleTable />`, `<ModuleCapabilities />`, ...) for lists. An
-  unpublished guide lives outside `content/docs` (Earn's is in
-  `apps/sdp-docs/content/unpublished/`). Rules: `apps/sdp-docs/CLAUDE.md`
+  unpublished guide lives outside `content/docs`; public guides stay in that
+  tree and follow their module's release-channel gate. Rules:
+  `apps/sdp-docs/CLAUDE.md`
   "Release Channels".
 - **Verify:** scanner D1 counts the module's pages; `pnpm --filter sdp-docs
   check:links` on both `experimental` and `stable`; `pnpm --filter sdp-docs
@@ -48,10 +48,9 @@ What a module exposes beyond its code, and where it runs. `api/` =
   the module, see E3), auth (action grants, `sf_` keys), routes, defaults.
 - **Verify:** scanner D3 flags fixed API hosts in the module's code; grep the
   example app and docs for the module's old scopes and route names.
-- **Earn:** the 09-10 partner PDFs pointed at `api.solana.com` (403 for Earn),
-  used retired scopes, claimed public OpenAPI routes that are held, and missed
-  14 queued-withdrawal routes; the unpublished guide still defaults
-  `SDP_API_URL` to `https://api.solana.com`.
+- **Earn:** the 2026-09-10 partner PDFs pointed at a host that refused Earn,
+  used retired scopes and missed 14 queued-withdrawal routes. Recheck each
+  integration's host against its deployment channel; Earn is `beta`.
 
 ## D4 Repo docs
 

@@ -118,6 +118,14 @@ const rampProviderRotator: ShikiTransformer = {
   },
 };
 
+/** Retain each fence's language for the shared docs code shell. */
+const codeLanguage: ShikiTransformer = {
+  name: "sdp-code-language",
+  pre(node) {
+    node.properties["data-language"] = this.options.lang;
+  },
+};
+
 const defaultTransformers = rehypeCodeDefaultOptions.transformers;
 if (!defaultTransformers) {
   throw new Error("fumadocs rehype-code default transformers missing");
@@ -130,7 +138,7 @@ export default defineConfig({
     remarkPlugins: (defaults) => [remarkDocsBlocks, ...defaults],
     rehypeCodeOptions: {
       ...rehypeCodeDefaultOptions,
-      transformers: [...defaultTransformers, rampProviderRotator],
+      transformers: [...defaultTransformers, rampProviderRotator, codeLanguage],
     },
   },
 });
