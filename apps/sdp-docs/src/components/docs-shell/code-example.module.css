@@ -77,6 +77,8 @@
   height: 14px;
 }
 
+.language,
+.languageLabel,
 .copy {
   flex: none;
 }

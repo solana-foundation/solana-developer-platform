@@ -138,22 +138,26 @@ function saveLanguage(
   for (const listener of group.listeners) listener();
 }
 
+function singleCodeOf(panel: ReactNode) {
+  if (!isValidElement<ChildProps>(panel)) return undefined;
+  const body = Children.toArray(panel.props.children).filter(
+    (child) => typeof child !== "string" || child.trim() !== ""
+  );
+  const [only] = body;
+  return body.length === 1 &&
+    isValidElement<CodeExampleProps>(only) &&
+    (only.type === CodeExample ||
+      (typeof only.props["data-language"] === "string" &&
+        only.props.className?.split(/\s+/).includes("shiki") === true))
+    ? only
+    : undefined;
+}
+
 function singleCodePanels(children: ReactNode): boolean {
-  return Children.toArray(children).every((panel) => {
-    if (typeof panel === "string" && panel.trim() === "") return true;
-    if (!isValidElement<ChildProps>(panel)) return false;
-    const body = Children.toArray(panel.props.children).filter(
-      (child) => typeof child !== "string" || child.trim() !== ""
-    );
-    const [only] = body;
-    return (
-      body.length === 1 &&
-      isValidElement<CodeExampleProps>(only) &&
-      (only.type === CodeExample ||
-        (typeof only.props["data-language"] === "string" &&
-          only.props.className?.split(/\s+/).includes("shiki") === true))
-    );
-  });
+  return Children.toArray(children).every(
+    (panel) =>
+      (typeof panel === "string" && panel.trim() === "") || singleCodeOf(panel) !== undefined
+  );
 }
 
 /** A generated code tab list carries labels; response status values are not languages. */
@@ -299,6 +303,13 @@ function LanguageGroup({
   if (selected === undefined) throw new Error(`Unknown code language choice: ${value}`);
   const container = useRef<HTMLDivElement>(null);
   const singleCode = singleCodePanels(children);
+  const activePanel = Children.toArray(children).find(
+    (panel) =>
+      isValidElement<ChildProps>(panel) &&
+      panel.props.value?.toLowerCase().replace(/\s/, "-") === value.toLowerCase().replace(/\s/, "-")
+  );
+  const title = singleCode ? singleCodeOf(activePanel)?.props.title : undefined;
+  const filename = typeof title === "string" && isLanguage(title.toLowerCase()) ? undefined : title;
   const [menuOpen, setMenuOpen] = useState(false);
   return (
     <Tabs
@@ -317,37 +328,40 @@ function LanguageGroup({
       data-code-example=""
     >
       <div className={styles.header}>
-        {options.length === 1 ? (
-          <span className={styles.languageLabel}>{selected.label}</span>
-        ) : (
-          <Popover open={menuOpen} onOpenChange={setMenuOpen}>
-            <PopoverTrigger
-              className={styles.language}
-              aria-label={`Code language: ${selected.label}`}
-            >
-              {selected.label}
-              <ChevronDown aria-hidden="true" />
-            </PopoverTrigger>
-            <PopoverContent align="start" className={`launch-popover ${styles.menu}`}>
-              <TabsList aria-label="Code language" className={styles.choices}>
-                {options.map((option) => (
-                  <PopoverClose key={option.value} asChild>
-                    <TabsTrigger
-                      value={option.value}
-                      className={styles.choice}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") setMenuOpen(false);
-                      }}
-                    >
-                      {option.label}
-                      {option.value === value && <Check aria-hidden="true" />}
-                    </TabsTrigger>
-                  </PopoverClose>
-                ))}
-              </TabsList>
-            </PopoverContent>
-          </Popover>
-        )}
+        <span className={styles.caption}>
+          {options.length === 1 ? (
+            <span className={styles.languageLabel}>{selected.label}</span>
+          ) : (
+            <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+              <PopoverTrigger
+                className={styles.language}
+                aria-label={`Code language: ${selected.label}`}
+              >
+                {selected.label}
+                <ChevronDown aria-hidden="true" />
+              </PopoverTrigger>
+              <PopoverContent align="start" className={`launch-popover ${styles.menu}`}>
+                <TabsList aria-label="Code language" className={styles.choices}>
+                  {options.map((option) => (
+                    <PopoverClose key={option.value} asChild>
+                      <TabsTrigger
+                        value={option.value}
+                        className={styles.choice}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") setMenuOpen(false);
+                        }}
+                      >
+                        {option.label}
+                        {option.value === value && <Check aria-hidden="true" />}
+                      </TabsTrigger>
+                    </PopoverClose>
+                  ))}
+                </TabsList>
+              </PopoverContent>
+            </Popover>
+          )}
+          {filename && <span className={styles.filename}>{filename}</span>}
+        </span>
         {singleCode && <CopyCode container={container} />}
       </div>
       <InCodeGroup value={singleCode ? SINGLE_CODE_GROUP : MULTIPLE_CODE_GROUP}>

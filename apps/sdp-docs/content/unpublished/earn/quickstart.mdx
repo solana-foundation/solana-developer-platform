@@ -9,6 +9,12 @@ wallet standing in for your customer's wallet. Nothing touches real funds.
 
 ## Before you begin
 
+Create the project folder. Run the remaining commands from it:
+
+```bash title="Terminal"
+mkdir earn-quickstart && cd earn-quickstart
+```
+
 | You need | How to get it |
 | --- | --- |
 | A sandbox API key with `earn.execute` | [Create an API key](/docs/developing-with-sdp/manage-api-keys) in your sandbox project. Keep it on your backend. |
@@ -21,10 +27,9 @@ wallet standing in for your customer's wallet. Nothing touches real funds.
 Your organization also needs the strategy's provider activated. If a preview
 returns `403` with `provider_not_entitled`, ask your SDP contact.
 
-Set up a project and your key:
+Install the TypeScript tools and set your key:
 
 ```bash title="Terminal"
-mkdir earn-quickstart && cd earn-quickstart
 npm init -y && npm pkg set type=module
 npm install @solana/kit@8 && npm install -D tsx
 export SDP_API_KEY="sf_..."

@@ -17,9 +17,6 @@ const previewOrigin = earnDocsPreviewOrigin();
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // Page actions run in the browser, where Vercel's server-only branch variables
-  // are absent. Inline this URL only after the server has checked both guards.
-  ...(previewOrigin ? { env: { NEXT_PUBLIC_SDP_DOCS_URL: `${previewOrigin}/docs` } } : {}),
   assetPrefix: "/docs",
   async redirects() {
     return [
@@ -114,6 +111,12 @@ const nextConfig = {
     ];
   },
 };
+
+// Page actions run in the browser, where Vercel's server-only branch variables
+// are absent. Inline this URL only after the server has checked both guards.
+if (previewOrigin) {
+  nextConfig.env = { NEXT_PUBLIC_SDP_DOCS_URL: `${previewOrigin}/docs` };
+}
 
 // Gated so non-container builds skip the unused standalone tree.
 // outputFileTracingRoot is required for pnpm-workspace symlinks to resolve.

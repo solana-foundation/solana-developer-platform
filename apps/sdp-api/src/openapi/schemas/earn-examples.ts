@@ -1,3 +1,5 @@
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
+
 /**
  * Whole-request and whole-response examples for the partner Earn operations.
  * The API reference samples a body from its schema, so without these it shows
@@ -8,7 +10,7 @@
  */
 
 const OWNER = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
-const USDC_DEVNET = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+const USDC_DEVNET = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 const VAULT = "C7N2fqV2GvhFghDf5PJSwstyjedjLNCY1cm2Ak7TeU83";
 const SHARE_MINT = "CeirL1mAehaM6g2EccgMUQwohNfnuyicskVQ4r9ekXk6";
 const VEDA_VAULT = "3wbKP5UGLT7gAZBAsLjvPC1NbfnWKtT3Dq7cniMWkzfU";
@@ -49,7 +51,7 @@ export const EARN_STRATEGY_EXAMPLE = {
   name: "Steakhouse High Yield USDC",
   sourceKind: "defi",
   underlyingSource: "klend",
-  depositMints: ["EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"],
+  depositMints: [WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address],
   shareMint: "FU2tGk7tFHEhZiZ516TKgpPqPwXYXHTeRHqvuDwa56UV",
   apyType: "variable",
   currentApy: "0.045113",

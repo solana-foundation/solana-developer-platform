@@ -1,3 +1,5 @@
+import { parseDecimalAmount } from "@sdp/solana/amount";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 import {
   earnExternalWalletDepositResponse,
@@ -206,15 +208,13 @@ describe("Earn reference examples", () => {
   });
 
   it("states earnings that add up", () => {
-    // Exact six-decimal units, never a JavaScript number.
-    const units = (value: string) => {
-      const [whole = "0", fraction = ""] = value.split(".");
-      return BigInt(whole + fraction.padEnd(6, "0"));
-    };
+    const decimals = WELL_KNOWN_TOKENS.USDC.mints.devnet.decimals;
     for (const total of EARN_EARNINGS_EXAMPLE.totalsByToken) {
       expect(
-        units(total.currentValue) + units(total.totalWithdrawn) - units(total.totalDeposited)
-      ).toBe(units(total.earned));
+        parseDecimalAmount(total.currentValue, decimals) +
+          parseDecimalAmount(total.totalWithdrawn, decimals) -
+          parseDecimalAmount(total.totalDeposited, decimals)
+      ).toBe(parseDecimalAmount(total.earned, decimals));
     }
   });
 

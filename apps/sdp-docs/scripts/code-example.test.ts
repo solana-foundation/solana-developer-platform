@@ -35,7 +35,12 @@ function copyCount(html: string): number {
   return html.match(/aria-label="Copy code"/g)?.length ?? 0;
 }
 
-function ServerCode(props: { "data-language": string; className: string; children?: ReactNode }) {
+function ServerCode(props: {
+  "data-language": string;
+  className: string;
+  title?: string;
+  children?: ReactNode;
+}) {
   return h(components.CodeExample, props);
 }
 
@@ -117,6 +122,76 @@ describe("shared docs code examples", () => {
     assert.doesNotMatch(workflow, /Code language:/);
     assert.match(workflow, />Preview<\/button>/);
     assert.match(workflow, />Submit<\/button>/);
+  });
+
+  it("shows only the active authored filename beside the language control", () => {
+    for (const defaultIndex of [0, 1]) {
+      const html = renderToStaticMarkup(
+        h(
+          components.DocsTabs,
+          { items: ["JavaScript", "Python"], defaultIndex },
+          h(
+            components.DocsTab,
+            { value: "JavaScript" },
+            code("js", "await checkAction()", "compliance-action.js")
+          ),
+          h(
+            components.DocsTab,
+            { value: "Python" },
+            code("py", "check_action()", "compliance_action.py")
+          )
+        )
+      );
+      const activeFilename = defaultIndex === 0 ? "compliance-action.js" : "compliance_action.py";
+      const hiddenFilename = defaultIndex === 0 ? "compliance_action.py" : "compliance-action.js";
+      assert.equal(html.split(activeFilename).length - 1, 1);
+      assert.ok(!html.includes(hiddenFilename));
+      assert.match(
+        html,
+        new RegExp(`aria-label="Code language: ${defaultIndex === 0 ? "JavaScript" : "Python"}"`)
+      );
+      assert.equal(copyCount(html), 1);
+    }
+  });
+
+  it("preserves active generated filenames across the server component boundary", () => {
+    for (const value of ["TypeScript", "Python"]) {
+      const html = renderToStaticMarkup(
+        h(
+          components.DocsCodeBlockTabs,
+          { value },
+          h(
+            CodeBlockTabsList,
+            null,
+            h(CodeBlockTabsTrigger, { value: "TypeScript" }, "TypeScript"),
+            h(CodeBlockTabsTrigger, { value: "Python" }, "Python")
+          ),
+          ...[
+            { language: "ts", label: "TypeScript", title: "example.ts" },
+            { language: "py", label: "Python", title: "example.py" },
+          ].map((example) =>
+            h(
+              components.DocsCodeBlockTab,
+              { key: example.label, value: example.label },
+              h(
+                ServerCode,
+                {
+                  "data-language": example.language,
+                  className: "shiki shiki-themes",
+                  title: example.title,
+                },
+                h("code", null, "example")
+              )
+            )
+          )
+        )
+      );
+      const activeFilename = value === "TypeScript" ? "example.ts" : "example.py";
+      const hiddenFilename = value === "TypeScript" ? "example.py" : "example.ts";
+      assert.equal(html.split(activeFilename).length - 1, 1);
+      assert.ok(!html.includes(hiddenFilename));
+      assert.equal(copyCount(html), 1);
+    }
   });
 
   it("recognizes highlighted code across the server component boundary", () => {

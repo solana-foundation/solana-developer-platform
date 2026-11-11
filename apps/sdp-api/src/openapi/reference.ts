@@ -464,6 +464,10 @@ function withoutErrorCodes(envelope: ApiSchema): ApiSchema {
   };
 }
 
+function exampleError(code: ErrorCode | SdpEarnErrorCode): AppError | SdpEarnError {
+  return code === "NOT_IMPLEMENTED" ? new SdpEarnError(code) : new AppError(code);
+}
+
 /**
  * An error answer as the API sends it: the envelope sampled from its schema, with the error the
  * route raises for that status (`missingAction` for a 403 on a route with an action).
@@ -479,12 +483,7 @@ function errorExample(
   const codes = envelopeCodes(schema, document);
   if (codes === null) return jsonValueSchema.parse(sampleFromSchema(schema, document));
   const code = exampleErrorCode(status, takesIdempotencyKey, where);
-  const error =
-    status === "403" && action !== null
-      ? missingAction(action)
-      : code === "NOT_IMPLEMENTED"
-        ? new SdpEarnError(code)
-        : new AppError(code);
+  const error = status === "403" && action !== null ? missingAction(action) : exampleError(code);
   if (String(error.statusCode) !== status || !codes.has(error.code)) {
     throw new Error(`${where}: ${error.code} is not an answer the document allows for a ${status}`);
   }
