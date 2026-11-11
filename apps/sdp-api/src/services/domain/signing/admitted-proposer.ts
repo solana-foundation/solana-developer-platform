@@ -57,8 +57,8 @@ export interface TransferProposalRequest {
  * failure from {@link CustodyTransferProposer.propose} may follow acceptance.
  */
 export class ProposalNotSentError extends Error {
-  constructor(readonly refusal: unknown) {
-    super("Custody proposal was refused before submission", { cause: refusal });
+  constructor(cause: unknown) {
+    super("Custody proposal was refused before submission", { cause });
     this.name = "ProposalNotSentError";
   }
 }

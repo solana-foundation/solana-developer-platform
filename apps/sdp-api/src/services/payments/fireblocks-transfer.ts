@@ -173,7 +173,7 @@ export async function submitProposedTransfer(
   } catch (error) {
     if (error instanceof ProposalNotSentError) {
       // A refusal before submission is definitely unsent, unlike an ambiguous provider outcome.
-      const refusal = error.refusal;
+      const refusal = error.cause;
       await repo.updateTransfer({
         transferId: row.id,
         organizationId: row.organization_id,

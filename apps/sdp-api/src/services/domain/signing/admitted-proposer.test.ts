@@ -1,4 +1,5 @@
 import { generateKeyPairSync } from "node:crypto";
+import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import { describe, expect, it, vi } from "vitest";
 import type { MoneyAdmissionDecision } from "@/lib/money-admission";
@@ -46,13 +47,10 @@ const context = {
   address: SOURCE,
 };
 const admitted: MoneyAdmissionDecision = { admitted: true };
-const refused = {
-  admitted: false,
-  reason: "movement_disabled",
-} as MoneyAdmissionDecision;
+const refused: MoneyAdmissionDecision = { admitted: false, reason: "movement_disabled" };
 
 function runtime() {
-  const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
+  const fetch = vi.fn<CustodyProvisioningRuntime["fetch"]>(async (_url, init) =>
     Response.json(
       init?.method === "POST"
         ? { id: "fb-1", status: "SUBMITTED" }
@@ -63,7 +61,7 @@ function runtime() {
     fetch,
     runtime: {
       ...proposalRuntime,
-      fetch: fetch as unknown as typeof globalThis.fetch,
+      fetch,
       sleep: async () => {},
     },
   };
@@ -140,17 +138,25 @@ describe("admittedTransferProposer (PRO-2435 D2)", () => {
     );
     const prepared = await devnet(() =>
       proposer.prepare({ token: "SOL", amount: "0.01", native: true })
-    ).catch(() => null);
+    );
     expect(decide).not.toHaveBeenCalled();
-    expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
-    if (prepared) expect(prepared.intent).toMatchObject({ connectionId: "cconn_1" });
+    // Native SOL needs no asset catalogue, so preparing makes no provider request at all.
+    expect(fetch).not.toHaveBeenCalled();
+    expect(prepared.intent).toEqual(intent);
   });
 
   it("gives recovery only a reader: it can GET a proposal but never create one", async () => {
     const { fetch, runtime: rt } = runtime();
     const reader = proposalReader(async () => access, rt);
     expect(Object.keys(reader)).toEqual(["read"]);
-    await reader.read("xfr_1").catch(() => undefined);
-    expect(fetch.mock.calls.every(([, init]) => (init?.method ?? "GET") === "GET")).toBe(true);
+    const result = await reader.read("xfr_1");
+    expect(result).toMatchObject({
+      id: "fb-1",
+      status: "PENDING_AUTHORIZATION",
+      externalTxId: "xfr_1",
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(String(fetch.mock.calls[0]?.[0])).toContain("/v1/transactions/external_tx_id/xfr_1");
+    expect(fetch.mock.calls[0]?.[1]?.method ?? "GET").toBe("GET");
   });
 });
