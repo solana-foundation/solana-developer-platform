@@ -109,10 +109,12 @@ separate from Sandbox and must be set up again.
 
 ## 3. Connect your custody provider account
 
-Production runs on your own provider account. In Production, open **Wallets**,
-click **Create wallet**, and select **Privy** if the page asks for a provider.
+Production runs on your own provider account. Open **Wallets**, click
+**Create wallet**, and choose a provider.
 
-Keep or rename the **Credential label**. Enter your **Privy app ID** and
+- [Connect Fireblocks](/docs/wallet-operations/fireblocks): Connect your own Fireblocks workspace for production custody.
+
+For Privy, keep or rename the **Credential label**. Enter your **Privy app ID** and
 **Privy app secret** from the [Privy dashboard](https://dashboard.privy.io),
 then a **Wallet label**. Click **Connect and create wallet** to verify the
 connection and create your first Privy wallet.
@@ -245,6 +247,8 @@ Create a custody wallet, check its balances, and use API key grants to control w
 - [Create a wallet](/docs/guides/setup-wallets): choose a provider and provision your first wallet.
 - [Wallet balances](/docs/wallet-operations/balances): read token balances and optional USD valuations.
 - [Manage API keys](/docs/developing-with-sdp/manage-api-keys): grant only the actions and wallets an integration needs.
+
+- [Connect Fireblocks](/docs/wallet-operations/fireblocks): Connect your own Fireblocks workspace for production custody.
 
 See the [Wallets API reference](/docs/reference/api/wallets) for request and response details.
 
@@ -43373,7 +43377,7 @@ A **custody wallet** is a Solana keypair whose key a custody provider holds. SDP
 | Provider | Description |
 | --- | --- |
 | **Privy** | Embedded wallet infrastructure platform |
-| **Fireblocks** | Digital asset infrastructure company |
+| **[Fireblocks](/docs/wallet-operations/fireblocks)** | Digital asset infrastructure company |
 | **Coinbase CDP** | Embedded wallets for developers |
 | **Para** | Wallet and authentication suite |
 | **Turnkey** | Non-custodial wallet infrastructure platform |
@@ -43381,6 +43385,8 @@ A **custody wallet** is a Solana keypair whose key a custody provider holds. SDP
 | **IBM Digital Asset Haven** | Institutional custody on IBM Digital Asset Haven |
 | **Anchorage** | Regulated institutional crypto custody |
 | **Utila** | Vault-backed wallet signing through service accounts |
+
+- [Connect Fireblocks](/docs/wallet-operations/fireblocks): Connect your own Fireblocks workspace for production custody.
 
 **Dashboard**
 
@@ -47956,6 +47962,146 @@ Source: https://platform.solana.com/docs/reference/conventions/versioning
 Every product route's path starts with its version: `/v1` is the current contract. A breaking change ships under a new major version, such as `/v2`, never inside `/v1`. The health checks, `/health` and `/health/ready`, have no version.
 
 The OpenAPI document's `info.version` counts revisions of that document for the current path version. It isn't the API's version.
+
+---
+
+## Docs
+
+### Connect Fireblocks
+Source: https://platform.solana.com/docs/wallet-operations/fireblocks
+
+> Connect your Fireblocks workspace, import Solana wallets, and approve payments.
+
+Connect your own Fireblocks workspace to use its Solana wallets in SDP.
+Fireblocks keeps the wallet signing keys and applies your transaction policy.
+
+## Before you start
+
+- Sign in to SDP as an **organization admin**. Ask the SDP team to enable
+  Fireblocks if it isn't offered in wallet setup.
+- Have a Fireblocks workspace owner available to approve the API user and an
+  authorized operator to configure policies.
+- Choose the right SDP project: **Sandbox** uses devnet; **Production** uses
+  mainnet and requires [mainnet access](/docs/guides/go-to-mainnet).
+
+## 1. Download a CSR from SDP
+
+Open **Integrations → Fireblocks → Add connection**. Enter a **Connection name**
+and click **Generate and download CSR**.
+
+SDP creates the API authentication key. Upload only the
+[CSR](https://developers.fireblocks.com/docs/integrate-fireblocks-with-third-party-service-providers)
+to Fireblocks, never a private key. Complete registration within seven days or
+generate a new CSR.
+
+## 2. Register an API user in Fireblocks
+
+In Fireblocks, open **Developer center → API users → Add API user**. Enter a
+descriptive name, select **Editor**, upload the CSR, and click **Add user**.
+Have the workspace owner approve it and wait until active.
+
+If the key uses [IP restrictions](https://developers.fireblocks.com/docs/whitelist-ips-for-api-keys),
+ask an authorized operator to allow SDP's outbound IPs under **⋯ → Allowlist IP
+address**. Get the IPs from the SDP team.
+
+## 3. Connect your vaults
+
+Copy **API User (ID)** from Fireblocks into SDP and click **Load vaults**.
+Select up to **20 vaults**, then click **Connect and verify**.
+
+SDP verifies and imports the existing wallets using their vault names.
+
+## 4. Set approvals and send a payment
+
+SDP submits direct payments as
+[one-time address transfers](https://developers.fireblocks.com/reference/transaction-sources-destinations#one_time_address).
+Your workspace and Transfer policy must allow them.
+
+In Fireblocks, open **Security → Policies → Transfer**. Have your authorized
+operator choose **Edit policy → Add rule** and configure:
+
+- **Scope:** select this SDP API user as **Initiator**, then the source vaults,
+  destinations, and an address type that permits one-time addresses.
+- **Funds:** select the assets and amount limits your organization permits.
+- **Action:** choose **Request approval**, set **Approver set** and **Threshold**,
+  then choose **Designated signer → Users** and select your organization's signer.
+
+Publish the rule, then open **Settings → General** and set **One-time address
+transactions** to **Allow**. Complete the required approvals for both changes.
+
+Manage any address whitelist in **Whitelisted addresses** and check the Solana
+network and address. SDP contacts do not whitelist recipients in Fireblocks.
+
+Open **Accounts → Vault**, select the source vault's Solana wallet, and use its
+deposit address. Fund it with **SOL for network fees**, including when sending
+USDC. Fireblocks signs and broadcasts direct SOL/canonical USDC payments;
+SDP fee sponsorship does not apply.
+
+Send a [small payment](/docs/payments/send-basic-payment) and approve it in
+Fireblocks. SDP tracks it while approval is pending.
+
+SDP relies on your Fireblocks policy. The **Pay** reminder does not detect
+missing policies: the Editor role cannot read them. Check the policy yourself.
+
+## Manage and troubleshoot
+
+Check the signer (optional)
+
+Direct SOL/USDC payments don't need this check. **Prove ownership**, batch
+payments, and other RAW-signing operations require workspace RAW enablement
+and a RAW policy permitting the SDP API user with your designated signer.
+If disabled, contact your Fireblocks Customer Success Manager for enablement.
+You don't need an API Co-signer for this connection.
+
+For the check, open the wallet's **Settings → Ownership → Prove ownership**.
+Approve promptly in Fireblocks. SDP requests a RAW signature and simulates
+without broadcasting; a configured, funded SDP fee payer is required.
+
+Rotate credentials
+
+Open **Integrations → Fireblocks**, select the connection, and choose
+**Rotate secret**. Generate a new CSR and register a replacement API user as
+above. Before switching, update policies that name the old **Initiator** to
+include the replacement user and configure its IP allowlist.
+
+Select the original verification vault. SDP checks every wallet before
+switching. Keep the previous user active and permitted during the 24-hour
+rollback window.
+
+Disconnect
+
+In Fireblocks, open **Developer center → API users → ⋯ → Delete** for the SDP
+API user. If unavailable, ask an authorized workspace operator.
+
+SDP blocks connection deactivation while wallets remain active. Fireblocks
+wallet deactivation is not supported from SDP; contact the SDP team for cleanup.
+
+Deleting the user does not cancel payments Fireblocks already accepted.
+Reject or cancel them there too; cancellation can race execution.
+
+How credentials are stored
+
+Wallet signing keys stay in Fireblocks. SDP stores API credentials in GCP
+Secret Manager by default on hosted SDP or encrypted database storage when
+self-hosted. Pending CSR keys are encrypted and deleted after registration or
+expiry.
+
+Fireblocks refused a payment
+
+Open **Transaction history**, expand the transaction, and read **Status** and
+**Sub-status**. **Inspect Policy** uses the current policy, which may differ
+from the one that evaluated the transaction. Pending approval is not a refusal.
+
+A refused submission or replay returns **HTTP 422** with
+`error.code: "CUSTODY_POLICY_REFUSED"`. A later refusal appears as a failed
+transfer. The dashboard shows:
+
+> Fireblocks blocked signing due to a wallet policy. Review the policy in
+> Fireblocks or adjust the request.
+
+If a submission times out, keep its original
+[Idempotency-Key](/docs/developing-with-sdp/idempotency) and check the existing
+payment before intentionally starting another.
 
 ## Notes
 - Generated from docs source. Hidden or internal-only APIs are intentionally excluded.

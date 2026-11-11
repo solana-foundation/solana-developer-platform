@@ -11,6 +11,7 @@ import generatedExamples from "@/generated/api-examples.json";
 import { apiExampleOf, type GuideApiExamples, renderApiExample } from "./api-example";
 import { developmentNoticeMarkdown } from "./development-notice";
 import {
+  type CustodyProviderEntry,
   DOCS_ACTION_MODULES,
   DOCS_CUSTODY_PROVIDERS,
   DOCS_MODULES,
@@ -31,14 +32,15 @@ import {
 import { apiUrl, canonicalSite } from "./site";
 
 /**
- * Generated blocks. A page about one module carries `module:` (or
- * `rampProvider:`) frontmatter; a shared page never names a module itself and
- * instead places a block that lists what the build publishes:
+ * Generated blocks. A page about one module or provider carries `module:`,
+ * `rampProvider:` or `custodyProvider:` frontmatter. A shared page instead
+ * places a block that lists what the build publishes:
  *
  * - `<ModuleTable />`: the modules, with what each does.
  * - `<ModuleCapabilities />`: one capability line per module (the AI guide).
  * - `<RampProviderMatrix />`: the ramp providers, each linking to its page.
  * - `<CustodyProviderTable />`: the custody providers, with what each is.
+ * - `<CustodyProviderGuides />`: setup guides for published custody providers.
  * - `<WalletCreateRetryTable />`: the custody providers whose wallet create
  *   dedupes on the request id, and for how long.
  * - `<ApiKeyGrantsTable />`: the actions an API key can be granted, by module.
@@ -67,6 +69,11 @@ const publishedModules = (surface: PublicSurface): ModuleEntry[] =>
   DOCS_MODULES.filter(
     (entry) => entry.module === "core" || isModulePublished(entry.module, surface)
   );
+
+const publishedCustodyProviders = (surface: PublicSurface): CustodyProviderEntry[] =>
+  Object.entries(DOCS_CUSTODY_PROVIDERS)
+    .filter(([provider]) => surface.custodyProviders.some((id) => id === provider))
+    .map(([, entry]) => entry);
 
 const BLOCKS = {
   ModuleTable: (surface) =>
@@ -102,10 +109,17 @@ const BLOCKS = {
   CustodyProviderTable: (surface) =>
     table(
       ["Provider", "Description"],
-      Object.entries(DOCS_CUSTODY_PROVIDERS)
-        .filter(([provider]) => surface.custodyProviders.some((id) => id === provider))
-        .map(([, entry]) => [`**${entry.name}**`, entry.description])
+      publishedCustodyProviders(surface).map((entry) => [
+        entry.guide ? `**[${entry.name}](${entry.guide.href})**` : `**${entry.name}**`,
+        entry.description,
+      ])
     ),
+  CustodyProviderGuides: (surface) =>
+    publishedCustodyProviders(surface)
+      .flatMap(({ guide }) =>
+        guide ? [`- [${guide.title}](${guide.href}): ${guide.description}`] : []
+      )
+      .join("\n"),
   WalletCreateRetryTable: ({ walletCreateDedupe }) =>
     table(
       ["Provider", "Wallets", "Same-key retry after a `5xx` returns the first wallet"],

@@ -17,7 +17,6 @@ import {
   type CustodyProviderCatalogEntry,
   getCustodyProviderEntry,
 } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
-import { docsHref } from "@/components/dashboard-nav";
 import {
   RecordBlock,
   RecordLine,
@@ -27,6 +26,7 @@ import {
 } from "@/components/refresh-record";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getTranslations } from "@/i18n/server";
+import { resolveDocsUrl } from "@/lib/docs-url";
 import { requestProjectHref } from "@/lib/sdp-api";
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
@@ -197,7 +197,9 @@ function DetailsBlock({ entry, t }: { entry: CustodyProviderCatalogEntry; t: Tra
         )}
         <RecordLine label={t("Shared.integrations.detailResources")}>
           <a
-            href={docsHref}
+            href={resolveDocsUrl(
+              entry.id === "fireblocks" ? "wallet-operations/fireblocks" : undefined
+            )}
             target="_blank"
             rel="noreferrer noopener"
             className="underline-offset-4 hover:underline"

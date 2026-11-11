@@ -11,9 +11,10 @@ import type { SdpModule, SdpReleaseChannel } from "@sdp/types/release-channels";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import generatedSurface from "@/generated/public-surface.json";
+import { DOCS_CUSTODY_PROVIDERS } from "./docs-catalog";
 
 /**
- * What this docs build may publish: the modules and ramp providers of the
+ * What this docs build may publish: the modules and providers of the
  * deployment's release channel. The API
  * decides it (`createPublicSurfaceManifest` in apps/sdp-api/src/openapi/spec.ts,
  * written by `openapi:generate` from `SDP_RELEASE_CHANNEL`) and `generate:api`
@@ -50,17 +51,20 @@ export type PublicSurface = {
 // JSON imports widen its unions to string.
 export const publicSurface = generatedSurface as PublicSurface;
 
-/** What a page or list entry is about: one module, or one ramp provider. */
-export type ChannelGate = { module: SdpModule } | { rampProvider: RampProviderId };
+/** What a page or list entry is about: one module or provider. */
+export type ChannelGate =
+  | { module: SdpModule }
+  | { rampProvider: RampProviderId }
+  | { custodyProvider: ManagedCustodyProvider };
 
 /**
- * Parses a module or ramp provider named in content (frontmatter), so a typo
+ * Parses a module or provider named in content (frontmatter), so a typo
  * fails the build instead of publishing or hiding a page.
  *
- * @throws When the name is not a known module or ramp provider.
+ * @throws When the name is not a known module or provider.
  */
 export function parseGate(
-  key: "module" | "rampProvider",
+  key: "module" | "rampProvider" | "custodyProvider",
   value: string,
   where: string,
   surface = publicSurface
@@ -72,6 +76,12 @@ export function parseGate(
       `${where}: module must be one of ${surface.allModules.join(", ")}; got "${value}"`
     );
   }
+  if (key === "custodyProvider") {
+    if (isDocsCustodyProvider(value)) return { custodyProvider: value };
+    throw new Error(
+      `${where}: custodyProvider must be one of ${Object.keys(DOCS_CUSTODY_PROVIDERS).join(", ")}; got "${value}"`
+    );
+  }
   const rampProvider = surface.allRampProviders.find((candidate) => candidate === value);
   if (rampProvider) return { rampProvider };
   throw new Error(
@@ -79,11 +89,17 @@ export function parseGate(
   );
 }
 
+// The catalog is exhaustive against the shared provider type. It validates names
+// even when this channel's manifest excludes the provider.
+function isDocsCustodyProvider(value: string): value is ManagedCustodyProvider {
+  return Object.hasOwn(DOCS_CUSTODY_PROVIDERS, value);
+}
+
 /** Whether the build publishes content behind `gate`. */
 export function isGatePublished(gate: ChannelGate, surface = publicSurface): boolean {
-  return "module" in gate
-    ? surface.modules.includes(gate.module)
-    : surface.rampProviders.includes(gate.rampProvider);
+  if ("module" in gate) return surface.modules.includes(gate.module);
+  if ("rampProvider" in gate) return surface.rampProviders.includes(gate.rampProvider);
+  return surface.custodyProviders.includes(gate.custodyProvider);
 }
 
 /** Whether the build publishes content about `module` (undefined: no module). */
@@ -96,10 +112,17 @@ export function isModulePublished(module: SdpModule | undefined, surface = publi
  * (Fumadocs owns titles and descriptions); empty frontmatter parses to null.
  */
 const pageGateFieldsSchema = z
-  .looseObject({ module: z.string().optional(), rampProvider: z.string().optional() })
+  .looseObject({
+    module: z.string().optional(),
+    rampProvider: z.string().optional(),
+    custodyProvider: z.string().optional(),
+  })
   .refine(
-    (fields) => fields.module === undefined || fields.rampProvider === undefined,
-    "a page takes module or rampProvider, not both"
+    (fields) =>
+      [fields.module, fields.rampProvider, fields.custodyProvider].filter(
+        (value) => value !== undefined
+      ).length <= 1,
+    "a page takes only one of module, rampProvider or custodyProvider"
   );
 
 export type PageGateFields = z.infer<typeof pageGateFieldsSchema>;
@@ -135,11 +158,15 @@ export function frontmatterOf(
 /**
  * A page's gate from its frontmatter: `module: <module>` for a page about one
  * module, `rampProvider: <provider>` for a page about one ramp provider (which
- * implies Ramps). Undefined for a page every channel publishes.
+ * implies Ramps), or `custodyProvider: <provider>` for a custody provider.
+ * Undefined for a page every channel publishes.
  */
 export function pageGateOf(data: PageGateFields, where: string): ChannelGate | undefined {
   if (data.module !== undefined) return parseGate("module", data.module, where);
   if (data.rampProvider !== undefined) return parseGate("rampProvider", data.rampProvider, where);
+  if (data.custodyProvider !== undefined) {
+    return parseGate("custodyProvider", data.custodyProvider, where);
+  }
   return undefined;
 }
 
@@ -154,6 +181,10 @@ export function isPagePublished(
 }
 
 /** Whether a raw MDX page is published by this build. */
-export function isPageSourcePublished(source: string, where: string): boolean {
-  return isPagePublished(frontmatterOf(source, where).data, where);
+export function isPageSourcePublished(
+  source: string,
+  where: string,
+  surface = publicSurface
+): boolean {
+  return isPagePublished(frontmatterOf(source, where).data, where, surface);
 }
