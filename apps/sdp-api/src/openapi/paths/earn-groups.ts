@@ -6,4 +6,4 @@ export const EARN_GROUPS = {
   programs: "Programs",
   providerActions: "Provider actions",
   onboarding: "Onboarding",
-} as const;
+} as const satisfies Record<string, string>;

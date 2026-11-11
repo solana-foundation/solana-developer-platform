@@ -58,7 +58,7 @@ export const EARN_EXAMPLE_IDS = {
   position: "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
   vedaPosition: "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc",
   withdrawalRequest: "earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9",
-} as const;
+} as const satisfies Record<string, string>;
 
 const IDS = EARN_EXAMPLE_IDS;
 

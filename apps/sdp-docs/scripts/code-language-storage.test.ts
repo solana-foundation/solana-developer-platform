@@ -18,6 +18,15 @@ function storage(cause?: Error) {
   };
 }
 
+function fullStorage() {
+  return {
+    ...storage(),
+    setItem(): void {
+      throw new DOMException("Storage full", "QuotaExceededError");
+    },
+  };
+}
+
 function browser(
   sessionStorage: ReturnType<typeof storage>,
   localStorage: ReturnType<typeof storage>
@@ -64,15 +73,32 @@ describe("optional code-language storage", () => {
     assert.doesNotThrow(() => storeCodeLanguage("code", "python", true));
   });
 
+  it("allows controls to continue when session storage is full", () => {
+    browser(fullStorage(), storage());
+    assert.doesNotThrow(() => storeCodeLanguage("code", "python", false));
+    assert.equal(readCodeLanguage("code", false), undefined);
+  });
+
+  it("keeps the session preference when persistent storage is full", () => {
+    const session = storage();
+    browser(session, fullStorage());
+    assert.doesNotThrow(() => storeCodeLanguage("code", "python", true));
+    assert.equal(session.getItem("code"), "python");
+    assert.equal(readCodeLanguage("code", true), "python");
+  });
+
+  it("surfaces a quota error from a storage read", () => {
+    const cause = new DOMException("Unexpected read failure", "QuotaExceededError");
+    const broken = storage(cause);
+    browser(broken, broken);
+    assert.throws(() => readCodeLanguage("code", true), cause);
+  });
+
   it("surfaces unexpected storage failures", () => {
-    for (const cause of [
-      new TypeError("Broken storage implementation"),
-      new DOMException("Storage full", "QuotaExceededError"),
-    ]) {
-      const broken = storage(cause);
-      browser(broken, broken);
-      assert.throws(() => readCodeLanguage("code", true), cause);
-      assert.throws(() => storeCodeLanguage("code", "python", true), cause);
-    }
+    const cause = new TypeError("Broken storage implementation");
+    const broken = storage(cause);
+    browser(broken, broken);
+    assert.throws(() => readCodeLanguage("code", true), cause);
+    assert.throws(() => storeCodeLanguage("code", "python", true), cause);
   });
 });

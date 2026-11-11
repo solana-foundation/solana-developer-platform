@@ -13,6 +13,8 @@ import { z } from "zod";
 
 const content = fileURLToPath(new URL("../content/docs/earn/", import.meta.url));
 const USDC = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
+const selectedStrategySchema = z.object({ id: z.string() });
+const finalizedMovementSchema = z.object({ status: z.literal("finalized") });
 type Strategy = Pick<
   EarnStrategy,
   "id" | "status" | "fundable" | "depositMints" | "depositSlippage" | "withdrawalSlippage"
@@ -41,19 +43,21 @@ async function example(page: string, title: string): Promise<string> {
 }
 
 /** Execute the authored examples with local request and wallet doubles. */
-async function runExample(
+async function runExample<Schema extends z.ZodType>(
   source: string,
   globals: Record<string, unknown>,
-  result: string
-): Promise<unknown> {
+  result: string,
+  schema: Schema
+): Promise<z.output<Schema>> {
   const script = source.replace(/^import .*;$/gm, "").replace(/^export /gm, "");
   const compiled = transpileModule(script, {
     compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022 },
   });
-  return await runInNewContext(`(async () => {\n${compiled.outputText}\nreturn ${result};\n})()`, {
-    URLSearchParams,
-    ...globals,
-  });
+  const evaluated: unknown = await runInNewContext(
+    `(async () => {\n${compiled.outputText}\nreturn ${result};\n})()`,
+    { URLSearchParams, ...globals }
+  );
+  return schema.parse(evaluated);
 }
 
 describe("Earn guide examples", () => {
@@ -70,9 +74,10 @@ describe("Earn guide examples", () => {
           }),
           ownerAddress: "test-owner",
         },
-        "strategy"
+        "strategy",
+        selectedStrategySchema
       );
-      assert.equal(z.object({ id: z.string() }).parse(result).id, eligible.id);
+      assert.equal(result.id, eligible.id);
     });
 
     it(`${page} stops when no funded USDC strategy is available`, async () => {
@@ -81,7 +86,8 @@ describe("Earn guide examples", () => {
         runExample(
           source,
           { earnRequest: async () => ({ strategies: [wrongMint, secondaryUsdc] }) },
-          "strategy"
+          "strategy",
+          selectedStrategySchema
         ),
         /No devnet USDC strategy is open for deposits/
       );
@@ -126,7 +132,7 @@ describe("Earn guide examples", () => {
       const calls: { route: string; body: Record<string, unknown> | undefined }[] = [];
       const floorCalls: [string, number, number][] = [];
       const savedPosition = { positionId: "saved-position", withdrawalSlippage };
-      await runExample(
+      const movement = await runExample(
         source,
         {
           savedPosition,
@@ -164,8 +170,10 @@ describe("Earn guide examples", () => {
             };
           },
         },
-        'await withdraw(savedPosition, "10")'
+        'await withdraw(savedPosition, "10")',
+        finalizedMovementSchema
       );
+      assert.equal(movement.status, "finalized");
       assert.equal(calls.filter(({ route }) => route.includes("/positions?")).length, 2);
       const build = calls.find(({ route }) => route.endsWith("/withdrawal-transactions"));
       assert.ok(build?.body);

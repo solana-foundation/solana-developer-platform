@@ -12,7 +12,7 @@ export function readCodeLanguage(
   }
 }
 
-/** Saves a code-language preference when browser privacy settings allow storage. */
+/** Saves a code-language preference when browser storage is available. */
 export function storeCodeLanguage(
   groupId: string,
   value: string,
@@ -22,6 +22,13 @@ export function storeCodeLanguage(
     window.sessionStorage.setItem(groupId, value);
     if (persist) window.localStorage.setItem(groupId, value);
   } catch (cause) {
-    if (!(cause instanceof DOMException && cause.name === "SecurityError")) throw cause;
+    if (
+      !(
+        cause instanceof DOMException &&
+        (cause.name === "SecurityError" || cause.name === "QuotaExceededError")
+      )
+    ) {
+      throw cause;
+    }
   }
 }
