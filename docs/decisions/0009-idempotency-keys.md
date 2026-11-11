@@ -48,7 +48,7 @@ credential is recorded on the row and compared in plain text rather than hashed:
   with GET to learn whether the original request ran before sending it again.
 
 A route can pass `canonicalize` where two spellings mean one request: unordered batch recipients,
-decimal amounts (`"1.0"` and `"1"`) on the money routes, and an empty batch `options` object.
+and decimal amounts (`"1.0"` and `"1"`) on the money routes.
 
 **Order.** Authentication → project context → `requirePermissions` → Allowed Operations →
 validation → **`authorize`** → **this step** → replay from the domain row → admission → handler.

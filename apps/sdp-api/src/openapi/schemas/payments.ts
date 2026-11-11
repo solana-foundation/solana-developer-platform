@@ -521,30 +521,6 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
         },
       ],
     }),
-    options: withOpenApi(
-      createTransferBatchSchemaBase.shape.options
-        .unwrap()
-        .extend({
-          priorityFee: withOpenApi(
-            createTransferBatchSchemaBase.shape.options.unwrap().shape.priorityFee,
-            {
-              description:
-                "Accepted for compatibility and ignored. No priority fee is applied, regardless of the selected value.",
-              example: "none",
-            }
-          ),
-        })
-        .optional(),
-      {
-        description:
-          "Execution options for transaction chunking and preflight validation. `priorityFee` is accepted for compatibility and ignored; no priority fee is applied.",
-        example: {
-          maxRecipientsPerTransaction: 20,
-          priorityFee: "none",
-          preflight: true,
-        },
-      }
-    ),
   })
   .openapi({
     description: "Create a custody-executed outbound transfer batch.",

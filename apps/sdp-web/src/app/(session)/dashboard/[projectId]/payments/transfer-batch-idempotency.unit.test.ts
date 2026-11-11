@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { PaymentTransferBatchRequest, PaymentTransferBatchStatus } from "@sdp/types/payments";
+import type { PaymentTransferBatchStatus } from "@sdp/types/payments";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { MOVEMENT_POLL_INTERVAL_MS, resetMovementWatchesForTests } from "@/lib/dashboard-fetch";
@@ -9,6 +9,7 @@ import {
   canonicalTransferBatchRequest,
   claimDefaultTransferBatchReference,
   claimTransferBatchIdempotencyKey,
+  type DashboardTransferBatchRequest,
   defaultTransferBatchReference,
   isTransferBatchSendOutcomeUnknown,
   nameTransferBatchRequest,
@@ -22,9 +23,10 @@ import {
 const t: Translate = (key) => key;
 
 function batchRequest(
-  overrides: Partial<PaymentTransferBatchRequest> = {}
-): PaymentTransferBatchRequest {
+  overrides: Partial<DashboardTransferBatchRequest> = {}
+): DashboardTransferBatchRequest {
   return {
+    projectId: "prj_1",
     sourceCustodyWalletId: "cwlt_1",
     token: "USDC",
     recipients: [
@@ -109,6 +111,7 @@ describe("transferBatchRequestFingerprint", () => {
 
   it("differs when any part of the intent changes", () => {
     const base = transferBatchRequestFingerprint(batchRequest());
+    expect(transferBatchRequestFingerprint(batchRequest({ projectId: "prj_2" }))).not.toBe(base);
     expect(
       transferBatchRequestFingerprint(batchRequest({ sourceCustodyWalletId: "cwlt_2" }))
     ).not.toBe(base);
@@ -121,6 +124,38 @@ describe("transferBatchRequestFingerprint", () => {
         })
       )
     ).not.toBe(base);
+  });
+
+  it("pins a batch's fingerprint, saved run name and generated run name to exact strings", () => {
+    const unnamed: DashboardTransferBatchRequest = {
+      projectId: "prj_1",
+      sourceCustodyWalletId: "cwlt_1",
+      token: "USDC",
+      recipients: [
+        { counterpartyId: "cp_2", counterpartyAccountId: "acct_2", amount: "2.50" },
+        { counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount: "1.0" },
+      ],
+    };
+    const savedName = "sdp:payments:transfer-batch:reference:v1:29b38f2627104071";
+    const sentAt = new Date("2026-11-10T12:00:00Z");
+
+    expect(transferBatchRequestFingerprint({ ...unnamed, externalId: "payroll-11" })).toBe(
+      '["prj_1","payroll-11","cwlt_1","USDC",[["cp_1","acct_1","1"],["cp_2","acct_2","2.5"]]]'
+    );
+    expect(defaultTransferBatchReference(unnamed, "2026-11-10")).toBe(
+      "batch-2026-11-10-29b38f2627104071"
+    );
+    expect(claimDefaultTransferBatchReference(unnamed, sentAt)).toBe(
+      "batch-2026-11-10-29b38f2627104071"
+    );
+    expect(Object.keys(window.localStorage)).toEqual([savedName]);
+    window.localStorage.setItem(
+      savedName,
+      JSON.stringify({ reference: "batch-2026-11-09-29b38f2627104071", savedAt: sentAt.getTime() })
+    );
+    expect(claimDefaultTransferBatchReference(unnamed, sentAt)).toBe(
+      "batch-2026-11-09-29b38f2627104071"
+    );
   });
 });
 
@@ -517,7 +552,7 @@ describe("defaultTransferBatchReference", () => {
     ).toBe(reference);
   });
 
-  it("names a different amount, wallet or day as a different run", () => {
+  it("names a different Project, amount, wallet or day as a different run", () => {
     const reference = defaultTransferBatchReference(batchRequest(), "2026-10-28");
     const otherAmount = batchRequest({
       recipients: [
@@ -526,6 +561,9 @@ describe("defaultTransferBatchReference", () => {
       ],
     });
 
+    expect(
+      defaultTransferBatchReference(batchRequest({ projectId: "prj_2" }), "2026-10-28")
+    ).not.toBe(reference);
     expect(defaultTransferBatchReference(otherAmount, "2026-10-28")).not.toBe(reference);
     expect(
       defaultTransferBatchReference(batchRequest({ sourceCustodyWalletId: "cwlt_2" }), "2026-10-28")

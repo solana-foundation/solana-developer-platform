@@ -4,8 +4,6 @@ import { paymentAmountSchema, paymentTokenSchema } from "@/routes/payments/schem
 /** The most recipients one batch holds; retry reads a whole batch at this size. */
 export const MAX_TRANSFER_BATCH_RECIPIENTS = 500;
 
-const priorityFeeSchema = z.enum(["none", "low", "medium", "high", "auto"]);
-
 export const transferBatchIdParamsSchema = z.object({
   batchId: z.string().min(1),
 });
@@ -34,18 +32,11 @@ const transferBatchRecipientSchema = z.object({
   amount: paymentAmountSchema,
 });
 
-export const transferBatchOptionsSchema = z.object({
-  maxRecipientsPerTransaction: z.number().int().min(1).max(64).optional(),
-  priorityFee: priorityFeeSchema.optional(),
-  preflight: z.boolean().optional(),
-});
-
 const transferBatchMovementSchema = z.strictObject({
   projectId: z.string().min(1).optional(),
   sourceCustodyWalletId: z.string().min(1),
   token: paymentTokenSchema,
   recipients: z.array(transferBatchRecipientSchema).min(1).max(MAX_TRANSFER_BATCH_RECIPIENTS),
-  options: transferBatchOptionsSchema.optional(),
 });
 
 /** A payout run's name (HOO-2335): the run key is derived from it. */

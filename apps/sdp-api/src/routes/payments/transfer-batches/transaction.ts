@@ -23,7 +23,7 @@ import {
 import { badRequest, internalError, sponsoredRentOverCap } from "@/lib/errors";
 import type { RecentBlockhash, ResolvedRecipient, TokenContext } from "./types";
 
-export const DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION = 20;
+export const MAX_RECIPIENTS_PER_TRANSACTION = 20;
 
 export interface RecipientInstructionGroup extends ResolvedRecipient {
   instructions: Instruction[];
@@ -225,8 +225,9 @@ function sponsoredRentOf(
 }
 
 /**
- * Packs instruction groups into transaction chunks, greedily filling each chunk up to the
- * recipient cap, the Solana transaction size limit and the sponsor's per-transaction rent cap.
+ * Packs instruction groups into transaction chunks, greedily filling each chunk up to
+ * {@link MAX_RECIPIENTS_PER_TRANSACTION}, the Solana transaction size limit and the sponsor's
+ * per-transaction rent cap.
  * A recipient whose own token account rent exceeds the cap is refused before any chunk is built,
  * so nothing is stored or sent.
  *
@@ -234,7 +235,6 @@ function sponsoredRentOf(
  * @param params.sourceSigner - Signer for the source wallet.
  * @param params.feePayer - Fee payer address.
  * @param params.lifetime - Blockhash lifetime applied to each chunk.
- * @param params.maxRecipientsPerTransaction - Upper bound on recipients per chunk.
  * @param params.sponsoredRent - Rent each created token account costs the sponsor, and its cap.
  * @returns The chunks to submit, each within transaction size limits and the rent cap.
  * @throws AppError `SPONSORED_RENT_OVER_CAP` when one recipient's rent alone exceeds the cap.
@@ -244,7 +244,6 @@ export function chunkInstructionGroups(params: {
   sourceSigner: TransactionSigner;
   feePayer: Address;
   lifetime: RecentBlockhash;
-  maxRecipientsPerTransaction: number;
   sponsoredRent: SponsoredRentLimit;
 }): TransactionChunk[] {
   const { sponsoredRent } = params;
@@ -280,7 +279,7 @@ export function chunkInstructionGroups(params: {
   };
 
   for (const group of params.groups) {
-    if (pending.length >= params.maxRecipientsPerTransaction) {
+    if (pending.length >= MAX_RECIPIENTS_PER_TRANSACTION) {
       flush();
     }
 

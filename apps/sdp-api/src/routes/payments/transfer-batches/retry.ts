@@ -23,7 +23,7 @@ import {
 } from "./resolve";
 import { buildTransferBatchResponse } from "./respond";
 import { prepareBatchChunks, runBatchChunks } from "./run";
-import { MAX_TRANSFER_BATCH_RECIPIENTS, transferBatchOptionsSchema } from "./schemas";
+import { MAX_TRANSFER_BATCH_RECIPIENTS } from "./schemas";
 import { solBatchMovement } from "./sol-movement";
 import type { TransferBatchMovementInput } from "./types";
 
@@ -177,8 +177,7 @@ export async function admitTransferBatchRetryExecution(
  * retry under its key in the same transaction, so a rerun is answered from it
  * (findTransferBatchRetryReplay). Each recipient is paid the address the batch
  * recorded for it, or the retry is refused. Each keeps its row and is linked
- * to its new chunk transfer; the failed transfer rows stay as they were. The
- * batch's stored options apply.
+ * to its new chunk transfer; the failed transfer rows stay as they were.
  *
  * @param c - Request context.
  * @returns JSON batch response with recipients and chunk transfers.
@@ -203,7 +202,6 @@ export async function retryTransferBatch(c: AppContext) {
     });
   }
 
-  const options = transferBatchOptionsSchema.parse(batch.options);
   const resolved = await resolveBatchMovement(
     asBatchInput(batch, authorized.sourceWallet.id, failed.rows),
     authorized
@@ -213,7 +211,7 @@ export async function retryTransferBatch(c: AppContext) {
     failed.rows,
     resolved.recipients.map((recipient) => recipient.destinationAddress)
   );
-  const prepared = await prepareBatchChunks(c, resolved, options.maxRecipientsPerTransaction);
+  const prepared = await prepareBatchChunks(c, resolved);
   // Before the claim: a recipient still below the rent minimum would only fail
   // again, so the retry is refused and its recipients stay failed (HOO-2375).
   const solMovement = solBatchMovement(resolved, prepared.chunks);
@@ -253,7 +251,6 @@ export async function retryTransferBatch(c: AppContext) {
       if (!claimedRow) throw internalError("Claimed transfer batch recipient is missing");
       return claimedRow;
     }),
-    preflight: options.preflight !== false,
   });
 
   return success(c, await buildTransferBatchResponse(c, finalBatch, organizationId, projectId));

@@ -126,7 +126,6 @@ export function applyRecipientRowUpdates(
  * @param params.chunk - Chunk to sign and submit.
  * @param params.recipientsByIndex - Mutable recipient-index map shared across chunks.
  * @param params.feePayment - Fee-payment adapter used to sponsor and send.
- * @param params.preflight - Whether to simulate before sending.
  */
 export async function executeChunk(params: {
   c: AppContext;
@@ -137,7 +136,6 @@ export async function executeChunk(params: {
   lastValidBlockHeight: bigint;
   /** The attempt whose recipients this chunk may link (PreparedBatchChunks.attemptId). */
   attemptId: string;
-  preflight: boolean;
 }): Promise<void> {
   const { c, resolved, chunk } = params;
   const partiallySigned = await signWithFreshBlockhash({
@@ -277,24 +275,22 @@ export async function executeChunk(params: {
       return { entry: settled ? outcome : null, result: settled };
     });
 
-  if (params.preflight) {
-    try {
-      const simulated = await simulateTransaction(resolved.rpc, txBytes);
-      if (!simulated.success) {
-        const shortfall = simulatedInsufficientFundsError(
-          simulated.error,
-          chunk.message.instructions
-        );
-        if (shortfall) throw shortfall;
-        throw transactionFailed(
-          `Batch transfer preflight failed: ${simulated.error ?? "unknown simulation error"}`,
-          { logs: simulated.logs }
-        );
-      }
-    } catch (error) {
-      await failAuditedChunk(error);
-      return;
+  try {
+    const simulated = await simulateTransaction(resolved.rpc, txBytes);
+    if (!simulated.success) {
+      const shortfall = simulatedInsufficientFundsError(
+        simulated.error,
+        chunk.message.instructions
+      );
+      if (shortfall) throw shortfall;
+      throw transactionFailed(
+        `Batch transfer preflight failed: ${simulated.error ?? "unknown simulation error"}`,
+        { logs: simulated.logs }
+      );
     }
+  } catch (error) {
+    await failAuditedChunk(error);
+    return;
   }
 
   const submissionStore = createTransferSignedSubmissionStore(getPaymentsRepository(c), transfer);

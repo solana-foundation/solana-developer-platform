@@ -49,7 +49,6 @@ function mapPaymentTransferBatchRow(row: Record<string, unknown>): PaymentTransf
     total_amount: (row.total_amount as string | null | undefined) ?? null,
     recipient_count: row.recipient_count as number,
     transaction_count: row.transaction_count as number,
-    options: row.options as Record<string, unknown>,
     error: (row.error as string | null | undefined) ?? null,
     initiated_by_key_id: (row.initiated_by_key_id as string | null | undefined) ?? null,
     idempotency_key: (row.idempotency_key as string | null | undefined) ?? null,
@@ -76,10 +75,6 @@ function mapPaymentTransferRecipientRow(row: Record<string, unknown>): PaymentTr
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
-}
-
-function jsonParam(value: Record<string, unknown> | undefined): string | null {
-  return value === undefined ? null : JSON.stringify(value);
 }
 
 function buildScopeWhere(params: {
@@ -163,12 +158,11 @@ async function insertTransferBatch(
          total_amount,
          recipient_count,
          transaction_count,
-         options,
          error,
          initiated_by_key_id,
          idempotency_key,
          idempotency_fingerprint
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?::jsonb, '{}'::jsonb), ?, ?, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`
     )
     .bind(
@@ -184,7 +178,6 @@ async function insertTransferBatch(
       input.totalAmount ?? null,
       input.recipientCount ?? 0,
       input.transactionCount ?? 0,
-      jsonParam(input.options),
       input.error ?? null,
       input.initiatedByKeyId ?? null,
       input.idempotencyKey ?? null,
@@ -302,10 +295,9 @@ export function createPostgresPaymentTransferBatchesRepository(
              total_amount,
              recipient_count,
              transaction_count,
-             options,
              error,
              initiated_by_key_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?::jsonb, '{}'::jsonb), ?, ?)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (id) DO UPDATE SET
              external_id = EXCLUDED.external_id,
              source_custody_wallet_id = EXCLUDED.source_custody_wallet_id,
@@ -316,7 +308,6 @@ export function createPostgresPaymentTransferBatchesRepository(
              total_amount = EXCLUDED.total_amount,
              recipient_count = EXCLUDED.recipient_count,
              transaction_count = EXCLUDED.transaction_count,
-             options = EXCLUDED.options,
              error = EXCLUDED.error,
              initiated_by_key_id = EXCLUDED.initiated_by_key_id,
              updated_at = sdp_iso_now()
@@ -337,7 +328,6 @@ export function createPostgresPaymentTransferBatchesRepository(
           input.totalAmount ?? null,
           input.recipientCount ?? 0,
           input.transactionCount ?? 0,
-          jsonParam(input.options),
           input.error ?? null,
           input.initiatedByKeyId ?? null
         )
@@ -368,7 +358,6 @@ export function createPostgresPaymentTransferBatchesRepository(
                  total_amount = CASE WHEN ?::boolean THEN ? ELSE total_amount END,
                  recipient_count = COALESCE(?, recipient_count),
                  transaction_count = COALESCE(?, transaction_count),
-                 options = CASE WHEN ?::boolean THEN ?::jsonb ELSE options END,
                  error = CASE WHEN ?::boolean THEN ? ELSE error END,
                  initiated_by_key_id = CASE WHEN ?::boolean THEN ? ELSE initiated_by_key_id END,
                  updated_at = sdp_iso_now()
@@ -386,8 +375,6 @@ export function createPostgresPaymentTransferBatchesRepository(
           input.totalAmount ?? null,
           input.recipientCount ?? null,
           input.transactionCount ?? null,
-          input.options !== undefined,
-          jsonParam(input.options),
           input.error !== undefined,
           input.error ?? null,
           input.initiatedByKeyId !== undefined,

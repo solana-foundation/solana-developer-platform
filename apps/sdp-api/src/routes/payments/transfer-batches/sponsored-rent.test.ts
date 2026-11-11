@@ -26,7 +26,6 @@ import { associatedTokenAccountSize, readSponsoredRentLimit } from "./sponsored-
 import {
   buildInstructionGroups,
   chunkInstructionGroups,
-  DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
   type RecipientInstructionGroup,
   type SponsoredRentLimit,
 } from "./transaction";
@@ -138,7 +137,6 @@ describe("batch chunks under the sponsor's rent cap (HOO-2024)", () => {
         sourceSigner: SOURCE,
         feePayer: FEE_PAYER,
         lifetime: LIFETIME,
-        maxRecipientsPerTransaction: DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
         sponsoredRent,
       });
       return { groups, sponsoredRent, chunks };
@@ -176,7 +174,6 @@ describe("batch chunks under the sponsor's rent cap (HOO-2024)", () => {
       sourceSigner: SOURCE,
       feePayer: FEE_PAYER,
       lifetime: LIFETIME,
-      maxRecipientsPerTransaction: DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
       sponsoredRent: { rentByTokenAccount: new Map(), capLamports: null },
     });
 
