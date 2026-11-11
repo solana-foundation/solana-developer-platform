@@ -29,6 +29,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { readCodeLanguage, storeCodeLanguage } from "@/lib/code-language-storage";
 import styles from "./code-example.module.css";
 import { CopyStatusAnnouncement, CopyStatusIcon, useCopyStatus } from "./copy-status";
 
@@ -112,13 +113,7 @@ function languagePreference(
   if (groupId === undefined) return undefined;
   const live = languagePreferences.get(groupId)?.value;
   if (live !== undefined) return live;
-  try {
-    const session = window.sessionStorage.getItem(groupId);
-    return session ?? (persist ? (window.localStorage.getItem(groupId) ?? undefined) : undefined);
-  } catch {
-    // Preference storage is optional; privacy settings must not disable code controls.
-    return undefined;
-  }
+  return readCodeLanguage(groupId, persist);
 }
 
 function saveLanguage(
@@ -128,13 +123,8 @@ function saveLanguage(
 ): void {
   if (groupId === undefined) return;
   const group = languageGroup(groupId);
+  storeCodeLanguage(groupId, value, persist);
   group.value = value;
-  try {
-    window.sessionStorage.setItem(groupId, value);
-    if (persist) window.localStorage.setItem(groupId, value);
-  } catch {
-    // Live synchronization still works when a browser disables optional preference storage.
-  }
   for (const listener of group.listeners) listener();
 }
 
@@ -396,13 +386,18 @@ export function DocsCodeBlockTabs({
 
 /** Hidden code variants stay mounted so search and fragment links can reveal them. */
 export function DocsCodeBlockTab({ className, ...props }: ComponentProps<typeof CodeBlockTab>) {
-  return (
-    <CodeBlockTab
-      {...props}
-      forceMount
-      className={[styles.panel, className].filter(Boolean).join(" ")}
-    />
-  );
+  const group = useContext(InCodeGroup);
+  const panelProps: ComponentProps<typeof CodeBlockTab> = {
+    ...props,
+    forceMount: true,
+    className: [styles.panel, className].filter(Boolean).join(" "),
+  };
+  if (group !== null) {
+    panelProps["aria-label"] =
+      props["aria-label"] ?? `${codeLanguageLabel(props.value)} code example`;
+    panelProps["aria-labelledby"] = undefined;
+  }
+  return <CodeBlockTab {...panelProps} />;
 }
 
 /** Authored language alternatives share the shell; workflow and UI/API tabs stay regular. */
@@ -456,6 +451,8 @@ export function DocsTab({ value, ...props }: ComponentProps<typeof FumadocsTab>)
     <TabsContent
       {...props}
       value={value.toLowerCase().replace(/\s/, "-")}
+      aria-label={props["aria-label"] ?? `${codeLanguageLabel(value)} code example`}
+      aria-labelledby={undefined}
       forceMount
       className={styles.panel}
     />

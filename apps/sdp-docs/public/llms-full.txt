@@ -479,7 +479,8 @@ export async function waitForMovement(movementId: string, timeoutMs = 300_000) {
 
 ### 2. Choose a strategy, then build
 
-This example picks the first fundable strategy that needs no slippage floor.
+This example picks an active, fundable strategy whose first deposit mint is
+devnet USDC and needs no slippage floor.
 [Strategies](/docs/earn/strategies) explains each check.
 
 ```typescript title="deposit.ts"
@@ -487,15 +488,23 @@ import { randomUUID } from "node:crypto";
 import { earnRequest, waitForMovement } from "./earn-api";
 import { ownerAddress, signWithTestWallet } from "./test-wallet";
 
-type Strategy = { id: string; status: string; fundable: boolean; depositSlippage: unknown };
+type Strategy = {
+  id: string;
+  status: string;
+  fundable: boolean;
+  depositMints: string[];
+  depositSlippage: unknown;
+  withdrawalSlippage: { defaultToleranceBps: number } | null;
+};
 
 const { strategies }: { strategies: Strategy[] } = await earnRequest(
   "/v1/earn/strategies?pageSize=100",
 );
 const strategy = strategies.find(
-  (s) => s.fundable && s.status === "active" && s.depositSlippage === null,
+  (s) => s.fundable && s.status === "active" && s.depositSlippage === null
+    && s.depositMints[0] === "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
 );
-if (!strategy) throw new Error("No sandbox strategy is open for deposits");
+if (!strategy) throw new Error("No devnet USDC strategy is open for deposits");
 const amount = "25"; // in the deposit token, depositMints[0]
 
 const preview = await earnRequest("/v1/earn/vault-deposit-previews", {
@@ -531,6 +540,10 @@ const { deposit } = await earnRequest(
 
 SDP checks the signature against the exact bytes it built, records the
 deposit, then broadcasts it.
+
+Persist `deposit.positionId` with the selected strategy's `withdrawalSlippage`
+in your backend. Save `null` explicitly when no floor is supported. Keep this
+record for withdrawals even if the strategy leaves the catalog.
 
 ### 4. Track it and read the position
 
@@ -897,7 +910,8 @@ path, start with the [Quickstart](/docs/earn/quickstart).
 You need the Quickstart's setup: `SDP_API_URL` for a beta or experimental
 deployment, a sandbox API key with `earn.execute`, a funded test wallet in
 `test-wallet.json`, and Node.js for signing. See
-[Before you begin](/docs/earn/quickstart#before-you-begin).
+[Before you begin](/docs/earn/quickstart#before-you-begin). The cURL examples
+also require jq 1.6 or later.
 
 **cURL**
 
@@ -940,8 +954,9 @@ The steps below are one file, `deposit.ts`, that you run with
 
 ## 1. Choose a strategy
 
-List the catalog and keep a strategy that is fundable, active, and needs no
-slippage floor. [Strategies](/docs/earn/strategies) explains each check.
+List the catalog and keep an active, fundable strategy whose first deposit
+mint is devnet USDC and needs no slippage floor.
+[Strategies](/docs/earn/strategies) explains each check.
 
 **cURL**
 
@@ -949,9 +964,12 @@ slippage floor. [Strategies](/docs/earn/strategies) explains each check.
 curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/strategies?pageSize=100" \
   -H "Authorization: Bearer $SDP_API_KEY" > strategies.json
 
-# The first fundable, active strategy that needs no slippage floor.
-export STRATEGY_ID="$(jq -r '[.data.strategies[]
-  | select(.fundable and .status == "active" and .depositSlippage == null)][0].id' strategies.json)"
+# The first active, fundable devnet USDC strategy that needs no deposit floor.
+STRATEGY_ID="$(jq -er --arg mint "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU" '
+  [.data.strategies[] | select(.fundable and .status == "active"
+    and .depositSlippage == null and .depositMints[0] == $mint)][0].id
+  // error("No devnet USDC strategy is open for deposits")' strategies.json)" || exit 1
+export STRATEGY_ID
 export AMOUNT="25"  # in the deposit token
 echo "$STRATEGY_ID"
 ```
@@ -963,15 +981,23 @@ import { randomUUID } from "node:crypto";
 import { earnRequest } from "./earn-api";
 import { ownerAddress, signWithTestWallet } from "./test-wallet";
 
-type Strategy = { id: string; name: string; status: string; fundable: boolean; depositSlippage: unknown };
+type Strategy = {
+  id: string;
+  status: string;
+  fundable: boolean;
+  depositMints: string[];
+  depositSlippage: unknown;
+  withdrawalSlippage: { defaultToleranceBps: number } | null;
+};
 
 const { strategies }: { strategies: Strategy[] } = await earnRequest(
   "/v1/earn/strategies?pageSize=100",
 );
 const strategy = strategies.find(
-  (s) => s.fundable && s.status === "active" && s.depositSlippage === null,
+  (s) => s.fundable && s.status === "active" && s.depositSlippage === null
+    && s.depositMints[0] === "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
 );
-if (!strategy) throw new Error("No sandbox strategy is open for deposits");
+if (!strategy) throw new Error("No devnet USDC strategy is open for deposits");
 const amount = "25"; // in the deposit token
 ```
 
@@ -1126,6 +1152,11 @@ const { deposit } = await earnRequest(
   idempotencyKey,
 );
 ```
+
+Persist the returned `positionId` with the selected strategy's
+`withdrawalSlippage` in your backend's position record. Keep `null` explicitly
+when no floor is supported. A strategy can leave the catalog while its
+positions remain withdrawable; use this saved policy when building an exit.
 
 ```json title="Response (trimmed)"
 {
@@ -1534,7 +1565,9 @@ does not check the wallet's balance.
 | Track | [`GET /v1/earn/external-wallet/movements/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement) |
 
 The example uses the Quickstart's `earn-api.ts` and `test-wallet.ts`, and
-`floor.ts` from [Slippage floors](/docs/earn/integration-details#slippage-floors):
+`floor.ts` from [Slippage floors](/docs/earn/integration-details#slippage-floors).
+Call `withdraw` with the `positionId` and `withdrawalSlippage` saved in your
+backend after the deposit, plus the share amount your customer chose:
 
 ```typescript title="withdraw.ts"
 import { randomUUID } from "node:crypto";
@@ -1542,56 +1575,55 @@ import { earnRequest, waitForMovement } from "./earn-api";
 import { floorForTolerance } from "./floor";
 import { ownerAddress, signWithTestWallet } from "./test-wallet";
 
-type Position = { id: string; provider: string; providerReference: string; withdrawableShares?: string };
-type Strategy = {
-  provider: string;
-  providerReference: string;
+type SavedPosition = {
+  positionId: string;
   withdrawalSlippage: { defaultToleranceBps: number } | null;
 };
+type Position = { id: string; withdrawableShares?: string };
 
-const { positions }: { positions: Position[] } = await earnRequest(
-  `/v1/earn/external-wallet/positions?${new URLSearchParams({ ownerAddress })}`,
-);
-const position = positions.find((p) => p.withdrawableShares !== undefined);
-if (!position) throw new Error("No position can withdraw right now");
-const shares = "10"; // share units, at most position.withdrawableShares
+export async function withdraw(savedPosition: SavedPosition, shares: string) {
+  let position: Position | undefined;
+  let before: string | null = null;
+  do {
+    const query = new URLSearchParams({ ownerAddress, limit: "100" });
+    if (before !== null) query.set("before", before);
+    const page: { positions: Position[]; nextCursor: string | null } = await earnRequest(
+      `/v1/earn/external-wallet/positions?${query}`,
+    );
+    position = page.positions.find((p) => p.id === savedPosition.positionId);
+    before = page.nextCursor;
+  } while (!position && before !== null);
+  if (!position || position.withdrawableShares === undefined) {
+    throw new Error("The saved position cannot withdraw right now");
+  }
 
-// A position names its strategy by provider and providerReference.
-const { strategies }: { strategies: Strategy[] } = await earnRequest(
-  "/v1/earn/strategies?pageSize=100",
-);
-const strategy = strategies.find(
-  (s) => s.provider === position.provider && s.providerReference === position.providerReference,
-);
-if (!strategy) throw new Error("The position's strategy is not in the catalog");
+  const preview = await earnRequest("/v1/earn/external-wallet/withdrawal-previews", {
+    positionId: position.id,
+    shares,
+  });
+  if (preview.blockingIssues.length > 0) {
+    throw new Error(`Preview blocked: ${JSON.stringify(preview.blockingIssues)}`);
+  }
 
-const preview = await earnRequest("/v1/earn/external-wallet/withdrawal-previews", {
-  positionId: position.id,
-  shares,
-});
-if (preview.blockingIssues.length > 0) {
-  throw new Error(`Preview blocked: ${JSON.stringify(preview.blockingIssues)}`);
+  // Send a floor only when the saved policy takes one; never require a catalog listing to exit.
+  const policy = savedPosition.withdrawalSlippage;
+  const minAmountOut = policy
+    ? floorForTolerance(preview.assetsOut, preview.assetDecimals, policy.defaultToleranceBps)
+    : undefined;
+
+  const { transaction: built } = await earnRequest(
+    "/v1/earn/external-wallet/withdrawal-transactions",
+    { positionId: position.id, shares, minAmountOut },
+  );
+  const signedTransaction = await signWithTestWallet(built.transaction);
+
+  const { withdrawal } = await earnRequest(
+    "/v1/earn/external-wallet/withdrawals",
+    { transactionId: built.transactionId, signedTransaction },
+    randomUUID(),
+  );
+  return waitForMovement(withdrawal.movementId);
 }
-
-// Send a floor only when the strategy takes one; a build refuses one it cannot enforce.
-const policy = strategy.withdrawalSlippage;
-const minAmountOut = policy
-  ? floorForTolerance(preview.assetsOut, preview.assetDecimals, policy.defaultToleranceBps)
-  : undefined;
-
-const { transaction: built } = await earnRequest(
-  "/v1/earn/external-wallet/withdrawal-transactions",
-  { positionId: position.id, shares, minAmountOut },
-);
-const signedTransaction = await signWithTestWallet(built.transaction);
-
-const { withdrawal } = await earnRequest(
-  "/v1/earn/external-wallet/withdrawals",
-  { transactionId: built.transactionId, signedTransaction },
-  randomUUID(),
-);
-const movement = await waitForMovement(withdrawal.movementId);
-console.log(movement.status, movement.tokenAmount);
 ```
 
 ```json title="Preview response"
@@ -1607,8 +1639,13 @@ console.log(movement.status, movement.tokenAmount);
 
 The preview quotes the payout; it does not reserve it. The build requires
 `minAmountOut` when the strategy's `withdrawalSlippage` is not null, and
-refuses it when the policy is null. To skip the catalog lookup, save the
-strategy's `id` with the position when the customer deposits.
+refuses it when the policy is null. The position supplies the vault and mints,
+so a delisted strategy stays exitable. Keep the deposit-time policy with the
+position; do not require the strategy to appear in today's catalog.
+
+If the build reports that the floor policy changed, refresh the policy with
+your SDP contact before retrying. Never guess a policy from a missing catalog
+row.
 
 At `finalized`, `tokenAmount` is the payout SDP observed. Check the customer's
 token balance onchain if you need independent proof, then refresh
@@ -39010,7 +39047,7 @@ Build one unsigned deposit transaction for an external wallet.
 
         - **`feePayer`** · `string` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
 
-          The `feePayer` your build request named. When present, the transaction needs the fee payer's signature as well as the customer's: co-sign on your backend before you submit, or the submit refuses it. When absent or null, the customer signs alone and pays the fee.
+          The `feePayer` your build request named. When present, the transaction needs the fee payer's signature as well as the customer's: co-sign on your backend before you submit, or the submit refuses it. When omitted, the customer signs alone and pays the fee.
 
         - **`provider`** · `string` · required · example `kamino`
 
@@ -39878,7 +39915,7 @@ Build one unsigned withdrawal transaction for a position. SDP reads the strategy
 
       - **`feePayer`** · `string` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
 
-        The `feePayer` your build request named. When present, the transaction needs the fee payer's signature as well as the customer's: co-sign on your backend before you submit, or the submit refuses it. When absent or null, the customer signs alone and pays the fee.
+        The `feePayer` your build request named. When present, the transaction needs the fee payer's signature as well as the customer's: co-sign on your backend before you submit, or the submit refuses it. When omitted, the customer signs alone and pays the fee.
 
       - **`provider`** · `string` · required · example `kamino`
 
@@ -41093,7 +41130,7 @@ Any of:
 
         - **`feePayer`** · `string` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
 
-          The `feePayer` your build request named. When present, the transaction needs the fee payer's signature as well as the customer's: co-sign on your backend before you submit, or the submit refuses it. When absent or null, the customer signs alone and pays the fee.
+          The `feePayer` your build request named. When present, the transaction needs the fee payer's signature as well as the customer's: co-sign on your backend before you submit, or the submit refuses it. When omitted, the customer signs alone and pays the fee.
 
         - **`provider`** · `string` · required · example `kamino`
 
@@ -41151,7 +41188,7 @@ Any of:
 
         - **`feePayer`** · `string` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
 
-          The `feePayer` your build request named. When present, the transaction needs the fee payer's signature as well as the customer's: co-sign on your backend before you submit, or the submit refuses it. When absent or null, the customer signs alone and pays the fee.
+          The `feePayer` your build request named. When present, the transaction needs the fee payer's signature as well as the customer's: co-sign on your backend before you submit, or the submit refuses it. When omitted, the customer signs alone and pays the fee.
 
         - **`provider`** · `string` · required · example `kamino`
 
@@ -42631,7 +42668,7 @@ Build a cancellation for the customer's wallet to sign. A solver queue request b
 
       - **`feePayer`** · `string` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
 
-        The `feePayer` your build request named. When present, the transaction needs the fee payer's signature as well as the customer's: co-sign on your backend before you submit, or the submit refuses it. When absent or null, the customer signs alone and pays the fee.
+        The `feePayer` your build request named. When present, the transaction needs the fee payer's signature as well as the customer's: co-sign on your backend before you submit, or the submit refuses it. When omitted, the customer signs alone and pays the fee.
 
       - **`provider`** · `string` · required · example `kamino`
 

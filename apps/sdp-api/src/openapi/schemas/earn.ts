@@ -5,6 +5,7 @@ import {
   errorResponseSchema,
   isoDateTimeSchema,
   successResponseSchema,
+  withOpenApi,
 } from "@/openapi/schemas/base";
 import {
   EARN_CANCEL_TRANSACTION_REQUEST_EXAMPLE,
@@ -36,8 +37,9 @@ import {
   EARN_WITHDRAWAL_TRANSACTION_EXAMPLE,
   EARN_WITHDRAWAL_TRANSACTION_REQUEST_EXAMPLE,
 } from "@/openapi/schemas/earn-examples";
+import { earnExternalWalletPositionsQuerySchema } from "@/routes/earn/schemas";
 
-/** A missing Earn provider capability, returned by SdpEarnError rather than AppError. */
+/** A missing Earn provider capability uses the shared NOT_IMPLEMENTED code. */
 export const earnNotImplementedErrorResponseSchema = errorResponseSchema.extend({
   error: errorResponseSchema.shape.error.extend({ code: z.literal("NOT_IMPLEMENTED") }),
 });
@@ -1015,8 +1017,8 @@ const earnExternalWalletTransactionSchema = z
         description:
           "The `feePayer` your build request named. When present, the transaction " +
           "needs the fee payer's signature as well as the customer's: co-sign on " +
-          "your backend before you submit, or the submit refuses it. When absent " +
-          "or null, the customer signs alone and pays the fee.",
+          "your backend before you submit, or the submit refuses it. When omitted, " +
+          "the customer signs alone and pays the fee.",
         example: earnFeePayerExample,
       }),
     provider: z.string().openapi({ example: "kamino" }),
@@ -1503,10 +1505,10 @@ export const earnExternalWalletEarningsResponse = successResponseSchema(
 export const earnOwnerAddressQueryParam = earnOwnerAddressSchema;
 
 export const earnCursorQueryParams = {
-  limit: z.coerce.number().int().min(1).max(100).default(20).openapi({
+  limit: withOpenApi(earnExternalWalletPositionsQuerySchema.shape.limit, {
     description: "Page size, from 1 to 100. Defaults to 20.",
   }),
-  before: z.string().min(1).optional().openapi({
+  before: withOpenApi(earnExternalWalletPositionsQuerySchema.shape.before, {
     description: "The previous page's `nextCursor`. Omit it for the first page.",
   }),
 };

@@ -1,6 +1,5 @@
 import { type ApiSchema, apiReferenceSchema } from "@sdp/api-catalog/reference";
 import { buildSnippets, SNIPPET_LANGUAGES } from "@sdp/api-catalog/snippets";
-import { SdpEarnError, type SdpEarnErrorCode } from "@sdp/earn/errors";
 import { SDP_RELEASE_CHANNEL_NAMES } from "@sdp/types/release-channels";
 import { DEFAULT_SDP_API_URL } from "@sdp/types/site";
 import type { OpenAPIObject, OperationObject } from "openapi3-ts/oas30";
@@ -28,18 +27,9 @@ function documentOperations(document: OpenAPIObject): Map<string, string[]> {
 
 const errorExampleSchema = z.object({
   error: z.object({
-    code: z.custom<ErrorCode | SdpEarnErrorCode>(
-      (value) => value === "NOT_IMPLEMENTED" || isErrorCode(value)
-    ),
+    code: z.custom<ErrorCode>(isErrorCode),
   }),
 });
-
-/** The app forwards missing SDK capabilities as 501 rather than converting them to AppError. */
-function statusOfErrorCode(code: ErrorCode | SdpEarnErrorCode): number {
-  return code === "NOT_IMPLEMENTED"
-    ? new SdpEarnError(code).statusCode
-    : new AppError(code).statusCode;
-}
 
 /** A document with one operation, for the shapes the published documents do not exercise. */
 function documentWith(operation: Record<string, unknown>): OpenAPIObject {
@@ -84,7 +74,7 @@ describe("buildApiReference", () => {
             expect(response.body.kind).toBe("json");
             if (response.body.kind !== "json") continue;
             const { error } = errorExampleSchema.parse(response.body.example);
-            expect(String(statusOfErrorCode(error.code))).toBe(response.status);
+            expect(String(new AppError(error.code).statusCode)).toBe(response.status);
           }
         }
       });
@@ -145,7 +135,7 @@ describe("buildApiReference", () => {
     });
   }
 
-  it("builds the Earn reference with every documented response, including SDK 501s", () => {
+  it("builds the Earn reference with every documented response, including shared 501 errors", () => {
     const document = createPublicOpenApiDocument({
       releaseChannel: "experimental",
     });
@@ -168,9 +158,9 @@ describe("buildApiReference", () => {
         expect(response.body.kind).toBe("json");
         if (response.body.kind !== "json") continue;
         const { error } = errorExampleSchema.parse(response.body.example);
-        expect(String(statusOfErrorCode(error.code))).toBe(response.status);
+        expect(String(new AppError(error.code).statusCode)).toBe(response.status);
         if (response.status === "501") {
-          expect(error.code).toBe("NOT_IMPLEMENTED");
+          expect(response.body.example).toMatchObject(new AppError("NOT_IMPLEMENTED").toResponse());
           missingCapabilityExamples += 1;
         }
       }
@@ -453,7 +443,7 @@ describe("exampleErrorCode", () => {
     ]) {
       for (const takesIdempotencyKey of [true, false]) {
         const code = exampleErrorCode(status, takesIdempotencyKey, "test");
-        expect(String(statusOfErrorCode(code))).toBe(status);
+        expect(String(new AppError(code).statusCode)).toBe(status);
       }
     }
   });

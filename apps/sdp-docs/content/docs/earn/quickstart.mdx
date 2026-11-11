@@ -113,7 +113,8 @@ export async function waitForMovement(movementId: string, timeoutMs = 300_000) {
 
 ### 2. Choose a strategy, then build
 
-This example picks the first fundable strategy that needs no slippage floor.
+This example picks an active, fundable strategy whose first deposit mint is
+devnet USDC and needs no slippage floor.
 [Strategies](/docs/earn/strategies) explains each check.
 
 ```typescript title="deposit.ts"
@@ -121,15 +122,23 @@ import { randomUUID } from "node:crypto";
 import { earnRequest, waitForMovement } from "./earn-api";
 import { ownerAddress, signWithTestWallet } from "./test-wallet";
 
-type Strategy = { id: string; status: string; fundable: boolean; depositSlippage: unknown };
+type Strategy = {
+  id: string;
+  status: string;
+  fundable: boolean;
+  depositMints: string[];
+  depositSlippage: unknown;
+  withdrawalSlippage: { defaultToleranceBps: number } | null;
+};
 
 const { strategies }: { strategies: Strategy[] } = await earnRequest(
   "/v1/earn/strategies?pageSize=100",
 );
 const strategy = strategies.find(
-  (s) => s.fundable && s.status === "active" && s.depositSlippage === null,
+  (s) => s.fundable && s.status === "active" && s.depositSlippage === null
+    && s.depositMints[0] === "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
 );
-if (!strategy) throw new Error("No sandbox strategy is open for deposits");
+if (!strategy) throw new Error("No devnet USDC strategy is open for deposits");
 const amount = "25"; // in the deposit token, depositMints[0]
 
 const preview = await earnRequest("/v1/earn/vault-deposit-previews", {
@@ -165,6 +174,10 @@ const { deposit } = await earnRequest(
 
 SDP checks the signature against the exact bytes it built, records the
 deposit, then broadcasts it.
+
+Persist `deposit.positionId` with the selected strategy's `withdrawalSlippage`
+in your backend. Save `null` explicitly when no floor is supported. Keep this
+record for withdrawals even if the strategy leaves the catalog.
 
 ### 4. Track it and read the position
 

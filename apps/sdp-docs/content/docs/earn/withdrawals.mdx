@@ -73,7 +73,9 @@ does not check the wallet's balance.
 | Track | [`GET /v1/earn/external-wallet/movements/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement) |
 
 The example uses the Quickstart's `earn-api.ts` and `test-wallet.ts`, and
-`floor.ts` from [Slippage floors](/docs/earn/integration-details#slippage-floors):
+`floor.ts` from [Slippage floors](/docs/earn/integration-details#slippage-floors).
+Call `withdraw` with the `positionId` and `withdrawalSlippage` saved in your
+backend after the deposit, plus the share amount your customer chose:
 
 ```typescript title="withdraw.ts"
 import { randomUUID } from "node:crypto";
@@ -81,56 +83,55 @@ import { earnRequest, waitForMovement } from "./earn-api";
 import { floorForTolerance } from "./floor";
 import { ownerAddress, signWithTestWallet } from "./test-wallet";
 
-type Position = { id: string; provider: string; providerReference: string; withdrawableShares?: string };
-type Strategy = {
-  provider: string;
-  providerReference: string;
+type SavedPosition = {
+  positionId: string;
   withdrawalSlippage: { defaultToleranceBps: number } | null;
 };
+type Position = { id: string; withdrawableShares?: string };
 
-const { positions }: { positions: Position[] } = await earnRequest(
-  `/v1/earn/external-wallet/positions?${new URLSearchParams({ ownerAddress })}`,
-);
-const position = positions.find((p) => p.withdrawableShares !== undefined);
-if (!position) throw new Error("No position can withdraw right now");
-const shares = "10"; // share units, at most position.withdrawableShares
+export async function withdraw(savedPosition: SavedPosition, shares: string) {
+  let position: Position | undefined;
+  let before: string | null = null;
+  do {
+    const query = new URLSearchParams({ ownerAddress, limit: "100" });
+    if (before !== null) query.set("before", before);
+    const page: { positions: Position[]; nextCursor: string | null } = await earnRequest(
+      `/v1/earn/external-wallet/positions?${query}`,
+    );
+    position = page.positions.find((p) => p.id === savedPosition.positionId);
+    before = page.nextCursor;
+  } while (!position && before !== null);
+  if (!position || position.withdrawableShares === undefined) {
+    throw new Error("The saved position cannot withdraw right now");
+  }
 
-// A position names its strategy by provider and providerReference.
-const { strategies }: { strategies: Strategy[] } = await earnRequest(
-  "/v1/earn/strategies?pageSize=100",
-);
-const strategy = strategies.find(
-  (s) => s.provider === position.provider && s.providerReference === position.providerReference,
-);
-if (!strategy) throw new Error("The position's strategy is not in the catalog");
+  const preview = await earnRequest("/v1/earn/external-wallet/withdrawal-previews", {
+    positionId: position.id,
+    shares,
+  });
+  if (preview.blockingIssues.length > 0) {
+    throw new Error(`Preview blocked: ${JSON.stringify(preview.blockingIssues)}`);
+  }
 
-const preview = await earnRequest("/v1/earn/external-wallet/withdrawal-previews", {
-  positionId: position.id,
-  shares,
-});
-if (preview.blockingIssues.length > 0) {
-  throw new Error(`Preview blocked: ${JSON.stringify(preview.blockingIssues)}`);
+  // Send a floor only when the saved policy takes one; never require a catalog listing to exit.
+  const policy = savedPosition.withdrawalSlippage;
+  const minAmountOut = policy
+    ? floorForTolerance(preview.assetsOut, preview.assetDecimals, policy.defaultToleranceBps)
+    : undefined;
+
+  const { transaction: built } = await earnRequest(
+    "/v1/earn/external-wallet/withdrawal-transactions",
+    { positionId: position.id, shares, minAmountOut },
+  );
+  const signedTransaction = await signWithTestWallet(built.transaction);
+
+  const { withdrawal } = await earnRequest(
+    "/v1/earn/external-wallet/withdrawals",
+    { transactionId: built.transactionId, signedTransaction },
+    randomUUID(),
+  );
+  return waitForMovement(withdrawal.movementId);
 }
-
-// Send a floor only when the strategy takes one; a build refuses one it cannot enforce.
-const policy = strategy.withdrawalSlippage;
-const minAmountOut = policy
-  ? floorForTolerance(preview.assetsOut, preview.assetDecimals, policy.defaultToleranceBps)
-  : undefined;
-
-const { transaction: built } = await earnRequest(
-  "/v1/earn/external-wallet/withdrawal-transactions",
-  { positionId: position.id, shares, minAmountOut },
-);
-const signedTransaction = await signWithTestWallet(built.transaction);
-
-const { withdrawal } = await earnRequest(
-  "/v1/earn/external-wallet/withdrawals",
-  { transactionId: built.transactionId, signedTransaction },
-  randomUUID(),
-);
-const movement = await waitForMovement(withdrawal.movementId);
-console.log(movement.status, movement.tokenAmount);
 ```
 
 ```json title="Preview response"
@@ -146,8 +147,13 @@ console.log(movement.status, movement.tokenAmount);
 
 The preview quotes the payout; it does not reserve it. The build requires
 `minAmountOut` when the strategy's `withdrawalSlippage` is not null, and
-refuses it when the policy is null. To skip the catalog lookup, save the
-strategy's `id` with the position when the customer deposits.
+refuses it when the policy is null. The position supplies the vault and mints,
+so a delisted strategy stays exitable. Keep the deposit-time policy with the
+position; do not require the strategy to appear in today's catalog.
+
+If the build reports that the floor policy changed, refresh the policy with
+your SDP contact before retrying. Never guess a policy from a missing catalog
+row.
 
 At `finalized`, `tokenAmount` is the payout SDP observed. Check the customer's
 token balance onchain if you need independent proof, then refresh

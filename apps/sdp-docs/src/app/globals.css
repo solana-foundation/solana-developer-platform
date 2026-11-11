@@ -2274,7 +2274,9 @@ a.rounded-lg.border.p-4 > p.truncate {
   margin-bottom: 0;
 }
 
-.sdp-docs-shell :not([role="tablist"]) > [role="tabpanel"]:not(:has(> figure.shiki:only-child)) {
+.sdp-docs-shell
+  :not([role="tablist"]):not([data-code-example])
+  > [role="tabpanel"]:not(:has(> figure.shiki:only-child)) {
   background-color: var(--color-fd-card);
   color: var(--color-fd-card-foreground);
   border: 1px solid var(--color-fd-border);

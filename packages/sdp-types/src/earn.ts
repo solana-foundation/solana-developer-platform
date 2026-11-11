@@ -942,6 +942,8 @@ export interface EarnExternalWalletWithdrawalRequestTransactionResponse {
   transaction: EarnExternalWalletTransaction &
     Partial<EarnExternalWalletExitReference> & {
       action: EarnExternalWalletWithdrawalRequestAction;
+      /** Present for a cancellation of an already-landed request. */
+      withdrawalRequestId?: string;
       requestAddress: string;
       mechanism: "solverQueue" | "operatorRedemption";
       shares?: string;

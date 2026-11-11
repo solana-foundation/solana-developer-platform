@@ -93,6 +93,19 @@ describe("search ranking", () => {
     }
   });
 
+  it("does not promote a distant prefix as a withdrawal match", () => {
+    const results = [
+      page("/docs/tutorial", "Build with SDP"),
+      page("/docs/earn/withdrawals", "Withdraw funds"),
+    ];
+    for (const query of ["withdraw", "withdrawal"]) {
+      assert.equal(
+        rankTitlesFirst(results, query, descriptionOf)[0]?.url,
+        "/docs/earn/withdrawals"
+      );
+    }
+  });
+
   it("puts an exact endpoint owner before guides that mention its path", () => {
     const endpointUrl = "/docs/reference/api/earn/create-earn-vault-withdrawal";
     const results = [

@@ -1,3 +1,23 @@
+import type {
+  EarnExternalWalletDepositResponse,
+  EarnExternalWalletDepositTransactionResponse,
+  EarnExternalWalletEarningsResponse,
+  EarnExternalWalletMovement,
+  EarnExternalWalletMovementsPage,
+  EarnExternalWalletPosition,
+  EarnExternalWalletPositionSummaryResponse,
+  EarnExternalWalletPositionsPage,
+  EarnExternalWalletWithdrawalRequestTransactionResponse,
+  EarnExternalWalletWithdrawalResponse,
+  EarnExternalWalletWithdrawalTransactionResponse,
+  EarnStrategy,
+  EarnVaultAsyncWithdrawalTermsRequest,
+  EarnVaultQueuedWithdrawalPreview,
+  EarnVaultWithdrawalOptions,
+  EarnVaultWithdrawalRequestRecord,
+  EarnVaultWithdrawalRequestResponse,
+  EarnVaultWithdrawalRequestsPage,
+} from "@sdp/types/earn";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 
 /**
@@ -65,7 +85,7 @@ export const EARN_STRATEGY_EXAMPLE = {
   feeSponsored: false,
   createdAt: "2026-11-04T00:17:15.491Z",
   updatedAt: "2026-11-06T17:52:10.042Z",
-};
+} satisfies EarnStrategy;
 
 export const EARN_DEPOSIT_PREVIEW_REQUEST_EXAMPLE = { strategyId: IDS.strategy, amount: "25" };
 
@@ -105,7 +125,7 @@ export const EARN_DEPOSIT_TRANSACTION_EXAMPLE = {
       hostCluster: "devnet",
     },
   },
-};
+} satisfies EarnExternalWalletDepositTransactionResponse;
 
 export const EARN_DEPOSIT_SUBMIT_REQUEST_EXAMPLE = {
   transactionId: IDS.depositBuild,
@@ -126,7 +146,10 @@ const DEPOSIT_MOVEMENT = {
   tokenMint: USDC_DEVNET,
   failureReason: null,
   createdAt: "2026-11-06T17:57:30.817Z",
-};
+} satisfies Omit<
+  EarnExternalWalletMovement,
+  "status" | "tokenAmount" | "confirmedAt" | "settledAt"
+>;
 
 /**
  * A deposit submit's answer: recorded and broadcast, not yet confirmed. A Kamino
@@ -139,7 +162,7 @@ export const EARN_DEPOSIT_SUBMIT_EXAMPLE = {
   confirmedAt: null,
   settledAt: null,
   replayed: false,
-};
+} satisfies EarnExternalWalletDepositResponse["deposit"];
 
 /** The same deposit once it is final. */
 export const EARN_MOVEMENT_FINALIZED_EXAMPLE = {
@@ -148,14 +171,14 @@ export const EARN_MOVEMENT_FINALIZED_EXAMPLE = {
   tokenAmount: "25",
   confirmedAt: "2026-11-06T17:57:32.517Z",
   settledAt: "2026-11-06T17:57:35.623Z",
-};
+} satisfies EarnExternalWalletMovement;
 
 export const EARN_MOVEMENTS_EXAMPLE = {
   ownerAddress: OWNER,
   movements: [EARN_MOVEMENT_FINALIZED_EXAMPLE],
   hasMore: false,
   nextCursor: null,
-};
+} satisfies EarnExternalWalletMovementsPage;
 
 const POSITION = {
   id: IDS.position,
@@ -170,14 +193,14 @@ const POSITION = {
   shares: "24.975",
   withdrawableShares: "24.975",
   tokenValue: "25.031",
-};
+} satisfies EarnExternalWalletPosition;
 
 export const EARN_POSITIONS_EXAMPLE = {
   ownerAddress: OWNER,
   positions: [POSITION],
   hasMore: false,
   nextCursor: null,
-};
+} satisfies EarnExternalWalletPositionsPage;
 
 export const EARN_EARNINGS_EXAMPLE = {
   ownerAddress: OWNER,
@@ -194,7 +217,7 @@ export const EARN_EARNINGS_EXAMPLE = {
       earned: "0.031",
     },
   ],
-};
+} satisfies EarnExternalWalletEarningsResponse["earnings"];
 
 /** Totals without the personal-data opt-ins: no wallet addresses, no positions. */
 export const EARN_POSITION_SUMMARY_EXAMPLE = {
@@ -230,7 +253,7 @@ export const EARN_POSITION_SUMMARY_EXAMPLE = {
       },
     ],
   },
-};
+} satisfies EarnExternalWalletPositionSummaryResponse;
 
 /** Kamino's withdrawal takes no floor, so neither body carries `minAmountOut`. */
 export const EARN_WITHDRAWAL_PREVIEW_REQUEST_EXAMPLE = { positionId: IDS.position, shares: "10" };
@@ -262,7 +285,7 @@ export const EARN_WITHDRAWAL_TRANSACTION_EXAMPLE = {
     shares: "10",
     minAmountOut: null,
   },
-};
+} satisfies EarnExternalWalletWithdrawalTransactionResponse;
 
 export const EARN_WITHDRAWAL_SUBMIT_REQUEST_EXAMPLE = {
   transactionId: IDS.withdrawalBuild,
@@ -289,7 +312,7 @@ export const EARN_WITHDRAWAL_SUBMIT_EXAMPLE = {
   confirmedAt: null,
   settledAt: null,
   replayed: false,
-};
+} satisfies EarnExternalWalletWithdrawalResponse["withdrawal"];
 
 export const EARN_WITHDRAWAL_OPTIONS_REQUEST_EXAMPLE = { positionId: IDS.vedaPosition };
 
@@ -312,7 +335,7 @@ export const EARN_WITHDRAWAL_OPTIONS_EXAMPLE = {
     shareDecimals: 6,
   },
   parRedemption: null,
-};
+} satisfies EarnVaultWithdrawalOptions;
 
 /** One solver queue request: 15 shares at a 10 bps discount, fillable for 60 s. */
 export const EARN_QUEUED_WITHDRAWAL_REQUEST_EXAMPLE = {
@@ -321,7 +344,7 @@ export const EARN_QUEUED_WITHDRAWAL_REQUEST_EXAMPLE = {
   shares: "15",
   discountBps: 10,
   deadlineSeconds: 60,
-};
+} satisfies EarnVaultAsyncWithdrawalTermsRequest;
 
 export const EARN_QUEUED_WITHDRAWAL_PREVIEW_EXAMPLE = {
   positionId: IDS.vedaPosition,
@@ -334,7 +357,7 @@ export const EARN_QUEUED_WITHDRAWAL_PREVIEW_EXAMPLE = {
   maturityTimestamp: "1793991049",
   deadlineTimestamp: "1793991109",
   blockingIssues: [],
-};
+} satisfies EarnVaultQueuedWithdrawalPreview;
 
 const REQUEST_BUILD = {
   transaction: UNSIGNED_TRANSACTION,
@@ -361,7 +384,7 @@ export const EARN_WITHDRAWAL_REQUEST_TRANSACTION_EXAMPLE = {
     maturityTimestamp: "1793991049",
     deadlineTimestamp: "1793991109",
   },
-};
+} satisfies EarnExternalWalletWithdrawalRequestTransactionResponse;
 
 export const EARN_WITHDRAWAL_REQUEST_SUBMIT_REQUEST_EXAMPLE = {
   transactionId: IDS.requestBuild,
@@ -380,7 +403,7 @@ export const EARN_WITHDRAWAL_REQUEST_CANCEL_TRANSACTION_EXAMPLE = {
     action: "cancel",
     mechanism: "solverQueue",
   },
-};
+} satisfies EarnExternalWalletWithdrawalRequestTransactionResponse;
 
 export const EARN_CANCEL_SUBMIT_REQUEST_EXAMPLE = {
   transactionId: IDS.cancelBuild,
@@ -418,10 +441,12 @@ const PENDING_REQUEST = {
   cancelledAt: null,
   createdAt: "2026-11-06T18:10:18.900Z",
   updatedAt: "2026-11-06T18:26:00.379Z",
-};
+} satisfies EarnVaultWithdrawalRequestRecord;
 
 /** A solver queue request waiting for maturity: shares are escrowed, nothing is paid. */
-export const EARN_WITHDRAWAL_REQUEST_EXAMPLE = { withdrawalRequest: PENDING_REQUEST };
+export const EARN_WITHDRAWAL_REQUEST_EXAMPLE = {
+  withdrawalRequest: PENDING_REQUEST,
+} satisfies EarnVaultWithdrawalRequestResponse;
 
 /** The same request after its cancellation was submitted past the deadline. */
 export const EARN_WITHDRAWAL_REQUEST_CANCELLING_EXAMPLE = {
@@ -432,10 +457,10 @@ export const EARN_WITHDRAWAL_REQUEST_CANCELLING_EXAMPLE = {
       "q7g4PK7KtYN8aUWuWL3VAGeecsLWdS4KeSPVpL5YJGLHt5HAz5Ajgr9pwFWTTfK4dh6XjCjuCp3gdex678CPU8h",
     updatedAt: "2026-11-06T19:12:41.020Z",
   },
-};
+} satisfies EarnVaultWithdrawalRequestResponse;
 
 export const EARN_WITHDRAWAL_REQUESTS_EXAMPLE = {
   withdrawalRequests: [PENDING_REQUEST],
   hasMore: false,
   nextCursor: null,
-};
+} satisfies EarnVaultWithdrawalRequestsPage;

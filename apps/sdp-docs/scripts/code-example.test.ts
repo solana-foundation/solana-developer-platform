@@ -35,6 +35,15 @@ function copyCount(html: string): number {
   return html.match(/aria-label="Copy code"/g)?.length ?? 0;
 }
 
+function assertNamedLanguagePanels(html: string, languages: string[]): void {
+  const panels = [...html.matchAll(/<div\b[^>]*role="tabpanel"[^>]*>/g)].map(([panel]) => panel);
+  assert.equal(panels.length, languages.length);
+  for (const [index, panel] of panels.entries()) {
+    assert.ok(panel.includes(`aria-label="${languages[index]} code example"`), panel);
+    assert.doesNotMatch(panel, /aria-labelledby=/);
+  }
+}
+
 function ServerCode(props: {
   "data-language": string;
   className: string;
@@ -74,6 +83,7 @@ describe("shared docs code examples", () => {
     assert.match(html, /curl example/);
     assert.match(html, /await fetch\(example\)/);
     assert.equal(html.match(/data-code-example=""/g)?.length, 3);
+    assertNamedLanguagePanels(html, ["cURL", "TypeScript"]);
   });
 
   it("keeps response status choices instead of relabeling them as languages", () => {
@@ -97,6 +107,9 @@ describe("shared docs code examples", () => {
     assert.equal(copyCount(html), 2);
     assert.match(html, /data-state="inactive"/);
     assert.match(html, /&quot;error&quot;:&quot;invalid&quot;/);
+    const labelledBy = [...html.matchAll(/aria-labelledby="([^"]+)"/g)];
+    assert.equal(labelledBy.length, 2);
+    for (const [, id] of labelledBy) assert.ok(html.includes(`id="${id}"`));
   });
 
   it("uses the same shell for authored languages but leaves workflow tabs alone", () => {
@@ -110,6 +123,7 @@ describe("shared docs code examples", () => {
     );
     assert.match(language, /Code language: cURL/);
     assert.equal(copyCount(language), 1);
+    assertNamedLanguagePanels(language, ["cURL", "TypeScript"]);
     const workflow = renderToStaticMarkup(
       h(
         components.DocsTabs,
@@ -213,6 +227,7 @@ describe("shared docs code examples", () => {
     assert.equal(copyCount(html), 1);
     assert.doesNotMatch(html, /Code language:/);
     assert.match(html, /await deposit\(\)/);
+    assertNamedLanguagePanels(html, ["TypeScript"]);
   });
 
   it("retains per-block copy when a language panel has prose or multiple blocks", () => {

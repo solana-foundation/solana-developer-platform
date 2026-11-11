@@ -875,9 +875,8 @@ describe("OpenAPI spec", () => {
     });
   }
 
-  // Common envelopes carry every AppError code. Earn's unsupported-capability 501
-  // has an exact SDK code the app forwards without converting it to AppError.
-  it("lists every ErrorCode in common envelopes and the SDK code for Earn 501s", () => {
+  // Common envelopes carry every AppError code; Earn's 501 narrows to NOT_IMPLEMENTED.
+  it("lists every ErrorCode in common envelopes and NOT_IMPLEMENTED for Earn 501s", () => {
     const documents = [
       createOpenApiDocument(),
       ...SDP_RELEASE_CHANNEL_NAMES.map((releaseChannel) =>

@@ -8,10 +8,12 @@ function wordsOf(text: string): string[] {
   return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
 }
 
-/** Prefixes cover inflections in either direction, including "withdraw" and "withdrawal". */
+/** Partial queries match prefixes; reverse matches allow only a short inflection. */
 function hasWord(words: string[], queryWord: string): boolean {
   return words.some(
-    (word) => word.startsWith(queryWord) || (word.length >= 4 && queryWord.startsWith(word))
+    (word) =>
+      word.startsWith(queryWord) ||
+      (word.length >= 4 && queryWord.length - word.length <= 3 && queryWord.startsWith(word))
   );
 }
 

@@ -13,7 +13,8 @@ path, start with the [Quickstart](/docs/earn/quickstart).
 You need the Quickstart's setup: `SDP_API_URL` for a beta or experimental
 deployment, a sandbox API key with `earn.execute`, a funded test wallet in
 `test-wallet.json`, and Node.js for signing. See
-[Before you begin](/docs/earn/quickstart#before-you-begin).
+[Before you begin](/docs/earn/quickstart#before-you-begin). The cURL examples
+also require jq 1.6 or later.
 
 <Tabs items={["cURL", "TypeScript"]} groupId="earn-code-language">
 <Tab value="cURL">
@@ -61,8 +62,9 @@ The steps below are one file, `deposit.ts`, that you run with
 
 ## 1. Choose a strategy
 
-List the catalog and keep a strategy that is fundable, active, and needs no
-slippage floor. [Strategies](/docs/earn/strategies) explains each check.
+List the catalog and keep an active, fundable strategy whose first deposit
+mint is devnet USDC and needs no slippage floor.
+[Strategies](/docs/earn/strategies) explains each check.
 
 <Tabs items={["cURL", "TypeScript"]} groupId="earn-code-language">
 <Tab value="cURL">
@@ -71,9 +73,12 @@ slippage floor. [Strategies](/docs/earn/strategies) explains each check.
 curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/strategies?pageSize=100" \
   -H "Authorization: Bearer $SDP_API_KEY" > strategies.json
 
-# The first fundable, active strategy that needs no slippage floor.
-export STRATEGY_ID="$(jq -r '[.data.strategies[]
-  | select(.fundable and .status == "active" and .depositSlippage == null)][0].id' strategies.json)"
+# The first active, fundable devnet USDC strategy that needs no deposit floor.
+STRATEGY_ID="$(jq -er --arg mint "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU" '
+  [.data.strategies[] | select(.fundable and .status == "active"
+    and .depositSlippage == null and .depositMints[0] == $mint)][0].id
+  // error("No devnet USDC strategy is open for deposits")' strategies.json)" || exit 1
+export STRATEGY_ID
 export AMOUNT="25"  # in the deposit token
 echo "$STRATEGY_ID"
 ```
@@ -86,15 +91,23 @@ import { randomUUID } from "node:crypto";
 import { earnRequest } from "./earn-api";
 import { ownerAddress, signWithTestWallet } from "./test-wallet";
 
-type Strategy = { id: string; name: string; status: string; fundable: boolean; depositSlippage: unknown };
+type Strategy = {
+  id: string;
+  status: string;
+  fundable: boolean;
+  depositMints: string[];
+  depositSlippage: unknown;
+  withdrawalSlippage: { defaultToleranceBps: number } | null;
+};
 
 const { strategies }: { strategies: Strategy[] } = await earnRequest(
   "/v1/earn/strategies?pageSize=100",
 );
 const strategy = strategies.find(
-  (s) => s.fundable && s.status === "active" && s.depositSlippage === null,
+  (s) => s.fundable && s.status === "active" && s.depositSlippage === null
+    && s.depositMints[0] === "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
 );
-if (!strategy) throw new Error("No sandbox strategy is open for deposits");
+if (!strategy) throw new Error("No devnet USDC strategy is open for deposits");
 const amount = "25"; // in the deposit token
 ```
 
@@ -272,6 +285,11 @@ const { deposit } = await earnRequest(
 
 </Tab>
 </Tabs>
+
+Persist the returned `positionId` with the selected strategy's
+`withdrawalSlippage` in your backend's position record. Keep `null` explicitly
+when no floor is supported. A strategy can leave the catalog while its
+positions remain withdrawable; use this saved policy when building an exit.
 
 ```json title="Response (trimmed)"
 {
