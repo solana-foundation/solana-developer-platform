@@ -3,7 +3,11 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Context, Next } from "hono";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import { badRequest, forbidden, notFound, unauthorized } from "@/lib/errors";
-import { isProductionEntitled, productionNotEnabled } from "@/lib/production-entitlement";
+import {
+  isProductionEntitled,
+  productionNotEnabled,
+  productionProjectsAllowed,
+} from "@/lib/production-entitlement";
 import type { Env } from "@/types/env";
 
 const PROJECT_HEADER = "x-project-id";
@@ -25,10 +29,11 @@ export interface ProjectContextOptions {
   /**
    * Take the project from this path parameter instead of the `x-project-id`
    * header, for routes that address a project in their URL (`/v1/projects/:projectId`).
-   * Dashboard actors there keep organization-level project permissions, so the
-   * project is resolved within the organization without a membership check;
-   * the handlers keep their own authorization. API keys must name their own
-   * project (`apiKeyProjectAccessMiddleware` runs first).
+   * A dashboard actor needs the same access as through the header: the project
+   * must be active and the user must have a `project_members` row for it
+   * (`findMemberProject`), or the request gets 404. The handlers keep their own
+   * authorization. API keys must name their own project
+   * (`apiKeyProjectAccessMiddleware` runs first).
    */
   projectIdParam?: string;
 }
@@ -47,10 +52,12 @@ export function projectContextMiddleware(options: ProjectContextOptions = {}) {
       ? await resolvePathProjectScope(c, options.projectIdParam)
       : await resolveProjectScope(c);
 
+    // A deployment that admits no production project refuses it to every
+    // request, exits included: it never held production money to unwind.
     if (
       scope.environment === "production" &&
-      !isProductionEntitled(c) &&
-      !(await options.allowUnentitledProduction?.(c))
+      (!productionProjectsAllowed(c.env) ||
+        (!isProductionEntitled(c) && !(await options.allowUnentitledProduction?.(c))))
     ) {
       throw productionNotEnabled();
     }
@@ -101,23 +108,38 @@ async function resolvePathProjectScope(
 ): Promise<{ organizationId: string; projectId: string; environment: SdpEnvironment }> {
   // Mounted only under a `/:projectId` path, so the parameter is always present.
   const projectId = c.req.param(param) as string;
-  const organizationId = c.get("apiKey")?.organizationId ?? c.get("clerk")?.organizationId;
-  if (!organizationId) {
-    throw unauthorized("Authentication is required");
-  }
   const apiKey = c.get("apiKey");
-  if (apiKey && apiKey.projectId !== projectId) {
-    throw notFound("Project");
+  if (apiKey) {
+    if (apiKey.projectId !== projectId) {
+      throw notFound("Project");
+    }
+    const row = await getDb(c.env)
+      .prepare("SELECT id, environment FROM projects WHERE id = ? AND organization_id = ? LIMIT 1")
+      .bind(projectId, apiKey.organizationId)
+      .first<{ id: string; environment: SdpEnvironment }>();
+    if (!row) {
+      throw notFound("Project");
+    }
+    return {
+      organizationId: apiKey.organizationId,
+      projectId: row.id,
+      environment: row.environment,
+    };
   }
 
-  const row = await getDb(c.env)
-    .prepare("SELECT id, environment FROM projects WHERE id = ? AND organization_id = ? LIMIT 1")
-    .bind(projectId, organizationId)
-    .first<{ id: string; environment: SdpEnvironment }>();
-  if (!row) {
+  const clerk = c.get("clerk");
+  const organizationId = clerk?.organizationId;
+  const userId = clerk?.userId;
+  if (!organizationId || !userId) {
+    throw unauthorized("Authentication is required");
+  }
+  // The same membership rule as the header scope, so a path never reaches a
+  // project the header would refuse. 404 rather than 403, like a missing project.
+  const project = await findMemberProject(getDb(c.env), { organizationId, userId, projectId });
+  if (!project) {
     throw notFound("Project");
   }
-  return { organizationId, projectId: row.id, environment: row.environment };
+  return { organizationId, projectId: project.id, environment: project.environment };
 }
 
 async function assertProjectMembership(

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { dashboardJson } from "@/lib/dashboard-response";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 /**
@@ -30,7 +30,7 @@ function tradesQuery(
 export async function GET(request: Request) {
   const validated = tradesQuery(request);
   if (!validated.ok) {
-    return NextResponse.json({ error: { message: validated.message } }, { status: 400 });
+    return dashboardJson({ error: { message: validated.message } }, { status: 400 });
   }
 
   return proxyToSdpApi({

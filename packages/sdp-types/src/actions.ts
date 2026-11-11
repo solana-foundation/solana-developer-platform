@@ -52,6 +52,10 @@ export type ActionOwner = SdpModule | "core";
  * private_channels, helius_rings, onramp, offramp, ramp_transfers) carry
  * a coarse mapping: GET is `read`, a mutation is `manage`, `execute` or
  * `configure` by the rule above. Review each before its module is promoted.
+ *
+ * The beta `subscriptions` module (direct subscription plans and subscriptions)
+ * borrows `recurring.*`. Before it is promoted to stable, give it its own action
+ * module or record a deliberate decision to keep the reuse.
  */
 export const ACTION_MODULES = {
   // Payments (V1)
@@ -71,6 +75,8 @@ export const ACTION_MODULES = {
   projects: { owner: "core", verbs: ["read", "manage"] },
   members: { owner: "core", verbs: ["read", "manage"] },
   organizations: { owner: "core", verbs: ["read", "manage"] },
+  // Dashboard feedback to the SDP team (an email through Iterable): a person, never a key.
+  feedback: { owner: "core", verbs: ["execute"] },
   // Coarse, review before promotion.
   onramp: { owner: "ramps", verbs: ["read", "execute"] },
   offramp: { owner: "ramps", verbs: ["read", "execute"] },
@@ -172,6 +178,7 @@ function isApiKeyForbiddenAction(action: Action): boolean {
   return (
     module === "api_keys" ||
     module === "members" ||
+    module === "feedback" ||
     action === "organizations.manage" ||
     action === "projects.manage" ||
     actionVerbOf(action) === "configure"
@@ -180,7 +187,7 @@ function isApiKeyForbiddenAction(action: Action): boolean {
 
 /**
  * Actions an API key may never hold: key, member, organization and project
- * administration, and every provider or credential setup. Key create and
+ * administration, dashboard feedback, and every provider or credential setup. Key create and
  * update refuse them, and authorization refuses them for a key even when a
  * stored row names one.
  */
@@ -197,7 +204,10 @@ export const API_KEY_GRANTABLE_ACTIONS: readonly Action[] = ACTIONS.filter(
  * surfaces"): the public OpenAPI document, its grant enum, the docs and the
  * AI resources never name their actions. Keys may still hold them.
  */
-export const HIDDEN_ACTION_MODULES = ["organizations"] as const satisfies readonly ActionModule[];
+export const HIDDEN_ACTION_MODULES = [
+  "organizations",
+  "feedback",
+] as const satisfies readonly ActionModule[];
 
 const HIDDEN_ACTION_MODULE_SET: ReadonlySet<ActionModule> = new Set(HIDDEN_ACTION_MODULES);
 

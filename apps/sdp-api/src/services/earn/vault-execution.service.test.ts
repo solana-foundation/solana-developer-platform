@@ -8,15 +8,21 @@ import {
   AccountRole,
   type Address,
   address,
+  addSignersToTransactionMessage,
+  appendTransactionMessageInstruction,
   type Blockhash,
   createNoopSigner,
+  createTransactionMessage,
   generateKeyPairSigner,
   getCompiledTransactionMessageDecoder,
   getSignatureFromTransaction,
   getTransactionDecoder,
   getTransactionEncoder,
   partiallySignTransaction,
+  partiallySignTransactionMessageWithSigners,
   type Signature,
+  setTransactionMessageFeePayer,
+  setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SponsorMessageMismatchError } from "@/services/sponsorship-integrity";
@@ -753,5 +759,88 @@ describe("vault execution deadline", () => {
 
     await vi.advanceTimersByTimeAsync(25);
     await rejection;
+  });
+});
+
+async function protocolSignedPlan(
+  owner: Address,
+  payer: Address = owner
+): Promise<EarnVaultTransactionPlan> {
+  const protocol = await generateKeyPairSigner();
+  const instruction = {
+    programAddress: address("11111111111111111111111111111111"),
+    accounts: [
+      { address: owner, role: AccountRole.READONLY_SIGNER },
+      { address: protocol.address, role: AccountRole.READONLY_SIGNER },
+    ],
+    data: Uint8Array.of(1),
+  };
+  const message = appendTransactionMessageInstruction(
+    instruction,
+    setTransactionMessageLifetimeUsingBlockhash(
+      { blockhash, lastValidBlockHeight: 999n },
+      setTransactionMessageFeePayer(payer, createTransactionMessage({ version: 0 }))
+    )
+  );
+  const transaction = await partiallySignTransactionMessageWithSigners(
+    addSignersToTransactionMessage([protocol], message)
+  );
+  return {
+    ...planForOwner(owner),
+    providerTransaction: {
+      transactionBase64: Buffer.from(getTransactionEncoder().encode(transaction)).toString(
+        "base64"
+      ),
+      additionalSigners: [protocol.address],
+      lastValidBlockHeight: "999",
+    },
+  };
+}
+
+describe("immutable provider signing", () => {
+  it("adds the custody owner signature without changing a protocol-signed message", async () => {
+    const owner = await generateKeyPairSigner(),
+      providerPlan = await protocolSignedPlan(owner.address);
+    const signed = await signVaultPlan({
+      plan: providerPlan,
+      owner,
+      fee: { kind: "wallet-pays" },
+      deadline: createVaultDeadline(),
+      expectedAssetIdentity: providerPlan.assetIdentity,
+    });
+    const original = providerPlan.providerTransaction;
+    if (original === undefined) throw new Error("Missing provider fixture");
+    execution.assertVaultSignaturesPreserved(
+      Buffer.from(original.transactionBase64, "base64"),
+      signed.bytes
+    );
+    expect(
+      Object.values(getTransactionDecoder().decode(signed.bytes).signatures).every(
+        (value) => value !== null
+      )
+    ).toBe(true);
+  });
+  it("keeps owner and protocol signatures when preparing an owned sponsor submission", async () => {
+    const [owner, sponsor] = await Promise.all([generateKeyPairSigner(), generateKeyPairSigner()]);
+    const providerPlan = await protocolSignedPlan(owner.address, sponsor.address),
+      payment = feePayment();
+    const partial = await inSandbox(execution.signVaultOwnerOnly)({
+      plan: providerPlan,
+      owner,
+      fee: { kind: "sponsored", sponsor: sponsor.address, feePayment: payment },
+      deadline: createVaultDeadline(),
+      expectedAssetIdentity: providerPlan.assetIdentity,
+      prepared: { plan: providerPlan, lookupTables: {}, blockhash, lastValidBlockHeight: 999n },
+    });
+    const original = providerPlan.providerTransaction;
+    if (original === undefined) throw new Error("Missing provider fixture");
+    execution.assertVaultSignaturesPreserved(
+      Buffer.from(original.transactionBase64, "base64"),
+      partial.bytes
+    );
+    const signatures = getTransactionDecoder().decode(partial.bytes).signatures;
+    expect(signatures[owner.address]).not.toBeNull();
+    expect(signatures[sponsor.address]).toBeNull();
+    expect(payment.signAsFeePayer).not.toHaveBeenCalled();
   });
 });

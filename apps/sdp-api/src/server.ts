@@ -20,11 +20,13 @@ import { assertClerkConfigured, warmClerkSigningKeys } from "@/lib/clerk-token";
 import { assertSdpReleaseChannelConfigured } from "@/lib/feature-flags";
 import { resolveGatewayIdentityConfig } from "@/lib/gateway-identity";
 import { getProcessEnv, isSelfHostedDeployment } from "@/lib/runtime-env";
+import { extraAllowedOrigins } from "@/middleware/cors";
 import { createNodeExecutionContext, NodeBackgroundRunner } from "@/runtime/background-node";
 import { startEgressGate } from "@/runtime/egress-gate";
 import { createNodeHttpApp } from "@/runtime/http-node";
 import { getLogger } from "@/runtime/logger";
 import { installOutboundDispatcher } from "@/runtime/outbound-dispatcher";
+import { installRpcTelemetrySink } from "@/runtime/rpc-telemetry";
 import { shutdown } from "@/runtime/shutdown-node";
 import { assertSigningProviderAllowed } from "@/services/adapters/signing";
 import { assertCustodyEncryptionScheme } from "@/services/custody-cipher/cipher-router";
@@ -136,6 +138,7 @@ export function assertRequiredEnv(env: Env): void {
 
 async function main(): Promise<void> {
   installOutboundDispatcher();
+  installRpcTelemetrySink();
   const env = getProcessEnv();
   assertRequiredEnv(env);
   warnIfCustodySigningBudgetCapped(env);
@@ -145,6 +148,7 @@ async function main(): Promise<void> {
   const shutdownTimeoutMs = resolveShutdownTimeoutMs();
   const fatalOnUnhandledRejection = shouldShutdownOnUnhandledRejection();
   assertCronConfig(env);
+  extraAllowedOrigins(env.CORS_EXTRA_ORIGIN);
 
   // Clerk's signing keys are the probe: the auth path needs them first, and
   // fetching them proves this instance can reach the internet.

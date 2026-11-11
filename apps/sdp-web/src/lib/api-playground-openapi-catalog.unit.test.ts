@@ -1,9 +1,9 @@
+import { ONCHAIN_TRANSFER_STATUSES } from "@sdp/types/payments";
 import { describe, expect, it } from "vitest";
-
-import { buildWalletsPlaygroundEndpointConfigs } from "@/app/dashboard/[projectId]/custody/wallets-playground-config";
-import { buildIssuancePlaygroundEndpointConfigs } from "@/app/dashboard/[projectId]/issuance/issuance-playground-config";
-import { buildCounterpartyPlaygroundEndpointConfigs } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-playground-config";
-import { buildPaymentsPlaygroundEndpointConfigs } from "@/app/dashboard/[projectId]/payments/payments-playground-config";
+import { buildIssuancePlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-playground-config";
+import { buildCounterpartyPlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-playground-config";
+import { buildPaymentsPlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/payments/payments-playground-config";
+import { buildWalletsPlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/wallets/wallets-playground-config";
 import type { ApiPlaygroundEndpointConfig } from "@/components/api-playground-shell";
 import { getMessages } from "@/i18n/messages";
 import { translate } from "@/i18n/translate";
@@ -129,6 +129,55 @@ describe("API playground release channel", () => {
     expect(JSON.parse(body)).toMatchObject({ provider: expect.any(String) });
   });
 
+  it("offers only the custody providers the channel publishes", () => {
+    const providersIn = (releaseChannel: "stable" | "experimental") =>
+      filterPlaygroundEndpointsToReleaseChannel(
+        getOpenApiPlaygroundEndpoints("wallets"),
+        releaseChannel
+      )
+        .find((endpoint) => endpoint.id === "list-wallets")
+        ?.pathFields.find((field) => field.key === "provider")
+        ?.options?.map((option) => option.value);
+    expect(providersIn("stable")).toEqual(["privy"]);
+    expect(providersIn("experimental")).toContain("fireblocks");
+    expect(providersIn("experimental")).not.toContain("local");
+  });
+
+  it("uses the channel's generated transfer fields and response examples", () => {
+    const endpoints = filterPlaygroundEndpointsToReleaseChannel(
+      getOpenApiPlaygroundEndpoints("payments"),
+      "stable"
+    );
+    const transfer = endpoints.find((endpoint) => endpoint.id === "create-payment-transfer");
+    expect(transfer).toBeDefined();
+    expect(transfer?.bodyFields.find((field) => field.key === "$body")?.defaultValue).not.toContain(
+      "transferId"
+    );
+    const serialized = JSON.stringify(endpoints);
+    expect(serialized).not.toMatch(/deliveryMode|fiatCurrency|providerReference|rampsMemo/);
+  });
+
+  it("keeps ramp statuses out of the curated transfer filter when no provider is offered", () => {
+    const endpoints = filterPlaygroundEndpointsToReleaseChannel(
+      buildPaymentsPlaygroundEndpointConfigs({ wallets: [], transfers: [], rampProviders: [] }, t),
+      "stable"
+    );
+    const statuses = endpoints
+      .find((endpoint) => endpoint.id === "list-transfers")
+      ?.pathFields.find((field) => field.key === "status")
+      ?.options?.map((option) => option.value);
+    expect(statuses).toEqual(ONCHAIN_TRANSFER_STATUSES);
+    const experimental = buildPaymentsPlaygroundEndpointConfigs(
+      { wallets: [], transfers: [], rampProviders: ["moonpay"] },
+      t
+    );
+    expect(
+      experimental
+        .find((endpoint) => endpoint.id === "list-transfers")
+        ?.pathFields.find((field) => field.key === "status")?.options
+    ).toContainEqual({ label: "settling", value: "settling" });
+  });
+
   it("filters every playground's forms on every channel without rejecting their examples", () => {
     const builders = [
       buildWalletsPlaygroundEndpointConfigs({ connectedProviders: [], wallets: [], t }),
@@ -191,7 +240,7 @@ describe("API playground allowlist", () => {
   it("refuses what the catalog does not publish on the channel", () => {
     expect(findPublishedPlaygroundOperation("GET", "/v1/api-keys", "experimental")).toBeUndefined();
     expect(
-      findPublishedPlaygroundOperation("POST", "/v1/payments/requests", "experimental")
+      findPublishedPlaygroundOperation("POST", "/v1/places/autocomplete", "experimental")
     ).toBeUndefined();
     expect(
       findPublishedPlaygroundOperation("GET", "/v1/payments/transfers/", "experimental")
@@ -219,3 +268,38 @@ describe("API playground allowlist", () => {
 function paths(endpoints: ApiPlaygroundEndpointConfig[]) {
   return endpoints.map((endpoint) => endpoint.path.split("?", 1)[0]);
 }
+
+// Regression: every write's snippet showed an Idempotency-Key and the "reuse
+// this key" note, even on routes that ignore the header.
+describe("API playground key contract", () => {
+  it("gives every form, hand-authored ones too, its route's Idempotency-Key contract", () => {
+    const messages = getMessages("en");
+    const t = (
+      key: Parameters<typeof translate<typeof messages>>[1],
+      values?: Record<string, string | number>
+    ) => translate(messages, key, values);
+    const built = [
+      ...buildWalletsPlaygroundEndpointConfigs({ connectedProviders: [], wallets: [], t }),
+      ...buildPaymentsPlaygroundEndpointConfigs(
+        { transfers: [], wallets: [], rampProviders: [] },
+        t
+      ),
+      ...buildCounterpartyPlaygroundEndpointConfigs([], t),
+      ...buildIssuancePlaygroundEndpointConfigs({ templates: [], tokens: [], t }),
+    ];
+    const generated = new Map(
+      (["wallets", "payments", "counterparties", "issuance"] as const).flatMap((module) =>
+        getOpenApiPlaygroundEndpoints(module).map((endpoint) => [operationKey(endpoint), endpoint])
+      )
+    );
+    for (const endpoint of built) {
+      const reference = generated.get(operationKey(endpoint));
+      if (reference === undefined) continue;
+      expect([operationKey(endpoint), endpoint.takesIdempotencyKey]).toEqual([
+        operationKey(endpoint),
+        reference.takesIdempotencyKey,
+      ]);
+    }
+    expect(built.some((endpoint) => endpoint.takesIdempotencyKey === false)).toBe(true);
+  });
+});

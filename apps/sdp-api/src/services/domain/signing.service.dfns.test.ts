@@ -1,14 +1,17 @@
 import { Buffer } from "node:buffer";
 import { KeychainDfnsAdapter } from "@sdp/custody/keychain/keychain-dfns.adapter";
 import { isFullSigningPort } from "@sdp/custody/signing";
-import { describe, expect, it } from "vitest";
+import { aroundEach, describe, expect, it } from "vitest";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { createAdapterFromEncryptedConfig } from "@/services/domain/signing/provider-adapter-factory";
 import { createEncryptionService } from "@/services/encryption.service";
+import { inSandboxScope } from "@/test/helpers/cluster-rpc";
 import type { Env } from "@/types/env";
 
 const TEST_ORG_ID = "org_dfns_legacy";
 const TEST_PROJECT_ID = "prj_dfns";
+
+aroundEach((runTest) => inSandboxScope(runTest));
 
 describe("signing.service dfns compatibility", () => {
   it("resolves DFNS adapter when encrypted config omits provider field", async () => {

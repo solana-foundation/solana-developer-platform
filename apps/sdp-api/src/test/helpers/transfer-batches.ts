@@ -1,5 +1,6 @@
 import { getDb } from "@/db/client";
 import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
+import { MAX_RECIPIENTS_PER_TRANSACTION } from "@/routes/payments/transfer-batches/transaction";
 import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import type { Env } from "@/types/env";
@@ -92,4 +93,16 @@ export async function seedProcessingBatchChunk(
     ],
   });
   return batch.id;
+}
+
+/**
+ * `value` once per recipient a chunk holds. Native SOL recipients that pay one address pack
+ * exactly this many to a transaction, so `[...fullChunkOf(a), ...fullChunkOf(b)]` sends two
+ * full chunks.
+ *
+ * @param value - The recipient (or the expected value per recipient) to repeat.
+ * @returns `MAX_RECIPIENTS_PER_TRANSACTION` copies of `value`.
+ */
+export function fullChunkOf<T>(value: T): T[] {
+  return Array.from({ length: MAX_RECIPIENTS_PER_TRANSACTION }, () => value);
 }

@@ -21,12 +21,18 @@ import { AppError, badRequest, internalError, unauthorized } from "@/lib/errors"
 import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { organizationNotActive, readActiveOrganizationSettings } from "@/lib/organization-access";
 import { recordOrganizationEntitlements } from "@/lib/production-entitlement";
+import { logEvent } from "@/runtime/money-path-events";
 import { AuditService } from "@/services/audit.service";
 import {
   ClerkUsersService,
   verifiedPrimaryEmailFromClerkUser,
 } from "@/services/clerk-users.service";
-import { findPendingInvitation } from "@/services/organization-membership.service";
+import {
+  findPendingInvitation,
+  invitationExpired,
+  linkClerkIdentity,
+  uninvitedRefusal,
+} from "@/services/organization-membership.service";
 import type { Env } from "@/types/env";
 import { DASHBOARD_ACTOR_MAX_REQUESTS, enforceRateLimit } from "./rate-limit";
 
@@ -199,42 +205,13 @@ async function ensureClerkUser(
   if (!normalizedEmail) {
     throw unauthorized("Clerk primary email must be verified");
   }
-  let user = await db
-    .prepare("SELECT id, email FROM users WHERE email = ?")
-    .bind(normalizedEmail)
-    .first<{ id: string; email: string }>();
-
-  if (!user) {
-    const userId = `usr_${crypto.randomUUID()}`;
-    await db
-      .prepare(
-        `INSERT INTO users (id, email, email_verified, status)
-         VALUES (?, ?, 1, 'active')
-         ON CONFLICT (email) DO NOTHING`
-      )
-      .bind(userId, normalizedEmail)
-      .run();
-    user = await db
-      .prepare("SELECT id, email FROM users WHERE email = ?")
-      .bind(normalizedEmail)
-      .first<{ id: string; email: string }>();
+  // Under the Clerk user's lock, with its deletion checked there: a sign-in
+  // that raced the user's deletion stores nothing (HOO-2303).
+  const linked = await linkClerkIdentity(db, { clerkUserId, email: normalizedEmail });
+  if (linked === null) {
+    throw unauthorized("This Clerk user was deleted");
   }
-
-  if (!user) {
-    throw internalError("Unable to resolve Clerk user");
-  }
-
-  await db
-    .prepare(
-      `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
-       VALUES (?, 'clerk', ?, ?, ?)
-       ON CONFLICT (provider, provider_user_id)
-       DO UPDATE SET user_id = EXCLUDED.user_id, email = EXCLUDED.email, updated_at = sdp_datetime_now()`
-    )
-    .bind(`aui_${crypto.randomUUID()}`, clerkUserId, user.id, normalizedEmail)
-    .run();
-
-  return { userId: user.id, email: user.email };
+  return linked;
 }
 
 async function ensureMembership(
@@ -273,15 +250,17 @@ async function ensureMembership(
 
     // Admission comes only from an SDP invitation (ADR 0012): the Clerk
     // membership that let this token name the organization grants nothing.
+    // The refusal is read from the newest invitation every time, so an
+    // expired one is still reported as expired once its row says so.
     if (!pendingInvite) {
-      throw unauthorized("No pending invitation to this organization");
+      throw await uninvitedRefusal(db, params);
     }
-    if (new Date(pendingInvite.expiresAt) < new Date()) {
+    if (new Date(pendingInvite.expiresAt) <= new Date()) {
       await db
         .prepare("UPDATE invitations SET status = 'expired' WHERE id = ? AND status = 'pending'")
         .bind(pendingInvite.id)
         .run();
-      throw unauthorized("Invitation to this organization has expired");
+      throw invitationExpired();
     }
 
     const role = pendingInvite.role;
@@ -371,6 +350,13 @@ async function ensureMembership(
         },
         result: undefined,
       };
+    });
+    logEvent("info", {
+      event: "sdp_api_invitation_accepted",
+      organization_id: params.organizationId,
+      user_id: params.userId,
+      invitation_id: pendingInvite.id,
+      role,
     });
     return role;
   } catch (error) {

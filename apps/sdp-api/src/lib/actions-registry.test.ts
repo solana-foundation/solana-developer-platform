@@ -52,6 +52,7 @@ const PUBLISHED_ACTIONS = [
   "members.manage",
   "organizations.read",
   "organizations.manage",
+  "feedback.execute",
   "onramp.read",
   "onramp.execute",
   "offramp.read",
@@ -150,7 +151,7 @@ describe("implication", () => {
 });
 
 describe("API key limits", () => {
-  it("never lets a key hold key, member, organization or project administration, or configure", () => {
+  it("never lets a key hold key, member, organization or project administration, feedback, or configure", () => {
     expect([...API_KEY_FORBIDDEN_ACTIONS].sort()).toEqual(
       [
         "api_keys.read",
@@ -159,6 +160,7 @@ describe("API key limits", () => {
         "members.manage",
         "organizations.manage",
         "projects.manage",
+        "feedback.execute",
         "wallets.configure",
         "private_channels.configure",
         "helius_rings.configure",

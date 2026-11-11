@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { SDP_GITHUB_REPO_URL } from "@sdp/types/site";
+import { SDP_GITHUB_REPO_URL, SDP_TERMS_PATH } from "@sdp/types/site";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { MessageKey } from "@/i18n/messages";
@@ -44,10 +44,10 @@ describe("HomepageFooter", () => {
     expect(headings.map((h) => h.textContent)).toEqual(["Platform", "Developers", "Ecosystem"]);
   });
 
-  it("links home through the lockup, named for screen readers", async () => {
+  it("links home through the wordmark, named for screen readers", async () => {
     const doc = await renderFooter();
     const brand = doc.querySelector('a[href="/"]');
-    expect(brand?.getAttribute("aria-label")).toBe("SDP home");
+    expect(brand?.getAttribute("aria-label")).toBe("Solana Developer Platform home");
     expect(brand?.querySelector("img")?.getAttribute("alt")).toBe("");
   });
 
@@ -58,9 +58,8 @@ describe("HomepageFooter", () => {
     );
     expect(hrefs).toEqual({
       Issuance: "#issuance",
-      Payments: "#payments-api",
+      Payments: "#payments",
       Markets: "#markets",
-      Privacy: "#privacy",
       Interfaces: "#interfaces",
       Docs: links.docs,
       OpenAPI: links.openapi,
@@ -73,5 +72,11 @@ describe("HomepageFooter", () => {
   it("names who provides the platform", async () => {
     const doc = await renderFooter();
     expect(doc.body.textContent).toContain("Provided by the Solana Foundation");
+  });
+
+  it("links the Terms of Use from its last line", async () => {
+    const doc = await renderFooter();
+    const terms = doc.querySelector(`a[href="${SDP_TERMS_PATH}"]`);
+    expect(terms?.textContent).toBe("Terms of Use");
   });
 });

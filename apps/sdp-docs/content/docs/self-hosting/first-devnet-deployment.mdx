@@ -1,23 +1,17 @@
 ---
 title: First Devnet Deployment
-description: Run self-hosted SDP on devnet, log into the dashboard, initialize a local wallet, and verify API access.
+description: Run self-hosted SDP on devnet, sign in to the dashboard, create a local wallet, and verify API access.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
-This tutorial takes a fresh self-hosted install from healthy containers to the
-first useful devnet workflow: dashboard login, local wallet initialization,
-wallet-scoped API key creation, and an authenticated API call.
+Take a fresh self-hosted install from healthy containers to a first devnet workflow: dashboard sign-in, a local custody wallet, a wallet-scoped API key, and an authenticated API call.
 
-Use this after the [Quickstart](/docs/self-hosting/quickstart). The path here is
-devnet-only and uses the default local signer. Provider-specific signing setup
-belongs in a later hardening pass.
+Start after the [Quickstart](/docs/self-hosting/quickstart). This path runs on devnet with the local signer. Set up a provider's signing later, when you harden the deployment.
 
 <Callout type="warn">
-The public Solana devnet RPC endpoint is useful for smoke tests, but it can be
-rate-limited or incomplete for balance-heavy wallet views. Use a dedicated
-devnet RPC endpoint from your provider before treating this flow as reliable.
+The public devnet RPC endpoint is fine for smoke tests, but it can rate-limit you or miss data that balance-heavy wallet views need. Use a dedicated devnet endpoint from your RPC provider before you rely on this flow.
 </Callout>
 
 <Steps>
@@ -26,7 +20,7 @@ devnet RPC endpoint from your provider before treating this flow as reliable.
 
 ## Confirm the stack is healthy
 
-From the directory where the installer placed `compose.yml` and `.env`:
+From the directory that holds `compose.yml` and `.env`:
 
 ```bash title="Terminal"
 cd ~/sdp
@@ -35,35 +29,23 @@ docker compose ps
 curl http://localhost:8787/health
 ```
 
-The health call should return a JSON response with `status: "ok"`. The dashboard
-is at `http://localhost:3000`, the API is at `http://localhost:8787`, and the
-self-hosted docs are at `http://localhost:3001`.
+The health check returns JSON with `"status": "ok"`. The dashboard is at `http://localhost:3000`, the API at `http://localhost:8787`, and these docs at `http://localhost:3001`.
 
 </Step>
 
 <Step>
 
-## Configure Clerk for dashboard login
+## Configure Clerk for dashboard sign-in
 
-In your Clerk development app:
+In your Clerk development application, follow the [Clerk setup guide](https://github.com/solana-foundation/solana-developer-platform/blob/main/apps/sdp-api/docs/self-hosting/clerk-setup.md):
 
-- Copy the publishable key, secret key, and issuer into the
-  [configurator](/docs/self-hosting/configurator).
-- Customize the session token (Clerk dashboard → **Sessions** → **Customize
-  session token**) with the claims from the
-  [Clerk setup guide](https://github.com/solana-foundation/solana-developer-platform/blob/main/apps/sdp-api/docs/self-hosting/clerk-setup.md).
-- Expose your local API with the webhook tunnel: reserve a free stable domain
-  at [dashboard.ngrok.com/domains](https://dashboard.ngrok.com/domains), set it
-  as `WEBHOOK_INGEST_DOMAIN` in `apps/sdp-api/.env.local`, and run
-  `pnpm dev:webhooks`.
-- Create a webhook endpoint that points at
-  `https://<your-domain>/webhooks/clerk/link-orgs` — Clerk delivers over the
-  public internet and cannot reach `localhost` directly.
-- Copy the webhook signing secret into `CLERK_WEBHOOK_SECRET`.
+- Turn on **Organizations**.
+- Customize the session token (**Sessions** → **Customize session token**) with the guide's claims. Without `org_id`, the API refuses every dashboard request.
+- Copy the publishable key, secret key, and issuer for the configurator.
+- Give the API a public HTTPS URL, because Clerk can't reach `localhost`. To test locally, reserve a free static domain at [dashboard.ngrok.com/domains](https://dashboard.ngrok.com/domains) and run `ngrok http --url=<your-domain> 8787`.
+- Add a webhook endpoint at `https://<your-domain>/webhooks/clerk/link-orgs`, subscribed to the events the guide lists. Copy its signing secret for `CLERK_WEBHOOK_SECRET`.
 
-`CLERK_WEBHOOK_SECRET` is optional at raw env-validation level, but this tutorial
-requires it because the webhook is what creates the local SDP organization record
-after dashboard signup.
+The API starts without `CLERK_WEBHOOK_SECRET`, but this tutorial needs it. The webhook is how SDP learns the settings you add to the organization in Clerk, including the one that turns on the local signer.
 
 </Step>
 
@@ -71,65 +53,59 @@ after dashboard signup.
 
 ## Generate the devnet `.env`
 
-Open the [configurator](/docs/self-hosting/configurator), keep the defaults for
-the first deployment, and fill in:
+Open the [configurator](/docs/self-hosting/configurator), keep its defaults, and fill in:
 
-- `SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL` with a devnet RPC endpoint.
-- Clerk publishable key, secret key, issuer, and webhook secret.
-- Local signing with native fee payment.
+- `SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL`: your devnet RPC endpoint.
+- The Clerk publishable key, secret key, issuer, and webhook secret.
 
-The signing step generates a local Solana signer in the browser and shows the
-public key to fund on devnet. Save the generated file as `~/sdp/.env`, then
-restart the stack:
+The signing step keeps the local signer and generates its `CUSTODY_PRIVATE_KEY` in your browser. SDP offers the local signer only while that key is set. Save the file as `~/sdp/.env`, then restart the stack:
 
 ```bash title="Terminal"
 cd ~/sdp
 docker compose up -d
 ```
 
-<Callout type="info">
-Providers that are not configured remain unavailable, so the default devnet path
-exposes only the local signer. The local signer is a manual provider: after you
-create your organization, enable it by adding
-`{"sdp": {"providerOverrides": {"custody": {"local": true}}}}` to the
-organization's private metadata in the Clerk dashboard.
-</Callout>
-
 </Step>
 
 <Step>
 
-## Log into the dashboard
+## Sign in to the dashboard
 
-Open `http://localhost:3000` and sign in through Clerk. Create or join an
-organization when prompted. After the Clerk webhook lands, the dashboard should
-show the organization and project context instead of onboarding errors.
+Open `http://localhost:3000`, sign in through Clerk, and create an organization when prompted. SDP creates it with you as its admin, along with a sandbox project and a production project.
 
-If the dashboard loads but organization state does not appear, check the API logs:
+If requests fail after sign-in, read the failing request's `401` response. `Clerk token missing organization` means the session token lacks the `org_id` claim, and `Clerk token has no usable email claim` means its `email` claim is wrong: fix the session token customization.
+
+If Clerk's webhook deliveries fail, check the API logs:
 
 ```bash title="Terminal"
 docker compose logs -f sdp-api
 ```
 
-Look for Clerk webhook errors, session token claim mismatches, or missing
-`CLERK_WEBHOOK_SECRET`.
+`webhooks: refused a Clerk webhook with an invalid signature` means `CLERK_WEBHOOK_SECRET` doesn't match the endpoint's signing secret. Clerk's delivery log shows the same refusal as `Invalid webhook signature`.
 
 </Step>
 
 <Step>
 
-## Initialize a local custody wallet
+## Turn on the local signer
 
-In the dashboard, open **Wallets**, choose the local provider, and create a wallet
-named `Devnet local wallet`.
+The local signer needs a per-organization activation. In the Clerk dashboard, open your organization's private metadata (**Organizations** → your organization → **Metadata** → **Private**) and add:
 
-There is no API-key path for this step. Initializing custody is provider setup
-(`wallets.configure`), which no API key can hold, so it is done signed in as an
-organization admin. Once the provider is initialized, keys that hold
-`wallets.manage` can create more wallets with `POST /v1/wallets`.
+```json
+{ "sdp": { "providerOverrides": { "custody": { "local": true } } } }
+```
 
-Copy the new wallet's ID from its card on the **Wallets** page. You will bind
-the API key to this wallet in the next step.
+The `organization.updated` webhook brings it into SDP. Until it does, choosing the local signer returns `403` with `Local requires manual activation for this organization.`
+
+</Step>
+
+<Step>
+
+## Create a local custody wallet
+
+In the dashboard, open **Wallets**, choose the local provider, and create a wallet named `Devnet local wallet`.
+
+This step needs the dashboard. Setting up a custody provider takes `wallets.configure`, which no API key can hold, so an organization admin does it signed in. After that, a key with `wallets.manage` can create more wallets with `POST /v1/wallets`.
 
 </Step>
 
@@ -137,11 +113,9 @@ the API key to this wallet in the next step.
 
 ## Create a wallet-scoped API key
 
-Open **API keys** in the dashboard, create a sandbox key, and choose **Selected
-wallets**. Select the local wallet you just created: it is the only wallet the
-key may sign with.
+Open **API keys** and create a key in the sandbox project. Under **Permissions**, grant at least `wallets.read`. Under **Access**, choose **Selected wallets** and select `Devnet local wallet`: it's the only wallet the key can sign with.
 
-Save the full key when the dashboard shows it. SDP only displays it once.
+Copy the full key when the dashboard shows it. SDP shows it only once.
 
 </Step>
 
@@ -149,7 +123,7 @@ Save the full key when the dashboard shows it. SDP only displays it once.
 
 ## Verify the key can read wallets
 
-Use the new key against your self-hosted API:
+Call your self-hosted API with the new key:
 
 ```bash title="Terminal"
 export SDP_API_KEY="sf_..."
@@ -158,9 +132,7 @@ curl "http://localhost:8787/v1/wallets?view=summary" \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
-The response should include the local wallet you created. At this point you have
-a self-hosted devnet stack with dashboard auth, local custody signing, and an API
-key bound to the wallet it is allowed to use.
+The response includes `Devnet local wallet`. You now have a self-hosted devnet stack with dashboard sign-in, local custody signing, and an API key bound to the wallet it may sign with.
 
 </Step>
 
@@ -168,10 +140,6 @@ key bound to the wallet it is allowed to use.
 
 ## Next steps
 
-- Use [Environment reference](/docs/self-hosting/env-reference) to move from
-  localhost defaults to real domains, external Postgres, or external Redis.
-- Use [Upgrade & backup](/docs/self-hosting/upgrade-and-backup) before keeping
-  meaningful operator data in the stack.
-- Use [External co-signers](/docs/self-hosting/external-co-signers) when a
-  provider requires an additional signing process outside the default compose
-  stack.
+- Use the [Environment reference](/docs/self-hosting/env-reference) to move from localhost defaults to real domains, an external Postgres, or an external Redis.
+- Read [Upgrade and backup](/docs/self-hosting/upgrade-and-backup) before you keep data you care about in the stack.
+- Use [External co-signers](/docs/self-hosting/external-co-signers) when a provider needs a signing process outside the default stack.

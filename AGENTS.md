@@ -8,7 +8,7 @@ This file is the canonical agent guide for this repository.
 - `apps/sdp-web`: dashboard application
 - `apps/sdp-docs`: public documentation site and generated API reference
 - `packages/sdp-types`: shared runtime types and shared product constants
-- `packages/sdp-design-tokens`: shared design tokens (CSS custom properties, Tailwind theme mapping) and the `refresh` theme scope; see its README
+- `packages/sdp-design-tokens`: shared design tokens (CSS custom properties, Tailwind theme mapping); see its README
 - `packages/sdp-ui`: the dashboard's UI primitives (`@sdp/ui`) over `@solana/design-system` and the design tokens; `apps/sdp-web/src/components/ui/*` re-exports them; see its README
 - `packages/sdp-api-catalog`: what the API, the dashboard and the docs share about the public API (`@sdp/api-catalog`): the API reference model and the request snippets; see its README
 
@@ -32,10 +32,10 @@ Do not hand-edit generated artifacts. Regenerate them with the owning script.
 
 Public docs and AI artifacts should mirror the supported public surface only.
 - Public API families are the ones the deployment's release channel runs (`SDP_RELEASE_CHANNEL`; prod and stage run `stable`, dev `experimental`), so no deployment documents a route it refuses with 403. Every surface derives from the module maturity in `packages/sdp-types/src/release-channels.ts` and the route inventory in `apps/sdp-api/src/routes/route-modules.ts`; never hand-maintain another list or move content to hide a module.
-  - Public OpenAPI: `createPublicOpenApiDocument({ releaseChannel })` in `apps/sdp-api/src/openapi/spec.ts` drops other modules' routes, and `openapi/release-channel-values.ts` drops their enum values, examples and `oneOf` branches from shared schemas (classify a new wallet-binding permission or wallet purpose there; an action's owner comes from the registry in `packages/sdp-types/src/actions.ts`). The API serves `/openapi.json` and `/llms.txt` for its own channel at runtime.
+  - Public OpenAPI: `createPublicOpenApiDocument({ releaseChannel })` in `apps/sdp-api/src/openapi/spec.ts` drops other modules' routes, and `openapi/release-channel-values.ts` drops their enum values, examples and `oneOf` branches from shared schemas (classify a new wallet-binding permission there and a new wallet purpose in `WALLET_PURPOSE_OWNERS` in `packages/sdp-types/src/release-channels.ts`, which the dashboard's purpose pickers filter by too; an action's owner comes from the registry in `packages/sdp-types/src/actions.ts`). A custody provider is named where `isCustodyProviderPublished` in `packages/sdp-types/src/release-channels.ts` allows it: the channel offers it in some custody mode, and never `local`, which runs only self-hosted. A field about one custody mode declares `CUSTODY_MODE_GATE`, and a provider's own fields `CUSTODY_PROVIDER_GATE`. The API serves `/openapi.json` and `/llms.txt` for its own channel at runtime.
   - Docs site, API reference, Postman and `llms*.txt`: the docs build reads `SDP_RELEASE_CHANNEL` (required on Vercel, set per environment like sdp-web; the Dockerfile build arg defaults to `experimental`). The API writes what the channel publishes (modules and ramp providers, Earn's hold included) to a manifest the docs build reads. Gates follow module declarations: a page about one module takes `module: <module>` frontmatter (or `rampProvider: <provider>`), shared pages never name a module, and lists of modules, providers or operations are generated blocks (see `apps/sdp-docs/CLAUDE.md`, "Release Channels"). Committed generated artifacts are built at `experimental` (an unset channel), so CI drift checks see every module; CI also checks links on `stable`.
   - API playground: the committed catalog holds every channel's operations with their module; the dashboard filters it, and the hand-authored forms, by its own channel.
-- `earn` is held out of every public surface until launch (PRO-2038), independently of its release-channel stage: `EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` drops the family from the public OpenAPI document, and the API reference, Postman collection, playground catalog and AI files regenerate from it. Flipping it back is a PRO-1872 security sign-off PR. The internal document and the runtime are unchanged, except `GET /v1/projects/{projectId}/provider-availability`, which omits Earn entries while the flag is false so the response matches the public document; it omits compliance entries on a channel without Compliance, and ramp entries for providers outside the channel, the same way.
+- `earn` is held out of every public surface until launch (PRO-2038), independently of its release-channel stage: `EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` drops the family from the public OpenAPI document, and the API reference, Postman collection, playground catalog and AI files regenerate from it. Flipping it back is a PRO-1872 security sign-off PR. The internal document and the runtime are unchanged, except `GET /v1/projects/{projectId}/provider-availability`, which omits Earn entries while the flag is false so the response matches the public document; it omits compliance entries on a channel without Compliance, ramp entries for providers outside the channel, and custody entries for providers the channel offers in no custody mode, the same way.
 - Hidden/internal families stay out of public AI resources unless product policy changes: `admin`, `onboarding`, `auth`, `organizations`, `members`, `api-keys`
 - Every Earn route requires an authenticated credential (an API key, or a dashboard session with a project) and runs in that project's environment. Keep the route list aligned across the router, the internal OpenAPI document and the Embedded Yield guide, which is unpublished until PRO-2038 and lives at `apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx`, outside the built `content/docs` tree.
 - Promoting a route into the public OpenAPI document is a security-relevant scope change, not a docs edit: the PR needs a named security sign-off. For `earn` the pinned list in `apps/sdp-api/src/openapi/spec.test.ts` enforces this (see `apps/sdp-api/src/routes/earn/CLAUDE.md`, "Public OpenAPI promotion").
@@ -54,6 +54,15 @@ Public docs and AI artifacts should mirror the supported public surface only.
 
 - **Every route declares one action.** `requireAction("module.verb")` (`apps/sdp-api/src/middleware/require-action.ts`) from the registry in `packages/sdp-types/src/actions.ts`, or `publicRoute(reason)`; `route-actions.test.ts` fails a route that declares neither. API keys hold explicit grants (no role, no wildcard) and can never hold key, member, organization or project administration or any `configure`.
 - **A route in a grouped API family names its docs group.** Payments, Issuance and Counterparties routes set `[DOCS_GROUP]: <FAMILY>_GROUPS.<group>` beside their `tags` (`apps/sdp-api/src/openapi/paths/helpers.ts`); the API reference shows each group as a folder of its family. `openapi:generate` fails a family that names groups on some routes but not all.
+- **An API change ships with its docs (hard rule).** Any change a caller can see (a route, a
+  request or response field, an enum value, an error code, an HTTP status, a header, or behavior)
+  updates the docs in the same PR: its OpenAPI description in `apps/sdp-api/src/openapi/**`, the
+  artifacts under "Generated files" regenerated at an unset channel (CI diffs them), every
+  hand-written page under `apps/sdp-docs/content` (`content/unpublished` included) that shows the
+  request, the response or the behavior, and the dashboard playground's hand-authored forms
+  (`apps/sdp-web/src/app/(session)/dashboard/[projectId]/**/*-playground-config.ts`). Run
+  `pnpm --filter sdp-docs check:prose` and `check:links`, and name the changed docs in the PR body;
+  an API PR with no docs change says why.
 
 - Follow `docs/contributing/code-standards.md` (correctness, concurrency, TypeScript, API, and dashboard rules). Reviews enforce it.
 - Every new ramp provider and ramp settlement change follows
@@ -66,6 +75,13 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - Update `docs/architecture/module-map.md` with `pnpm generate:module-map`; do not edit it by hand.
 - A new env key the API reads goes in `apps/sdp-api/src/types/env.d.ts`, `scripts/secret-keys.mjs` and
   `turbo.json` `globalEnv`: turbo drops undeclared keys, so without the last two the local API never sees it.
+- The self-hosting configurator (`packages/sdp-env-config/src/fields.ts`) writes only keys something reads.
+  `scripts/check-env-configurator-drift.mjs` also passes any key `infra/self-hosted/.env.example` or
+  `API_LOCAL_ENV_KEYS` lists, and neither proves a reader, so find the reader before adding a field; a choice
+  that only shapes the form goes in `UI_ONLY_KEYS` and that script's `IGNORE`.
+- The root `docker-compose.yml` passes each `sdp-api` and `sdp-web` key by hand, so a key the root `.env.example`
+  lists needs its passthrough there. `${KEY:-}` sends an empty string: use it only for a key whose reader treats
+  empty as unset.
 - **Migrations run while the previous revision still serves traffic.** `pnpm check:migration-compat`
   rejects one the previous image cannot run against and common DDL that holds a blocking lock on an
   existing table: build an index `CONCURRENTLY`, alone in a `-- sdp:migration-mode: non-transactional`
@@ -109,7 +125,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - `.agents/skills/sdp-make-pr/SKILL.md`: explicit-only PR creation workflow with technical before/after behavior, flows or pseudocode, verification, and risk notes.
 - `.agents/skills/sdp-review/SKILL.md`: explicit-only SDP change-set digest and focused review workflow.
 - `.agents/skills/sdp-bug-report/SKILL.md`: explicit-only SDP bug-bash reporting workflow for Linear issue `PRO-1482`.
-- `.agents/skills/sdp-module-alignment/SKILL.md`: internal engineering checklist and scanner (`scripts/scan-module.sh`) for bringing a module onto the current architecture and the refresh design before it is promoted or released, built from Earn's October 2026 alignment.
+- `.agents/skills/sdp-module-alignment/SKILL.md`: internal engineering checklist and scanner (`scripts/scan-module.sh`) for bringing a module onto the current architecture and the 2026 design before it is promoted or released, built from Earn's October 2026 alignment.
 
 When updating repo-local skills:
 - keep them grounded in the public docs and API reference instead of internal handlers

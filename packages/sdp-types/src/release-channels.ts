@@ -17,6 +17,7 @@ import {
   CUSTODY_PROVIDERS,
   type CustodyMode,
   type CustodyProvider,
+  type CustodyWalletPurpose,
   isByokCustodyProvider,
 } from "./custody";
 import { RAMP_PROVIDERS, type RampProviderId } from "./provider-access";
@@ -25,6 +26,7 @@ export const SDP_MODULES = [
   "custody",
   "payments",
   "recurring_payments",
+  "subscriptions",
   "ramps",
   "compliance",
   "issuance",
@@ -59,6 +61,7 @@ export type SdpReleaseChannel = (typeof SDP_RELEASE_CHANNEL_NAMES)[number];
 export const SDP_MODULE_MATURITY = {
   payments: "stable",
   recurring_payments: "stable",
+  subscriptions: "beta",
   compliance: "experimental",
   issuance: "experimental",
   earn: "beta",
@@ -172,6 +175,33 @@ export function isCustodyProviderInReleaseChannel(
 }
 
 /**
+ * Custody providers no public surface names. Local signing runs only in a
+ * self-hosted deployment (the API refuses it in every managed one), and the
+ * public OpenAPI document, docs and playground describe the managed API.
+ */
+const UNPUBLISHED_CUSTODY_PROVIDERS: ReadonlySet<CustodyProvider> = new Set(["local"]);
+
+/**
+ * Whether a release channel's public surfaces (OpenAPI document, docs,
+ * playground) may name custody `provider`: the channel offers it in either
+ * custody mode, and it is not unpublished.
+ *
+ * @param releaseChannel - The surface's release channel.
+ * @param provider - The custody provider.
+ * @returns True when the channel offers the provider and it is publishable.
+ */
+export function isCustodyProviderPublished(
+  releaseChannel: SdpReleaseChannel,
+  provider: CustodyProvider
+): boolean {
+  if (UNPUBLISHED_CUSTODY_PROVIDERS.has(provider)) return false;
+  return (
+    isCustodyProviderInReleaseChannel(releaseChannel, provider, "managed") ||
+    isCustodyProviderInReleaseChannel(releaseChannel, provider, "byok")
+  );
+}
+
+/**
  * @param rampProviderMaturity - `SDP_RAMP_PROVIDER_MATURITY`; tests pass their own table.
  */
 export function isModuleInReleaseChannel(
@@ -215,3 +245,18 @@ export const SDP_RELEASE_CHANNELS = {
   beta: modulesInReleaseChannel("beta"),
   stable: modulesInReleaseChannel("stable"),
 } as const satisfies Record<SdpReleaseChannel, readonly SdpModule[]>;
+
+/**
+ * The module each wallet purpose serves. A `core` purpose runs in every release channel; any
+ * other runs only where its module does, so elsewhere the public OpenAPI document drops it and
+ * the dashboard does not offer it. The `Record` type makes a new purpose fail to compile until
+ * it is classified here.
+ */
+export const WALLET_PURPOSE_OWNERS = {
+  root: "core",
+  mint_authority: "issuance",
+  freeze_authority: "issuance",
+  fee_payer: "core",
+  transfer: "core",
+  dvp_settlement_authority: "dvp",
+} as const satisfies Record<CustodyWalletPurpose, SdpModule | "core">;

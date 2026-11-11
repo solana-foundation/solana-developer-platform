@@ -3,7 +3,7 @@ title: Embedded Yield
 description: Offer yield from your own app. SDP builds the transactions, your customer's wallet signs, and your backend can pay the fees with a co-signing wallet.
 ---
 
-{/* Keep this guide and the dashboard integration module (apps/sdp-web/src/app/dashboard/[projectId]/markets/earn/earn-integration-snippets.ts) in sync: they document the same flow. */}
+{/* Keep this guide and the dashboard integration module (apps/sdp-web/src/app/(session)/dashboard/[projectId]/markets/earn/earn-integration-snippets.ts) in sync: they document the same flow. */}
 
 Embedded Yield lets your platform offer vault yield without SDP ever holding your users' funds. SDP **builds** an unsigned Solana transaction for the customer's own wallet, the customer signs it in your app, and your backend **submits** the signed bytes to SDP for verification, durable tracking, and broadcast. Withdrawals work the same way in reverse.
 
@@ -18,7 +18,18 @@ All endpoints live under `/v1/earn`. Every code sample uses one Solana SDK, `@so
 
 Every request sends `Authorization: Bearer <SDP_API_KEY>` and runs in your project's environment (sandbox runs on devnet). A build can name a `feePayer`, and your backend submits the signed bytes to SDP, which records the movement or request before broadcast and reconciles it to a terminal state.
 
-**The key.** Create an API key for your project in the dashboard and grant it Earn `execute` (which includes `earn.read`); grant `earn.manage` too if it builds external-wallet withdrawal cancellations or manages programs. Cancelling a queued withdrawal signs or sponsors a transaction, so it takes `execute`. Start in sandbox, which runs on devnet. A strategy is depositable when `fundable` is `true` and `status` is `active`.
+**The key.** Create an API key for your project in the dashboard and grant it
+Earn `execute` (which includes `earn.read`). Grant `earn.manage` for cancellation
+builds and submits or program setup. Cancellation remains available after
+production access is removed or starts are disabled; a live
+credential with the required grants and wallet scope is still required. Start
+in sandbox, which runs on devnet. A strategy is depositable when `fundable` is
+`true` and `status` is `active`.
+
+An organization suspension still blocks authentication, including recovery
+routes. This is the organization's incident-control policy.
+
+Earn is available only on deployments whose release channel includes it.
 
 ## Endpoints
 
@@ -48,6 +59,37 @@ The dashboard's **Embedded Yield → Integrate** page generates a complete serve
 | Submit request recovery | `POST /v1/earn/external-wallet/withdrawal-request-cancellations` |
 
 Every per-owner read addresses the customer's wallet the same way: a required `ownerAddress` query parameter.
+
+## WisdomTree customer verification (internal, pre-launch)
+
+The backend Moderator onboarding flow uses an existing project-scoped
+counterparty as the customer. All endpoints start with
+`onboarding/wisdomtree`; reads take `earn.read` and writes take
+`earn.execute` plus `Idempotency-Key`.
+
+| Step | Endpoint |
+| --- | --- |
+| Read the live KYC/KYB form | `GET /v1/earn/onboarding/wisdomtree/forms/{entityType}` (`individual` or `business`) |
+| Create KYC or save/submit KYB | `POST /v1/earn/onboarding/wisdomtree/{counterpartyId}` |
+| Upload one business document | `POST /v1/earn/onboarding/wisdomtree/{counterpartyId}/documents` |
+| Read verification/corrections | `GET /v1/earn/onboarding/wisdomtree/{counterpartyId}` |
+| Answer one business correction | `POST /v1/earn/onboarding/wisdomtree/{counterpartyId}/corrections/{reasonId}` |
+| Register an active child customer's Solana wallet | `POST /v1/earn/onboarding/wisdomtree/{counterpartyId}/wallets` |
+
+Submit `{ application, documents? }` using the latest form's template and the
+applicant's own agreement answers. Business intent is explicit (`draft` or
+`submit`); individual KYC submits immediately and is US-only. Document uploads
+accept base64 PDF/JPEG/PNG up to 20 MiB decoded and return SDP document IDs;
+map those IDs under `documents` using the form's submission keys. Provider
+GUIDs and blob paths cannot be supplied by callers.
+
+A business's returned child organization is durably linked to the counterparty.
+A retail person's GUID is separate and never turns the moderator into a child.
+Only an `active`, still-assigned business child can register wallets on this
+rail. Submission is not approval. After answering corrections, submit the same
+business again. Unknown create outcomes require operator reconciliation; do
+not create a second application. This backend workflow does not enable
+WisdomTree surfacing or production deposits.
 
 ## 1. Pick a strategy
 
@@ -114,7 +156,11 @@ const signedTransaction = getBase64EncodedWireTransaction(signed);
 
 Any wallet library works as long as it returns the signed transaction as base64; the submit only checks signatures.
 
-A built transaction expires with its blockhash, about a minute. If the customer walks away, build a fresh one: submitting an expired build is refused with `409 TRANSACTION_EXPIRED` before anything is recorded.
+A blockhash limits when a transaction can first land. An unsigned abandoned
+build can be replaced after expiry. Keep every signed transaction and its
+idempotency key until its outcome is resolved: the wallet may already have
+broadcast it. Submit the original signed bytes even after expiry and poll the
+recorded movement.
 
 **Submit.** The `Idempotency-Key` header is required. Reuse the same key when retrying: a retry returns the original movement with `replayed: true` instead of moving money twice, and each built transaction is consumable exactly once.
 
@@ -195,6 +241,10 @@ What to know when sponsoring:
 - **The fee payer is committed at build time.** It is inside the signed message, so it cannot be swapped at submit; rebuild if you need a different sponsor.
 - **Keep a SOL float.** The sponsor pays the fee on every sponsored transaction and the rent on every first deposit. The build simulates with your sponsor as the payer and refuses with a 400 naming it when it cannot pay.
 - **Kamino rent stays in the customer's share account.** A full exit leaves the empty account open; it does not automatically refund you or the customer. A recorded creation claim cannot prove who funded the live account. The owner can authorize a separate close in their wallet; SDP has no rent-reclaim endpoint yet. Do not count retained rent as vault principal or earnings.
+- **Hastra transient rent returns to its current payer.** The temporary wYLDS
+  account created for an exit refunds the wallet funding that exit. Historical
+  share-account funding does not redirect that refund. Hastra request-account
+  rent follows the provider program and returns to the owner.
 - **Mind the clock.** Build, customer signature, your co-signature, and submit must all fit inside the blockhash window. Co-sign programmatically, not through a manual approval step.
 - Passing the customer's own address as `feePayer` means the default; the build does not echo it. Program-derived addresses cannot sign, so an off-curve fee payer can never be submitted.
 - Applies to `withdrawal-transactions` identically, and to the standalone swap transaction of a split swap-funded deposit.
@@ -393,6 +443,26 @@ if (canRecover) {
 
 A request transaction and a cancellation transaction are lifecycle actions, not payouts. Never add either to the customer's available payout-asset balance. Only `fulfilled` creates the corresponding withdrawal movement. On `cancelled`, refresh the original share balance for a solver request, or the position's `parIntermediate` for an operator redemption, which can then be redeemed with `intermediateAmount`.
 
+Asynchronous build metadata survives blockhash expiry. If its unsigned
+reservation was released or replaced, a late signed request needs proof that
+the exact transaction succeeded at finality. Retry `409 CONFLICT` with the same
+signed bytes and key while that proof becomes visible. It cannot replace
+another recorded request. If a par redemption already closed on chain, its
+late receipt returns `409 CONFLICT` and needs support to reconcile the history;
+it cannot claim a newer cycle at the reused address.
+
+Finalized failed transactions found during recovery return
+`400 TRANSACTION_FAILED`; build a new transaction. An unresolved 16-signature
+history window returns `503` and needs support reconciliation rather than an
+unbounded search during submission.
+
+An expired par build whose creation history is unavailable also returns
+`503`; keep and retry the original signed intent.
+
+An expired create becomes `failed` only after
+repeated checks find no finalized transaction, provider request or close event;
+unknown or incomplete history stays recoverable.
+
 ## Floors and previews
 
 Both previews work for every provider and are the figures to show a customer before they confirm. Whether a build also takes a protection floor depends on the strategy row:
@@ -418,16 +488,15 @@ Recovery across that split is yours: persist the swap signature and the `followU
 
 | Call | Rule |
 | --- | --- |
-| Builds | No `Idempotency-Key`. A build moves no money and expires with its blockhash. |
+| Builds | No `Idempotency-Key`. A build moves no money. Expiry permits replacing an unsigned draft; signed builds stay recoverable. |
 | Submits | `Idempotency-Key` header required. Same key on retry returns the original movement or asynchronous request (`replayed: true`). Use a different key for a later cancellation action. |
 
 | Response | Meaning | What to do |
 | --- | --- | --- |
 | `400` | The request or the current vault state must change. | Fix the request or show the message; do not retry unchanged. |
-| `409 TRANSACTION_EXPIRED` | The build's blockhash expired before submit. Nothing was recorded. | Build again and have the customer sign the new transaction. |
-| `409 CONFLICT` (any other message) | The build was already consumed under a different idempotency key, or the key was reused with a different body. | Look up the existing movement or asynchronous request; do not rebuild blindly. |
+| `409 CONFLICT` | A key or build was reused, another request occupies the provider address, or a released asynchronous reservation needs finalized execution proof. | Look up the existing intent. For a late signed submission, retry its exact bytes and key while finality becomes visible; do not rebuild blindly. |
 | `422 SIGNING_REJECTED` | A fee sponsor refused the transaction by policy. | The same transaction will be refused again; change it. |
-| `503 PROVIDER_UNAVAILABLE` | Live provider or RPC state could not be read. | Retry the read-only preview or build with bounded backoff. |
+| `503 PROVIDER_UNAVAILABLE` | Live provider or RPC state could not be read. | Retry previews or builds with bounded backoff. For a submit, retain and retry its original signed bytes and key. |
 | Timeout or 5xx on a submit | Outcome uncertain. | Retry the exact signed bytes with the same `Idempotency-Key`. |
 
 ## Before production
@@ -454,3 +523,59 @@ Refresh position and wallet balances after confirmation and display the observed
 values. Do not add a requested amount to a stale balance, or replace a null
 `tokenAmount` with a requested withdrawal amount. Request amounts and queue
 `quotedAssets` may be shown separately with requested or expected labels.
+
+## Plume provider orders (internal integration)
+
+Plume uses the same strategy catalogue, caller-signed deposit and withdrawal
+transactions, positions and movement endpoints as other vault providers. The
+provider is staged with money-in disabled pending deployment validation. No Plume
+API key is required. Your wallet must pass Plume's Predicate v2 mint eligibility
+check; a 403 from its builder means the wallet is not approved.
+
+For a first mint with a separate fee payer, finalize the share token account setup:
+
+1. `POST /v1/earn/provider-actions/external/preparation-transactions` with
+   `strategyId`, `ownerAddress`, and optional `feePayer`.
+2. Sign the returned action's `transaction` with the owner and optional fee payer.
+3. `POST /v1/earn/provider-actions/external/preparations` with `actionId` and
+   `signedTransaction`.
+4. Poll `GET /v1/earn/provider-actions/{actionId}` until `finalized` or `not_required`, then use the
+   normal deposit build and submit flow.
+
+Every POST requires an `Idempotency-Key`. Preserve the key and identical payload
+when retrying an uncertain request. The preparation action is durable and can outlive the browser session.
+`not_required` means the live account already exists; no setup transaction or
+signature is needed. An abandoned unsigned build can be rebuilt under a new key;
+reuse its original key to recover an uncertain submit.
+
+Plume mint transactions already contain protocol signatures. Sign the exact
+message and preserve every existing signature. Do not replace its blockhash,
+change its fee payer, append instructions, or compose a swap into it. Fund USDC
+before building the mint. SDP accepts human-readable decimal amounts and converts
+them to exact base-unit integers; no fractional base units are rounded.
+
+The withdrawal build accepts optional `redemptionMode: "standard" | "instant"`.
+Both modes settle across chains. `instant` uses the provider's available instant
+liquidity; it does not mean same-transaction delivery. Neither mode requires a
+later user-signed claim. A `confirmed` source movement still awaits delivery.
+Poll until `finalized` and inspect `settlementOutcome: "delivered"`; SDP verifies
+the destination Solana token credit before reporting fulfillment. A status-indexing
+404 remains pending. Output-floor parameters are unsupported for these
+cross-chain flows and are refused rather than silently ignored.
+
+A pending standard redemption can be cancelled with
+`POST /v1/earn/provider-actions/external/cancellation-transactions`, naming its
+`movementId` and optional `feePayer`. Sign the returned transaction, submit it to
+`POST /v1/earn/provider-actions/external/cancellations`, and poll the action id.
+The cancellation uses the original order's composer. It sets Plume's aggregate
+pending amount to zero for that wallet and vault, which can affect other pending
+requests. Only a verified full share return closes the selected SDP movement;
+partial or aggregated returns remain pending for recovery. A cancelled movement
+reports `settlementOutcome: "cancelled"` and zero USDC payout. Already-delivered
+USDC cannot be recalled.
+
+These provider-action routes are registered in the internal OpenAPI document.
+They remain outside the publishable Earn contract until a named security sign-off
+promotes them; Earn itself remains unpublished until PRO-2038. Treasury uses the
+custody equivalents, `POST /v1/earn/provider-actions/preparations` and
+`POST /v1/earn/provider-actions/cancellations`, under the same project scope.

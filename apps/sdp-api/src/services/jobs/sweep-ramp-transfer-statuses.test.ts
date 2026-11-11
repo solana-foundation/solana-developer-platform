@@ -423,6 +423,16 @@ describe("sweepRampTransferStatuses", () => {
     expect((await row("xfr_production")).provider_status_last_polled_at).not.toBeNull();
   });
 
+  it("never pulls production rows on a devnet-only deployment, even with production keys", async () => {
+    Object.assign(env, MOONPAY_PRODUCTION_ENV);
+    await seedTransfer({ id: "xfr_production", provider: "moonpay", project: PROJECTS.production });
+
+    await sweepRampTransferStatuses({ ...env, SDP_ALLOW_PRODUCTION_PROJECTS: "false" });
+
+    expect(requestsTo("api.moonpay.com")).toBe(0);
+    expect((await row("xfr_production")).provider_status_last_polled_at).toBeNull();
+  });
+
   it("drains open transfers before expired ones", async () => {
     for (let index = 0; index < RAMP_STATUS_PULLS_PER_SWEEP; index += 1) {
       await seedTransfer({

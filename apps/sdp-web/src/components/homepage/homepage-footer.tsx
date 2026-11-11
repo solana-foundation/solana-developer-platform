@@ -1,4 +1,4 @@
-import { SDP_GITHUB_REPO_URL } from "@sdp/types/site";
+import { SDP_GITHUB_REPO_URL, SDP_TERMS_PATH } from "@sdp/types/site";
 import { cn } from "@sdp/ui/cn";
 import Image from "next/image";
 import Link from "next/link";
@@ -24,10 +24,9 @@ export async function HomepageFooter({ links }: { links: HomepageLinks }) {
       id: "platform",
       title: t("Homepage.footer.columns.platform"),
       links: [
-        { label: t("Homepage.footer.links.payments"), href: "#payments-api" },
         { label: t("Homepage.footer.links.issuance"), href: "#issuance" },
+        { label: t("Homepage.footer.links.payments"), href: "#payments" },
         { label: t("Homepage.footer.links.markets"), href: "#markets" },
-        { label: t("Homepage.footer.links.privacy"), href: "#privacy" },
       ],
     },
     {
@@ -56,7 +55,12 @@ export async function HomepageFooter({ links }: { links: HomepageLinks }) {
         <div className={styles.grid}>
           <div className={styles.lead}>
             <Link className={styles.brand} href="/" aria-label={t("Homepage.footer.home")}>
-              <Image src="/homepage/v6/logo-sdp-lockup-on-dark.svg" alt="" width={78} height={30} />
+              <Image
+                src="/homepage/v6/logo-sdp-wordmark-on-dark.svg"
+                alt=""
+                width={332}
+                height={30}
+              />
             </Link>
             <p className={styles.tagline}>{t("Homepage.footer.tagline")}</p>
           </div>
@@ -75,9 +79,12 @@ export async function HomepageFooter({ links }: { links: HomepageLinks }) {
             </div>
           ))}
         </div>
-        <p className={styles.bottom}>
-          {t("Homepage.footer.providedBy", { organization: FOOTER_ORGANIZATION })}
-        </p>
+        <div className={styles.bottom}>
+          <p>{t("Homepage.footer.providedBy", { organization: FOOTER_ORGANIZATION })}</p>
+          <Link className={styles.legalLink} href={SDP_TERMS_PATH}>
+            {t("Homepage.footer.terms")}
+          </Link>
+        </div>
       </div>
     </footer>
   );

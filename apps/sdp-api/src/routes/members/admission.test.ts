@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { MEMBER_STATUSES, type MemberStatus } from "@sdp/types/organizations";
+import {
+  INVITATION_EXPIRED_REASON,
+  MEMBER_STATUSES,
+  type MemberStatus,
+} from "@sdp/types/organizations";
 import { ORGANIZATION_ROLES, type OrganizationRole } from "@sdp/types/roles";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -14,6 +18,7 @@ import {
 } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { readInvitationStatus, seedInvitation } from "@/test/helpers/invitations";
+import { recordLoggedEvents } from "@/test/helpers/log-events";
 import { organizationMember, seedOrganizationMembers } from "@/test/helpers/organization-members";
 import {
   archiveProject,
@@ -30,6 +35,7 @@ const INVITATION_ID = "inv_admission";
 const ADMIN = organizationMember("admission_admin", "admin");
 const INVITEE = organizationMember("admission_invitee", "member");
 let projects: SeededDefaultProjects;
+let loggedEvents: ReturnType<typeof recordLoggedEvents>;
 
 async function signIn(orgRole: "admin" | "member", clerkOrgId: string): Promise<Response> {
   const token = await signTestClerkJwt({
@@ -96,6 +102,19 @@ const ACCEPT_INVITE_AUDIT = {
   user_id: INVITEE.userId,
 };
 
+function invitationAcceptedEvent(role: OrganizationRole) {
+  return [
+    "info",
+    {
+      event: "sdp_api_invitation_accepted",
+      organization_id: ORGANIZATION.id,
+      user_id: INVITEE.userId,
+      invitation_id: INVITATION_ID,
+      role,
+    },
+  ];
+}
+
 async function inviteeProjectIds(): Promise<string[]> {
   const rows = await getDb(env).queryMany<{ project_id: string }>(
     "SELECT project_id FROM project_members WHERE user_id = ? ORDER BY project_id",
@@ -148,6 +167,7 @@ describe("sign-in admission", () => {
       createdBy: ADMIN.userId,
       members: [ADMIN.userId],
     });
+    loggedEvents = recordLoggedEvents(["sdp_api_invitation_accepted"]);
   });
 
   afterEach(async () => {
@@ -163,6 +183,7 @@ describe("sign-in admission", () => {
       "No pending invitation to this organization"
     );
     expect(await inviteeMembership()).toBeNull();
+    expect(loggedEvents()).toEqual([]);
   });
 
   it("expires an invitation past its expiry instead of admitting", async () => {
@@ -175,9 +196,81 @@ describe("sign-in admission", () => {
     );
     expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("expired");
     expect(await inviteeMembership()).toBeNull();
+    expect(loggedEvents()).toEqual([]);
   });
 
-  it("admits at the invitation's role, never the Clerk role, into every project, audited", async () => {
+  it("reports an expired invitation as expired on every sign-in, not only the one that marked it", async () => {
+    await setInviteeMembership(null);
+    await invite("member", -1);
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await signIn("member", CLERK_ORG_ID);
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Invitation to this organization has expired",
+          details: { reason: INVITATION_EXPIRED_REASON },
+        },
+      });
+    }
+    expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("expired");
+    expect(await inviteeMembership()).toBeNull();
+  });
+
+  it("reports expiry when a revoked invitation was replaced within the same second", async () => {
+    await setInviteeMembership(null);
+    const db = getDb(env);
+    for (const [id, status, expiresInDays] of [
+      ["inv_admission_revoked", "revoked", -2],
+      [INVITATION_ID, "pending", -1],
+    ] as const) {
+      await seedInvitation(db, {
+        id,
+        organizationId: ORGANIZATION.id,
+        email: INVITEE.email,
+        role: "member",
+        invitedBy: ADMIN.userId,
+        status,
+        expiresInDays,
+      });
+    }
+    // Both rows carry one whole-second creation time, as two invites in one second do.
+    await db.execute("UPDATE invitations SET created_at = ? WHERE organization_id = ?", [
+      "2026-11-01 12:00:00",
+      ORGANIZATION.id,
+    ]);
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expectUnauthorized(
+        await signIn("member", CLERK_ORG_ID),
+        "Invitation to this organization has expired"
+      );
+    }
+  });
+
+  it("refuses without the expired reason once the newest invitation was revoked", async () => {
+    await setInviteeMembership(null);
+    await seedInvitation(getDb(env), {
+      id: INVITATION_ID,
+      organizationId: ORGANIZATION.id,
+      email: INVITEE.email,
+      role: "member",
+      invitedBy: ADMIN.userId,
+      status: "revoked",
+      expiresInDays: -1,
+    });
+
+    const response = await signIn("member", CLERK_ORG_ID);
+    expect(response.status).toBe(401);
+    const body = z
+      .object({ error: z.object({ message: z.string(), details: z.unknown().optional() }) })
+      .parse(await response.json());
+    expect(body.error).toEqual({ message: "No pending invitation to this organization" });
+    expect(await inviteeMembership()).toBeNull();
+  });
+
+  it("admits at the invitation's role, never the Clerk role, into every project, audited and logged", async () => {
     await setInviteeMembership(null);
     await invite("admin", 7);
 
@@ -198,6 +291,7 @@ describe("sign-in admission", () => {
     expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("accepted");
     expect(await inviteeProjectIds()).toEqual([projects.production.id, projects.sandbox.id]);
     expect(await acceptInviteAudits()).toEqual([ACCEPT_INVITE_AUDIT]);
+    expect(loggedEvents()).toEqual([invitationAcceptedEvent("admin")]);
   });
 
   it("admits on a pending invitation stored in other letter case", async () => {
@@ -251,6 +345,7 @@ describe("sign-in admission", () => {
   it("does not restore an established member's missing project memberships", async () => {
     expect((await signIn("member", CLERK_ORG_ID)).status).toBe(200);
     expect(await inviteeProjectIds()).toEqual([]);
+    expect(loggedEvents()).toEqual([]);
   });
 
   it("rolls the claim, membership and audit back together when admission fails", async () => {
@@ -288,6 +383,7 @@ describe("sign-in admission", () => {
     expect(await inviteeMembership()).toMatchObject({ role: "member", status: "active" });
     expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("accepted");
     expect(await acceptInviteAudits()).toEqual([ACCEPT_INVITE_AUDIT]);
+    expect(loggedEvents()).toEqual([invitationAcceptedEvent("member")]);
   });
 
   it("answers the winner's role when a concurrent admission claims the invitation between its reads", async () => {

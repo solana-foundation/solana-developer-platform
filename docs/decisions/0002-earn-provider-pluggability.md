@@ -1300,3 +1300,52 @@ automatic share-account close. Other providers' behavior is unchanged.
 This supersedes the Kamino requested-amount and rent-refund assumptions above.
 See [the audit](../earn/kamino-audit-2026-09-29.md) for validation, threat analysis
 and rollout requirements for previously issued transactions.
+
+## Addendum — 2026-11-03 Customer onboarding: the KYC/KYB capability
+
+A regulated instrument is depositable only for customers the ISSUER verified
+(see the deposit-eligibility capability). That verification needs a customer
+onboarding flow, and onboarding is where pluggability almost went wrong: the
+first implementation constructed the provider's client directly in the route
+handlers, so adding a second KYB provider would have meant a second route
+mount, a second service, and a second repository — three stacks to keep in
+lockstep on a money-adjacent flow.
+
+### The capability
+
+`EarnOnboardingProvider` is an optional capability (extends
+`EarnVaultProvider`, discovered by method presence via `supportsOnboarding` —
+never a provider-id check). The API owns the SHARED orchestration: durable
+customer and wallet claims, identity links, moderator-consistency checks,
+encrypted document references, wallet claim → proof-of-control → register,
+release-on-confirmed-rejection, and recovery of uncertain submissions. The
+adapter owns every provider shape behind the capability: forms, the
+application and correction vocabulary, wire submissions, the wallet
+registration proof message, and the recovery identifiers its errors carry.
+Onboarding state lives in provider-scoped tables (`provider` column), so two
+KYB integrations onboard the same counterparty and register the same wallet
+independently; each provider's cross-customer uniqueness rules stay inside
+its own scope.
+
+### How a future provider inherits this
+
+1. Implement `EarnOnboardingProvider` on the registry client
+   (`EARN_PROVIDER_CLIENTS`) — forms, application submission, customer
+   detail, document upload, corrections, wallet registration, the
+   scope-bound registration message, and the recovery-reference reader.
+   Wire vocabulary stops in the adapter.
+2. Mount the shared stack for it: `earn.route("/onboarding/<provider>",
+   createEarnOnboardingRoutes("<provider>"))`. There is no dispatch to edit;
+   a provider without the capability fails loudly at boot instead of
+   half-serving.
+3. If its application vocabulary differs from the mounted route's body
+   schemas, give the mount its own schema module composed from the
+   adapter's schemas — handlers, service, repository and middleware are
+   unchanged.
+4. The provider's own cross-customer restrictions (for WisdomTree, one
+   wallet per customer across ALL its customers) are enforced inside the
+   provider-scoped uniqueness of the onboarding tables and by its adapter.
+   Tenant isolation (organization, project, environment, counterparty) is
+   shared and never provider-specific.
+
+2026-11-05: MARKETS_ENABLED and EARN_ENABLED were removed; the release channel alone gates Markets and Earn.

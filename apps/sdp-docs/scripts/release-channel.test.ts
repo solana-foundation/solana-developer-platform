@@ -24,6 +24,11 @@ const STABLE: PublicSurface = {
   releaseChannel: "stable",
   modules: ["custody", "payments", "compliance"],
   rampProviders: [],
+  custodyProviders: ["privy"],
+  walletCreateDedupe: [
+    { provider: "privy", mode: "managed", window: "permanent" },
+    { provider: "privy", mode: "byok", window: "permanent" },
+  ],
   grantableActions: [{ module: "transfers", verbs: ["read", "execute"] }],
   ...ALL,
 };
@@ -32,6 +37,12 @@ const EXPERIMENTAL: PublicSurface = {
   releaseChannel: "experimental",
   modules: ["custody", "payments", "ramps", "issuance", "compliance"],
   rampProviders: ["stripe"],
+  custodyProviders: ["fireblocks", "privy", "turnkey"],
+  walletCreateDedupe: [
+    { provider: "fireblocks", mode: "byok", window: "24h" },
+    { provider: "privy", mode: "managed", window: "permanent" },
+    { provider: "privy", mode: "byok", window: "permanent" },
+  ],
   grantableActions: [
     { module: "transfers", verbs: ["read", "execute"] },
     { module: "onramp", verbs: ["read", "execute"] },
@@ -114,6 +125,37 @@ describe("docs follow the release channel", () => {
     assert.match(stable, /end-to-end-payment-flow/);
     assert.doesNotMatch(stable, /issue-a-regulated-stablecoin|TutorialLinks/);
     assert.match(experimental, /issue-a-regulated-stablecoin/);
+  });
+
+  it("tables only the custody providers the build publishes", () => {
+    const stable = expandDocsBlocks("<CustodyProviderTable />\n", "wallets.mdx", {
+      surface: STABLE,
+    });
+    assert.match(stable, /\| \*\*Privy\*\* \|/);
+    assert.doesNotMatch(stable, /Fireblocks|Turnkey|Local/);
+
+    const experimental = expandDocsBlocks("<CustodyProviderTable />\n", "wallets.mdx", {
+      surface: EXPERIMENTAL,
+    });
+    assert.match(experimental, /\| \*\*Fireblocks\*\* \|/);
+    assert.match(experimental, /\| \*\*Turnkey\*\* \|/);
+    assert.doesNotMatch(experimental, /Anchorage/);
+  });
+
+  it("tables the wallet creates a same-key retry reruns, with each window", () => {
+    const stable = expandDocsBlocks("<WalletCreateRetryTable />\n", "idempotency.mdx", {
+      surface: STABLE,
+    });
+    assert.match(stable, /\| \*\*Privy\*\* \| Managed \(`provider`\) \| Always \|/);
+    assert.doesNotMatch(stable, /Fireblocks|Coinbase/);
+
+    const experimental = expandDocsBlocks("<WalletCreateRetryTable />\n", "idempotency.mdx", {
+      surface: EXPERIMENTAL,
+    });
+    assert.match(
+      experimental,
+      /\| \*\*Fireblocks\*\* \| Custody Connection \(`connectionId`\) \| Within 24 hours of the first attempt \|/
+    );
   });
 
   it("tables the API's rate limits from the manifest", () => {

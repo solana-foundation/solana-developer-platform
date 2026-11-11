@@ -142,15 +142,12 @@ Deeper docs: gates and scoping in
 
 ## Rollout gating (pre-release)
 
-Earn is the child in a two-level module flag hierarchy: `MARKETS_ENABLED`
-(parent — the whole Markets module) and `EARN_ENABLED` (child — the Earn
-sub-module). Earn needs **both**, and both default to **false** everywhere, so
-a deployed environment stays dark until it is switched on. `sdp-api` and
-`sdp-web` read the same unprefixed names; there is no `NEXT_PUBLIC_*` twin.
-API-side the hierarchy is owned by `isEarnEnabled`
-(`apps/sdp-api/src/lib/feature-flags.ts`); web-side the two flags declared in
-`apps/sdp-web/src/flags.ts` gate the nested route segments
-(`dashboard/markets/layout.tsx`). The flags are
+Earn is a Markets sub-module, and the release channel decides both: Earn is
+`beta`, so it runs on the `beta` and `experimental` channels and stays dark on
+`stable`. API-side the hierarchy is owned by `isEarnEnabled`
+(`apps/sdp-api/src/lib/feature-flags.ts`); web-side the `markets` and `earn`
+flags in `apps/sdp-web/src/flags/definitions.ts` default on inside the channel
+and gate the nested route segments (`dashboard/markets/layout.tsx`). Gating is
 module visibility, not the provider on/off lever — see the ADR 0002 addendum.
 
 ## Architecture: where everything lives
@@ -447,5 +444,5 @@ pnpm --filter @sdp/earn typecheck
 
 API-layer earn tests (routes, repository, availability) live in
 `apps/sdp-api` and run under vitest + testcontainers. Canonical web route files
-live in `apps/sdp-web/src/app/dashboard/markets/embedded-yield`; shared internal
-module tests remain in `apps/sdp-web/src/app/dashboard/markets/earn`.
+live in `apps/sdp-web/src/app/(session)/dashboard/markets/embedded-yield`; shared internal
+module tests remain in `apps/sdp-web/src/app/(session)/dashboard/markets/earn`.

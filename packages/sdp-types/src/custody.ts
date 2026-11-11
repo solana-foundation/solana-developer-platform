@@ -16,13 +16,17 @@ export const CUSTODY_PROVIDERS = [
 export type CustodyProvider = (typeof CUSTODY_PROVIDERS)[number];
 export type ManagedCustodyProvider = Exclude<CustodyProvider, "local">;
 
+/** Whose provider account an integration runs under: the deployment's own (`managed`) or one the project supplied (`byok`). */
+export const PROVIDER_MODES = ["managed", "byok"] as const;
+export type ProviderMode = (typeof PROVIDER_MODES)[number];
+
 /**
  * Where a wallet's provider account comes from, fixed per wallet by its owner
  * row: a custody config is `managed` (the deployment's own provider account),
  * a custody connection is `byok` (a provider account the project supplied).
  */
-export const CUSTODY_MODES = ["managed", "byok"] as const;
-export type CustodyMode = (typeof CUSTODY_MODES)[number];
+export const CUSTODY_MODES = PROVIDER_MODES;
+export type CustodyMode = ProviderMode;
 
 /** Providers with a BYOK runtime: the only ones a custody connection can name. */
 export const BYOK_CUSTODY_PROVIDERS = [
@@ -39,6 +43,44 @@ export type ByokCustodyProvider = (typeof BYOK_CUSTODY_PROVIDERS)[number];
  */
 export function isByokCustodyProvider(provider: string): provider is ByokCustodyProvider {
   return BYOK_CUSTODY_PROVIDERS.some((byokProvider) => byokProvider === provider);
+}
+
+/**
+ * How long a wallet create keeps returning the same wallet for the same request
+ * id: `permanent` when the provider also keeps a lasting id (Privy's
+ * `external_id`, Coinbase CDP's account name), `24h` when only its idempotency
+ * window does (Fireblocks). A provider missing from its mode makes a new
+ * wallet on every call.
+ */
+export type WalletCreateDedupe = "permanent" | "24h";
+
+/**
+ * The custody providers whose wallet create dedupes on SDP's request id, by
+ * custody mode. A keyed create on one of them releases its key after a 5xx,
+ * so the same-key retry gets back the wallet the first attempt made (HOO-2565).
+ */
+export const WALLET_CREATE_DEDUPE = {
+  managed: { privy: "permanent", coinbase_cdp: "permanent" },
+  byok: { privy: "permanent", fireblocks: "24h" },
+} as const satisfies {
+  managed: Partial<Record<CustodyProvider, WalletCreateDedupe>>;
+  byok: Partial<Record<ByokCustodyProvider, WalletCreateDedupe>>;
+};
+
+/**
+ * Whether, and for how long, a wallet create on `provider` in `mode` returns
+ * the same wallet for the same request id.
+ *
+ * @param provider - The custody provider the create runs on.
+ * @param mode - `managed` for a custody config, `byok` for a custody connection.
+ * @returns The dedupe window, or null when every call makes a new wallet.
+ */
+export function walletCreateDedupe(
+  provider: CustodyProvider,
+  mode: CustodyMode
+): WalletCreateDedupe | null {
+  const table: Partial<Record<CustodyProvider, WalletCreateDedupe>> = WALLET_CREATE_DEDUPE[mode];
+  return table[provider] ?? null;
 }
 
 /**
@@ -525,6 +567,14 @@ export function isUnarchivedCustodyConfigStatus(status: CustodyConfigStatus): bo
 /** Config statuses a provider lookup may return; archived rows are skipped. */
 export const UNARCHIVED_CUSTODY_CONFIG_STATUSES: readonly CustodyConfigStatus[] =
   CUSTODY_CONFIG_STATUSES.filter(isUnarchivedCustodyConfigStatus);
+
+export type InactiveCustodyConfigStatus = Exclude<CustodyConfigStatus, "active">;
+
+/** Config statuses that leave the provider unconnected for the project. */
+export const INACTIVE_CUSTODY_CONFIG_STATUSES: readonly InactiveCustodyConfigStatus[] =
+  CUSTODY_CONFIG_STATUSES.filter(
+    (status): status is InactiveCustodyConfigStatus => status !== "active"
+  );
 export type CustodyWalletStatus = "active" | "inactive";
 
 export interface FireblocksCustodyOptions {
@@ -803,6 +853,23 @@ export const CUSTODY_CONNECTION_LIFECYCLES = [
   "deactivated",
 ] as const;
 export type CustodyConnectionLifecycle = (typeof CUSTODY_CONNECTION_LIFECYCLES)[number];
+
+export type InactiveCustodyConnectionLifecycle = Exclude<CustodyConnectionLifecycle, "active">;
+
+/** Lifecycles that leave the provider unconnected for the project. */
+export const INACTIVE_CUSTODY_CONNECTION_LIFECYCLES: readonly InactiveCustodyConnectionLifecycle[] =
+  CUSTODY_CONNECTION_LIFECYCLES.filter(
+    (lifecycle): lifecycle is InactiveCustodyConnectionLifecycle => lifecycle !== "active"
+  );
+
+/**
+ * Connection lifecycles the earn wallet-binding proof distinguishes: only an
+ * `active` connection proves a wallet binding, and `pending` is the state a
+ * not-yet-usable connection holds instead.
+ */
+export const CUSTODY_CONNECTION_BINDING_LIFECYCLES = ["active", "pending"] as const;
+export type CustodyConnectionBindingLifecycle =
+  (typeof CUSTODY_CONNECTION_BINDING_LIFECYCLES)[number];
 
 /** Outcome of a single connection install check. */
 export const CUSTODY_CONNECTION_CHECK_STATUSES = [

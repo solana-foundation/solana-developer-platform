@@ -1,4 +1,5 @@
 import { RpcTimeoutError, SdpRpcError } from "@sdp/rpc/errors";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import type { CronRunStatus } from "@sdp/types/cron-runs";
@@ -16,9 +17,12 @@ import { z } from "zod";
 import { currentDatabaseIdentity, type DatabaseIdentity } from "@/db/identity";
 import type { BackgroundRunner } from "@/runtime/background";
 import * as moneyPathEvents from "@/runtime/money-path-events";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
+import { installLogLineCapture } from "@/test/helpers/log-lines";
 import { required } from "@/test/helpers/required";
+import type { Env } from "@/types/env";
 import { earnCatalogueSyncCron } from "./earn-catalogue-sync";
 import { pendingTransfersCron } from "./pending-transfers";
 import { CRON_RUN_EVENT, type CronRegistration } from "./run-event";
@@ -109,9 +113,9 @@ function registrationKey(cron: string, environment: SdpEnvironment | null): stri
   return JSON.stringify([cron, environment]);
 }
 
-async function startWorker(): Promise<Worker> {
+async function startWorker(workerEnv: Env = env): Promise<Worker> {
   const { bg, runs } = recordingBackgroundRunner();
-  const handle = required(startCron({ env, bg }));
+  const handle = required(startCron({ env: workerEnv, bg }));
   await bg.awaitAll();
   const registrations = new Map<string, ScheduledFake>();
   const discovered: DiscoveredRegistration[] = [];
@@ -215,6 +219,21 @@ describe("startCron", () => {
     }));
     expect(registered).toHaveLength(expected.length);
     expect(registered).toEqual(expect.arrayContaining(expected));
+  });
+
+  it("registers no production work on a deployment that admits no production project", async () => {
+    const worker = await startWorker({ ...env, SDP_ALLOW_PRODUCTION_PROJECTS: "false" });
+
+    const environments = worker.discovered.map((registration) => registration.environment);
+    expect(environments).not.toContain("production");
+    expect(environments).toContain("sandbox");
+    expect(worker.discovered).toHaveLength(
+      CRON_DEFINITIONS.reduce(
+        (count, definition) =>
+          count + (definition.scope === "cluster" ? SDP_ENVIRONMENTS.length - 1 : 1),
+        0
+      )
+    );
   });
 
   it("runs every slot under the system database identity named for its definition", async () => {
@@ -412,6 +431,28 @@ describe("startCron", () => {
   });
 });
 
+describe("a slot's RPC lines", () => {
+  const rpc = installClusterRpcStub();
+  const lines = installLogLineCapture();
+
+  it("carry the definition's name and no route", async () => {
+    rpc.answer("getBlockHeight", 900);
+    const worker = await startWorker();
+    vi.mocked(pendingTransfersCron.run).mockImplementationOnce(async () => {
+      await createClusterRpc().getBlockHeight().send();
+    });
+
+    const [run] = fire(worker, pendingTransfersCron.name, "sandbox");
+    await run;
+
+    expect(
+      lines
+        .filter((line) => line.event === "sdp_rpc_attempt" && line.method === "getBlockHeight")
+        .map((line) => ({ cron: line.cron, route: line.route, sample_weight: line.sample_weight }))
+    ).toEqual([{ cron: pendingTransfersCron.name, sample_weight: 1 }]);
+  });
+});
+
 describe("DISABLE_CRON", () => {
   it.each(["true", "1", "  TRUE  "])("does not start when DISABLE_CRON is %j", (value) => {
     expect(() => assertCronConfig({ DISABLE_CRON: value })).not.toThrow();
@@ -434,6 +475,12 @@ describe("DISABLE_CRON", () => {
     expect(() => assertCronConfig(cloudRunEnv)).not.toThrow();
     expect(startCron({ env: cloudRunEnv, bg: recordingBackgroundRunner().bg })).not.toBeNull();
     expect(scheduler.tasks).not.toEqual([]);
+  });
+
+  it("refuses an SDP_ALLOW_PRODUCTION_PROJECTS that is neither true nor false", () => {
+    expect(() => assertCronConfig({ SDP_ALLOW_PRODUCTION_PROJECTS: "no" })).toThrow(
+      'Invalid SDP_ALLOW_PRODUCTION_PROJECTS: "no"'
+    );
   });
 
   it.each(["treu", "yes", "   "])("refuses DISABLE_CRON %j before scheduling anything", (value) => {

@@ -3,25 +3,27 @@ title: Core concepts
 description: The interfaces, environments, and conventions you build against.
 ---
 
-SDP exposes two interfaces that operate over the same backend and enforce the same grants, wallet scopes, and audit trails:
+SDP has two interfaces over the same API:
 
-- **Dashboard** — browser-based UI for setup, token management, and compliance operations. Sign in with email, Google, or GitHub.
-- **REST API:** programmatic access for backend integrations. Routes authenticate with an API key in the `Authorization` header.
+- **Dashboard:** the browser UI. Sign in with email, Google, or GitHub.
+- **REST API:** programmatic access for backend integrations. Requests authenticate with an API key in the `Authorization` header.
 
-Everything the dashboard does is available through the API. Build against the API for automation and integrations; use the dashboard to set up your organization, inspect state, and perform one-off operations.
+Both call the same API, and each route requires the same action whoever calls it. A signed-in member holds actions through their organization role; an API key holds the grants you give it. Some routes are for signed-in members only, such as managing API keys, members, and the organization, or setting up a custody provider. An API key is refused them.
+
+Build against the API for automation and integrations. Use the dashboard to set up your organization, inspect state, and run one-off operations.
 
 ## Environments
 
-Authenticated environments are a property of the **project**, not of individual requests. Every tenant resource and API key belongs to a project and inherits that project's environment.
+An environment belongs to the **project**, not to individual requests. Every tenant resource and API key belongs to a project and inherits its environment.
 
 | Environment  | Network      |
 | ------------ | ------------ |
 | `sandbox`    | devnet       |
 | `production` | mainnet-beta |
 
-A key's format does not name its environment: the project it belongs to does.
+A key's format doesn't name its environment; the project it belongs to does.
 
-Both environments expose the same route shapes. Develop and test authenticated integrations against a sandbox project, then switch to production by swapping your API key.
+Both environments expose the same route shapes. Build and test against your sandbox project, then move to production with a production project's API key. [Go to mainnet](/docs/guides/go-to-mainnet) covers requesting access and setting up your production wallets and API key.
 
 ## Response conventions
 
@@ -38,15 +40,16 @@ Errors return a machine-readable `code` alongside a human-readable `message`:
 
 ```json
 {
-  "error": { "code": "INVALID_API_KEY", "message": "Invalid API key" }
+  "error": { "code": "INVALID_API_KEY", "message": "Invalid API key" },
+  "meta": { "requestId": "req_..." }
 }
 ```
 
-Include the `requestId` when reporting an issue — it links your request to our internal traces and audit records.
+Include the `requestId` when you report an issue. It links your request to SDP's traces.
 
 ## Execution model
 
-SDP executes custody operations by building, signing, and submitting with the configured custody wallet.
+For a custody operation, SDP builds the transaction, signs it with the configured custody wallet, and submits it.
 
 ## Read next
 

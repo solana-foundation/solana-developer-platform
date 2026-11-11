@@ -37,15 +37,26 @@ describe("buildSnippets", () => {
     expect(py.endsWith("})")).toBe(true);
   });
 
-  it("gives a call its own Idempotency-Key in each language where the route takes one", () => {
+  // each run minted its key inside the call, so a retry of the
+  // sample was a second request. The key is minted once, before the call.
+  it("mints a call's Idempotency-Key once, before the call, in each language where the route takes one", () => {
     for (const method of ["POST", "PATCH", "DELETE"]) {
       const { curl, ts, py } = buildSnippets({ ...READ, method, takesIdempotencyKey: true });
       expect(curl).toBe(
-        `curl -X ${method} '${URL}' \\\n  -H "Authorization: Bearer $SDP_API_KEY" \\\n  -H "Idempotency-Key: $(uuidgen)"`
+        `IDEMPOTENCY_KEY=$(uuidgen)\ncurl -X ${method} '${URL}' \\\n  -H "Authorization: Bearer $SDP_API_KEY" \\\n  -H "Idempotency-Key: $IDEMPOTENCY_KEY"`
       );
-      expect(ts).toContain('    "Idempotency-Key": crypto.randomUUID()');
-      expect(py.startsWith("import os, requests, uuid\n")).toBe(true);
-      expect(py).toContain('"Idempotency-Key": str(uuid.uuid4())');
+      expect(
+        ts.startsWith(
+          "// Reuse this key when you retry this request.\nconst idempotencyKey = crypto.randomUUID();\n"
+        )
+      ).toBe(true);
+      expect(ts).toContain('    "Idempotency-Key": idempotencyKey');
+      expect(
+        py.startsWith(
+          "import os, requests, uuid\n\n# Reuse this key when you retry this request.\nidempotency_key = str(uuid.uuid4())\n"
+        )
+      ).toBe(true);
+      expect(py).toContain('"Idempotency-Key": idempotency_key');
     }
     const write = buildSnippets({
       ...READ,
@@ -54,7 +65,7 @@ describe("buildSnippets", () => {
       takesIdempotencyKey: true,
     });
     expect(write.curl).toContain(
-      '  -H "Idempotency-Key: $(uuidgen)" \\\n  -H "Content-Type: application/json" \\'
+      '  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \\\n  -H "Content-Type: application/json" \\'
     );
   });
 
@@ -94,7 +105,7 @@ describe("buildSnippets", () => {
     });
     expect(curl).not.toContain("Authorization");
     expect(curl).toContain(
-      '  -H "Idempotency-Key: $(uuidgen)" \\\n  -H "Content-Type: application/json"'
+      '  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \\\n  -H "Content-Type: application/json"'
     );
     expect(py.startsWith("import requests, uuid\n")).toBe(true);
   });

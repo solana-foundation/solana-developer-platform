@@ -8,7 +8,7 @@ import { useTranslations } from "@/i18n/provider";
 const DEFAULT_RELOAD_DELAY_MS = 15_000;
 const SIDEBAR_ROW_IDS = ["home", "wallets", "issuance", "payments", "api-keys"];
 
-/** Shared dashboard frame while workspace, scope, or client auth resolves. */
+/** Shared dashboard frame while the workspace or its scope resolves. */
 export function FullscreenLoadingIndicator({
   allowDelayedReload = false,
   children,

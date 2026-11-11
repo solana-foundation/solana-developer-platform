@@ -1,7 +1,15 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseClient as AppDb, DatabaseExecutor } from "@/db/client";
+import {
+  currentDatabaseIdentity,
+  DatabaseIdentityError,
+  runWithSystemDatabaseIdentity,
+} from "@/db/identity";
 
 export const SPONSORSHIP_BREAKER_OPERATOR = "system:sponsorship-breaker";
+
+/** The system identity a lost Redis budget window is rebuilt under. */
+export const SPONSORSHIP_BUDGET_RECONSTRUCTION_IDENTITY = "sponsorship-budget-reconstruction";
 
 export type SponsorshipNetwork = "devnet" | "mainnet";
 
@@ -529,7 +537,7 @@ export class SponsorshipBudgetRepository {
     );
   }
 
-  async getWindowUsage(
+  private async getWindowUsage(
     input: {
       network: SponsorshipNetwork;
       organizationId: string;
@@ -537,7 +545,7 @@ export class SponsorshipBudgetRepository {
       hourBucket: string;
       dayBucket: string;
     },
-    executor: DatabaseExecutor = this.db,
+    executor: DatabaseExecutor,
     excludeReservationId?: string
   ): Promise<{ hour: SponsorshipBudgetUsage; day: SponsorshipBudgetUsage }> {
     const params: string[] = [
@@ -586,13 +594,13 @@ export class SponsorshipBudgetRepository {
     };
   }
 
-  async listLiveWindowReservations(
+  private async listLiveWindowReservations(
     input: {
       network: SponsorshipNetwork;
       hourBucket: string;
       dayBucket: string;
     },
-    executor: DatabaseExecutor = this.db,
+    executor: DatabaseExecutor,
     excludeReservationId?: string
   ): Promise<{
     hour: SponsorshipLiveWindowReservation[];
@@ -635,6 +643,21 @@ export class SponsorshipBudgetRepository {
     return { hour, day };
   }
 
+  /**
+   * The Postgres state an admission seeds the Redis window from. Redis seeds
+   * each field only while it is uninitialized, so this is what the network-wide
+   * `global` counter (and its live-reservation markers) is rebuilt from after
+   * Redis loses the window.
+   *
+   * It reads under the system database identity, and it is the only producer
+   * of window usage: under the caller's tenant identity, row-level security
+   * would drop every other organization's rows and seed `global` with this
+   * organization's spend alone. The organization and project sums stay the
+   * caller's through their SQL predicates, and a tenant caller can only ask
+   * for its own organization. One transaction keeps every figure on one
+   * snapshot, so a reservation is never counted in one sum and missing from
+   * another.
+   */
   async loadWindowAdmissionSnapshot(input: {
     network: SponsorshipNetwork;
     organizationId: string;
@@ -649,16 +672,24 @@ export class SponsorshipBudgetRepository {
       day: SponsorshipLiveWindowReservation[];
     };
   }> {
-    return this.db.transaction(async (tx) => {
-      await tx.queryMany("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
-      const usage = await this.getWindowUsage(input, tx, input.excludeReservationId);
-      const liveReservations = await this.listLiveWindowReservations(
-        { network: input.network, hourBucket: input.hourBucket, dayBucket: input.dayBucket },
-        tx,
-        input.excludeReservationId
+    const caller = currentDatabaseIdentity();
+    if (caller?.kind === "tenant" && caller.organizationId !== input.organizationId) {
+      throw new DatabaseIdentityError(
+        "A sponsorship budget snapshot can only be read for the caller's own organization"
       );
-      return { usage, liveReservations };
-    });
+    }
+    return runWithSystemDatabaseIdentity(SPONSORSHIP_BUDGET_RECONSTRUCTION_IDENTITY, () =>
+      this.db.transaction(async (tx) => {
+        await tx.queryMany("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+        const usage = await this.getWindowUsage(input, tx, input.excludeReservationId);
+        const liveReservations = await this.listLiveWindowReservations(
+          { network: input.network, hourBucket: input.hourBucket, dayBucket: input.dayBucket },
+          tx,
+          input.excludeReservationId
+        );
+        return { usage, liveReservations };
+      })
+    );
   }
 
   async listReconciliationCandidates(

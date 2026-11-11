@@ -1,14 +1,5 @@
 import type { SdpReleaseChannel } from "@sdp/types/release-channels";
-import {
-  assetProfiles,
-  dvp,
-  earn,
-  heliusRings,
-  issuance,
-  markets,
-  paymentsDemoMode,
-  privateChannels,
-} from "@/flags";
+import { assetProfiles, dvp, earn, heliusRings, issuance, markets, privateChannels } from "@/flags";
 import {
   deploymentReleaseChannel,
   isModuleInDeploymentReleaseChannel,
@@ -26,8 +17,6 @@ export type DashboardFlags = {
   issuance: boolean;
   markets: boolean;
   payments: boolean;
-  /** Payments' Demo switch; absent (older fixtures) means on. */
-  paymentsDemoMode?: boolean;
   privateChannels: boolean;
   ramps: boolean;
   /** This deployment's release channel; the API playground offers only its modules. */
@@ -52,7 +41,6 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     heliusRingsEnabled,
     issuanceEnabled,
     marketsEnabled,
-    paymentsDemoModeEnabled,
     privateChannelsEnabled,
     rampsEnabled,
   ] = await Promise.all([
@@ -62,7 +50,6 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     heliusRings(),
     issuance(),
     markets(),
-    paymentsDemoMode(),
     privateChannels(),
     isRampsEnabled(),
   ]);
@@ -78,7 +65,6 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     issuance: issuanceEnabled,
     markets: marketsEnabled,
     payments: isModuleInDeploymentReleaseChannel("payments"),
-    paymentsDemoMode: paymentsDemoModeEnabled,
     privateChannels: privateChannelsEnabled,
     ramps: rampsEnabled,
     releaseChannel: deploymentReleaseChannel(),

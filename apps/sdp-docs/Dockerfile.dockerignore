@@ -45,12 +45,14 @@ apps/sdp-docs/.cloudflare.*.env
 apps/sdp-web
 packages/*
 !packages/sdp-types
+!packages/sdp-earn
 !packages/sdp-api-catalog
 !packages/sdp-env-config
 !packages/sdp-design-tokens
 !packages/sdp-rpc
 !packages/sdp-custody
 !packages/sdp-redaction
+!packages/sdp-ip
 !packages/sdp-solana
 !packages/sdp-payments
 !packages/sdp-fee-payment

@@ -8,6 +8,8 @@
 
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import { type ScheduledTask, schedule } from "node-cron";
+import { accountPiiCron } from "@/cron/account-pii";
+import { adminAlertEmailsCron } from "@/cron/admin-alert-emails";
 import { dvpTradesCron } from "@/cron/dvp-trades";
 import { earnCatalogueSyncCron } from "@/cron/earn-catalogue-sync";
 import { earnMetricsRefreshCron } from "@/cron/earn-metrics-refresh";
@@ -30,8 +32,10 @@ import { secretRetirementsCron } from "@/cron/secret-retirements";
 import { sponsorshipBudgetsCron } from "@/cron/sponsorship-budgets";
 import { subscriptionAuthoritiesCron } from "@/cron/subscription-authorities";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
+import { productionProjectsAllowed } from "@/lib/production-entitlement";
 import type { BackgroundRunner } from "@/runtime/background";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
+import { runWithLogContext } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import type { CronDefinition } from "./define-cron";
 import { type CronRegistration, logCronRun } from "./run-event";
@@ -66,8 +70,10 @@ export const CRON_DEFINITIONS: readonly CronDefinition[] = [
   secretRetirementsCron,
   providerCredentialSecretCleanupCron,
   idempotencyKeyPruneCron,
+  accountPiiCron,
   earnCatalogueSyncCron,
   earnMetricsRefreshCron,
+  adminAlertEmailsCron,
 ];
 
 /**
@@ -118,22 +124,35 @@ function isCronDisabled(env: Pick<Env, "DISABLE_CRON" | "K_SERVICE">): boolean {
   );
 }
 
-/** Throws on an invalid DISABLE_CRON, so the entrypoint fails before it opens sockets. */
-export function assertCronConfig(env: Pick<Env, "DISABLE_CRON" | "K_SERVICE">): void {
+/**
+ * Throws on an invalid DISABLE_CRON or SDP_ALLOW_PRODUCTION_PROJECTS, so the entrypoint fails
+ * before it opens sockets.
+ */
+export function assertCronConfig(
+  env: Pick<Env, "DISABLE_CRON" | "K_SERVICE" | "SDP_ALLOW_PRODUCTION_PROJECTS">
+): void {
   isCronDisabled(env);
+  productionProjectsAllowed(env);
 }
 
 /**
  * The Environments a definition is registered for: one per Environment for `cluster`, a single
- * environment-less registration for `global`.
+ * environment-less registration for `global`. A deployment that admits no production project
+ * registers no production work.
  *
  * @param definition - The definition to register.
+ * @param env - Process environment naming whether production projects are admitted.
  * @returns One entry per registration.
  */
-function registrationEnvironments(definition: CronDefinition): readonly (SdpEnvironment | null)[] {
+function registrationEnvironments(
+  definition: CronDefinition,
+  env: Pick<Env, "SDP_ALLOW_PRODUCTION_PROJECTS">
+): readonly (SdpEnvironment | null)[] {
   switch (definition.scope) {
     case "cluster":
-      return SDP_ENVIRONMENTS;
+      return productionProjectsAllowed(env)
+        ? SDP_ENVIRONMENTS
+        : SDP_ENVIRONMENTS.filter((environment) => environment !== "production");
     case "global":
       return [null];
     default: {
@@ -144,10 +163,10 @@ function registrationEnvironments(definition: CronDefinition): readonly (SdpEnvi
 }
 
 /**
- * Run one slot of a definition's work under the system database identity (reconciliation is
- * cross-tenant, and row-level security denies an undeclared workload) and, for a `cluster`
- * registration, inside that Environment's cluster scope. Logs the slot's outcome and rethrows
- * a failure so the background runner records it.
+ * Run one slot of a definition's work in a log context naming the definition, under the system
+ * database identity (reconciliation is cross-tenant, and row-level security denies an undeclared
+ * workload) and, for a `cluster` registration, inside that Environment's cluster scope. Logs the
+ * slot's outcome and rethrows a failure so the background runner records it.
  *
  * @param definition - The definition whose slot fired.
  * @param registration - The registration the slot belongs to.
@@ -162,10 +181,12 @@ async function runSlot(
   const startedAt = Date.now();
   const environment = registration.environment;
   try {
-    await runWithSystemDatabaseIdentity(`cron:${definition.name}`, () =>
-      environment === null
-        ? definition.run(env)
-        : runInEnvironmentClusterScope(environment, () => definition.run(env))
+    await runWithLogContext({ cron: definition.name }, () =>
+      runWithSystemDatabaseIdentity(`cron:${definition.name}`, () =>
+        environment === null
+          ? definition.run(env)
+          : runInEnvironmentClusterScope(environment, () => definition.run(env))
+      )
     );
   } catch (error) {
     logCronRun(registration, { status: "error", durationMs: Date.now() - startedAt, cause: error });
@@ -197,7 +218,7 @@ export function startCron(deps: CronDeps): CronHandle | null {
 
   for (const definition of CRON_DEFINITIONS) {
     const enabled = definition.enabled(deps.env);
-    for (const environment of registrationEnvironments(definition)) {
+    for (const environment of registrationEnvironments(definition, deps.env)) {
       const registration: CronRegistration = { cron: definition.name, environment };
       // The in-flight run's own token, so a run abandoned at the deadline that settles later
       // cannot free the registration from under its successor.

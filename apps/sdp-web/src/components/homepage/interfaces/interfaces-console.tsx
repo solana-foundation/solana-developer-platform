@@ -13,6 +13,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { ComingSoon } from "@/components/homepage/coming-soon";
+import shared from "@/components/homepage/homepage.module.css";
 import { Rise } from "@/components/homepage/rise";
 import styles from "./interfaces.module.css";
 import { RequestCard } from "./request-card";
@@ -24,6 +26,10 @@ type InterfacesConsoleProps = {
   copy: Record<InterfaceMode, InterfaceModeCopy>;
   modesLabel: string;
   responseLabel: string;
+  /** The modes whose call the deployment's release channel holds back; their tabs carry the pill. */
+  comingSoonModes: readonly InterfaceMode[];
+  /** The translated "Coming soon". */
+  comingSoonLabel: string;
   /** The reference links set under the modes. */
   links: ReactNode;
 };
@@ -61,7 +67,7 @@ function isStepKey(key: string): key is keyof typeof KEY_STEPS {
 }
 
 /**
- * The three ways in are the tabs of the call beside them. On a timer (the line under the chosen
+ * The two ways in are the tabs of the call beside them. On a timer (the line under the chosen
  * way filling over 6.2s) the tabs take turns; a way under the mouse holds while it is there, and a
  * tap, a click or the keyboard holds the chosen way until the block leaves the screen. Keyboard
  * focus on the tabs also holds, and nothing turns off screen, in a hidden tab or under reduced
@@ -71,6 +77,8 @@ export function InterfacesConsole({
   copy,
   modesLabel,
   responseLabel,
+  comingSoonModes,
+  comingSoonLabel,
   links,
 }: InterfacesConsoleProps) {
   const reducedMotion = useReducedMotion();
@@ -202,7 +210,12 @@ export function InterfacesConsole({
                 onPointerEnter={(event) => handlePointerEnter(event, index)}
                 onPointerLeave={handlePointerLeave}
               >
-                <b className={styles.wayTitle}>{copy[each.mode].title}</b>
+                <b className={styles.wayTitle}>
+                  {copy[each.mode].title}
+                  {comingSoonModes.includes(each.mode) ? (
+                    <ComingSoon label={comingSoonLabel} className={shared.soonInline} />
+                  ) : null}
+                </b>
                 <span className={styles.wayBody}>{copy[each.mode].body}</span>
                 <span className={styles.wayBar} aria-hidden="true">
                   <i

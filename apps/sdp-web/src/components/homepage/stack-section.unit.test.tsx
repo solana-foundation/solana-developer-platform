@@ -27,7 +27,6 @@ const copy: StackDrawingCopy = {
   aria: { partners: "partners aria", sdp: "sdp aria", product: "product aria" },
   services: {
     custody: "Custody",
-    compliance: "Compliance",
     ramps: "Ramps",
     nodes: "Nodes",
     wallets: "Wallets",
@@ -60,7 +59,7 @@ describe("StackSection markup", () => {
     const headings = doc.querySelectorAll("h1, h2, h3");
     expect(headings).toHaveLength(1);
     expect(headings[0].tagName).toBe("H2");
-    expect(headings[0].textContent).toContain("One integration across the stack");
+    expect(headings[0].textContent).toContain("Modular, institutional-grade infrastructure");
   });
 
   it("describes each bubble as an image with its whole meaning", async () => {
@@ -72,8 +71,8 @@ describe("StackSection markup", () => {
       el.getAttribute("aria-label")
     );
     expect(labels).toEqual([
-      "Partner APIs: custody, compliance, ramps, nodes, wallets",
-      "SDP",
+      "Partner APIs: custody, ramps, nodes, wallets",
+      "Solana Developer Platform",
       "Your product: a wallet, checkout, payroll, treasury",
     ]);
   });
@@ -93,14 +92,14 @@ describe("StackSection markup", () => {
     for (const img of lists[0].querySelectorAll("img")) expect(img.getAttribute("alt")).toBe("");
   });
 
-  it("marks the compliance service coming soon on the stable channel", async () => {
+  it("marks the ramps service coming soon on the stable channel", async () => {
     vi.stubEnv("SDP_RELEASE_CHANNEL", "stable");
     const doc = new DOMParser().parseFromString(
       renderToStaticMarkup(await StackSection()),
       "text/html"
     );
     const drawing = within(doc.body);
-    expect(within(drawing.getByText("Compliance")).getByText("Coming soon")).toBeTruthy();
+    expect(within(drawing.getByText("Ramps")).getByText("Coming soon")).toBeTruthy();
     expect(within(drawing.getByText("Custody")).queryByText("Coming soon")).toBeNull();
   });
 });

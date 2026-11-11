@@ -1,6 +1,7 @@
 "use client";
 
 import type { ComponentProps } from "react";
+import { integrationTabFamilies } from "@/app/(session)/dashboard/[projectId]/integrations/integration-sections";
 import { getDashboardPageConfig } from "@/components/dashboard-header";
 import { resolvePageLoadingComponent } from "@/components/dashboard-page-loading";
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
@@ -10,7 +11,7 @@ import { useTranslations } from "@/i18n/provider";
 import { resolveDashboardLoadingRoute } from "@/lib/dashboard-navigation-loading";
 import { useDashboardPathname } from "@/lib/use-dashboard-project";
 
-// Preparation, scope reconciliation, and client auth all paint the same destination.
+// Preparation, scope reconciliation, and a lost organization all paint the same destination.
 export function DashboardLoadingScreen({
   pathname,
   flags,
@@ -26,7 +27,13 @@ export function DashboardLoadingScreen({
   const path = pathname.split(/[?#]/)[0];
   const route = resolveDashboardLoadingRoute(path) ?? "home";
   const PageLoading = resolvePageLoadingComponent(route);
-  const config = getDashboardPageConfig(path, t, flags?.payments);
+  const config = getDashboardPageConfig(
+    path,
+    t,
+    flags ? integrationTabFamilies(flags) : [],
+    flags?.payments,
+    flags?.ramps
+  );
 
   return (
     <FullscreenLoadingIndicator

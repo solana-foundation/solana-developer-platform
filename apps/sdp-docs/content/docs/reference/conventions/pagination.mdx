@@ -3,7 +3,7 @@ title: Pagination
 description: Lists return one page at a time, by page number on most routes and by cursor on a few.
 ---
 
-Each list operation's page says which of the two it uses, with its default and largest page size.
+Each list operation's page says which style it uses, with its default and largest page size.
 
 ## Page numbers
 
@@ -20,4 +20,4 @@ Ask for the next `page` while `hasMore` is `true`.
 
 ## Cursors
 
-A few lists take a `limit` instead and return a `nextCursor` with each page. Send it back in the cursor parameter the operation names, `cursor` or `before`, to get the next page; it's `null` on the last one.
+A few lists take a `limit` and a cursor parameter instead. Each page returns a `nextCursor`: send it back in the cursor parameter the operation names, such as `cursor`, to get the next page. It's `null` on the last page.

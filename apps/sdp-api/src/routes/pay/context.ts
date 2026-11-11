@@ -5,6 +5,7 @@ import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repos
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { notFound } from "@/lib/errors";
 import { runAsMoneyPrincipal } from "@/lib/money-principal";
+import { productionProjectsAllowed } from "@/lib/production-entitlement";
 import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
 
@@ -44,7 +45,8 @@ export async function paymentRequestScope(
     c.req.param("token")
   );
   const project = await new ProjectService(getDb(c.env)).getProject(projectId);
-  if (!project) {
+  // A deployment that admits no production project serves no production payment link.
+  if (!project || (project.environment === "production" && !productionProjectsAllowed(c.env))) {
     throw notFound("Payment request");
   }
   await runInClusterScope({ projectId: project.id, environment: project.environment }, () =>

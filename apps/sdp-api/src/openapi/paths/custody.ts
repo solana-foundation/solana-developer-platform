@@ -33,14 +33,21 @@ const keyAcceptedHeaders = projectScopeWithDeclaredIdempotencyHeaders({
   key: "accepted",
   serverErrors: "store",
 });
-// Wallet create also mounts `replayFromRecord`: `recovery: "record"`.
+// Wallet create also mounts `replayFromRecord`: `recovery: "record"`, and its
+// authorize step reruns a 5xx on a provider that dedupes on the request id.
 const walletCreateKeyHeaders = projectScopeWithDeclaredIdempotencyHeaders({
   key: "accepted",
   serverErrors: "store",
   recovery: "record",
+  rerunsWhenProviderDedupes: true,
 });
 
-export function registerCustodyPaths(registry: OpenAPIRegistry) {
+/**
+ * Custody setup, which takes `wallets.configure`: an API key can never hold a
+ * `configure` action, so the public document, which an API key calls, omits
+ * it.
+ */
+export function registerCustodyAdministrationPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
     method: "post",
     path: "/v1/wallets/initialize",
@@ -48,8 +55,8 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Initialize wallet signing",
     operationId: "initializeWalletSigning",
     description:
-      "Sets up Managed custody for the project's named provider by creating its active signing configuration and first wallet. Production projects use BYOK only: there this returns 403 with details.reason custody_mode_not_allowed, and wallets are created in a Custody Connection with POST /v1/wallets and connectionId.",
-    security: [{ apiKeyAuth: [] }],
+      "Sets up Managed custody for the project's named provider by creating its active signing configuration and first wallet. Takes `wallets.configure`, which only a signed-in person holds: the dashboard calls it, and an API key gets 403 INSUFFICIENT_PERMISSIONS. Production projects use BYOK only: there this returns 403 with details.reason custody_mode_not_allowed, and wallets are created in a Custody Connection with POST /v1/wallets and connectionId.",
+    security: [{ clerkBearerAuth: [] }],
     request: {
       headers: keyAcceptedHeaders,
       body: {
@@ -75,7 +82,9 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       },
     },
   });
+}
 
+export function registerCustodyPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
     method: "post",
     path: "/v1/wallets",
@@ -83,7 +92,10 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Create wallet",
     operationId: "createWallet",
     description:
-      "Provisions a new wallet under exactly one provider account: the project's Managed config for provider, or the Custody Connection named by connectionId. A body naming both, or neither, is rejected with 400. With an Idempotency-Key, SDP never records a second wallet for one key: a retry returns the wallet an earlier attempt recorded, including after the 24-hour key window. Privy and Coinbase CDP also receive a request id derived from the key, so they dedupe at the provider. A provider failure is stored as a 503, and a new key is a new provider request. A 503 can mean the provider created the wallet before the error, and with a provider other than Privy or Coinbase CDP, a failure that left no SDP wallet row makes even the same key a new provider request after 24 hours: before any retry after an ambiguous failure, whatever the key, check GET /v1/wallets and, if the wallet is not there, the provider account. The provider request id and the recorded-wallet lookup both include the credential, so after an API key rotation, once the key's 24-hour record has expired, the same key under the new credential is a new provider request and can create a second wallet: after a rotation, list wallets with GET /v1/wallets and check the provider account before retrying a create.",
+      "Provisions a new wallet under exactly one provider account: the project's Managed config for `provider`, or the Custody Connection named by `connectionId`. A body naming both, or neither, is rejected with `400`.\n\n" +
+      "With an `Idempotency-Key`, SDP never records a second wallet for one key: a retry returns the wallet an earlier attempt recorded, even after the 24-hour key window. A provider that accepts a request id also receives one derived from the key.\n\n" +
+      "On a provider that dedupes on the request id, a `5xx` is not stored: a same-key retry runs again and gets back the wallet the first attempt made, even when SDP failed to record it, for as long as the provider keeps the request id (permanently, or for 24 hours; the Idempotency guide lists each provider). On any other provider a failure is stored as a `503`, and a new key is a new provider request. A `503` can mean the provider created the wallet before the error. With a provider that accepts no request id, a failure that left no SDP wallet row makes even the same key a new provider request after 24 hours. Before any retry after an ambiguous failure, whatever the key, check `GET /v1/wallets` and, if the wallet is not there, the provider account.\n\n" +
+      "The provider request id and the recorded-wallet lookup both include the credential. After an API key rotation, once the key's 24-hour record has expired, the same key under the new credential is a new provider request and can create a second wallet: list wallets with `GET /v1/wallets` and check the provider account before retrying a create.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: walletCreateKeyHeaders,

@@ -82,6 +82,7 @@ describe("requestTracingMiddleware", () => {
         request_id: response.headers.get("X-Request-ID"),
         trace_id: response.headers.get("X-Request-ID"),
         web_trace_hash: expectedHash,
+        route: "GET /join",
       },
     ]);
     expect(response.headers.get("X-SDP-Trace-ID")).toBe(response.headers.get("X-Request-ID"));

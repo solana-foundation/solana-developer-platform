@@ -2,7 +2,7 @@
 
 This guide walks an operator through wiring up their own Clerk tenant for a self-hosted SDP deployment. Follow it after you have the API and dashboard running with `SDP_DEPLOYMENT_MODE=self_hosted` (see [`apps/sdp-api/README.md`](../../README.md#self-hosted-mode-no-third-party-providers)).
 
-SDP creates organizations and their memberships (ADR 0012); the Clerk webhook only syncs the name, slug and entitlements of organizations SDP already knows, and ignores membership events. Without the steps below, sign-ups will succeed in Clerk but the API will reject every authenticated request with `Active Clerk organization required` (the session token does not contain `org_id` by default — see step 3).
+SDP creates organizations and their memberships (ADR 0012); the Clerk webhook only syncs the name, slug and entitlements of organizations SDP already knows, and ignores membership events. Without the steps below, sign-ups will succeed in Clerk but the API will reject every authenticated request with `Clerk token missing organization` (the session token does not contain `org_id` by default — see step 3).
 
 Time estimate: under 30 minutes against a fresh Clerk account.
 
@@ -47,7 +47,6 @@ Clerk's default session token does not include `org_id`. Without the custom clai
    ```json
    {
      "org_id": "{{org.id}}",
-     "org_role": "{{org.role}}",
      "org_slug": "{{org.slug}}",
      "email": "{{user.primary_email_address}}"
    }
@@ -59,13 +58,14 @@ The `email` claim also feeds the dashboard's feature-flag targeting (`apps/sdp-w
 
 What each claim does:
 
-| Claim      | Required?   | Used by                                                                                                                       |
-| ---------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `sub`      | yes         | User identity; checked in `clerk-token.ts` and threaded through every request as the actor                                    |
-| `org_id`   | yes         | Organization scope; the request is rejected if missing                                                                        |
-| `org_role` | recommended | Maps `"org:admin"` to admin, anything else to member (`clerk-role.ts`); without it everyone is a member                       |
-| `org_slug` | optional    | Surfaced in some logs and audit events                                                                                        |
-| `email`    | optional    | Used for actor display; the API also falls back to `email_addresses[0].email_address` if you prefer Clerk's default shorthand |
+| Claim      | Required? | Used by                                                                                                                       |
+| ---------- | --------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `sub`      | yes       | User identity; checked in `clerk-token.ts` and threaded through every request as the actor                                    |
+| `org_id`   | yes       | Organization scope; the request is rejected if missing                                                                        |
+| `org_slug` | optional  | Surfaced in some logs and audit events                                                                                        |
+| `email`    | optional  | Used for actor display; the API also falls back to `email_addresses[0].email_address` if you prefer Clerk's default shorthand |
+
+The Clerk organization role is never read: everyone is `org:member` in Clerk, and SDP holds each person's role ([ADR 0012](../../../../docs/decisions/0012-sdp-owns-organization-membership.md)).
 
 When testing, sign in to Clerk's hosted UI with an **active organization selected**. Tokens minted without an active org omit `org_id` and the API rejects them.
 
@@ -135,7 +135,7 @@ In production self-hosted deployments, point Clerk directly at the deployment's 
 
 ## Troubleshooting
 
-- **API returns `Active Clerk organization required`** — the JWT lacks `org_id`. Confirm the session token customization (step 3) includes `"org_id": "{{org.id}}"` and you signed in with an active organization selected.
+- **API returns `Clerk token missing organization`**: the JWT lacks `org_id`. Confirm the session token customization (step 3) includes `"org_id": "{{org.id}}"` and you signed in with an active organization selected.
 - **Webhook signature verification fails** — `CLERK_WEBHOOK_SECRET` does not match the endpoint's signing secret in Clerk. Re-copy the secret from the endpoint detail page, restart the API.
 - **`organizations` row never appears** — the ngrok tunnel is not running, or the Clerk endpoint URL doesn't match `WEBHOOK_INGEST_DOMAIN`. Check deliveries in the ngrok inspector at `http://localhost:4040`; check the Clerk endpoint's **Message Attempts** tab for HTTP errors.
 - **Token verification fails with `unable to retrieve JWKS`** — `CLERK_ISSUER` is wrong. The default JWKS path is `${CLERK_ISSUER}/.well-known/jwks.json`; load that URL in a browser to confirm Clerk returns a JSON document.

@@ -14,9 +14,7 @@ import { RECEIVED_AMOUNTS } from "./stack/stack-timeline";
 export async function StackSection() {
   const t = await getTranslations();
   const locale = await getRequestLocale();
-  const comingSoonServices = (["compliance", "ramps"] as const).filter((service) =>
-    isComingSoon(service)
-  );
+  const comingSoonServices = (["ramps"] as const).filter((service) => isComingSoon(service));
   const copy: StackDrawingCopy = {
     labels: {
       partners: t("Homepage.stack.labels.partners"),
@@ -37,7 +35,6 @@ export async function StackSection() {
     },
     services: {
       custody: t("Homepage.stack.services.custody"),
-      compliance: t("Homepage.stack.services.compliance"),
       ramps: t("Homepage.stack.services.ramps"),
       nodes: t("Homepage.stack.services.nodes"),
       wallets: t("Homepage.stack.services.wallets"),

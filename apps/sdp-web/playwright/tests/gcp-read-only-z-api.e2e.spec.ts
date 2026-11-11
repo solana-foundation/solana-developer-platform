@@ -1,5 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 import type { SdpModule } from "@sdp/types/release-channels";
+import { test } from "@/playwright/support/vercel-bypass";
 import { getE2EEnv } from "../env";
 import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
 import { provisionWithAdminSession } from "../support/local-dashboard-bootstrap";
@@ -43,11 +44,7 @@ const GOLDEN_ENDPOINTS: GoldenEndpoint[] = [
     query: FIRST_PAGE,
   },
   { domain: "payments-recurring", path: "/v1/payments/recurring-payments", scope: "project" },
-  // Earn answers 403 wherever EARN_ENABLED is off (stage and prod today); the smoke pins the
-  // flag off in smoke-flags.json, so the row is only meaningful when the posture turns it on.
-  ...(process.env.EARN_ENABLED === "true"
-    ? [{ domain: "earn-strategies", path: "/v1/earn/strategies", scope: "project" as const }]
-    : []),
+  { domain: "earn-strategies", path: "/v1/earn/strategies", scope: "project", module: "earn" },
 ];
 
 test.describe("GCP dev API golden endpoints", () => {

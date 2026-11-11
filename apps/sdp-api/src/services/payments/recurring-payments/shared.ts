@@ -1,5 +1,13 @@
-import { createClusterRpc } from "@sdp/rpc/factory";
-import { confirmTransaction, getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
+import { createClusterRpc, getSignatureStatusesFromEveryEndpoint } from "@sdp/rpc/factory";
+import {
+  confirmTransaction,
+  getChainHeight,
+  getRecentBlockhash,
+  getSignatureStatuses,
+  type SignatureStatusInfo,
+  type SolanaRpc,
+  VERDICT_HISTORY_HORIZON_BLOCKS,
+} from "@sdp/rpc/solana";
 import { withTransientRpcRetry } from "@sdp/rpc/transient";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { ApiKeyWalletScope, SdpEnvironment } from "@sdp/types/api-keys";
@@ -28,7 +36,10 @@ import { findPlanPda, type SubscriptionDelegation } from "@solana/subscriptions"
 import { getApproveInstruction } from "@solana-program/token-2022";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import type {
+  ClaimedRecurringPaymentRow,
   PaymentRecurringPaymentRow,
+  RecurringPaymentLease,
+  RecurringPaymentLeaseOperation,
   RecurringPaymentStepSignatureSlot,
 } from "@/db/repositories/payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
@@ -54,7 +65,9 @@ import { assertMovementAdmitted, decidePrincipal } from "@/lib/money-admission";
 import type { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
+import { logEvent } from "@/runtime/money-path-events";
 import { parseGrantsColumn } from "@/services/api-key.service";
+import { callerInsufficientFundsError } from "@/services/fee-payment-errors";
 import {
   isNativePaymentToken,
   normalizePaymentToken,
@@ -315,13 +328,19 @@ export async function sendSubscriptionInstructions(input: {
   );
   const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
   const txBytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
-  return submitSponsoredTransaction({
-    feePayment,
-    rpc,
-    transaction: txBytes,
-    lastValidBlockHeight,
-    store: input.submissionStore,
-  });
+  try {
+    return await submitSponsoredTransaction({
+      feePayment,
+      rpc,
+      transaction: txBytes,
+      lastValidBlockHeight,
+      store: input.submissionStore,
+    });
+  } catch (error) {
+    // A source wallet short of funds is recorded with the reason the caller
+    // can act on, not "An internal error occurred" (HOO-2621).
+    throw callerInsufficientFundsError(error, input.instructions) ?? error;
+  }
 }
 
 /** A row holding one of a step's saved signatures. */
@@ -331,11 +350,34 @@ export interface SubscriptionStepSignatureRow {
   id: string;
 }
 
+/**
+ * The lease a claimed run holds on its recurring payment, for the fence every write that commits
+ * its progress checks first.
+ *
+ * @param claimed - The row the run's claim returned.
+ * @param operation - What the conflict calls the run's operation.
+ * @returns The lease.
+ */
+export function recurringPaymentLease(
+  claimed: ClaimedRecurringPaymentRow,
+  operation: RecurringPaymentLeaseOperation
+): RecurringPaymentLease {
+  return {
+    recurringPaymentId: claimed.id,
+    organizationId: claimed.organization_id,
+    projectId: claimed.project_id,
+    leaseId: claimed.lease_id,
+    operation,
+  };
+}
+
 /** Where one subscription step's signature is saved: its tenant and every row that holds it. */
 export interface SubscriptionStep {
   env: Env;
   organizationId: string;
   projectId: string;
+  /** The claimed run's lease: its saves and clears write nothing once another run took over. */
+  lease: RecurringPaymentLease;
   rows: readonly SubscriptionStepSignatureRow[];
 }
 
@@ -388,6 +430,7 @@ async function clearSubscriptionStepSignature(
   const updatedAt = new Date().toISOString();
   await getDb(step.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    await recurringRepo.assertRecurringPaymentLease(step.lease);
     for (const row of step.rows) {
       const cleared = await recurringRepo.clearStepSignature({
         ...row,
@@ -416,18 +459,23 @@ async function clearSubscriptionStepSignature(
 
 /**
  * The submission store every subscription step sends with. `save` writes the step's signature and
- * its blockhash's expiry before the send; after a provably refused send, the step's rows are
- * cleared, so a retry sends again instead of waiting on a transaction that never left. Recovery
- * reads the saved send and the chain, so there is no started marker.
+ * its blockhash's expiry before the send, in one transaction that first checks the run still holds
+ * its lease: a run another one took over throws there and never broadcasts. After a provably
+ * refused send, the step's rows are cleared, so a retry sends again instead of waiting on a
+ * transaction that never left. Recovery reads the saved send and the chain, so there is no
+ * started marker.
  *
- * @param step - The step's rows and the writer that saves its send to them.
- * @param step.save - Writes the signature and the block height to the step's rows.
+ * @param step - The step's rows, its lease and the writer that saves its send to them.
+ * @param step.save - Writes the signature and the block height to the step's rows through `tx`.
  * @param step.revokeFence - Checked before the save, for a step an incident revoke must stop.
  * @returns The store.
  */
 export function createSubscriptionStepStore(
   step: SubscriptionStep & {
-    save: (send: { signature: Signature; lastValidBlockHeight: string }) => Promise<void>;
+    save: (
+      send: { signature: Signature; lastValidBlockHeight: string },
+      tx: DatabaseExecutor
+    ) => Promise<void>;
     /** For a step that creates or subscribes to an authority: refused once a revoke overtook it. */
     revokeFence?: SubscriptionAuthorityRevokeFence;
   }
@@ -437,7 +485,12 @@ export function createSubscriptionStepStore(
       if (step.revokeFence) {
         await refuseIfSubscriptionAuthorityRevokedSince(step.env, step.revokeFence);
       }
-      await step.save({ signature, lastValidBlockHeight });
+      await getDb(step.env).transaction(async (tx) => {
+        await createPostgresPaymentRecurringPaymentsRepository(tx).assertRecurringPaymentLease(
+          step.lease
+        );
+        await step.save({ signature, lastValidBlockHeight }, tx);
+      });
     },
     markStarted: async () => {},
     hasStarted: async () => false,
@@ -627,7 +680,10 @@ export type SavedSendOutcome =
 
 /**
  * Reads a saved send from the chain. A send with no record is proven never landed only once the
- * chain's block height is past the expiry of the blockhash it was signed with.
+ * `finalized` block height is past the expiry of the blockhash it was signed with, and every pool
+ * endpoint, read at that finalized slot, has no record of it inside the history horizon. Any
+ * endpoint that cannot answer, or an expiry past the horizon, leaves the send `pending`, so the
+ * caller keeps it and its fence.
  *
  * @param rpc - The cluster's RPC.
  * @param savedSend - The send's signature and its blockhash's expiry.
@@ -638,32 +694,60 @@ export async function readSavedSend(
   rpc: SolanaRpc,
   savedSend: SavedStepSend
 ): Promise<SavedSendOutcome> {
+  const { signature, lastValidBlockHeight } = savedSend;
   // Read before the status: once the chain is past the expiry, nothing lands after the status read.
-  const chainTip = await withTransientRpcRetry(() =>
-    rpc.getEpochInfo({ commitment: "confirmed" }).send()
-  );
-  const statuses = await withTransientRpcRetry(() =>
-    rpc.getSignatureStatuses([savedSend.signature], { searchTransactionHistory: true }).send()
-  );
-  const [status] = statuses.value;
-  if (status) {
-    // Seen only at "processed", the verdict may be on a fork the cluster drops: a failure
-    // there does not stop the same send landing, so resending it could collect twice
-    // (APE SOLA9-708).
-    if (status.confirmationStatus === null || status.confirmationStatus === "processed") {
-      return "pending";
+  const finalized = await withTransientRpcRetry(() => getChainHeight(rpc, "finalized"));
+  if (lastValidBlockHeight === null || finalized.blockHeight <= lastValidBlockHeight) {
+    const [status] = await getSignatureStatuses(rpc, [signature], {
+      searchTransactionHistory: true,
+    });
+    if (status !== null) return savedSendStatusOutcome(status);
+    if (lastValidBlockHeight === null) {
+      throw internalError("A saved send with no record has no block height to prove its expiry");
     }
-    return status.err === null ? "succeeded" : "failed";
-  }
-  if (savedSend.lastValidBlockHeight === null) {
-    throw internalError("A saved send with no record has no block height to prove its expiry");
-  }
-  if (chainTip.blockHeight <= savedSend.lastValidBlockHeight) {
     return "pending";
   }
-  // The pool may answer the two reads from different nodes: only a node that has processed the
-  // slot the expiry was seen at has seen every block the send could have landed in.
-  return statuses.context.slot >= chainTip.absoluteSlot ? "expired" : "pending";
+
+  const [read] = await getSignatureStatusesFromEveryEndpoint([signature], {
+    minContextSlot: finalized.absoluteSlot,
+    commitment: "finalized",
+  });
+  if (read.kind === "found") return savedSendStatusOutcome(read.status);
+  if (read.kind === "unresolved") {
+    logEvent("warn", {
+      event: "sdp_api_recurring_saved_send_unresolved",
+      signature,
+      last_valid_block_height: lastValidBlockHeight.toString(),
+      min_context_slot: finalized.absoluteSlot.toString(),
+      endpoint_failures: read.failures.map((failure) =>
+        failure.reason === "node_behind_floor"
+          ? { reason: failure.reason, context_slot: failure.contextSlot.toString() }
+          : { reason: failure.reason, error_name: failure.errorName }
+      ),
+    });
+    return "pending";
+  }
+  if (finalized.blockHeight - lastValidBlockHeight > VERDICT_HISTORY_HORIZON_BLOCKS) {
+    logEvent("error", {
+      event: "sdp_api_recurring_saved_send_verdict_unprovable",
+      signature,
+      last_valid_block_height: lastValidBlockHeight.toString(),
+      finalized_block_height: finalized.blockHeight.toString(),
+      min_context_slot: finalized.absoluteSlot.toString(),
+    });
+    return "pending";
+  }
+  return "expired";
+}
+
+function savedSendStatusOutcome(status: SignatureStatusInfo): SavedSendOutcome {
+  // Seen only at "processed", the verdict may be on a fork the cluster drops: a failure
+  // there does not stop the same send landing, so resending it could collect twice
+  // (APE SOLA9-708).
+  if (status.confirmationStatus === null || status.confirmationStatus === "processed") {
+    return "pending";
+  }
+  return status.err === null ? "succeeded" : "failed";
 }
 
 /**
@@ -911,4 +995,29 @@ export async function refuseIfSubscriptionAuthorityRevokedSince(
       }
     }
   });
+}
+
+/**
+ * The 409 for a start on a schedule whose counterparty or account is archived
+ * or no longer in the project (HOO-2634): the recipient cannot come back on
+ * this schedule, so collect and resume both say what to do instead.
+ */
+export function recipientUnavailable(): AppError {
+  return conflict(
+    "Recurring payment recipient is unavailable; cancel this schedule and create a new one"
+  );
+}
+
+/**
+ * The 409 for a collection on a schedule that is not active: the recipient
+ * guidance for one paused because its recipient is unavailable, else the
+ * generic refusal.
+ */
+export function notCollectable(
+  row: Pick<PaymentRecurringPaymentRow, "status" | "paused_reason">
+): AppError {
+  if (row.status === "paused" && row.paused_reason === "destination_unavailable") {
+    return recipientUnavailable();
+  }
+  return conflict("Recurring payment must be active before collection");
 }

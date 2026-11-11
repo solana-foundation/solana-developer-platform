@@ -35,7 +35,6 @@ export interface Env extends ManagedRpcEnv {
   // Injected automatically by Cloud Run services and jobs.
   K_SERVICE?: string;
   K_REVISION?: string;
-  CLOUD_RUN_JOB?: string;
   // Explicit proxy-trust assertion; never inferred from K_SERVICE (APE-810).
   // "gclb": ingress is restricted to the Google external load balancer, which
   // appends the verified client address. "true": a deployment-owned proxy
@@ -66,6 +65,15 @@ export interface Env extends ManagedRpcEnv {
   // release channels). Required: a missing or unknown name fails at boot.
   SDP_RELEASE_CHANNEL?: string;
 
+  // Whether this deployment may admit a production project. Unset allows;
+  // "false" refuses every production project whatever an organization's
+  // entitlement says (a devnet-only deployment).
+  SDP_ALLOW_PRODUCTION_PROJECTS?: string;
+
+  // One extra origin the CORS allowlist admits, as an exact https origin, for a
+  // deployment whose docs site is not the canonical one.
+  CORS_EXTRA_ORIGIN?: string;
+
   // Credential secret store selection for BYO custody credentials.
   // Managed SDP should use GCP Secret Manager. Self-hosted deployments default
   // to encrypted DB storage.
@@ -91,6 +99,20 @@ export interface Env extends ManagedRpcEnv {
   CLERK_SECRET_KEY?: string;
   CLERK_API_URL?: string;
   CLERK_WEBHOOK_SECRET?: string;
+
+  // Email (`services/iterable-email.ts`): one Iterable campaign sends every SDP email
+  ITERABLE_API_KEY?: string;
+  /** https://api.iterable.com on deployments; local development points it at a stub. */
+  ITERABLE_API_URL?: string;
+  /** The triggered campaign whose template passes `subject`, `body` and `replyTo` through. */
+  ITERABLE_TRANSACTIONAL_CAMPAIGN_ID?: string;
+  /**
+   * The SDP operators' address: mainnet access requests (HOO-2427) email it, and customers see it
+   * as the contact for changes. Prod sets the operator alias in Doppler `prd`. Doppler `dev` leaves
+   * it unset; to try the flow locally, set your own address in `apps/sdp-api/.env.local`. Unset (or
+   * not an address), the deployment takes no mainnet access requests.
+   */
+  SDP_OPERATOR_EMAIL?: string;
 
   // Allowlist configuration
   ALLOWLIST_ADMIN_KEY?: string;
@@ -128,7 +150,6 @@ export interface Env extends ManagedRpcEnv {
   // Fireblocks configuration (@solana/keychain-fireblocks)
   FIREBLOCKS_API_KEY?: string;
   FIREBLOCKS_API_SECRET?: string;
-  FIREBLOCKS_VAULT_ID?: string;
   FIREBLOCKS_ASSET_ID?: string;
   FIREBLOCKS_API_BASE_URL?: string;
 
@@ -137,7 +158,6 @@ export interface Env extends ManagedRpcEnv {
   PRIVY_APP_SECRET?: string;
   PRIVY_WALLET_ID?: string;
   PRIVY_API_BASE_URL?: string;
-  PRIVY_REQUEST_DELAY_MS?: string;
 
   // Coinbase CDP Server Wallet configuration (Solana)
   COINBASE_CDP_API_KEY_ID?: string;
@@ -145,37 +165,29 @@ export interface Env extends ManagedRpcEnv {
   COINBASE_CDP_WALLET_SECRET?: string;
   COINBASE_CDP_API_BASE_URL?: string;
   COINBASE_CDP_NETWORK?: "solana" | "solana-devnet";
-  COINBASE_CDP_WALLET_ID?: string;
   COINBASE_CDP_ACCOUNT_NAMESPACE?: string;
 
   // Para Server Wallet configuration (Solana)
   PARA_API_KEY?: string;
   PARA_API_BASE_URL?: string;
-  PARA_REQUEST_DELAY_MS?: string;
-  PARA_WALLET_ID?: string;
 
   // Turnkey Server Wallet configuration (Solana)
   TURNKEY_API_PUBLIC_KEY?: string;
   TURNKEY_API_PRIVATE_KEY?: string;
   TURNKEY_ORGANIZATION_ID?: string;
   TURNKEY_API_BASE_URL?: string;
-  TURNKEY_REQUEST_DELAY_MS?: string;
-  TURNKEY_PRIVATE_KEY_ID?: string;
-  TURNKEY_PUBLIC_KEY?: string;
 
   // DFNS Server Wallet configuration (Solana)
   DFNS_AUTH_TOKEN?: string;
   DFNS_CREDENTIAL_ID?: string;
   DFNS_PRIVATE_KEY?: string;
   DFNS_API_BASE_URL?: string;
-  DFNS_WALLET_ID?: string;
 
   // IBM Digital Asset Haven configuration (white-label Dfns; Solana)
   IBM_HAVEN_AUTH_TOKEN?: string;
   IBM_HAVEN_CREDENTIAL_ID?: string;
   IBM_HAVEN_PRIVATE_KEY?: string;
   IBM_HAVEN_API_BASE_URL?: string;
-  IBM_HAVEN_WALLET_ID?: string;
 
   // Anchorage wallet lifecycle configuration
   ANCHORAGE_API_KEY?: string;
@@ -208,10 +220,6 @@ export interface Env extends ManagedRpcEnv {
   KORA_PER_TRANSACTION_BUDGET_LAMPORTS?: string;
   KORA_SURFPOOL_SHIM?: string;
   KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS?: string;
-
-  // MagicBlock private payments configuration
-  MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL?: string;
-  MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN?: string;
 
   // Self-hosted Asset Profiles production opt-in; managed rollout uses Vercel.
   SDP_FLAG_ASSET_PROFILES?: string;
@@ -261,9 +269,6 @@ export interface Env extends ManagedRpcEnv {
   STRIPE_PRODUCTION_SECRET_KEY?: string;
   STRIPE_PRODUCTION_WEBHOOK_SECRET?: string;
 
-  // Markets module gate. Clearing it dark-launches every Markets API surface.
-  MARKETS_ENABLED?: string;
-  EARN_ENABLED?: string;
   // Optional Hastra PRIME -> wYLDS -> Jupiter -> USDC exit. Off by default;
   // Hastra's operator-settled par redemption remains available independently.
   EARN_HASTRA_DEX_EXIT_ENABLED?: string;
@@ -285,6 +290,9 @@ export interface Env extends ManagedRpcEnv {
   UPSHIFT_SANDBOX_API_KEY?: string;
   PERENA_API_KEY?: string;
   PERENA_SANDBOX_API_KEY?: string;
+  // Separate document-reference encryption keys; never applicant answers/files.
+  EARN_ONBOARDING_ENCRYPTION_KEY?: string;
+  EARN_ONBOARDING_KMS_KEY_NAME?: string;
   // Packed JSON: {"clientId","clientSecret","username","password"} — the
   // OAuth2 password-grant quad WisdomTree Connect provisions. One value per
   // environment; format documented on EarnRuntimeEnvironment in @sdp/earn.
@@ -320,6 +328,8 @@ declare module "hono" {
     idempotencyCommitted?: boolean;
     // Set by replayFromRecord when the key's domain row records another request
     idempotencyRecordMismatch?: boolean;
+    // Set by markIdempotencyRerunnable() when running the request again is safe
+    idempotencyRerunnable?: boolean;
     apiKey?: {
       id: string;
       organizationId: string;

@@ -199,10 +199,15 @@ export async function depositIntoVault(
   // Provider-side KYC/eligibility, before any sponsorship resolution or build:
   // an ineligible wallet's deposit would settle nowhere (see the helper), so
   // it must not cost a paymaster reservation or an RPC build either.
-  await assertVaultDepositEligible(client, runtime, {
-    providerReference: input.providerReference,
-    owner: input.wallet.publicKey,
-  });
+  await assertVaultDepositEligible(
+    client,
+    runtime,
+    {
+      providerReference: input.providerReference,
+      owner: input.wallet.publicKey,
+    },
+    { organizationId: input.organizationId, projectId: input.projectId, database: env }
+  );
 
   // Resolved here, AFTER the replay reads above and BEFORE the provider builds.
   // Both halves of that sentence matter: a replay must still answer during a

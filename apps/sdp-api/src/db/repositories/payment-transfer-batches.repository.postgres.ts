@@ -1,7 +1,8 @@
+import type { CounterpartyAccountStatus } from "@sdp/types/counterparties";
 import { z } from "zod";
 import type { DatabaseClient as AppDb, DatabaseExecutor } from "@/db/client";
 import { parsePostgresJson } from "@/db/postgres-utils";
-import { internalError } from "@/lib/errors";
+import { AppError, internalError, notFound } from "@/lib/errors";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";
 import {
   type ClaimFailedTransferRecipientsInput,
@@ -48,7 +49,6 @@ function mapPaymentTransferBatchRow(row: Record<string, unknown>): PaymentTransf
     total_amount: (row.total_amount as string | null | undefined) ?? null,
     recipient_count: row.recipient_count as number,
     transaction_count: row.transaction_count as number,
-    options: row.options as Record<string, unknown>,
     error: (row.error as string | null | undefined) ?? null,
     initiated_by_key_id: (row.initiated_by_key_id as string | null | undefined) ?? null,
     idempotency_key: (row.idempotency_key as string | null | undefined) ?? null,
@@ -75,10 +75,6 @@ function mapPaymentTransferRecipientRow(row: Record<string, unknown>): PaymentTr
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
-}
-
-function jsonParam(value: Record<string, unknown> | undefined): string | null {
-  return value === undefined ? null : JSON.stringify(value);
 }
 
 function buildScopeWhere(params: {
@@ -162,12 +158,11 @@ async function insertTransferBatch(
          total_amount,
          recipient_count,
          transaction_count,
-         options,
          error,
          initiated_by_key_id,
          idempotency_key,
          idempotency_fingerprint
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?::jsonb, '{}'::jsonb), ?, ?, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`
     )
     .bind(
@@ -183,7 +178,6 @@ async function insertTransferBatch(
       input.totalAmount ?? null,
       input.recipientCount ?? 0,
       input.transactionCount ?? 0,
-      jsonParam(input.options),
       input.error ?? null,
       input.initiatedByKeyId ?? null,
       input.idempotencyKey ?? null,
@@ -260,6 +254,7 @@ export function createPostgresPaymentTransferBatchesRepository(
   return {
     async createTransferBatchWithRecipients(input: CreatePaymentTransferBatchWithRecipientsInput) {
       return db.transaction(async (tx) => {
+        await assertRecipientAccountsUnchanged(tx, input.batch, input.recipients);
         const batch = await insertTransferBatch(tx, input.batch);
         const recipients = await insertTransferRecipients(
           tx,
@@ -300,10 +295,9 @@ export function createPostgresPaymentTransferBatchesRepository(
              total_amount,
              recipient_count,
              transaction_count,
-             options,
              error,
              initiated_by_key_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?::jsonb, '{}'::jsonb), ?, ?)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (id) DO UPDATE SET
              external_id = EXCLUDED.external_id,
              source_custody_wallet_id = EXCLUDED.source_custody_wallet_id,
@@ -314,7 +308,6 @@ export function createPostgresPaymentTransferBatchesRepository(
              total_amount = EXCLUDED.total_amount,
              recipient_count = EXCLUDED.recipient_count,
              transaction_count = EXCLUDED.transaction_count,
-             options = EXCLUDED.options,
              error = EXCLUDED.error,
              initiated_by_key_id = EXCLUDED.initiated_by_key_id,
              updated_at = sdp_iso_now()
@@ -335,7 +328,6 @@ export function createPostgresPaymentTransferBatchesRepository(
           input.totalAmount ?? null,
           input.recipientCount ?? 0,
           input.transactionCount ?? 0,
-          jsonParam(input.options),
           input.error ?? null,
           input.initiatedByKeyId ?? null
         )
@@ -366,7 +358,6 @@ export function createPostgresPaymentTransferBatchesRepository(
                  total_amount = CASE WHEN ?::boolean THEN ? ELSE total_amount END,
                  recipient_count = COALESCE(?, recipient_count),
                  transaction_count = COALESCE(?, transaction_count),
-                 options = CASE WHEN ?::boolean THEN ?::jsonb ELSE options END,
                  error = CASE WHEN ?::boolean THEN ? ELSE error END,
                  initiated_by_key_id = CASE WHEN ?::boolean THEN ? ELSE initiated_by_key_id END,
                  updated_at = sdp_iso_now()
@@ -384,8 +375,6 @@ export function createPostgresPaymentTransferBatchesRepository(
           input.totalAmount ?? null,
           input.recipientCount ?? null,
           input.transactionCount ?? null,
-          input.options !== undefined,
-          jsonParam(input.options),
           input.error !== undefined,
           input.error ?? null,
           input.initiatedByKeyId !== undefined,
@@ -987,6 +976,18 @@ export function createPostgresPaymentTransferBatchesRepository(
           if (claimed.results.length !== input.recipientIds.length) {
             throw new ClaimLostError();
           }
+          await assertRecipientAccountsUnchanged(
+            tx,
+            input,
+            claimed.results.map((row) => {
+              const recipient = mapPaymentTransferRecipientRow(row);
+              return {
+                id: recipient.id,
+                counterpartyAccountId: recipient.counterparty_account_id,
+                destinationAddress: recipient.destination_address,
+              };
+            })
+          );
           const supersededTransferIds = [
             ...new Set(
               claimed.results.flatMap((row) =>
@@ -1080,6 +1081,62 @@ function recipientIdClause(recipientIds: string[] | undefined): string {
 
 /** Rolls a partial claim back: another resend took one of the recipients. */
 class ClaimLostError extends Error {}
+
+/**
+ * Locks the counterparty accounts a batch is about to pay (`FOR SHARE`) and
+ * refuses the batch if one was archived, or now holds a different address,
+ * since `authorize` read it (HOO-2563). Archive and address updates write the
+ * account row, so each commits before this transaction reads it or waits for
+ * this transaction to finish. One read for the whole batch.
+ *
+ * An archived (or vanished) account answers 404, as authorize's own read
+ * does. A changed address answers 409 `TRANSFER_BATCH_DESTINATION_CHANGED`,
+ * naming the retry's recipients, or create's accounts. Nothing has been
+ * signed, and the caller's transaction rolls back.
+ */
+async function assertRecipientAccountsUnchanged(
+  tx: DatabaseExecutor,
+  scope: { organizationId: string; projectId: string },
+  recipients: ReadonlyArray<{
+    id?: string;
+    counterpartyAccountId: string;
+    destinationAddress: string;
+  }>
+): Promise<void> {
+  const accountIds = [...new Set(recipients.map((r) => r.counterpartyAccountId))].sort();
+  if (accountIds.length === 0) return;
+  const rows = await tx
+    .prepare(
+      `SELECT id, status, details->>'address' AS address
+         FROM counterparty_accounts
+        WHERE organization_id = ?
+          AND project_id = ?
+          AND id IN (${accountIds.map(() => "?").join(", ")})
+        ORDER BY id
+          FOR SHARE`
+    )
+    .bind(scope.organizationId, scope.projectId, ...accountIds)
+    .all<{ id: string; status: CounterpartyAccountStatus; address: string | null }>();
+  const accounts = new Map(rows.results.map((row) => [row.id, row]));
+  const gone = accountIds.find((id) => accounts.get(id)?.status !== "active");
+  if (gone !== undefined) {
+    throw notFound(`Counterparty account ${gone}`);
+  }
+  const changed = recipients.filter(
+    (r) => accounts.get(r.counterpartyAccountId)?.address !== r.destinationAddress
+  );
+  if (changed.length === 0) return;
+  const isRetry = changed.every((r) => r.id !== undefined);
+  throw new AppError(
+    "TRANSFER_BATCH_DESTINATION_CHANGED",
+    isRetry
+      ? undefined
+      : "A recipient's counterparty account changed its address while the batch was being prepared. Nothing was sent; send the batch again.",
+    isRetry
+      ? { recipientIds: changed.map((r) => r.id) }
+      : { counterpartyAccountIds: [...new Set(changed.map((r) => r.counterpartyAccountId))] }
+  );
+}
 
 /**
  * Locks the batch row, derives the batch status from its recipient rows, and

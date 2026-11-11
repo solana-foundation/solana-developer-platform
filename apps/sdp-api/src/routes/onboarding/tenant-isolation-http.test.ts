@@ -68,7 +68,6 @@ function clerkPayload(clerkOrgId: string) {
     sub: "user_clerk_onboarding_isolation",
     org_id: clerkOrgId,
     org_slug: "onboarding-isolation",
-    org_role: "org:admin",
     email: SESSION_EMAIL,
   };
 }
@@ -142,18 +141,29 @@ describe("onboarding status under database tenant isolation", () => {
   });
 
   it.each([
-    { holding: "no invitation", invitations: [] },
     {
-      holding: "an expired invitation",
+      holding: "no invitation",
+      invitations: [],
+      refusal: "No pending invitation to this organization",
+    },
+    {
+      holding: "a pending invitation past its expiry",
       invitations: [{ email: SESSION_EMAIL, status: "pending", expiresInDays: -1 }],
+      refusal: "Invitation to this organization has expired",
+    },
+    {
+      holding: "an invitation marked expired",
+      invitations: [{ email: SESSION_EMAIL, status: "expired", expiresInDays: -1 }],
+      refusal: "Invitation to this organization has expired",
     },
     {
       holding: "a revoked invitation",
       invitations: [{ email: SESSION_EMAIL, status: "revoked", expiresInDays: 7 }],
+      refusal: "No pending invitation to this organization",
     },
   ] as const)(
     "refuses a Clerk member SDP never admitted who holds $holding",
-    async ({ invitations }) => {
+    async ({ invitations, refusal }) => {
       for (const invitation of invitations) {
         await invite(invitation);
       }
@@ -162,7 +172,7 @@ describe("onboarding status under database tenant isolation", () => {
 
       expect(res.status).toBe(401);
       expect(await res.json()).toMatchObject({
-        error: { code: "UNAUTHORIZED", message: "No pending invitation to this organization" },
+        error: { code: "UNAUTHORIZED", message: refusal },
       });
     }
   );

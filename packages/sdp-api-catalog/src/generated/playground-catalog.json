@@ -4,49 +4,23 @@
     "command": "pnpm -C apps/sdp-api playground:generate",
     "families": {
       "Health": 2,
-      "Wallets": 10,
+      "Wallets": 9,
       "Projects": 4,
       "Issuance": 37,
-      "Payments": 36,
+      "Payments": 41,
       "Compliance": 1,
       "Counterparties": 13,
       "Asset Profiles": 7
     },
     "modules": {
-      "wallets": 10,
-      "payments": 36,
+      "wallets": 9,
+      "payments": 41,
       "counterparties": 13,
       "issuance": 37
     }
   },
   "modules": {
     "wallets": [
-      {
-        "id": "initialize-wallet-signing",
-        "operationId": "initializeWalletSigning",
-        "title": "Initialize wallet signing",
-        "method": "POST",
-        "path": "/v1/wallets/initialize",
-        "pathFields": [],
-        "bodyFields": [
-          {
-            "key": "$body",
-            "label": "JSON request body",
-            "description": "Generated from this operation's public OpenAPI request schema.",
-            "kind": "textarea",
-            "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"local\"\n}",
-            "required": true
-          }
-        ],
-        "expectedResponse": {
-          "configId": "cfg_example",
-          "publicKey": "So11111111111111111111111111111111111111112",
-          "walletId": "privy_wallet_123"
-        },
-        "releaseModule": "custody",
-        "shadowedBy": []
-      },
       {
         "id": "create-wallet",
         "operationId": "createWallet",
@@ -68,14 +42,14 @@
         "expectedResponse": {
           "data": {
             "wallet": {
-              "id": "cw_example",
+              "id": "cwlt_example",
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
-              "label": "Root Signing Wallet",
-              "purpose": "root",
+              "label": "Treasury wallet",
+              "purpose": "transfer",
               "status": "active",
               "createdAt": "2025-01-01T00:00:00.000Z"
             }
@@ -85,6 +59,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "custody",
         "shadowedBy": []
       },
@@ -102,13 +77,13 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"anchorage\",\n  \"walletId\": \"anchorage_wallet_123\"\n}",
+            "defaultValue": "{\n  \"provider\": \"privy\",\n  \"walletId\": \"privy_wallet_123\"\n}",
             "required": true
           }
         ],
         "expectedResponse": {
           "data": {
-            "walletId": "anchorage_wallet_123",
+            "walletId": "privy_wallet_123",
             "deleted": true
           },
           "meta": {
@@ -116,6 +91,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "custody",
         "shadowedBy": []
       },
@@ -134,10 +110,6 @@
             "required": false,
             "kind": "select",
             "options": [
-              {
-                "label": "local",
-                "value": "local"
-              },
               {
                 "label": "fireblocks",
                 "value": "fireblocks"
@@ -211,14 +183,14 @@
           "data": {
             "wallets": [
               {
-                "id": "cw_example",
+                "id": "cwlt_example",
                 "custodyConfigId": "cfg_example",
                 "provider": "privy",
                 "isRuntimeExecutionAllowed": true,
                 "walletId": "privy_wallet_123",
                 "publicKey": "So11111111111111111111111111111111111111112",
-                "label": "Root Signing Wallet",
-                "purpose": "root",
+                "label": "Treasury wallet",
+                "purpose": "transfer",
                 "status": "active",
                 "createdAt": "2025-01-01T00:00:00.000Z"
               }
@@ -229,6 +201,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "custody",
         "shadowedBy": []
       },
@@ -258,6 +231,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "custody",
         "shadowedBy": []
       },
@@ -276,10 +250,6 @@
             "required": false,
             "kind": "select",
             "options": [
-              {
-                "label": "local",
-                "value": "local"
-              },
               {
                 "label": "fireblocks",
                 "value": "fireblocks"
@@ -342,6 +312,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "custody",
         "shadowedBy": []
       },
@@ -364,6 +335,7 @@
         "expectedResponse": {
           "publicKey": "So11111111111111111111111111111111111111112"
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "custody",
         "shadowedBy": []
       },
@@ -400,6 +372,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "custody",
         "shadowedBy": []
       },
@@ -440,14 +413,14 @@
         "expectedResponse": {
           "data": {
             "wallet": {
-              "id": "cw_example",
+              "id": "cwlt_example",
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
-              "label": "Root Signing Wallet",
-              "purpose": "root",
+              "label": "Treasury wallet",
+              "purpose": "transfer",
               "status": "active",
               "createdAt": "2025-01-01T00:00:00.000Z"
             }
@@ -457,6 +430,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "custody",
         "shadowedBy": ["/v1/wallets/aggregate", "/v1/wallets/configs", "/v1/wallets/public-key"]
       },
@@ -489,14 +463,14 @@
         "expectedResponse": {
           "data": {
             "wallet": {
-              "id": "cw_example",
+              "id": "cwlt_example",
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
-              "label": "Root Signing Wallet",
-              "purpose": "root",
+              "label": "Treasury wallet",
+              "purpose": "transfer",
               "status": "active",
               "createdAt": "2025-01-01T00:00:00.000Z"
             }
@@ -506,6 +480,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "custody",
         "shadowedBy": []
       }
@@ -559,6 +534,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -602,7 +578,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -661,6 +637,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -681,7 +658,7 @@
           {
             "key": "search",
             "label": "search",
-            "description": "Search transfer ID, signature, provider reference, source or destination address, memo, counterparty ID, or counterparty display name. Use at least 3 non-whitespace characters; a blank value is treated as no search filter.",
+            "description": "Search transfer ID, signature, source or destination address, memo, counterparty ID, or counterparty display name. Use at least 3 non-whitespace characters; a blank value is treated as no search filter.",
             "defaultValue": "xfr_example",
             "required": false
           },
@@ -714,13 +691,13 @@
             "key": "status",
             "label": "status",
             "description": "Filter by transfer status. Accepts a comma-separated list of statuses.",
-            "defaultValue": "completed,confirmed,finalized",
+            "defaultValue": "confirmed,finalized",
             "required": false
           },
           {
             "key": "category",
             "label": "category",
-            "description": "Filter by wallet transfers or ramp transfers.",
+            "description": "Filter by transfer category.",
             "defaultValue": "ramp",
             "required": false,
             "kind": "select",
@@ -890,7 +867,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -952,6 +929,7 @@
             "requestId": "req_example"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -993,7 +971,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -1052,6 +1030,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -1069,7 +1048,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpacct_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  },\n  \"externalId\": \"payroll_2026_06_30\"\n}",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpacct_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"externalId\": \"payroll_2026_06_30\"\n}",
             "required": true
           }
         ],
@@ -1099,6 +1078,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -1116,7 +1096,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpacct_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  },\n  \"externalId\": \"payroll_2026_06_30\"\n}",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpacct_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"externalId\": \"payroll_2026_06_30\"\n}",
             "required": true
           }
         ],
@@ -1175,7 +1155,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -1235,6 +1215,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -1345,6 +1326,7 @@
             "requestId": "req_example"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -1419,7 +1401,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -1479,6 +1461,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -1553,7 +1536,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -1613,6 +1596,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -1683,6 +1667,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -1806,6 +1791,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -1884,6 +1870,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -1952,6 +1939,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -1970,7 +1958,17 @@
             "required": true
           }
         ],
-        "bodyFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{}",
+            "required": false
+          }
+        ],
         "expectedResponse": {
           "data": {
             "recurringPayment": {
@@ -2020,6 +2018,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -2088,7 +2087,242 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "recurring_payments",
+        "shadowedBy": []
+      },
+      {
+        "id": "create-payment-request",
+        "operationId": "createPaymentRequest",
+        "title": "Create payment request",
+        "method": "POST",
+        "path": "/v1/payments/requests",
+        "pathFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"walletId\": \"privy_wallet_123\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"10.00\",\n  \"expiresAt\": null\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "id": "preq_example",
+            "organizationId": "organization_example",
+            "projectId": "project_example",
+            "walletId": "wallet_example",
+            "destinationAddress": "So11111111111111111111111111111111111111112",
+            "token": "example",
+            "amount": "100.00",
+            "reference": "So11111111111111111111111111111111111111112",
+            "status": "canceled",
+            "expiresAt": "2025-01-01T00:00:00.000Z",
+            "fulfilledByTransferId": "fulfilledbytransfer_example",
+            "paidLate": false,
+            "lastCheckedAt": "2025-01-01T00:00:00.000Z",
+            "canceledByApiKeyId": "canceledbyapikey_example",
+            "canceledByUserId": "canceledbyuser_example",
+            "canceledAt": "2025-01-01T00:00:00.000Z",
+            "lifecycle": [
+              {
+                "status": "canceled",
+                "at": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "createdBy": "example",
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "updatedAt": "2025-01-01T00:00:00.000Z",
+            "publicToken": "example-public-token"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "takesIdempotencyKey": true,
+        "releaseModule": "payments",
+        "shadowedBy": []
+      },
+      {
+        "id": "list-payment-requests",
+        "operationId": "listPaymentRequests",
+        "title": "List payment requests",
+        "method": "GET",
+        "path": "/v1/payments/requests?page={page}&pageSize={pageSize}&status={status}",
+        "pathFields": [
+          {
+            "key": "page",
+            "label": "page",
+            "description": "Page number, starting at 1.",
+            "defaultValue": "1",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "pageSize",
+            "label": "pageSize",
+            "description": "Results per page, 1 to 100.",
+            "defaultValue": "20",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "status",
+            "label": "status",
+            "description": "Payment request status. `awaiting_payment` is open; `paid` was settled by an on-chain payment; `canceled` and `expired` closed without one.",
+            "defaultValue": "canceled",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "awaiting_payment",
+                "value": "awaiting_payment"
+              },
+              {
+                "label": "paid",
+                "value": "paid"
+              },
+              {
+                "label": "canceled",
+                "value": "canceled"
+              },
+              {
+                "label": "expired",
+                "value": "expired"
+              }
+            ]
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "paymentRequests": [
+              {
+                "id": "preq_example",
+                "organizationId": "organization_example",
+                "projectId": "project_example",
+                "walletId": "wallet_example",
+                "destinationAddress": "So11111111111111111111111111111111111111112",
+                "token": "example",
+                "amount": "100.00",
+                "reference": "So11111111111111111111111111111111111111112",
+                "status": "canceled",
+                "expiresAt": "2025-01-01T00:00:00.000Z",
+                "fulfilledByTransferId": "fulfilledbytransfer_example",
+                "paidLate": false,
+                "lastCheckedAt": "2025-01-01T00:00:00.000Z",
+                "canceledByApiKeyId": "canceledbyapikey_example",
+                "canceledByUserId": "canceledbyuser_example",
+                "canceledAt": "2025-01-01T00:00:00.000Z",
+                "lifecycle": [
+                  {
+                    "status": "canceled",
+                    "at": "2025-01-01T00:00:00.000Z"
+                  }
+                ],
+                "createdBy": "example",
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "total": 1,
+            "page": 1,
+            "pageSize": 1
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "takesIdempotencyKey": false,
+        "releaseModule": "payments",
+        "shadowedBy": []
+      },
+      {
+        "id": "get-payment-request",
+        "operationId": "getPaymentRequest",
+        "title": "Get payment request",
+        "method": "GET",
+        "path": "/v1/payments/requests/{paymentRequestId}",
+        "pathFields": [
+          {
+            "key": "paymentRequestId",
+            "label": "{paymentRequestId}",
+            "description": "SDP payment request ID.",
+            "defaultValue": "preq_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "id": "preq_example",
+            "organizationId": "organization_example",
+            "projectId": "project_example",
+            "walletId": "wallet_example",
+            "destinationAddress": "So11111111111111111111111111111111111111112",
+            "token": "example",
+            "amount": "100.00",
+            "reference": "So11111111111111111111111111111111111111112",
+            "status": "canceled",
+            "expiresAt": "2025-01-01T00:00:00.000Z",
+            "fulfilledByTransferId": "fulfilledbytransfer_example",
+            "paidLate": false,
+            "lastCheckedAt": "2025-01-01T00:00:00.000Z",
+            "canceledByApiKeyId": "canceledbyapikey_example",
+            "canceledByUserId": "canceledbyuser_example",
+            "canceledAt": "2025-01-01T00:00:00.000Z",
+            "lifecycle": [
+              {
+                "status": "canceled",
+                "at": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "createdBy": "example",
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "takesIdempotencyKey": false,
+        "releaseModule": "payments",
+        "shadowedBy": []
+      },
+      {
+        "id": "get-payment-request-link",
+        "operationId": "getPaymentRequestLink",
+        "title": "Get payment request link",
+        "method": "GET",
+        "path": "/v1/payments/requests/{paymentRequestId}/link",
+        "pathFields": [
+          {
+            "key": "paymentRequestId",
+            "label": "{paymentRequestId}",
+            "description": "SDP payment request ID.",
+            "defaultValue": "preq_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "id": "preq_example",
+            "publicToken": "example-public-token"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "takesIdempotencyKey": false,
+        "releaseModule": "payments",
         "shadowedBy": []
       },
       {
@@ -2140,6 +2374,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -2204,7 +2439,7 @@
               "attemptedAt": "2025-01-01T00:00:00.000Z",
               "status": "pending",
               "signature": "example",
-              "error": "example",
+              "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
               "metadata": {
                 "recurringPaymentId": "recurringpayment_example",
                 "initiatedByKeyId": "initiatedbykey_example",
@@ -2233,7 +2468,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -2292,6 +2527,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -2360,6 +2596,105 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
+        "releaseModule": "recurring_payments",
+        "shadowedBy": []
+      },
+      {
+        "id": "list-payment-recurring-payment-collection-attempts",
+        "operationId": "listPaymentRecurringPaymentCollectionAttempts",
+        "title": "List recurring payment collection attempts",
+        "method": "GET",
+        "path": "/v1/payments/recurring-payments/{id}/collection-attempts?status={status}&page={page}&pageSize={pageSize}",
+        "pathFields": [
+          {
+            "key": "id",
+            "label": "{id}",
+            "description": "SDP recurring payment record ID.",
+            "defaultValue": "prp_example",
+            "required": true
+          },
+          {
+            "key": "status",
+            "label": "status",
+            "description": "Collection attempt status.",
+            "defaultValue": "pending",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "pending",
+                "value": "pending"
+              },
+              {
+                "label": "processing",
+                "value": "processing"
+              },
+              {
+                "label": "confirmed",
+                "value": "confirmed"
+              },
+              {
+                "label": "failed",
+                "value": "failed"
+              },
+              {
+                "label": "skipped",
+                "value": "skipped"
+              }
+            ]
+          },
+          {
+            "key": "page",
+            "label": "page",
+            "defaultValue": "1",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "pageSize",
+            "label": "pageSize",
+            "defaultValue": "20",
+            "required": false,
+            "valueType": "number"
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "collectionAttempts": [
+              {
+                "id": "psca_example",
+                "organizationId": "org_example",
+                "projectId": "prj_example",
+                "subscriptionId": "subscription_example",
+                "transferId": "xfr_example",
+                "token": "example",
+                "amount": "100.00",
+                "dueAt": "2025-01-01T00:00:00.000Z",
+                "attemptedAt": "2025-01-01T00:00:00.000Z",
+                "status": "pending",
+                "signature": "example",
+                "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
+                "metadata": {
+                  "recurringPaymentId": "recurringpayment_example",
+                  "initiatedByKeyId": "initiatedbykey_example",
+                  "source": "manual"
+                },
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "total": 1,
+            "page": 1,
+            "pageSize": 1
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "takesIdempotencyKey": false,
         "releaseModule": "recurring_payments",
         "shadowedBy": []
       },
@@ -2409,7 +2744,8 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "takesIdempotencyKey": true,
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -2490,7 +2826,8 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "takesIdempotencyKey": false,
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -2554,7 +2891,8 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "takesIdempotencyKey": false,
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -2601,7 +2939,8 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "takesIdempotencyKey": false,
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -2658,7 +2997,8 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "takesIdempotencyKey": true,
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -2707,7 +3047,8 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "takesIdempotencyKey": true,
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -2815,7 +3156,8 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "takesIdempotencyKey": false,
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -2880,7 +3222,8 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "takesIdempotencyKey": false,
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -2943,7 +3286,8 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "takesIdempotencyKey": false,
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -3006,7 +3350,8 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "takesIdempotencyKey": false,
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -3075,7 +3420,7 @@
               "attemptedAt": "2025-01-01T00:00:00.000Z",
               "status": "pending",
               "signature": "example",
-              "error": "example",
+              "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
               "metadata": {
                 "recurringPaymentId": "recurringpayment_example",
                 "initiatedByKeyId": "initiatedbykey_example",
@@ -3090,7 +3435,8 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "takesIdempotencyKey": false,
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -3137,7 +3483,8 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "takesIdempotencyKey": false,
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -3215,7 +3562,7 @@
                 "attemptedAt": "2025-01-01T00:00:00.000Z",
                 "status": "pending",
                 "signature": "example",
-                "error": "example",
+                "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
                 "metadata": {
                   "recurringPaymentId": "recurringpayment_example",
                   "initiatedByKeyId": "initiatedbykey_example",
@@ -3234,7 +3581,8 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "takesIdempotencyKey": false,
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -3471,6 +3819,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "ramps",
         "shadowedBy": []
       },
@@ -3708,6 +4057,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "ramps",
         "shadowedBy": []
       },
@@ -3744,6 +4094,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "ramps",
         "shadowedBy": []
       },
@@ -3766,6 +4117,7 @@
           }
         ],
         "expectedResponse": {},
+        "takesIdempotencyKey": false,
         "releaseModule": "ramps",
         "shadowedBy": []
       },
@@ -3902,6 +4254,7 @@
             "nextCursor": "example"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       }
@@ -3932,6 +4285,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -4004,6 +4358,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -4045,6 +4400,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -4084,6 +4440,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": ["/v1/counterparties/accounts", "/v1/counterparties/metadata"]
       },
@@ -4133,6 +4490,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -4153,6 +4511,7 @@
         ],
         "bodyFields": [],
         "expectedResponse": {},
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -4387,6 +4746,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "ramps",
         "shadowedBy": []
       },
@@ -4484,6 +4844,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -4537,6 +4898,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -5622,6 +5984,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "ramps",
         "shadowedBy": []
       },
@@ -5672,6 +6035,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -5732,6 +6096,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       },
@@ -5759,6 +6124,7 @@
         ],
         "bodyFields": [],
         "expectedResponse": {},
+        "takesIdempotencyKey": true,
         "releaseModule": "payments",
         "shadowedBy": []
       }
@@ -5796,6 +6162,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -5837,6 +6204,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -5926,6 +6294,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6133,6 +6502,7 @@
             "requestId": "req_example"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6164,6 +6534,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6282,6 +6653,7 @@
             "requestId": "req_example"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6441,6 +6813,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": ["/v1/issuance/tokens/facets"]
       },
@@ -6538,6 +6911,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6561,6 +6935,7 @@
           "name": "example",
           "symbol": "example"
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6648,6 +7023,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6793,6 +7169,7 @@
             "requestId": "req_example"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6856,6 +7233,7 @@
             "requestId": "req_example"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6953,6 +7331,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -6997,6 +7376,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7094,6 +7474,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7133,6 +7514,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7201,6 +7583,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7258,6 +7641,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7325,6 +7709,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7381,6 +7766,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7448,6 +7834,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7504,6 +7891,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7571,6 +7959,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7627,6 +8016,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7694,6 +8084,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7750,6 +8141,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7806,6 +8198,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7862,6 +8255,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7910,6 +8304,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -7958,6 +8353,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": true,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8015,6 +8411,7 @@
             "requestId": "req_example"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8085,6 +8482,7 @@
             "requestId": "req_example"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8132,6 +8530,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8161,6 +8560,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8195,6 +8595,7 @@
         ],
         "bodyFields": [],
         "expectedResponse": {},
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8220,6 +8621,7 @@
           },
           "meta": {}
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       },
@@ -8255,6 +8657,7 @@
           },
           "meta": {}
         },
+        "takesIdempotencyKey": false,
         "releaseModule": "issuance",
         "shadowedBy": []
       }
@@ -8488,6 +8891,1917 @@
     },
     "bvnk": {
       "module": "ramps"
+    },
+    "local": {
+      "custodyProvider": "local"
+    },
+    "fireblocks": {
+      "custodyProvider": "fireblocks"
+    },
+    "privy": {
+      "custodyProvider": "privy"
+    },
+    "coinbase_cdp": {
+      "custodyProvider": "coinbase_cdp"
+    },
+    "para": {
+      "custodyProvider": "para"
+    },
+    "turnkey": {
+      "custodyProvider": "turnkey"
+    },
+    "dfns": {
+      "custodyProvider": "dfns"
+    },
+    "ibm_haven": {
+      "custodyProvider": "ibm_haven"
+    },
+    "anchorage": {
+      "custodyProvider": "anchorage"
+    },
+    "utila": {
+      "custodyProvider": "utila"
+    }
+  },
+  "channelOverrides": {
+    "experimental": {},
+    "beta": {
+      "POST /v1/payments/transfers": {
+        "id": "create-payment-transfer",
+        "operationId": "createPaymentTransfer",
+        "title": "Execute transfer (custody)",
+        "method": "POST",
+        "path": "/v1/payments/transfers",
+        "pathFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transfer": {
+              "fireblocks": {
+                "transactionId": "transaction_example",
+                "status": "example",
+                "subStatus": "example"
+              },
+              "id": "xfr_example",
+              "organizationId": "org_example",
+              "custodyWalletId": "cwlt_example",
+              "providerWalletId": "privy_wallet_123",
+              "projectId": "prj_example",
+              "type": "transfer",
+              "kind": "example",
+              "direction": "outbound",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "serializedTx": "base64_tx_example",
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "confirmedAt": "2025-01-01T00:00:00.000Z",
+              "fee": 0,
+              "error": "Signature failed",
+              "initiatedBy": {
+                "type": "api_key"
+              },
+              "source": "So11111111111111111111111111111111111111112",
+              "destination": "So11111111111111111111111111111111111111112",
+              "amount": "100.00",
+              "counterpartyId": "cpty_example",
+              "counterpartyDisplayName": "Acme Studio",
+              "risk": {
+                "provider": "trm",
+                "score": "0.12",
+                "level": "low",
+                "evaluatedAt": "2025-01-01T00:00:00.000Z"
+              },
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "takesIdempotencyKey": true
+      },
+      "GET /v1/payments/transfers": {
+        "id": "list-payment-transfers",
+        "operationId": "listPaymentTransfers",
+        "title": "List transfers",
+        "method": "GET",
+        "path": "/v1/payments/transfers?custodyWalletId={custodyWalletId}&search={search}&token={token}&direction={direction}&status={status}&category={category}&type={type}&counterpartyId={counterpartyId}&from={from}&to={to}&includeObserved={includeObserved}&sortBy={sortBy}&sortDirection={sortDirection}&page={page}&pageSize={pageSize}",
+        "pathFields": [
+          {
+            "key": "custodyWalletId",
+            "label": "custodyWalletId",
+            "description": "Filter persisted transfers by exact SDP Wallet ID.",
+            "defaultValue": "cwlt_example",
+            "required": false
+          },
+          {
+            "key": "search",
+            "label": "search",
+            "description": "Search transfer ID, signature, source or destination address, memo, counterparty ID, or counterparty display name. Use at least 3 non-whitespace characters; a blank value is treated as no search filter.",
+            "defaultValue": "xfr_example",
+            "required": false
+          },
+          {
+            "key": "token",
+            "label": "token",
+            "description": "Filter by token symbol or mint.",
+            "defaultValue": "USDC",
+            "required": false
+          },
+          {
+            "key": "direction",
+            "label": "direction",
+            "description": "Filter by transfer direction.",
+            "defaultValue": "outbound",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "inbound",
+                "value": "inbound"
+              },
+              {
+                "label": "outbound",
+                "value": "outbound"
+              }
+            ]
+          },
+          {
+            "key": "status",
+            "label": "status",
+            "description": "Filter by transfer status. Accepts a comma-separated list of statuses.",
+            "defaultValue": "confirmed,finalized",
+            "required": false
+          },
+          {
+            "key": "category",
+            "label": "category",
+            "description": "Filter by transfer category.",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "wallet",
+                "value": "wallet"
+              }
+            ]
+          },
+          {
+            "key": "type",
+            "label": "type",
+            "description": "Filter by one or more comma-separated transfer types.",
+            "defaultValue": "transfer,transfer_batch",
+            "required": false
+          },
+          {
+            "key": "counterpartyId",
+            "label": "counterpartyId",
+            "description": "Filter transfers tied to a specific counterparty.",
+            "defaultValue": "cpty_example",
+            "required": false
+          },
+          {
+            "key": "from",
+            "label": "from",
+            "description": "Filter from timestamp.",
+            "defaultValue": "2025-01-01T00:00:00.000Z",
+            "required": false
+          },
+          {
+            "key": "to",
+            "label": "to",
+            "description": "Filter to timestamp.",
+            "defaultValue": "2025-01-02T00:00:00.000Z",
+            "required": false
+          },
+          {
+            "key": "includeObserved",
+            "label": "includeObserved",
+            "description": "When custodyWalletId is supplied, also include RPC-observed activity for that exact wallet row's address. Observed rows have custodyWalletId null.",
+            "defaultValue": "false",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "true",
+                "value": "true"
+              },
+              {
+                "label": "false",
+                "value": "false"
+              }
+            ]
+          },
+          {
+            "key": "sortBy",
+            "label": "sortBy",
+            "description": "Field used to sort the transfer list.",
+            "defaultValue": "createdAt",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "createdAt",
+                "value": "createdAt"
+              },
+              {
+                "label": "updatedAt",
+                "value": "updatedAt"
+              },
+              {
+                "label": "amount",
+                "value": "amount"
+              },
+              {
+                "label": "status",
+                "value": "status"
+              }
+            ]
+          },
+          {
+            "key": "sortDirection",
+            "label": "sortDirection",
+            "description": "Sort direction.",
+            "defaultValue": "desc",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "asc",
+                "value": "asc"
+              },
+              {
+                "label": "desc",
+                "value": "desc"
+              }
+            ]
+          },
+          {
+            "key": "page",
+            "label": "page",
+            "description": "Page number (1-based).",
+            "defaultValue": "1",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "pageSize",
+            "label": "pageSize",
+            "description": "Items per page.",
+            "defaultValue": "20",
+            "required": false,
+            "valueType": "number"
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": [
+            {
+              "fireblocks": {
+                "transactionId": "transaction_example",
+                "status": "example",
+                "subStatus": "example"
+              },
+              "id": "xfr_example",
+              "organizationId": "org_example",
+              "custodyWalletId": "cwlt_example",
+              "providerWalletId": "privy_wallet_123",
+              "projectId": "prj_example",
+              "type": "transfer",
+              "kind": "example",
+              "direction": "outbound",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "serializedTx": "base64_tx_example",
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "confirmedAt": "2025-01-01T00:00:00.000Z",
+              "fee": 0,
+              "error": "Signature failed",
+              "initiatedBy": {
+                "type": "api_key"
+              },
+              "source": "So11111111111111111111111111111111111111112",
+              "destination": "So11111111111111111111111111111111111111112",
+              "amount": "100.00",
+              "counterpartyId": "cpty_example",
+              "counterpartyDisplayName": "Acme Studio",
+              "risk": {
+                "provider": "trm",
+                "score": "0.12",
+                "level": "low",
+                "evaluatedAt": "2025-01-01T00:00:00.000Z"
+              },
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          ],
+          "meta": {
+            "total": 1,
+            "page": 1,
+            "pageSize": 1,
+            "hasMore": false,
+            "requestId": "req_example"
+          }
+        },
+        "takesIdempotencyKey": false
+      },
+      "GET /v1/payments/transfers/{transferId}": {
+        "id": "get-payment-transfer",
+        "operationId": "getPaymentTransfer",
+        "title": "Get transfer",
+        "method": "GET",
+        "path": "/v1/payments/transfers/{transferId}",
+        "pathFields": [
+          {
+            "key": "transferId",
+            "label": "{transferId}",
+            "description": "Transfer identifier (SDP record ID, not the on-chain signature).",
+            "defaultValue": "xfr_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "transfer": {
+              "fireblocks": {
+                "transactionId": "transaction_example",
+                "status": "example",
+                "subStatus": "example"
+              },
+              "id": "xfr_example",
+              "organizationId": "org_example",
+              "custodyWalletId": "cwlt_example",
+              "providerWalletId": "privy_wallet_123",
+              "projectId": "prj_example",
+              "type": "transfer",
+              "kind": "example",
+              "direction": "outbound",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "serializedTx": "base64_tx_example",
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "confirmedAt": "2025-01-01T00:00:00.000Z",
+              "fee": 0,
+              "error": "Signature failed",
+              "initiatedBy": {
+                "type": "api_key"
+              },
+              "source": "So11111111111111111111111111111111111111112",
+              "destination": "So11111111111111111111111111111111111111112",
+              "amount": "100.00",
+              "counterpartyId": "cpty_example",
+              "counterpartyDisplayName": "Acme Studio",
+              "risk": {
+                "provider": "trm",
+                "score": "0.12",
+                "level": "low",
+                "evaluatedAt": "2025-01-01T00:00:00.000Z"
+              },
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "takesIdempotencyKey": false
+      },
+      "POST /v1/payments/transfer-batches": {
+        "id": "create-payment-transfer-batch",
+        "operationId": "createPaymentTransferBatch",
+        "title": "Create transfer batch",
+        "method": "POST",
+        "path": "/v1/payments/transfer-batches",
+        "pathFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpacct_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"externalId\": \"payroll_2026_06_30\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "batch": {
+              "id": "xbatch_example",
+              "organizationId": "org_example",
+              "projectId": "prj_example",
+              "externalId": "payroll_2026_06_30",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
+              "sourceAddress": "So11111111111111111111111111111111111111112",
+              "token": "SOL",
+              "status": "processing",
+              "totalAmount": "1000.00",
+              "recipientCount": 20,
+              "transactionCount": 1,
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "recipients": [
+              {
+                "id": "_example",
+                "batchId": "batch_example",
+                "transferId": "xfr_example",
+                "externalId": "payroll_row_001",
+                "counterpartyId": "cpty_example",
+                "counterpartyAccountId": "cpacct_example",
+                "destination": "So11111111111111111111111111111111111111112",
+                "amount": "100.00",
+                "status": "pending",
+                "error": "example",
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "transfers": [
+              {
+                "fireblocks": {
+                  "transactionId": "transaction_example",
+                  "status": "example",
+                  "subStatus": "example"
+                },
+                "id": "xfr_example",
+                "organizationId": "org_example",
+                "custodyWalletId": "cwlt_example",
+                "providerWalletId": "privy_wallet_123",
+                "projectId": "prj_example",
+                "type": "transfer",
+                "kind": "example",
+                "direction": "outbound",
+                "status": "confirmed",
+                "signature": "sig_example",
+                "serializedTx": "base64_tx_example",
+                "slot": 123456,
+                "blockTime": "2025-01-01T00:00:00.000Z",
+                "confirmedAt": "2025-01-01T00:00:00.000Z",
+                "fee": 0,
+                "error": "Signature failed",
+                "initiatedBy": {
+                  "type": "api_key"
+                },
+                "source": "So11111111111111111111111111111111111111112",
+                "destination": "So11111111111111111111111111111111111111112",
+                "amount": "100.00",
+                "counterpartyId": "cpty_example",
+                "counterpartyDisplayName": "Acme Studio",
+                "risk": {
+                  "provider": "trm",
+                  "score": "0.12",
+                  "level": "low",
+                  "evaluatedAt": "2025-01-01T00:00:00.000Z"
+                },
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-02T00:00:00.000Z"
+              }
+            ]
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "takesIdempotencyKey": true
+      },
+      "POST /v1/payments/transfer-batches/{batchId}/retry": {
+        "id": "retry-payment-transfer-batch",
+        "operationId": "retryPaymentTransferBatch",
+        "title": "Retry a transfer batch's failed recipients",
+        "method": "POST",
+        "path": "/v1/payments/transfer-batches/{batchId}/retry",
+        "pathFields": [
+          {
+            "key": "batchId",
+            "label": "{batchId}",
+            "description": "Transfer batch identifier.",
+            "defaultValue": "xbatch_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "batch": {
+              "id": "xbatch_example",
+              "organizationId": "org_example",
+              "projectId": "prj_example",
+              "externalId": "payroll_2026_06_30",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
+              "sourceAddress": "So11111111111111111111111111111111111111112",
+              "token": "SOL",
+              "status": "processing",
+              "totalAmount": "1000.00",
+              "recipientCount": 20,
+              "transactionCount": 1,
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "recipients": [
+              {
+                "id": "_example",
+                "batchId": "batch_example",
+                "transferId": "xfr_example",
+                "externalId": "payroll_row_001",
+                "counterpartyId": "cpty_example",
+                "counterpartyAccountId": "cpacct_example",
+                "destination": "So11111111111111111111111111111111111111112",
+                "amount": "100.00",
+                "status": "pending",
+                "error": "example",
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "transfers": [
+              {
+                "fireblocks": {
+                  "transactionId": "transaction_example",
+                  "status": "example",
+                  "subStatus": "example"
+                },
+                "id": "xfr_example",
+                "organizationId": "org_example",
+                "custodyWalletId": "cwlt_example",
+                "providerWalletId": "privy_wallet_123",
+                "projectId": "prj_example",
+                "type": "transfer",
+                "kind": "example",
+                "direction": "outbound",
+                "status": "confirmed",
+                "signature": "sig_example",
+                "serializedTx": "base64_tx_example",
+                "slot": 123456,
+                "blockTime": "2025-01-01T00:00:00.000Z",
+                "confirmedAt": "2025-01-01T00:00:00.000Z",
+                "fee": 0,
+                "error": "Signature failed",
+                "initiatedBy": {
+                  "type": "api_key"
+                },
+                "source": "So11111111111111111111111111111111111111112",
+                "destination": "So11111111111111111111111111111111111111112",
+                "amount": "100.00",
+                "counterpartyId": "cpty_example",
+                "counterpartyDisplayName": "Acme Studio",
+                "risk": {
+                  "provider": "trm",
+                  "score": "0.12",
+                  "level": "low",
+                  "evaluatedAt": "2025-01-01T00:00:00.000Z"
+                },
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-02T00:00:00.000Z"
+              }
+            ]
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "takesIdempotencyKey": true
+      },
+      "GET /v1/payments/transfer-batches/{batchId}": {
+        "id": "get-payment-transfer-batch",
+        "operationId": "getPaymentTransferBatch",
+        "title": "Get transfer batch",
+        "method": "GET",
+        "path": "/v1/payments/transfer-batches/{batchId}",
+        "pathFields": [
+          {
+            "key": "batchId",
+            "label": "{batchId}",
+            "description": "Transfer batch identifier.",
+            "defaultValue": "xbatch_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "batch": {
+              "id": "xbatch_example",
+              "organizationId": "org_example",
+              "projectId": "prj_example",
+              "externalId": "payroll_2026_06_30",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
+              "sourceAddress": "So11111111111111111111111111111111111111112",
+              "token": "SOL",
+              "status": "processing",
+              "totalAmount": "1000.00",
+              "recipientCount": 20,
+              "transactionCount": 1,
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "recipients": [
+              {
+                "id": "_example",
+                "batchId": "batch_example",
+                "transferId": "xfr_example",
+                "externalId": "payroll_row_001",
+                "counterpartyId": "cpty_example",
+                "counterpartyAccountId": "cpacct_example",
+                "destination": "So11111111111111111111111111111111111111112",
+                "amount": "100.00",
+                "status": "pending",
+                "error": "example",
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "transfers": [
+              {
+                "fireblocks": {
+                  "transactionId": "transaction_example",
+                  "status": "example",
+                  "subStatus": "example"
+                },
+                "id": "xfr_example",
+                "organizationId": "org_example",
+                "custodyWalletId": "cwlt_example",
+                "providerWalletId": "privy_wallet_123",
+                "projectId": "prj_example",
+                "type": "transfer",
+                "kind": "example",
+                "direction": "outbound",
+                "status": "confirmed",
+                "signature": "sig_example",
+                "serializedTx": "base64_tx_example",
+                "slot": 123456,
+                "blockTime": "2025-01-01T00:00:00.000Z",
+                "confirmedAt": "2025-01-01T00:00:00.000Z",
+                "fee": 0,
+                "error": "Signature failed",
+                "initiatedBy": {
+                  "type": "api_key"
+                },
+                "source": "So11111111111111111111111111111111111111112",
+                "destination": "So11111111111111111111111111111111111111112",
+                "amount": "100.00",
+                "counterpartyId": "cpty_example",
+                "counterpartyDisplayName": "Acme Studio",
+                "risk": {
+                  "provider": "trm",
+                  "score": "0.12",
+                  "level": "low",
+                  "evaluatedAt": "2025-01-01T00:00:00.000Z"
+                },
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-02T00:00:00.000Z"
+              }
+            ]
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "takesIdempotencyKey": false
+      },
+      "POST /v1/payments/recurring-payments/{id}/collect": {
+        "id": "collect-payment-recurring-payment",
+        "operationId": "collectPaymentRecurringPayment",
+        "title": "Collect recurring payment",
+        "method": "POST",
+        "path": "/v1/payments/recurring-payments/{id}/collect",
+        "pathFields": [
+          {
+            "key": "id",
+            "label": "{id}",
+            "description": "SDP recurring payment record ID.",
+            "defaultValue": "prp_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "recurringPayment": {
+              "id": "prp_example",
+              "organizationId": "org_example",
+              "projectId": "prj_example",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
+              "sourceAddress": "So11111111111111111111111111111111111111112",
+              "counterpartyId": "cpty_example",
+              "counterpartyAccountId": "cpacct_example",
+              "destinationAddress": "So11111111111111111111111111111111111111112",
+              "destinationTokenAccount": "So11111111111111111111111111111111111111112",
+              "token": "example",
+              "amount": "100.00",
+              "periodHours": 720,
+              "firstCollectionAt": "2025-01-01T00:00:00.000Z",
+              "nextCollectionDueAt": "2025-01-01T00:00:00.000Z",
+              "planId": "plan_example",
+              "subscriptionId": "subscription_example",
+              "planPda": "So11111111111111111111111111111111111111112",
+              "planCreatedAt": "example",
+              "planCreationSignature": "example",
+              "subscriptionPda": "So11111111111111111111111111111111111111112",
+              "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
+              "authorizationSignature": "example",
+              "status": "active",
+              "pausedReason": null,
+              "metadataUri": "example",
+              "createdBy": "example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "collectionAttempt": {
+              "id": "psca_example",
+              "organizationId": "org_example",
+              "projectId": "prj_example",
+              "subscriptionId": "subscription_example",
+              "transferId": "xfr_example",
+              "token": "example",
+              "amount": "100.00",
+              "dueAt": "2025-01-01T00:00:00.000Z",
+              "attemptedAt": "2025-01-01T00:00:00.000Z",
+              "status": "pending",
+              "signature": "example",
+              "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
+              "metadata": {
+                "recurringPaymentId": "recurringpayment_example",
+                "initiatedByKeyId": "initiatedbykey_example",
+                "source": "manual"
+              },
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "transfer": {
+              "fireblocks": {
+                "transactionId": "transaction_example",
+                "status": "example",
+                "subStatus": "example"
+              },
+              "id": "xfr_example",
+              "organizationId": "org_example",
+              "custodyWalletId": "cwlt_example",
+              "providerWalletId": "privy_wallet_123",
+              "projectId": "prj_example",
+              "type": "transfer",
+              "kind": "example",
+              "direction": "outbound",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "serializedTx": "base64_tx_example",
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "confirmedAt": "2025-01-01T00:00:00.000Z",
+              "fee": 0,
+              "error": "Signature failed",
+              "initiatedBy": {
+                "type": "api_key"
+              },
+              "source": "So11111111111111111111111111111111111111112",
+              "destination": "So11111111111111111111111111111111111111112",
+              "amount": "100.00",
+              "counterpartyId": "cpty_example",
+              "counterpartyDisplayName": "Acme Studio",
+              "risk": {
+                "provider": "trm",
+                "score": "0.12",
+                "level": "low",
+                "evaluatedAt": "2025-01-01T00:00:00.000Z"
+              },
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "takesIdempotencyKey": true
+      },
+      "GET /v1/transactions": {
+        "id": "list-unified-transactions",
+        "operationId": "listUnifiedTransactions",
+        "title": "List transactions",
+        "method": "GET",
+        "path": "/v1/transactions?module={module}&kind={kind}&status={status}&custodyWalletId={custodyWalletId}&counterpartyId={counterpartyId}&token={token}&search={search}&createdAtFrom={createdAtFrom}&createdAtTo={createdAtTo}&cursor={cursor}&limit={limit}",
+        "pathFields": [
+          {
+            "key": "module",
+            "label": "module",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "payments",
+                "value": "payments"
+              }
+            ]
+          },
+          {
+            "key": "kind",
+            "label": "kind",
+            "required": false
+          },
+          {
+            "key": "status",
+            "label": "status",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "pending",
+                "value": "pending"
+              },
+              {
+                "label": "succeeded",
+                "value": "succeeded"
+              },
+              {
+                "label": "failed",
+                "value": "failed"
+              },
+              {
+                "label": "canceled",
+                "value": "canceled"
+              }
+            ]
+          },
+          {
+            "key": "custodyWalletId",
+            "label": "custodyWalletId",
+            "required": false
+          },
+          {
+            "key": "counterpartyId",
+            "label": "counterpartyId",
+            "required": false
+          },
+          {
+            "key": "token",
+            "label": "token",
+            "required": false
+          },
+          {
+            "key": "search",
+            "label": "search",
+            "description": "Prefix match against transaction id, module id, or signature — not a substring search.",
+            "required": false
+          },
+          {
+            "key": "createdAtFrom",
+            "label": "createdAtFrom",
+            "required": false
+          },
+          {
+            "key": "createdAtTo",
+            "label": "createdAtTo",
+            "required": false
+          },
+          {
+            "key": "cursor",
+            "label": "cursor",
+            "required": false
+          },
+          {
+            "key": "limit",
+            "label": "limit",
+            "defaultValue": "50",
+            "required": false,
+            "valueType": "number"
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "transactions": [
+              {
+                "id": "_example",
+                "moduleId": "module_example",
+                "status": "pending",
+                "organizationId": "organization_example",
+                "projectId": "project_example",
+                "custodyWalletId": "custodywallet_example",
+                "custodyWalletLabel": "example",
+                "token": "example",
+                "amount": "example",
+                "counterpartyId": "counterparty_example",
+                "signature": "example",
+                "createdAt": "example",
+                "module": "payments",
+                "kind": "example",
+                "moduleStatus": "pending"
+              }
+            ],
+            "nextCursor": "example"
+          }
+        },
+        "takesIdempotencyKey": false
+      }
+    },
+    "stable": {
+      "GET /v1/wallets": {
+        "id": "list-wallets",
+        "operationId": "listWallets",
+        "title": "List wallets",
+        "method": "GET",
+        "path": "/v1/wallets?provider={provider}&includeBalances={includeBalances}&view={view}",
+        "pathFields": [
+          {
+            "key": "provider",
+            "label": "provider",
+            "description": "Wallet signing provider.",
+            "defaultValue": "privy",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "privy",
+                "value": "privy"
+              }
+            ]
+          },
+          {
+            "key": "includeBalances",
+            "label": "includeBalances",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "true",
+                "value": "true"
+              },
+              {
+                "label": "false",
+                "value": "false"
+              }
+            ],
+            "valueType": "boolean"
+          },
+          {
+            "key": "view",
+            "label": "view",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "summary",
+                "value": "summary"
+              }
+            ]
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "wallets": [
+              {
+                "id": "cwlt_example",
+                "custodyConfigId": "cfg_example",
+                "provider": "privy",
+                "isRuntimeExecutionAllowed": true,
+                "walletId": "privy_wallet_123",
+                "publicKey": "So11111111111111111111111111111111111111112",
+                "label": "Treasury wallet",
+                "purpose": "transfer",
+                "status": "active",
+                "createdAt": "2025-01-01T00:00:00.000Z"
+              }
+            ]
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "takesIdempotencyKey": false
+      },
+      "GET /v1/wallets/aggregate": {
+        "id": "aggregate-wallet-balances",
+        "operationId": "aggregateWalletBalances",
+        "title": "Aggregate wallet balances",
+        "method": "GET",
+        "path": "/v1/wallets/aggregate?provider={provider}",
+        "pathFields": [
+          {
+            "key": "provider",
+            "label": "provider",
+            "description": "Wallet signing provider.",
+            "defaultValue": "privy",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "privy",
+                "value": "privy"
+              }
+            ]
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "aggregate": {
+              "walletCount": 3,
+              "balances": [
+                {
+                  "token": "USDC",
+                  "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+                  "amount": "1250000",
+                  "uiAmount": "1.25",
+                  "decimals": 6,
+                  "usdPrice": 1,
+                  "usdValue": 125.5
+                }
+              ]
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "takesIdempotencyKey": false
+      },
+      "POST /v1/payments/transfers": {
+        "id": "create-payment-transfer",
+        "operationId": "createPaymentTransfer",
+        "title": "Execute transfer (custody)",
+        "method": "POST",
+        "path": "/v1/payments/transfers",
+        "pathFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transfer": {
+              "id": "xfr_example",
+              "organizationId": "org_example",
+              "custodyWalletId": "cwlt_example",
+              "providerWalletId": "privy_wallet_123",
+              "projectId": "prj_example",
+              "type": "transfer",
+              "kind": "example",
+              "direction": "outbound",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "serializedTx": "base64_tx_example",
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "confirmedAt": "2025-01-01T00:00:00.000Z",
+              "fee": 0,
+              "error": "Signature failed",
+              "initiatedBy": {
+                "type": "api_key"
+              },
+              "source": "So11111111111111111111111111111111111111112",
+              "destination": "So11111111111111111111111111111111111111112",
+              "amount": "100.00",
+              "counterpartyId": "cpty_example",
+              "counterpartyDisplayName": "Acme Studio",
+              "risk": {
+                "provider": "trm",
+                "score": "0.12",
+                "level": "low",
+                "evaluatedAt": "2025-01-01T00:00:00.000Z"
+              },
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "takesIdempotencyKey": true
+      },
+      "GET /v1/payments/transfers": {
+        "id": "list-payment-transfers",
+        "operationId": "listPaymentTransfers",
+        "title": "List transfers",
+        "method": "GET",
+        "path": "/v1/payments/transfers?custodyWalletId={custodyWalletId}&search={search}&token={token}&direction={direction}&status={status}&category={category}&type={type}&counterpartyId={counterpartyId}&from={from}&to={to}&includeObserved={includeObserved}&sortBy={sortBy}&sortDirection={sortDirection}&page={page}&pageSize={pageSize}",
+        "pathFields": [
+          {
+            "key": "custodyWalletId",
+            "label": "custodyWalletId",
+            "description": "Filter persisted transfers by exact SDP Wallet ID.",
+            "defaultValue": "cwlt_example",
+            "required": false
+          },
+          {
+            "key": "search",
+            "label": "search",
+            "description": "Search transfer ID, signature, source or destination address, memo, counterparty ID, or counterparty display name. Use at least 3 non-whitespace characters; a blank value is treated as no search filter.",
+            "defaultValue": "xfr_example",
+            "required": false
+          },
+          {
+            "key": "token",
+            "label": "token",
+            "description": "Filter by token symbol or mint.",
+            "defaultValue": "USDC",
+            "required": false
+          },
+          {
+            "key": "direction",
+            "label": "direction",
+            "description": "Filter by transfer direction.",
+            "defaultValue": "outbound",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "inbound",
+                "value": "inbound"
+              },
+              {
+                "label": "outbound",
+                "value": "outbound"
+              }
+            ]
+          },
+          {
+            "key": "status",
+            "label": "status",
+            "description": "Filter by transfer status. Accepts a comma-separated list of statuses.",
+            "defaultValue": "confirmed,finalized",
+            "required": false
+          },
+          {
+            "key": "category",
+            "label": "category",
+            "description": "Filter by transfer category.",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "wallet",
+                "value": "wallet"
+              }
+            ]
+          },
+          {
+            "key": "type",
+            "label": "type",
+            "description": "Filter by one or more comma-separated transfer types.",
+            "defaultValue": "transfer,transfer_batch",
+            "required": false
+          },
+          {
+            "key": "counterpartyId",
+            "label": "counterpartyId",
+            "description": "Filter transfers tied to a specific counterparty.",
+            "defaultValue": "cpty_example",
+            "required": false
+          },
+          {
+            "key": "from",
+            "label": "from",
+            "description": "Filter from timestamp.",
+            "defaultValue": "2025-01-01T00:00:00.000Z",
+            "required": false
+          },
+          {
+            "key": "to",
+            "label": "to",
+            "description": "Filter to timestamp.",
+            "defaultValue": "2025-01-02T00:00:00.000Z",
+            "required": false
+          },
+          {
+            "key": "includeObserved",
+            "label": "includeObserved",
+            "description": "When custodyWalletId is supplied, also include RPC-observed activity for that exact wallet row's address. Observed rows have custodyWalletId null.",
+            "defaultValue": "false",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "true",
+                "value": "true"
+              },
+              {
+                "label": "false",
+                "value": "false"
+              }
+            ]
+          },
+          {
+            "key": "sortBy",
+            "label": "sortBy",
+            "description": "Field used to sort the transfer list.",
+            "defaultValue": "createdAt",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "createdAt",
+                "value": "createdAt"
+              },
+              {
+                "label": "updatedAt",
+                "value": "updatedAt"
+              },
+              {
+                "label": "amount",
+                "value": "amount"
+              },
+              {
+                "label": "status",
+                "value": "status"
+              }
+            ]
+          },
+          {
+            "key": "sortDirection",
+            "label": "sortDirection",
+            "description": "Sort direction.",
+            "defaultValue": "desc",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "asc",
+                "value": "asc"
+              },
+              {
+                "label": "desc",
+                "value": "desc"
+              }
+            ]
+          },
+          {
+            "key": "page",
+            "label": "page",
+            "description": "Page number (1-based).",
+            "defaultValue": "1",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "pageSize",
+            "label": "pageSize",
+            "description": "Items per page.",
+            "defaultValue": "20",
+            "required": false,
+            "valueType": "number"
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": [
+            {
+              "id": "xfr_example",
+              "organizationId": "org_example",
+              "custodyWalletId": "cwlt_example",
+              "providerWalletId": "privy_wallet_123",
+              "projectId": "prj_example",
+              "type": "transfer",
+              "kind": "example",
+              "direction": "outbound",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "serializedTx": "base64_tx_example",
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "confirmedAt": "2025-01-01T00:00:00.000Z",
+              "fee": 0,
+              "error": "Signature failed",
+              "initiatedBy": {
+                "type": "api_key"
+              },
+              "source": "So11111111111111111111111111111111111111112",
+              "destination": "So11111111111111111111111111111111111111112",
+              "amount": "100.00",
+              "counterpartyId": "cpty_example",
+              "counterpartyDisplayName": "Acme Studio",
+              "risk": {
+                "provider": "trm",
+                "score": "0.12",
+                "level": "low",
+                "evaluatedAt": "2025-01-01T00:00:00.000Z"
+              },
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          ],
+          "meta": {
+            "total": 1,
+            "page": 1,
+            "pageSize": 1,
+            "hasMore": false,
+            "requestId": "req_example"
+          }
+        },
+        "takesIdempotencyKey": false
+      },
+      "GET /v1/payments/transfers/{transferId}": {
+        "id": "get-payment-transfer",
+        "operationId": "getPaymentTransfer",
+        "title": "Get transfer",
+        "method": "GET",
+        "path": "/v1/payments/transfers/{transferId}",
+        "pathFields": [
+          {
+            "key": "transferId",
+            "label": "{transferId}",
+            "description": "Transfer identifier (SDP record ID, not the on-chain signature).",
+            "defaultValue": "xfr_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "transfer": {
+              "id": "xfr_example",
+              "organizationId": "org_example",
+              "custodyWalletId": "cwlt_example",
+              "providerWalletId": "privy_wallet_123",
+              "projectId": "prj_example",
+              "type": "transfer",
+              "kind": "example",
+              "direction": "outbound",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "serializedTx": "base64_tx_example",
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "confirmedAt": "2025-01-01T00:00:00.000Z",
+              "fee": 0,
+              "error": "Signature failed",
+              "initiatedBy": {
+                "type": "api_key"
+              },
+              "source": "So11111111111111111111111111111111111111112",
+              "destination": "So11111111111111111111111111111111111111112",
+              "amount": "100.00",
+              "counterpartyId": "cpty_example",
+              "counterpartyDisplayName": "Acme Studio",
+              "risk": {
+                "provider": "trm",
+                "score": "0.12",
+                "level": "low",
+                "evaluatedAt": "2025-01-01T00:00:00.000Z"
+              },
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "takesIdempotencyKey": false
+      },
+      "POST /v1/payments/transfer-batches": {
+        "id": "create-payment-transfer-batch",
+        "operationId": "createPaymentTransferBatch",
+        "title": "Create transfer batch",
+        "method": "POST",
+        "path": "/v1/payments/transfer-batches",
+        "pathFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpacct_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"externalId\": \"payroll_2026_06_30\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "batch": {
+              "id": "xbatch_example",
+              "organizationId": "org_example",
+              "projectId": "prj_example",
+              "externalId": "payroll_2026_06_30",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
+              "sourceAddress": "So11111111111111111111111111111111111111112",
+              "token": "SOL",
+              "status": "processing",
+              "totalAmount": "1000.00",
+              "recipientCount": 20,
+              "transactionCount": 1,
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "recipients": [
+              {
+                "id": "_example",
+                "batchId": "batch_example",
+                "transferId": "xfr_example",
+                "externalId": "payroll_row_001",
+                "counterpartyId": "cpty_example",
+                "counterpartyAccountId": "cpacct_example",
+                "destination": "So11111111111111111111111111111111111111112",
+                "amount": "100.00",
+                "status": "pending",
+                "error": "example",
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "transfers": [
+              {
+                "id": "xfr_example",
+                "organizationId": "org_example",
+                "custodyWalletId": "cwlt_example",
+                "providerWalletId": "privy_wallet_123",
+                "projectId": "prj_example",
+                "type": "transfer",
+                "kind": "example",
+                "direction": "outbound",
+                "status": "confirmed",
+                "signature": "sig_example",
+                "serializedTx": "base64_tx_example",
+                "slot": 123456,
+                "blockTime": "2025-01-01T00:00:00.000Z",
+                "confirmedAt": "2025-01-01T00:00:00.000Z",
+                "fee": 0,
+                "error": "Signature failed",
+                "initiatedBy": {
+                  "type": "api_key"
+                },
+                "source": "So11111111111111111111111111111111111111112",
+                "destination": "So11111111111111111111111111111111111111112",
+                "amount": "100.00",
+                "counterpartyId": "cpty_example",
+                "counterpartyDisplayName": "Acme Studio",
+                "risk": {
+                  "provider": "trm",
+                  "score": "0.12",
+                  "level": "low",
+                  "evaluatedAt": "2025-01-01T00:00:00.000Z"
+                },
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-02T00:00:00.000Z"
+              }
+            ]
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "takesIdempotencyKey": true
+      },
+      "POST /v1/payments/transfer-batches/{batchId}/retry": {
+        "id": "retry-payment-transfer-batch",
+        "operationId": "retryPaymentTransferBatch",
+        "title": "Retry a transfer batch's failed recipients",
+        "method": "POST",
+        "path": "/v1/payments/transfer-batches/{batchId}/retry",
+        "pathFields": [
+          {
+            "key": "batchId",
+            "label": "{batchId}",
+            "description": "Transfer batch identifier.",
+            "defaultValue": "xbatch_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "batch": {
+              "id": "xbatch_example",
+              "organizationId": "org_example",
+              "projectId": "prj_example",
+              "externalId": "payroll_2026_06_30",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
+              "sourceAddress": "So11111111111111111111111111111111111111112",
+              "token": "SOL",
+              "status": "processing",
+              "totalAmount": "1000.00",
+              "recipientCount": 20,
+              "transactionCount": 1,
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "recipients": [
+              {
+                "id": "_example",
+                "batchId": "batch_example",
+                "transferId": "xfr_example",
+                "externalId": "payroll_row_001",
+                "counterpartyId": "cpty_example",
+                "counterpartyAccountId": "cpacct_example",
+                "destination": "So11111111111111111111111111111111111111112",
+                "amount": "100.00",
+                "status": "pending",
+                "error": "example",
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "transfers": [
+              {
+                "id": "xfr_example",
+                "organizationId": "org_example",
+                "custodyWalletId": "cwlt_example",
+                "providerWalletId": "privy_wallet_123",
+                "projectId": "prj_example",
+                "type": "transfer",
+                "kind": "example",
+                "direction": "outbound",
+                "status": "confirmed",
+                "signature": "sig_example",
+                "serializedTx": "base64_tx_example",
+                "slot": 123456,
+                "blockTime": "2025-01-01T00:00:00.000Z",
+                "confirmedAt": "2025-01-01T00:00:00.000Z",
+                "fee": 0,
+                "error": "Signature failed",
+                "initiatedBy": {
+                  "type": "api_key"
+                },
+                "source": "So11111111111111111111111111111111111111112",
+                "destination": "So11111111111111111111111111111111111111112",
+                "amount": "100.00",
+                "counterpartyId": "cpty_example",
+                "counterpartyDisplayName": "Acme Studio",
+                "risk": {
+                  "provider": "trm",
+                  "score": "0.12",
+                  "level": "low",
+                  "evaluatedAt": "2025-01-01T00:00:00.000Z"
+                },
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-02T00:00:00.000Z"
+              }
+            ]
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "takesIdempotencyKey": true
+      },
+      "GET /v1/payments/transfer-batches/{batchId}": {
+        "id": "get-payment-transfer-batch",
+        "operationId": "getPaymentTransferBatch",
+        "title": "Get transfer batch",
+        "method": "GET",
+        "path": "/v1/payments/transfer-batches/{batchId}",
+        "pathFields": [
+          {
+            "key": "batchId",
+            "label": "{batchId}",
+            "description": "Transfer batch identifier.",
+            "defaultValue": "xbatch_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "batch": {
+              "id": "xbatch_example",
+              "organizationId": "org_example",
+              "projectId": "prj_example",
+              "externalId": "payroll_2026_06_30",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
+              "sourceAddress": "So11111111111111111111111111111111111111112",
+              "token": "SOL",
+              "status": "processing",
+              "totalAmount": "1000.00",
+              "recipientCount": 20,
+              "transactionCount": 1,
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "recipients": [
+              {
+                "id": "_example",
+                "batchId": "batch_example",
+                "transferId": "xfr_example",
+                "externalId": "payroll_row_001",
+                "counterpartyId": "cpty_example",
+                "counterpartyAccountId": "cpacct_example",
+                "destination": "So11111111111111111111111111111111111111112",
+                "amount": "100.00",
+                "status": "pending",
+                "error": "example",
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "transfers": [
+              {
+                "id": "xfr_example",
+                "organizationId": "org_example",
+                "custodyWalletId": "cwlt_example",
+                "providerWalletId": "privy_wallet_123",
+                "projectId": "prj_example",
+                "type": "transfer",
+                "kind": "example",
+                "direction": "outbound",
+                "status": "confirmed",
+                "signature": "sig_example",
+                "serializedTx": "base64_tx_example",
+                "slot": 123456,
+                "blockTime": "2025-01-01T00:00:00.000Z",
+                "confirmedAt": "2025-01-01T00:00:00.000Z",
+                "fee": 0,
+                "error": "Signature failed",
+                "initiatedBy": {
+                  "type": "api_key"
+                },
+                "source": "So11111111111111111111111111111111111111112",
+                "destination": "So11111111111111111111111111111111111111112",
+                "amount": "100.00",
+                "counterpartyId": "cpty_example",
+                "counterpartyDisplayName": "Acme Studio",
+                "risk": {
+                  "provider": "trm",
+                  "score": "0.12",
+                  "level": "low",
+                  "evaluatedAt": "2025-01-01T00:00:00.000Z"
+                },
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-02T00:00:00.000Z"
+              }
+            ]
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "takesIdempotencyKey": false
+      },
+      "POST /v1/payments/recurring-payments/{id}/collect": {
+        "id": "collect-payment-recurring-payment",
+        "operationId": "collectPaymentRecurringPayment",
+        "title": "Collect recurring payment",
+        "method": "POST",
+        "path": "/v1/payments/recurring-payments/{id}/collect",
+        "pathFields": [
+          {
+            "key": "id",
+            "label": "{id}",
+            "description": "SDP recurring payment record ID.",
+            "defaultValue": "prp_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "recurringPayment": {
+              "id": "prp_example",
+              "organizationId": "org_example",
+              "projectId": "prj_example",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
+              "sourceAddress": "So11111111111111111111111111111111111111112",
+              "counterpartyId": "cpty_example",
+              "counterpartyAccountId": "cpacct_example",
+              "destinationAddress": "So11111111111111111111111111111111111111112",
+              "destinationTokenAccount": "So11111111111111111111111111111111111111112",
+              "token": "example",
+              "amount": "100.00",
+              "periodHours": 720,
+              "firstCollectionAt": "2025-01-01T00:00:00.000Z",
+              "nextCollectionDueAt": "2025-01-01T00:00:00.000Z",
+              "planId": "plan_example",
+              "subscriptionId": "subscription_example",
+              "planPda": "So11111111111111111111111111111111111111112",
+              "planCreatedAt": "example",
+              "planCreationSignature": "example",
+              "subscriptionPda": "So11111111111111111111111111111111111111112",
+              "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
+              "authorizationSignature": "example",
+              "status": "active",
+              "pausedReason": null,
+              "metadataUri": "example",
+              "createdBy": "example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "collectionAttempt": {
+              "id": "psca_example",
+              "organizationId": "org_example",
+              "projectId": "prj_example",
+              "subscriptionId": "subscription_example",
+              "transferId": "xfr_example",
+              "token": "example",
+              "amount": "100.00",
+              "dueAt": "2025-01-01T00:00:00.000Z",
+              "attemptedAt": "2025-01-01T00:00:00.000Z",
+              "status": "pending",
+              "signature": "example",
+              "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
+              "metadata": {
+                "recurringPaymentId": "recurringpayment_example",
+                "initiatedByKeyId": "initiatedbykey_example",
+                "source": "manual"
+              },
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "transfer": {
+              "id": "xfr_example",
+              "organizationId": "org_example",
+              "custodyWalletId": "cwlt_example",
+              "providerWalletId": "privy_wallet_123",
+              "projectId": "prj_example",
+              "type": "transfer",
+              "kind": "example",
+              "direction": "outbound",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "serializedTx": "base64_tx_example",
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "confirmedAt": "2025-01-01T00:00:00.000Z",
+              "fee": 0,
+              "error": "Signature failed",
+              "initiatedBy": {
+                "type": "api_key"
+              },
+              "source": "So11111111111111111111111111111111111111112",
+              "destination": "So11111111111111111111111111111111111111112",
+              "amount": "100.00",
+              "counterpartyId": "cpty_example",
+              "counterpartyDisplayName": "Acme Studio",
+              "risk": {
+                "provider": "trm",
+                "score": "0.12",
+                "level": "low",
+                "evaluatedAt": "2025-01-01T00:00:00.000Z"
+              },
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "takesIdempotencyKey": true
+      },
+      "GET /v1/transactions": {
+        "id": "list-unified-transactions",
+        "operationId": "listUnifiedTransactions",
+        "title": "List transactions",
+        "method": "GET",
+        "path": "/v1/transactions?module={module}&kind={kind}&status={status}&custodyWalletId={custodyWalletId}&counterpartyId={counterpartyId}&token={token}&search={search}&createdAtFrom={createdAtFrom}&createdAtTo={createdAtTo}&cursor={cursor}&limit={limit}",
+        "pathFields": [
+          {
+            "key": "module",
+            "label": "module",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "payments",
+                "value": "payments"
+              }
+            ]
+          },
+          {
+            "key": "kind",
+            "label": "kind",
+            "required": false
+          },
+          {
+            "key": "status",
+            "label": "status",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "pending",
+                "value": "pending"
+              },
+              {
+                "label": "succeeded",
+                "value": "succeeded"
+              },
+              {
+                "label": "failed",
+                "value": "failed"
+              },
+              {
+                "label": "canceled",
+                "value": "canceled"
+              }
+            ]
+          },
+          {
+            "key": "custodyWalletId",
+            "label": "custodyWalletId",
+            "required": false
+          },
+          {
+            "key": "counterpartyId",
+            "label": "counterpartyId",
+            "required": false
+          },
+          {
+            "key": "token",
+            "label": "token",
+            "required": false
+          },
+          {
+            "key": "search",
+            "label": "search",
+            "description": "Prefix match against transaction id, module id, or signature — not a substring search.",
+            "required": false
+          },
+          {
+            "key": "createdAtFrom",
+            "label": "createdAtFrom",
+            "required": false
+          },
+          {
+            "key": "createdAtTo",
+            "label": "createdAtTo",
+            "required": false
+          },
+          {
+            "key": "cursor",
+            "label": "cursor",
+            "required": false
+          },
+          {
+            "key": "limit",
+            "label": "limit",
+            "defaultValue": "50",
+            "required": false,
+            "valueType": "number"
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "transactions": [
+              {
+                "id": "_example",
+                "moduleId": "module_example",
+                "status": "pending",
+                "organizationId": "organization_example",
+                "projectId": "project_example",
+                "custodyWalletId": "custodywallet_example",
+                "custodyWalletLabel": "example",
+                "token": "example",
+                "amount": "example",
+                "counterpartyId": "counterparty_example",
+                "signature": "example",
+                "createdAt": "example",
+                "module": "payments",
+                "kind": "example",
+                "moduleStatus": "pending"
+              }
+            ],
+            "nextCursor": "example"
+          }
+        },
+        "takesIdempotencyKey": false
+      }
     }
   }
 }

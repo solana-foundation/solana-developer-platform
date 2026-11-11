@@ -1,0 +1,105 @@
+// @vitest-environment jsdom
+/**
+ * What `createTransfer` makes of each answer.
+ *
+ * A 202 is inside `response.ok` and is NOT a transfer: a wallet policy parked
+ * the payment until somebody approves it. Reading it as a transfer is what
+ * turned a held payment into "Transfer failed" and invited a second send.
+ */
+
+import { address } from "@solana/kit";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createTransfer, TransferRequestError, type Translate } from "./payments-workspace.data";
+
+const t: Translate = (key) => key;
+
+const SUBMISSION = {
+  sourceCustodyWalletId: "cwlt_1",
+  destination: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+  token: address("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"),
+  amount: "250",
+};
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("createTransfer", () => {
+  it("sends the idempotency key as a header, never in the body", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const transfer = await createTransfer(SUBMISSION, t, { value: "key_1", persisted: true });
+
+    expect(transfer).toEqual({ id: "xfr_1", status: "confirmed" });
+    const init = fetchMock.mock.calls[0][1];
+    expect(init).toBeDefined();
+    expect(new Headers(init?.headers).get("Idempotency-Key")).toBe("key_1");
+    expect(JSON.parse(String(init?.body))).not.toHaveProperty("idempotencyKey");
+  });
+
+  it("gives a caller without its own key a per-action key", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createTransfer({ ...SUBMISSION, transferId: "xfr_ramp" }, t, null);
+
+    const init = fetchMock.mock.calls[0][1];
+    expect(init).toBeDefined();
+    // Transfers require a key (HOO-1918), so a single-shot caller gets one for
+    // its action from dashboardRequest.
+    expect(new Headers(init?.headers).get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
+    expect(JSON.parse(String(init?.body)).transferId).toBe("xfr_ramp");
+  });
+
+  it("names the contact account the destination belongs to, and only when given", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createTransfer({ ...SUBMISSION, counterpartyAccountId: "cpacct_1" }, t, {
+      value: "key_1",
+      persisted: true,
+    });
+    await createTransfer(SUBMISSION, t, { value: "key_2", persisted: true });
+
+    const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(bodies[0].counterpartyAccountId).toBe("cpacct_1");
+    expect(bodies[1]).not.toHaveProperty("counterpartyAccountId");
+  });
+
+  it("refuses a success answer that carries no transfer", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ data: {} }))
+    );
+
+    await expect(
+      createTransfer(SUBMISSION, t, { value: "key_1", persisted: true })
+    ).rejects.toThrow("DashboardPayments.workspace.transferMissing");
+  });
+
+  // The status decides the key's fate, so the error has to carry it.
+  it("throws the API's message with its status", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ error: { message: "over the limit" } }, { status: 422 }))
+    );
+
+    await expect(
+      createTransfer(SUBMISSION, t, { value: "key_1", persisted: true })
+    ).rejects.toMatchObject({
+      name: "TransferRequestError",
+      message: "over the limit",
+      status: 422,
+    });
+    await expect(
+      createTransfer(SUBMISSION, t, { value: "key_1", persisted: true })
+    ).rejects.toBeInstanceOf(TransferRequestError);
+  });
+});

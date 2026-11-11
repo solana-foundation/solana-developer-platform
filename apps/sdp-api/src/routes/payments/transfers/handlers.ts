@@ -33,6 +33,7 @@ import {
   getTransactionEncoder,
   type Instruction,
   pipe,
+  type Signature,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
   type TransactionSigner,
@@ -42,6 +43,7 @@ import { getTransferSolInstruction } from "@solana-program/system";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
+import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
 import {
   generatePaymentTransferId,
   type PaymentTransferDirection as TransferDirection,
@@ -84,7 +86,11 @@ import {
   isModuleInChannel,
 } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { type AppContext, getPaymentsRepository } from "@/routes/payments/context";
+import {
+  type AppContext,
+  getCounterpartyAccountsRepository,
+  getPaymentsRepository,
+} from "@/routes/payments/context";
 import { mapTransferRow } from "@/routes/payments/mappers";
 import { transferIdParamsSchema } from "@/routes/payments/schemas";
 import {
@@ -101,7 +107,14 @@ import {
 } from "@/routes/payments/wallets";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
-import { AuditService } from "@/services/audit.service";
+import {
+  type AuditIntent,
+  type AuditLogEntry,
+  AuditService,
+  type CriticalOutcome,
+  criticalOutcomeEntry,
+} from "@/services/audit.service";
+import { callerInsufficientFundsError } from "@/services/fee-payment-errors";
 import {
   assertPaymentProjectScope,
   isNativePaymentToken,
@@ -109,6 +122,7 @@ import {
   type OutboundPaymentOperation,
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
+import { readSolanaCryptoWalletAddress } from "@/services/payments/counterparty-account-resolution";
 import {
   isFireblocksTransfer,
   prepareFireblocksTransfer,
@@ -118,6 +132,7 @@ import {
 import { signWithFreshBlockhash } from "@/services/payments/sign-with-fresh-blockhash";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import { assertNoSolRentShortfall } from "@/services/payments/sol-rent-minimum";
+import { SPONSORED_WALLET_FEE_LAMPORTS } from "@/services/payments/sponsored-fee";
 import { loadPaymentMint, parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
@@ -139,6 +154,15 @@ import {
 } from "./observed-transfers";
 import { type createTransferSchema, listTransfersQuerySchema } from "./schemas";
 
+/**
+ * The fee a new transfer row records before broadcast: a sponsored send's 0, so a row the
+ * recovery job confirms keeps it too. A Fireblocks vault pays its own fee, recorded once
+ * Fireblocks reports it.
+ */
+function walletFeeAtCreation(isFireblocks: boolean): number | undefined {
+  return isFireblocks ? undefined : SPONSORED_WALLET_FEE_LAMPORTS;
+}
+
 async function createTransferRecord(
   c: AppContext,
   input: {
@@ -146,6 +170,8 @@ async function createTransferRecord(
     projectId: string;
     custodyWalletId: string;
     walletId: string;
+    /** The contact the transfer pays, when the request named one of its accounts. */
+    counterpartyId: string | null;
     sourceAddress: string;
     destinationAddress: string;
     token: string;
@@ -163,6 +189,8 @@ async function createTransferRecord(
      */
     idempotency: { key: string; fingerprint: string } | null;
     providerData?: Record<string, unknown>;
+    /** The network fee the source wallet will pay, when known before broadcast. */
+    fee?: number | null;
   }
 ): Promise<{ row: TransferRow; replayed: boolean }> {
   const idempotencyKey = input.idempotency?.key ?? null;
@@ -176,7 +204,7 @@ async function createTransferRecord(
       projectId: input.projectId,
       custodyWalletId: input.custodyWalletId,
       walletId: input.walletId,
-      counterpartyId: null,
+      counterpartyId: input.counterpartyId,
       sourceAddress: input.sourceAddress,
       destinationAddress: input.destinationAddress,
       token: input.token,
@@ -194,6 +222,7 @@ async function createTransferRecord(
       serializedTx: input.serializedTx ?? null,
       signature: null,
       slot: null,
+      fee: input.fee ?? null,
       initiatedByKeyId: input.initiatedByKeyId ?? null,
       idempotencyKey,
       idempotencyFingerprint: input.idempotency?.fingerprint ?? null,
@@ -233,6 +262,8 @@ interface TransferResolved {
   operation: OutboundPaymentOperation;
   /** The ramp deposit a `transferId` request funds, in the caller's project, whatever its state. */
   rampTransfer: TransferRow | null;
+  /** The contact account `counterpartyAccountId` names, in the caller's project, whatever its state. */
+  counterpartyAccount: CounterpartyAccountRow | null;
 }
 
 function rampTransferHasOnchainValues(transfer: TransferRow): boolean {
@@ -376,12 +407,13 @@ async function updateOnchainTransferForRamp(
 
 /**
  * The create-transfer access check (HOO-1918, ADR 0009): the caller may move
- * money from the named source wallet, read fresh, in its own project. It runs
- * before the Idempotency-Key is claimed, so a replay passes exactly these
- * checks. A wallet deactivated since a request ran still passes here (a replay
- * moves nothing); admission refuses new work on it.
+ * money from the named source wallet, read fresh, in its own project, and a
+ * named contact account is in that project. It runs before the Idempotency-Key
+ * is claimed, so a replay passes exactly these checks. A wallet deactivated, or
+ * an account archived, since a request ran still passes here (a replay moves
+ * nothing); admission refuses new work on either.
  *
- * @returns The resolved scope and outbound operation, for the later steps.
+ * @returns The resolved scope, outbound operation and named contact account, for the later steps.
  */
 export async function authorizeTransfer(
   c: AppContext,
@@ -414,7 +446,48 @@ export async function authorizeTransfer(
     });
     if (!rampTransfer) throw notFound("Ramp transfer");
   }
-  return { scope, operation, rampTransfer };
+  // A contact account is named the same way: in the project, any status, as a batch checks its
+  // recipients. A ramp deposit already carries its counterparty, so the two never combine.
+  let counterpartyAccount: CounterpartyAccountRow | null = null;
+  if (body.counterpartyAccountId) {
+    if (body.transferId) {
+      throw badRequest("counterpartyAccountId cannot be combined with transferId");
+    }
+    const [account] = await getCounterpartyAccountsRepository(
+      c
+    ).listCounterpartyAccountsByIdsInProject({
+      counterpartyAccountIds: [body.counterpartyAccountId],
+      organizationId: scope.auth.organizationId,
+      projectId: requireProjectId(c),
+      status: "any",
+    });
+    if (!account) throw notFound(`Counterparty account ${body.counterpartyAccountId}`);
+    counterpartyAccount = account;
+  }
+  return { scope, operation, rampTransfer, counterpartyAccount };
+}
+
+/**
+ * Checks, as new work, that the contact account a transfer names can still be paid at its
+ * destination: active (archived since is a 404, as for a batch recipient), a Solana wallet,
+ * and the very address the request sends to, so the record never ties a payment to a contact
+ * it did not go to.
+ *
+ * @param account - The account authorize loaded.
+ * @param destination - The request's destination address.
+ * @throws AppError 404 when the account is no longer active, 400 when it is not the destination's.
+ */
+function assertCounterpartyAccountPaysDestination(
+  account: CounterpartyAccountRow,
+  destination: string
+): void {
+  if (account.status !== "active") throw notFound(`Counterparty account ${account.id}`);
+  if (account.account_kind !== "crypto_wallet") {
+    throw badRequest("counterpartyAccountId must be a crypto wallet account");
+  }
+  if (readSolanaCryptoWalletAddress(account.details) !== destination) {
+    throw badRequest("destination must be the address of the counterpartyAccountId account");
+  }
 }
 
 /**
@@ -426,10 +499,16 @@ export async function admitTransferExecution(
   c: AppContext,
   input: MovementStepInput<TransferResolved>
 ): Promise<void> {
-  const { rampTransfer } = input.authorized;
+  const { rampTransfer, counterpartyAccount } = input.authorized;
   if (rampTransfer) {
     // An excluded provider's deposit is never funded.
     assertTransferRampProviderInChannel(c, rampTransfer);
+  }
+  if (counterpartyAccount) {
+    assertCounterpartyAccountPaysDestination(
+      counterpartyAccount,
+      input.authorized.operation.destinationAddress
+    );
   }
   await admitPaymentStart(c, input.authorized.operation.sourceWallet, "payments.transfer");
 }
@@ -590,23 +669,67 @@ function logSubmittedUnconfirmed(transfer: TransferRow, signature: string | null
   });
 }
 
+/** The open audit intent a failed send closes, and the outcome it closes with. */
+interface ClosingTransferAudit {
+  service: AuditService;
+  intent: AuditIntent;
+  outcome: CriticalOutcome;
+}
+
 /**
  * An off-ramp deposit that failed before SDP recorded signed bytes moved
  * nothing, so its sale goes back to awaiting the deposit instead of failing.
- * False when the row holds anything a broadcast could have used.
+ * False when the row holds anything a broadcast could have used. With `audit`,
+ * the release and the attempt's audit outcome commit in one ledger transaction:
+ * a released row is claimable again, and the next claim records its own intent
+ * over this one. A ledger failure keeps the claim, and the caller fails the row.
  */
 async function releaseUnsentRampDeposit(
   c: AppContext,
   transfer: TransferRow,
-  cause: unknown
+  cause: unknown,
+  audit?: ClosingTransferAudit
 ): Promise<boolean> {
   if (transfer.type !== "offramp") return false;
-  const released = await getPaymentsRepository(c).releaseOfframpDepositClaim({
+  const release = {
     transferId: transfer.id,
     organizationId: transfer.organization_id,
     projectId: transfer.project_id,
     updatedAt: new Date().toISOString(),
-  });
+  };
+  let released: TransferRow | null;
+  if (audit === undefined) {
+    released = await getPaymentsRepository(c).releaseOfframpDepositClaim(release);
+  } else {
+    try {
+      released = await audit.service.logWithin(c, async (tx) => {
+        const payments = createPostgresPaymentsRepository(tx, getRequestTenantScope(c));
+        const row = await payments.releaseOfframpDepositClaim(release);
+        const closed =
+          row !== null &&
+          (await payments.closeTransferAuditIntent({
+            transferId: transfer.id,
+            organizationId: transfer.organization_id,
+            projectId: transfer.project_id,
+            auditIntentId: audit.intent.id,
+          }));
+        return {
+          entry: closed ? criticalOutcomeEntry(audit.intent, audit.outcome) : null,
+          result: row,
+        };
+      });
+    } catch (error) {
+      logEvent("warn", {
+        event: "sdp_api_ramp_deposit_release_unaudited",
+        provider: transfer.provider,
+        organization_id: transfer.organization_id,
+        project_id: transfer.project_id,
+        transfer_id: transfer.id,
+        ...describeError(error),
+      });
+      return false;
+    }
+  }
   if (released === null) return false;
   markIdempotencyReleased(c);
   logEvent("warn", {
@@ -627,7 +750,8 @@ async function releaseUnsentRampDeposit(
  * success closes the audit intent like a concurrent verdict, and a failure
  * answers exactly as a later replay of the row would.
  * Before that marker, no broadcast was possible and the
- * transfer can fail normally; an unsigned off-ramp deposit is released.
+ * transfer can fail normally; an unsigned off-ramp deposit is released,
+ * closing `audit`'s intent with the release.
  */
 async function settleTransferExecutionFailure(
   c: AppContext,
@@ -635,7 +759,8 @@ async function settleTransferExecutionFailure(
   recorder: { submittedRow(): Promise<TransferRow | null> },
   error: unknown,
   toPayload: (row: TransferRow) => Record<string, unknown>,
-  onConcurrentChainVerdict?: (settled: TransferRow) => Promise<void>
+  onConcurrentChainVerdict?: (settled: TransferRow) => Promise<void>,
+  audit?: Omit<ClosingTransferAudit, "outcome">
 ): Promise<Response> {
   const submitted = await recorder.submittedRow();
   if (submitted && !isDefiniteExecutionFailure(error)) {
@@ -658,7 +783,15 @@ async function settleTransferExecutionFailure(
   }
   const message = error instanceof Error ? error.message : "Unknown transfer error";
   const answer = mapTransferExecutionError(error);
-  if (submitted === null && (await releaseUnsentRampDeposit(c, transfer, error))) {
+  if (
+    submitted === null &&
+    (await releaseUnsentRampDeposit(
+      c,
+      transfer,
+      error,
+      audit && { ...audit, outcome: { status: "failure", metadata: { error: message } } }
+    ))
+  ) {
     throw answer;
   }
   const settled = resolveTransferUpdateResult(
@@ -749,13 +882,20 @@ async function executeSponsoredTransfer(
   });
   const txEncoder = getTransactionEncoder();
   const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
-  const signature = await submitSponsoredTransaction({
-    feePayment,
-    rpc,
-    transaction: txBytes,
-    lastValidBlockHeight,
-    store: params.submissionStore,
-  });
+  let signature: Signature;
+  try {
+    signature = await submitSponsoredTransaction({
+      feePayment,
+      rpc,
+      transaction: txBytes,
+      lastValidBlockHeight,
+      store: params.submissionStore,
+    });
+  } catch (error) {
+    // The sponsor simulates before it signs: a source wallet short of funds
+    // is the caller's to fix, not an upstream failure (HOO-2621).
+    throw callerInsufficientFundsError(error, instructions) ?? error;
+  }
 
   const confirmation = await confirmTransaction(rpc, signature, {
     commitment: params.landingStatus,
@@ -853,6 +993,22 @@ function replayTransferRow(c: AppContext, row: TransferRow): Response {
 }
 
 /**
+ * The code a failed transfer row recorded, or `TRANSACTION_FAILED` for a row
+ * the reconciler failed from the chain, which records none.
+ *
+ * @param row - A transfer row whose status is `failed`.
+ * @returns The error code the row answers with.
+ */
+function recordedFailureCode(row: TransferRow): ErrorCode {
+  const recorded = row.provider_data[EXECUTION_FAILURE_KEY];
+  const recordedCode =
+    typeof recorded === "object" && recorded !== null && "code" in recorded
+      ? recorded.code
+      : undefined;
+  return isErrorCode(recordedCode) ? recordedCode : "TRANSACTION_FAILED";
+}
+
+/**
  * The error a failed transfer row answers with: the code its request recorded,
  * or `TRANSACTION_FAILED` for a row the reconciler failed from the chain.
  *
@@ -860,17 +1016,9 @@ function replayTransferRow(c: AppContext, row: TransferRow): Response {
  * @returns The error a replay of the row's key answers with.
  */
 function failedTransferError(row: TransferRow): AppError {
-  const recorded = row.provider_data[EXECUTION_FAILURE_KEY];
-  const recordedCode =
-    typeof recorded === "object" && recorded !== null && "code" in recorded
-      ? recorded.code
-      : undefined;
-  // A row the reconciler failed from the chain records no code: it is a
-  // transaction failure.
-  const code = isErrorCode(recordedCode) ? recordedCode : "TRANSACTION_FAILED";
   return new AppError(
-    code,
-    `${row.error ?? "The transfer failed"}. This Idempotency-Key belongs to a transfer that failed; send the request again with a new Idempotency-Key to try again.`,
+    recordedFailureCode(row),
+    `${(row.error ?? "The transfer failed").replace(/\.$/, "")}. This Idempotency-Key belongs to a transfer that failed; send the request again with a new Idempotency-Key to try again.`,
     { transferId: row.id, status: row.status }
   );
 }
@@ -937,26 +1085,100 @@ async function executeFireblocksTransfer(
   try {
     updated = await submitFireblocksTransfer(c.env, getPaymentsRepository(c), transfer);
   } catch (error) {
-    await auditService.completeCritical(c, auditIntent, {
+    await completeTransferAudit(c, auditService, transfer, auditIntent, {
       status: "failure",
       metadata: { status: "failed" },
     });
     throw error;
   }
   if (updated.provider_reference || updated.status === "failed") {
-    await auditService.completeCritical(c, auditIntent, {
+    await completeTransferAudit(c, auditService, transfer, auditIntent, {
       status: updated.status === "failed" ? "failure" : "success",
       metadata: { fireblocksTransactionId: updated.provider_reference, status: updated.status },
     });
   }
+  // The same code a replay of the key reads, so a confirmed policy block answers
+  // 422 CUSTODY_POLICY_REFUSED both times (HOO-2478).
   if (updated.status === "failed")
-    throw transactionFailed(updated.error ?? "Fireblocks refused the transfer");
+    throw new AppError(
+      recordedFailureCode(updated),
+      updated.error ?? "Fireblocks refused the transfer"
+    );
   return success(c, { transfer: mapTransferRow(updated) });
+}
+
+/**
+ * Opens a transfer's critical audit intent and records it on the row in the
+ * same ledger transaction, so the job that later settles an ambiguous
+ * submission finds and closes it. A row not ready to send records nothing and
+ * refuses the send.
+ */
+async function beginTransferAudit(
+  c: AppContext,
+  auditService: AuditService,
+  transfer: TransferRow,
+  entry: AuditLogEntry
+): Promise<AuditIntent> {
+  const intent = await auditService.beginCriticalWithin(c, entry, (tx, auditIntentId) =>
+    createPostgresPaymentsRepository(tx, getRequestTenantScope(c)).recordTransferAuditIntent({
+      transferId: transfer.id,
+      organizationId: transfer.organization_id,
+      projectId: transfer.project_id,
+      auditIntentId,
+    })
+  );
+  if (intent === null) {
+    throw internalError("Payment transfer was not ready to record its audit intent");
+  }
+  return intent;
+}
+
+/**
+ * Closes the transfer's audit intent unless the pending-transfer job already
+ * did: the outcome commits with clearing the row's open intent, so of the
+ * request and the job only the first appends one. Best-effort like
+ * `completeCritical`: a ledger failure leaves the intent open for the job or
+ * for reconciliation.
+ */
+async function completeTransferAudit(
+  c: AppContext,
+  auditService: AuditService,
+  transfer: TransferRow,
+  intent: AuditIntent,
+  outcome: CriticalOutcome = {}
+): Promise<void> {
+  try {
+    await auditService.logWithin(c, async (tx) => {
+      const claimed = await createPostgresPaymentsRepository(
+        tx,
+        getRequestTenantScope(c)
+      ).closeTransferAuditIntent({
+        transferId: transfer.id,
+        organizationId: transfer.organization_id,
+        projectId: transfer.project_id,
+        auditIntentId: intent.id,
+      });
+      return { entry: claimed ? criticalOutcomeEntry(intent, outcome) : null, result: undefined };
+    });
+  } catch (error) {
+    getLogger().error(
+      {
+        event: "audit_critical_outcome_persistence_failed",
+        auditIntentId: intent.id,
+        targetAction: intent.entry.action,
+        targetResourceType: intent.entry.resourceType,
+        targetResourceId: intent.entry.resourceId ?? null,
+        error,
+      },
+      "Critical operation outcome was not persisted; durable audit intent requires reconciliation"
+    );
+  }
 }
 
 export async function createTransfer(c: ValidatedBodyContext<typeof createTransferSchema>) {
   const body = c.req.valid("json");
-  const { scope, operation, rampTransfer } = getAuthorized<TransferResolved>(c);
+  const { scope, operation, rampTransfer, counterpartyAccount } =
+    getAuthorized<TransferResolved>(c);
   // The credential-bound record key (ADR 0009), never the raw client key.
   const recordKey = getIdempotencyRecordKey(c);
   const fingerprint = getIdempotencyFingerprint(c);
@@ -1007,6 +1229,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         projectId: requireProjectId(c),
         custodyWalletId: operation.sourceWallet.id,
         walletId: operation.sourceWallet.walletId,
+        counterpartyId: counterpartyAccount ? counterpartyAccount.counterparty_id : null,
         sourceAddress: operation.sourceWallet.publicKey,
         destinationAddress: body.destination,
         token: operation.token,
@@ -1016,6 +1239,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         initiatedByKeyId: scope.auth.id,
         idempotency,
         providerData: fireblocks ? { fireblocksTransfer: fireblocks.intent } : undefined,
+        fee: walletFeeAtCreation(fireblocks !== null),
       });
 
   if (replayed) {
@@ -1033,7 +1257,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
   const auditService = new AuditService(getDb(c.env));
   let auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>>;
   try {
-    auditIntent = await auditService.beginCritical(c, {
+    auditIntent = await beginTransferAudit(c, auditService, transfer, {
       action: "transfer",
       resourceType: "payment_transfer",
       resourceId: transfer.id,
@@ -1042,6 +1266,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         walletId: operation.sourceWallet.walletId,
         sourceAddress: operation.sourceWallet.publicKey,
         destination: body.destination,
+        counterpartyAccountId: counterpartyAccount ? counterpartyAccount.id : null,
         // Named tokenMint: a bare "token" key is scrubbed as a credential by
         // the audit redaction policy, and a mint address is not a secret.
         tokenMint: operation.token,
@@ -1078,10 +1303,12 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
           signature: solResult.signature,
           slot: solResult.slot,
           blockTime: solResult.blockTime,
+          // The sponsor pays the network fee, so the source wallet paid nothing (HOO-2614).
+          fee: SPONSORED_WALLET_FEE_LAMPORTS,
           error: null,
         })
       );
-      await auditService.completeCritical(c, auditIntent, {
+      await completeTransferAudit(c, auditService, transfer, auditIntent, {
         metadata: { signature: solResult.signature, slot: solResult.slot?.toString() ?? null },
       });
       return success(c, { transfer: mapTransferRow(updated) });
@@ -1105,10 +1332,11 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         signature: result.signature,
         slot: result.slot,
         blockTime: result.blockTime,
+        fee: SPONSORED_WALLET_FEE_LAMPORTS,
         error: null,
       })
     );
-    await auditService.completeCritical(c, auditIntent, {
+    await completeTransferAudit(c, auditService, transfer, auditIntent, {
       metadata: { signature: result.signature, slot: result.slot?.toString() ?? null },
     });
 
@@ -1126,14 +1354,15 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
           // proved the chain outcome; the intent resolves with that verdict
           // instead of dangling on an operation whose result is known.
           if (isSuccessfulPaymentTransferStatus(settled.status)) {
-            await auditService.completeCritical(c, auditIntent, {
+            await completeTransferAudit(c, auditService, transfer, auditIntent, {
               metadata: { signature: settled.signature, slot: settled.slot?.toString() ?? null },
             });
           }
-        }
+        },
+        { service: auditService, intent: auditIntent }
       );
     } catch (settledError) {
-      await auditService.completeCritical(c, auditIntent, {
+      await completeTransferAudit(c, auditService, transfer, auditIntent, {
         status: "failure",
         metadata: { error: error instanceof Error ? error.message : "Unknown transfer error" },
       });

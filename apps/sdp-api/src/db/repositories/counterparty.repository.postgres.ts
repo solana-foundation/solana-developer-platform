@@ -180,11 +180,8 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
     },
 
     async archiveCounterparty(input: ArchiveCounterpartyInput) {
-      // One statement, so the links can never outlive their parent's active
-      // status: an active customer link on an archived counterparty would
-      // shadow the provider reference against re-claiming (the 0080 unique
-      // index covers active links) while the runtime lookup no longer
-      // resolves it.
+      // Accounts and provider links must stop resolving with their parent.
+      // Keep all three writes atomic so archived contacts cannot stay payable.
       const row = await db
         .prepare(
           `WITH archived AS (
@@ -196,6 +193,16 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
                 AND project_id = ?
                 AND status = 'active'
             RETURNING *
+           ),
+           archived_accounts AS (
+             UPDATE counterparty_accounts ca
+                SET status = 'archived',
+                    updated_at = sdp_iso_now()
+               FROM archived a
+              WHERE ca.counterparty_id = a.id
+                AND ca.organization_id = a.organization_id
+                AND ca.project_id = a.project_id
+                AND ca.status = 'active'
            ),
            archived_links AS (
              UPDATE counterparty_provider_accounts cpa

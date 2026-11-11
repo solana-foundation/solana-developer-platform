@@ -16,7 +16,7 @@ import {
 } from "@/db/identity";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { getOptionalAuth } from "@/lib/auth";
-import { getClientIp } from "@/lib/client-ip";
+import { getClientIp, truncateClientIp } from "@/lib/client-ip";
 import { forbidden } from "@/lib/errors";
 import type { KVStore } from "@/runtime/kv";
 import { createAuditLedgerCheckpointStore } from "@/runtime/kv-redis";
@@ -113,12 +113,19 @@ export type ResourceType =
   | "custody_connection"
   | "earn_movement"
   | "earn_vault_withdrawal_request"
+  | "earn_provider_action"
   | "dvp_trade"
   | "payment_request"
   | "payment_transfer"
   | "audit_ledger";
 
 export interface AuditLogEntry {
+  /**
+   * The request comes from someone SDP cannot identify (a `/pay` payer): the
+   * record keeps their network, not their address, and no user agent
+   * (SDP-022 PA-6, HOO-2345). Set by the writer, never inferred.
+   */
+  anonymousRequester?: true;
   organizationId?: string;
   userId?: string;
   apiKeyId?: string;
@@ -528,12 +535,13 @@ const AUDIT_LEDGER_DATABASE_IDENTITY = { kind: "system", component: "audit-ledge
 function requestActor(c: Context<{ Bindings: Env }>, entry: AuditLogEntry): AuditActor {
   const auth = c.get("apiKey");
   const clerk = c.get("clerk");
+  const anonymous = entry.anonymousRequester === true;
   return {
     organizationId: entry.organizationId || auth?.organizationId || clerk?.organizationId || null,
     userId: entry.userId || clerk?.userId || null,
     apiKeyId: entry.apiKeyId || auth?.id || null,
-    ipAddress: getClientIp(c),
-    userAgent: c.req.header("user-agent") || null,
+    ipAddress: anonymous ? truncateClientIp(getClientIp(c)) : getClientIp(c),
+    userAgent: anonymous ? null : c.req.header("user-agent") || null,
     requestId: c.get("requestId"),
   };
 }
@@ -610,6 +618,39 @@ export function criticalOutcomeEntry(
       auditIntentId: intent.id,
     },
     status: outcome.status ?? "success",
+  };
+}
+
+/** Refuses an intent filed under an organization other than the authenticated caller's. */
+function assertIntentOrganization(c: Context<{ Bindings: Env }>, entry: AuditLogEntry): void {
+  const auth = getOptionalAuth(c);
+  if (
+    auth !== null &&
+    entry.organizationId !== undefined &&
+    entry.organizationId !== auth.organizationId
+  ) {
+    throw forbidden("Audit intent names an organization other than the caller's");
+  }
+}
+
+/** The ledger record that admits the critical operation `entry` describes under `intentId`. */
+function criticalIntentRecord(entry: AuditLogEntry, intentId: string): AuditLogEntry {
+  return {
+    anonymousRequester: entry.anonymousRequester,
+    organizationId: entry.organizationId,
+    action: "maintenance",
+    resourceType: "audit_ledger",
+    resourceId: intentId,
+    metadata: {
+      auditPhase: "intent",
+      target: {
+        action: entry.action,
+        resourceType: entry.resourceType,
+        resourceId: entry.resourceId ?? null,
+        metadata: entry.metadata ? scrubAuditMetadata(entry.metadata) : null,
+      },
+    },
+    status: "success",
   };
 }
 
@@ -746,32 +787,37 @@ export class AuditService {
     entry: AuditLogEntry,
     options: { intentId?: string } = {}
   ): Promise<AuditIntent> {
-    const auth = getOptionalAuth(c);
-    if (
-      auth !== null &&
-      entry.organizationId !== undefined &&
-      entry.organizationId !== auth.organizationId
-    ) {
-      throw forbidden("Audit intent names an organization other than the caller's");
-    }
+    assertIntentOrganization(c, entry);
     const intentId = options.intentId ?? `aint_${crypto.randomUUID()}`;
-    await this.log(c, {
-      organizationId: entry.organizationId,
-      action: "maintenance",
-      resourceType: "audit_ledger",
-      resourceId: intentId,
-      metadata: {
-        auditPhase: "intent",
-        target: {
-          action: entry.action,
-          resourceType: entry.resourceType,
-          resourceId: entry.resourceId ?? null,
-          metadata: entry.metadata ? scrubAuditMetadata(entry.metadata) : null,
-        },
-      },
-      status: "success",
-    });
+    await this.log(c, criticalIntentRecord(entry, intentId));
     return { id: intentId, entry };
+  }
+
+  /**
+   * `beginCritical` whose intent commits in one transaction with `link`, the
+   * write that records the intent where a later job finds it to close it
+   * (`logWithin` rules apply to `link`). The intent and its link are durable
+   * together or not at all, so no crash between them strands an intent.
+   *
+   * @param c - The request context, for the actor and the authenticated organization.
+   * @param entry - The operation the intent admits.
+   * @param link - Records the intent id; false when there was nothing to record it on.
+   * @returns The durable intent, or null when `link` returned false and nothing was written.
+   * @throws AppError `FORBIDDEN` when the entry names an organization other than the
+   *   authenticated caller's.
+   */
+  async beginCriticalWithin(
+    c: Context<{ Bindings: Env }>,
+    entry: AuditLogEntry,
+    link: (tx: DatabaseClient, intentId: string) => Promise<boolean>
+  ): Promise<AuditIntent | null> {
+    assertIntentOrganization(c, entry);
+    const intentId = `aint_${crypto.randomUUID()}`;
+    const linked = await this.logWithin(c, async (tx) => {
+      const recorded = await link(tx, intentId);
+      return { entry: recorded ? criticalIntentRecord(entry, intentId) : null, result: recorded };
+    });
+    return linked ? { id: intentId, entry } : null;
   }
 
   /**
@@ -1015,7 +1061,8 @@ export class AuditService {
           // else identifying — names, phone, date of birth, street, bank
           // instrument, whole identity blobs — goes. `ip_address` and
           // `user_agent` are unaffected: they are dedicated columns and part of
-          // the security record, not caller-supplied metadata.
+          // the security record, not caller-supplied metadata (an anonymous
+          // caller's are already coarsened in requestActor).
           const metadata = entry.metadata ? scrubAuditMetadata(entry.metadata) : null;
           const currentHead = await tx.queryOne<AuditLedgerHead>(
             `SELECT ledger.ledger_sequence,

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 /** The partner services the drawing cycles through, in order. */
-export const STACK_SERVICES = ["custody", "compliance", "ramps", "nodes", "wallets"] as const;
+export const STACK_SERVICES = ["custody", "ramps", "nodes", "wallets"] as const;
 export type StackService = (typeof STACK_SERVICES)[number];
 
 /** What a product built on SDP can be; the product bubble cycles through them. */
@@ -14,12 +14,6 @@ const paths: Record<StackService, ReactNode> = {
       <rect x="4.5" y="10.5" width="15" height="9.5" rx="2.2" />
       <path d="M8 10.5V7.6a4 4 0 0 1 8 0v2.9" />
       <path d="M12 14.2v2.2" />
-    </>
-  ),
-  compliance: (
-    <>
-      <path d="M12 3.2 19 6v5.1c0 4.3-2.9 8.1-7 9.5-4.1-1.4-7-5.2-7-9.5V6z" />
-      <path d="m9 11.8 2.1 2.1L15.2 9.8" />
     </>
   ),
   ramps: (

@@ -1,5 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { ByokCustodyProvider } from "@sdp/types/custody";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { Context } from "hono";
 import { type DatabaseClient, getDb } from "@/db/client";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
@@ -7,7 +9,9 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict, internalError, notFound, providerUnavailable } from "@/lib/errors";
 import { normalizeForFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { requireEnv } from "@/lib/runtime-env";
+import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import { getLogger } from "@/runtime/logger";
+import { logEvent } from "@/runtime/money-path-events";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import {
@@ -23,6 +27,7 @@ import {
   resolveRegistrationPayload,
   retireFireblocksCsr,
 } from "@/services/custody/fireblocks-registration.service";
+import { assertPrivyCredentialAccepted } from "@/services/custody/privy-credential";
 import {
   admitByokCustodySetup,
   refuseCustodySetup,
@@ -43,6 +48,7 @@ import {
 } from "@/services/stores/provider-credential.store";
 import type { Env } from "@/types/env";
 
+const PRIVY_PREFLIGHT_QUOTA = { name: "privy-credential-preflight", actorMax: 5, orgMax: 20 };
 const UNFINISHED_INSTALLATION_MESSAGE =
   "A custody installation is already in progress for this project";
 const REPLACEMENT_CONFLICT_MESSAGE = "Custody Connection cannot accept replacement credentials";
@@ -99,6 +105,7 @@ interface SubmissionContext {
   idempotencyKey: string;
   organizationId: string;
   projectId: string;
+  cluster: SolanaCluster;
   userId: string;
   db: DatabaseClient;
   store: ProviderCredentialStore;
@@ -184,6 +191,17 @@ async function submitProviderCredentialIntent(
   if (setup.kind === "replay") {
     return setup.result;
   }
+  if ("appId" in fields) {
+    await enforceMeteredQuota(c, PRIVY_PREFLIGHT_QUOTA);
+    try {
+      await assertPrivyCredentialAccepted(c.env, fields);
+    } catch (error) {
+      await auditFailure(c, context.audit, context.auditBase, {
+        reason: "provider_preflight_refused",
+      });
+      throw error;
+    }
+  }
 
   await resolveRegistrationPayload(c, input.provider, fields, idempotencyKey);
   return persistPreparedSubmission({
@@ -223,6 +241,7 @@ function createSubmissionContext(
     idempotencyKey,
     organizationId,
     projectId,
+    cluster: currentClusterScope().cluster,
     userId,
     db,
     store,
@@ -403,6 +422,17 @@ async function persistPreparedSubmission(
     });
 
     if (transaction.kind === "committed") {
+      logEvent("info", {
+        event: "sdp_api_provider_credential_submitted",
+        provider: prepared.input.provider,
+        cluster: prepared.cluster,
+        setup: prepared.preflightPlan.kind,
+        organization_id: prepared.organizationId,
+        project_id: prepared.projectId,
+        provider_credential_id: transaction.result.providerCredential.id,
+        connection_id: transaction.result.connectionId,
+        request_id: prepared.c.get("requestId"),
+      });
       await prepared.audit.completeCritical(prepared.c, auditIntent, {
         metadata: {
           event: "provider_credential_submitted",

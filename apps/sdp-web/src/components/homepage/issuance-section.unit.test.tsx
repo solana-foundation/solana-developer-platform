@@ -50,9 +50,11 @@ describe("IssuanceSection", () => {
 
     const heading = doc.querySelector("h2");
     expect(heading?.querySelector(".sr-only")?.textContent).toBe(
-      "Issue the asset. Control after launch."
+      "Full programmatic asset control, from mint to freeze"
     );
-    expect(doc.body.textContent).toContain("every operation auditable.");
+    expect(doc.body.textContent).toContain(
+      "directly via the API using API keys, or from the dashboard."
+    );
 
     const link = doc.querySelector("a");
     expect(link?.textContent).toBe("Open issuance in the sandbox");
@@ -83,7 +85,6 @@ describe("IssuanceSheet", () => {
       "Supply",
       "Transfer controls",
       "Authority",
-      "Privacy",
     ]);
     expect(screen.getByText("Live")).toBeTruthy();
     expect(screen.getByText("100,000,000")).toBeTruthy();

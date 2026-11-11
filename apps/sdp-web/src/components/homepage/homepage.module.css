@@ -125,13 +125,10 @@
   color: var(--night-ink2);
 }
 
-/* markets and privacy in one panel: violet at the top right behind the chart, privacy's green
-   behind the switch near the bottom, and the two never meet (one colour per screen) */
+/* markets' panel: violet at the top right behind the chart */
 .panelRun {
   --panel-after: clamp(48px, 6vw, 96px);
-  --panel-light:
-    radial-gradient(60% 40% at 100% 0%, #9945ff24 0%, #9945ff00 70%),
-    radial-gradient(45% 30% at 22% 78%, #14f19512 0%, #14f19500 70%);
+  --panel-light: radial-gradient(60% 40% at 100% 0%, #9945ff24 0%, #9945ff00 70%);
 }
 
 .panel :where(h1, h2, h3) {

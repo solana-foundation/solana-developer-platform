@@ -145,16 +145,6 @@ const WALLET_SCOPE_ROUTES = {
   "POST /v1/payments/recurring-payments/:id/cancel": {
     refusedEarly: { file: RECURRING, test: RECURRING_ACTIVE },
   },
-  "POST /v1/payments/subscription-plans": { exempt: SPONSOR_ONLY },
-  "PATCH /v1/payments/subscription-plans/:planId": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscription-plans/:planId/prepare-create": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscriptions": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-authorization": {
-    exempt: SPONSOR_ONLY,
-  },
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-cancel": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-collection": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-resume": { exempt: SPONSOR_ONLY },
 
   // DvP
   "POST /v1/dvp/trades": {
@@ -216,6 +206,40 @@ const WALLET_SCOPE_ROUTES = {
     exempt: SPONSOR_ONLY,
   },
   "POST /v1/earn/external-wallet/withdrawal-request-cancellations": { exempt: SPONSOR_ONLY },
+  "POST /v1/earn/onboarding/wisdomtree/:counterpartyId": {
+    exempt: "saves a KYC/KYB application with the provider; signs nothing",
+  },
+  "POST /v1/earn/onboarding/wisdomtree/:counterpartyId/corrections/:reasonId": {
+    exempt: "answers a provider correction; signs nothing",
+  },
+  "POST /v1/earn/onboarding/wisdomtree/:counterpartyId/documents": {
+    exempt: "uploads a document to the provider; signs nothing",
+  },
+  "POST /v1/earn/onboarding/wisdomtree/:counterpartyId/wallets": {
+    exempt: "registers a wallet with the provider; signs nothing",
+  },
+  "POST /v1/earn/provider-actions/preparations": {
+    refusedEarly: {
+      file: "routes/earn.provider-actions-wallet-scope.test.ts",
+      test: "refuses a preparation for a custody wallet outside the key's scope before creating the action",
+    },
+  },
+  "POST /v1/earn/provider-actions/cancellations": {
+    refusedEarly: {
+      file: "routes/earn.provider-actions-wallet-scope.test.ts",
+      test: "refuses a cancellation whose custody wallet is outside the key's scope before creating the action",
+    },
+  },
+  // The external provider-action routes build for and submit the caller's own
+  // signed transaction; the custody wallet stays out of the signing path.
+  "POST /v1/earn/provider-actions/external/preparation-transactions": {
+    exempt: SPONSOR_ONLY,
+  },
+  "POST /v1/earn/provider-actions/external/cancellation-transactions": {
+    exempt: SPONSOR_ONLY,
+  },
+  "POST /v1/earn/provider-actions/external/preparations": { exempt: SPONSOR_ONLY },
+  "POST /v1/earn/provider-actions/external/cancellations": { exempt: SPONSOR_ONLY },
 
   // Issuance
   "POST /v1/issuance/tokens/:tokenId/burn": { refusedEarly: ISSUANCE_BURN },

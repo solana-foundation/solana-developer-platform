@@ -1,12 +1,15 @@
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { ORGANIZATION_STATUSES } from "@sdp/types/organizations";
 import type { Context } from "hono";
 import { z } from "zod";
 import { type DatabaseClient, getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { conflict, internalError } from "@/lib/errors";
+import { productionProjectsAllowed } from "@/lib/production-entitlement";
 import { created } from "@/lib/response";
 import { requireClerkSignup } from "@/middleware/clerk-auth";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { logEvent } from "@/runtime/money-path-events";
 import { AuditService } from "@/services/audit.service";
 import {
   ensureUniqueSlug,
@@ -21,6 +24,25 @@ type AppContext = Context<{ Bindings: Env }>;
 
 const ORGANIZATION_COLUMNS = "id, name, slug, tier, status, settings, created_at, updated_at";
 const SLUG_ATTEMPTS = 3;
+const DEFAULT_PROJECTS = [
+  {
+    name: "Default Sandbox Project",
+    slug: "default-sandbox",
+    description: "Default sandbox project",
+    environment: "sandbox",
+  },
+  {
+    name: "Default Production Project",
+    slug: "default-production",
+    description: "Default production project",
+    environment: "production",
+  },
+] as const satisfies readonly {
+  name: string;
+  slug: string;
+  description: string;
+  environment: SdpEnvironment;
+}[];
 const organizationStatusSchema = z.object({ status: z.enum(ORGANIZATION_STATUSES) });
 
 /**
@@ -244,7 +266,7 @@ async function activateOrganization(
   c: AppContext,
   params: { organizationId: string; creatorUserId: string }
 ): Promise<void> {
-  await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
+  const activated = await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
     const current = await tx
       .prepare("SELECT status FROM organizations WHERE id = ? FOR UPDATE")
       .bind(params.organizationId)
@@ -255,7 +277,7 @@ async function activateOrganization(
     const { status } = organizationStatusSchema.parse(current);
     // A concurrent attempt activated it first.
     if (status !== "provisioning") {
-      return { entry: null, result: undefined };
+      return { entry: null, result: false };
     }
     await tx
       .prepare(
@@ -265,21 +287,25 @@ async function activateOrganization(
       )
       .bind(`mem_${crypto.randomUUID()}`, params.organizationId, params.creatorUserId)
       .run();
+    // A deployment that admits no production project creates the sandbox one only.
+    const defaultProjects = productionProjectsAllowed(c.env)
+      ? DEFAULT_PROJECTS
+      : DEFAULT_PROJECTS.filter((project) => project.environment !== "production");
     await tx
       .prepare(
         `INSERT INTO projects (id, organization_id, name, slug, description, environment, status, created_by)
-         VALUES
-           ('prj_' || gen_random_uuid(), ?, 'Default Sandbox Project', 'default-sandbox',
-            'Default sandbox project', 'sandbox', 'active', ?),
-           ('prj_' || gen_random_uuid(), ?, 'Default Production Project', 'default-production',
-            'Default production project', 'production', 'active', ?)
+         VALUES ${defaultProjects.map(() => "('prj_' || gen_random_uuid(), ?, ?, ?, ?, ?, 'active', ?)").join(", ")}
          ON CONFLICT (organization_id, slug) DO NOTHING`
       )
       .bind(
-        params.organizationId,
-        params.creatorUserId,
-        params.organizationId,
-        params.creatorUserId
+        ...defaultProjects.flatMap((project) => [
+          params.organizationId,
+          project.name,
+          project.slug,
+          project.description,
+          project.environment,
+          params.creatorUserId,
+        ])
       )
       .run();
     await tx
@@ -307,7 +333,14 @@ async function activateOrganization(
         organizationId: params.organizationId,
         userId: params.creatorUserId,
       },
-      result: undefined,
+      result: true,
     };
   });
+  if (activated) {
+    logEvent("info", {
+      event: "sdp_api_organization_created",
+      organization_id: params.organizationId,
+      user_id: params.creatorUserId,
+    });
+  }
 }

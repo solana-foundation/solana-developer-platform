@@ -12,10 +12,15 @@ export const createTransferSchema = z.strictObject({
   transferId: z.string().min(1).optional(),
   sourceCustodyWalletId: z.string().min(1),
   destination: solanaAddressSchema("destination"),
+  /** The contact's Solana account the destination belongs to, as a batch recipient names it. */
+  counterpartyAccountId: z.string().min(1).optional(),
   token: paymentTokenSchema,
   amount: paymentAmountSchema,
   memo: z.string().max(256).optional(),
 });
+
+/** Ordinary transfers cannot name a ramp deposit on a channel without Ramps. */
+export const walletTransferSchema = createTransferSchema.omit({ transferId: true });
 
 export const transferDirectionSchema = z.enum(["inbound", "outbound"]);
 

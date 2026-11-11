@@ -1,5 +1,5 @@
+import { canonicalizeIpRange } from "@sdp/ip/ip-range";
 import { z } from "zod";
-import { canonicalizeIpAllowlistEntry } from "@/lib/ip-allowlist";
 
 /** Rebuilt per authenticated request, so bounded; 100 dwarfs any real footprint. */
 const MAX_ORGANIZATION_ALLOWED_IPS = 100;
@@ -11,7 +11,7 @@ const MAX_ORGANIZATION_ALLOWED_IPS = 100;
  * one host but authorizes 256 — the stored list must say what it grants.
  */
 const organizationAllowedIpSchema = z.string().transform((value, ctx) => {
-  const canonical = canonicalizeIpAllowlistEntry(value);
+  const canonical = canonicalizeIpRange(value);
   if (canonical === null) {
     ctx.addIssue({
       code: "custom",
@@ -36,6 +36,8 @@ export const updateOrgSchema = z.object({
         .max(MAX_ORGANIZATION_ALLOWED_IPS)
         .transform((entries) => [...new Set(entries)])
         .optional(),
+      /** HOO-2299: false stops every alert email to admins, except the one saying so. */
+      alertEmails: z.boolean().optional(),
     })
     .optional(),
 });

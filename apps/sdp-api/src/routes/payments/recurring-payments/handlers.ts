@@ -3,7 +3,9 @@ import {
   RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS,
 } from "@sdp/payments/recurring-payment-lifecycle";
 import {
+  isEditableRecurringPaymentStatus,
   isInFlightRecurringPaymentAttemptStatus,
+  isPendingActivationRecurringPaymentStatus,
   type ListPaymentRecurringPaymentsResponse,
   type PaymentRecurringPayment,
   type PaymentRecurringPaymentCollectionResponse,
@@ -17,7 +19,9 @@ import {
   AppError,
   badRequestParams,
   badRequestQuery,
+  conflict,
   internalError,
+  notFound,
   walletNotFound,
 } from "@/lib/errors";
 import { assertMoneyStartAdmitted } from "@/lib/money-admission";
@@ -37,7 +41,11 @@ import {
   getPaymentSubscriptionsRepository,
   getPaymentsRepository,
 } from "@/routes/payments/context";
-import { mapCollectionAttemptRow, mapTransferRow } from "@/routes/payments/mappers";
+import {
+  mapCollectionAttemptRow,
+  mapTransferRow,
+  respondWithCollectionAttemptsPage,
+} from "@/routes/payments/mappers";
 import { activateRecurringPayment as activateRecurringPaymentRecord } from "@/services/payments/recurring-payments/activation";
 import { describeTokenApprovalAfterCancel } from "@/services/payments/recurring-payments/authority-revocation";
 import { collectRecurringPayment as collectRecurringPaymentRecord } from "@/services/payments/recurring-payments/collection";
@@ -137,7 +145,7 @@ export async function findRecurringPaymentCreateReplay(
 /** The schedule's pinned source wallet; an unresolved pin is refused for new work (state). */
 function pinnedSourceWallet(authorized: AuthorizedRecurringPayment): CustodyWallet {
   if (authorized.sourceWallet === null) {
-    throw new AppError("CONFLICT", "Recurring payment source wallet is unresolved");
+    throw conflict("Recurring payment source wallet is unresolved");
   }
   return authorized.sourceWallet;
 }
@@ -350,15 +358,36 @@ export const createRecurringPayment = async (
   return created(c, response);
 };
 
+/**
+ * Refuses (409 `RECURRING_PAYMENT_CHANGED`) an edit or activation of a version
+ * the caller no longer holds (HOO-2562): `expectedUpdatedAt` names the version
+ * it reviewed, and authorize read the current one. Only a row at rest is
+ * compared. A row mid-operation is this key's own interrupted run, which
+ * resumes, or another run, which the operation refuses as in flight.
+ */
+function assertReviewedVersion(
+  recurringPayment: PaymentRecurringPaymentRow,
+  expectedUpdatedAt: string | undefined,
+  isAtRest: (status: PaymentRecurringPaymentRow["status"]) => boolean
+): void {
+  if (expectedUpdatedAt === undefined || !isAtRest(recurringPayment.status)) return;
+  if (expectedUpdatedAt === recurringPayment.updated_at) return;
+  throw new AppError("RECURRING_PAYMENT_CHANGED", undefined, {
+    recurringPaymentId: recurringPayment.id,
+    updatedAt: recurringPayment.updated_at,
+  });
+}
+
 export const updateRecurringPayment = async (
   c: ValidatedBodyContext<typeof updateRecurringPaymentSchema>
 ) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
-  const body = c.req.valid("json");
+  const { expectedUpdatedAt, ...body } = c.req.valid("json");
   const authorized = getAuthorized<AuthorizedRecurringPaymentUpdate>(c);
   const { recurringPayment, nextSourceWallet } = authorized;
+  assertReviewedVersion(recurringPayment, expectedUpdatedAt, isEditableRecurringPaymentStatus);
   const sourceWallet = pinnedSourceWallet(authorized);
   // Authorize resolves the named wallet whatever its status; moving a
   // schedule onto it needs an active one.
@@ -399,6 +428,11 @@ export const activateRecurringPayment = async (
 
   const authorized = getAuthorized<AuthorizedRecurringPayment>(c);
   const { recurringPayment } = authorized;
+  assertReviewedVersion(
+    recurringPayment,
+    c.req.valid("json").expectedUpdatedAt,
+    isPendingActivationRecurringPaymentStatus
+  );
   const sourceWallet = pinnedSourceWallet(authorized);
 
   const activated = await activateRecurringPaymentRecord({
@@ -553,8 +587,44 @@ export const getRecurringPayment = async (c: AppContext) => {
   });
 
   if (!recurringPayment) {
-    throw new AppError("NOT_FOUND", "Recurring payment not found");
+    throw notFound("Recurring payment");
   }
 
   return success(c, await recurringPaymentResponse(c, recurringPayment));
+};
+
+/**
+ * Lists every collection attempt a recurring payment has made, across the subscriptions its edits
+ * replaced as well as its current one, scoped to the request's project.
+ *
+ * @param c - Request context carrying the `id` path parameter and the paging query.
+ * @returns The page of collection attempts, in the subscription collection-attempt list contract.
+ */
+export const listRecurringPaymentCollectionAttempts = async (c: AppContext) => {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const params = recurringPaymentIdParamsSchema.safeParse(c.req.param());
+
+  if (!params.success) {
+    throw badRequestParams();
+  }
+
+  return respondWithCollectionAttemptsPage(c, async (page) => {
+    const recurringPayment = await getPaymentRecurringPaymentsRepository(c).getRecurringPaymentById(
+      {
+        recurringPaymentId: params.data.id,
+        organizationId: auth.organizationId,
+        projectId,
+      }
+    );
+    if (!recurringPayment) {
+      throw notFound("Recurring payment");
+    }
+    return getPaymentSubscriptionsRepository(c).listRecurringPaymentCollectionAttempts({
+      organizationId: auth.organizationId,
+      projectId,
+      recurringPaymentId: recurringPayment.id,
+      ...page,
+    });
+  });
 };

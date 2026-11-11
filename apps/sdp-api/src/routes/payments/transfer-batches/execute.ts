@@ -15,8 +15,13 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { type AppContext, getPaymentsRepository } from "@/routes/payments/context";
 import { logEvent } from "@/runtime/money-path-events";
 import { type AuditIntent, AuditService, criticalOutcomeEntry } from "@/services/audit.service";
+import {
+  callerInsufficientFundsError,
+  simulatedInsufficientFundsError,
+} from "@/services/fee-payment-errors";
 import { signWithFreshBlockhash } from "@/services/payments/sign-with-fresh-blockhash";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
+import { SPONSORED_WALLET_FEE_LAMPORTS } from "@/services/payments/sponsored-fee";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import {
   isDefiniteSubmissionError,
@@ -121,7 +126,6 @@ export function applyRecipientRowUpdates(
  * @param params.chunk - Chunk to sign and submit.
  * @param params.recipientsByIndex - Mutable recipient-index map shared across chunks.
  * @param params.feePayment - Fee-payment adapter used to sponsor and send.
- * @param params.preflight - Whether to simulate before sending.
  */
 export async function executeChunk(params: {
   c: AppContext;
@@ -132,7 +136,6 @@ export async function executeChunk(params: {
   lastValidBlockHeight: bigint;
   /** The attempt whose recipients this chunk may link (PreparedBatchChunks.attemptId). */
   attemptId: string;
-  preflight: boolean;
 }): Promise<void> {
   const { c, resolved, chunk } = params;
   const partiallySigned = await signWithFreshBlockhash({
@@ -185,6 +188,8 @@ export async function executeChunk(params: {
       serializedTx,
       signature: null,
       slot: null,
+      // Every chunk is sponsored, so the source wallet pays no network fee (HOO-2614).
+      fee: SPONSORED_WALLET_FEE_LAMPORTS,
       initiatedByKeyId: resolved.scope.auth.id,
     });
 
@@ -270,19 +275,22 @@ export async function executeChunk(params: {
       return { entry: settled ? outcome : null, result: settled };
     });
 
-  if (params.preflight) {
-    try {
-      const simulated = await simulateTransaction(resolved.rpc, txBytes);
-      if (!simulated.success) {
-        throw transactionFailed(
-          `Batch transfer preflight failed: ${simulated.error ?? "unknown simulation error"}`,
-          { logs: simulated.logs }
-        );
-      }
-    } catch (error) {
-      await failAuditedChunk(error);
-      return;
+  try {
+    const simulated = await simulateTransaction(resolved.rpc, txBytes);
+    if (!simulated.success) {
+      const shortfall = simulatedInsufficientFundsError(
+        simulated.error,
+        chunk.message.instructions
+      );
+      if (shortfall) throw shortfall;
+      throw transactionFailed(
+        `Batch transfer preflight failed: ${simulated.error ?? "unknown simulation error"}`,
+        { logs: simulated.logs }
+      );
     }
+  } catch (error) {
+    await failAuditedChunk(error);
+    return;
   }
 
   const submissionStore = createTransferSignedSubmissionStore(getPaymentsRepository(c), transfer);
@@ -312,7 +320,11 @@ export async function executeChunk(params: {
       });
       return;
     }
-    await failAuditedChunk(error);
+    // A source wallet short of funds fails the chunk with the reason the
+    // caller can act on, not the sponsor's raw refusal (HOO-2621).
+    await failAuditedChunk(
+      callerInsufficientFundsError(error, chunk.message.instructions) ?? error
+    );
     return;
   }
 }

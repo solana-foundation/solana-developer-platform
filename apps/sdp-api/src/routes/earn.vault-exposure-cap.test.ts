@@ -109,8 +109,6 @@ const CUSTODY_WALLET_ID = "cwlt_earn_cap";
 /** The platform default's absolute ceiling, `DEFAULT_VAULT_EXPOSURE_CAP.maxAbsolute`. */
 const DEFAULT_CEILING = "5000000";
 
-let originalMarketsEnabled: string | undefined;
-let originalEarnEnabled: string | undefined;
 let originalCapsEnforced: string | undefined;
 
 async function seedAuth(): Promise<void> {
@@ -343,11 +341,7 @@ async function expectRedactedCapRefusal(res: Response, vaultAddress: string): Pr
 }
 
 beforeEach(async () => {
-  originalMarketsEnabled = env.MARKETS_ENABLED;
-  originalEarnEnabled = env.EARN_ENABLED;
   originalCapsEnforced = env.EARN_VOLUME_CAPS_ENFORCED;
-  env.MARKETS_ENABLED = "true";
-  env.EARN_ENABLED = "true";
   env.EARN_VOLUME_CAPS_ENFORCED = "true";
   exposureReadFailure.current = null;
   vaultDirectClientOverride.current = null;
@@ -358,6 +352,7 @@ beforeEach(async () => {
   depositIntoVault.mockResolvedValue({
     position: { id: "earn_position_cap_test" },
     movement: {
+      provider_data: {},
       id: "earn_movement_cap_test",
       status: "submitted",
       signature: "sig_test",
@@ -401,8 +396,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  env.MARKETS_ENABLED = originalMarketsEnabled;
-  env.EARN_ENABLED = originalEarnEnabled;
   env.EARN_VOLUME_CAPS_ENFORCED = originalCapsEnforced;
   vi.restoreAllMocks();
 });

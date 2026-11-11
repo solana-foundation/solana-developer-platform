@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { z } from "zod";
 
 const DEFAULT_CLERK_TEST_ORG_NAME = "Solana";
 const DEFAULT_CLERK_TEST_EMAIL = "e2e-smoke+sdp-web@example.com";
@@ -14,6 +15,12 @@ const GCP_EXTERNAL_API_URLS = [
   "https://api-preview.solana.com",
 ];
 const GCP_DEV_API_URL = GCP_EXTERNAL_API_URLS[0];
+// A deployed dashboard sits behind Vercel Bot Protection; a Vercel Firewall custom
+// rule lets requests carrying this token through (playwright/support/vercel-bypass.ts).
+const vercelBypassTokenSchema = z
+  .string({ error: "SDP_CANARY_BYPASS_TOKEN is required against a deployed dashboard" })
+  .trim()
+  .min(1, "SDP_CANARY_BYPASS_TOKEN is required against a deployed dashboard");
 
 type E2EEnvCommon = {
   baseURL: string;
@@ -25,6 +32,8 @@ type E2EEnvCommon = {
   ticketAuth: boolean;
   /** True when the run targets a deployed dashboard and must not start a local web server. */
   deployedWeb: boolean;
+  /** Vercel Bot Protection bypass token, set only when the run targets a deployed dashboard. */
+  vercelBypassToken: string | null;
   webServerEnv: Record<string, string>;
 };
 
@@ -136,6 +145,9 @@ export function getE2EEnv(): E2EEnv {
       "External GCP smoke requires PLAYWRIGHT_USE_NEXT_START=1 or a deployed PLAYWRIGHT_BASE_URL"
     );
   }
+  const vercelBypassToken = deployedWeb
+    ? vercelBypassTokenSchema.parse(process.env.SDP_CANARY_BYPASS_TOKEN)
+    : null;
   if (useExternalApi && process.env.NODE_ENV !== "production") {
     throw new Error("External GCP smoke requires NODE_ENV=production");
   }
@@ -198,6 +210,7 @@ export function getE2EEnv(): E2EEnv {
     sdpApiBaseUrl,
     ticketAuth,
     deployedWeb,
+    vercelBypassToken,
     webServerEnv: {
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: clerkPublishableKey,
       CLERK_SECRET_KEY: clerkSecretKey,
@@ -206,22 +219,6 @@ export function getE2EEnv(): E2EEnv {
       NEXT_PUBLIC_DISABLE_SENTRY: "1",
       NEXT_PUBLIC_SENTRY_DSN: "",
       PLAYWRIGHT_DISABLE_SENTRY: "1",
-      NEXT_PUBLIC_CLERK_SIGN_IN_URL:
-        process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ??
-        fallback.NEXT_PUBLIC_CLERK_SIGN_IN_URL ??
-        "/sign-in",
-      NEXT_PUBLIC_CLERK_SIGN_UP_URL:
-        process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ??
-        fallback.NEXT_PUBLIC_CLERK_SIGN_UP_URL ??
-        "/sign-up",
-      NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL:
-        process.env.NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL ??
-        fallback.NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL ??
-        "/dashboard",
-      NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL:
-        process.env.NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL ??
-        fallback.NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL ??
-        "/dashboard",
       NODE_ENV: process.env.NODE_ENV ?? "development",
     },
   };

@@ -1,7 +1,7 @@
 import { AppError } from "@/lib/errors";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
-import { describeClerkFailure } from "./clerk-error";
+import { ClerkRequestError, describeClerkFailure } from "./clerk-error";
 
 interface ClerkEmailAddress {
   id: string;
@@ -67,10 +67,7 @@ export class ClerkUsersService {
         new Error(describeClerkFailure(res.status, body)),
         startedAt
       );
-      throw new AppError("INTERNAL_ERROR", describeClerkFailure(res.status, body), {
-        status: res.status,
-        body,
-      });
+      throw new ClerkRequestError(res.status, body);
     }
 
     if (res.status === 204) {

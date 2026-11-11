@@ -3,7 +3,11 @@ import { hashString } from "@sdp/payments/hash";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { getRecentBlockhash } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { isPaymentRequestPayableAt } from "@sdp/types/payments";
+import {
+  isPayablePaymentRequestStatus,
+  isPaymentRequestPayableAt,
+  type PaymentRequestStatus,
+} from "@sdp/types/payments";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
   type AccountMeta,
@@ -74,6 +78,16 @@ const sponsoredPaymentTransactionSchema = z.discriminatedUnion("kind", [
 
 export type SponsoredPaymentTransaction = z.infer<typeof sponsoredPaymentTransactionSchema>;
 
+/**
+ * A claim is served or signed only while its request is still awaiting payment, as of the read
+ * that loaded the claim: the payable snapshot `/pay` started from can be stale by then.
+ */
+function assertClaimRequestAwaitingPayment(claim: { requestStatus: PaymentRequestStatus }): void {
+  if (!isPayablePaymentRequestStatus(claim.requestStatus)) {
+    throw badRequest("Payment request is no longer payable");
+  }
+}
+
 function assertNotExpired(request: PaymentRequestRow): void {
   if (isPaymentRequestExpired(request.expires_at)) {
     throw badRequest("Payment request is no longer payable");
@@ -109,7 +123,8 @@ function assertSavedPayerIsNotSponsor(payer: Address, unsignedBase64: string): v
  *   its `PAY_SPONSOR_SIGNATURES_PER_HOUR` sponsor signatures for the sliding window.
  * @throws AppError `SERVICE_UNAVAILABLE` when the signature counter store is unavailable.
  * @throws AppError `BAD_REQUEST` when the payer is the sponsor, a SOL amount is not positive, or
- *   the request stopped being payable before its claim (canceled, paid or expired).
+ *   the request stopped being payable (canceled, paid or expired) before its claim is taken,
+ *   served or signed.
  */
 export async function issuePaymentRequestTransaction(
   c: Context<{ Bindings: Env }>,
@@ -127,7 +142,12 @@ export async function issuePaymentRequestTransaction(
 
   const serveLiveClaim = async (): Promise<SponsoredPaymentTransaction | null> => {
     const claim = await repository.getSponsoredTransactionClaim(request.id);
-    if (claim === null || claim.lastValidBlockHeight < currentBlockHeight) {
+    if (claim === null) {
+      return null;
+    }
+    // A request another payment settled keeps its claim columns; they are never served again.
+    assertClaimRequestAwaitingPayment(claim);
+    if (claim.lastValidBlockHeight < currentBlockHeight) {
       return null;
     }
     assertNotExpired(request);
@@ -184,11 +204,31 @@ export async function issuePaymentRequestTransaction(
     assertNotExpired(request);
     await admitSponsorSignature();
     const feePayment = await getFeePayment();
+    // Read fresh right before the sponsor signs: the request may have settled or been reclaimed
+    // since the claim was taken. The signature write is fenced the same way, for a payment that
+    // lands while the sponsor signs.
+    const current = await repository.getSponsoredTransactionClaim(request.id);
+    if (current !== null) {
+      assertClaimRequestAwaitingPayment(current);
+    }
+    if (
+      current === null ||
+      current.account !== payer ||
+      current.unsignedTransaction !== unsignedBase64
+    ) {
+      throw rateLimited("This payment request's sponsored transaction was superseded; retry");
+    }
+    // A concurrent post from the same payer already signed these bytes: serve them.
+    if (current.signedTransaction !== null) {
+      return { kind: "signed", transaction: current.signedTransaction };
+    }
     const unsignedBytes = new Uint8Array(getBase64Encoder().encode(unsignedBase64));
     // The intent is durable before signAsFeePayer reserves budget and Kora
     // signs, so no reservation can exist without its audit record.
     const auditService = new AuditService(getDb(c.env));
     const auditIntent = await auditService.beginCritical(c, {
+      // The payer is an anonymous third party: keep their network only.
+      anonymousRequester: true,
       organizationId: request.organization_id,
       action: "sign",
       resourceType: "payment_request",
@@ -235,6 +275,9 @@ export async function issuePaymentRequestTransaction(
     });
     if (!stored) {
       const superseding = await repository.getSponsoredTransactionClaim(request.id);
+      if (superseding !== null) {
+        assertClaimRequestAwaitingPayment(superseding);
+      }
       const heightNow = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
       if (
         superseding !== null &&

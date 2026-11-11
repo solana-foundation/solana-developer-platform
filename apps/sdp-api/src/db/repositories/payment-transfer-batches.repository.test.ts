@@ -92,19 +92,33 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
     totalAmount: "1",
     recipientCount: 1,
     transactionCount: 1,
-    options: {},
     initiatedByKeyId: null,
     idempotencyFingerprint: "fp-1",
   };
 
   it("persists idempotency metadata and finds a batch by organization, project, and key", async () => {
     const { batch: created } = await repo.createTransferBatchWithRecipients({
-      batch: { ...baseInput, projectId: TEST_PROJECT_ID, idempotencyKey: "batch-key-abc" },
+      batch: {
+        ...baseInput,
+        projectId: TEST_PROJECT_ID,
+        recipientCount: 3,
+        transactionCount: 2,
+        error: "batch_error",
+        idempotencyKey: "batch-key-abc",
+      },
       recipients: [],
     });
 
-    expect(created.idempotency_key).toBe("batch-key-abc");
-    expect(created.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
+    expect(created).toMatchObject({
+      source_custody_wallet_id: TEST_CUSTODY_WALLET_ID,
+      total_amount: "1",
+      recipient_count: 3,
+      transaction_count: 2,
+      error: "batch_error",
+      initiated_by_key_id: null,
+      idempotency_key: "batch-key-abc",
+      idempotency_fingerprint: "fp-1",
+    });
 
     const found = await repo.findTransferBatchByIdempotency({
       organizationId: TEST_ORG.id,
@@ -331,6 +345,156 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       })
     ).toMatchObject({ batch_id: batch.id, recipient_ids: [first] });
   });
+
+  describe("counterparty accounts re-read at admission (HOO-2563)", () => {
+    const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+    const recipient = {
+      ...scope,
+      externalId: null,
+      counterpartyId: "cpty_batch_recheck",
+      counterpartyAccountId: "cpa_batch_recheck",
+      destinationAddress: "Dest111",
+      amount: "1",
+      status: "pending" as const,
+      error: null,
+      attemptId: "attempt-create",
+    };
+
+    beforeEach(async () => {
+      await seedProjectCryptoWalletCounterparty(getDb(env), {
+        ...scope,
+        createdBy: TEST_USER.id,
+        counterpartyId: recipient.counterpartyId,
+        counterpartyAccountId: recipient.counterpartyAccountId,
+        walletAddress: recipient.destinationAddress,
+      });
+    });
+
+    const archiveAccount = () =>
+      getDb(env)
+        .prepare("UPDATE counterparty_accounts SET status = 'archived' WHERE id = ?")
+        .bind(recipient.counterpartyAccountId)
+        .run();
+    const rotateAccount = () =>
+      getDb(env)
+        .prepare(
+          `UPDATE counterparty_accounts
+              SET details = jsonb_set(details, '{address}', '"Rotated111"')
+            WHERE id = ?`
+        )
+        .bind(recipient.counterpartyAccountId)
+        .run();
+    const create = (idempotencyKey: string) =>
+      repo.createTransferBatchWithRecipients({
+        batch: { ...baseInput, projectId: TEST_PROJECT_ID, idempotencyKey },
+        recipients: [recipient],
+      });
+    const batchCount = async () =>
+      (
+        await getDb(env)
+          .prepare("SELECT count(*)::int AS n FROM payment_transfer_batches")
+          .first<{ n: number }>()
+      )?.n;
+
+    it("refuses a create whose account was archived after authorize, writing nothing", async () => {
+      await archiveAccount();
+      await expect(create("recheck-archived")).rejects.toMatchObject({ code: "NOT_FOUND" });
+      expect(await batchCount()).toBe(0);
+    });
+
+    it("refuses a create whose account address rotated after authorize, writing nothing", async () => {
+      await rotateAccount();
+      await expect(create("recheck-rotated")).rejects.toMatchObject({
+        code: "TRANSFER_BATCH_DESTINATION_CHANGED",
+        details: { counterpartyAccountIds: [recipient.counterpartyAccountId] },
+      });
+      expect(await batchCount()).toBe(0);
+    });
+
+    it("waits for an account update in flight and refuses the address it committed", async () => {
+      let commitUpdate = () => {};
+      const updateHeld = new Promise<void>((resolve) => {
+        commitUpdate = resolve;
+      });
+      let updateLocked = () => {};
+      const locked = new Promise<void>((resolve) => {
+        updateLocked = resolve;
+      });
+      // A concurrent account rotation holds the row lock while admission starts.
+      const update = getDb(env).transaction(async (tx) => {
+        await tx.execute(
+          `UPDATE counterparty_accounts
+              SET details = jsonb_set(details, '{address}', '"Rotated111"')
+            WHERE id = ?`,
+          [recipient.counterpartyAccountId]
+        );
+        updateLocked();
+        await updateHeld;
+      });
+      await locked;
+      let admissionSettled = false;
+      const admission = create("recheck-concurrent").finally(() => {
+        admissionSettled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const waitedForUpdate = !admissionSettled;
+      // Released before any assertion, so a failure never leaves the row lock
+      // or either connection held for the tests after it.
+      commitUpdate();
+      const [, admitted] = await Promise.allSettled([update, admission]);
+
+      // FOR SHARE waits on the update's lock instead of reading the old row.
+      expect(waitedForUpdate).toBe(true);
+      expect(admitted).toMatchObject({
+        status: "rejected",
+        reason: { code: "TRANSFER_BATCH_DESTINATION_CHANGED" },
+      });
+      expect(await batchCount()).toBe(0);
+    });
+
+    for (const [change, apply, code] of [
+      ["archived", archiveAccount, "NOT_FOUND"],
+      ["rotated", rotateAccount, "TRANSFER_BATCH_DESTINATION_CHANGED"],
+    ] as const) {
+      it(`refuses a retry claim when the account was ${change}, leaving the recipient failed`, async () => {
+        const { batch, recipients } = await create(`recheck-retry-${change}`);
+        const [failed] = recipients.map((row) => row.id);
+        await repo.updateTransferRecipientsStatus({
+          ...scope,
+          recipientIds: [failed],
+          transferId: null,
+          status: "failed",
+          error: "rejected",
+        });
+        await apply();
+        await expect(
+          repo.claimFailedTransferRecipients({
+            ...scope,
+            batchId: batch.id,
+            recipientIds: [failed],
+            addedTransactionCount: 1,
+            attemptLastValidBlockHeight: 1_000n,
+            attemptId: "attempt-retry",
+            retry: {
+              idempotencyKey: `recheck-retry-key-${change}`,
+              idempotencyFingerprint: "retry-fingerprint",
+              initiatedByKeyId: null,
+            },
+          })
+        ).rejects.toMatchObject({ code });
+        expect(
+          await repo.getTransferRecipientById({ ...scope, recipientId: failed })
+        ).toMatchObject({ status: "failed" });
+        expect(
+          await repo.findTransferBatchRetryByIdempotency({
+            ...scope,
+            batchId: batch.id,
+            idempotencyKey: `recheck-retry-key-${change}`,
+          })
+        ).toBeNull();
+      });
+    }
+  });
 });
 
 describe("PaymentTransferBatchesRepository.listStrandedTransferBatches (postgres)", () => {
@@ -427,7 +591,6 @@ describe("PaymentTransferBatchesRepository.listStrandedTransferBatches (postgres
           totalAmount: "1",
           recipientCount: 1,
           transactionCount: 1,
-          options: {},
           initiatedByKeyId: null,
           idempotencyKey: `stranded-${environment}`,
           idempotencyFingerprint: `fp-stranded-${environment}`,

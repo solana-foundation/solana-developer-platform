@@ -10,6 +10,12 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
   integrations: "/dashboard/integrations",
 } as const;
 
+export const DASHBOARD_ACCOUNT_HREF = "/dashboard/account";
+
+export const DASHBOARD_FEEDBACK_HREF = "/dashboard/feedback";
+/** The query parameter the Send feedback link carries: the dashboard page the person was on. */
+export const DASHBOARD_FEEDBACK_FROM_PARAM = "from";
+
 export const DASHBOARD_MARKETS_SUBNAV_HREFS = {
   treasurySolutions: "/dashboard/markets/treasury-solutions",
   earnProgram: "/dashboard/markets/embedded-yield",
@@ -25,19 +31,11 @@ export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
   recurring: "/dashboard/payments/recurring",
 } as const;
 
-export const DASHBOARD_INTEGRATIONS_SUBNAV_HREFS = {
-  custody: "/dashboard/integrations?tab=custody",
-  ramps: "/dashboard/integrations?tab=ramps",
-  compliance: "/dashboard/integrations?tab=compliance",
-  privacy: "/dashboard/integrations?tab=privacy",
-} as const;
-
 export type DashboardLoadingRoute =
   | "home"
   | "token-holdings"
   | "wallets-overview"
   | "wallet-setup"
-  | "wallet-connections"
   | "wallet-detail"
   | "issuance-overview"
   | "issuance-create"
@@ -47,7 +45,6 @@ export type DashboardLoadingRoute =
   | "treasury-solutions"
   | "embedded-yield-portfolio"
   | "embedded-yield-configure"
-  | "embedded-yield-integrate"
   | "dvp-trades"
   | "dvp-trade-create"
   | "dvp-trade-detail"
@@ -68,6 +65,8 @@ export type DashboardLoadingRoute =
   | "api-key-new"
   | "api-key-edit"
   | "settings"
+  | "account"
+  | "feedback"
   | "integrations"
   | "integration-detail"
   | "private-channels-setup"
@@ -80,16 +79,10 @@ function normalizePathname(pathname: string): string {
 }
 
 function resolveWalletLoadingRoute(pathname: string): DashboardLoadingRoute | null {
-  const prefix =
-    pathname === "/dashboard/custody" || pathname.startsWith("/dashboard/custody/")
-      ? "/dashboard/custody"
-      : pathname === "/dashboard/wallets" || pathname.startsWith("/dashboard/wallets/")
-        ? "/dashboard/wallets"
-        : null;
-  if (!prefix) return null;
+  const prefix = "/dashboard/wallets";
+  if (pathname !== prefix && !pathname.startsWith(`${prefix}/`)) return null;
   if (pathname === prefix) return "wallets-overview";
   if (pathname === `${prefix}/setup`) return "wallet-setup";
-  if (pathname === `${prefix}/connections`) return "wallet-connections";
 
   const suffix = pathname.slice(prefix.length).split("/").filter(Boolean);
   if (suffix.length < 1) return null;
@@ -107,9 +100,6 @@ function resolveMarketsLoadingRoute(pathname: string): DashboardLoadingRoute | n
   if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure`) {
     return "embedded-yield-configure";
   }
-  if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/integrate`) {
-    return "embedded-yield-integrate";
-  }
   if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.dvp) return "dvp-trades";
   // Before the detail arm: /dvp/create would otherwise match its id pattern.
   if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/create`) return "dvp-trade-create";
@@ -125,8 +115,9 @@ function resolveOperationsLoadingRoute(pathname: string): DashboardLoadingRoute 
   if (pathname === "/dashboard/api-keys") return "api-keys-list";
   if (pathname === "/dashboard/api-keys/new") return "api-key-new";
   if (/^\/dashboard\/api-keys\/[^/]+\/edit$/.test(pathname)) return "api-key-edit";
-  // Members only redirects into Settings, so it loads as the page it lands on.
-  if (pathname === "/dashboard/settings" || pathname === "/dashboard/members") return "settings";
+  if (pathname === "/dashboard/settings") return "settings";
+  if (pathname === DASHBOARD_ACCOUNT_HREF) return "account";
+  if (pathname === DASHBOARD_FEEDBACK_HREF) return "feedback";
   return null;
 }
 
@@ -188,8 +179,7 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
  * Whether a top-level nav destination is the one currently being viewed.
  *
  * Lives here rather than in the shell so the sidebar and the mobile bottom bar
- * cannot drift apart on which tab is highlighted. Wallets deliberately claims the
- * `/dashboard/custody` tree too — they are the same destination under two paths.
+ * cannot drift apart on which tab is highlighted.
  */
 export function isDashboardNavItemActive(pathname: string, href: string): boolean {
   const [pathnameOnly, pathnameSearch = ""] = pathname.split("?", 2);
@@ -215,9 +205,7 @@ export function isDashboardNavItemActive(pathname: string, href: string): boolea
     );
   }
   if (href === "/dashboard/wallets") {
-    return (
-      pathnameOnly.startsWith("/dashboard/wallets") || pathnameOnly.startsWith("/dashboard/custody")
-    );
+    return pathnameOnly.startsWith("/dashboard/wallets");
   }
   if (href === "/dashboard/payments") {
     return (
@@ -238,7 +226,7 @@ const PROJECT_SWITCH_DESTINATIONS = [
  * (or sub-module) the page belongs to, never the page itself, because ids in
  * the path (wallets, tokens, trades) belong to the Project being left.
  *
- * @param dashboardPath - Project-less path of the current page, e.g. `/dashboard/custody/cwlt_1`.
+ * @param dashboardPath - Project-less path of the current page, e.g. `/dashboard/wallets/cwlt_1`.
  * @returns The module root to open under the other Project, e.g. `/dashboard/wallets`.
  */
 export function projectSwitchDestination(dashboardPath: string): string {

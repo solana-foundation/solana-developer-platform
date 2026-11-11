@@ -5,7 +5,10 @@ import {
   type RateLimitTier,
 } from "@sdp/types/api-keys";
 import type { OrganizationSettings } from "@sdp/types/organizations";
-import { organizationStatusMayAuthenticate } from "@sdp/types/organizations";
+import {
+  ORGANIZATION_SUSPENDED_REASON,
+  organizationStatusMayAuthenticate,
+} from "@sdp/types/organizations";
 import { projectStatusMayAuthenticate } from "@sdp/types/projects";
 import type { Context } from "hono";
 import { z } from "zod";
@@ -15,7 +18,7 @@ import { refuseTerminally } from "@/lib/api-key-refusal-cache";
 import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import type { WalletAccess } from "@/lib/auth";
 import { getClientIp } from "@/lib/client-ip";
-import { AppError } from "@/lib/errors";
+import { AppError, forbidden } from "@/lib/errors";
 import { isClientIpAllowed } from "@/lib/ip-allowlist";
 import { parseGrantsColumn } from "@/services/api-key.service";
 import type { Env } from "@/types/env";
@@ -81,6 +84,17 @@ export function organizationNotActive(): AppError {
 }
 
 /**
+ * The refusal every door gives a suspended organization (HOO-2009): a 403
+ * naming the suspension, since the credential itself is fine and access comes
+ * back when SDP resumes the organization.
+ */
+export function organizationSuspended(): AppError {
+  return forbidden("This organization is suspended. Contact SDP support to restore access.", {
+    reason: ORGANIZATION_SUSPENDED_REASON,
+  });
+}
+
+/**
  * The session doors' uncached organization read: the organization must exist
  * and be `active`. Returns its raw settings.
  */
@@ -93,6 +107,9 @@ export async function readActiveOrganizationSettings(
     .bind(organizationId)
     .first<{ status: string; settings: string | null }>();
 
+  if (row?.status === "suspended") {
+    throw organizationSuspended();
+  }
   if (!row || !organizationStatusMayAuthenticate(row.status)) {
     throw organizationNotActive();
   }
@@ -165,9 +182,11 @@ export interface ApiKeyAuthorization {
  * restriction, an archived project or a narrowed wallet scope applies on the
  * key's next request.
  *
- * Refuses, in order: an unknown key (INVALID_API_KEY); an inactive
- * organization or project (REVOKED_API_KEY); a revoked, expired or
- * past-its-rotation-deadline key (REVOKED_API_KEY / EXPIRED_API_KEY); a key
+ * Refuses, in order: an unknown key (INVALID_API_KEY); a deleted,
+ * provisioning or otherwise inactive organization, or an inactive project
+ * (REVOKED_API_KEY); a revoked, expired or past-its-rotation-deadline key
+ * (REVOKED_API_KEY / EXPIRED_API_KEY); a suspended organization (FORBIDDEN,
+ * `organization_suspended`); a key
  * that predates grants (REVOKED_API_KEY); an
  * origin outside the key's `allowed_ips`, then the organization's allowlist
  * (FORBIDDEN). The filters stay out of SQL so each refusal keeps its code.
@@ -210,9 +229,11 @@ export async function authorizeApiKey(
   }
   // Organization and project status before the key's own: a key created or
   // rotated after an organization deletion enumerated its keys is covered by
-  // neither that deletion's revocation nor anything else.
+  // neither that deletion's revocation nor anything else. A suspension waits
+  // for the key's own status below.
+  const suspended = row.organization_status === "suspended";
   if (
-    !organizationStatusMayAuthenticate(row.organization_status) ||
+    (!suspended && !organizationStatusMayAuthenticate(row.organization_status)) ||
     !projectStatusMayAuthenticate(row.project_status)
   ) {
     throw new AppError("REVOKED_API_KEY");
@@ -225,6 +246,11 @@ export async function authorizeApiKey(
   }
   if (refusal === "expired") {
     throw refuseTerminally(refusalKey, "EXPIRED_API_KEY");
+  }
+  // A live key of a suspended organization is named, not blamed on the key:
+  // it works again once the suspension lifts. A dead key stays dead above.
+  if (suspended) {
+    throw organizationSuspended();
   }
   // A key from before grants holds none until a person gives it some; it is
   // refused by name rather than failing every route. Not remembered: setting
@@ -274,5 +300,6 @@ export function projectOrganizationSettings(settings: OrganizationSettings): Org
     providerOverrides: settings.providerOverrides,
     enableProductionProject: settings.enableProductionProject,
     customRateLimits: settings.customRateLimits,
+    alertEmails: settings.alertEmails,
   };
 }

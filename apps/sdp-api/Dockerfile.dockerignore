@@ -26,6 +26,7 @@ packages/*
 !packages/sdp-rpc
 !packages/sdp-custody
 !packages/sdp-redaction
+!packages/sdp-ip
 !packages/sdp-solana
 !packages/sdp-payments
 !packages/sdp-fee-payment
@@ -40,6 +41,7 @@ packages/*
 !packages/bigint-buffer
 !packages/sdp-veda
 !packages/sdp-ondo
+!packages/sdp-plume
 docs
 infra
 scripts

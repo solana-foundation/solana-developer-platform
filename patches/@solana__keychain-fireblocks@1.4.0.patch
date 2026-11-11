@@ -1,0 +1,73 @@
+diff --git a/dist/fireblocks-signer.js b/dist/fireblocks-signer.js
+index 984794386a92f1dbcbe3ce09dcbf63c368cec6f1..831600e5a8d897c61ff6c0892d26d840ec4dce6b 100644
+--- a/dist/fireblocks-signer.js
++++ b/dist/fireblocks-signer.js
+@@ -19,6 +19,10 @@ const DEFAULT_API_BASE_URL = 'https://api.fireblocks.io';
+ const DEFAULT_ASSET_ID = 'SOL';
+ const DEFAULT_POLL_INTERVAL_MS = 1000;
+ const DEFAULT_MAX_POLL_ATTEMPTS = 60;
++/** Keep a terminal transaction's documented sub-status code, never arbitrary provider text. */
++function terminalSubStatus(subStatus) {
++    return typeof subStatus === 'string' && /^[A-Z0-9_]{1,100}$/.test(subStatus) ? subStatus : undefined;
++}
+ /**
+  * Fireblocks-based signer for Solana transactions
+  *
+@@ -220,6 +224,8 @@ export class FireblocksSigner {
+             if (isTerminalStatus(status)) {
+                 throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                     message: `Transaction failed with status: ${txResponse.status}`,
++                    status: txResponse.status,
++                    subStatus: terminalSubStatus(txResponse.subStatus),
+                 });
+             }
+             // Wait before next poll
+diff --git a/dist/types.d.ts b/dist/types.d.ts
+index fa09e5208bbd32731b2c126984502384972be629..ad0c10a6c24fbc1f8acb49e63ae6de34cba795d7 100644
+--- a/dist/types.d.ts
++++ b/dist/types.d.ts
+@@ -74,6 +74,7 @@ export interface TransactionResponse {
+     id: string;
+     signedMessages?: SignedMessage[];
+     status: string;
++    subStatus?: string;
+ }
+ export interface SignedMessage {
+     signature: SignatureData;
+diff --git a/src/fireblocks-signer.ts b/src/fireblocks-signer.ts
+index 954141f32f931784479868f10dc1d0e2d058bdb2..582edf0bd3fe22119ab69fd3f0febf5ae4f3e411 100644
+--- a/src/fireblocks-signer.ts
++++ b/src/fireblocks-signer.ts
+@@ -47,6 +47,11 @@ const DEFAULT_ASSET_ID = 'SOL';
+ const DEFAULT_POLL_INTERVAL_MS = 1000;
+ const DEFAULT_MAX_POLL_ATTEMPTS = 60;
+ 
++/** Keep a terminal transaction's documented sub-status code, never arbitrary provider text. */
++function terminalSubStatus(subStatus: string | undefined): string | undefined {
++    return typeof subStatus === 'string' && /^[A-Z0-9_]{1,100}$/.test(subStatus) ? subStatus : undefined;
++}
++
+ /**
+  * Fireblocks-based signer for Solana transactions
+  *
+@@ -284,6 +289,8 @@ export class FireblocksSigner<TAddress extends string = string> implements Solan
+             if (isTerminalStatus(status)) {
+                 throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                     message: `Transaction failed with status: ${txResponse.status}`,
++                    status: txResponse.status,
++                    subStatus: terminalSubStatus(txResponse.subStatus),
+                 });
+             }
+ 
+diff --git a/src/types.ts b/src/types.ts
+index 2304839fb2ed78d90e4f96823f91652547fb7a58..9c48aa466fdc3d649ce74ef020202005f73ee83b 100644
+--- a/src/types.ts
++++ b/src/types.ts
+@@ -89,6 +89,7 @@ export interface TransactionResponse {
+     id: string;
+     signedMessages?: SignedMessage[];
+     status: string;
++    subStatus?: string;
+ }
+ 
+ export interface SignedMessage {

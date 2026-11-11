@@ -18,9 +18,11 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.json ./
 COPY apps/sdp-docs/package.json ./apps/sdp-docs/
 COPY apps/sdp-api/package.json ./apps/sdp-api/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
+# sdp-api imports @sdp/earn from its earn-onboarding route schemas.
+COPY packages/sdp-earn/package.json ./packages/sdp-earn/
 # The API reference model and request snippets the reference renders from.
 COPY packages/sdp-api-catalog/package.json ./packages/sdp-api-catalog/
-# The refresh palette, type scale and font files the docs render with.
+# The palette, type scale and font files the docs render with.
 COPY packages/sdp-design-tokens/package.json ./packages/sdp-design-tokens/
 COPY packages/sdp-env-config/package.json ./packages/sdp-env-config/
 COPY packages/sdp-payments/package.json ./packages/sdp-payments/
@@ -28,6 +30,7 @@ COPY packages/sdp-fee-payment/package.json ./packages/sdp-fee-payment/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
 COPY packages/sdp-custody/package.json ./packages/sdp-custody/
 COPY packages/sdp-redaction/package.json ./packages/sdp-redaction/
+COPY packages/sdp-ip/package.json ./packages/sdp-ip/
 COPY packages/sdp-solana/package.json ./packages/sdp-solana/
 COPY packages/sdp-issuance/package.json ./packages/sdp-issuance/
 COPY patches ./patches
@@ -42,6 +45,8 @@ COPY --from=deps /repo /repo
 COPY apps/sdp-docs ./apps/sdp-docs
 COPY apps/sdp-api ./apps/sdp-api
 COPY packages/sdp-types ./packages/sdp-types
+# sdp-api imports @sdp/earn from its earn-onboarding route schemas.
+COPY packages/sdp-earn ./packages/sdp-earn
 COPY packages/sdp-api-catalog ./packages/sdp-api-catalog
 COPY packages/sdp-design-tokens ./packages/sdp-design-tokens
 COPY packages/sdp-env-config ./packages/sdp-env-config
@@ -50,6 +55,7 @@ COPY packages/sdp-fee-payment ./packages/sdp-fee-payment
 COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-custody ./packages/sdp-custody
 COPY packages/sdp-redaction ./packages/sdp-redaction
+COPY packages/sdp-ip ./packages/sdp-ip
 COPY packages/sdp-solana ./packages/sdp-solana
 COPY packages/sdp-issuance ./packages/sdp-issuance
 

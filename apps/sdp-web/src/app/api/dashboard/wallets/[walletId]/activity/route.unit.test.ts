@@ -1,15 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as walletActivityServer from "@/app/(session)/dashboard/[projectId]/wallets/wallet-activity.server";
+import { expectDashboardNoStore } from "@/test/dashboard-response";
 
 const mocks = vi.hoisted(() => ({
   createSdpApiClient: vi.fn(),
-  loadWalletActivity: vi.fn(),
 }));
 
-vi.mock("@/app/dashboard/[projectId]/custody/wallet-activity.data", () => ({
-  loadWalletActivity: mocks.loadWalletActivity,
-  WALLET_ACTIVITY_LIMIT: 20,
-  WALLET_ACTIVITY_MAX_LIMIT: 500,
-}));
+// The loader's module reads the Issuance flag; the spy below stands in for the loader itself.
+vi.mock("@/flags", () => ({ issuance: vi.fn() }));
 vi.mock("@/i18n/server", () => ({
   getTranslations: vi.fn(async () => (key: string) => key),
 }));
@@ -18,6 +16,8 @@ vi.mock("@/lib/sdp-api", () => ({
 }));
 
 import { GET } from "./route";
+
+const loadWalletActivity = vi.spyOn(walletActivityServer, "loadWalletActivity");
 
 describe("GET /api/dashboard/wallets/:walletId/activity", () => {
   beforeEach(() => {
@@ -51,8 +51,9 @@ describe("GET /api/dashboard/wallets/:walletId/activity", () => {
     );
 
     expect(response.status).toBe(502);
+    expectDashboardNoStore(response);
     expect(apiRequest).toHaveBeenCalledTimes(1);
-    expect(mocks.loadWalletActivity).not.toHaveBeenCalled();
+    expect(loadWalletActivity).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -69,7 +70,7 @@ describe("GET /api/dashboard/wallets/:walletId/activity", () => {
       })
     );
     mocks.createSdpApiClient.mockResolvedValue({ request: apiRequest });
-    mocks.loadWalletActivity.mockResolvedValue({
+    loadWalletActivity.mockResolvedValue({
       ok: true,
       data: { activityRows: [], activityError: null, activityNotice: null, hasMore: false },
     });
@@ -80,11 +81,30 @@ describe("GET /api/dashboard/wallets/:walletId/activity", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.loadWalletActivity).toHaveBeenCalledWith(
+    expectDashboardNoStore(response);
+    expect(response.headers.has("X-SDP-Trace-ID")).toBe(true);
+    expect(loadWalletActivity).toHaveBeenCalledWith(
       apiRequest,
       { custodyWalletId: "cwlt_1", providerWalletId: "privy_1" },
       expect.any(Function),
       { pageSize }
     );
+  });
+
+  it("marks a malformed wallet id and an unexpected failure uncacheable", async () => {
+    const malformed = await GET(
+      new Request("https://dashboard.example.com/api/dashboard/wallets/%E0/activity"),
+      { params: Promise.resolve({ walletId: "%E0" }) }
+    );
+    expect(malformed.status).toBe(400);
+    expectDashboardNoStore(malformed);
+
+    mocks.createSdpApiClient.mockRejectedValue(new Error("client unavailable"));
+    const failed = await GET(
+      new Request("https://dashboard.example.com/api/dashboard/wallets/cwlt_1/activity"),
+      { params: Promise.resolve({ walletId: "cwlt_1" }) }
+    );
+    expect(failed.status).toBe(500);
+    expectDashboardNoStore(failed);
   });
 });

@@ -32,12 +32,21 @@ import {
   isInstructionForProgram,
   isInstructionWithAccounts,
   isInstructionWithData,
+  isSolanaError,
   type Signature,
+  SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+  type SolanaError,
+  unwrapSimulationError,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
+import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import {
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
+  TOKEN_2022_ERROR__INSUFFICIENT_FUNDS,
+  TOKEN_2022_ERROR__OWNER_MISMATCH,
+  TOKEN_2022_PROGRAM_ADDRESS,
 } from "@solana-program/token-2022";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import type {
@@ -67,6 +76,7 @@ import {
   AppError,
   badRequest,
   conflict,
+  type ErrorCode,
   internalError,
   notFound,
   solanaRpcError,
@@ -78,6 +88,7 @@ import { resolveSourceTokenAccountOrAta } from "@/routes/payments/token-accounts
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { createSigningService } from "@/services/domain/signing.service";
+import { resolveSolanaCounterpartyAccount } from "@/services/payments/counterparty-account-resolution";
 import type { TransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import { loadPaymentMint, loadPaymentMintFacts } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
@@ -93,7 +104,9 @@ import {
   assertRecurringPaymentSourceWallet,
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
+  notCollectable,
   readSavedSend,
+  recipientUnavailable,
   recurringPaymentErrorMessage,
   sendSubscriptionInstructions,
 } from "./shared";
@@ -129,7 +142,7 @@ function assertCollectibleRecurringPayment(
     row.subscription_id === null ||
     row.next_collection_due_at === null
   ) {
-    throw conflict("Recurring payment must be active before collection");
+    throw notCollectable(row);
   }
 }
 
@@ -624,6 +637,101 @@ interface RecurringPaymentPause {
   reason: RecurringPaymentPauseReason;
   /** Failed attempts at the due period since the schedule last resumed, this one included. */
   failedAttempts: number;
+  /**
+   * The pausing failure's API error code, or `UNEXPECTED` for an error SDP did not classify, so
+   * an alert can tell a payer's or issuer's refusal from an SDP or dependency fault.
+   */
+  errorCode: ErrorCode | "UNEXPECTED";
+  /**
+   * Who refused the collection, when that is proven: `payer` for a custody policy refusal or a
+   * preflight refusal the token or subscriptions program raised for the payer's balance or
+   * delegation, `issuer` for a token program's frozen-account refusal, and `unconfirmed` for
+   * everything else, an expired or on-chain failed send included, so an alert on `unconfirmed`
+   * misses no SDP or dependency fault.
+   */
+  failureSource: RecurringPaymentFailureSource;
+}
+
+type RecurringPaymentFailureSource = "payer" | "issuer" | "unconfirmed";
+
+/** The token programs a pull moves tokens through. */
+const TOKEN_PROGRAMS: ReadonlySet<string> = new Set([
+  TOKEN_PROGRAM_ADDRESS,
+  TOKEN_2022_PROGRAM_ADDRESS,
+]);
+
+/**
+ * Whether a program error proves the payer refused the pull: the token program refused a drained
+ * source token account or one whose delegation was revoked (the program is no longer its
+ * delegate, so the token program sees an owner mismatch), or the subscriptions program refused a
+ * delegation the payer let expire. A code alone proves nothing: the System program, a Token-2022
+ * transfer hook or any other program can raise the same numbers.
+ *
+ * @param programAddress - The program that raised the error.
+ * @param code - Its custom error code.
+ * @returns Whether it is the payer's refusal.
+ */
+function isPayerRefusal(programAddress: string, code: number): boolean {
+  if (TOKEN_PROGRAMS.has(programAddress)) {
+    return (
+      code === TOKEN_2022_ERROR__INSUFFICIENT_FUNDS || code === TOKEN_2022_ERROR__OWNER_MISMATCH
+    );
+  }
+  return (
+    programAddress === subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS &&
+    code === subscriptionsProgram.SUBSCRIPTIONS_ERROR__DELEGATION_EXPIRED
+  );
+}
+
+const PROGRAM_CUSTOM_ERROR_LINE = /^Program (\S+) failed: custom program error: 0x([0-9a-f]+)$/;
+
+/**
+ * The program that raised a preflight refusal's custom error, and the code. The runtime logs a
+ * failure line for each program the error unwinds through, innermost first, so the first line
+ * names the program that raised it, a CPI's callee rather than its caller.
+ *
+ * @param refusal - The preflight refusal.
+ * @returns The raising program and its code, or null when the logs do not show one that
+ *   matches the refusal's error.
+ */
+function preflightProgramError(
+  refusal: SolanaError<
+    typeof SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE
+  >
+): { programAddress: string; code: number } | null {
+  const programError = unwrapSimulationError(refusal);
+  if (!isSolanaError(programError, SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM)) return null;
+  const failure = (refusal.context.logs ?? [])
+    .map((line) => PROGRAM_CUSTOM_ERROR_LINE.exec(line))
+    .find((match) => match !== null);
+  if (!failure || Number.parseInt(failure[2], 16) !== programError.context.code) return null;
+  return { programAddress: failure[1], code: programError.context.code };
+}
+
+/**
+ * Classifies a pausing failure's source from what it proves (see `RecurringPaymentPause`).
+ *
+ * @param error - The failure.
+ * @returns Its source.
+ */
+function recurringPaymentFailureSource(error: Error): RecurringPaymentFailureSource {
+  if (!(error instanceof AppError)) return "unconfirmed";
+  if (error.code === "CUSTODY_POLICY_REFUSED") return "payer";
+  if (
+    (error.code !== "TRANSACTION_FAILED" && error.code !== "ACCOUNT_FROZEN") ||
+    !isSolanaError(
+      error.cause,
+      SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE
+    )
+  ) {
+    return "unconfirmed";
+  }
+  const raised = preflightProgramError(error.cause);
+  if (raised === null) return "unconfirmed";
+  if (error.code === "ACCOUNT_FROZEN") {
+    return TOKEN_PROGRAMS.has(raised.programAddress) ? "issuer" : "unconfirmed";
+  }
+  return isPayerRefusal(raised.programAddress, raised.code) ? "payer" : "unconfirmed";
 }
 
 /**
@@ -675,7 +783,14 @@ async function pauseFailingRecurringPayment(
     reason,
     updatedAt: input.pausedAt,
   });
-  return paused === null ? null : { reason, failedAttempts };
+  if (paused === null) return null;
+  const errorCode = input.error instanceof AppError ? input.error.code : "UNEXPECTED";
+  return {
+    reason,
+    failedAttempts,
+    errorCode,
+    failureSource: recurringPaymentFailureSource(input.error),
+  };
 }
 
 /**
@@ -700,6 +815,8 @@ function logRecurringPaymentPaused(
     event: "sdp_recurring_payment_paused",
     reason: pause.reason,
     failed_attempts: pause.failedAttempts,
+    error_code: pause.errorCode,
+    failure_source: pause.failureSource,
     organization_id: context.organizationId,
     project_id: context.projectId,
     recurring_payment_id: context.recurringPaymentId,
@@ -737,7 +854,9 @@ async function hasRecentCollectionFailure(
  * they sign, one transaction writes the attempt (carrying the request's
  * Idempotency-Key, HOO-1918) and the transfer it will submit, linked. Every
  * keyed attempt therefore has a transfer, and a same-key retry is answered
- * from them. Returns null when the cycle moved on or another attempt holds it.
+ * from them. Recipient locks order the claim against archival: an archive that
+ * commits first pauses the schedule; one after admission leaves the attempt
+ * recoverable. Returns null when the cycle moved on or another attempt holds it.
  */
 async function claimCollectionUnderRecurringLock(input: {
   env: Env;
@@ -755,8 +874,22 @@ async function claimCollectionUnderRecurringLock(input: {
   transfer: PaymentTransferRow;
 } | null> {
   const { recurringPayment } = input;
-  return getDb(input.env).transaction(async (tx) => {
+  const outcome = await getDb(input.env).transaction(async (tx) => {
+    const destinationAvailable = await lockCollectionDestination(tx, input);
     if (!(await lockOpenCollectionCycle(tx, input))) return null;
+    if (!destinationAvailable) {
+      const paused = await createPostgresPaymentRecurringPaymentsRepository(
+        tx
+      ).pauseRecurringPayment({
+        recurringPaymentId: recurringPayment.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        reason: "destination_unavailable",
+        updatedAt: input.attemptedAt,
+      });
+      if (!paused) throw conflict("Recurring payment changed before it could be paused");
+      return { kind: "destination_unavailable" as const };
+    }
 
     const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
     if (input.enforceCooldown && (await hasRecentCollectionFailure(subscriptionsRepo, input))) {
@@ -827,8 +960,14 @@ async function claimCollectionUnderRecurringLock(input: {
     if (!attempt || attempt.transfer_id !== transfer.id) {
       throw internalError("Failed to link collection attempt to transfer");
     }
-    return { attempt, transfer };
+    return { kind: "claimed" as const, attempt, transfer };
   });
+  if (outcome === null) return null;
+  if (outcome.kind === "destination_unavailable") {
+    logCollectionDestinationPause(input);
+    throw recipientUnavailable();
+  }
+  return { attempt: outcome.attempt, transfer: outcome.transfer };
 }
 
 /**
@@ -1058,6 +1197,59 @@ async function settleCollectionAttempt(
 }
 
 /**
+ * The failed-collection write matched no transfer row: the transfer is confirmed (a pull that
+ * landed meanwhile), whose signature the attempt then records. With `requireUnsubmitted`, a
+ * transfer that gained a saved send since recovery read it is refused for a retry instead
+ * (APE SOLA9-816).
+ *
+ * @param tx - The transaction the failed-collection write ran in.
+ * @param input - The failed collection, with the transfer whose write matched no row.
+ * @returns The confirmed transfer's signature.
+ * @throws AppError `CONFLICT` when the collector saved its send after recovery read the row.
+ */
+async function confirmedTransferSignatureAfterMissedFail(
+  tx: DatabaseExecutor,
+  input: Parameters<typeof markRecurringPaymentCollectionFailedAtomically>[0] & {
+    transfer: PaymentTransferRow;
+  }
+): Promise<Signature> {
+  const currentTransfer = await tx
+    .prepare(
+      `SELECT status, signature
+           FROM payment_transfers
+          WHERE id = ?
+            AND organization_id = ?
+            AND project_id = ?`
+    )
+    .bind(input.transfer.id, input.organizationId, input.projectId)
+    .first<{ status: string; signature: string | null }>();
+
+  if (
+    input.requireUnsubmitted &&
+    currentTransfer !== null &&
+    currentTransfer.status !== "confirmed" &&
+    currentTransfer.signature !== null
+  ) {
+    // The collector saved its send after recovery read the row: it may land, so
+    // the next recovery reads that send instead of failing the cycle under it.
+    throw conflict("Recurring payment collection saved a send while recovering it; retry");
+  }
+  if (currentTransfer === null || currentTransfer.status !== "confirmed") {
+    throw internalError("Failed to mark collection transfer failed");
+  }
+
+  const currentSignature = currentTransfer.signature ?? input.submittedSignature;
+  if (!currentSignature) {
+    throw internalError("Confirmed collection transfer is missing signature");
+  }
+  return validatedStoredCollectionSignature({
+    attemptId: input.attempt.id,
+    signature: currentSignature,
+    transferId: input.transfer.id,
+  });
+}
+
+/**
  * Atomically settles a failed collection attempt and its linked transfer.
  *
  * Keep these status writes in one database transaction. Splitting them into
@@ -1072,6 +1264,12 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
   attempt: PaymentSubscriptionCollectionAttemptRow;
   transfer: PaymentTransferRow | null;
   submittedSignature: Signature | null;
+  /**
+   * Fail the transfer only while it still holds no signature and no submission
+   * start: what recovery read before deciding the run never sent (APE SOLA9-816).
+   * A collector that saved its send since then keeps it, and recovery retries.
+   */
+  requireUnsubmitted: boolean;
   error: Error;
 }): Promise<void> {
   const failedAt = new Date().toISOString();
@@ -1096,7 +1294,8 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
-              AND status IN ('pending', 'processing', 'failed')`
+              AND status IN ('pending', 'processing', 'failed')
+              AND (NOT ?::boolean OR (signature IS NULL AND submission_started_at IS NULL))`
         )
         .bind(
           input.submittedSignature !== null,
@@ -1105,33 +1304,14 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
           failedAt,
           input.transfer.id,
           input.organizationId,
-          input.projectId
+          input.projectId,
+          input.requireUnsubmitted
         )
         .run();
       if (transferRows === 0) {
-        const currentTransfer = await tx
-          .prepare(
-            `SELECT status, signature
-               FROM payment_transfers
-              WHERE id = ?
-                AND organization_id = ?
-                AND project_id = ?`
-          )
-          .bind(input.transfer.id, input.organizationId, input.projectId)
-          .first<{ status: string; signature: string | null }>();
-
-        if (currentTransfer === null || currentTransfer.status !== "confirmed") {
-          throw internalError("Failed to mark collection transfer failed");
-        }
-
-        const currentSignature = currentTransfer.signature ?? input.submittedSignature;
-        if (!currentSignature) {
-          throw internalError("Confirmed collection transfer is missing signature");
-        }
-        confirmedTransferSignature = validatedStoredCollectionSignature({
-          attemptId: input.attempt.id,
-          signature: currentSignature,
-          transferId: input.transfer.id,
+        confirmedTransferSignature = await confirmedTransferSignatureAfterMissedFail(tx, {
+          ...input,
+          transfer: input.transfer,
         });
       }
     }
@@ -1359,7 +1539,7 @@ async function journalRecurringPaymentCollectionError(input: {
     return;
   }
 
-  await markRecurringPaymentCollectionFailedAtomically(input);
+  await markRecurringPaymentCollectionFailedAtomically({ ...input, requireUnsubmitted: false });
 }
 
 async function safeJournalRecurringPaymentCollectionError(input: {
@@ -1506,6 +1686,7 @@ async function recoverRecurringPaymentCollection(input: {
       attempt: existing,
       transfer: null,
       submittedSignature: null,
+      requireUnsubmitted: false,
       error: new Error("Recurring payment collection was interrupted before transfer creation"),
     });
     return null;
@@ -1532,6 +1713,7 @@ async function recoverRecurringPaymentCollection(input: {
       attempt: existing,
       transfer,
       submittedSignature: null,
+      requireUnsubmitted: true,
       error: new Error("Recurring payment collection was interrupted before submission"),
     });
     return null;
@@ -1553,6 +1735,7 @@ async function recoverRecurringPaymentCollection(input: {
       attempt: existing,
       transfer,
       submittedSignature: recoveredSignature,
+      requireUnsubmitted: false,
       error: new Error("Recurring payment collection was interrupted before broadcast"),
     });
     return null;
@@ -1585,6 +1768,7 @@ async function recoverRecurringPaymentCollection(input: {
       attempt: existing,
       transfer,
       submittedSignature: recoveredSignature,
+      requireUnsubmitted: false,
       error: transactionFailed(message),
     });
     return null;
@@ -1662,6 +1846,7 @@ async function recoverRecurringPaymentCollection(input: {
         attempt: existing,
         transfer,
         submittedSignature: recoveredSignature,
+        requireUnsubmitted: false,
         error,
       });
       return null;
@@ -1751,6 +1936,100 @@ function refuseCanceledCollection(
   }
 }
 
+/**
+ * Locks the parent before its account, matching parent archival's write order.
+ * The claim holds both shared locks until its attempt and transfer commit, so
+ * archival cannot slip between active-recipient admission and the claim.
+ */
+async function lockCollectionDestination(
+  tx: DatabaseExecutor,
+  input: {
+    organizationId: string;
+    projectId: string;
+    recurringPayment: RecurringPaymentCollectionCycleRow;
+  }
+): Promise<boolean> {
+  const counterparty = await tx
+    .prepare(
+      `SELECT id FROM counterparties
+        WHERE id = ? AND organization_id = ? AND project_id = ? AND status = 'active'
+        FOR SHARE`
+    )
+    .bind(input.recurringPayment.counterparty_id, input.organizationId, input.projectId)
+    .first<{ id: string }>();
+  if (!counterparty) return false;
+  const account = await tx
+    .prepare(
+      `SELECT id FROM counterparty_accounts
+        WHERE id = ? AND counterparty_id = ? AND organization_id = ? AND project_id = ?
+          AND status = 'active'
+        FOR SHARE`
+    )
+    .bind(
+      input.recurringPayment.counterparty_account_id,
+      input.recurringPayment.counterparty_id,
+      input.organizationId,
+      input.projectId
+    )
+    .first<{ id: string }>();
+  return account !== null;
+}
+
+function logCollectionDestinationPause(input: {
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+}): void {
+  logEvent("warn", {
+    event: "sdp_recurring_payment_paused",
+    reason: "destination_unavailable",
+    organization_id: input.organizationId,
+    project_id: input.projectId,
+    recurring_payment_id: input.recurringPayment.id,
+  });
+}
+
+/** Re-check the recipient for a new cycle, after recovery and before signing. */
+async function admitCollectionDestination(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: CollectibleRecurringPaymentRow;
+}): Promise<void> {
+  try {
+    await resolveSolanaCounterpartyAccount({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      counterpartyId: input.recurringPayment.counterparty_id,
+      counterpartyAccountId: input.recurringPayment.counterparty_account_id,
+    });
+    return;
+  } catch (error) {
+    // Active-only, tenant-scoped lookups also refuse missing or moved rows.
+    // Database failures must propagate without changing the mandate.
+    if (!(error instanceof AppError) || error.code !== "NOT_FOUND") throw error;
+  }
+
+  const attemptedAt = new Date().toISOString();
+  const paused = await getDb(input.env).transaction(async (tx) => {
+    // Another collector may have claimed this cycle since recovery read it.
+    // Leave its status intact so that collection keeps its recovery path.
+    if (!(await lockOpenCollectionCycle(tx, { ...input, attemptedAt }))) return null;
+    return createPostgresPaymentRecurringPaymentsRepository(tx).pauseRecurringPayment({
+      recurringPaymentId: input.recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      reason: "destination_unavailable",
+      updatedAt: attemptedAt,
+    });
+  });
+  if (paused) {
+    logCollectionDestinationPause(input);
+  }
+  throw recipientUnavailable();
+}
+
 export async function collectRecurringPayment(input: {
   env: Env;
   organizationId: string;
@@ -1771,7 +2050,7 @@ export async function collectRecurringPayment(input: {
 }): Promise<RecurringPaymentCollectionResult> {
   assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
   if (!hasRecoverableRecurringPaymentCollection(input.recurringPayment.status)) {
-    throw conflict("Recurring payment must be active before collection");
+    throw notCollectable(input.recurringPayment);
   }
   if (!input.recurringPayment.subscription_id || !input.recurringPayment.next_collection_due_at) {
     throw conflict("Recurring payment is missing subscription records");
@@ -1810,7 +2089,7 @@ export async function collectRecurringPayment(input: {
   if (recovered) return recovered;
   refuseCanceledCollection(input.recurringPayment, subscription);
   if (!isCollectableRecurringPaymentStatus(input.recurringPayment.status)) {
-    throw conflict("Recurring payment must be active before collection");
+    throw notCollectable(input.recurringPayment);
   }
   assertCollectibleRecurringPayment(input.recurringPayment);
   const recurringPayment = input.recurringPayment;
@@ -1820,6 +2099,7 @@ export async function collectRecurringPayment(input: {
   if (!recurringPayment.plan_pda || !recurringPayment.subscription_pda) {
     throw conflict("Recurring payment is missing on-chain subscription records");
   }
+  await admitCollectionDestination({ ...input, recurringPayment });
   await input.admitStart();
   const nowIso = new Date().toISOString();
 

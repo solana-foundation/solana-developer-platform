@@ -38,6 +38,7 @@ function facts(overrides: Partial<MoneyAdmissionFacts> = {}): MoneyAdmissionFact
     organizationStatus: "active",
     projectEnvironment: "production",
     rawSettings: ENTITLED,
+    productionProjectsAllowed: true,
     disabledMovements: [],
     principal: LIVE_KEY_PRINCIPAL_FACTS,
     readAt: Date.now(),
@@ -67,6 +68,16 @@ describe("decideMoneyStart", () => {
       admitted: false,
       reason: "production_not_enabled",
     });
+  });
+
+  it("refuses an entitled production project on a deployment that admits none, and still admits its sandbox", () => {
+    expect(decideMoneyStart(facts({ productionProjectsAllowed: false }))).toEqual({
+      admitted: false,
+      reason: "production_not_enabled",
+    });
+    expect(
+      decideMoneyStart(facts({ productionProjectsAllowed: false, projectEnvironment: "sandbox" }))
+    ).toEqual({ admitted: true });
   });
 
   it.each(
@@ -115,6 +126,7 @@ describe("MOVEMENTS exits", () => {
     expect(exits).toEqual([
       "dvp.cancel",
       "dvp.reclaim",
+      "earn.queued_withdraw_cancel",
       "earn.queued_withdraw_request",
       "earn.withdraw",
       "helius_rings.gateway_transaction",
@@ -591,7 +603,8 @@ describe("MOVEMENTS starts", () => {
       "dvp.fund": ["dvp.execute"],
       "dvp.settle": ["dvp.execute"],
       "earn.deposit": ["earn.execute"],
-      "earn.queued_withdraw_cancel": ["earn.manage"],
+      "earn.prepare": ["earn.execute"],
+      "earn.provider_order_cancel": ["earn.manage"],
       "private_channels.session": ["private_channels.execute"],
       "private_channels.deposit": ["private_channels.execute"],
       "private_channels.transfer": ["private_channels.execute"],

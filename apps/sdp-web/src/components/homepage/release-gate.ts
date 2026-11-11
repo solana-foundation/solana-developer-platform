@@ -2,15 +2,15 @@ import type { SdpModule } from "@sdp/types/release-channels";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 
 /**
- * The module that decides each homepage surface a release channel can hold back. Privacy follows
- * private channels; markets follows its derived module, in when Earn or DvP is.
+ * The module that decides each homepage surface a release channel can hold back. Markets follows
+ * its derived module, in when Earn or DvP is.
  */
 const GATED_SURFACE_MODULES = {
   issuance: "issuance",
   markets: "markets",
-  privacy: "private_channels",
   compliance: "compliance",
   ramps: "ramps",
+  subscriptions: "subscriptions",
 } as const satisfies Record<string, SdpModule>;
 
 export type GatedSurface = keyof typeof GATED_SURFACE_MODULES;

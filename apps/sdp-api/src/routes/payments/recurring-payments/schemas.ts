@@ -37,8 +37,16 @@ export const createRecurringPaymentSchema = z.strictObject({
     .optional(),
 });
 
+/**
+ * The `updatedAt` of the version the caller reviewed (HOO-2562). An edit or
+ * activation of any other version answers 409 `RECURRING_PAYMENT_CHANGED`
+ * and changes nothing.
+ */
+export const expectedUpdatedAtSchema = z.string().min(1).max(64);
+
 export const updateRecurringPaymentSchema = z
   .strictObject({
+    expectedUpdatedAt: expectedUpdatedAtSchema.optional(),
     sourceCustodyWalletId: z.string().min(1).optional(),
     counterpartyId: z.string().min(1).optional(),
     counterpartyAccountId: z.string().min(1).optional(),
@@ -59,7 +67,7 @@ export const updateRecurringPaymentSchema = z
       .nullable()
       .optional(),
   })
-  .refine((value) => Object.keys(value).length > 0, {
+  .refine((value) => Object.keys(value).some((key) => key !== "expectedUpdatedAt"), {
     message: "At least one field must be provided",
   })
   .refine((value) => !value.counterpartyId || value.counterpartyAccountId, {
@@ -67,7 +75,9 @@ export const updateRecurringPaymentSchema = z
     path: ["counterpartyAccountId"],
   });
 
-export const activateRecurringPaymentSchema = z.object({}).strict();
+export const activateRecurringPaymentSchema = z.strictObject({
+  expectedUpdatedAt: expectedUpdatedAtSchema.optional(),
+});
 export const cancelRecurringPaymentSchema = z.object({}).strict();
 export const collectRecurringPaymentSchema = z.object({}).strict();
 export const resumeRecurringPaymentSchema = z.object({}).strict();

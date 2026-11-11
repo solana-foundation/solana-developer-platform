@@ -1,0 +1,210 @@
+// @vitest-environment jsdom
+
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { useState } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { TokenOperations } from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/asset-profile/use-token-operations";
+import { getMessages } from "@/i18n/messages";
+import { I18nProvider } from "@/i18n/provider";
+import { AuthorityForm } from "./authority-form";
+
+const messages = getMessages("en");
+const wallets = [
+  {
+    id: "w1",
+    walletId: "p1",
+    isRuntimeExecutionAllowed: true,
+    publicKey: "Addr1",
+    label: "Treasury",
+  },
+  { id: "w2", walletId: "p2", isRuntimeExecutionAllowed: true, publicKey: "Addr2", label: "Ops" },
+] as PaymentsDashboardWallet[];
+
+function buildOps(newAuthority: string) {
+  return {
+    authorityModalRow: {
+      id: "freeze-authority",
+      title: "Freeze authority",
+      helper: "",
+      value: "Addr1",
+      authorityRole: "freeze",
+    },
+    authorityModalCurrentAuthority: "Addr1",
+    authorityModalNewAuthority: newAuthority,
+    authorityModalSignerWalletId: "w1",
+    authorityModalSignerSelection: {
+      wallets: [wallets[0]],
+      defaultWalletId: "w1",
+      unavailableReason: null,
+    },
+    authorityWallets: wallets,
+    authorityWalletsError: null,
+    isPending: false,
+    setAuthorityModalNewAuthority: vi.fn(),
+    setAuthorityModalSignerWalletId: vi.fn(),
+    handleAuthorityModalConfirm: vi.fn(),
+    handleAuthorityModalClose: vi.fn(),
+  } as unknown as TokenOperations;
+}
+
+function renderForm(newAuthority: string) {
+  const ops = buildOps(newAuthority);
+  render(
+    <I18nProvider locale="en" messages={messages}>
+      <AuthorityForm ops={ops} />
+    </I18nProvider>
+  );
+  return ops;
+}
+
+function Harness({
+  initial,
+  base,
+  submitted,
+}: {
+  initial: string;
+  base: TokenOperations;
+  submitted: string[];
+}) {
+  const [newAuthority, setNewAuthority] = useState(initial);
+  const ops = {
+    ...base,
+    authorityModalNewAuthority: newAuthority,
+    setAuthorityModalNewAuthority: (value: string) => {
+      base.setAuthorityModalNewAuthority(value);
+      setNewAuthority(value);
+    },
+    handleAuthorityModalConfirm: async () => {
+      submitted.push(newAuthority);
+    },
+  } as TokenOperations;
+  return <AuthorityForm ops={ops} />;
+}
+
+/** The form over operations that keep the new holder, as the token's operations hook does. */
+function renderStatefulForm(initial: string) {
+  const base = buildOps(initial);
+  const submitted: string[] = [];
+  render(
+    <I18nProvider locale="en" messages={messages}>
+      <Harness initial={initial} base={base} submitted={submitted} />
+    </I18nProvider>
+  );
+  return { ops: base, submitted };
+}
+
+/**
+ * The form when two custody wallets hold the authority, keeping the chosen signer as the hook
+ * does, with an action running when `pending`.
+ */
+function SignerHarness({ pending }: { pending: boolean }) {
+  const [signerWalletId, setSignerWalletId] = useState("");
+  const ops: TokenOperations = {
+    ...buildOps("Addr2"),
+    isPending: pending,
+    authorityModalSignerWalletId: signerWalletId,
+    authorityModalSignerSelection: {
+      wallets: [wallets[0], { ...wallets[0], id: "w3", walletId: "p3", label: "Treasury backup" }],
+      defaultWalletId: "",
+      unavailableReason: null,
+    },
+    setAuthorityModalSignerWalletId: setSignerWalletId,
+  };
+  return <AuthorityForm ops={ops} />;
+}
+
+/** The picker under the "Signing wallet" label; the holder field is a combobox too. */
+function signerPicker(): HTMLElement {
+  const block = screen.getByText(messages.DashboardIssuance.signer.label).closest("div");
+  if (!block) throw new Error("The signing wallet label sits outside its block");
+  return within(block).getByRole("combobox");
+}
+
+const save = () => screen.getByRole("button", { name: messages.DashboardIssuance.authority.save });
+
+describe("AuthorityForm", () => {
+  afterEach(cleanup);
+
+  it("shows the holder and saves only a change", () => {
+    renderForm("Addr1");
+    expect(screen.getByText(messages.DashboardIssuance.newDesign.permissions.holder)).toBeTruthy();
+    expect((save() as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("saves a new holder in place and cancels back to the row", () => {
+    const ops = renderForm("Addr2");
+    fireEvent.click(save());
+    expect(ops.handleAuthorityModalConfirm).toHaveBeenCalledOnce();
+    fireEvent.click(
+      screen.getByRole("button", { name: messages.DashboardIssuance.newDesign.permissions.cancel })
+    );
+    expect(ops.handleAuthorityModalClose).toHaveBeenCalledOnce();
+  });
+
+  it("says what giving the authority up ends, and asks once more before sending it", () => {
+    const ops = renderForm("");
+    const authority = messages.DashboardIssuance.authority;
+    expect(screen.getByText(authority.freezeNoneImpact)).toBeTruthy();
+    fireEvent.click(save());
+    expect(ops.handleAuthorityModalConfirm).not.toHaveBeenCalled();
+    expect(screen.getByText(authority.freezeNoneTitle)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: authority.confirmNone }));
+    expect(ops.handleAuthorityModalConfirm).toHaveBeenCalledOnce();
+  });
+
+  it("transfers the authority to a custom Solana address outside the project's wallets", () => {
+    const authority = messages.DashboardIssuance.authority;
+    const { ops, submitted } = renderStatefulForm("Addr1");
+    // The project's wallets stay the default; a custom address is one step away.
+    expect(screen.queryByRole("textbox", { name: "Freeze authority" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: authority.useCustom }));
+
+    const input = screen.getByRole("textbox", { name: "Freeze authority" }) as HTMLInputElement;
+    expect(input.value).toBe("");
+    expect(screen.getByText(authority.customWalletWarning)).toBeTruthy();
+    // Empty is unfinished here, not None: no None warning, nothing to save.
+    expect(screen.queryByText(authority.freezeNoneImpact)).toBeNull();
+    expect((save() as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(input, { target: { value: "not-an-address" } });
+    expect(screen.getByText(messages.DashboardIssuance.forms.enterSolanaAddress)).toBeTruthy();
+    expect((save() as HTMLButtonElement).disabled).toBe(true);
+
+    const external = "So11111111111111111111111111111111111111112";
+    fireEvent.change(input, { target: { value: external } });
+    expect(screen.queryByText(messages.DashboardIssuance.forms.enterSolanaAddress)).toBeNull();
+    fireEvent.click(save());
+    expect(submitted).toEqual([external]);
+
+    // Going back to the list restores the holder chosen there.
+    fireEvent.click(screen.getByRole("button", { name: authority.chooseWallet }));
+    expect(ops.setAuthorityModalNewAuthority).toHaveBeenLastCalledWith("Addr1");
+    expect(screen.queryByRole("textbox", { name: "Freeze authority" })).toBeNull();
+  });
+
+  it("keeps the signing wallet on screen once chosen when several wallets hold the authority", async () => {
+    const user = userEvent.setup();
+    render(
+      <I18nProvider locale="en" messages={messages}>
+        <SignerHarness pending={false} />
+      </I18nProvider>
+    );
+    expect(save()).toHaveProperty("disabled", true);
+
+    await user.click(signerPicker());
+    await user.click(await screen.findByRole("option", { name: /Treasury backup/ }));
+    expect(signerPicker().textContent).toContain("Treasury backup");
+    expect(save()).toHaveProperty("disabled", false);
+  });
+
+  it("locks the signing wallet while an action runs", () => {
+    render(
+      <I18nProvider locale="en" messages={messages}>
+        <SignerHarness pending />
+      </I18nProvider>
+    );
+    expect(signerPicker().hasAttribute("data-disabled")).toBe(true);
+  });
+});

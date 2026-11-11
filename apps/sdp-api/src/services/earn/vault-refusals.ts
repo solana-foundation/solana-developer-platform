@@ -1,4 +1,5 @@
-import { isTransientRpcError } from "@sdp/rpc/transient";
+import { RpcUnavailableError } from "@sdp/rpc/errors";
+import { isRpcUpstreamUnavailable, isTransientRpcError } from "@sdp/rpc/transient";
 import { badRequest, conflict, providerUnavailable } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 
@@ -53,6 +54,7 @@ function providerError(error: unknown): { code: string; message: string } | null
  */
 export function rethrowVaultProviderFailure(error: unknown): never {
   const failure = providerError(error);
+  const unreadableRpc = error instanceof RpcUnavailableError || isRpcUpstreamUnavailable(error);
   if (failure && REFUSED_BUILD_CODES.has(failure.code)) {
     throw badRequest(failure.message);
   }
@@ -65,7 +67,8 @@ export function rethrowVaultProviderFailure(error: unknown): never {
   if (
     failure?.code === "VAULT_UNREADABLE" ||
     failure?.code === "REQUEST_UNREADABLE" ||
-    failure?.code === "POSITION_UNREADABLE"
+    failure?.code === "POSITION_UNREADABLE" ||
+    unreadableRpc
   ) {
     const causes = new Set<Error>();
     let cause = error;
@@ -80,7 +83,7 @@ export function rethrowVaultProviderFailure(error: unknown): never {
     getLogger().warn(
       {
         event: "earn_provider_state_unavailable",
-        providerCode: failure.code,
+        providerCode: failure?.code ?? null,
         transient,
         causeCode: root && "code" in root && typeof root.code === "number" ? root.code : null,
       },

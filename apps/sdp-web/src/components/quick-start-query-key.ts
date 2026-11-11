@@ -1,3 +1,4 @@
 export const quickStartQueryKeys = {
-  status: () => "dashboard-quick-start-status",
+  // Per project: the wallet step reads the open project's wallets.
+  status: (projectId: string) => `dashboard-quick-start-status:${projectId}`,
 };

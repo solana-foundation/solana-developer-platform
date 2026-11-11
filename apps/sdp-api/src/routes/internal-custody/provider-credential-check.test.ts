@@ -1,3 +1,4 @@
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
@@ -39,6 +40,7 @@ const CREDENTIAL_ID = "pcred_provider_credential_installation";
 const CONNECTION_ID = "cconn_provider_credential_installation";
 const MANAGED_CONFIG_ID = "cust_cfg_provider_credential_installation";
 const SEEDED_AT = "2026-01-01T00:00:00.000Z";
+const INSTALLATION_COMPLETED_EVENT = "sdp_api_provider_credential_installation_completed";
 const APP_ID = "privy-app-1234";
 const APP_SECRET = "exact secret";
 const WALLET_LABEL = "Treasury Wallet";
@@ -424,6 +426,7 @@ describe("exact Custody Connection installation routes", () => {
   });
 
   it("completes an exact Connection and replays terminal success out of channel beside an untouched Managed Config", async () => {
+    const info = vi.spyOn(getLogger(), "info");
     await seedManagedConfig();
     const providerFetch = successfulPrivyFetch(CONNECTION_ID);
     const { app, token } = buildApp();
@@ -543,6 +546,19 @@ describe("exact Custody Connection installation routes", () => {
       ).status
     ).toBe(200);
     expect(auditAdmission).not.toHaveBeenCalled();
+    expect(info.mock.calls.filter((call) => call[1] === INSTALLATION_COMPLETED_EVENT)).toEqual([
+      [
+        expect.objectContaining({
+          event: INSTALLATION_COMPLETED_EVENT,
+          provider: "privy",
+          cluster: CLUSTER_BY_SDP_ENVIRONMENT.sandbox,
+          outcome: "success",
+          failure_code: undefined,
+          connection_id: CONNECTION_ID,
+        }),
+        INSTALLATION_COMPLETED_EVENT,
+      ],
+    ]);
   });
 
   it("keeps completion successful and replayable when its audit outcome cannot be persisted", async () => {
@@ -954,6 +970,7 @@ describe("exact Custody Connection installation routes", () => {
   });
 
   it("stores invalid credentials as a redacted terminal failure and replays it while BYOK is out of channel", async () => {
+    const warn = vi.spyOn(getLogger(), "warn");
     const providerFetch = vi
       .fn()
       .mockResolvedValue(privyJson({ error: "raw provider credential detail" }, 401));
@@ -1015,6 +1032,17 @@ describe("exact Custody Connection installation routes", () => {
     });
     expect(providerFetch).not.toHaveBeenCalled();
     expect(secretFactory).not.toHaveBeenCalled();
+    expect(warn.mock.calls.filter((call) => call[1] === INSTALLATION_COMPLETED_EVENT)).toEqual([
+      [
+        expect.objectContaining({
+          event: INSTALLATION_COMPLETED_EVENT,
+          cluster: CLUSTER_BY_SDP_ENVIRONMENT.sandbox,
+          outcome: "failed",
+          failure_code: "invalid_credentials",
+        }),
+        INSTALLATION_COMPLETED_EVENT,
+      ],
+    ]);
   });
 
   it("destroys a rejected GCP secret version only after terminal state is committed", async () => {

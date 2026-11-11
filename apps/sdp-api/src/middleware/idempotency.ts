@@ -483,7 +483,10 @@ export async function runIdempotency(
       await release(() =>
         freshClaim ? repository.discard(id, claimToken) : repository.unlock(id, claimToken)
       );
-    } else if (response.status >= 500 && options.serverErrors === "rerun") {
+    } else if (
+      response.status >= 500 &&
+      (options.serverErrors === "rerun" || c.get("idempotencyRerunnable") === true)
+    ) {
       await release(() => repository.unlock(id, claimToken));
     } else {
       // Completing clears the claim token, so a late renewal matches nothing.
@@ -623,6 +626,17 @@ export function markIdempotencyCommitted(c: Context<{ Bindings: Env }>): void {
  */
 export function markIdempotencyReleased(c: Context<{ Bindings: Env }>): void {
   c.set("idempotencyCommitted", false);
+}
+
+/**
+ * Marks that running this request again is safe, so a 5xx is not stored and
+ * the key is released for its retry, as on a `serverErrors: "rerun"` route.
+ * For a handler whose own external call dedupes on the key (a provider that
+ * returns the same wallet for the same request id): storing the 5xx would
+ * push the client to a new key, and the provider to a second wallet.
+ */
+export function markIdempotencyRerunnable(c: Context<{ Bindings: Env }>): void {
+  c.set("idempotencyRerunnable", true);
 }
 
 /**

@@ -1,0 +1,783 @@
+"use client";
+
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
+import type {
+  CounterpartyAccountSummary,
+  PaymentsDashboardWallet,
+  PaymentTransferBatchEstimateWarning,
+} from "@sdp/types/payments";
+import {
+  isWellKnownTokenSymbol,
+  type SolanaCluster,
+  WELL_KNOWN_TOKEN_BY_MINT,
+  wellKnownMint,
+} from "@sdp/types/well-known-tokens";
+import {
+  addDecimalFixedPoint,
+  decimalFixedPoint,
+  decimalFixedPointToString,
+} from "@solana/fixed-points";
+import { useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
+import { toast } from "sonner";
+import useSWR from "swr";
+import { shortenAddress } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
+import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import {
+  type CreateTransferBatchResult,
+  estimateTransferBatch,
+  fetchBatchRecipients,
+  fetchTransferBatch,
+  TransferBatchRequestError,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
+import type { BulkImportRow } from "@/app/(session)/dashboard/[projectId]/payments/ramps/bulk-import";
+import {
+  batchSendSchema,
+  MAX_BATCH_RECIPIENTS,
+  ONCHAIN_AMOUNT_PATTERN,
+} from "@/app/(session)/dashboard/[projectId]/payments/ramps/schema";
+import { walletBalanceAssetOptions } from "@/app/(session)/dashboard/[projectId]/payments/ramps/wallet-options";
+import {
+  canonicalTransferBatchRequest,
+  type DashboardTransferBatchRequest,
+  isTransferBatchSendOutcomeUnknown,
+  nameTransferBatchRequest,
+  retryTransferBatchUnderKey,
+  sendTransferBatchUnderKey,
+} from "@/app/(session)/dashboard/[projectId]/payments/transfer-batch-idempotency";
+import type { MessageKey } from "@/i18n/messages";
+import { useTranslations } from "@/i18n/provider";
+import type { TranslationValues } from "@/i18n/translate";
+import { MOVEMENT_POLL_INTERVAL_MS } from "@/lib/dashboard-fetch";
+import { isMovementInFlight } from "@/lib/idempotency";
+import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
+import { usePaymentsActionWallets } from "./use-payments-action-wallets";
+import type { RampWizardStep } from "./use-ramp-wizard";
+
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
+export type BatchSendStepId = "RECIPIENTS" | "REVIEW";
+
+function getBatchSendSteps(t: Translate): readonly RampWizardStep<BatchSendStepId>[] {
+  return [
+    // The rows form speaks for itself; the step header already says "Details".
+    { id: "RECIPIENTS", label: t("DashboardPayments.onchainSend.details"), title: "" },
+    {
+      id: "REVIEW",
+      label: t("DashboardPayments.batchSend.reviewStep"),
+      title: t("DashboardPayments.batchSend.reviewTitle"),
+    },
+  ];
+}
+
+export type BatchEligibleRecipient = CounterpartyAccountSummary;
+
+const RECIPIENTS_PAGE_SIZE = 6;
+
+/** u64 with 9 decimals — matches ONCHAIN_AMOUNT_PATTERN's max fractional digits. */
+const batchAmountFixedPoint = decimalFixedPoint("unsigned", 64, 9);
+
+/** Sums schema-valid amounts exactly, skipping entries still being typed. */
+export function sumBatchAmounts(amounts: string[]): string {
+  return decimalFixedPointToString(
+    amounts.reduce((sum, amount) => {
+      const trimmed = amount.trim();
+      return ONCHAIN_AMOUNT_PATTERN.test(trimmed)
+        ? addDecimalFixedPoint(sum, batchAmountFixedPoint(trimmed))
+        : sum;
+    }, batchAmountFixedPoint("0"))
+  );
+}
+
+export interface BatchRecipientDraft {
+  counterpartyId: string;
+  counterpartyAccountId: string;
+  name: string;
+  address: string;
+  label: string | null;
+  amount: string;
+}
+
+interface BatchRecipientEntry {
+  recipient: BatchEligibleRecipient;
+  amount: string;
+}
+
+export interface UseBatchSendWizardProps {
+  wallets: PaymentsDashboardWallet[];
+  walletsError: string | null;
+  issuedTokenSymbolsByMint: Record<string, string>;
+  cluster: SolanaCluster;
+  onExit: () => void;
+}
+
+/** Copy for the retry refusals the API names (HOO-2343); each sent nothing. */
+const RETRY_REFUSAL_COPY = {
+  TRANSFER_BATCH_RETRY_CLAIMED: {
+    title: "DashboardPayments.batchSend.retryAlreadyClaimed",
+    description: "DashboardPayments.batchSend.retryAlreadyClaimedDescription",
+  },
+  TRANSFER_BATCH_NOTHING_TO_RETRY: {
+    title: "DashboardPayments.batchSend.nothingToRetry",
+    description: "DashboardPayments.batchSend.nothingToRetryDescription",
+  },
+  TRANSFER_BATCH_DESTINATION_CHANGED: {
+    title: "DashboardPayments.batchSend.retryDestinationChanged",
+    description: "DashboardPayments.batchSend.retryDestinationChangedDescription",
+  },
+} as const satisfies Record<string, { title: MessageKey; description: MessageKey }>;
+
+type RetryRefusalCode = keyof typeof RETRY_REFUSAL_COPY;
+
+function isRetryRefusalCode(code: string | null): code is RetryRefusalCode {
+  return code !== null && Object.hasOwn(RETRY_REFUSAL_COPY, code);
+}
+
+/**
+ * What a failed retry request tells the user. A refusal the API names sent
+ * nothing, so it is said in our words; anything else shows its own message.
+ *
+ * @param failure - The caught value, narrowed: the API's refusal, another
+ *   error, or null for anything that is not an Error.
+ */
+function retryFailureCopy(
+  failure: TransferBatchRequestError | Error | null,
+  t: (key: MessageKey) => string
+): { title: string; description: string } {
+  if (failure instanceof TransferBatchRequestError && isRetryRefusalCode(failure.code)) {
+    const refusal = RETRY_REFUSAL_COPY[failure.code];
+    return { title: t(refusal.title), description: t(refusal.description) };
+  }
+  const fallback = t("DashboardPayments.batchSend.retryRequestFailed");
+  return { title: fallback, description: failure === null ? fallback : failure.message };
+}
+
+/**
+ * One page of the contacts a batch can pay, filtered by the search box. A new search starts
+ * again from the first page.
+ */
+function useBatchRecipientPage() {
+  const t = useTranslations();
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+
+  const trimmedSearch = search.trim();
+  const { data: recipientPage, isLoading: recipientsLoading } = useSWR(
+    paymentsQueryKeys.batchRecipients({ page, search: trimmedSearch }),
+    () =>
+      fetchBatchRecipients(
+        {
+          page,
+          pageSize: RECIPIENTS_PAGE_SIZE,
+          search: trimmedSearch.length > 0 ? trimmedSearch : undefined,
+        },
+        t
+      ),
+    { revalidateOnFocus: false, keepPreviousData: true }
+  );
+  const pageRecipients = recipientPage ? recipientPage.accounts : [];
+  const recipientTotal = recipientPage ? recipientPage.total : 0;
+  const pageCount = Math.max(1, Math.ceil(recipientTotal / RECIPIENTS_PAGE_SIZE));
+
+  const setSearchQuery = (next: string) => {
+    setSearch(next);
+    setPage(1);
+  };
+
+  return {
+    page,
+    setPage,
+    search,
+    setSearchQuery,
+    pageRecipients,
+    recipientsLoading,
+    recipientTotal,
+    pageCount,
+  };
+}
+
+/**
+ * The rows in the batch, keyed by counterparty account so a pick survives paging and
+ * searching, with the ways to add, remove, and price them.
+ */
+function useBatchRecipientEntries() {
+  const [entries, setEntries] = useState<Record<string, BatchRecipientEntry>>({});
+  // Typing an amount also adds the row to the batch, so the input can show on every row.
+  const setRecipientAmount = (recipient: BatchEligibleRecipient, amount: string) => {
+    setEntries((prev) => ({
+      ...prev,
+      [recipient.counterpartyAccountId]: { recipient, amount },
+    }));
+  };
+
+  const toggleRecipient = (recipient: BatchEligibleRecipient) => {
+    setEntries((prev) => {
+      const next = { ...prev };
+      if (next[recipient.counterpartyAccountId]) {
+        delete next[recipient.counterpartyAccountId];
+      } else {
+        next[recipient.counterpartyAccountId] = { recipient, amount: "" };
+      }
+      return next;
+    });
+  };
+
+  const setManySelected = (recipientsToSet: BatchEligibleRecipient[], value: boolean) => {
+    setEntries((prev) => {
+      const next = { ...prev };
+      for (const recipient of recipientsToSet) {
+        if (value) {
+          if (!next[recipient.counterpartyAccountId]) {
+            next[recipient.counterpartyAccountId] = { recipient, amount: "" };
+          }
+        } else {
+          delete next[recipient.counterpartyAccountId];
+        }
+      }
+      return next;
+    });
+  };
+
+  return { entries, setEntries, setRecipientAmount, toggleRecipient, setManySelected };
+}
+
+/**
+ * What the source wallet holds of the chosen token (0 when it holds none, null before a
+ * wallet is picked), and whether the batch total is more than that.
+ */
+function batchBalanceCheck(
+  selectedWallet: PaymentsDashboardWallet | null,
+  selectedAssetBalance: CustodyWalletTokenBalance | null,
+  totalAmount: string
+): { availableAmount: number | null; exceedsBalance: boolean } {
+  const totalAmountValue = Number(totalAmount);
+  let availableAmount: number | null = null;
+  if (selectedWallet) {
+    availableAmount = selectedAssetBalance ? Number(selectedAssetBalance.uiAmount) : 0;
+  }
+  const exceedsBalance =
+    totalAmountValue > 0 && availableAmount !== null && totalAmountValue > availableAmount;
+  return { availableAmount, exceedsBalance };
+}
+
+/**
+ * Whether the primary button may act. A finished batch always may; otherwise the wallet has
+ * to be able to sign, and on the rows step the rows have to be valid, affordable, and in a
+ * token the wallet holds.
+ */
+function batchCanProceed({
+  batchResult,
+  selectedWallet,
+  currentStepId,
+  recipientsValid,
+  exceedsBalance,
+  hasMint,
+}: {
+  batchResult: CreateTransferBatchResult | null;
+  selectedWallet: PaymentsDashboardWallet | null;
+  currentStepId: BatchSendStepId;
+  recipientsValid: boolean;
+  exceedsBalance: boolean;
+  hasMint: boolean;
+}): boolean {
+  return (
+    batchResult !== null ||
+    (selectedWallet?.isRuntimeExecutionAllowed === true &&
+      (currentStepId === "RECIPIENTS" ? recipientsValid && !exceedsBalance && hasMint : true))
+  );
+}
+
+/** How often an estimate with warnings is re-read while the review is open. */
+const ESTIMATE_WARNING_RECHECK_MS = 10_000;
+
+/**
+ * The minimum SOL amount of each recipient the estimate says create would
+ * refuse (HOO-2375), by counterparty account. Warnings name recipients by
+ * index into the canonical request, which may be reordered.
+ */
+export function belowRentMinimumByAccount(
+  warnings: readonly PaymentTransferBatchEstimateWarning[],
+  requestRecipients: readonly { counterpartyAccountId: string }[]
+): Map<string, string> {
+  const byAccount = new Map<string, string>();
+  for (const warning of warnings) {
+    if (warning.code !== "AMOUNT_BELOW_RENT_MINIMUM") continue;
+    // The estimate is keyed by this exact request, so every index is in it.
+    const recipient = requestRecipients[warning.recipientIndex];
+    if (recipient === undefined) {
+      throw new Error(
+        `Estimate warning names recipient ${warning.recipientIndex}, not in the request`
+      );
+    }
+    byAccount.set(recipient.counterpartyAccountId, warning.minimumAmount);
+  }
+  return byAccount;
+}
+
+/** The source wallet's rent warning, if the estimate gave one (HOO-2375). */
+export function sourceBelowRentMinimum(
+  warnings: readonly PaymentTransferBatchEstimateWarning[]
+): { sourceRemainder: string; minimumAmount: string } | null {
+  const warning = warnings.find((entry) => entry.code === "SOURCE_BELOW_RENT_MINIMUM");
+  return warning?.code === "SOURCE_BELOW_RENT_MINIMUM"
+    ? { sourceRemainder: warning.sourceRemainder, minimumAmount: warning.minimumAmount }
+    : null;
+}
+
+/** The fee estimate's failure as a sentence, or null while it has not failed. */
+function estimateErrorMessage(error: unknown, t: Translate): string | null {
+  if (!error) {
+    return null;
+  }
+  return error instanceof Error ? error.message : t("DashboardPayments.batchSend.estimateFailed");
+}
+
+export function useBatchSendWizard({
+  wallets,
+  walletsError,
+  issuedTokenSymbolsByMint,
+  cluster,
+  onExit,
+}: UseBatchSendWizardProps) {
+  const router = useRouter();
+  const href = useProjectHref();
+  const projectId = useProjectId();
+  const t = useTranslations();
+  const steps = getBatchSendSteps(t);
+  const [stepIndex, setStepIndex] = useState(0);
+  const [walletId, setWalletId] = useState("");
+  const [asset, setAsset] = useState("");
+  const [externalId, setExternalId] = useState("");
+  const { entries, setEntries, setRecipientAmount, toggleRecipient, setManySelected } =
+    useBatchRecipientEntries();
+  const [submitting, setSubmitting] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [batchResult, setBatchResult] = useState<CreateTransferBatchResult | null>(null);
+  // The batch as sent when its answer left the outcome unknown. Until the API
+  // answers for it, the wizard only sends these same bytes again, under the
+  // same key and payout run, so an edit can never start a second run.
+  const [unconfirmedSend, setUnconfirmedSend] = useState<DashboardTransferBatchRequest | null>(
+    null
+  );
+  const recovering = unconfirmedSend !== null;
+
+  const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
+    wallets,
+    walletsError
+  );
+
+  const {
+    page,
+    setPage,
+    search,
+    setSearchQuery,
+    pageRecipients,
+    recipientsLoading,
+    recipientTotal,
+    pageCount,
+  } = useBatchRecipientPage();
+
+  const selectedWallet = useMemo(
+    () => liveWallets.find((wallet) => wallet.id === walletId) ?? null,
+    [liveWallets, walletId]
+  );
+  const signingUnavailable = !!walletId && selectedWallet?.isRuntimeExecutionAllowed !== true;
+  const assetOptions = useMemo(
+    () =>
+      walletBalanceAssetOptions(selectedWallet, issuedTokenSymbolsByMint, t).map((option) => {
+        const known =
+          WELL_KNOWN_TOKEN_BY_MINT.has(option.value) ||
+          Boolean(issuedTokenSymbolsByMint[option.value]);
+        return {
+          value: option.value,
+          label: option.label === option.value ? shortenAddress(option.value) : option.label,
+          description: known ? undefined : t("DashboardPayments.batchSend.unknownToken"),
+        };
+      }),
+    [issuedTokenSymbolsByMint, selectedWallet, t]
+  );
+  const selectedAssetBalance = useMemo(
+    () => selectedWallet?.balances?.find((balance) => balance.mint === asset) ?? null,
+    [selectedWallet, asset]
+  );
+  const selectedAssetOption = assetOptions.find((option) => option.value === asset);
+  const displayAsset: string | null =
+    selectedAssetOption === undefined ? null : selectedAssetOption.label;
+
+  const selectWallet = (nextWalletId: string) => {
+    setWalletId(nextWalletId);
+    const nextWallet = liveWallets.find((wallet) => wallet.id === nextWalletId) ?? null;
+    const nextAssets = walletBalanceAssetOptions(nextWallet, issuedTokenSymbolsByMint, t);
+    if (!nextAssets.some((option) => option.value === asset)) {
+      const preferred = nextAssets.find((option) => option.label === "USDC");
+      const fallback = preferred === undefined ? nextAssets[0] : preferred;
+      setAsset(fallback === undefined ? "" : fallback.value);
+    }
+  };
+
+  const bulkImport = async (rows: BulkImportRow[]): Promise<{ unresolved: string[] }> => {
+    // One batch pays one token, and both importers (the paste dialog and the CSV drop) arrive
+    // here. Rows are compared by the mint they resolve to, so "USDC" and USDC's mint address
+    // name the same token; the check runs before any recipient is looked up.
+    const mints = new Set<string>();
+    for (const { currency } of rows) {
+      const rowMint = isWellKnownTokenSymbol(currency)
+        ? wellKnownMint(currency, cluster)
+        : currency;
+      if (!rowMint) {
+        throw new Error(t("DashboardPayments.batchSend.tokenUnavailableOnNetwork", { currency }));
+      }
+      mints.add(rowMint);
+    }
+    if (mints.size > 1) {
+      const currencies = [...new Set(rows.map((row) => row.currency))];
+      throw new Error(
+        t("DashboardPayments.batchSend.oneCurrencyRequired", { currencies: currencies.join(", ") })
+      );
+    }
+    const [mint] = mints;
+
+    const ids = [...new Set(rows.map((row) => row.accountId))];
+    const resolved = await fetchBatchRecipients({ ids }, t);
+    const byId = new Map(
+      resolved.accounts.map((recipient) => [recipient.counterpartyAccountId, recipient])
+    );
+    const additions: Record<string, BatchRecipientEntry> = {};
+    const unresolved: string[] = [];
+    for (const row of rows) {
+      const recipient = byId.get(row.accountId);
+      if (recipient) {
+        additions[row.accountId] = { recipient, amount: row.amount };
+      } else {
+        unresolved.push(row.accountId);
+      }
+    }
+    if (unresolved.length > 0) {
+      return { unresolved };
+    }
+
+    const nextEntries = mint === asset ? { ...entries, ...additions } : additions;
+    if (Object.keys(nextEntries).length > MAX_BATCH_RECIPIENTS) {
+      throw new Error(
+        t("DashboardPayments.batchSend.importExceedsMaximumRecipients", {
+          max: MAX_BATCH_RECIPIENTS,
+          total: Object.keys(nextEntries).length,
+        })
+      );
+    }
+    setAsset(mint);
+    setEntries(nextEntries);
+    return { unresolved };
+  };
+
+  // The batch is whatever has an entry — selection persists across pages via the stored map.
+  const recipients = useMemo<BatchRecipientDraft[]>(
+    () =>
+      Object.values(entries).map(({ recipient, amount }) => ({
+        counterpartyId: recipient.counterpartyId,
+        counterpartyAccountId: recipient.counterpartyAccountId,
+        name: recipient.name,
+        address: recipient.address,
+        label: recipient.label,
+        amount,
+      })),
+    [entries]
+  );
+
+  const totalAmount = useMemo(() => sumBatchAmounts(recipients.map((r) => r.amount)), [recipients]);
+  const { availableAmount, exceedsBalance } = batchBalanceCheck(
+    selectedWallet,
+    selectedAssetBalance,
+    totalAmount
+  );
+  const exceedsMaxRecipients = recipients.length > MAX_BATCH_RECIPIENTS;
+  const hasMint = !walletId || selectedAssetBalance !== null;
+  const trimmedExternalId = externalId.trim();
+
+  // Canonical form, not the order the recipients were assembled in: the API
+  // fingerprints recipients IN ORDER, so a retry that reorders the same set
+  // has to send the same bytes or it is refused as a key conflict. A blank
+  // Reference is named at send time, durably (sendTransferBatchUnderKey).
+  const request = useMemo(
+    () =>
+      canonicalTransferBatchRequest({
+        projectId,
+        ...(trimmedExternalId.length > 0 ? { externalId: trimmedExternalId } : {}),
+        sourceCustodyWalletId: walletId,
+        token: asset,
+        recipients: recipients.map((r) => ({
+          counterpartyId: r.counterpartyId,
+          counterpartyAccountId: r.counterpartyAccountId,
+          amount: r.amount,
+        })),
+      }),
+    [projectId, walletId, asset, recipients, trimmedExternalId]
+  );
+  const recipientsValid = batchSendSchema.safeParse({
+    walletId,
+    asset,
+    externalId,
+    recipients,
+  }).success;
+
+  const currentStepId = steps[stepIndex].id;
+  const isLastStep = stepIndex === steps.length - 1;
+  const canProceed = batchCanProceed({
+    batchResult,
+    selectedWallet,
+    currentStepId,
+    recipientsValid,
+    exceedsBalance,
+    hasMint,
+  });
+
+  const { data: estimate, error: estimateError } = useSWR(
+    currentStepId === "REVIEW" && canProceed && !batchResult
+      ? paymentsQueryKeys.batchEstimate({ serializedRequest: JSON.stringify(request) })
+      : null,
+    () => estimateTransferBatch(request, t),
+    {
+      revalidateOnFocus: false,
+      // Each estimate belongs to its own request: its warnings index that
+      // request's recipients, and Send waits for it. The dashboard default
+      // keeps the previous request's estimate while the next one loads.
+      keepPreviousData: false,
+      // A flagged address may be funded elsewhere: recheck until it clears,
+      // so Send re-enables without the request changing (HOO-2375).
+      refreshInterval: (latest) =>
+        latest !== undefined && latest.warnings.length > 0 ? ESTIMATE_WARNING_RECHECK_MS : 0,
+    }
+  );
+  // No estimate yet (loading or failed): nothing to flag.
+  const belowRentMinimum = useMemo(
+    () =>
+      estimate === undefined
+        ? new Map<string, string>()
+        : belowRentMinimumByAccount(estimate.warnings, request.recipients),
+    [estimate, request]
+  );
+  const sourceRentShortfall = useMemo(
+    () => (estimate === undefined ? null : sourceBelowRentMinimum(estimate.warnings)),
+    [estimate]
+  );
+  // Create would refuse the batch (409): nothing to send until it is fixed.
+  // Review sends only once the estimate has answered (or failed, as before)
+  // and named no recipient create would refuse.
+  const estimateSettled = estimate !== undefined || estimateError !== undefined;
+  const canSend =
+    recovering ||
+    (canProceed &&
+      (currentStepId !== "REVIEW" ||
+        batchResult !== null ||
+        (estimateSettled && belowRentMinimum.size === 0 && sourceRentShortfall === null)));
+
+  const submitBatch = async () => {
+    setSubmitting(true);
+    const toastId = toast.loading(t("DashboardPayments.batchSend.submitting"), {
+      position: "bottom-right",
+    });
+    const sent = unconfirmedSend ?? nameTransferBatchRequest(request);
+    try {
+      // Durable per tab: a retry of this exact batch (double press, timeout,
+      // reload) carries the SAME key, so the API replays the recorded batch
+      // instead of moving the money again.
+      const result = await sendTransferBatchUnderKey(sent, t);
+      setUnconfirmedSend(null);
+      setBatchResult(result);
+      const status = result.batch.status;
+      if (status === "confirmed") {
+        toast.success(t("DashboardPayments.batchSend.resultConfirmed"), {
+          id: toastId,
+          position: "bottom-right",
+        });
+      } else if (status === "partially_failed") {
+        toast.warning(t("DashboardPayments.batchSend.resultPartiallyFailed"), {
+          id: toastId,
+          description: t("DashboardPayments.batchSend.someRecipientsDidNotReceiveFunds"),
+          position: "bottom-right",
+        });
+      } else if (status === "failed") {
+        toast.error(t("DashboardPayments.batchSend.resultFailed"), {
+          id: toastId,
+          position: "bottom-right",
+        });
+      } else {
+        toast.success(t("DashboardPayments.batchSend.resultSubmitted"), {
+          id: toastId,
+          // Still processing: the key is kept, so a resend returns this batch (APE-461).
+          description: isMovementInFlight(status)
+            ? t("Shared.idempotency.processingCheckStatus")
+            : t("DashboardPayments.batchSend.status", { status }),
+          position: "bottom-right",
+        });
+      }
+    } catch (error) {
+      // The batch may be paying: hold it, and say so in the review.
+      if (isTransferBatchSendOutcomeUnknown(error)) {
+        setUnconfirmedSend(sent);
+        toast.error(t("DashboardPayments.batchSend.outcomeUnknown"), {
+          id: toastId,
+          description: t("DashboardPayments.batchSend.outcomeUnknownToast"),
+          position: "bottom-right",
+        });
+        return;
+      }
+      // A reference another batch on this wallet already uses (HOO-2335): nothing was sent.
+      if (
+        error instanceof TransferBatchRequestError &&
+        error.code === "TRANSFER_BATCH_RUN_EXISTS"
+      ) {
+        toast.error(t("DashboardPayments.batchSend.referenceInUse"), {
+          id: toastId,
+          description: t("DashboardPayments.batchSend.referenceInUseDescription"),
+          position: "bottom-right",
+        });
+        return;
+      }
+      toast.error(t("DashboardPayments.batchSend.resultFailed"), {
+        id: toastId,
+        description:
+          error instanceof Error ? error.message : t("DashboardPayments.batchSend.resultFailed"),
+        position: "bottom-right",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // The send answers before its chunks settle, so the batch is read until it
+  // is final: a recipient that fails later still offers Retry.
+  const { data: liveBatch, mutate: setLiveBatch } = useSWR(
+    batchResult ? paymentsQueryKeys.transferBatch({ batchId: batchResult.batch.id }) : null,
+    ([, batchId]) => fetchTransferBatch(batchId, t),
+    {
+      revalidateOnFocus: false,
+      refreshInterval: (latest) =>
+        isMovementInFlight((latest ?? batchResult)?.batch.status ?? null)
+          ? MOVEMENT_POLL_INTERVAL_MS
+          : 0,
+    }
+  );
+  const currentBatch = liveBatch ?? batchResult;
+  const failedRecipientIds =
+    currentBatch?.recipients
+      .filter((recipient) => recipient.status === "failed")
+      .map((recipient) => recipient.id) ?? [];
+  const failedRecipientCount = failedRecipientIds.length;
+
+  // Sends only the recipients the API still finds failed (HOO-2343); the rest
+  // of the batch is never sent again.
+  const retryFailedRecipients = async () => {
+    if (currentBatch === null || failedRecipientCount === 0 || retrying) {
+      return;
+    }
+    setRetrying(true);
+    const toastId = toast.loading(t("DashboardPayments.batchSend.retryingFailedRecipients"), {
+      position: "bottom-right",
+    });
+    try {
+      const result = await retryTransferBatchUnderKey(currentBatch.batch.id, failedRecipientIds, t);
+      setBatchResult(result);
+      await setLiveBatch(result, { revalidate: false });
+      toast.success(t("DashboardPayments.batchSend.retrySubmitted"), {
+        id: toastId,
+        description: t("DashboardPayments.batchSend.retrySubmittedDescription"),
+        position: "bottom-right",
+      });
+    } catch (error) {
+      const { title, description } = retryFailureCopy(error instanceof Error ? error : null, t);
+      toast.error(title, { id: toastId, description, position: "bottom-right" });
+      // The API may have taken the retry even though its answer was lost: read
+      // the batch again, so a resend in flight resumes the poll.
+      void setLiveBatch();
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  const handlePrimary = async () => {
+    if (!canSend) {
+      return;
+    }
+    if (isLastStep) {
+      if (batchResult) {
+        router.push(href("/dashboard/payments"));
+        return;
+      }
+      await submitBatch();
+      return;
+    }
+    setStepIndex((current) => current + 1);
+  };
+
+  const handleSecondary = () => {
+    if (submitting || batchResult || recovering) {
+      return;
+    }
+    onExit();
+  };
+
+  // Back from review to the rows, only while nothing may have been sent.
+  const handleBack = () => {
+    if (submitting || batchResult || recovering) {
+      return;
+    }
+    setStepIndex((current) => Math.max(0, current - 1));
+  };
+
+  return {
+    stepIndex,
+    currentStepId,
+    isLastStep,
+    canProceed: canSend,
+    liveWallets,
+    walletsLoading,
+    liveWalletsError,
+    sourceWalletHint:
+      signingUnavailable && !batchResult ? t("DashboardPayments.signingUnavailable") : null,
+    walletId,
+    selectWallet,
+    asset,
+    displayAsset,
+    setAsset,
+    externalId,
+    setExternalId,
+    assetOptions,
+    selectedWallet,
+    selectedAssetBalance,
+    availableAmount,
+    totalAmount,
+    exceedsBalance,
+    exceedsMaxRecipients,
+    pageRecipients,
+    recipientsLoading,
+    recipientTotal,
+    page,
+    pageCount,
+    setPage,
+    search,
+    setSearchQuery,
+    recipients,
+    entries,
+    steps,
+    toggleRecipient,
+    setManySelected,
+    setRecipientAmount,
+    bulkImport,
+    estimate: estimate ?? null,
+    belowRentMinimum,
+    sourceRentShortfall,
+    estimateError: estimateErrorMessage(estimateError, t),
+    submitting,
+    recovering,
+    transactionsHref: href("/dashboard/payments/transactions"),
+    batchResult: currentBatch,
+    failedRecipientCount,
+    retrying,
+    retryFailedRecipients,
+    handlePrimary,
+    handleSecondary,
+    handleBack,
+  };
+}
+
+export type BatchSendWizard = ReturnType<typeof useBatchSendWizard>;

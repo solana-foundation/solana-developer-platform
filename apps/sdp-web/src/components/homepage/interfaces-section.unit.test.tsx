@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { IDEMPOTENCY_REQUIRED_ROUTES } from "@sdp/types/idempotency-required-routes";
 import { DEFAULT_SDP_API_URL } from "@sdp/types/site";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageKey } from "@/i18n/messages";
@@ -41,14 +41,20 @@ function escapeRegExp(literal: string): string {
 }
 
 const copy = {
-  execute: { title: "Execute mode", body: "Execute body", status: "200 · confirmed" },
-  prepare: { title: "Prepare mode", body: "Prepare body", status: "200 · ready to sign" },
+  api: { title: "REST API", body: "API body", status: "200 · confirmed" },
   dashboard: { title: "Dashboard", body: "Dashboard body", status: "200 · 1 pending" },
 };
 
 function renderConsole() {
   return render(
-    <InterfacesConsole copy={copy} modesLabel="Ways in" responseLabel="Response" links={null} />
+    <InterfacesConsole
+      copy={copy}
+      modesLabel="Ways in"
+      responseLabel="Response"
+      comingSoonModes={[]}
+      comingSoonLabel="Coming soon"
+      links={null}
+    />
   );
 }
 
@@ -71,6 +77,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("InterfacesSection", () => {
@@ -81,21 +88,18 @@ describe("InterfacesSection", () => {
     const section = doc.querySelector("section#interfaces");
     expect(section?.getAttribute("data-ground")).toBe("paper");
     expect(doc.querySelectorAll("h2")).toHaveLength(1);
-    expect(doc.querySelector("h2")?.textContent).toContain("Call the API.");
+    expect(doc.querySelector("h2")?.textContent).toContain(
+      "Integrate directly via API or manage from a single dashboard"
+    );
 
     const tablist = doc.querySelector('[role="tablist"]');
     expect(tablist?.getAttribute("aria-label")).toBe("Ways to work with the platform");
     const tabs = [...doc.querySelectorAll('[role="tab"]')];
     expect(tabs.map((tab) => tab.querySelector("b")?.textContent)).toEqual([
-      "Execute mode",
-      "Prepare mode",
+      "REST API",
       "Dashboard",
     ]);
-    expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual([
-      "true",
-      "false",
-      "false",
-    ]);
+    expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual(["true", "false"]);
 
     const panel = doc.querySelector('[role="tabpanel"]');
     expect(panel?.getAttribute("aria-labelledby")).toBe(tabs[0]?.id);
@@ -103,7 +107,7 @@ describe("InterfacesSection", () => {
 
     const code = doc.querySelector("pre code")?.textContent ?? "";
     expect(code).toContain(`curl -X POST ${DEFAULT_SDP_API_URL}/v1/payments/transfers`);
-    expect(code).toContain('-H "Authorization: Bearer sk_test_…"');
+    expect(code).toContain('-H "Authorization: Bearer sf_…"');
 
     const anchors = [...doc.querySelectorAll("a")].map((a) => [
       a.textContent,
@@ -117,16 +121,44 @@ describe("InterfacesSection", () => {
     // The tabs turn on their own, so the card is not a live region.
     expect(markup).not.toContain("aria-live");
   });
+
+  it("shows both ways with no coming-soon badge on the stable channel", async () => {
+    vi.stubEnv("SDP_RELEASE_CHANNEL", "stable");
+    const view = document.createElement("div");
+    view.innerHTML = renderToStaticMarkup(await InterfacesSection({ links }));
+    const section = within(view);
+
+    expect(section.getAllByRole("tab").map((tab) => tab.querySelector("b")?.textContent)).toEqual([
+      "REST API",
+      "Dashboard",
+    ]);
+    expect(section.queryByRole("tab", { name: /Coming soon/ })).toBeNull();
+    expect(view.textContent).not.toContain("Coming soon");
+  });
 });
 
 describe("interface snippets", () => {
-  // The homepage is served on every deployment, so each call must be in prod's public document.
-  it.each(INTERFACE_SNIPPETS)("$method $path is a public API route on stable", (snippet) => {
-    expect(findPublishedPlaygroundOperation(snippet.method, snippet.path, "stable")).toMatchObject({
-      method: snippet.method,
-      pathTemplate: snippet.path,
-    });
-  });
+  it.each(INTERFACE_SNIPPETS.filter((snippet) => snippet.gate === undefined))(
+    "$method $path is a public API route on stable",
+    (snippet) => {
+      expect(
+        findPublishedPlaygroundOperation(snippet.method, snippet.path, "stable")
+      ).toMatchObject({ method: snippet.method, pathTemplate: snippet.path });
+    }
+  );
+
+  it.each(INTERFACE_SNIPPETS.filter((snippet) => snippet.gate !== undefined))(
+    "$method $path is held back on stable and public on beta",
+    (snippet) => {
+      expect(
+        findPublishedPlaygroundOperation(snippet.method, snippet.path, "stable")
+      ).toBeUndefined();
+      expect(findPublishedPlaygroundOperation(snippet.method, snippet.path, "beta")).toMatchObject({
+        method: snippet.method,
+        pathTemplate: snippet.path,
+      });
+    }
+  );
 
   it.each(INTERFACE_SNIPPETS)("$mode calls its own path on the public host", (snippet) => {
     const concrete = snippet.path
@@ -137,7 +169,7 @@ describe("interface snippets", () => {
     for (const request of [snippet.request, snippet.narrowRequest]) {
       const text = request.map(lineText).join("\n");
       expect(text).toMatch(url);
-      expect(text).toContain('Authorization: Bearer sk_test_…"');
+      expect(text).toContain('Authorization: Bearer sf_…"');
       expect(text.startsWith(`$ curl ${snippet.method === "GET" ? "-G" : "-X POST"}`)).toBe(true);
     }
   });
@@ -174,18 +206,20 @@ describe("InterfacesConsole", () => {
   it("selects a way from the keyboard and holds it", () => {
     renderConsole();
     const tabs = screen.getAllByRole("tab");
-    expect(tabs.map((tab) => tab.tabIndex)).toEqual([0, -1, -1]);
+    expect(tabs.map((tab) => tab.tabIndex)).toEqual([0, -1]);
 
     act(() => tabs[0]?.focus());
     fireEvent.keyDown(tabs[0], { key: "ArrowDown" });
     expect(tabs[1]?.getAttribute("aria-selected")).toBe("true");
     expect(document.activeElement).toBe(tabs[1]);
     expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(tabs[1]?.id);
-    expect(screen.getByRole("tabpanel").textContent).toContain("prepare-collection");
+    expect(screen.getByRole("tabpanel").textContent).toContain("status=pending");
 
-    fireEvent.keyDown(tabs[1], { key: "End" });
-    expect(tabs[2]?.getAttribute("aria-selected")).toBe("true");
-    fireEvent.keyDown(tabs[2], { key: "ArrowDown" });
+    fireEvent.keyDown(tabs[1], { key: "Home" });
+    expect(tabs[0]?.getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(tabs[0], { key: "End" });
+    expect(tabs[1]?.getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(tabs[1], { key: "ArrowDown" });
     expect(tabs[0]?.getAttribute("aria-selected")).toBe("true");
     expect(activeBar().dataset.state).toBe("held");
   });

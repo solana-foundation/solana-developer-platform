@@ -4,6 +4,7 @@
     "custody",
     "payments",
     "recurring_payments",
+    "subscriptions",
     "ramps",
     "compliance",
     "issuance",
@@ -13,6 +14,39 @@
     "helius_rings"
   ],
   "rampProviders": ["moonpay", "stripe"],
+  "custodyProviders": [
+    "fireblocks",
+    "privy",
+    "coinbase_cdp",
+    "para",
+    "turnkey",
+    "dfns",
+    "ibm_haven",
+    "anchorage",
+    "utila"
+  ],
+  "walletCreateDedupe": [
+    {
+      "provider": "fireblocks",
+      "mode": "byok",
+      "window": "24h"
+    },
+    {
+      "provider": "privy",
+      "mode": "managed",
+      "window": "permanent"
+    },
+    {
+      "provider": "privy",
+      "mode": "byok",
+      "window": "permanent"
+    },
+    {
+      "provider": "coinbase_cdp",
+      "mode": "managed",
+      "window": "permanent"
+    }
+  ],
   "grantableActions": [
     {
       "module": "transfers",
@@ -83,6 +117,7 @@
     "custody",
     "payments",
     "recurring_payments",
+    "subscriptions",
     "ramps",
     "compliance",
     "issuance",

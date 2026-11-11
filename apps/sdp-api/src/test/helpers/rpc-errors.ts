@@ -26,9 +26,13 @@ export function rpcHttpError(
  * transaction, which proves it was never broadcast.
  *
  * @param customProgramErrorCode - A custom program error to carry as the cause, if any.
+ * @param logs - The simulation's logs, if any.
  * @returns A kit `SolanaError` for the refused send.
  */
-export function sendTransactionPreflightError(customProgramErrorCode?: number): SolanaError {
+export function sendTransactionPreflightError(
+  customProgramErrorCode?: number,
+  logs: string[] | null = null
+): SolanaError {
   const cause =
     customProgramErrorCode === undefined
       ? undefined
@@ -41,7 +45,7 @@ export function sendTransactionPreflightError(customProgramErrorCode?: number): 
     fee: null,
     loadedAccountsDataSize: null,
     loadedAddresses: null,
-    logs: null,
+    logs,
     postBalances: null,
     postTokenBalances: null,
     preBalances: null,

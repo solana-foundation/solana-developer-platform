@@ -37,7 +37,7 @@ const { DashboardQuickStart } = await import("./dashboard-quick-start");
 
 const SKIPPED_AN_HOUR_AGO = new Date(NOW - 3_600_000).toISOString();
 const PENDING_STATUS: QuickStartStatus = {
-  custodyProvider: null,
+  hasWallet: false,
   apiKeyCount: 0,
   lastCallAt: null,
 };
@@ -85,13 +85,11 @@ describe("Overview quick start", () => {
     renderQuickStart("overview");
     const card = screen.getByRole("region", { name: "Quick start" });
     expect(within(card).getByText("1 of 2")).toBeTruthy();
-    expect(
-      within(card).getByText("Skipped today. Nothing holds funds until a provider is connected.")
-    ).toBeTruthy();
+    expect(within(card).getByText("Skipped today. You can create one anytime.")).toBeTruthy();
     expect(within(card).getByText("Skipped · today")).toBeTruthy();
     expect(within(card).getByText("Needs a key")).toBeTruthy();
-    expect(within(card).getByRole("link", { name: "Connect" }).getAttribute("href")).toBe(
-      "/dashboard/prj_test_sandbox/integrations?tab=custody"
+    expect(within(card).getByRole("link", { name: "Create wallet" }).getAttribute("href")).toBe(
+      "/dashboard/prj_test_sandbox/wallets/setup"
     );
     expect(within(card).getByRole("link", { name: "Create an API key" }).getAttribute("href")).toBe(
       "/dashboard/prj_test_sandbox/api-keys/new"
@@ -106,10 +104,19 @@ describe("Overview quick start", () => {
   });
 
   it("waits for a call once a key exists", () => {
-    setup({ status: { custodyProvider: null, apiKeyCount: 2, lastCallAt: null } });
+    setup({ status: { hasWallet: false, apiKeyCount: 2, lastCallAt: null } });
     renderQuickStart("overview");
     expect(screen.getByText("Waiting for a call")).toBeTruthy();
     expect(screen.getByRole("link", { name: "View API keys" })).toBeTruthy();
+  });
+
+  it("points a created wallet at the wallet list", () => {
+    setup({ status: { hasWallet: true, apiKeyCount: 0, lastCallAt: null } });
+    renderQuickStart("overview");
+    expect(screen.getByText("Created")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "View wallets" }).getAttribute("href")).toBe(
+      "/dashboard/prj_test_sandbox/wallets"
+    );
   });
 
   it("folds to its header and dismisses", () => {
@@ -123,7 +130,7 @@ describe("Overview quick start", () => {
 
   it("renders nothing once the guide is not visible", () => {
     setup({
-      status: { custodyProvider: "privy", apiKeyCount: 1, lastCallAt: "2026-09-25T10:00:00Z" },
+      status: { hasWallet: true, apiKeyCount: 1, lastCallAt: "2026-09-25T10:00:00Z" },
     });
     const { container } = renderQuickStart("overview");
     expect(container.innerHTML).toBe("");
@@ -135,13 +142,25 @@ describe("Sidebar quick start", () => {
     setup();
     renderQuickStart("sidebar");
     const card = screen.getByRole("complementary", { name: "Setup" });
-    expect(within(card).getByRole("link", { name: /Connect custody, skipped/ })).toBeTruthy();
     expect(
       within(card)
-        .getByRole("link", { name: /Your first call has arrived/ })
+        .getByRole("link", { name: /Create a wallet, skipped/ })
+        .getAttribute("href")
+    ).toBe("/dashboard/prj_test_sandbox/wallets/setup");
+    expect(
+      within(card)
+        .getByRole("link", { name: /Make your first API call/ })
         .getAttribute("href")
     ).toBe("/dashboard/prj_test_sandbox/api-keys/new");
-    fireEvent.click(within(card).getByRole("button", { name: "Hide" }));
+  });
+
+  // A Hide beside Dismiss read as a second way to close the guide; the header is the fold.
+  it("folds from its header and keeps only Dismiss in its foot", () => {
+    setup();
+    renderQuickStart("sidebar");
+    const card = screen.getByRole("complementary", { name: "Setup" });
+    expect(within(card).queryByRole("button", { name: "Hide" })).toBeNull();
+    fireEvent.click(within(card).getByRole("button", { name: /^Setup/ }));
     expect(readQuickStartPrefs(KEY).sidebarCollapsed).toBe(true);
   });
 
@@ -171,7 +190,7 @@ describe("Settings quick start", () => {
     expect(
       screen.getByText("Quick start is unavailable right now. Refresh the page to try again.")
     ).toBeTruthy();
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(Open Overview|Show quick start)$/ })).toBeNull();
   });
 
   it("still brings a dismissed guide back when its status could not be read", () => {
@@ -187,6 +206,6 @@ describe("Settings quick start", () => {
     setup();
     renderQuickStart("settings");
     expect(screen.getByText("Switch to Sandbox to use the quick start.")).toBeTruthy();
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(Open Overview|Show quick start)$/ })).toBeNull();
   });
 });

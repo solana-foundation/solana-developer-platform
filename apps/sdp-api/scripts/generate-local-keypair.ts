@@ -4,9 +4,9 @@
  *   - CUSTODY_PRIVATE_KEY    (Solana 64-byte keypair, base58-encoded)
  *   - CUSTODY_ENCRYPTION_KEY (256-bit AES key, base64-encoded)
  *
- * The keypair format matches what KeychainMemoryAdapter (the runtime
- * adapter for SIGNING_PROVIDER=local) expects (32B seed + 32B public key,
- * base58-encoded).
+ * Setting CUSTODY_PRIVATE_KEY turns the local signer on: the API only checks
+ * that it is set, and each project's local signer makes its own keypair. The
+ * value is still a well-formed keypair (32B seed + 32B public key, base58).
  * The encryption key is required by EncryptionService for storing
  * provider-managed wallet secrets when connecting custody providers
  * through the dashboard.

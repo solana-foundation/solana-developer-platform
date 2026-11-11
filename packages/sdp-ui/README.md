@@ -1,6 +1,6 @@
 # @sdp/ui
 
-The dashboard's UI primitives: buttons, inputs, selects, the combobox, modals and drawers,
+The dashboard's UI primitives: buttons, inputs, selects, the combobox, modals,
 tables, tooltips, badges, the date and time fields, list toolbars, skeletons and the rest. They
 wrap `@solana/design-system` where it has a component and are styled with Tailwind v4 utilities
 over `@sdp/design-tokens`. They live apart from `apps/sdp-web` so a Storybook can render them
@@ -17,7 +17,6 @@ or a prop:
 | Need                                                                 | How it arrives                                                                                                                                                                                                                                                                     |
 | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Built-in labels (close, pagination, picker footers, combobox states) | `UiI18nProvider` from `@sdp/ui/i18n`, with a `locale` and a `translate(key, values)`. The keys (`UiMessageKey`) are sdp-web's `Shared.SharedComponents.*` catalog keys, so the package carries no copy. Without a provider a label renders as its key and dates format in English. |
-| Theme scope for portaled content                                     | `ThemeScopeProvider` from `@sdp/ui/theme-scope-provider`; popovers, menus and modals read it through `useThemeScopeAttributes` (`@sdp/ui/theme-scope`).                                                                                                                            |
 | Router links                                                         | `ActionTile` takes a `linkComponent` (an anchor by default).                                                                                                                                                                                                                       |
 | Class merging                                                        | `cn` from `@sdp/ui/cn`, tailwind-merge extended with the token scales.                                                                                                                                                                                                             |
 
@@ -25,13 +24,22 @@ or a prop:
 
 - `I18nProvider` (`apps/sdp-web/src/i18n/provider.tsx`) renders `UiI18nProvider` with the app's
   catalog, so every tree that has the app's translations, tests included, has the primitives'.
-- `ThemeScopeProvider` is the same one the dashboard shell already renders.
 - The app imports each primitive from its subpath (`@sdp/ui/button`, `@sdp/ui/cn`, ...); it
   keeps no re-export copies (ADR 0010). The one wrapper is
   `apps/sdp-web/src/components/ui/action-tile.tsx`, which passes `next/link` as the tile's
   `linkComponent`.
 - `apps/sdp-web/src/app/globals.css` adds `@source` for `packages/sdp-ui/src`, so Tailwind
   generates the classes the primitives use.
+
+`motion` holds the one entrance a dialog or a flow's step plays (`playEntrance`): 150 ms,
+ease-out, compositor properties only, with nothing left on the element afterwards and nothing
+under reduced motion. `Modal` opens with it, except when it takes over from a dialog that closed
+a moment before, so a loading dialog giving way to the real one does not blink its backdrop.
+Dialogs still close at once: callers often derive `isOpen` from the state their content reads.
+It also holds the design's mark on something just made (`playMark`): the tile's paper held for
+55% of 1.4 s, then cleared, on an element with no background of its own, under the same
+reduced-motion rule. A payment request's page marks the link the new-request page opened it
+with.
 
 `shiki-code` holds the Shiki highlighting every code surface shares, with the one css-variables
 theme. `code-block` and `paginated-footer` stay in sdp-web: the first still reads the app's

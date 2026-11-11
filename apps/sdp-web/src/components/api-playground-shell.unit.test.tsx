@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
 
 import type { SdpReleaseChannel } from "@sdp/types/release-channels";
-import { ThemeScopeProvider } from "@sdp/ui/theme-scope-provider";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import * as playgroundCatalog from "@/lib/api-playground-openapi-catalog";
+import { MOVEMENT_POLL_INTERVAL_MS } from "@/lib/dashboard-fetch";
 import {
   createIdempotencyKeyStore,
+  KEPT_KEY_WINDOW_MS,
   resetIdempotencyKeyStoresForTests,
 } from "@/lib/idempotency-key-store";
 import { PRODUCTION_PROJECT } from "@/test/projects";
@@ -113,7 +114,7 @@ describe("ApiPlaygroundShell", () => {
       </I18nProvider>
     );
 
-    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    fireEvent.click(view.getByRole("button", { name: "Run" }));
 
     await waitFor(() => expect(view.container.textContent).toContain("Request execution failed."));
     expect(view.container.textContent).not.toContain(secret);
@@ -154,7 +155,7 @@ describe("ApiPlaygroundShell", () => {
       </I18nProvider>
     );
 
-    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    fireEvent.click(view.getByRole("button", { name: "Run" }));
 
     await waitFor(() => expect(view.container.textContent).toContain("201 Created"));
     expect(view.container.textContent).toContain("res_1");
@@ -191,13 +192,13 @@ describe("ApiPlaygroundShell", () => {
 
     const confirm = vi.fn(() => false);
     vi.stubGlobal("confirm", confirm);
-    const run = () => fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    const run = () => fireEvent.click(view.getByRole("button", { name: "Run" }));
 
     // Declined, twice: nothing goes out and the earlier write stays held.
     run();
     await waitFor(() => expect(view.container.textContent).toContain("Not sent."));
     await waitFor(() =>
-      expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(false)
+      expect(view.getByRole("button", { name: "Run" }).hasAttribute("disabled")).toBe(false)
     );
     run();
     await waitFor(() => expect(confirm).toHaveBeenCalledTimes(2));
@@ -208,7 +209,7 @@ describe("ApiPlaygroundShell", () => {
     run();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     await waitFor(() =>
-      expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(false)
+      expect(view.getByRole("button", { name: "Run" }).hasAttribute("disabled")).toBe(false)
     );
     run();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -235,12 +236,12 @@ describe("ApiPlaygroundShell", () => {
     const sentKey = (call: number) =>
       new Headers(fetchMock.mock.calls[call][1].headers).get("Idempotency-Key") ?? undefined;
 
-    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    fireEvent.click(view.getByRole("button", { name: "Run" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     await waitFor(() =>
-      expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(false)
+      expect(view.getByRole("button", { name: "Run" }).hasAttribute("disabled")).toBe(false)
     );
-    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    fireEvent.click(view.getByRole("button", { name: "Run" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 
     const first = sentKey(0);
@@ -256,7 +257,7 @@ describe("ApiPlaygroundShell", () => {
         <ApiPlaygroundShell endpoints={[endpoint]} productName="Test product" />
       </I18nProvider>
     );
-    fireEvent.click(getView.getByRole("button", { name: "Run request" }));
+    fireEvent.click(getView.getByRole("button", { name: "Run" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(sentKey(0)).toBeUndefined();
   });
@@ -288,11 +289,9 @@ describe("ApiPlaygroundShell", () => {
       new Headers(fetchMock.mock.calls[call][1].headers).get("Idempotency-Key") ?? undefined;
     const send = async (calls: number) => {
       await waitFor(() =>
-        expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(
-          false
-        )
+        expect(view.getByRole("button", { name: "Run" }).hasAttribute("disabled")).toBe(false)
       );
-      fireEvent.click(view.getByRole("button", { name: "Run request" }));
+      fireEvent.click(view.getByRole("button", { name: "Run" }));
       await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(calls));
     };
 
@@ -304,6 +303,122 @@ describe("ApiPlaygroundShell", () => {
     expect(sentKey(1)).toBe(sentKey(0));
     expect(sentKey(2)).toBe(sentKey(0));
     expect(sentKey(3)).not.toBe(sentKey(2));
+  });
+
+  it.each([
+    ["refuses to resend on any other write", "/v1/counterparties", false],
+    ["resends on a transfer", "/v1/payments/transfers", true],
+  ])("%s a lost POST's key past the key record's window", async (_case, path, resent) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
+      const fetchMock = vi
+        .fn(async (_input: RequestInfo | URL, _init: RequestInit) => new Response("{}"))
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"));
+      vi.stubGlobal("fetch", fetchMock);
+      const postEndpoint: ApiPlaygroundEndpointConfig = {
+        ...endpoint,
+        id: "post-outlived",
+        method: "POST",
+        path,
+      };
+      const view = render(
+        <I18nProvider locale="en" messages={getMessages("en")}>
+          <ApiPlaygroundShell endpoints={[postEndpoint]} productName="Test product" />
+        </I18nProvider>
+      );
+      const run = async () => {
+        await waitFor(() =>
+          expect(view.getByRole("button", { name: "Run" }).hasAttribute("disabled")).toBe(false)
+        );
+        fireEvent.click(view.getByRole("button", { name: "Run" }));
+      };
+      const sentKey = (call: number) =>
+        new Headers(fetchMock.mock.calls[call]?.[1].headers).get("Idempotency-Key");
+
+      await run();
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      vi.setSystemTime(Date.now() + KEPT_KEY_WINDOW_MS);
+      await run();
+
+      if (resent) {
+        // A money route answers the key from the movement's row.
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+        expect(sentKey(1)).toBe(sentKey(0));
+        return;
+      }
+      // Only the key record answers it, so the old key could run again.
+      expect(await view.findByText(/check the list before trying again/)).toBeTruthy();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await run();
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      expect(sentKey(1)).not.toBe(sentKey(0));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // any 2xx retired a transfer's key, even one still processing, so
+  // a Send after that answer went out under a new key and could pay twice.
+  it("keeps a transfer's key while it is processing, and settles it once a read shows it final", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
+    let settled = false;
+    const posts: RequestInit[] = [];
+    // The API replays the first 2xx verbatim: every Run under the key answers
+    // `processing`, and only the transfer's own read can show it final.
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init: RequestInit) => {
+      if ((init.method ?? "GET") === "GET") {
+        return Response.json({
+          data: { transfer: { id: "tx_1", status: settled ? "confirmed" : "processing" } },
+        });
+      }
+      const replayed = posts.length > 0 && !settled;
+      posts.push(init);
+      return Response.json(
+        { data: { transfer: { id: "tx_1", status: "processing" } } },
+        {
+          status: 201,
+          headers: replayed ? { "Idempotent-Replayed": "true" } : undefined,
+        }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const transferEndpoint: ApiPlaygroundEndpointConfig = {
+      ...endpoint,
+      id: "post-transfer-in-flight",
+      method: "POST",
+      path: "/v1/payments/transfers",
+    };
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell endpoints={[transferEndpoint]} productName="Test product" />
+      </I18nProvider>
+    );
+    const sentKey = (post: number) =>
+      new Headers(posts[post]?.headers).get("Idempotency-Key") ?? undefined;
+    const run = async (expectedPosts: number) => {
+      await waitFor(() =>
+        expect(view.getByRole("button", { name: "Run" }).hasAttribute("disabled")).toBe(false)
+      );
+      fireEvent.click(view.getByRole("button", { name: "Run" }));
+      await waitFor(() => expect(posts).toHaveLength(expectedPosts));
+    };
+
+    try {
+      await run(1);
+      await run(2);
+      // Still processing: the replay keeps the key.
+      expect(sentKey(1)).toBe(sentKey(0));
+
+      settled = true;
+      await vi.advanceTimersByTimeAsync(MOVEMENT_POLL_INTERVAL_MS);
+      await run(3);
+      // The read showed it final, so the next Run is a new request.
+      expect(sentKey(2)).not.toBe(sentKey(1));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // SOLA9-817: the retry key was derived from order-sensitive JSON text, so a
@@ -342,12 +457,10 @@ describe("ApiPlaygroundShell", () => {
       new Headers(fetchMock.mock.calls[call][1].headers).get("Idempotency-Key") ?? undefined;
     const send = async (metadata: string, calls: number) => {
       await waitFor(() =>
-        expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(
-          false
-        )
+        expect(view.getByRole("button", { name: "Run" }).hasAttribute("disabled")).toBe(false)
       );
       fireEvent.change(view.getByLabelText("Metadata"), { target: { value: metadata } });
-      fireEvent.click(view.getByRole("button", { name: "Run request" }));
+      fireEvent.click(view.getByRole("button", { name: "Run" }));
       await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(calls));
     };
 
@@ -392,11 +505,9 @@ describe("ApiPlaygroundShell", () => {
       new Headers(fetchMock.mock.calls[call][1].headers).get("Idempotency-Key") ?? undefined;
     const send = async (calls: number) => {
       await waitFor(() =>
-        expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(
-          false
-        )
+        expect(view.getByRole("button", { name: "Run" }).hasAttribute("disabled")).toBe(false)
       );
-      fireEvent.click(view.getByRole("button", { name: "Run request" }));
+      fireEvent.click(view.getByRole("button", { name: "Run" }));
       await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(calls));
     };
 
@@ -445,9 +556,9 @@ describe("ApiPlaygroundShell", () => {
       </I18nProvider>
     );
     await waitFor(() =>
-      expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(false)
+      expect(view.getByRole("button", { name: "Run" }).hasAttribute("disabled")).toBe(false)
     );
-    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    fireEvent.click(view.getByRole("button", { name: "Run" }));
 
     expect(await view.findByText(/isn’t keeping the request’s retry key/)).toBeTruthy();
     expect(fetchMock).not.toHaveBeenCalled();
@@ -483,11 +594,9 @@ describe("ApiPlaygroundShell", () => {
         </Provider>
       );
       await waitFor(() =>
-        expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(
-          false
-        )
+        expect(view.getByRole("button", { name: "Run" }).hasAttribute("disabled")).toBe(false)
       );
-      fireEvent.click(view.getByRole("button", { name: "Run request" }));
+      fireEvent.click(view.getByRole("button", { name: "Run" }));
       await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(calls));
       cleanup();
     };
@@ -541,11 +650,9 @@ describe("ApiPlaygroundShell", () => {
         </I18nProvider>
       );
       await waitFor(() =>
-        expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(
-          false
-        )
+        expect(view.getByRole("button", { name: "Run" }).hasAttribute("disabled")).toBe(false)
       );
-      fireEvent.click(view.getByRole("button", { name: "Run request" }));
+      fireEvent.click(view.getByRole("button", { name: "Run" }));
       await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(calls));
       cleanup();
     };
@@ -560,21 +667,13 @@ describe("ApiPlaygroundShell", () => {
     expect(sentKey(1)).toBeUndefined();
     expect(sentKey(2)).toBe(sentKey(0));
   });
-});
-
-describe("ApiPlaygroundShell refresh layout", () => {
-  afterEach(() => {
-    cleanup();
-  });
 
   // playwright/tests/theme.e2e.spec.ts reads the code tokens off this panel.
   it("shows the fetch snippet in the first code panel once the Code view is open", async () => {
     const user = userEvent.setup();
     const view = render(
       <I18nProvider locale="en" messages={getMessages("en")}>
-        <ThemeScopeProvider scope="refresh">
-          <ApiPlaygroundShell endpoints={[endpoint]} productName="Test product" />
-        </ThemeScopeProvider>
+        <ApiPlaygroundShell endpoints={[endpoint]} productName="Test product" />
       </I18nProvider>
     );
 
@@ -651,9 +750,7 @@ describe("ApiPlaygroundShell refresh layout", () => {
   it("offers Run with no API key at all", () => {
     const view = render(
       <I18nProvider locale="en" messages={getMessages("en")}>
-        <ThemeScopeProvider scope="refresh">
-          <ApiPlaygroundShell endpoints={[endpoint]} productName="Test product" />
-        </ThemeScopeProvider>
+        <ApiPlaygroundShell endpoints={[endpoint]} productName="Test product" />
       </I18nProvider>
     );
     expect((view.getByRole("button", { name: "Run" }) as HTMLButtonElement).disabled).toBe(false);
@@ -664,9 +761,7 @@ describe("ApiPlaygroundShell refresh layout", () => {
     const user = userEvent.setup();
     const view = render(
       <I18nProvider locale="en" messages={getMessages("en")}>
-        <ThemeScopeProvider scope="refresh">
-          <ApiPlaygroundShell endpoints={[endpoint]} productName="Test product" />
-        </ThemeScopeProvider>
+        <ApiPlaygroundShell endpoints={[endpoint]} productName="Test product" />
       </I18nProvider>
     );
     await user.click(view.getByRole("tab", { name: "Code" }));

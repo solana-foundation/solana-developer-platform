@@ -5,7 +5,9 @@ import shared from "./homepage.module.css";
 import type { HomepageLinks } from "./homepage-links";
 import styles from "./interfaces/interfaces.module.css";
 import { InterfacesConsole } from "./interfaces/interfaces-console";
+import { INTERFACE_SNIPPETS } from "./interfaces/snippets";
 import { MoreLink } from "./more-link";
+import { isComingSoon } from "./release-gate";
 import { Rise } from "./rise";
 
 type ReferenceKey = "openapi" | "llms" | "docs";
@@ -21,6 +23,9 @@ function referenceLinks(links: HomepageLinks): { key: ReferenceKey; href: string
 
 export async function InterfacesSection({ links }: { links: HomepageLinks }) {
   const t = await getTranslations();
+  const comingSoonModes = INTERFACE_SNIPPETS.filter(
+    (snippet) => snippet.gate !== undefined && isComingSoon(snippet.gate)
+  ).map((snippet) => snippet.mode);
 
   return (
     <section id="interfaces" data-ground="paper" className={cn(shared.paper, styles.section)}>
@@ -30,11 +35,7 @@ export async function InterfacesSection({ links }: { links: HomepageLinks }) {
             <FormHeadline
               as="h2"
               className={shared.display}
-              parts={[
-                t("Homepage.interfaces.headlineLine1"),
-                { lineBreak: true },
-                t("Homepage.interfaces.headlineLine2"),
-              ]}
+              parts={[t("Homepage.interfaces.headline")]}
             />
           </div>
           <p className={styles.intro}>{t("Homepage.interfaces.intro")}</p>
@@ -43,16 +44,13 @@ export async function InterfacesSection({ links }: { links: HomepageLinks }) {
         <InterfacesConsole
           modesLabel={t("Homepage.interfaces.modes")}
           responseLabel={t("Homepage.interfaces.response")}
+          comingSoonModes={comingSoonModes}
+          comingSoonLabel={t("Homepage.comingSoon")}
           copy={{
-            execute: {
-              title: t("Homepage.interfaces.execute.title"),
-              body: t("Homepage.interfaces.execute.body"),
-              status: t("Homepage.interfaces.execute.status"),
-            },
-            prepare: {
-              title: t("Homepage.interfaces.prepare.title"),
-              body: t("Homepage.interfaces.prepare.body"),
-              status: t("Homepage.interfaces.prepare.status"),
+            api: {
+              title: t("Homepage.interfaces.api.title"),
+              body: t("Homepage.interfaces.api.body"),
+              status: t("Homepage.interfaces.api.status"),
             },
             dashboard: {
               title: t("Homepage.interfaces.dashboard.title"),

@@ -112,10 +112,12 @@ describe("applyMembershipChange", () => {
       });
     });
     const staleRemoval = change(ADMIN_B, { kind: "remove", memberId: MEMBER_C.memberId });
+    // Observed before the commit: the refusal can land before `commit` returns.
+    const refused = expect(staleRemoval).rejects.toMatchObject(MISSING_MANAGE);
     await untilLockWaiters(db, { fragment: "ORDER BY id", count: 1 });
     await firstRemoval.commit();
 
-    await expect(staleRemoval).rejects.toMatchObject(MISSING_MANAGE);
+    await refused;
     expect(await activeAdminIds()).toEqual([{ id: ADMIN_A.memberId }, { id: MEMBER_C.memberId }]);
   });
 
@@ -206,6 +208,7 @@ describe("mirrorClerkMembershipDeletion", () => {
 
     await expect(mirror(LONE_ADMIN.userId, async () => false)).resolves.toEqual({
       removedMemberId: LONE_ADMIN.memberId,
+      removedRole: "admin",
       revokedInvitations: 1,
     });
     expect(
@@ -225,6 +228,7 @@ describe("mirrorClerkMembershipDeletion", () => {
 
     await expect(mirror(LONE_ADMIN.userId, async () => false)).resolves.toEqual({
       removedMemberId: null,
+      removedRole: null,
       revokedInvitations: 0,
     });
     expect(await readInvitationStatus(getDb(env), "inv_mirror_reinvite")).toBe("pending");
@@ -233,6 +237,7 @@ describe("mirrorClerkMembershipDeletion", () => {
   it("keeps a membership Clerk lists again once the row is locked", async () => {
     await expect(mirror(LONE_ADMIN.userId, async () => true)).resolves.toEqual({
       removedMemberId: null,
+      removedRole: null,
       revokedInvitations: 0,
     });
     expect(
@@ -252,6 +257,7 @@ describe("mirrorClerkMembershipDeletion", () => {
 
     await expect(mirror("usr_mirror_invitee", async () => false)).resolves.toEqual({
       removedMemberId: null,
+      removedRole: null,
       revokedInvitations: 1,
     });
     expect(await readInvitationStatus(db, "inv_mirror_invitee")).toBe("revoked");
@@ -283,6 +289,7 @@ describe("mirrorClerkMembershipDeletion", () => {
 
     await expect(mirrored).resolves.toEqual({
       removedMemberId: "mem_mirror_admitted",
+      removedRole: "member",
       revokedInvitations: 0,
     });
     expect(

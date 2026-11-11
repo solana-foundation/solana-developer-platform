@@ -28,6 +28,7 @@
   line-height: 1;
   letter-spacing: -0.02em;
   margin: 0 auto;
+  text-wrap: balance;
 }
 
 .sub {
@@ -36,6 +37,7 @@
   font: 500 clamp(16px, 1.3vw, 19px) / 1.45 var(--font);
   letter-spacing: -0.01em;
   color: #0f0f1399;
+  text-wrap: pretty;
 }
 
 /* ── the drawing ─────────────────────────────────────────────────────────── */

@@ -4,8 +4,13 @@ import type { PaymentTransferStatus } from "@sdp/types/payments";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db/client";
+import { asTransactionalClient, getDb } from "@/db/client";
 import { app } from "@/index";
+import {
+  linkClerkIdentity,
+  lockClerkUser,
+  pseudonymizeDeletedPerson,
+} from "@/services/organization-membership.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { readAuditActions } from "@/test/helpers/audit-logs";
 import { stubClerkBackend } from "@/test/helpers/clerk-backend";
@@ -17,10 +22,14 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
+import type { Env } from "@/types/env";
 
 const WEBHOOK_SECRET = `whsec_${Buffer.from("test_clerk_webhook_secret_1234567890").toString("base64")}`;
 
-async function simulateClerkWebhook(event: { type: string; data: Record<string, unknown> }) {
+async function simulateClerkWebhook(
+  event: { type: string; data: Record<string, unknown> },
+  requestEnv: Env = env
+) {
   const payload = JSON.stringify(event);
   const timestamp = Math.floor(Date.now() / 1000);
   const messageId = `msg_${crypto.randomUUID()}`;
@@ -41,7 +50,7 @@ async function simulateClerkWebhook(event: { type: string; data: Record<string, 
       },
       body: payload,
     },
-    env
+    requestEnv
   );
 }
 
@@ -134,6 +143,36 @@ describe("Clerk webhooks", () => {
       ).toEqual([]);
     }
   );
+  it("audits a mainnet entitlement change once, so the organization's admins are emailed (HOO-2299)", async () => {
+    await seedKnownOrganization();
+    const clerk = stubClerkBackend(env);
+    const enabled = {
+      id: KNOWN_CLERK_ORG_ID,
+      name: "Org",
+      slug: "org",
+      private_metadata: { sdp: { enableProductionProject: true } },
+    };
+    clerk.answer({ status: 200, body: enabled });
+    clerk.answer({ status: 200, body: enabled });
+
+    for (let delivery = 0; delivery < 2; delivery += 1) {
+      const response = await simulateClerkWebhook({
+        type: "organization.updated",
+        data: STALE_ORGANIZATION_EVENT,
+      });
+      expect(response.status).toBe(200);
+    }
+
+    const entries = await getDb(env).queryMany<{ metadata: string }>(
+      `SELECT metadata FROM audit_logs
+        WHERE organization_id = ? AND action = 'update' AND resource_type = 'organization'`,
+      [KNOWN_ORGANIZATION.id]
+    );
+    expect(entries.map((entry) => JSON.parse(entry.metadata))).toEqual([
+      { event: "production_entitlement_changed", enabled: true, source: "clerk" },
+    ]);
+  });
+
   it("changes nothing when Clerk no longer has the organization an event names", async () => {
     await seedKnownOrganization();
     const before = await knownOrganizationState();
@@ -150,6 +189,30 @@ describe("Clerk webhooks", () => {
       { method: "GET", path: `/organizations/${KNOWN_CLERK_ORG_ID}`, body: null },
     ]);
     expect(await knownOrganizationState()).toEqual(before);
+  });
+  it("does not store a production entitlement Clerk grants on a deployment that admits no production project", async () => {
+    await seedKnownOrganization();
+    const clerk = stubClerkBackend(env);
+    clerk.answer({
+      status: 200,
+      body: {
+        id: KNOWN_CLERK_ORG_ID,
+        name: "Org",
+        slug: "org",
+        private_metadata: { sdp: { enableProductionProject: true } },
+      },
+    });
+
+    const response = await simulateClerkWebhook(
+      { type: "organization.updated", data: STALE_ORGANIZATION_EVENT },
+      { ...env, SDP_ALLOW_PRODUCTION_PROJECTS: "false" }
+    );
+
+    expect(response.status).toBe(200);
+    expect(await knownOrganizationState()).toMatchObject({ settings: null });
+    expect(
+      await readAuditActions(getDb(env), { type: "organization", id: KNOWN_ORGANIZATION.id })
+    ).toEqual([]);
   });
   it.each(["organizationMembership.created", "organizationMembership.updated"])(
     "%s writes no membership",
@@ -324,6 +387,453 @@ describe("Clerk webhooks", () => {
       )
     ).toEqual([{ action: "revoke", organization_id: "org_webhook_outsider" }]);
   });
+  it("user.deleted pseudonymizes the person and their past invitations, keeping their id (SA-7)", async () => {
+    await seedKnownOrganization();
+    await seedInvitation(getDb(env), {
+      id: "inv_webhook_deleted_accepted",
+      organizationId: KNOWN_ORGANIZATION.id,
+      email: KNOWN_ADMIN.email,
+      role: "admin",
+      invitedBy: OUTSIDER.userId,
+      status: "accepted",
+      expiresInDays: 7,
+    });
+    stubClerkBackend(env);
+
+    const deleted = { id: OLD_CLERK_USER_ID, object: "user", deleted: true };
+    expect((await simulateClerkWebhook({ type: "user.deleted", data: deleted })).status).toBe(200);
+    // A redelivery changes nothing further.
+    expect((await simulateClerkWebhook({ type: "user.deleted", data: deleted })).status).toBe(200);
+
+    const pseudonym = `deleted+${KNOWN_ADMIN.userId}@users.invalid`;
+    expect(
+      await getDb(env).queryOne("SELECT email, name, status FROM users WHERE id = ?", [
+        KNOWN_ADMIN.userId,
+      ])
+    ).toEqual({ email: pseudonym, name: null, status: "deleted" });
+    expect(
+      await getDb(env).queryMany("SELECT email FROM auth_user_identities WHERE user_id = ?", [
+        KNOWN_ADMIN.userId,
+      ])
+    ).toEqual([{ email: null }]);
+    expect(
+      await getDb(env).queryOne("SELECT email FROM invitations WHERE id = ?", [
+        "inv_webhook_deleted_accepted",
+      ])
+    ).toEqual({ email: pseudonym });
+  });
+
+  it("user.deleted keeps the email of a person who signed up again under a new Clerk user", async () => {
+    await seedKnownOrganization();
+    await getDb(env).execute(
+      `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+       VALUES (?, 'clerk', ?, ?, ?)`,
+      ["aui_webhook_known_admin_new", NEW_CLERK_USER_ID, KNOWN_ADMIN.userId, KNOWN_ADMIN.email]
+    );
+    const clerk = stubClerkBackend(env);
+    clerk.answer({ status: 200, body: { data: [], total_count: 1 } });
+
+    const response = await simulateClerkWebhook({
+      type: "user.deleted",
+      data: { id: OLD_CLERK_USER_ID, object: "user", deleted: true },
+    });
+
+    expect(response.status).toBe(200);
+    expect(
+      await getDb(env).queryOne("SELECT email, status FROM users WHERE id = ?", [
+        KNOWN_ADMIN.userId,
+      ])
+    ).toEqual({ email: KNOWN_ADMIN.email, status: "active" });
+  });
+
+  it("user.deleted pseudonymizes a person once their last linked Clerk user is deleted", async () => {
+    await seedKnownOrganization();
+    const newEmail = "known.admin.again@example.com";
+    await getDb(env).execute(
+      `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+       VALUES (?, 'clerk', ?, ?, ?)`,
+      ["aui_webhook_known_admin_new", NEW_CLERK_USER_ID, KNOWN_ADMIN.userId, newEmail]
+    );
+    await seedInvitation(getDb(env), {
+      id: "inv_webhook_old_address",
+      organizationId: KNOWN_ORGANIZATION.id,
+      email: KNOWN_ADMIN.email,
+      role: "admin",
+      invitedBy: OUTSIDER.userId,
+      status: "accepted",
+      expiresInDays: 7,
+    });
+    const clerk = stubClerkBackend(env);
+    clerk.answer({ status: 200, body: { data: [], total_count: 1 } });
+
+    for (const clerkUserId of [OLD_CLERK_USER_ID, NEW_CLERK_USER_ID]) {
+      const response = await simulateClerkWebhook({
+        type: "user.deleted",
+        data: { id: clerkUserId, object: "user", deleted: true },
+      });
+      expect(response.status).toBe(200);
+    }
+
+    const pseudonym = `deleted+${KNOWN_ADMIN.userId}@users.invalid`;
+    expect(
+      await getDb(env).queryOne("SELECT email, status FROM users WHERE id = ?", [
+        KNOWN_ADMIN.userId,
+      ])
+    ).toEqual({ email: pseudonym, status: "deleted" });
+    expect(
+      await getDb(env).queryMany(
+        "SELECT provider, email FROM auth_user_identities WHERE user_id = ? ORDER BY id",
+        [KNOWN_ADMIN.userId]
+      )
+    ).toEqual([
+      { provider: "clerk_deleted", email: null },
+      { provider: "clerk_deleted", email: null },
+    ]);
+    // An invitation to the first account's address, which only its tombstone still held.
+    expect(
+      await getDb(env).queryOne("SELECT email FROM invitations WHERE id = ?", [
+        "inv_webhook_old_address",
+      ])
+    ).toEqual({ email: pseudonym });
+  });
+
+  it("ignores a late user.updated for a deleted Clerk user, restoring nothing", async () => {
+    await seedKnownOrganization();
+    stubClerkBackend(env);
+    expect(
+      (
+        await simulateClerkWebhook({
+          type: "user.deleted",
+          data: { id: OLD_CLERK_USER_ID, object: "user", deleted: true },
+        })
+      ).status
+    ).toBe(200);
+
+    const late = await simulateClerkWebhook({
+      type: "user.updated",
+      data: {
+        id: OLD_CLERK_USER_ID,
+        first_name: "Restored",
+        primary_email_address_id: "email_late",
+        email_addresses: [
+          {
+            id: "email_late",
+            email_address: KNOWN_ADMIN.email,
+            verification: { status: "verified" },
+          },
+        ],
+      },
+    });
+
+    expect(late.status).toBe(200);
+    expect(
+      await getDb(env).queryOne("SELECT email, name, status FROM users WHERE id = ?", [
+        KNOWN_ADMIN.userId,
+      ])
+    ).toEqual({
+      email: `deleted+${KNOWN_ADMIN.userId}@users.invalid`,
+      name: null,
+      status: "deleted",
+    });
+    expect(
+      await getDb(env).queryOne("SELECT count(*)::int AS count FROM users WHERE email = ?", [
+        KNOWN_ADMIN.email,
+      ])
+    ).toEqual({ count: 0 });
+  });
+
+  it("makes a user.updated that overlaps a deletion wait for it, then recreate nothing", async () => {
+    await seedKnownOrganization();
+    const pseudonym = `deleted+${KNOWN_ADMIN.userId}@users.invalid`;
+    let commitDeletion = () => {};
+    const deletionHeld = new Promise<void>((resolve) => {
+      commitDeletion = resolve;
+    });
+    let deletionLocked = () => {};
+    const locked = new Promise<void>((resolve) => {
+      deletionLocked = resolve;
+    });
+    // A deletion in flight: it holds the Clerk user's lock and has written its tombstone.
+    const deletion = getDb(env).transaction(async (tx) => {
+      await lockClerkUser(tx, OLD_CLERK_USER_ID);
+      await tx.execute("INSERT INTO clerk_deleted_users (clerk_user_id) VALUES (?)", [
+        OLD_CLERK_USER_ID,
+      ]);
+      await tx.execute(
+        `UPDATE auth_user_identities SET provider = 'clerk_deleted', email = NULL
+          WHERE provider = 'clerk' AND provider_user_id = ?`,
+        [OLD_CLERK_USER_ID]
+      );
+      await tx.execute("UPDATE users SET email = ?, name = NULL, status = 'deleted' WHERE id = ?", [
+        pseudonym,
+        KNOWN_ADMIN.userId,
+      ]);
+      deletionLocked();
+      await deletionHeld;
+    });
+    await locked;
+    let updateSettled = false;
+    const update = simulateClerkWebhook({
+      type: "user.updated",
+      data: {
+        id: OLD_CLERK_USER_ID,
+        first_name: "Restored",
+        primary_email_address_id: "email_overlap",
+        email_addresses: [
+          {
+            id: "email_overlap",
+            email_address: KNOWN_ADMIN.email,
+            verification: { status: "verified" },
+          },
+        ],
+      },
+    }).finally(() => {
+      updateSettled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const updateWaited = !updateSettled;
+    // Released before any assertion, so a failure never leaves the lock held.
+    commitDeletion();
+    const [, answered] = await Promise.allSettled([deletion, update]);
+
+    expect(updateWaited).toBe(true);
+    expect(answered.status === "fulfilled" ? answered.value.status : answered.reason).toBe(200);
+    expect(
+      await getDb(env).queryOne("SELECT count(*)::int AS count FROM users WHERE email = ?", [
+        KNOWN_ADMIN.email,
+      ])
+    ).toEqual({ count: 0 });
+    expect(
+      await getDb(env).queryMany(
+        "SELECT provider FROM auth_user_identities WHERE provider_user_id = ?",
+        [OLD_CLERK_USER_ID]
+      )
+    ).toEqual([{ provider: "clerk_deleted" }]);
+  });
+
+  // Regression: a deletion before SDP ever linked the person left no
+  // tombstone, so a retried user.created stored their details.
+  it("ignores a user.created that arrives after the Clerk user's deletion, even never linked", async () => {
+    stubClerkBackend(env);
+    const neverLinked = "clerk_user_never_linked";
+    const deleted = await simulateClerkWebhook({
+      type: "user.deleted",
+      data: { id: neverLinked, object: "user", deleted: true },
+    });
+    expect(deleted.status).toBe(200);
+
+    const created = await simulateClerkWebhook({
+      type: "user.created",
+      data: {
+        id: neverLinked,
+        first_name: "Late",
+        primary_email_address_id: "email_late",
+        email_addresses: [
+          {
+            id: "email_late",
+            email_address: "never.linked@example.com",
+            verification: { status: "verified" },
+          },
+        ],
+      },
+    });
+
+    expect(created.status).toBe(200);
+    expect(
+      await getDb(env).queryOne("SELECT count(*)::int AS count FROM users WHERE email = ?", [
+        "never.linked@example.com",
+      ])
+    ).toEqual({ count: 0 });
+    expect(
+      await getDb(env).queryOne(
+        "SELECT count(*)::int AS count FROM auth_user_identities WHERE provider_user_id = ?",
+        [neverLinked]
+      )
+    ).toEqual({ count: 0 });
+  });
+
+  // Regression: the deletion read the mapping before taking the lock, so
+  // a mapping committed while it waited was never cleaned up.
+  it("cleans up a person whose mapping commits while the user.deleted waits for the lock", async () => {
+    stubClerkBackend(env);
+    const clerkUserId = "clerk_user_mapping_in_flight";
+    const email = "mapping.in.flight@example.com";
+    let commitMapping = () => {};
+    const mappingHeld = new Promise<void>((resolve) => {
+      commitMapping = resolve;
+    });
+    let mappingLocked = () => {};
+    const locked = new Promise<void>((resolve) => {
+      mappingLocked = resolve;
+    });
+    // A user.created in flight: it holds the Clerk user's lock with its mapping written.
+    const mapping = getDb(env).transaction(async (tx) => {
+      await lockClerkUser(tx, clerkUserId);
+      await tx.execute(
+        "INSERT INTO users (id, email, name, email_verified, status) VALUES (?, ?, 'In Flight', 1, 'active')",
+        ["usr_mapping_in_flight", email]
+      );
+      await tx.execute(
+        `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+         VALUES (?, 'clerk', ?, ?, ?)`,
+        ["aui_mapping_in_flight", clerkUserId, "usr_mapping_in_flight", email]
+      );
+      mappingLocked();
+      await mappingHeld;
+    });
+    await locked;
+    let deletionSettled = false;
+    const deletion = simulateClerkWebhook({
+      type: "user.deleted",
+      data: { id: clerkUserId, object: "user", deleted: true },
+    }).finally(() => {
+      deletionSettled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const deletionWaited = !deletionSettled;
+    // Released before any assertion, so a failure never leaves the lock held.
+    commitMapping();
+    const [, answered] = await Promise.allSettled([mapping, deletion]);
+
+    expect(deletionWaited).toBe(true);
+    expect(answered.status === "fulfilled" ? answered.value.status : answered.reason).toBe(200);
+    expect(
+      await getDb(env).queryOne("SELECT email, name, status FROM users WHERE id = ?", [
+        "usr_mapping_in_flight",
+      ])
+    ).toEqual({
+      email: "deleted+usr_mapping_in_flight@users.invalid",
+      name: null,
+      status: "deleted",
+    });
+  });
+
+  // Regression: a new Clerk account read the person, then linked them
+  // after the old account's deletion had cleared them.
+  it("links a new Clerk account to a fresh person when a deletion of the old one commits first", async () => {
+    await seedKnownOrganization();
+    stubClerkBackend(env);
+    const pseudonym = `deleted+${KNOWN_ADMIN.userId}@users.invalid`;
+    let commitDeletion = () => {};
+    const deletionHeld = new Promise<void>((resolve) => {
+      commitDeletion = resolve;
+    });
+    let deletionLocked = () => {};
+    const locked = new Promise<void>((resolve) => {
+      deletionLocked = resolve;
+    });
+    // The old account's deletion in flight: it holds the person's row, already cleared.
+    const deletion = getDb(env).transaction(async (tx) => {
+      await lockClerkUser(tx, OLD_CLERK_USER_ID);
+      await tx.execute("SELECT id FROM users WHERE id = ? FOR UPDATE", [KNOWN_ADMIN.userId]);
+      await tx.execute("UPDATE users SET email = ?, name = NULL, status = 'deleted' WHERE id = ?", [
+        pseudonym,
+        KNOWN_ADMIN.userId,
+      ]);
+      deletionLocked();
+      await deletionHeld;
+    });
+    await locked;
+    let signupSettled = false;
+    const signup = simulateClerkWebhook({
+      type: "user.created",
+      data: {
+        id: NEW_CLERK_USER_ID,
+        primary_email_address_id: "email_signup",
+        email_addresses: [
+          {
+            id: "email_signup",
+            email_address: KNOWN_ADMIN.email,
+            verification: { status: "verified" },
+          },
+        ],
+      },
+    }).finally(() => {
+      signupSettled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const signupWaited = !signupSettled;
+    // Released before any assertion, so a failure never leaves the row lock held.
+    commitDeletion();
+    const [, answered] = await Promise.allSettled([deletion, signup]);
+
+    expect(signupWaited).toBe(true);
+    expect(answered.status === "fulfilled" ? answered.value.status : answered.reason).toBe(200);
+    const linked = await getDb(env).queryOne<{ user_id: string }>(
+      "SELECT user_id FROM auth_user_identities WHERE provider = 'clerk' AND provider_user_id = ?",
+      [NEW_CLERK_USER_ID]
+    );
+    expect(linked?.user_id).toBeDefined();
+    expect(linked?.user_id).not.toBe(KNOWN_ADMIN.userId);
+    expect(
+      await getDb(env).queryOne("SELECT email, status FROM users WHERE id = ?", [
+        KNOWN_ADMIN.userId,
+      ])
+    ).toEqual({ email: pseudonym, status: "deleted" });
+  });
+
+  // Regression: sign-in wrote the mapping without the deletion's lock or check.
+  it("refuses to link a Clerk user Clerk deleted, as a sign-in that raced its deletion would", async () => {
+    await getDb(env).execute("INSERT INTO clerk_deleted_users (clerk_user_id) VALUES (?)", [
+      "clerk_user_deleted_before_signin",
+    ]);
+
+    expect(
+      await linkClerkIdentity(getDb(env), {
+        clerkUserId: "clerk_user_deleted_before_signin",
+        email: "deleted.before.signin@example.com",
+      })
+    ).toBeNull();
+    expect(
+      await getDb(env).queryOne("SELECT count(*)::int AS count FROM users WHERE email = ?", [
+        "deleted.before.signin@example.com",
+      ])
+    ).toEqual({ count: 0 });
+  });
+
+  it("rolls the whole pseudonymization back when one of its writes fails", async () => {
+    await seedKnownOrganization();
+    await seedInvitation(getDb(env), {
+      id: "inv_webhook_rollback",
+      organizationId: KNOWN_ORGANIZATION.id,
+      email: KNOWN_ADMIN.email,
+      role: "admin",
+      invitedBy: OUTSIDER.userId,
+      status: "accepted",
+      expiresInDays: 7,
+    });
+    const personRows = async () => ({
+      user: await getDb(env).queryOne("SELECT email, name, status FROM users WHERE id = ?", [
+        KNOWN_ADMIN.userId,
+      ]),
+      identities: await getDb(env).queryMany(
+        "SELECT provider, email FROM auth_user_identities WHERE user_id = ?",
+        [KNOWN_ADMIN.userId]
+      ),
+      invitation: await getDb(env).queryOne("SELECT email FROM invitations WHERE id = ?", [
+        "inv_webhook_rollback",
+      ]),
+    });
+    const seeded = await personRows();
+
+    await expect(
+      getDb(env).transaction(async (tx) => {
+        // The failing transaction also removes this test-only trigger.
+        await tx.execute(`CREATE FUNCTION refuse_user_pseudonym() RETURNS trigger
+          LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'pseudonym refused'; END $$`);
+        await tx.execute(`CREATE TRIGGER refuse_user_pseudonym
+          BEFORE UPDATE ON users FOR EACH ROW
+          WHEN (NEW.status = 'deleted') EXECUTE FUNCTION refuse_user_pseudonym()`);
+        await pseudonymizeDeletedPerson(asTransactionalClient(tx), {
+          userId: KNOWN_ADMIN.userId,
+          deletedClerkUserId: OLD_CLERK_USER_ID,
+        });
+      })
+    ).rejects.toThrow("pseudonym refused");
+
+    expect(await personRows()).toEqual(seeded);
+  });
+
   it("user.deleted naming no user is refused", async () => {
     const response = await simulateClerkWebhook({ type: "user.deleted", data: {} });
 
@@ -332,6 +842,37 @@ describe("Clerk webhooks", () => {
       error: { code: "BAD_REQUEST", message: "user.deleted event names no user" },
       meta: { requestId: expect.any(String) },
     });
+  });
+  it("refuses a bad signature without saying why", async () => {
+    const response = await app.request(
+      "/webhooks/clerk/link-orgs",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "svix-id": `msg_${crypto.randomUUID()}`,
+          "svix-timestamp": String(Math.floor(Date.now() / 1000)),
+          "svix-signature": "v1,bm90LWEtcmVhbC1zaWduYXR1cmU=",
+        },
+        body: JSON.stringify({ type: "user.deleted", data: {} }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({
+      error: { code: "UNAUTHORIZED", message: "Invalid webhook signature" },
+      meta: { requestId: expect.any(String) },
+    });
+  });
+  it("answers a missing signing secret with a bare internal error", async () => {
+    env.CLERK_WEBHOOK_SECRET = undefined;
+    const response = await simulateClerkWebhook({ type: "user.deleted", data: {} });
+
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body.error.code).toBe("INTERNAL_ERROR");
+    expect(JSON.stringify(body)).not.toContain("CLERK_WEBHOOK_SECRET");
   });
   it("refuses the organization's API keys once Clerk deletes it", async () => {
     const clerkOrgId = "org_clerk_webhook_cache_invalidation";
@@ -883,6 +1424,30 @@ describe("MoonPay ramp webhook", () => {
       .bind(MOONPAY_TRANSACTION_ID)
       .first<{ failure_reason: string | null }>();
     expect(retired).toEqual({ failure_reason: "kyc_rejected" });
+  });
+  it("takes no production delivery on a deployment that admits no production project", async () => {
+    const body = JSON.stringify(completedPayload);
+    const res = await app.request(
+      "/webhooks/payments/ramps/production/moonpay",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Moonpay-Signature-V2": moonpaySignatureHeader(body, Math.floor(Date.now() / 1000), {
+            key: MOONPAY_WEBHOOK_KEY,
+          }),
+        },
+        body,
+      },
+      { ...env, SDP_ALLOW_PRODUCTION_PROJECTS: "false" }
+    );
+
+    expect(res.status).toBe(404);
+    expect(
+      await getDb(env).queryMany(
+        "SELECT id FROM ramp_webhook_events WHERE environment = 'production'"
+      )
+    ).toEqual([]);
   });
   it("rejects a moonpay webhook whose signed timestamp is outside the replay window", async () => {
     const body = JSON.stringify(completedPayload);

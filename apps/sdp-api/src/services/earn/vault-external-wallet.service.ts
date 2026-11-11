@@ -1,3 +1,4 @@
+import { supportsProviderRedemptionModes } from "@sdp/earn/capabilities";
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnVaultTransactionPlan } from "@sdp/earn/types";
 import { currentClusterScope } from "@sdp/rpc/scope";
@@ -292,10 +293,15 @@ export async function buildExternalWalletDepositTransaction(
   // settlement. A refusal deliberately stays generic and non-enumerating;
   // wallet registration, approval and product entitlement must not be
   // distinguishable through this admission boundary.
-  await assertVaultDepositEligible(client, runtime, {
-    providerReference: input.providerReference,
-    owner: input.ownerAddress,
-  });
+  await assertVaultDepositEligible(
+    client,
+    runtime,
+    {
+      providerReference: input.providerReference,
+      owner: input.ownerAddress,
+    },
+    { organizationId: input.organizationId, projectId: input.projectId, database: env }
+  );
 
   /**
    * One build attempt at a given swap route width. Swap-funded builds may run
@@ -625,6 +631,7 @@ async function compileStandaloneSwapTransaction(input: {
 
 /** An external-wallet exit build. The open cluster scope decides its environment and cluster. */
 export type ExternalWalletWithdrawalBuildInput = ExternalWalletBuildContext & {
+  redemptionMode?: "standard" | "instant";
   provider: string;
   /** The EXISTING external-wallet holding being exited. */
   positionId: string;
@@ -680,10 +687,17 @@ export async function buildExternalWalletWithdrawalTransaction(
 
   const buildPlan = async (compactMemo = false): Promise<EarnVaultTransactionPlan> => {
     try {
+      if (
+        input.redemptionMode !== undefined &&
+        (!supportsProviderRedemptionModes(client) ||
+          !client.getProviderRedemptionModes().includes(input.redemptionMode))
+      )
+        throw badRequest("This provider does not support the requested redemption mode");
       const built = await client.buildVaultWithdrawal(runtime, {
         providerReference: input.vaultAddress,
         owner: input.ownerAddress,
         shares: input.shares,
+        redemptionMode: input.redemptionMode,
         ...(input.minAmountOut === undefined ? {} : { minAmountOut: input.minAmountOut }),
         ...(rentPayer === undefined ? {} : { rentPayer }),
         ...(rentRefundTo === undefined ? {} : { rentRefundTo }),

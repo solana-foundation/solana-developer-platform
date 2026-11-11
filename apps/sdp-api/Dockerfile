@@ -30,6 +30,7 @@ COPY packages/sdp-fee-payment/package.json ./packages/sdp-fee-payment/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
 COPY packages/sdp-custody/package.json ./packages/sdp-custody/
 COPY packages/sdp-redaction/package.json ./packages/sdp-redaction/
+COPY packages/sdp-ip/package.json ./packages/sdp-ip/
 COPY packages/sdp-solana/package.json ./packages/sdp-solana/
 COPY packages/sdp-issuance/package.json ./packages/sdp-issuance/
 COPY packages/sdp-private-channels/package.json ./packages/sdp-private-channels/
@@ -42,6 +43,7 @@ COPY packages/sdp-wisdomtree/package.json ./packages/sdp-wisdomtree/
 COPY packages/bigint-buffer/package.json ./packages/bigint-buffer/
 COPY packages/sdp-veda/package.json ./packages/sdp-veda/
 COPY packages/sdp-ondo/package.json ./packages/sdp-ondo/
+COPY packages/sdp-plume/package.json ./packages/sdp-plume/
 COPY patches ./patches
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
@@ -64,6 +66,7 @@ COPY packages/sdp-fee-payment ./packages/sdp-fee-payment
 COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-custody ./packages/sdp-custody
 COPY packages/sdp-redaction ./packages/sdp-redaction
+COPY packages/sdp-ip ./packages/sdp-ip
 COPY packages/sdp-solana ./packages/sdp-solana
 COPY packages/sdp-issuance ./packages/sdp-issuance
 COPY packages/sdp-private-channels ./packages/sdp-private-channels
@@ -76,6 +79,7 @@ COPY packages/sdp-wisdomtree ./packages/sdp-wisdomtree
 COPY packages/bigint-buffer ./packages/bigint-buffer
 COPY packages/sdp-veda ./packages/sdp-veda
 COPY packages/sdp-ondo ./packages/sdp-ondo
+COPY packages/sdp-plume ./packages/sdp-plume
 
 WORKDIR /repo/apps/sdp-api
 RUN node scripts/build-node.mjs

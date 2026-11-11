@@ -10,6 +10,7 @@
  */
 
 import type { ActionModule } from "@sdp/types/actions";
+import type { ManagedCustodyProvider } from "@sdp/types/custody";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { SdpModule } from "@sdp/types/release-channels";
 
@@ -45,7 +46,7 @@ export const DOCS_MODULES: readonly ModuleEntry[] = [
   {
     module: "payments",
     name: "Payments",
-    summary: "Move funds onchain — transfers, batches, recurring payments, and payment requests",
+    summary: "Move funds onchain: transfers, batches, recurring payments, and payment requests",
     capability: "Payments, transfers, and recurring payments",
   },
   {
@@ -89,6 +90,27 @@ export const DOCS_TUTORIALS: readonly {
   },
 ];
 
+/**
+ * The custody providers `<CustodyProviderTable />` lists, in display order.
+ * Local signing is left out: it runs only in a self-hosted deployment, which
+ * the self-hosting pages cover. Names repeat `CUSTODY_PROVIDER_CATALOG_BY_ID`
+ * labels because this file stays free of runtime workspace imports.
+ */
+export const DOCS_CUSTODY_PROVIDERS = {
+  privy: { name: "Privy", description: "Embedded wallet infrastructure platform" },
+  fireblocks: { name: "Fireblocks", description: "Digital asset infrastructure company" },
+  coinbase_cdp: { name: "Coinbase CDP", description: "Embedded wallets for developers" },
+  para: { name: "Para", description: "Wallet and authentication suite" },
+  turnkey: { name: "Turnkey", description: "Non-custodial wallet infrastructure platform" },
+  dfns: { name: "DFNS", description: "Digital asset wallet infrastructure" },
+  ibm_haven: {
+    name: "IBM Digital Asset Haven",
+    description: "Institutional custody on IBM Digital Asset Haven",
+  },
+  anchorage: { name: "Anchorage", description: "Regulated institutional crypto custody" },
+  utila: { name: "Utila", description: "Vault-backed wallet signing through service accounts" },
+} as const satisfies Record<ManagedCustodyProvider, { name: string; description: string }>;
+
 /** One ramp provider's capabilities; its page is /docs/payments/ramps-<provider>. */
 export type RampProviderEntry = {
   provider: RampProviderId;
@@ -120,7 +142,7 @@ export const DOCS_RAMP_PROVIDERS: readonly RampProviderEntry[] = [
     sandbox: "✓ (shared credentials)",
     deliveryMode: "session_widget",
     bestFor: "Widget/session-embedded onramp UI; onramp only.",
-    notes: "No separate sandbox credentials — supply a Stripe test-mode secret key.",
+    notes: "No separate sandbox credentials: supply a Stripe test-mode secret key.",
   },
 ];
 
@@ -144,13 +166,15 @@ export const DOCS_ACTION_MODULES = {
   payment_requests: "Payment requests and their payment links",
   counterparties: "Counterparties, their accounts, and provider requirements",
   transactions: "The unified transaction list; each row also needs the read of its own module",
-  recurring: "Recurring payments, subscription plans and subscriptions",
+  recurring:
+    "Recurring payments and their collection attempts; on beta, also subscription plans and subscriptions",
   wallets: "Custody wallets and their balances",
   compliance: "Address screening",
   api_keys: "API keys",
   projects: "Projects and provider availability",
   members: "Organization and project members",
   organizations: "Organization settings and provider access",
+  feedback: "Dashboard feedback to the SDP team",
   onramp: "On-ramp currencies, estimates and quotes",
   offramp: "Off-ramp currencies, estimates and quotes",
   ramp_transfers: "Ramp transfer cancellation and sandbox simulation",

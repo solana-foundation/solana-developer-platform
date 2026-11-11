@@ -103,7 +103,8 @@ test.describe
       await expect(sendButton).toBeEnabled({ timeout: 120_000 });
       await sendButton.click();
 
-      await expect(app.getByText("Transfer submitted")).toBeVisible({ timeout: 120_000 });
+      // The heading names the outcome: sent once finalized, submitted while still confirming.
+      await expect(app.getByText(/^Transfer (sent|submitted)$/)).toBeVisible({ timeout: 120_000 });
       const doneButton = app.getByRole("button", { name: "Done", exact: true });
       await doneButton.focus();
       await doneButton.press("Enter");
@@ -111,8 +112,9 @@ test.describe
         new RegExp(`${projectHref(bootstrapProjectId, "/dashboard/payments")}(?:\\?.*)?$`)
       );
 
-      const shortenedDestination = `${destinationAddress.slice(0, 6)}…${destinationAddress.slice(-4)}`;
-      const transferRow = app.getByRole("link").filter({ hasText: shortenedDestination }).first();
+      // Pay names the contact's account, so the payment is tied to the contact and its row
+      // reads the contact's name rather than the destination address.
+      const transferRow = app.getByRole("link").filter({ hasText: counterpartyName }).first();
       await expect(transferRow).toBeVisible({ timeout: 120_000 });
       await expect(transferRow).toContainText("0.01");
     });

@@ -1,6 +1,7 @@
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
 import { TOKEN_TRANSACTION_STATUSES } from "@sdp/types/tokens";
 import { z } from "zod";
+import { ERROR_CODES } from "@/lib/errors";
 import { IDEMPOTENCY_KEY_PATTERN } from "@/middleware/idempotency-key";
 
 extendZodWithOpenApi(z);
@@ -125,56 +126,10 @@ export const tokenTransactionStatusQuerySchema = z
   .enum(TOKEN_TRANSACTION_STATUSES)
   .openapi({ description: "Filter by token transaction status.", example: "confirmed" });
 
+// Every code, on every channel: codes name no module, so held modules' codes are listed too, and
+// the API reference strips the list (`withoutErrorCodes` in `reference.ts`).
 const errorCodeSchema = z
-  .enum([
-    "BAD_REQUEST",
-    "UNAUTHORIZED",
-    "FORBIDDEN",
-    "NOT_FOUND",
-    "CONFLICT",
-    "RATE_LIMITED",
-    "SERVICE_UNAVAILABLE",
-    "RPC_UNAVAILABLE",
-    "INTERNAL_ERROR",
-    "NOT_ALLOWLISTED",
-    "INVALID_API_KEY",
-    "EXPIRED_API_KEY",
-    "REVOKED_API_KEY",
-    "INSUFFICIENT_PERMISSIONS",
-    "INVALID_TOKEN",
-    "TOKEN_NOT_FOUND",
-    "TOKEN_NOT_ACTIVE",
-    "TOKEN_NOT_MINTABLE",
-    "TOKEN_NOT_DEPLOYED",
-    "TOKEN_PAUSED",
-    "NOT_ON_TOKEN_ALLOWLIST",
-    "ON_TOKEN_BLOCKLIST",
-    "ACCOUNT_FROZEN",
-    "ACCOUNT_NOT_FROZEN",
-    "MAX_SUPPLY_EXCEEDED",
-    "INSUFFICIENT_TOKEN_BALANCE",
-    "SOLANA_RPC_ERROR",
-    "CUSTODY_ERROR",
-    "TRANSACTION_FAILED",
-    "SIGNING_FAILED",
-    "SIGNING_REJECTED",
-    "CUSTODY_POLICY_REFUSED",
-    "PROVIDER_NOT_CONFIGURED",
-    "PROVIDER_UNAVAILABLE",
-    "PROVIDER_RESPONSE_INVALID",
-    "UNSUPPORTED_CORRIDOR",
-    "VAULT_EXPOSURE_CAP",
-    "AMOUNT_BELOW_RENT_MINIMUM",
-    "TRANSFER_BATCH_RUN_EXISTS",
-    "TRANSFER_BATCH_NOTHING_TO_RETRY",
-    "TRANSFER_BATCH_RETRY_CLAIMED",
-    "TRANSFER_BATCH_DESTINATION_CHANGED",
-    "SPONSORED_RENT_OVER_CAP",
-    "IDEMPOTENCY_KEY_REQUIRED",
-    "IDEMPOTENCY_KEY_REUSED",
-    "IDEMPOTENCY_KEY_IN_FLIGHT",
-    "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN",
-  ])
+  .enum(ERROR_CODES)
   .openapi({ description: "Machine-readable error code." });
 
 export const errorSchema = z

@@ -1,3 +1,5 @@
+import { COUNTRY_CODES } from "@sdp/types/countries";
+import { MAINNET_ACCESS_STATES } from "@sdp/types/mainnet-access";
 import { ORGANIZATION_STATUSES, ORGANIZATION_TIERS } from "@sdp/types/organizations";
 import { ORGANIZATION_ROLES } from "@sdp/types/roles";
 import { z } from "zod";
@@ -5,6 +7,8 @@ import {
   inviteSchema as inviteSchemaBase,
   updateMemberRoleSchema as updateMemberRoleSchemaBase,
 } from "@/routes/members/schemas";
+import { sendFeedbackSchema as sendFeedbackSchemaBase } from "@/routes/organization-feedback/schemas";
+import { requestMainnetAccessSchema as requestMainnetAccessSchemaBase } from "@/routes/organization-mainnet-access/schemas";
 import {
   createOrganizationSchema as createOrganizationSchemaBase,
   updateOrgSchema as updateOrgSchemaBase,
@@ -53,6 +57,11 @@ const organizationSettingsSchema = z
       })
       .optional()
       .openapi({ description: "Custom rate limit overrides." }),
+    alertEmails: z.boolean().optional().openapi({
+      description:
+        "Whether organization admins are emailed when money moves in a mainnet project or the organization's members, API keys, custody or mainnet access change. Unset means true. Turning it off is itself emailed to the admins.",
+      example: true,
+    }),
   })
   .strict()
   .openapi({ description: "Organization-level settings." });
@@ -146,6 +155,11 @@ const invitationSchema = z
     expiresAt: isoDateTimeSchema.openapi({
       description: "Invitation expiration timestamp.",
       example: "2025-02-01T00:00:00.000Z",
+    }),
+    clerkInvitationId: z.string().nullable().openapi({
+      description:
+        "The emailed invitation's id, or null when the address already belongs to the organization's sign-in account, typically from accepting an earlier invitation that then expired. No email is sent then; the invitation admits them at their next sign-in.",
+      example: "orginv_2abc",
     }),
   })
   .openapi({ description: "Invitation summary." });
@@ -271,3 +285,56 @@ export const inviteMemberRequestSchema = inviteSchemaBase
     }),
   })
   .openapi({ description: "Invite member request body." });
+
+export const requestMainnetAccessRequestSchema = requestMainnetAccessSchemaBase.openapi(
+  "RequestMainnetAccessRequest",
+  {
+    description:
+      "The organization's self-declared jurisdiction (its primary registered geography for business) and the SDP Terms and Conditions version the admin read and accepted.",
+    example: { countryCode: "US", termsVersion: "2026-10-placeholder", acceptTerms: true },
+  }
+);
+
+export const mainnetAccessSchema = z
+  .object({
+    state: z.enum(MAINNET_ACCESS_STATES).openapi({
+      description:
+        "`approved` once an operator enables production for the organization; `pending` after a request; otherwise `not_requested`.",
+    }),
+    available: z.boolean().openapi({
+      description:
+        "Whether this deployment takes requests. While false, a request or resend is refused with 503.",
+    }),
+    countryCode: z.enum(COUNTRY_CODES).nullable(),
+    request: z
+      .object({
+        requestedAt: isoDateTimeSchema,
+        requestedByUserId: userIdSchema,
+        termsVersion: z.string().openapi({
+          description:
+            "The SDP Terms and Conditions version the requester accepted with the request.",
+        }),
+        notified: z.boolean().openapi({
+          description: "False until the SDP alias received the request; `POST …/notify` sends it.",
+        }),
+      })
+      .nullable(),
+    contactEmail: z.string().nullable(),
+  })
+  .openapi("MainnetAccess", { description: "The organization's mainnet access request." });
+
+export const sendFeedbackRequestSchema = sendFeedbackSchemaBase.openapi("SendFeedbackRequest", {
+  description:
+    "Feedback from the dashboard's Send feedback screen: what it is about, what the sender would change, the page they sent it from, and how many files they attached. The files and the session replay go to Sentry; `sentryEventId` names that Sentry feedback event.",
+  example: {
+    category: "idea",
+    message: "I expected the payout to show the fee before I sent it.",
+    pageUrl: "https://platform.solana.com/dashboard/proj_123/payments/pay",
+    attachmentCount: 1,
+    sentryEventId: "0123456789abcdef0123456789abcdef",
+  },
+});
+
+export const sendFeedbackResultSchema = z
+  .object({ sent: z.literal(true) })
+  .openapi("SendFeedbackResult", { description: "The feedback reached the SDP team's inbox." });
