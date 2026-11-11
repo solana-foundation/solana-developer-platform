@@ -180,6 +180,7 @@ export const DOCS_ACTION_MODULES = {
   projects: "Projects and provider availability",
   members: "Organization and project members",
   organizations: "Organization settings and provider access",
+  feedback: "Dashboard feedback to the SDP team",
   onramp: "On-ramp currencies, estimates and quotes",
   offramp: "Off-ramp currencies, estimates and quotes",
   ramp_transfers: "Ramp transfer cancellation and sandbox simulation",

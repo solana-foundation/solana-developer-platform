@@ -39,6 +39,8 @@ import { apiUrl, canonicalSite } from "./site";
  * - `<ModuleCapabilities />`: one capability line per module (the AI guide).
  * - `<RampProviderMatrix />`: the ramp providers, each linking to its page.
  * - `<CustodyProviderTable />`: the custody providers, with what each is.
+ * - `<WalletCreateRetryTable />`: the custody providers whose wallet create
+ *   dedupes on the request id, and for how long.
  * - `<ApiKeyGrantsTable />`: the actions an API key can be granted, by module.
  * - `<RateLimitTable />`: the API's rate limits, per API key tier and without a key.
  * - `<TutorialLinks />`: tutorials available on this build.
@@ -103,6 +105,15 @@ const BLOCKS = {
       Object.entries(DOCS_CUSTODY_PROVIDERS)
         .filter(([provider]) => surface.custodyProviders.some((id) => id === provider))
         .map(([, entry]) => [`**${entry.name}**`, entry.description])
+    ),
+  WalletCreateRetryTable: ({ walletCreateDedupe }) =>
+    table(
+      ["Provider", "Wallets", "Same-key retry after a `5xx` returns the first wallet"],
+      walletCreateDedupe.map(({ provider, mode, window }) => [
+        `**${DOCS_CUSTODY_PROVIDERS[provider].name}**`,
+        mode === "managed" ? "Managed (`provider`)" : "Custody Connection (`connectionId`)",
+        window === "permanent" ? "Always" : "Within 24 hours of the first attempt",
+      ])
     ),
   ApiKeyGrantsTable: (surface) =>
     table(

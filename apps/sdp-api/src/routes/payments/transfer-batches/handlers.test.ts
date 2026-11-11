@@ -73,8 +73,10 @@ import {
   respondTokenAccounts,
   scaledUiAmountConfig,
 } from "@/test/helpers/token-mints";
+import { fullChunkOf } from "@/test/helpers/transfer-batches";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
+import { MAX_RECIPIENTS_PER_TRANSACTION } from "./transaction";
 
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 const getRecentBlockhashMock = vi.spyOn(solanaRpc, "getRecentBlockhash");
@@ -479,6 +481,10 @@ describe("payment transfer batches", () => {
     vi.clearAllMocks();
     labeledSignatures.clear();
     rpc.answer("getMinimumBalanceForRentExemption", SYSTEM_ACCOUNT_RENT_MINIMUM);
+    rpc.answer("simulateTransaction", {
+      context: { slot: 1 },
+      value: { err: null, logs: [], accounts: null, unitsConsumed: 150, returnData: null },
+    });
     // Every recipient token account exists unless a test says otherwise (HOO-2024).
     respondTokenAccounts(rpc, { tokenProgram: address(SPL_TOKEN_PROGRAMS["spl-token"]) });
     // Every destination is a funded account unless a test says otherwise.
@@ -612,6 +618,50 @@ describe("payment transfer batches", () => {
           )
           .bind(TEST_ORG.id, TEST_PROJECT.id)
           .first<{ count: number }>()
+      ).toEqual({ count: 0 });
+    }
+  );
+
+  it.each(["/v1/payments/transfer-batches", "/v1/payments/transfer-batches/estimate"])(
+    "refuses a body that sends options at %s with 400, writing nothing",
+    async (endpoint) => {
+      const counterpartyId = await seedCounterparty("batch_options_refused");
+      const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      const response = await app.request(
+        endpoint,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({
+            externalId: testRunId(),
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+            options: { maxRecipientsPerTransaction: 1 },
+          }),
+        },
+        env
+      );
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { code: "BAD_REQUEST", message: expect.stringContaining('"options"') },
+      });
+      expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+      expect(rpc.calls).toEqual([]);
+      expect(
+        await getDb(env)
+          .prepare(
+            "SELECT COUNT(*)::int AS count FROM payment_transfer_batches WHERE project_id = ?"
+          )
+          .bind(TEST_PROJECT.id)
+          .first()
       ).toEqual({ count: 0 });
     }
   );
@@ -902,14 +952,13 @@ describe("payment transfer batches", () => {
     });
 
     it("refuses a sweep whose concurrent chunks could leave the source below the minimum", async () => {
-      const recipients = (await seedRentRecipients()).map((recipient, index) => ({
-        ...recipient,
-        amount: index === 0 ? "0.0005" : "0.01",
-      }));
-      // Exactly the total held, one recipient per chunk: the 0.0005 chunk landing last leaves
-      // 0.0005 SOL behind until it does.
+      const [funded, , large] = await seedRentRecipients();
+      const recipients = [
+        ...fullChunkOf({ ...large, amount: "0.001" }),
+        ...fullChunkOf({ ...funded, amount: "0.00002" }),
+      ];
       getMultipleAccountsLamportsMock.mockImplementation(async (_rpc, addresses) =>
-        addresses.map((account) => (account === FUNDED ? 5_000_000n : 20_500_000n))
+        addresses.map((account) => (account === FUNDED ? 5_000_000n : 20_400_000n))
       );
       const res = await app.request(
         "/v1/payments/transfer-batches",
@@ -925,14 +974,13 @@ describe("payment transfer batches", () => {
             sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             token: "SOL",
             recipients,
-            options: { maxRecipientsPerTransaction: 1 },
           }),
         },
         env
       );
       expect(res.status).toBe(409);
       expect(await res.json()).toMatchObject({
-        error: { code: "AMOUNT_BELOW_RENT_MINIMUM", details: { sourceRemainder: "0.0005" } },
+        error: { code: "AMOUNT_BELOW_RENT_MINIMUM", details: { sourceRemainder: "0.0004" } },
       });
     });
   });
@@ -958,7 +1006,6 @@ describe("payment transfer batches", () => {
         sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
         token: "SOL",
         recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
-        options: { preflight: false },
       }),
     };
     await getDb(env)
@@ -1041,10 +1088,17 @@ describe("payment transfer batches", () => {
             sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             token: "SOL",
             recipients: [
-              { counterpartyId, counterpartyAccountId: firstAccountId, amount: "0.1" },
-              { counterpartyId, counterpartyAccountId: secondAccountId, amount: "0.2" },
+              ...fullChunkOf({
+                counterpartyId,
+                counterpartyAccountId: firstAccountId,
+                amount: "0.1",
+              }),
+              ...fullChunkOf({
+                counterpartyId,
+                counterpartyAccountId: secondAccountId,
+                amount: "0.2",
+              }),
             ],
-            options: { preflight: true, maxRecipientsPerTransaction: 1 },
           }),
         },
         env
@@ -1060,12 +1114,12 @@ describe("payment transfer batches", () => {
         })
         .parse(await response.json());
       expect(body.data.recipients.map((recipient) => recipient.status).sort()).toEqual([
-        "failed",
-        "processing",
+        ...fullChunkOf("failed"),
+        ...fullChunkOf("processing"),
       ]);
-      expect(
-        body.data.recipients.find((recipient) => recipient.status === "failed")?.error
-      ).toContain("disabled");
+      for (const recipient of body.data.recipients.filter((row) => row.status === "failed")) {
+        expect(recipient.error).toContain("disabled");
+      }
       expect(body.data.transfers).toHaveLength(2);
       expect(signingOutcomeMock).toHaveBeenCalledOnce();
       expect(sendTransactionMock).toHaveBeenCalledOnce();
@@ -1125,12 +1179,9 @@ describe("payment transfer batches", () => {
               externalId: testRunId(),
               sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
               token: "SOL",
-              recipients: accounts.map((counterpartyAccountId) => ({
-                counterpartyId,
-                counterpartyAccountId,
-                amount: "0.1",
-              })),
-              options: { maxRecipientsPerTransaction: 1, preflight: false },
+              recipients: accounts.flatMap((counterpartyAccountId) =>
+                fullChunkOf({ counterpartyId, counterpartyAccountId, amount: "0.1" })
+              ),
             }),
           },
           env
@@ -1153,7 +1204,7 @@ describe("payment transfer batches", () => {
 
       expect(response.status).toBe(200);
       const failed = body.data.recipients.filter((row) => row.status === "failed");
-      expect(failed).toHaveLength(allowFirst ? 1 : 2);
+      expect(failed).toHaveLength(MAX_RECIPIENTS_PER_TRANSACTION * (allowFirst ? 1 : 2));
       for (const recipient of failed) {
         expect(recipient).toMatchObject({
           error: expect.stringContaining("Privy blocked signing"),
@@ -1211,23 +1262,19 @@ describe("payment transfer batches", () => {
           sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: "SOL",
           recipients: [
-            {
+            ...fullChunkOf({
               externalId: "batch-recipient-001",
               counterpartyId,
               counterpartyAccountId: firstAccountId,
-              amount: "0.1",
-            },
-            {
+              amount: "0.005",
+            }),
+            ...fullChunkOf({
               externalId: "batch-recipient-002",
               counterpartyId,
               counterpartyAccountId: secondAccountId,
-              amount: "0.2",
-            },
+              amount: "0.01",
+            }),
           ],
-          options: {
-            maxRecipientsPerTransaction: 1,
-            preflight: false,
-          },
         }),
       },
       env
@@ -1258,10 +1305,10 @@ describe("payment transfer batches", () => {
       status: "processing",
       externalId: "batch-create-001",
       totalAmount: "0.3",
-      recipientCount: 2,
+      recipientCount: 2 * MAX_RECIPIENTS_PER_TRANSACTION,
       transactionCount: 2,
     });
-    expect(body.data.recipients).toHaveLength(2);
+    expect(body.data.recipients).toHaveLength(2 * MAX_RECIPIENTS_PER_TRANSACTION);
     expect(body.data.recipients.every((recipient) => recipient.status === "processing")).toBe(true);
     expect(body.data.recipients.every((recipient) => Boolean(recipient.transferId))).toBe(true);
     expect(body.data.transfers).toHaveLength(2);
@@ -1290,7 +1337,7 @@ describe("payment transfer batches", () => {
     expect(batchRow).toMatchObject({
       status: "processing",
       total_amount: "0.3",
-      recipient_count: 2,
+      recipient_count: 2 * MAX_RECIPIENTS_PER_TRANSACTION,
       transaction_count: 2,
     });
 
@@ -1303,7 +1350,7 @@ describe("payment transfer batches", () => {
       )
       .bind(body.data.batch.id)
       .all<{ status: string; transfer_id: string | null }>();
-    expect(recipientRows.results).toHaveLength(2);
+    expect(recipientRows.results).toHaveLength(2 * MAX_RECIPIENTS_PER_TRANSACTION);
     expect(recipientRows.results.every((recipient) => recipient.status === "processing")).toBe(
       true
     );
@@ -1353,8 +1400,8 @@ describe("payment transfer batches", () => {
       .all<{ status: string }>();
     expect(required(settledBatch).status).toBe("partially_failed");
     expect(settledRecipients.results.map((recipient) => recipient.status).sort()).toEqual([
-      "confirmed",
-      "failed",
+      ...fullChunkOf("confirmed"),
+      ...fullChunkOf("failed"),
     ]);
 
     // Each chunk's audit intent closes with its chain verdict, not with RPC
@@ -1402,7 +1449,7 @@ describe("payment transfer batches", () => {
         }),
       })
       .parse(await detailRes.json());
-    expect(detailBody.data.recipients).toHaveLength(2);
+    expect(detailBody.data.recipients).toHaveLength(2 * MAX_RECIPIENTS_PER_TRANSACTION);
     expect(detailBody.data.transfers).toHaveLength(2);
 
     const listRes = await app.request(
@@ -1458,7 +1505,6 @@ describe("payment transfer batches", () => {
                 amount: "0.1",
               },
             ],
-            options: { preflight: false },
           }),
         },
         env
@@ -1511,7 +1557,6 @@ describe("payment transfer batches", () => {
           sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: "SOL",
           recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
-          options: { preflight: false },
         }),
       },
       env
@@ -1713,7 +1758,6 @@ describe("payment transfer batches", () => {
           sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: "SOL",
           recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
-          options: { preflight: false },
         }),
       },
       env
@@ -1778,7 +1822,6 @@ describe("payment transfer batches", () => {
             sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             token: "SOL",
             recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
-            options: { preflight: false },
           }),
         },
         env
@@ -1842,7 +1885,6 @@ describe("payment transfer batches", () => {
           sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: "SOL",
           recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
-          options: { preflight: false },
         }),
       },
       env
@@ -1990,7 +2032,6 @@ describe("payment transfer batches", () => {
           sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: "SOL",
           recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
-          options: { preflight: false },
         }),
       },
       env
@@ -2016,11 +2057,11 @@ describe("payment transfer batches", () => {
       }),
     });
 
-    async function postShortfallBatch(preflight: boolean) {
+    async function postShortfallBatch() {
       const sourceSigner = await generateKeyPairSigner();
       await updateSeededWalletPublicKey(sourceSigner.address);
       createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
-      const counterpartyId = await seedCounterparty(`batch_shortfall_${String(preflight)}`);
+      const counterpartyId = await seedCounterparty("batch_shortfall");
       const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
         counterpartyId,
         walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
@@ -2039,7 +2080,6 @@ describe("payment transfer batches", () => {
             sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             token: "SOL",
             recipients: [{ counterpartyId, counterpartyAccountId, amount: "500" }],
-            options: { preflight },
           }),
         },
         env
@@ -2079,7 +2119,7 @@ describe("payment transfer batches", () => {
         })
       );
 
-      const body = await postShortfallBatch(false);
+      const body = await postShortfallBatch();
 
       expect(signAsFeePayer).toHaveBeenCalledOnce();
       expectShortfallRecorded(body);
@@ -2136,8 +2176,7 @@ describe("payment transfer batches", () => {
             externalId: testRunId(),
             sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             token: "SOL",
-            recipients,
-            options: { preflight: true, maxRecipientsPerTransaction: 1 },
+            recipients: recipients.flatMap((recipient) => fullChunkOf(recipient)),
           }),
         },
         env
@@ -2153,10 +2192,10 @@ describe("payment transfer batches", () => {
       const created = partialSchema.parse(await response.json());
       const failedRows = (body: z.infer<typeof partialSchema>) =>
         body.data.recipients.filter((recipient) => recipient.status === "failed");
-      expect(failedRows(created)).toEqual([
-        { status: "failed", error: INSUFFICIENT_FUNDS_MESSAGE },
-      ]);
-      expect(created.data.recipients).toHaveLength(2);
+      expect(failedRows(created)).toEqual(
+        fullChunkOf({ status: "failed", error: INSUFFICIENT_FUNDS_MESSAGE })
+      );
+      expect(created.data.recipients).toHaveLength(2 * MAX_RECIPIENTS_PER_TRANSACTION);
 
       const read = await app.request(
         `/v1/payments/transfer-batches/${created.data.batch.id}`,
@@ -2164,12 +2203,12 @@ describe("payment transfer batches", () => {
         env
       );
       expect(read.status).toBe(200);
-      expect(failedRows(partialSchema.parse(await read.json()))).toEqual([
-        { status: "failed", error: INSUFFICIENT_FUNDS_MESSAGE },
-      ]);
+      expect(failedRows(partialSchema.parse(await read.json()))).toEqual(
+        fullChunkOf({ status: "failed", error: INSUFFICIENT_FUNDS_MESSAGE })
+      );
     });
 
-    it("fails a chunk SDP's preflight finds short with the same reason, before the sponsor signs", async () => {
+    it("fails a chunk SDP's simulation finds short with the same reason, before the sponsor signs or anything is sent", async () => {
       const signAsFeePayer = vi.fn().mockImplementation(fullySignTestTransaction);
       createKoraAdapterMock.mockReturnValueOnce(
         testKoraAdapter({
@@ -2191,9 +2230,10 @@ describe("payment transfer batches", () => {
         },
       });
 
-      const body = await postShortfallBatch(true);
+      const body = await postShortfallBatch();
 
       expect(signAsFeePayer).not.toHaveBeenCalled();
+      expect(sendTransactionMock).not.toHaveBeenCalled();
       expectShortfallRecorded(body);
     });
   });
@@ -2214,7 +2254,6 @@ describe("payment transfer batches", () => {
       sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
       token: "SOL",
       recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
-      options: { preflight: false },
     });
     const first = await app.request(
       "/v1/payments/transfer-batches",
@@ -2273,7 +2312,6 @@ describe("payment transfer batches", () => {
       sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
       token: "SOL",
       recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
-      options: { preflight: false },
     });
     const first = await app.request(
       "/v1/payments/transfer-batches",
@@ -2337,7 +2375,6 @@ describe("payment transfer batches", () => {
             sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             token: "SOL",
             recipients,
-            options: { preflight: false },
           }),
         },
         env
@@ -2386,7 +2423,6 @@ describe("payment transfer batches", () => {
             sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             token: "SOL",
             recipients: [{ counterpartyId, counterpartyAccountId: accountId, amount: "0.1" }],
-            options: { preflight: false },
           }),
         },
         env
@@ -2456,7 +2492,6 @@ describe("payment transfer batches", () => {
           sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: "SOL",
           recipients: [{ counterpartyId, counterpartyAccountId: accountId, amount: "0.1" }],
-          options: { preflight: false },
         }),
       },
       env
@@ -2515,7 +2550,6 @@ describe("payment transfer batches", () => {
             sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             token: "SOL",
             recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
-            options: { preflight: false },
           }),
         },
         env
@@ -2560,7 +2594,6 @@ describe("payment transfer batches", () => {
       sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
       token: "SOL",
       recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
-      options: { preflight: false },
     });
 
     const first = await app.request(
@@ -2654,7 +2687,6 @@ describe("payment transfer batches", () => {
           sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: "SOL",
           recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
-          options: { preflight: false },
         }),
       },
       env
@@ -2669,7 +2701,6 @@ describe("payment transfer batches", () => {
           sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: "SOL",
           recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.2" }],
-          options: { preflight: false },
         }),
       },
       env
@@ -2720,7 +2751,6 @@ describe("payment transfer batches", () => {
       sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
       token: "SOL",
       recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
-      options: { preflight: false },
     });
 
     const first = app.request(
@@ -2815,7 +2845,6 @@ describe("payment transfer batches", () => {
         sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
         token: "SOL",
         recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
-        options: { preflight: false },
       });
     getRecentBlockhashMock
       .mockResolvedValueOnce({
@@ -2909,7 +2938,6 @@ describe("payment transfer batches", () => {
               sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
               token: "SOL",
               recipients: [{ counterpartyId, counterpartyAccountId, amount }],
-              options: { preflight: false },
             }),
           },
           env
@@ -2953,7 +2981,6 @@ describe("payment transfer batches", () => {
             totalAmount: "0.1",
             recipientCount: 0,
             transactionCount: 0,
-            options: {},
             initiatedByKeyId: null,
             idempotencyKey,
             idempotencyFingerprint: "another-request-fingerprint",
@@ -3192,7 +3219,7 @@ describe("payment transfer batches", () => {
     });
     const readBatch = async (response: Response) => batchBodySchema.parse(await response.json());
 
-    /** Two recipients in two chunks; the first chunk sent is rejected, so it never lands. */
+    /** Two full chunks; the first chunk sent is rejected, so its recipients never land. */
     async function seedPartiallyFailedBatch(run = "") {
       const sourceSigner = await generateKeyPairSigner();
       await updateSeededWalletPublicKey(sourceSigner.address);
@@ -3223,12 +3250,9 @@ describe("payment transfer batches", () => {
             externalId: `${testRunId()}${run}`,
             sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             token: "SOL",
-            recipients: accountIds.map((counterpartyAccountId) => ({
-              counterpartyId,
-              counterpartyAccountId,
-              amount: "0.1",
-            })),
-            options: { preflight: false, maxRecipientsPerTransaction: 1 },
+            recipients: accountIds.flatMap((counterpartyAccountId) =>
+              fullChunkOf({ counterpartyId, counterpartyAccountId, amount: "0.1" })
+            ),
           }),
         },
         env
@@ -3237,9 +3261,11 @@ describe("payment transfer batches", () => {
       const body = await readBatch(created);
       // The chunk that was sent settles later, so the batch is still processing.
       expect(body.data.batch.status).toBe("processing");
+      const failedIds = body.data.recipients.filter((r) => r.status === "failed").map((r) => r.id);
+      expect(failedIds).toHaveLength(MAX_RECIPIENTS_PER_TRANSACTION);
       const failed = required(body.data.recipients.find((r) => r.status === "failed"));
       const sent = required(body.data.recipients.find((r) => r.status !== "failed"));
-      return { batch: body.data.batch, failed, sent };
+      return { batch: body.data.batch, failed, failedIds, sent };
     }
 
     const retry = (batchId: string, idempotencyKey: string = crypto.randomUUID()) =>
@@ -3448,7 +3474,7 @@ describe("payment transfer batches", () => {
     });
 
     it("refuses a retry whose recipient's account changed address, signing nothing", async () => {
-      const { batch, failed } = await seedPartiallyFailedBatch();
+      const { batch, failed, failedIds } = await seedPartiallyFailedBatch();
       await getDb(env)
         .prepare(
           `UPDATE counterparty_accounts
@@ -3465,7 +3491,7 @@ describe("payment transfer batches", () => {
       expect(await response.json()).toMatchObject({
         error: {
           code: "TRANSFER_BATCH_DESTINATION_CHANGED",
-          details: { batchId: batch.id, recipientIds: [failed.id] },
+          details: { batchId: batch.id, recipientIds: expect.arrayContaining(failedIds) },
         },
       });
       expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
@@ -3685,9 +3711,6 @@ describe("payment transfer batches", () => {
                 amount: "1.25",
               },
             ],
-            options: {
-              preflight: false,
-            },
           }),
         },
         env
@@ -3790,7 +3813,6 @@ describe("payment transfer batches", () => {
           sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: mint,
           recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.000001" }],
-          options: { preflight: false },
         }),
       },
       env
@@ -3870,7 +3892,6 @@ describe("payment transfer batches", () => {
             { counterpartyId, counterpartyAccountId: counterpartyAccountIds[0], amount: "10" },
             { counterpartyId, counterpartyAccountId: counterpartyAccountIds[1], amount: "2.5" },
           ],
-          options: { preflight: false },
         }),
       },
       env
@@ -3956,7 +3977,6 @@ describe("payment transfer batches", () => {
             counterpartyAccountId,
             amount: "1.25",
           })),
-          options: { preflight: false },
         }),
       },
       env
@@ -4015,7 +4035,6 @@ describe("payment transfer batches", () => {
           sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: "SOL",
           recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
-          options: { preflight: false },
         }),
       },
       env
@@ -4066,7 +4085,6 @@ describe("payment transfer batches", () => {
           sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: "SOL",
           recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
-          options: { preflight: false },
         }),
       },
       env
@@ -4132,10 +4150,9 @@ describe("payment transfer batches", () => {
           sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: "SOL",
           recipients: [
-            { counterpartyId, counterpartyAccountId: accountId, amount: "0.1" },
-            { counterpartyId, counterpartyAccountId: accountId, amount: "0.1" },
+            ...fullChunkOf({ counterpartyId, counterpartyAccountId: accountId, amount: "0.1" }),
+            ...fullChunkOf({ counterpartyId, counterpartyAccountId: accountId, amount: "0.1" }),
           ],
-          options: { maxRecipientsPerTransaction: 1, preflight: false },
         }),
       },
       env
@@ -4192,10 +4209,17 @@ describe("payment transfer batches", () => {
           sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: "SOL",
           recipients: [
-            { counterpartyId, counterpartyAccountId: firstAccountId, amount: "0.1" },
-            { counterpartyId, counterpartyAccountId: secondAccountId, amount: "0.2" },
+            ...fullChunkOf({
+              counterpartyId,
+              counterpartyAccountId: firstAccountId,
+              amount: "0.1",
+            }),
+            ...fullChunkOf({
+              counterpartyId,
+              counterpartyAccountId: secondAccountId,
+              amount: "0.2",
+            }),
           ],
-          options: { preflight: false, maxRecipientsPerTransaction: 1 },
         }),
       },
       env
@@ -4245,14 +4269,10 @@ describe("payment transfer batches", () => {
       )
       .bind(body.data.batch.id)
       .all<{ status: string; error: string | null; signature: string }>();
-    const bySignature = (left: { signature: string }, right: { signature: string }) =>
-      left.signature < right.signature ? -1 : left.signature > right.signature ? 1 : 0;
-    expect([...recipientRows.results].sort(bySignature)).toMatchObject(
-      [
-        { status: "confirmed", error: null, signature: actualSignature(FIRST_SIGNATURE) },
-        { status: "failed", signature: actualSignature(SECOND_SIGNATURE) },
-      ].sort(bySignature)
-    );
+    const statusesSentAs = (signature: string) =>
+      recipientRows.results.filter((row) => row.signature === signature).map((row) => row.status);
+    expect(statusesSentAs(actualSignature(FIRST_SIGNATURE))).toEqual(fullChunkOf("confirmed"));
+    expect(statusesSentAs(actualSignature(SECOND_SIGNATURE))).toEqual(fullChunkOf("failed"));
     const failedRow = recipientRows.results.find((row) => row.status === "failed");
     expect(required(failedRow).error).toContain("InstructionError");
   });
@@ -4309,10 +4329,17 @@ describe("payment transfer batches", () => {
             sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             token: "SOL",
             recipients: [
-              { counterpartyId, counterpartyAccountId: firstAccountId, amount: "0.1" },
-              { counterpartyId, counterpartyAccountId: secondAccountId, amount: "0.2" },
+              ...fullChunkOf({
+                counterpartyId,
+                counterpartyAccountId: firstAccountId,
+                amount: "0.1",
+              }),
+              ...fullChunkOf({
+                counterpartyId,
+                counterpartyAccountId: secondAccountId,
+                amount: "0.2",
+              }),
             ],
-            options: { preflight: false, maxRecipientsPerTransaction: 1 },
           }),
         },
         env
@@ -4329,7 +4356,7 @@ describe("payment transfer batches", () => {
       expect(body.data.transfers).toHaveLength(1);
       expect(body.data.batch.status).toBe("processing");
       const statuses = body.data.recipients.map((recipient) => recipient.status).sort();
-      expect(statuses).toEqual(["failed", "processing"]);
+      expect(statuses).toEqual([...fullChunkOf("failed"), ...fullChunkOf("processing")]);
       const failedRecipient = body.data.recipients.find(
         (recipient) => recipient.status === "failed"
       );
@@ -4396,7 +4423,6 @@ describe("payment transfer batches", () => {
             sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             token: "SOL",
             recipients: [{ counterpartyId, counterpartyAccountId: accountId, amount: "0.1" }],
-            options: { preflight: false },
           }),
         },
         env
@@ -4499,7 +4525,6 @@ describe("payment transfer batches", () => {
             sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             token: "SOL",
             recipients: [{ counterpartyId, counterpartyAccountId: accountId, amount: "0.1" }],
-            options: { preflight: false },
           }),
         },
         env
@@ -4593,7 +4618,6 @@ describe("payment transfer batches", () => {
             sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             token: "SOL",
             recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
-            options: { preflight: false },
           }),
         },
         env
@@ -4650,10 +4674,17 @@ describe("payment transfer batches", () => {
           sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: "SOL",
           recipients: [
-            { counterpartyId, counterpartyAccountId: firstAccountId, amount: "0.1" },
-            { counterpartyId, counterpartyAccountId: secondAccountId, amount: "0.2" },
+            ...fullChunkOf({
+              counterpartyId,
+              counterpartyAccountId: firstAccountId,
+              amount: "0.1",
+            }),
+            ...fullChunkOf({
+              counterpartyId,
+              counterpartyAccountId: secondAccountId,
+              amount: "0.2",
+            }),
           ],
-          options: { preflight: false, maxRecipientsPerTransaction: 1 },
         }),
       },
       env
@@ -4722,7 +4753,6 @@ describe("payment transfer batches", () => {
           sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: "SOL",
           recipients: [{ counterpartyId, counterpartyAccountId: accountId, amount: "0.1" }],
-          options: { preflight: false },
         }),
       },
       env
@@ -4832,7 +4862,6 @@ describe("payment transfer batches", () => {
           sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: "SOL",
           recipients,
-          options: { preflight: false },
         }),
       },
       env
@@ -4906,7 +4935,6 @@ describe("payment transfer batches", () => {
               sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
               token: "SOL",
               recipients,
-              options: { preflight: false },
             }),
           },
           env

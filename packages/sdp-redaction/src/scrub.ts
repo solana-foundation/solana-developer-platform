@@ -11,7 +11,7 @@
  *   full address stays in the invitations table, behind tenant scoping.
  */
 
-import { redactCredentialString } from "./credentials";
+import { type JsonValue, parseJsonDocument, redactCredentialString } from "./credentials";
 import { isSensitiveKey, REDACTED, REDACTED_EMAIL } from "./policy";
 
 export type EmailMode = "redact" | "mask";
@@ -61,8 +61,84 @@ export function maskEmail(value: string): string {
   });
 }
 
-function scrubString(value: string, emails: EmailMode): string {
-  const withoutCredentials = redactCredentialString(value);
+/** The longest string parsed as a serialized JSON document, matching the credential pass. */
+const MAX_SERIALIZED_JSON_LENGTH = 64 * 1024;
+/** How many serialized documents deep a string is parsed (JSON in a string in JSON). */
+const MAX_SERIALIZED_NESTING = 3;
+const SERIALIZED_JSON_START = /^\s*[[{]/;
+
+/**
+ * A string that is a whole serialized JSON object or array, scrubbed by key
+ * like any object (HOO-2570): a provider error that echoes a body as text
+ * (`"{\"beneficiaryName\":\"Jane\"}"`) has PII the field patterns below
+ * cannot all name, and the key policy can. Undefined when the string is not a
+ * document or nothing in it changed, so its formatting survives.
+ */
+function scrubSerializedJson(
+  value: string,
+  emails: EmailMode,
+  nesting: number
+): string | undefined {
+  if (
+    nesting >= MAX_SERIALIZED_NESTING ||
+    value.length > MAX_SERIALIZED_JSON_LENGTH ||
+    !SERIALIZED_JSON_START.test(value)
+  ) {
+    return undefined;
+  }
+  const document = parseJsonDocument(value);
+  if (document === undefined) {
+    return undefined;
+  }
+  // SAFETY: scrubValue maps a JSON value to a JSON value: it keeps structure,
+  // replaces strings with strings and truncates past MAX_DEPTH with a string.
+  const scrubbed = scrubValue(
+    document.parsed,
+    emails,
+    new WeakSet<object>(),
+    0,
+    nesting + 1
+  ) as JsonValue;
+  if (unchangedBy(document.parsed, scrubbed)) {
+    return undefined;
+  }
+  return document.restoreNumbers(JSON.stringify(scrubbed));
+}
+
+function isJsonObject(value: JsonValue): value is { [key: string]: JsonValue } {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Whether scrubbing left a parsed document as it was. The walk is bounded by
+ * the scrubbed side, which the walker truncates at {@link MAX_DEPTH}, so an
+ * arbitrarily nested original never recurses past that.
+ */
+function unchangedBy(original: JsonValue | undefined, scrubbed: JsonValue): boolean {
+  if (scrubbed === null || typeof scrubbed !== "object") {
+    return Object.is(original, scrubbed);
+  }
+  if (Array.isArray(scrubbed)) {
+    return (
+      Array.isArray(original) &&
+      original.length === scrubbed.length &&
+      scrubbed.every((item, index) => unchangedBy(original[index], item))
+    );
+  }
+  if (original === undefined || !isJsonObject(original) || !isJsonObject(scrubbed)) {
+    return false;
+  }
+  const keys = Object.keys(scrubbed);
+  return (
+    keys.length === Object.keys(original).length &&
+    keys.every((key) => Object.hasOwn(original, key) && unchangedBy(original[key], scrubbed[key]))
+  );
+}
+
+function scrubString(value: string, emails: EmailMode, nesting = 0): string {
+  const withoutCredentials = redactCredentialString(
+    scrubSerializedJson(value, emails, nesting) ?? value
+  );
   const withoutAddresses =
     emails === "mask"
       ? maskEmail(withoutCredentials)
@@ -102,9 +178,15 @@ function scrubSensitive(value: unknown, emails: EmailMode): unknown {
 const MAX_DEPTH = 16;
 const TRUNCATED = "[Truncated]";
 
-function scrubValue(value: unknown, emails: EmailMode, seen: WeakSet<object>, depth = 0): unknown {
+function scrubValue(
+  value: unknown,
+  emails: EmailMode,
+  seen: WeakSet<object>,
+  depth = 0,
+  nesting = 0
+): unknown {
   if (typeof value === "string") {
-    return scrubString(value, emails);
+    return scrubString(value, emails, nesting);
   }
 
   if (value === null || value === undefined || typeof value !== "object") {
@@ -137,16 +219,19 @@ function scrubValue(value: unknown, emails: EmailMode, seen: WeakSet<object>, de
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => scrubValue(item, emails, seen, depth + 1));
+    return value.map((item) => scrubValue(item, emails, seen, depth + 1, nesting));
   }
 
-  const result: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(value)) {
-    result[key] = isSensitiveKey(key)
-      ? scrubSensitive(item, emails)
-      : scrubValue(item, emails, seen, depth + 1);
-  }
-  return result;
+  // `Object.fromEntries` defines own properties, so a `__proto__` field
+  // survives instead of hitting the inherited setter.
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      key,
+      isSensitiveKey(key)
+        ? scrubSensitive(item, emails)
+        : scrubValue(item, emails, seen, depth + 1, nesting),
+    ])
+  );
 }
 
 /**

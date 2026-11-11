@@ -228,7 +228,7 @@ export async function createTransferBatch(
   const externalId = body.externalId;
   const idempotencyKey = transferBatchRunKey(authorized, externalId);
   const idempotencyFingerprint = getIdempotencyFingerprint(c) ?? null;
-  const prepared = await prepareBatchChunks(c, resolved, body.options?.maxRecipientsPerTransaction);
+  const prepared = await prepareBatchChunks(c, resolved);
   const { chunks } = prepared;
   // Before the batch row: a refusal is unstored, so the same key runs again once it clears.
   const solMovement = solBatchMovement(resolved, chunks);
@@ -252,7 +252,6 @@ export async function createTransferBatch(
         totalAmount: resolved.totalAmount,
         recipientCount: resolved.recipients.length,
         transactionCount: chunks.length,
-        options: body.options === undefined ? {} : body.options,
         initiatedByKeyId: resolved.scope.auth.id,
         idempotencyKey,
         idempotencyFingerprint,
@@ -289,7 +288,6 @@ export async function createTransferBatch(
     batchId: batch.id,
     prepared,
     recipientRows,
-    preflight: body.options?.preflight !== false,
   });
 
   return success(

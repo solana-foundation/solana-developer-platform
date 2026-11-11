@@ -36,9 +36,13 @@ afterEach(() => {
 
 describe("MainnetAccessSection", () => {
   it.each([
-    [true, "Enable mainnet for your organization.", 1],
+    [
+      true,
+      "The sandbox is open to everyone. SDP turns on mainnet for Acme once, when an Admin asks, and every project then has a production.",
+      1,
+    ],
     [false, "Mainnet requests aren't open yet.", 0],
-  ])("explains Not requested while available is %s", async (available, help, requestButtons) => {
+  ])("explains Sandbox only while available is %s", async (available, help, requestButtons) => {
     await renderSection({
       state: "not_requested",
       available,
@@ -48,9 +52,9 @@ describe("MainnetAccessSection", () => {
     });
 
     expect(rowLabels()).toEqual(["Status"]);
-    expect(screen.getByRole("definition").textContent).toBe("Not requested");
+    expect(screen.getByRole("definition").textContent).toBe("Sandbox only");
     expect(screen.getByRole("button", { name: help })).toBeTruthy();
-    expect(screen.queryAllByRole("button", { name: "Request mainnet access" })).toHaveLength(
+    expect(screen.queryAllByRole("button", { name: "Request mainnet access…" })).toHaveLength(
       requestButtons
     );
   });
@@ -70,11 +74,36 @@ describe("MainnetAccessSection", () => {
     });
 
     expect(rowLabels()).toEqual(["Status", "Requested", "Terms and Conditions", "Changes"]);
-    expect(screen.getByText("Approved")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Mainnet is enabled." })).toBeTruthy();
+    expect(screen.getByText("On")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Every project in Acme has a production, on mainnet." })
+    ).toBeTruthy();
     expect(screen.getByRole("link", { name: "mainnet@example.test" }).getAttribute("href")).toBe(
       "mailto:mainnet@example.test"
     );
-    expect(screen.queryByRole("button", { name: "Request mainnet access" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Request mainnet access…" })).toBeNull();
+  });
+
+  it("shows a request in review as a band, not a status row", async () => {
+    await renderSection({
+      state: "pending",
+      available: true,
+      countryCode: "SG",
+      request: {
+        requestedAt: "2026-11-01T12:00:00.000Z",
+        requestedByUserId: "user_test_admin",
+        termsVersion: "2026-10",
+        notified: true,
+      },
+      contactEmail: "mainnet@example.test",
+    });
+
+    expect(screen.getByText("In review")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "SDP reviews every request by hand and emails the Admins once mainnet is on for Acme."
+      )
+    ).toBeTruthy();
+    expect(rowLabels()).toEqual(["Requested", "Based in", "Terms and Conditions", "Changes"]);
   });
 });

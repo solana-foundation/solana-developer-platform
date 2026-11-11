@@ -48,6 +48,10 @@ const BASE_SURFACE: PublicSurface = {
   modules: ["custody", "payments"],
   rampProviders: [],
   custodyProviders: ["privy"],
+  walletCreateDedupe: [
+    { provider: "privy", mode: "managed", window: "permanent" },
+    { provider: "privy", mode: "byok", window: "permanent" },
+  ],
   grantableActions: [{ module: "wallets", verbs: ["read"] }],
   allModules: ["custody", "payments", "earn"],
   allRampProviders: [],

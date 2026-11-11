@@ -97,6 +97,7 @@ exports[`route actions > pins each route's action 1`] = `
   "earn.read POST /v1/earn/vault-queued-withdrawal-previews",
   "earn.read POST /v1/earn/vault-withdrawal-options",
   "earn.read POST /v1/earn/vault-withdrawal-previews",
+  "feedback.execute POST /v1/organizations/:orgId/feedback",
   "helius_rings.configure GET /internal/dashboard/helius-rings/connections",
   "helius_rings.configure POST /internal/dashboard/helius-rings/connections",
   "helius_rings.configure POST /internal/dashboard/helius-rings/connections/:connectionId/deactivate",

@@ -130,7 +130,7 @@ describe("WorkspaceSwitcher", () => {
       "true"
     );
     const production = screen.getByRole("menuitem", { name: /^Production/ });
-    expect(within(production).getByText("Mainnet · not enabled")).toBeDefined();
+    expect(within(production).getByText("Mainnet · after review")).toBeDefined();
     expect(within(production).getByText("Request access")).toBeDefined();
     expect(production.getAttribute("href")).toBe(
       `/dashboard/${SANDBOX_PROJECT.id}/settings#mainnet-access`

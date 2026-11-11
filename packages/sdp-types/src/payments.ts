@@ -646,19 +646,12 @@ export interface PaymentTransferBatchRecipientRequest {
   amount: string;
 }
 
-export interface PaymentTransferBatchOptions {
-  maxRecipientsPerTransaction?: number;
-  priorityFee?: "none" | "low" | "medium" | "high" | "auto";
-  preflight?: boolean;
-}
-
 export interface PaymentTransferBatchRequest {
   projectId?: string;
   externalId?: string;
   sourceCustodyWalletId: string;
   token: string;
   recipients: PaymentTransferBatchRecipientRequest[];
-  options?: PaymentTransferBatchOptions;
 }
 
 export type PaymentTransferBatchEstimateRequest = PaymentTransferBatchRequest;
@@ -1533,6 +1526,8 @@ export interface CreatePaymentRecurringPaymentRequest {
 }
 
 export interface UpdatePaymentRecurringPaymentRequest {
+  /** The `updatedAt` of the version the caller reviewed; a stale one answers 409 (HOO-2562). */
+  expectedUpdatedAt?: string;
   sourceCustodyWalletId?: string;
   counterpartyId?: string;
   counterpartyAccountId?: string;

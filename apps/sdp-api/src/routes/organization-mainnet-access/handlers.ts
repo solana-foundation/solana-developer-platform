@@ -5,6 +5,7 @@ import { isProductionEntitled } from "@/lib/production-entitlement";
 import { success } from "@/lib/response";
 import { requireHumanActor } from "@/middleware/human-session";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { logEvent } from "@/runtime/money-path-events";
 import { AuditService } from "@/services/audit.service";
 import {
   notifyMainnetAccessRequest,
@@ -79,6 +80,13 @@ export const requestMainnetAccess = async (
         },
       },
     };
+  });
+  logEvent("info", {
+    event: "sdp_api_mainnet_access_requested",
+    organization_id: row.organization_id,
+    user_id: userId,
+    country_code: row.country_code,
+    terms_version: row.terms_version,
   });
 
   const notified = await notifyMainnetAccessRequest(c.env, getDb(c.env), row.organization_id);

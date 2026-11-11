@@ -3,7 +3,11 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Context, Next } from "hono";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import { badRequest, forbidden, notFound, unauthorized } from "@/lib/errors";
-import { isProductionEntitled, productionNotEnabled } from "@/lib/production-entitlement";
+import {
+  isProductionEntitled,
+  productionNotEnabled,
+  productionProjectsAllowed,
+} from "@/lib/production-entitlement";
 import type { Env } from "@/types/env";
 
 const PROJECT_HEADER = "x-project-id";
@@ -48,10 +52,12 @@ export function projectContextMiddleware(options: ProjectContextOptions = {}) {
       ? await resolvePathProjectScope(c, options.projectIdParam)
       : await resolveProjectScope(c);
 
+    // A deployment that admits no production project refuses it to every
+    // request, exits included: it never held production money to unwind.
     if (
       scope.environment === "production" &&
-      !isProductionEntitled(c) &&
-      !(await options.allowUnentitledProduction?.(c))
+      (!productionProjectsAllowed(c.env) ||
+        (!isProductionEntitled(c) && !(await options.allowUnentitledProduction?.(c))))
     ) {
       throw productionNotEnabled();
     }

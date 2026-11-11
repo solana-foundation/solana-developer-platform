@@ -477,6 +477,34 @@ describe("runEarnCatalogueSyncIfDue", () => {
     expect(mocks.compareAndDelete).not.toHaveBeenCalled();
   });
 
+  it("reads no production shelf on a deployment that admits no production project", async () => {
+    const listStrategies = vi.fn(async (ctx: { environment: string }) => [
+      makeSnapshot(`vault-${ctx.environment}`),
+    ]);
+    installProviders({ upshift: makeProvider("upshift", listStrategies) });
+
+    const outcome = await runEarnCatalogueSyncIfDue({
+      ...env,
+      SDP_ALLOW_PRODUCTION_PROJECTS: "false",
+    });
+
+    expect(outcome).toBe("synced");
+    expect(listStrategies.mock.calls.map(([ctx]) => ctx.environment)).toEqual(["sandbox"]);
+    const written = mocks.upsertStrategies.mock.calls
+      .flat(2)
+      .map((row: { environment: string }) => row.environment);
+    expect(written).toContain("sandbox");
+    expect(written).not.toContain("production");
+    // The mirror converges to empty, as when production has no credentials.
+    expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledWith({
+      provider: "upshift",
+      environment: "sandbox",
+      hostCluster: "mainnet-beta",
+      listedProviderReferences: [],
+      allowEmptyKeepSet: true,
+    });
+  });
+
   it("deprecates rows the provider no longer lists, per provider, environment and lane", async () => {
     // The keep set is what the provider still lists; the repository decides
     // what that leaves behind. This is what makes a tightened catalogue gate

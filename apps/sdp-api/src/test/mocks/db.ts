@@ -100,6 +100,7 @@ const POSTGRES_TEST_TABLES = [
   "audit_logs",
   "auth_organization_identities",
   "auth_user_identities",
+  "clerk_deleted_users",
   "organization_members",
   "users",
   "organizations",

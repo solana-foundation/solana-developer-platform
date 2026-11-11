@@ -19,10 +19,13 @@
   gap: 40px;
 }
 
+/* the full wordmark, as in the bar */
 .brand {
   display: block;
-  width: 78px;
+  width: auto;
+  max-width: 100%;
   height: 30px;
+  aspect-ratio: 1108 / 100;
 }
 
 .brand img {
@@ -107,8 +110,12 @@
   }
 }
 
-/* on a phone: two columns */
+/* on a phone: two columns, the wordmark a size down */
 @media (max-width: 600px) {
+  .brand {
+    height: 24px;
+  }
+
   .grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

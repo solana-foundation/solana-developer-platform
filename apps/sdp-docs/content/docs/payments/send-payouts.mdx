@@ -38,12 +38,15 @@ The two ids do different jobs:
 
 Use `GET /v1/payments/transfer-batches/{batchId}` to inspect recipient and chunk outcomes.
 
+Batch execution does not add a priority fee. The estimate reports
+`priorityFeeLamports: "0"`.
+
 ### One batch per payout run
 
 The batch `externalId` names the payout run, and it is unique per project and source wallet. Whatever `Idempotency-Key` it carries, a batch with an `externalId` already used on that wallet never pays anyone again:
 
 - The same request, from the same API key, returns the existing batch as it stands. A worker that restarts with a fresh key gets the original run back.
-- Any other request (different recipients, amounts or options, or another API key) returns `409 TRANSFER_BATCH_RUN_EXISTS` with the existing batch in `error.details.batchId`. A replay only goes to the API key that sent the run, so after a key rotation the new key gets the 409: read the batch by its id instead of resending.
+- Any other request (different recipients or amounts, or another API key) returns `409 TRANSFER_BATCH_RUN_EXISTS` with the existing batch in `error.details.batchId`. A replay only goes to the API key that sent the run, so after a key rotation the new key gets the 409: read the batch by its id instead of resending.
 
 Derive the `externalId` from data you already have, so a worker that crashes and restarts computes the same value without storing anything: `payroll-2026-05`, `invoice-run-8812`. Never generate it at random: a random value is new on every attempt and protects nothing. New recipients go in a new run with a new `externalId`, never in a renamed copy of a run that was already sent.
 
@@ -87,7 +90,7 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches/{batchId}/retry
   -H "Idempotency-Key: 8b2e4f1c-7d3a-4e9b-a6c5-1f0d9e8c7b6a"
 ```
 
-The retry sends only the batch's `failed` recipients, to the addresses the batch recorded for them, from the same wallet with the batch's options, and returns the batch with those recipients `processing` again. Recipients still `pending` or `processing` may still land, so they are never sent again. Each resent recipient keeps its row in the batch and links to its new transfer.
+The retry sends only the batch's `failed` recipients, to the addresses the batch recorded for them, from the same wallet, and returns the batch with those recipients `processing` again. Recipients still `pending` or `processing` may still land, so they are never sent again. Each resent recipient keeps its row in the batch and links to its new transfer.
 
 - Use a new `Idempotency-Key` for each retry you mean to send. The same key never sends again, including after a timeout or a server error, so resend a lost answer under the same key. It returns the saved response while that is stored, which can still show recipients `processing`: read the batch with `GET /v1/payments/transfer-batches/{batchId}` for its current state. If recipients fail again later, a retry under that old key sends nothing.
 - Any API key that may send from the batch's wallet can retry it, not only the one that created it.

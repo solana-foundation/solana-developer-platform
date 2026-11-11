@@ -36,6 +36,8 @@ import {
  * as for single transfers; this module owns what makes two batches the same one.
  */
 
+export type DashboardTransferBatchRequest = PaymentTransferBatchRequest & { projectId: string };
+
 const store = createIdempotencyKeyStore("sdp:payments:transfer-batch:idempotency:v1");
 const retryStore = createIdempotencyKeyStore("sdp:payments:transfer-batch-retry:idempotency:v1");
 
@@ -64,8 +66,8 @@ export function resetTransferBatchIdempotencyStateForTests(): void {
  * that re-enters `1` for `1.0` is the same batch under the same key.
  */
 export function canonicalTransferBatchRequest(
-  request: PaymentTransferBatchRequest
-): PaymentTransferBatchRequest {
+  request: DashboardTransferBatchRequest
+): DashboardTransferBatchRequest {
   return {
     ...request,
     recipients: request.recipients
@@ -75,16 +77,16 @@ export function canonicalTransferBatchRequest(
 }
 
 /**
- * What makes two submissions the SAME batch: the source wallet, the token,
+ * What makes two submissions the SAME batch: the Project, the source wallet, the token,
  * every recipient with its amount (in canonical spelling), and the external reference. Change any one
  * and it is a different batch, not a retry. Recipients are read in canonical
  * order, which is also the order they are SENT in, so this key and the API's
  * own order-sensitive fingerprint agree on what one intent is.
  */
-export function transferBatchRequestFingerprint(request: PaymentTransferBatchRequest): string {
+export function transferBatchRequestFingerprint(request: DashboardTransferBatchRequest): string {
   const canonical = canonicalTransferBatchRequest(request);
   return JSON.stringify([
-    canonical.projectId ?? null,
+    canonical.projectId,
     canonical.externalId ?? null,
     canonical.sourceCustodyWalletId,
     canonical.token,
@@ -93,7 +95,6 @@ export function transferBatchRequestFingerprint(request: PaymentTransferBatchReq
       recipient.counterpartyAccountId,
       recipient.amount,
     ]),
-    canonical.options ?? null,
   ]);
 }
 
@@ -116,7 +117,7 @@ function referenceStorage(): Storage | null {
   }
 }
 
-function referenceStoreName(unnamed: PaymentTransferBatchRequest): string {
+function referenceStoreName(unnamed: DashboardTransferBatchRequest): string {
   const { externalId: _ignored, ...rest } = unnamed;
   return `${DEFAULT_REFERENCE_STORE_PREFIX}${storageFingerprint(transferBatchRequestFingerprint(rest))}`;
 }
@@ -133,7 +134,7 @@ function referenceStoreName(unnamed: PaymentTransferBatchRequest): string {
  * @param day - The UTC calendar day, `YYYY-MM-DD`, shared by every operator.
  */
 export function defaultTransferBatchReference(
-  request: PaymentTransferBatchRequest,
+  request: DashboardTransferBatchRequest,
   day: string
 ): string {
   const { externalId: _ignored, ...rest } = request;
@@ -147,7 +148,7 @@ export function defaultTransferBatchReference(
  * run. A storage that refuses falls back to the day's name.
  */
 export function claimDefaultTransferBatchReference(
-  unnamed: PaymentTransferBatchRequest,
+  unnamed: DashboardTransferBatchRequest,
   now: Date = new Date()
 ): string {
   const storage = referenceStorage();
@@ -208,7 +209,7 @@ function releaseDefaultReferenceNamed(reference: string): void {
 }
 
 /** Forgets a settled send's default reference, so the next identical batch is a new run. */
-function releaseDefaultTransferBatchReference(sent: PaymentTransferBatchRequest): void {
+function releaseDefaultTransferBatchReference(sent: DashboardTransferBatchRequest): void {
   const storage = referenceStorage();
   const name = referenceStoreName(sent);
   try {
@@ -227,8 +228,8 @@ function releaseDefaultTransferBatchReference(sent: PaymentTransferBatchRequest)
  * the same key, so the wizard holds it after a send it could not confirm.
  */
 export function nameTransferBatchRequest(
-  request: PaymentTransferBatchRequest
-): PaymentTransferBatchRequest {
+  request: DashboardTransferBatchRequest
+): DashboardTransferBatchRequest {
   const unnamed = canonicalTransferBatchRequest(request);
   return unnamed.externalId === undefined
     ? { ...unnamed, externalId: claimDefaultTransferBatchReference(unnamed) }
@@ -281,30 +282,18 @@ export function releaseTransferBatchIdempotencyKey(fingerprint: string, key: str
  * @returns The recorded batch.
  */
 export async function sendTransferBatchUnderKey(
-  request: PaymentTransferBatchRequest,
+  request: DashboardTransferBatchRequest,
   t: Translate
 ): Promise<CreateTransferBatchResult> {
   const canonical = nameTransferBatchRequest(request);
   const fingerprint = transferBatchRequestFingerprint(canonical);
-  const { key, persisted, outlived } = store.claim(fingerprint);
+  // However old the kept key is, the API answers it from the batch's own row
+  // (`IDEMPOTENCY_REQUIRED_ROUTES`), so it goes out: a new key could pay again.
+  const { key, persisted } = store.claim(fingerprint);
   const settleKey = () => {
     store.release(fingerprint, key);
     releaseDefaultTransferBatchReference(canonical);
   };
-  if (outlived) {
-    // The API may have forgotten a key this old, so a retry under it could pay
-    // every recipient again. Nothing is sent: the user checks the list. Only
-    // the request key is retired: the saved payout reference stays until the
-    // batch's outcome is known, since the API finds an earlier run by that
-    // reference and refuses to pay it again.
-    store.release(fingerprint, key);
-    throw new TransferBatchRequestError(
-      t("Shared.idempotency.outcomeUnknownCheckList"),
-      409,
-      false,
-      "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN"
-    );
-  }
   let result: CreateTransferBatchResult;
   try {
     result = await createTransferBatch(canonical, t, { value: key, persisted });

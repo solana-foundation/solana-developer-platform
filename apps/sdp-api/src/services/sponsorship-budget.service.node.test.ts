@@ -57,6 +57,7 @@ const ACTIVE_SANDBOX: MoneyAdmissionFacts = admittedMoneyFacts();
 const ACTIVE_ENTITLED_PRODUCTION: MoneyAdmissionFacts = admittedMoneyFacts({
   projectEnvironment: "production",
   rawSettings: JSON.stringify({ enableProductionProject: true }),
+  productionProjectsAllowed: true,
 });
 
 function buildTransaction(version: 0 | "legacy" = 0): Uint8Array {
@@ -798,6 +799,23 @@ describe("BudgetedFeePayment", () => {
         "payments.transfer",
         { custodyWalletId: "cwlt_1" }
       );
+      expect(repository.createReservation).not.toHaveBeenCalled();
+      expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+    });
+
+    // HOO-2572: admission read at the edge can go stale before a job signs;
+    // the sponsor decides on its own read at signing.
+    it("refuses a new sponsor signature once the project disables the movement", async () => {
+      const { feePayment, provider, repository, readAdmissionFacts } = harness();
+      readAdmissionFacts.mockResolvedValue({
+        ...ACTIVE_SANDBOX,
+        disabledMovements: ["payments.transfer"],
+      });
+
+      const refusal = await feePayment.signAsFeePayer(buildTransaction()).catch((e: unknown) => e);
+
+      expect(refusal).toBeInstanceOf(MoneyMovementRefusedError);
+      expect(refusal).toMatchObject({ reason: "movement_disabled" });
       expect(repository.createReservation).not.toHaveBeenCalled();
       expect(provider.signAsFeePayer).not.toHaveBeenCalled();
     });

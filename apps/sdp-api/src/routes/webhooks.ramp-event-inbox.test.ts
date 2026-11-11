@@ -487,6 +487,26 @@ describe("Ramp webhook event inbox", () => {
     expect(await readInboxRows()).toMatchObject([{ status: "discharged" }]);
   });
 
+  it("never replays a production event on a devnet-only deployment", async () => {
+    const stored = await createPostgresRampWebhookEventsRepository(getDb(env)).insertEvent({
+      provider: "moonpay",
+      environment: "production",
+      payload: completedPayload,
+    });
+    await getDb(env)
+      .prepare("UPDATE ramp_webhook_events SET created_at = ?, updated_at = ? WHERE id = ?")
+      .bind("2026-06-18T00:00:00.000Z", "2026-06-18T00:00:00.000Z", stored.id)
+      .run();
+
+    const applied = await replayRampWebhookEvents(
+      { ...env, SDP_ALLOW_PRODUCTION_PROJECTS: "false" },
+      SDP_RAMP_PROVIDER_MATURITY
+    );
+
+    expect(applied).toBe(0);
+    expect(await readInboxRows()).toMatchObject([{ status: "pending", attempts: 0 }]);
+  });
+
   it("replays a legacy JSONB string without encoding it again", async () => {
     const rawBody = JSON.stringify(completedPayload);
     const stored = await createPostgresRampWebhookEventsRepository(getDb(env)).insertEvent({

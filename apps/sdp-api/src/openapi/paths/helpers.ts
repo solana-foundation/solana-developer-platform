@@ -56,6 +56,12 @@ export interface IdempotencyDocumentation {
    * from then on any status is stored: transfers and transfer batches.
    */
   storesAnswerAfterRecord?: boolean;
+  /**
+   * The route's authorize step marks a 5xx rerunnable when the custody
+   * provider dedupes on the request id (`markIdempotencyRerunnable`,
+   * `WALLET_CREATE_DEDUPE`): wallet create.
+   */
+  rerunsWhenProviderDedupes?: boolean;
 }
 
 const IDEMPOTENCY_CONTRACT =
@@ -83,12 +89,16 @@ const UNRECORDED_OUTCOME = {
 const ANSWER_AFTER_RECORD =
   "Once the request has written its record, any answer below 500 is stored: a transfer that fails after that (such as 400 `TRANSACTION_FAILED` or a 409 signer mismatch) answers a same-key retry with the same error and `Idempotent-Replayed: true`, and after 24 hours the record answers with the same status and code. A 5xx is not stored: a same-key retry runs again and is answered from the record. To try again after a failure, send the request with a new key.";
 
+const PROVIDER_DEDUPE_RETRY =
+  "On a custody provider that returns the same wallet for the same request ID, a 5xx is not stored: a same-key retry runs again and gets back the wallet the first attempt made. The Idempotency guide lists those providers and how long each keeps the request ID. On any other provider, a 5xx is stored and replayed like any other answer; check `GET /v1/wallets` before retrying with a new key.";
+
 /** The `Idempotency-Key` header description for a route's declared mode. */
 function idempotencyKeyDescription({
   key,
   serverErrors,
   recovery,
   storesAnswerAfterRecord,
+  rerunsWhenProviderDedupes,
 }: IdempotencyDocumentation) {
   const lead =
     key === "required"
@@ -96,7 +106,10 @@ function idempotencyKeyDescription({
       : "Optional, and honored when sent.";
   const afterRecord = storesAnswerAfterRecord ? ` ${ANSWER_AFTER_RECORD}` : "";
   const unrecorded = UNRECORDED_OUTCOME[recovery ?? "none"];
-  return `${lead} ${IDEMPOTENCY_CONTRACT} ${unrecorded}${afterRecord} ${SERVER_ERROR_RETRY[serverErrors]}`;
+  const serverErrorRetry = rerunsWhenProviderDedupes
+    ? PROVIDER_DEDUPE_RETRY
+    : SERVER_ERROR_RETRY[serverErrors];
+  return `${lead} ${IDEMPOTENCY_CONTRACT} ${unrecorded}${afterRecord} ${serverErrorRetry}`;
 }
 
 /**
