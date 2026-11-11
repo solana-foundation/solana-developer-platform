@@ -10,6 +10,7 @@
     "wallet-operations/index",
     "payments/index",
     "tokens/index",
+    "earn",
     "---Resources---",
     "self-hosting/index",
     "reference/api",

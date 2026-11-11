@@ -38,13 +38,13 @@ describe("Earn code search", () => {
     );
   });
 
-  it("does not index held Earn snippets or broaden other modules' code search", () => {
-    const held: PublicSurface = {
+  it("does not index channel-excluded Earn snippets or broaden other modules' code search", () => {
+    const excluded: PublicSurface = {
       ...publicSurface,
       modules: publicSurface.modules.filter((module) => module !== "earn"),
     };
     for (const module of ["earn", undefined]) {
-      const data = searchData(module, held);
+      const data = searchData(module, excluded);
       assert.equal(
         data.contents.some(({ content }) => content.includes("getTransactionDecoder")),
         false

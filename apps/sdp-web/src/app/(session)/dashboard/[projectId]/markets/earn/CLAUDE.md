@@ -152,9 +152,9 @@ nothing else; the program create still sends the body `requestId` form.
   snippets — a B2B2C partner cannot name a custody wallet. The optional
   partner `feePayer` (the implementor sponsoring its customers' fees) is
   documented in
-  `apps/sdp-docs/content/unpublished/earn/integration-details.mdx`. The flow
-  guide remains `apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx`;
-  both stay unpublished until PRO-2038. Keep the shared authenticated flow
+  `apps/sdp-docs/content/docs/earn/integration-details.mdx`. The flow guide
+  is `apps/sdp-docs/content/docs/guides/embedded-yield.mdx`; both follow Earn's
+  release-channel visibility. Keep the shared authenticated flow
   and signed-intent retry advice aligned with the snippets. The
   guide is entirely derived from the strategy catalogue: nothing is persisted,
   there is no styling to save, and no public handoff token exists. (The UI

@@ -145,14 +145,13 @@ describe("buildApiReference", () => {
     });
   }
 
-  it("builds the opt-in Earn reference with every documented response, including SDK 501s", () => {
+  it("builds the Earn reference with every documented response, including SDK 501s", () => {
     const document = createPublicOpenApiDocument({
-      publishEarn: true,
       releaseChannel: "experimental",
     });
     const reference = apiReferenceSchema.parse(buildApiReference(document));
     const earn = reference.families.find((family) => family.name === "Earn");
-    if (!earn) throw new Error("The opted-in Earn family is missing");
+    if (!earn) throw new Error("The Earn family is missing");
     const documented = new Map(
       [...documentOperations(document)].filter(([operation]) => operation.includes("/v1/earn/"))
     );

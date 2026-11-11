@@ -103,7 +103,6 @@ function familyLines(families: readonly AiDiscoveryFamily[]): string[] {
 }
 
 function renderApiLlms(families: readonly AiDiscoveryFamily[]): string {
-  const earnPublished = families.some((family) => family.prefix === "/v1/earn");
   return [
     "# Solana Developer Platform API",
     "",
@@ -119,11 +118,6 @@ function renderApiLlms(families: readonly AiDiscoveryFamily[]): string {
     "## Authentication",
     "- Use `Authorization: Bearer <api_key>`.",
     "- API keys are issued by SDP in the shared `sf_<key id>_<secret><checksum>` format; keys issued earlier (`sk_test_...`, `sk_live_...`) are still accepted.",
-    ...(earnPublished
-      ? [
-          "- Earn strategy reads, previews, withdrawal-route discovery, and instant unsigned external-wallet builds may be anonymous; queued action builds, submits, and tenant reads require an API key.",
-        ]
-      : []),
     "- Session-only or internal routes are intentionally excluded from this resource.",
     "",
     "## Public endpoint families",

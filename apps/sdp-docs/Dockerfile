@@ -25,7 +25,6 @@ COPY packages/sdp-api-catalog/package.json ./packages/sdp-api-catalog/
 # The palette, type scale and font files the docs render with.
 COPY packages/sdp-design-tokens/package.json ./packages/sdp-design-tokens/
 COPY packages/sdp-env-config/package.json ./packages/sdp-env-config/
-COPY packages/sdp-earn/package.json ./packages/sdp-earn/
 COPY packages/sdp-payments/package.json ./packages/sdp-payments/
 COPY packages/sdp-fee-payment/package.json ./packages/sdp-fee-payment/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
@@ -51,7 +50,6 @@ COPY packages/sdp-earn ./packages/sdp-earn
 COPY packages/sdp-api-catalog ./packages/sdp-api-catalog
 COPY packages/sdp-design-tokens ./packages/sdp-design-tokens
 COPY packages/sdp-env-config ./packages/sdp-env-config
-COPY packages/sdp-earn ./packages/sdp-earn
 COPY packages/sdp-payments ./packages/sdp-payments
 COPY packages/sdp-fee-payment ./packages/sdp-fee-payment
 COPY packages/sdp-rpc ./packages/sdp-rpc

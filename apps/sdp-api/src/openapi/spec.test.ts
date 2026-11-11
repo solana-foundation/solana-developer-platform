@@ -45,13 +45,6 @@ const forbiddenResponseSchema = z.object({ description: z.string() });
 /** The widest public document: every module's routes, as dev serves it. */
 const EXPERIMENTAL = { releaseChannel: "experimental" } as const;
 
-/**
- * The publishable Earn document: the Earn hold lifted on a release channel that
- * runs Earn. What partners see once PRO-2038 flips the hold and Earn reaches the
- * public release channel.
- */
-const PUBLISHABLE_EARN = { publishEarn: true, releaseChannel: "experimental" } as const;
-
 interface TestJsonSchema {
   anyOf?: TestJsonSchema[];
   enum?: unknown[];
@@ -287,26 +280,34 @@ describe("OpenAPI spec", () => {
     ]);
   });
 
-  it("holds the Earn family out of the public document until launch", () => {
-    // PUBLICATION HOLD (PRO-2038). The default public document, which is what
-    // api.solana.com/openapi.json, Swagger UI, the API reference, the Postman
-    // collection, the playground catalog and the AI files are built from,
-    // carries no Earn operation and no Earn tag. Flipping
-    // EARN_PUBLIC_SURFACE_PUBLISHED is a PRO-1872 security sign-off PR; when it
-    // flips, move these assertions to the publishable document below.
-    const publicDocument = createPublicOpenApiDocument(EXPERIMENTAL);
-    expect(Object.keys(publicDocument.paths ?? {}).filter((p) => p.startsWith("/v1/earn"))).toEqual(
-      []
-    );
-    expect(publicDocument.tags?.map((tag) => tag.name)).not.toContain("Earn");
-    expect(JSON.stringify(publicDocument)).not.toMatch(/\/v1\/earn/);
-  });
+  it.each([
+    ["experimental", true],
+    ["beta", true],
+    ["stable", false],
+  ] as const)(
+    "%s publishes Earn only when its release channel runs it",
+    (releaseChannel, runsEarn) => {
+      const document = createPublicOpenApiDocument({ releaseChannel });
+      const operations = Object.entries(document.paths)
+        .filter(([path]) => path.startsWith("/v1/earn/"))
+        .flatMap(([, item]) =>
+          (["get", "post", "put", "patch", "delete"] as const).filter(
+            (method) => item[method] !== undefined
+          )
+        );
+      const manifest = createPublicSurfaceManifest(releaseChannel);
+
+      expect(operations.length).toBe(runsEarn ? 21 : 0);
+      expect(document.tags?.some((tag) => tag.name === "Earn")).toBe(runsEarn);
+      expect(/earn/i.test(JSON.stringify(document))).toBe(runsEarn);
+      expect(manifest.modules.includes("earn")).toBe(runsEarn);
+      expect(manifest.grantableActions.some(({ module }) => module === "earn")).toBe(runsEarn);
+    }
+  );
 
   it("publishes the caller-signed money routes and keeps retired button-configuration paths out", () => {
     const internal = createOpenApiDocument();
-    // The publishable Earn document: what partners see once PRO-2038 flips the
-    // hold. Pinned here so the contract cannot drift while it is held.
-    const publicDocument = createPublicOpenApiDocument(PUBLISHABLE_EARN);
+    const publicDocument = createPublicOpenApiDocument(EXPERIMENTAL);
 
     expect(internal.components?.securitySchemes?.clerkBearerAuth).toMatchObject({
       type: "http",
@@ -322,7 +323,7 @@ describe("OpenAPI spec", () => {
     expect(publicDocument.components?.securitySchemes?.clerkBearerAuth).toBeUndefined();
 
     // SECURITY REVIEW GATE (PRO-1872, threat model EARN-027)
-    // The public/preview split is a publication boundary. Changing either the
+    // The public/internal split is a publication boundary. Changing either the
     // operation list or an operation's public security declaration is a
     // threat-model revisit trigger. This list is the route-publication gate: a PR that grows it must
     // carry security sign-off (routes/earn/CLAUDE.md, "Public OpenAPI
@@ -439,12 +440,10 @@ describe("OpenAPI spec", () => {
   });
 
   it("keeps literal Earn guide endpoints aligned with their documented scopes", () => {
-    const publicDocument = createPublicOpenApiDocument(PUBLISHABLE_EARN);
+    const publicDocument = createPublicOpenApiDocument(EXPERIMENTAL);
     const internalDocument = createOpenApiDocument();
-    // The guide is unpublished until PRO-2038 (apps/sdp-docs/CLAUDE.md,
-    // "Unpublishing a Page") but its route contract is still pinned here.
     const guide = readFileSync(
-      new URL("../../../sdp-docs/content/unpublished/guides/embedded-yield.mdx", import.meta.url),
+      new URL("../../../sdp-docs/content/docs/guides/embedded-yield.mdx", import.meta.url),
       "utf8"
     );
     const generatedModule = readFileSync(
@@ -454,12 +453,12 @@ describe("OpenAPI spec", () => {
       ),
       "utf8"
     );
-    const draftDirectory = new URL("../../../sdp-docs/content/unpublished/earn/", import.meta.url);
-    const drafts = readdirSync(draftDirectory, { recursive: true, encoding: "utf8" })
+    const guideDirectory = new URL("../../../sdp-docs/content/docs/earn/", import.meta.url);
+    const guides = readdirSync(guideDirectory, { recursive: true, encoding: "utf8" })
       .filter((file) => file.endsWith(".mdx"))
-      .map((file) => readFileSync(new URL(file, draftDirectory), "utf8"))
+      .map((file) => readFileSync(new URL(file, guideDirectory), "utf8"))
       .join("\n");
-    const partnerPaths = literalEarnPaths(`${guide}\n${generatedModule}`);
+    const partnerPaths = literalEarnPaths(`${guide}\n${guides}\n${generatedModule}`);
     expect(partnerPaths).toEqual(
       expect.arrayContaining([
         "/v1/earn/external-wallet/withdrawal-options",
@@ -472,28 +471,13 @@ describe("OpenAPI spec", () => {
       ])
     );
     for (const path of partnerPaths) {
-      if (path.startsWith("/v1/earn/onboarding/wisdomtree/")) {
-        expect(
-          internalDocument.paths?.[path],
-          `Missing internal onboarding path: ${path}`
-        ).toBeDefined();
-        expect(
-          publicDocument.paths?.[path],
-          `Onboarding must remain internal: ${path}`
-        ).toBeUndefined();
-      } else if (path.startsWith("/v1/earn/provider-actions")) {
-        expect(
-          internalDocument.paths?.[path],
-          `Missing internal OpenAPI path: ${path}`
-        ).toBeDefined();
-        expect(
-          publicDocument.paths?.[path],
-          `Unreviewed public promotion: ${path}`
-        ).toBeUndefined();
-      } else {
-        expect(publicDocument.paths?.[path], `Missing public OpenAPI path: ${path}`).toBeDefined();
-      }
+      expect(publicDocument.paths?.[path], `Missing public OpenAPI path: ${path}`).toBeDefined();
     }
+    const draftDirectory = new URL("../../../sdp-docs/content/unpublished/earn/", import.meta.url);
+    const drafts = readdirSync(draftDirectory, { recursive: true, encoding: "utf8" })
+      .filter((file) => file.endsWith(".mdx"))
+      .map((file) => readFileSync(new URL(file, draftDirectory), "utf8"))
+      .join("\n");
     const draftPaths = literalEarnPaths(drafts);
     expect(draftPaths.length).toBeGreaterThan(0);
     for (const path of draftPaths) {
@@ -505,7 +489,7 @@ describe("OpenAPI spec", () => {
   });
 
   it("publishes both asynchronous withdrawal mechanisms with their exact row shapes", () => {
-    const doc = createPublicOpenApiDocument(PUBLISHABLE_EARN);
+    const doc = createPublicOpenApiDocument(EXPERIMENTAL);
     const requestPath = doc.paths?.["/v1/earn/external-wallet/withdrawal-request-transactions"];
 
     const buildRequest = getJsonSchema(requestPath?.post?.requestBody);
@@ -836,10 +820,8 @@ describe("OpenAPI spec", () => {
       "Compliance",
       "Counterparties",
       "Asset Profiles",
+      "Earn",
     ]);
-    expect(createPublicOpenApiDocument(PUBLISHABLE_EARN).tags?.map((tag) => tag.name)).toContain(
-      "Earn"
-    );
 
     expect(doc.paths?.["/v1/organizations/{orgId}"]).toBeUndefined();
     expect(doc.paths?.["/v1/members"]).toBeUndefined();
@@ -871,7 +853,7 @@ describe("OpenAPI spec", () => {
   // `moonpay` transfer provider). No document may name a value its channel leaves out.
   for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
     it(`${releaseChannel}: names no enum value, example or default its release channel leaves out`, () => {
-      const modules = publishedModules(releaseChannel, false);
+      const modules = publishedModules(releaseChannel);
       const leaked = new Set<string>();
       const visit = (node: unknown, inValues: boolean): void => {
         if (typeof node === "string") {
@@ -920,6 +902,11 @@ describe("OpenAPI spec", () => {
       expect(request.properties).not.toHaveProperty("transferId");
       expect(request.properties).toHaveProperty("counterpartyAccountId");
       // All shared transfer responses, including batches, retry and recurring collect.
+      const serializedPayments = JSON.stringify(
+        Object.fromEntries(
+          Object.entries(doc.paths).filter(([path]) => path.startsWith("/v1/payments/"))
+        )
+      );
       const serialized = JSON.stringify(doc);
       for (const field of [
         "deliveryMode",
@@ -930,7 +917,7 @@ describe("OpenAPI spec", () => {
         "deliveryMismatch",
         "rampsMemo",
       ]) {
-        expect(serialized).not.toContain(`"${field}"`);
+        expect(serializedPayments).not.toContain(`"${field}"`);
       }
       expect(serialized).not.toMatch(/\bramps?\b|onramp\.read|offramp\.read/i);
       const parameters = doc.paths?.["/v1/payments/transfers"]?.get?.parameters;
@@ -1107,12 +1094,6 @@ describe("OpenAPI spec", () => {
     }
   });
 
-  it("names Earn nowhere in any channel's document while the hold is on", () => {
-    for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
-      expect(JSON.stringify(createPublicOpenApiDocument({ releaseChannel }))).not.toMatch(/earn/i);
-    }
-  });
-
   it("keeps the values of modules a channel runs", () => {
     const stable = JSON.stringify(createPublicOpenApiDocument({ releaseChannel: "stable" }));
     expect(stable).toContain('"fee_payer"');
@@ -1136,18 +1117,6 @@ describe("OpenAPI spec", () => {
     expect(stable.paths?.["/v1/payments/ramps/onramp/quote"]).toBeUndefined();
     expect(stable.paths?.["/v1/counterparties/{counterpartyId}/requirements"]).toBeUndefined();
     expect(stable.paths?.["/v1/issuance/tokens"]).toBeUndefined();
-  });
-
-  it("keeps Earn unpublished on every release channel while the hold is on", () => {
-    for (const releaseChannel of ["experimental", "beta", "stable"] as const) {
-      const doc = createPublicOpenApiDocument({ releaseChannel });
-      expect(Object.keys(doc.paths ?? {}).filter((path) => path.startsWith("/v1/earn"))).toEqual(
-        []
-      );
-    }
-    // Lifting the hold does not publish Earn on a release channel that leaves it out.
-    const stable = createPublicOpenApiDocument({ publishEarn: true, releaseChannel: "stable" });
-    expect(JSON.stringify(stable)).not.toMatch(/\/v1\/earn/);
   });
 
   it("documents the DvP trade routes on the internal document only", () => {

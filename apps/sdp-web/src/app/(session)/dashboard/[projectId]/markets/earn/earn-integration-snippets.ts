@@ -19,9 +19,9 @@ import { DEFAULT_SDP_API_URL } from "@sdp/types/site";
  * The sections concatenate into one server module. `@solana/kit` is the only
  * Solana SDK referenced, and only by the optional sponsor signer.
  *
- * The docs guide (apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx,
- * unpublished until PRO-2038) documents this same authenticated flow. Keep the
- * shared contract aligned in both.
+ * The docs guide (apps/sdp-docs/content/docs/guides/embedded-yield.mdx)
+ * documents this same authenticated flow. Keep the shared contract aligned
+ * in both.
  */
 export interface EarnIntegrationSections {
   /** Shared client setup: base URL, auth headers, response envelope, signers. */

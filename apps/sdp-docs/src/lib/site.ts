@@ -4,7 +4,6 @@ import {
   SDP_AI_GUIDE_DOCS_SLUG,
   SDP_GITHUB_REPO_URL,
 } from "@sdp/types/site";
-import { earnDocsPreviewOrigin } from "./earn-docs-preview.mjs";
 
 export function normalizeDocsPageSlug(pageSlug: string): string {
   return pageSlug.replace(/(^|\/)index$/, "");
@@ -86,19 +85,8 @@ function buildSiteUrls(docsUrl: string, apiUrl: string) {
  */
 export const canonicalSite = buildSiteUrls(DEFAULT_SDP_DOCS_URL, DEFAULT_SDP_API_URL);
 
-const previewOrigin = earnDocsPreviewOrigin();
-/** Generated artifacts stay canonical except in this branch's Vercel preview. */
-export const discoverySite = previewOrigin
-  ? {
-      ...buildSiteUrls(`${previewOrigin}/docs`, DEFAULT_SDP_API_URL),
-      apiOpenApiUrl: `${previewOrigin}/docs/earn/openapi.json`,
-    }
-  : canonicalSite;
-
 const site = buildSiteUrls(
-  previewOrigin
-    ? `${previewOrigin}/docs`
-    : process.env.NEXT_PUBLIC_SDP_DOCS_URL || DEFAULT_SDP_DOCS_URL,
+  process.env.NEXT_PUBLIC_SDP_DOCS_URL || DEFAULT_SDP_DOCS_URL,
   process.env.NEXT_PUBLIC_SDP_API_URL || DEFAULT_SDP_API_URL
 );
 

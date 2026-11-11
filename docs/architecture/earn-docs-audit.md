@@ -145,16 +145,18 @@ here earlier, is fixed with the queued poller's cleanup pattern. No
 money-path implementation was changed to resolve these findings. No Linear
 issues or external comments were created by this audit.
 
-## Publication gates
+## Publication (updated 2026-11-11)
 
-- PRO-2395 tracks content readiness and reviewer review.
-- PRO-2038 owns launch publication.
-- PRO-2406 and PRO-1872 require named security sign-off for promotion.
-- `EARN_PUBLIC_SURFACE_PUBLISHED` remains false. Authored drafts also carry
-  `module: earn`; normal builds do not read `content/unpublished`.
-- Only `VERCEL_ENV=preview` with `VERCEL_GIT_COMMIT_REF=earn-docs` stages the
-  partner guides and 21 prospective API operations. Treasury and Programs stay
-  excluded. Preview discovery links use its own origin and OpenAPI download.
+- Keegan Thompson approved publication of the existing partner contract on
+  2026-11-11.
+- Earn follows its `beta` release-channel maturity: `beta` and `experimental`
+  publish its guides and 21 partner API operations; `stable` leaves them out.
+- Authored public guides carry `module: earn`. Every build uses the normal
+  public OpenAPI, reference, Postman, playground and AI generators.
+- Treasury, Programs and provider-action routes remain internal. Promoting
+  another route into the public contract requires named security sign-off.
+- Every Earn route requires an authenticated SDP credential and runs in that
+  credential's project environment.
 
 ## Validation
 

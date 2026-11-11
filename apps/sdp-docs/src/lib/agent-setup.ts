@@ -28,7 +28,7 @@ const RELEASED_MODULES: ReadonlySet<SdpModule> = new Set(SDP_RELEASE_CHANNELS.st
 
 /**
  * The module skills the menu offers: listed, their module released (stable), and published by
- * this deployment, which also applies a module's publication hold.
+ * this deployment's release channel.
  */
 export function offeredModuleSkills(skills: readonly ModuleSkill[]): readonly ModuleSkill[] {
   return skills.filter(

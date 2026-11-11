@@ -71,7 +71,7 @@ describe("AI discovery page selection", () => {
     assert.equal(sections.flatMap(({ pages }) => pages).length, pages.size);
   });
 
-  it("skips absent Earn drafts and discovers the four guides when admitted", () => {
+  it("skips channel-excluded Earn pages and discovers the four guides when admitted", () => {
     const unpublished = pagesOf("introduction");
     assert.deepEqual(selectKeyPages(unpublished, ["introduction"], EARN_KEY_PAGE_SLUGS), [
       unpublished.get("introduction"),

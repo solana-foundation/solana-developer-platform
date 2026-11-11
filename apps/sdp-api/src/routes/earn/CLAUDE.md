@@ -105,7 +105,7 @@ balance with a live one.
 
 - **Public OpenAPI promotion is a security review gate** (PRO-1872, threat
   model EARN-027). `registerPublicEarnPaths` decides what partners see, and
-  the public/preview split is a PUBLICATION boundary. Every runtime route
+  the public/internal split is a publication boundary. Every runtime route
   requires a credential, under the same `/v1/*` tracing and rate-limit
   middleware. Moving a route into the public document or
   changing its published `security` declaration changes partner-facing scope,
@@ -115,20 +115,12 @@ balance with a live one.
   sign-off named in the PR (who reviewed, and the threat-model row the route
   lands under), and the threat model's revisit trigger fires. Never widen the
   list just to make the test pass.
-  **Publication hold (PRO-2038):** since PR #2005 the whole family is held out
-  of the DEFAULT public document by `EARN_PUBLIC_SURFACE_PUBLISHED` in
-  `../../openapi/spec.ts`, so api.solana.com/openapi.json, Swagger UI, the API
-  reference, Postman, the playground catalog and the AI files carry no Earn
-  until launch. Each deployment's public document also carries only the
-  modules its release channel runs (`releaseChannel`, an additional
-  condition): Earn publishes only when the flag is true AND the channel runs
-  Earn, so promoting Earn to a channel never publishes it on its own. The
-  pinned list is asserted against `createPublicOpenApiDocument({ publishEarn:
-  true, releaseChannel: "experimental" })`, and sibling tests assert the
-  document is Earn-free on every channel while the flag is false. Flipping the
-  constant is the sign-off PR. The flag reaches one runtime response:
-  `GET /v1/projects/{projectId}/provider-availability` omits Earn entries
-  while it is false, so the response matches the public document.
+  Earn uses the same release-channel publication rule as every other module:
+  its beta maturity publishes the partner operations in beta and experimental,
+  while stable omits them. OpenAPI, the API reference, Postman, the playground,
+  AI discovery and project provider availability follow that channel. The pinned
+  operation list is asserted against
+  `createPublicOpenApiDocument({ releaseChannel: "experimental" })`.
   Public OpenAPI declares API-key auth on every operation; the internal
   document additionally accepts Clerk and session auth.
 
@@ -263,9 +255,9 @@ widen the surface just to make a test pass.
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
   admitted only by the hourly sync cron; the 5-minute metrics refresh
   (`cron/earn-metrics-refresh.ts`) updates figures only and can never insert.
-  Registered in the internal and opt-in public documents; default public
-  publication remains held under PRO-2038. Partners need the `strategyId` every deposit build takes and
-  the live APY their own UI shows (`openapi/paths/earn.ts`,
+  Registered in the internal document and public documents whose release
+  channel runs Earn. Partners need the `strategyId` every deposit build takes
+  and the live APY their own UI shows (`openapi/paths/earn.ts`,
   `registerEarnStrategyPaths`).
   - **The list is ranked by deposit size** (PRO-1732): TVL descending, read from
     `riskMetadata.tvlUsd` in SQL, no-TVL rows last (devnet rows carry none by

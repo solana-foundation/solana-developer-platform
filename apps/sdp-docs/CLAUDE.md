@@ -256,7 +256,7 @@ the repo:
 
 ## Release Channels
 
-Each docs deployment documents only what its release channel publishes. The API decides that (`createPublicSurfaceManifest` in `apps/sdp-api/src/openapi/spec.ts`: modules, ramp and custody providers and the actions an API key can be granted, Earn's hold included, plus the rate limits every channel enforces); `generate:api` writes it to `src/generated/public-surface.json` from `SDP_RELEASE_CHANNEL` (required on Vercel; `experimental` when unset elsewhere, which is what the committed file holds).
+Each docs deployment documents only what its release channel publishes. The API decides that (`createPublicSurfaceManifest` in `apps/sdp-api/src/openapi/spec.ts`: modules, ramp and custody providers and the actions an API key can be granted, plus the rate limits every channel enforces); `generate:api` writes it to `src/generated/public-surface.json` from `SDP_RELEASE_CHANNEL` (required on Vercel; `experimental` when unset elsewhere, which is what the committed file holds).
 
 Before documenting a new ramp provider, follow
 `docs/contributing/ramp-provider-safety.md` and verify its sandbox settlement
@@ -278,11 +278,11 @@ Gates follow module declarations, never sentences:
 - Committed generated files (`public/llms*.txt`, Postman, `reference/api/index.mdx`, `src/generated/public-surface.json`, `src/generated/api-examples.json`) are built at `experimental`; the deployment's build regenerates them for its channel. The root `content/docs/meta.json` is hand-maintained.
 - The docs skill (`public/SKILL.md`, and the same file at the repo's `skills/sdp-docs/SKILL.md`, which `npx skills add` installs from GitHub) is the exception: it names no module, so one copy fits every channel. `generate:ai` links only shared pages from it and fails on a gated or missing one; send readers to `llms.txt` for what a channel publishes.
 
-API reference pages are different: they are generated from the public OpenAPI document, a folder per tag, so a family appears and disappears with that document (`EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` is the one such switch). The docs keep no list of families of their own, and an untagged operation fails `generate:api`.
+API reference pages are different: they are generated from the public OpenAPI document, a folder per tag, so a family appears and disappears with its release channel. The docs keep no list of families of their own, and an untagged operation fails `generate:api`.
 `generate:ai` reads that channel's generated `apps/sdp-api/generated/openapi.json`
 after `generate:api`. `@sdp/api-catalog/ai-discovery` renders both the docs
 `llms.txt` and API `/llms.txt`, so their public endpoint family lists come from
-the same tags, including the Earn publication hold. Change that shared
+the same channel-filtered tags. Change that shared
 generator when changing family discovery, not either output alone.
 The generated API Reference index is a directory of published families: one
 link and description per family in `<ApiFamilyList>`. Shared API conventions
@@ -344,28 +344,18 @@ metadata paths relative to their folder, and includes unlisted pages once.
 Metadata never admits a gated page. Keep optional Earn discovery links behind
 the same filtered page map.
 
-### Private Earn authoring
+### Earn docs
 
-The Earn guides and generated reference stay under `content/unpublished/`
-until PRO-2038. See `content/unpublished/README.md` for the authoring and
-promotion checks. Use `pnpm --filter sdp-docs generate:earn-preview` to render
-the private reference from internal OpenAPI, then
-`pnpm --filter sdp-docs check:earn-drafts` to check gates, MDX, prose, future
-links and complete Markdown parity. The preview generator writes an ignored
-API intermediate and the unpublished reference, without changing the public
-OpenAPI document. Treasury and Programs remain internal; do not copy this
-whole reference into the public tree. Public promotion requires named security
-sign-off and regeneration from the approved public OpenAPI document.
+Earn uses the same `module: earn` frontmatter and release-channel rules as
+every other module. Its guides live in `content/docs/earn`, with Embedded
+Yield in `content/docs/guides/embedded-yield.mdx`. The public API reference,
+Postman, playground and AI resources regenerate from the channel's public
+OpenAPI document. No branch or deployment-preview override admits content.
 
-`scripts/build.ts` stages the partner guides and intended public Earn reference
-only when `VERCEL_ENV=preview` **and** `VERCEL_GIT_COMMIT_REF=earn-docs`. Keep both
-conditions exact. Production, other branches and normal local builds keep the
-hold. The preview includes search, Markdown and AI output, with a noindex header;
-it excludes Treasury and Programs. Staged MDX remains through Vercel packaging
-for Markdown reads. Every build first removes marked staging and regenerates
-normal artifacts. Never enable a preview by changing the API publication flag.
-Direct source or AI generation rejects a staged preview manifest outside that
-exact context. Run `generate:api` to reset it before normal generation.
+The Treasury and provider-integration guides remain under
+`content/unpublished/earn` because they describe internal operations. Treasury, Programs and provider administration
+stay outside the pinned public API contract. A change to that contract needs
+security review; publication follows module maturity.
 
 ---
 

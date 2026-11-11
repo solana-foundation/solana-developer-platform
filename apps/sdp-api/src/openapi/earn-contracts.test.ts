@@ -30,16 +30,22 @@ describe("Earn API contract coverage", () => {
     expect([...documented].sort()).toEqual([...runtime].sort());
   });
 
-  it("keeps every Earn operation authenticated and unpublished", () => {
+  it("keeps every Earn operation authenticated and internal groups out of the public document", () => {
     const internal = createOpenApiDocument();
     const published = createPublicOpenApiDocument({ releaseChannel: "experimental" });
     for (const [path, item] of Object.entries(internal.paths)) {
       if (!path.startsWith("/v1/earn/")) continue;
-      expect(published.paths[path]).toBeUndefined();
-      for (const [method, operation] of Object.entries(item)) {
-        if (!["get", "post", "put"].includes(method)) continue;
-        expect(operation).toHaveProperty("security");
-        expect((operation as { security: object[] }).security).not.toContainEqual({});
+      for (const method of ["get", "post", "put", "patch", "delete"] as const) {
+        const operation = item[method];
+        if (!operation) continue;
+        expect(operation.security).toBeDefined();
+        expect(operation.security).not.toContainEqual({});
+        if (
+          operation[DOCS_GROUP] !== EARN_GROUPS.discovery &&
+          operation[DOCS_GROUP] !== EARN_GROUPS.embeddedYield
+        ) {
+          expect(published.paths[path]?.[method]).toBeUndefined();
+        }
       }
     }
   });
@@ -60,7 +66,6 @@ describe("Earn API contract coverage", () => {
     expect([...groups].sort()).toEqual(Object.values(EARN_GROUPS).sort());
 
     const partner = createPublicOpenApiDocument({
-      publishEarn: true,
       releaseChannel: "experimental",
     });
     for (const [path, item] of Object.entries(partner.paths)) {

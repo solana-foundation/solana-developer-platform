@@ -1,7 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createMDX } from "fumadocs-mdx/next";
-import { earnDocsPreviewOrigin, isEarnDocsPreview } from "./src/lib/earn-docs-preview.mjs";
 
 // Verified with fumadocs-mdx 14.3.1: this internal opt-out keeps Fumadocs from
 // rewriting .source after our scripts patch it for Next's parser.
@@ -11,8 +10,6 @@ const withMDX = createMDX({
   configPath: "source.config.ts",
   outDir: ".source",
 });
-
-const previewOrigin = earnDocsPreviewOrigin();
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -49,9 +46,6 @@ const nextConfig = {
   },
   async rewrites() {
     return [
-      ...(isEarnDocsPreview()
-        ? [{ source: "/docs/earn/openapi.json", destination: "/earn/openapi.json" }]
-        : []),
       // Raw <img> references to public/images must use /docs/images/... paths:
       // production traffic reaches this app through sdp-web's /docs/:path*
       // proxy, which never forwards root-level /images requests. Map the
@@ -81,7 +75,6 @@ const nextConfig = {
         // which is never framed either.
         source: "/:path*",
         headers: [
-          ...(isEarnDocsPreview() ? [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] : []),
           {
             key: "Content-Security-Policy",
             value: "frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
@@ -111,12 +104,6 @@ const nextConfig = {
     ];
   },
 };
-
-// Page actions run in the browser, where Vercel's server-only branch variables
-// are absent. Inline this URL only after the server has checked both guards.
-if (previewOrigin) {
-  nextConfig.env = { NEXT_PUBLIC_SDP_DOCS_URL: `${previewOrigin}/docs` };
-}
 
 // Gated so non-container builds skip the unused standalone tree.
 // outputFileTracingRoot is required for pnpm-workspace symlinks to resolve.

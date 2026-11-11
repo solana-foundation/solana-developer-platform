@@ -78,7 +78,8 @@ at these boundaries can duplicate transfers, strand tracking, or misstate balanc
   rules; this runner does not retry those effects.
 - Internal OpenAPI covers the actual mounted Earn operations. Custody request
   schemas are reused from runtime validation; core response schemas are shared
-  with the Treasury UI. Public Earn publication remains disabled under PRO-2038.
+  with the Treasury UI. Public Earn follows its `beta` release-channel maturity;
+  Treasury and Programs remain internal.
   Unknown values remain absent, and shares, token amounts and USD are distinct.
 
 ## Evidence and rollout

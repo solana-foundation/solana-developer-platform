@@ -29,6 +29,7 @@ describe("GET /llms.txt", () => {
     expect(body).toContain("/v1/wallets");
     expect(body).toContain("/v1/issuance");
     expect(body).toContain("/v1/compliance");
+    expect(body).toContain("/v1/earn");
     expect(body).not.toContain("/admin/allowlist");
     expect(body).not.toContain("/v1/onboarding");
     expect(body).not.toContain("/v1/organizations");
@@ -40,14 +41,20 @@ describe("GET /llms.txt", () => {
     expect(body).toContain("/v1/payments");
     expect(body).not.toContain("/v1/compliance");
     expect(body).not.toContain("/v1/issuance");
-    expect(body).not.toMatch(/earn/i);
   });
 
-  it("leaves Earn out on every channel while its publication hold is on", async () => {
-    for (const releaseChannel of ["experimental", "beta", "stable"]) {
-      expect(await llmsBody(releaseChannel)).not.toMatch(/earn/i);
+  it.each([
+    ["experimental", true],
+    ["beta", true],
+    ["stable", false],
+  ] as const)(
+    "%s names Earn only when its release channel runs it",
+    async (releaseChannel, runsEarn) => {
+      const body = await llmsBody(releaseChannel);
+      expect(body.includes("/v1/earn")).toBe(runsEarn);
+      expect(/earn/i.test(body)).toBe(runsEarn);
     }
-  });
+  );
 
   it("matches the committed docs family list on experimental", async () => {
     const docs = await readFile(

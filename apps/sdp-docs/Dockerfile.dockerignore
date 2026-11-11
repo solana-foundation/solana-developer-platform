@@ -48,7 +48,6 @@ packages/*
 !packages/sdp-earn
 !packages/sdp-api-catalog
 !packages/sdp-env-config
-!packages/sdp-earn
 !packages/sdp-design-tokens
 !packages/sdp-rpc
 !packages/sdp-custody
