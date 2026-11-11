@@ -8,6 +8,9 @@ Every deposit names a strategy. List the catalog, keep the strategies your
 project can fund, and check each one's terms before you offer it to
 customers.
 
+Set `SDP_API_URL` and `SDP_API_KEY` as shown in the
+[Quickstart](/docs/earn/quickstart#before-you-begin).
+
 ## List the catalog
 
 [`GET /v1/earn/strategies`](/docs/reference/api/earn/list-earn-strategies)
@@ -15,7 +18,7 @@ returns the strategies your project can see, largest first. It defaults to
 your project's cluster: devnet for sandbox, mainnet for production.
 
 ```bash title="Terminal"
-curl --fail-with-body -sS "https://api.solana.com/v1/earn/strategies?pageSize=100" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/strategies?pageSize=100" \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 

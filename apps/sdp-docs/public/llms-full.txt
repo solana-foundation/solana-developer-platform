@@ -383,6 +383,7 @@ mkdir earn-quickstart && cd earn-quickstart
 
 | You need | How to get it |
 | --- | --- |
+| An API URL for a beta or experimental deployment | Use the API URL supplied with your SDP deployment. Stable deployments do not include Earn. |
 | A sandbox API key with `earn.execute` | [Create an API key](/docs/developing-with-sdp/manage-api-keys) in your sandbox project. Keep it on your backend. |
 | The Solana CLI | [Install it](https://solana.com/docs/intro/installation) for `solana-keygen` and `solana airdrop`. |
 | A test wallet | `solana-keygen new --no-bip39-passphrase -o test-wallet.json` creates one. It plays your customer's wallet. |
@@ -393,11 +394,12 @@ mkdir earn-quickstart && cd earn-quickstart
 Your organization also needs the strategy's provider activated. If a preview
 returns `403` with `provider_not_entitled`, ask your SDP contact.
 
-Install the TypeScript tools and set your key:
+Install the TypeScript tools, then set your deployment URL and key:
 
 ```bash title="Terminal"
 npm init -y && npm pkg set type=module
 npm install @solana/kit@8 && npm install -D tsx
+export SDP_API_URL="https://YOUR_SDP_API_HOST"
 export SDP_API_KEY="sf_..."
 ```
 
@@ -438,7 +440,8 @@ file, `deposit.ts`.
 ### 1. Add the request helper
 
 ```typescript title="earn-api.ts"
-const SDP_API_URL = process.env.SDP_API_URL ?? "https://api.solana.com";
+const SDP_API_URL = process.env.SDP_API_URL;
+if (!SDP_API_URL) throw new Error("Set SDP_API_URL to your beta or experimental API URL");
 const SDP_API_KEY = process.env.SDP_API_KEY;
 if (!SDP_API_KEY) throw new Error("Set SDP_API_KEY to your sandbox API key");
 
@@ -751,6 +754,9 @@ Every deposit names a strategy. List the catalog, keep the strategies your
 project can fund, and check each one's terms before you offer it to
 customers.
 
+Set `SDP_API_URL` and `SDP_API_KEY` as shown in the
+[Quickstart](/docs/earn/quickstart#before-you-begin).
+
 ## List the catalog
 
 [`GET /v1/earn/strategies`](/docs/reference/api/earn/list-earn-strategies)
@@ -758,7 +764,7 @@ returns the strategies your project can see, largest first. It defaults to
 your project's cluster: devnet for sandbox, mainnet for production.
 
 ```bash title="Terminal"
-curl --fail-with-body -sS "https://api.solana.com/v1/earn/strategies?pageSize=100" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/strategies?pageSize=100" \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
@@ -888,8 +894,9 @@ path, start with the [Quickstart](/docs/earn/quickstart).
 
 ## Before you begin
 
-You need the Quickstart's setup: a sandbox API key with `earn.execute`, a
-funded test wallet in `test-wallet.json`, and Node.js for signing. See
+You need the Quickstart's setup: `SDP_API_URL` for a beta or experimental
+deployment, a sandbox API key with `earn.execute`, a funded test wallet in
+`test-wallet.json`, and Node.js for signing. See
 [Before you begin](/docs/earn/quickstart#before-you-begin).
 
 **cURL**
@@ -939,7 +946,7 @@ slippage floor. [Strategies](/docs/earn/strategies) explains each check.
 **cURL**
 
 ```bash title="Terminal"
-curl --fail-with-body -sS "https://api.solana.com/v1/earn/strategies?pageSize=100" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/strategies?pageSize=100" \
   -H "Authorization: Bearer $SDP_API_KEY" > strategies.json
 
 # The first fundable, active strategy that needs no slippage floor.
@@ -976,7 +983,7 @@ quotes the shares the deposit would receive right now. It moves nothing.
 **cURL**
 
 ```bash title="Terminal"
-curl --fail-with-body -sS "https://api.solana.com/v1/earn/vault-deposit-previews" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/vault-deposit-previews" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d "$(jq -nc --arg strategyId "$STRATEGY_ID" --arg amount "$AMOUNT" \
@@ -1024,7 +1031,7 @@ returns an unsigned transaction for the customer's wallet.
 **cURL**
 
 ```bash title="Terminal"
-curl --fail-with-body -sS "https://api.solana.com/v1/earn/external-wallet/deposit-transactions" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/deposit-transactions" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d "$(jq -nc --arg strategyId "$STRATEGY_ID" --arg ownerAddress "$OWNER_ADDRESS" \
@@ -1101,7 +1108,7 @@ export IDEMPOTENCY_KEY="$(node -e 'console.log(crypto.randomUUID())')"
 jq -nc --arg transactionId "$TRANSACTION_ID" --arg signedTransaction "$SIGNED_TRANSACTION" \
   '{transactionId: $transactionId, signedTransaction: $signedTransaction}' > submit.json
 
-curl --fail-with-body -sS "https://api.solana.com/v1/earn/external-wallet/deposits" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/deposits" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
@@ -1158,7 +1165,7 @@ until the status is `finalized` or `failed`.
 MOVEMENT_ID="$(jq -r '.data.deposit.movementId' deposit.json)"
 # Every second for a minute, then every five seconds, for up to three minutes.
 for attempt in $(seq 84); do
-  curl --fail-with-body -sS "https://api.solana.com/v1/earn/external-wallet/movements/$MOVEMENT_ID" \
+  curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/movements/$MOVEMENT_ID" \
     -H "Authorization: Bearer $SDP_API_KEY" > movement.json
   jq -e '.data.movement.status | IN("finalized", "failed")' movement.json >/dev/null && break
   if [ "$attempt" -le 60 ]; then sleep 1; else sleep 5; fi
@@ -1206,7 +1213,7 @@ returns the wallet's live positions.
 **cURL**
 
 ```bash title="Terminal"
-curl --fail-with-body -sS --get "https://api.solana.com/v1/earn/external-wallet/positions" \
+curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/positions" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   --data-urlencode "ownerAddress=$OWNER_ADDRESS"
 ```
@@ -1275,13 +1282,16 @@ per-wallet read takes the customer's wallet as `ownerAddress`, so your
 backend decides which wallet a signed-in customer may see. The examples read
 it from `OWNER_ADDRESS`, as in [Deposit funds](/docs/earn/deposits#before-you-begin).
 
+Set `SDP_API_URL` and `SDP_API_KEY` as shown in the
+[Quickstart](/docs/earn/quickstart#before-you-begin).
+
 ## Positions
 
 [`GET /v1/earn/external-wallet/positions`](/docs/reference/api/earn/list-earn-external-wallet-positions)
 returns the wallet's live positions.
 
 ```bash title="Terminal"
-curl --fail-with-body -sS --get "https://api.solana.com/v1/earn/external-wallet/positions" \
+curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/positions" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   --data-urlencode "ownerAddress=$OWNER_ADDRESS"
 ```
@@ -1320,7 +1330,7 @@ or list a wallet's history, newest first, with
 [`GET /v1/earn/external-wallet/movements`](/docs/reference/api/earn/list-earn-external-wallet-movements).
 
 ```bash title="Terminal"
-curl --fail-with-body -sS --get "https://api.solana.com/v1/earn/external-wallet/movements" \
+curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/movements" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   --data-urlencode "ownerAddress=$OWNER_ADDRESS"
 ```
@@ -1364,7 +1374,7 @@ each status and `settlement`.
 returns the wallet's balance and earnings for each deposit token.
 
 ```bash title="Terminal"
-curl --fail-with-body -sS --get "https://api.solana.com/v1/earn/external-wallet/earnings" \
+curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/earnings" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   --data-urlencode "ownerAddress=$OWNER_ADDRESS"
 ```
@@ -1422,7 +1432,7 @@ returns live totals across every customer wallet in your project, by token and
 by strategy. It takes no `ownerAddress`.
 
 ```bash title="Terminal"
-curl --fail-with-body -sS "https://api.solana.com/v1/earn/external-wallet/positions/summary" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/positions/summary" \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
@@ -1459,13 +1469,16 @@ A withdrawal spends shares from a position and pays the deposit token back to
 the wallet that owns it. Some routes pay in the same transaction; others pay
 later. Read the live routes first, then follow the one your customer chooses.
 
+Set `SDP_API_URL` and `SDP_API_KEY` as shown in the
+[Quickstart](/docs/earn/quickstart#before-you-begin).
+
 ## 1. Choose a route
 
 [`POST /v1/earn/external-wallet/withdrawal-options`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-options)
 reads each route from live provider state.
 
 ```bash title="Terminal"
-curl --fail-with-body -sS "https://api.solana.com/v1/earn/external-wallet/withdrawal-options" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/withdrawal-options" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc"}'

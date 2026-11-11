@@ -8,7 +8,11 @@ it("tracks active-panel headings and stops both subscriptions after cleanup", ()
   const intersections: TestIntersectionObserver[] = [];
   const mutations: TestMutationObserver[] = [];
 
-  class TestIntersectionObserver {
+  class TestIntersectionObserver implements IntersectionObserver {
+    readonly root = null;
+    readonly rootMargin = "0px";
+    readonly scrollMargin = "0px";
+    readonly thresholds = [0];
     observed: Element[] = [];
     disconnects = 0;
 
@@ -25,15 +29,44 @@ it("tracks active-panel headings and stops both subscriptions after cleanup", ()
       this.observed = [];
     }
 
+    unobserve(target: Element) {
+      this.observed = this.observed.filter((element) => element !== target);
+    }
+
+    takeRecords(): IntersectionObserverEntry[] {
+      return [];
+    }
+
     intersect(target: Element) {
+      const bounds: DOMRectReadOnly = {
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        toJSON: () => ({}),
+      };
       this.callback(
-        [{ target, isIntersecting: true } as IntersectionObserverEntry],
-        this as unknown as IntersectionObserver
+        [
+          {
+            target,
+            isIntersecting: true,
+            boundingClientRect: bounds,
+            intersectionRect: bounds,
+            rootBounds: null,
+            intersectionRatio: 1,
+            time: 0,
+          },
+        ],
+        this
       );
     }
   }
 
-  class TestMutationObserver {
+  class TestMutationObserver implements MutationObserver {
     disconnects = 0;
     target: Node | undefined;
 
@@ -49,8 +82,12 @@ it("tracks active-panel headings and stops both subscriptions after cleanup", ()
       this.disconnects += 1;
     }
 
+    takeRecords(): MutationRecord[] {
+      return [];
+    }
+
     mutate() {
-      this.callback([], this as unknown as MutationObserver);
+      this.callback([], this);
     }
   }
 
@@ -64,22 +101,26 @@ it("tracks active-panel headings and stops both subscriptions after cleanup", ()
   });
 
   try {
-    const headings = ["api", "embedded", "outside"].map((id) => ({
-      id,
-      inactive: id === "embedded",
-      closest() {
-        return this.inactive ? {} : null;
-      },
-    }));
+    const headings = ["api", "embedded", "outside"].map((id) => {
+      // SAFETY: the observer reads only id and closest; both are supplied here.
+      const element = { id } as HTMLElement;
+      const heading = { element, inactive: id === "embedded" };
+      Object.defineProperty(element, "closest", {
+        value: () => (heading.inactive ? element : null),
+      });
+      return heading;
+    });
     const [api, embedded, outside] = headings;
     assert(api && embedded && outside);
+    // SAFETY: the observer uses only ownerDocument.getElementById and contains.
     const article = {
       ownerDocument: {
-        getElementById: (id: string) => headings.find((heading) => heading.id === id),
+        getElementById: (id: string) =>
+          headings.find((heading) => heading.element.id === id)?.element ?? null,
       },
-      contains: (element: unknown) => element !== outside,
-    } as unknown as HTMLElement;
-    const items = headings.map(({ id }) => ({ url: `#${id}` }));
+      contains: (element: Node | null) => element !== outside.element,
+    } as HTMLElement;
+    const items = headings.map(({ element }) => ({ url: `#${element.id}` }));
     const visible: string[][] = [];
     const active: string[] = [];
     const cleanup = observeTableOfContents(
@@ -93,17 +134,17 @@ it("tracks active-panel headings and stops both subscriptions after cleanup", ()
     assert(intersection && mutation);
     assert.equal(mutation.target, article);
     assert.deepEqual(visible, [["#api"]]);
-    intersection.intersect(embedded as unknown as Element);
+    intersection.intersect(embedded.element);
     assert.deepEqual(active, []);
-    intersection.intersect(api as unknown as Element);
+    intersection.intersect(api.element);
     assert.deepEqual(active, ["#api"]);
 
     api.inactive = true;
     embedded.inactive = false;
     mutation.mutate();
     assert.deepEqual(visible, [["#api"], ["#embedded"]]);
-    assert.deepEqual(intersection.observed, [embedded]);
-    intersection.intersect(embedded as unknown as Element);
+    assert.deepEqual(intersection.observed, [embedded.element]);
+    intersection.intersect(embedded.element);
     assert.deepEqual(active, ["#api", "#embedded"]);
 
     const previousDisconnects = intersection.disconnects;
@@ -112,7 +153,7 @@ it("tracks active-panel headings and stops both subscriptions after cleanup", ()
     assert.equal(mutation.disconnects, 1);
     api.inactive = false;
     mutation.mutate();
-    intersection.intersect(api as unknown as Element);
+    intersection.intersect(api.element);
     assert.deepEqual(visible, [["#api"], ["#embedded"]]);
     assert.deepEqual(active, ["#api", "#embedded"]);
   } finally {

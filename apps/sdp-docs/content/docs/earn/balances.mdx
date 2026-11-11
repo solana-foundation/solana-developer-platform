@@ -9,13 +9,16 @@ per-wallet read takes the customer's wallet as `ownerAddress`, so your
 backend decides which wallet a signed-in customer may see. The examples read
 it from `OWNER_ADDRESS`, as in [Deposit funds](/docs/earn/deposits#before-you-begin).
 
+Set `SDP_API_URL` and `SDP_API_KEY` as shown in the
+[Quickstart](/docs/earn/quickstart#before-you-begin).
+
 ## Positions
 
 [`GET /v1/earn/external-wallet/positions`](/docs/reference/api/earn/list-earn-external-wallet-positions)
 returns the wallet's live positions.
 
 ```bash title="Terminal"
-curl --fail-with-body -sS --get "https://api.solana.com/v1/earn/external-wallet/positions" \
+curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/positions" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   --data-urlencode "ownerAddress=$OWNER_ADDRESS"
 ```
@@ -54,7 +57,7 @@ or list a wallet's history, newest first, with
 [`GET /v1/earn/external-wallet/movements`](/docs/reference/api/earn/list-earn-external-wallet-movements).
 
 ```bash title="Terminal"
-curl --fail-with-body -sS --get "https://api.solana.com/v1/earn/external-wallet/movements" \
+curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/movements" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   --data-urlencode "ownerAddress=$OWNER_ADDRESS"
 ```
@@ -98,7 +101,7 @@ each status and `settlement`.
 returns the wallet's balance and earnings for each deposit token.
 
 ```bash title="Terminal"
-curl --fail-with-body -sS --get "https://api.solana.com/v1/earn/external-wallet/earnings" \
+curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/earnings" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   --data-urlencode "ownerAddress=$OWNER_ADDRESS"
 ```
@@ -156,7 +159,7 @@ returns live totals across every customer wallet in your project, by token and
 by strategy. It takes no `ownerAddress`.
 
 ```bash title="Terminal"
-curl --fail-with-body -sS "https://api.solana.com/v1/earn/external-wallet/positions/summary" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/positions/summary" \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 

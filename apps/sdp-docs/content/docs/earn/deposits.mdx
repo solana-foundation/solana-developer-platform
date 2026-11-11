@@ -10,8 +10,9 @@ path, start with the [Quickstart](/docs/earn/quickstart).
 
 ## Before you begin
 
-You need the Quickstart's setup: a sandbox API key with `earn.execute`, a
-funded test wallet in `test-wallet.json`, and Node.js for signing. See
+You need the Quickstart's setup: `SDP_API_URL` for a beta or experimental
+deployment, a sandbox API key with `earn.execute`, a funded test wallet in
+`test-wallet.json`, and Node.js for signing. See
 [Before you begin](/docs/earn/quickstart#before-you-begin).
 
 <Tabs items={["cURL", "TypeScript"]} groupId="earn-code-language">
@@ -67,7 +68,7 @@ slippage floor. [Strategies](/docs/earn/strategies) explains each check.
 <Tab value="cURL">
 
 ```bash title="Terminal"
-curl --fail-with-body -sS "https://api.solana.com/v1/earn/strategies?pageSize=100" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/strategies?pageSize=100" \
   -H "Authorization: Bearer $SDP_API_KEY" > strategies.json
 
 # The first fundable, active strategy that needs no slippage floor.
@@ -109,7 +110,7 @@ quotes the shares the deposit would receive right now. It moves nothing.
 <Tab value="cURL">
 
 ```bash title="Terminal"
-curl --fail-with-body -sS "https://api.solana.com/v1/earn/vault-deposit-previews" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/vault-deposit-previews" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d "$(jq -nc --arg strategyId "$STRATEGY_ID" --arg amount "$AMOUNT" \
@@ -162,7 +163,7 @@ returns an unsigned transaction for the customer's wallet.
 <Tab value="cURL">
 
 ```bash title="Terminal"
-curl --fail-with-body -sS "https://api.solana.com/v1/earn/external-wallet/deposit-transactions" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/deposit-transactions" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d "$(jq -nc --arg strategyId "$STRATEGY_ID" --arg ownerAddress "$OWNER_ADDRESS" \
@@ -249,7 +250,7 @@ export IDEMPOTENCY_KEY="$(node -e 'console.log(crypto.randomUUID())')"
 jq -nc --arg transactionId "$TRANSACTION_ID" --arg signedTransaction "$SIGNED_TRANSACTION" \
   '{transactionId: $transactionId, signedTransaction: $signedTransaction}' > submit.json
 
-curl --fail-with-body -sS "https://api.solana.com/v1/earn/external-wallet/deposits" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/deposits" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
@@ -311,7 +312,7 @@ until the status is `finalized` or `failed`.
 MOVEMENT_ID="$(jq -r '.data.deposit.movementId' deposit.json)"
 # Every second for a minute, then every five seconds, for up to three minutes.
 for attempt in $(seq 84); do
-  curl --fail-with-body -sS "https://api.solana.com/v1/earn/external-wallet/movements/$MOVEMENT_ID" \
+  curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/movements/$MOVEMENT_ID" \
     -H "Authorization: Bearer $SDP_API_KEY" > movement.json
   jq -e '.data.movement.status | IN("finalized", "failed")' movement.json >/dev/null && break
   if [ "$attempt" -le 60 ]; then sleep 1; else sleep 5; fi
@@ -364,7 +365,7 @@ returns the wallet's live positions.
 <Tab value="cURL">
 
 ```bash title="Terminal"
-curl --fail-with-body -sS --get "https://api.solana.com/v1/earn/external-wallet/positions" \
+curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/positions" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   --data-urlencode "ownerAddress=$OWNER_ADDRESS"
 ```

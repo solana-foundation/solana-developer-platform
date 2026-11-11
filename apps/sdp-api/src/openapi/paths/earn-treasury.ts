@@ -37,7 +37,38 @@ import {
   projectScopeWithRequiredIdempotencyHeaders,
 } from "./helpers";
 
-/** Internal Treasury contracts. Public Earn publication is gated separately. */
+type TreasuryIdempotency = "required" | "either" | "optional-either";
+
+function idempotencyContract(idempotency: TreasuryIdempotency | undefined) {
+  const retryAdvice =
+    " A new intentional operation needs a new Idempotency-Key, even with identical terms. Retrying an uncertain operation must reuse its key and exact payload.";
+  switch (idempotency) {
+    case undefined:
+      return { headers: projectScopeHeaders, description: "" };
+    case "required":
+      return { headers: projectScopeWithRequiredIdempotencyHeaders, description: retryAdvice };
+    case "either":
+      return {
+        headers: projectScopeWithIdempotencyHeaders,
+        description:
+          retryAdvice +
+          " Supply exactly one key through Idempotency-Key or body requestId (UUIDv4).",
+      };
+    case "optional-either":
+      return {
+        headers: projectScopeWithIdempotencyHeaders,
+        description:
+          retryAdvice +
+          " An idempotency key is optional; send Idempotency-Key or body requestId (UUIDv4), never both.",
+      };
+    default: {
+      const exhaustive: never = idempotency;
+      throw new Error(`Unknown Treasury idempotency mode: ${exhaustive}`);
+    }
+  }
+}
+
+/** Internal Treasury contracts, excluded from the public Earn registration. */
 export function registerEarnTreasuryPaths(
   registry: OpenAPIRegistry,
   security: Array<Record<string, string[]>>
@@ -55,18 +86,13 @@ export function registerEarnTreasuryPaths(
       body?: z.ZodType;
       query?: Query;
       params?: Query;
-      idempotency?: "required" | "either" | "optional-either";
+      idempotency?: TreasuryIdempotency;
       signs?: true;
       created?: boolean;
       description: string;
     }
   ) {
-    const headers =
-      options.idempotency === "required"
-        ? projectScopeWithRequiredIdempotencyHeaders
-        : options.idempotency === "either" || options.idempotency === "optional-either"
-          ? projectScopeWithIdempotencyHeaders
-          : projectScopeHeaders;
+    const idempotency = idempotencyContract(options.idempotency);
     registry.registerPath({
       method,
       path: `/v1/earn/${path}`,
@@ -75,18 +101,9 @@ export function registerEarnTreasuryPaths(
       tags: ["Earn"],
       [DOCS_GROUP]: path.startsWith("programs") ? EARN_GROUPS.programs : EARN_GROUPS.treasury,
       security,
-      description:
-        options.description +
-        (options.idempotency
-          ? " A new intentional operation needs a new Idempotency-Key, even with identical terms. Retrying an uncertain operation must reuse its key and exact payload."
-          : "") +
-        (options.idempotency === "either"
-          ? " Supply exactly one key through Idempotency-Key or body requestId (UUIDv4)."
-          : options.idempotency === "optional-either"
-            ? " An idempotency key is optional; send Idempotency-Key or body requestId (UUIDv4), never both."
-            : ""),
+      description: options.description + idempotency.description,
       request: {
-        headers,
+        headers: idempotency.headers,
         ...(options.params ? { params: options.params } : {}),
         ...(options.query ? { query: options.query } : {}),
         ...(options.body ? { body: { required: true, content: jsonContent(options.body) } } : {}),

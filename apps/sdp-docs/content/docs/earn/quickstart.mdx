@@ -17,6 +17,7 @@ mkdir earn-quickstart && cd earn-quickstart
 
 | You need | How to get it |
 | --- | --- |
+| An API URL for a beta or experimental deployment | Use the API URL supplied with your SDP deployment. Stable deployments do not include Earn. |
 | A sandbox API key with `earn.execute` | [Create an API key](/docs/developing-with-sdp/manage-api-keys) in your sandbox project. Keep it on your backend. |
 | The Solana CLI | [Install it](https://solana.com/docs/intro/installation) for `solana-keygen` and `solana airdrop`. |
 | A test wallet | `solana-keygen new --no-bip39-passphrase -o test-wallet.json` creates one. It plays your customer's wallet. |
@@ -27,11 +28,12 @@ mkdir earn-quickstart && cd earn-quickstart
 Your organization also needs the strategy's provider activated. If a preview
 returns `403` with `provider_not_entitled`, ask your SDP contact.
 
-Install the TypeScript tools and set your key:
+Install the TypeScript tools, then set your deployment URL and key:
 
 ```bash title="Terminal"
 npm init -y && npm pkg set type=module
 npm install @solana/kit@8 && npm install -D tsx
+export SDP_API_URL="https://YOUR_SDP_API_HOST"
 export SDP_API_KEY="sf_..."
 ```
 
@@ -72,7 +74,8 @@ file, `deposit.ts`.
 ### 1. Add the request helper
 
 ```typescript title="earn-api.ts"
-const SDP_API_URL = process.env.SDP_API_URL ?? "https://api.solana.com";
+const SDP_API_URL = process.env.SDP_API_URL;
+if (!SDP_API_URL) throw new Error("Set SDP_API_URL to your beta or experimental API URL");
 const SDP_API_KEY = process.env.SDP_API_KEY;
 if (!SDP_API_KEY) throw new Error("Set SDP_API_KEY to your sandbox API key");
 

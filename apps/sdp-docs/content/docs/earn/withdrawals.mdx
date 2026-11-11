@@ -8,13 +8,16 @@ A withdrawal spends shares from a position and pays the deposit token back to
 the wallet that owns it. Some routes pay in the same transaction; others pay
 later. Read the live routes first, then follow the one your customer chooses.
 
+Set `SDP_API_URL` and `SDP_API_KEY` as shown in the
+[Quickstart](/docs/earn/quickstart#before-you-begin).
+
 ## 1. Choose a route
 
 [`POST /v1/earn/external-wallet/withdrawal-options`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-options)
 reads each route from live provider state.
 
 ```bash title="Terminal"
-curl --fail-with-body -sS "https://api.solana.com/v1/earn/external-wallet/withdrawal-options" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/withdrawal-options" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc"}'
