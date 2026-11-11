@@ -741,6 +741,7 @@ export function TreasurySolutionsWorkspace({
           }}
           provider={withdrawProgram.provider}
           programId={withdrawProgram.id}
+          projectId={selectedProjectId}
         />
       ) : null}
 

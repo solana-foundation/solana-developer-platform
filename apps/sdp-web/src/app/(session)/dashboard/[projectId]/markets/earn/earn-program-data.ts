@@ -1760,17 +1760,35 @@ export function previewEarnWithdrawal(
   });
 }
 
-export interface EarnWithdrawalCreateInput extends EarnWithdrawalPreviewInput {
-  /** Client-minted UUIDv4 so a retried confirm can never double-withdraw. */
-  requestId: string;
+export interface EarnWithdrawalCreateInput {
+  /** REQUIRED — a payout with no amount is not a request. */
+  amountUsd: string;
+  token: EarnPortfolioToken;
   destinationAddress: string;
 }
 
 export function createEarnWithdrawal(
   programId: string,
-  input: EarnWithdrawalCreateInput
+  input: EarnWithdrawalCreateInput,
+  idempotencyKey: string
 ): Promise<DashboardFetchResult<{ data: EarnProgramWithdrawalResponse }>> {
-  return dashboardFetch(programPath(programId, "/withdrawals"), { method: "POST", body: input });
+  // The key rides the `Idempotency-Key` header, ONE source: the API refuses a
+  // withdrawal carrying BOTH that header and a body `requestId` — it cannot
+  // tell which one a retry keeps stable, and following the wrong one pays out
+  // twice. The dashboard's fetch layer attaches the header to any keyed POST
+  // that lacks one, so the legacy body form would collide with it on every
+  // submit; rebuild the body field-by-field and leave `requestId` no way in
+  // (the same allowlist the vault seams rebuild theirs with).
+  const body = {
+    amountUsd: input.amountUsd,
+    token: input.token,
+    destinationAddress: input.destinationAddress,
+  };
+  return dashboardFetch(programPath(programId, "/withdrawals"), {
+    method: "POST",
+    headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
+    body,
+  });
 }
 
 function fetchEarnWithdrawal(

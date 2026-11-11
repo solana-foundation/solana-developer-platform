@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { withdrawalRequestSignature } from "./earn-program-withdraw-tracking";
 import {
   floorUsdToCents,
   isPositiveUsdAmount,
   laneCeilingFromErrorBody,
   liquidityWriteWins,
-  withdrawalRequestSignature,
 } from "./earn-withdraw-modal";
 
 describe("exact USD amount checks", () => {

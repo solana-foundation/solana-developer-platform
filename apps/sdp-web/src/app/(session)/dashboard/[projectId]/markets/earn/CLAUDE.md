@@ -109,12 +109,13 @@ one grows — and the API already answers an unknown value with an empty page, w
 is the honest result.
 
 `proxyToSdpApi` never copies the inbound header bag — auth, project scope and
-tracing stay server-owned — so a client-set `Idempotency-Key` never reaches the
-API on its own. A route forwards one deliberately, per header, through the
-optional `upstreamHeaders` argument, spelling it `IDEMPOTENCY_KEY_HEADER`
-(`src/lib/idempotency.ts`). `vault-deposits/`, `vault-withdrawals/`, and the
-queued request create/cancel routes opt in, forwarding that single header and
-nothing else; the program create still sends the body `requestId` form.
+tracing stay server-owned. Since the dashboard-wide keying (HOO-1918) a
+non-GET request's own `Idempotency-Key` is the one header the proxy relays
+(`withForwardedIdempotencyKey`), so a caller-chosen key reaches the API without
+per-route plumbing. `vault-deposits/`, `vault-withdrawals/`, the queued
+request create/cancel routes and the program withdrawal create all use that:
+one key, the header form. The program create's body `requestId` form is the
+API's other accepted source and no browser flow sends it.
 
 ## Routes
 
@@ -258,7 +259,23 @@ nothing else; the program create still sends the body `requestId` form.
   undefined` and the form subtree renders only once it is a REAL lane: seeding
   state with a default stablecoin would make every read below depend on
   remembering to fail closed, and the provider-unavailable case would silently
-  hold a lane that cannot pay out.
+  hold a lane that cannot pay out. Its idempotency key is claimed from the
+  persisted store (`earn-program-withdraw-tracking.ts`) at submit and sent as
+  the `Idempotency-Key` header ALONE — the API refuses a withdrawal carrying
+  both that header and a body `requestId`, so the seam rebuilds the body
+  field-by-field and leaves the legacy body form no way in. A key the browser
+  could not persist blocks submission (`DashboardEarn.intentStorageUnavailable`).
+- `earn-program-withdraw-tracking.ts` — the custodial-program withdrawal
+  idempotency-key store under its own versioned `sessionStorage` key, the vault
+  stores' sibling. The fingerprint is
+  `(project, program, canonical amount, token, destination)` — hashed with
+  `storageFingerprint`, so the destination address never sits in storage in the
+  clear — and the amount is canonicalized before hashing: "12.50", "12.5" and
+  "012.50" are ONE intended withdrawal at three spellings, and a cosmetic edit
+  after an ambiguous failure must replay the original key, not pay a second
+  time. The PROJECT is in there because the API's replay lookup is org-scoped
+  (sibling projects reach the same program): a key minted under one project
+  must never resolve the other's identical-looking withdrawal as its replay.
 - `earn-vault-deposit-modal.tsx` — the `vault_direct` deposit: one SDP custody
   wallet funds one strategy, and that same wallet signs on chain and holds the
   shares. A vault address is never presented as a funding address. The
@@ -397,8 +414,8 @@ nothing else; the program create still sends the body `requestId` form.
   reasoning as the slippage machinery; the deposit and withdrawal modals
   resolving "did my submission move anything" differently is how a double-count
   ships.
-- `@/lib/idempotency-key-store.ts` — the shared machinery behind BOTH tracking
-  modules (storage tiers, quota divergence), plus `settleIdempotencyKey`, which
+- `@/lib/idempotency-key-store.ts` — the shared machinery behind ALL THREE
+  tracking modules (storage tiers, quota divergence), plus `settleIdempotencyKey`, which
   applies the shared retire rule (`answerRetiresKey`). Extracted
   when the withdrawal flow arrived; two copies of a double-spend guard is how
   one drifts.
@@ -425,7 +442,8 @@ nothing else; the program create still sends the body `requestId` form.
 `createEarnVaultWithdrawal`, `useEarnVaultDepositOutcome`,
 `useEarnVaultWithdrawalOutcome`, `isEarnVaultDepositInFlight`,
 `isEarnVaultWithdrawalInFlight`, `earn-vault-deposit-tracking.ts`,
-`earn-vault-withdraw-tracking.ts`, `EarnWithdrawModal`, `EarnVaultDepositModal`,
+`earn-vault-withdraw-tracking.ts`, `earn-program-withdraw-tracking.ts`,
+`EarnWithdrawModal`, `EarnVaultDepositModal`,
 `EarnVaultWithdrawModal`, `EarnVaultDepositOutcomeTracker` and
 `EarnVaultWithdrawalOutcomeTracker` have **no caller inside this module**. That is a module boundary, not an oversight: this module is the Earn
 Program page (select a strategy → integrate the API), and the

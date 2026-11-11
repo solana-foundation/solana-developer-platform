@@ -4,6 +4,7 @@ import type { EarnPortfolioWithdrawal } from "@sdp/types/earn";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
+import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { EarnWithdrawModal } from "./earn-withdraw-modal";
 
 const mocks = vi.hoisted(() => ({
@@ -44,6 +45,7 @@ function renderModal() {
       <EarnWithdrawModal
         programId="earn_program_1"
         provider="upshift"
+        projectId="prj_test"
         onClose={vi.fn()}
         onWithdrawalCreated={onWithdrawalCreated}
       />
@@ -72,9 +74,23 @@ beforeEach(() => {
       },
     },
   });
+  // The store is what carries a withdrawal's key between submits now, so it
+  // has to start empty; and each mint returns a DISTINCT value, otherwise
+  // "the retry reused the key" would pass against a constant mock that proves
+  // nothing.
+  resetIdempotencyKeyStoresForTests();
+  sessionStorage.clear();
+  let minted = 0;
+  vi.spyOn(globalThis.crypto, "randomUUID").mockImplementation(() => {
+    minted += 1;
+    return `11111111-1111-4111-8111-11111111111${minted}` as ReturnType<typeof crypto.randomUUID>;
+  });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe("EarnWithdrawModal submit lock", () => {
   /**
@@ -131,5 +147,19 @@ describe("EarnWithdrawModal submit lock", () => {
     await screen.findByText("Withdrawal submitted");
     expect(mocks.createEarnWithdrawal).toHaveBeenCalledTimes(2);
     expect(onWithdrawalCreated).toHaveBeenCalledWith("wref_1");
+    // Both attempts rode ONE key claimed from the persisted store — the 500 is
+    // an outcome-unknown answer, so the key stays kept and the retry replays
+    // the first attempt instead of paying a second one. And the input carries
+    // no `requestId`: the key travels as the `Idempotency-Key` header alone,
+    // because the API refuses a withdrawal that names both sources.
+    const [, firstInput, firstKey] = mocks.createEarnWithdrawal.mock.calls[0];
+    const [, secondInput, secondKey] = mocks.createEarnWithdrawal.mock.calls[1];
+    expect(firstKey).toBe(secondKey);
+    expect(firstInput).toEqual({
+      amountUsd: "12.50",
+      token: "usdc",
+      destinationAddress: DESTINATION,
+    });
+    expect(secondInput).toEqual(firstInput);
   });
 });

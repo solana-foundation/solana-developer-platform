@@ -15,6 +15,7 @@ import {
   appendVaultPositionsRead,
   createEarnVaultDeposit,
   createEarnVaultWithdrawalRequest,
+  createEarnWithdrawal,
   type EarnVaultPositionsRead,
   earnExternalWalletSummaryRefreshInterval,
   earnLedgerRefreshInterval,
@@ -711,6 +712,54 @@ describe("createEarnVaultDeposit", () => {
 
     expect(result.ok).toBe(false);
     expect(result).toMatchObject({ error: "Invalid vault deposit response", status: 201 });
+  });
+});
+
+describe("createEarnWithdrawal", () => {
+  it("sends idempotency only as a header and allowlists the JSON body", async () => {
+    const withdrawal = {
+      withdrawalRef: "wref_1",
+      status: "processing",
+      destinationAddress: "11111111111111111111111111111111",
+      createdAt: TIMESTAMP,
+    } as const;
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ data: { withdrawal } }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const untypedInput = {
+      amountUsd: "10",
+      token: "usdc",
+      destinationAddress: "11111111111111111111111111111111",
+      requestId: "must-not-be-forwarded",
+    } as unknown as Parameters<typeof createEarnWithdrawal>[1];
+
+    const result = await createEarnWithdrawal("earn_program_1", untypedInput, "withdrawal-key");
+
+    expect(result).toEqual({
+      ok: true,
+      status: 201,
+      data: { data: { withdrawal } },
+    });
+    const [url, options] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe("/api/dashboard/markets/earn/programs/earn_program_1/withdrawals");
+    const headers = new Headers(options?.headers);
+    // ONE key source: the API refuses a withdrawal carrying BOTH this header
+    // and a body `requestId`, and the dashboard's fetch layer would attach the
+    // header to any keyed POST that lacks one — so the legacy body form must
+    // never ride along.
+    expect(headers.get("Idempotency-Key")).toBe("withdrawal-key");
+    expect(headers.get("x-project-id")).toBe("prj_test_sandbox");
+    expect(JSON.parse(String(options?.body))).toEqual({
+      amountUsd: "10",
+      token: "usdc",
+      destinationAddress: "11111111111111111111111111111111",
+    });
+    expect(String(options?.body)).not.toContain("requestId");
   });
 });
 
