@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { expandDocsBlocks } from "@/lib/docs-blocks";
-import { type PublicSurface, publicSurface } from "@/lib/release-channel";
+import { isPageSourcePublished, type PublicSurface, publicSurface } from "@/lib/release-channel";
 import {
   buildSections,
   type DocsMeta,
@@ -94,6 +94,36 @@ describe("AI discovery page selection", () => {
       () => selectKeyPages(unpublished, ["missing-required-page"], EARN_KEY_PAGE_SLUGS),
       /Missing required key docs page "missing-required-page"/
     );
+  });
+
+  it("admits custody setup guides and their shared links only through the provider gate", () => {
+    const slug = "wallet-operations/fireblocks";
+    const raw =
+      "---\ntitle: Connect Fireblocks\ncustodyProvider: fireblocks\n---\nFireblocks setup.\n";
+    for (const releaseChannel of ["stable", "beta"] as const) {
+      const published = releaseChannel === "beta";
+      const surface: PublicSurface = {
+        ...publicSurface,
+        releaseChannel,
+        custodyProviders: published ? ["privy", "fireblocks"] : ["privy"],
+      };
+      const pages = pagesOf("introduction", "wallet-operations/index");
+      if (isPageSourcePublished(raw, `${slug}.mdx`, surface)) {
+        const [guide] = pagesOf(slug).values();
+        if (!guide) throw new Error("Missing Fireblocks test page");
+        pages.set(slug, guide);
+      }
+      const sections = buildSections(
+        { pages: ["wallet-operations"] },
+        pages,
+        new Map([["wallet-operations", { title: "Wallets", pages: ["index", "fireblocks"] }]]),
+        published ? new Set() : new Set([slug])
+      );
+      const corpusSlugs = sections.flatMap(({ pages }) => pages.map(({ slug }) => slug));
+      assert.equal(corpusSlugs.includes(slug), published);
+      const links = expandDocsBlocks("<CustodyProviderGuides />\n", "wallets.mdx", { surface });
+      assert.equal(links.includes(`/docs/${slug}`), published);
+    }
   });
 
   it("keeps Earn capability text behind the existing public-surface gate", () => {

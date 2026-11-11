@@ -2,14 +2,20 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { SDP_RELEASE_CHANNELS } from "@sdp/types/release-channels";
+import { isCustodyProviderPublished, SDP_RELEASE_CHANNELS } from "@sdp/types/release-channels";
 import { structure } from "fumadocs-core/mdx-plugins/remark-structure";
 import remarkGfm from "remark-gfm";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { expandDocsBlocks, remarkDocsBlocks } from "@/lib/docs-blocks";
-import { isPagePublished, type PublicSurface } from "@/lib/release-channel";
+import {
+  isPagePublished,
+  isPageSourcePublished,
+  type PublicSurface,
+  pageGateOf,
+  parsePageGateFields,
+} from "@/lib/release-channel";
 
 const ALL: Pick<PublicSurface, "allModules" | "allRampProviders" | "rateLimits"> = {
   allModules: ["custody", "payments", "ramps", "issuance", "compliance", "earn"],
@@ -99,6 +105,60 @@ describe("docs follow the release channel", () => {
     );
   });
 
+  it("publishes custody provider pages from the API manifest in every channel", () => {
+    const source =
+      "---\ntitle: Connect Fireblocks\ncustodyProvider: fireblocks\n---\nSetup steps.\n";
+    const fields = parsePageGateFields(
+      { title: "Connect Fireblocks", custodyProvider: "fireblocks" },
+      "wallet-operations/fireblocks.mdx"
+    );
+    assert.deepEqual(pageGateOf(fields, "wallet-operations/fireblocks.mdx"), {
+      custodyProvider: "fireblocks",
+    });
+
+    for (const releaseChannel of ["stable", "beta", "experimental"] as const) {
+      const published = isCustodyProviderPublished(releaseChannel, "fireblocks");
+      const surface: PublicSurface = {
+        ...STABLE,
+        releaseChannel,
+        custodyProviders: published ? ["privy", "fireblocks"] : ["privy"],
+      };
+      assert.equal(isPagePublished(fields, "fireblocks.mdx", surface), published);
+      assert.equal(isPageSourcePublished(source, "fireblocks.mdx", surface), published);
+    }
+
+    // A provider promotion needs only a new API manifest, with no docs gate edit.
+    assert.equal(
+      isPageSourcePublished(source, "fireblocks.mdx", {
+        ...STABLE,
+        custodyProviders: ["privy", "fireblocks"],
+      }),
+      true
+    );
+  });
+
+  it("rejects unknown custody providers and conflicting page gates before publication", () => {
+    assert.throws(
+      () =>
+        isPageSourcePublished(
+          "---\ncustodyProvider: fireblokcs\n---\nHidden page.\n",
+          "fireblocks.mdx",
+          STABLE
+        ),
+      /custodyProvider must be one of/
+    );
+    for (const otherGate of [{ module: "custody" }, { rampProvider: "stripe" }]) {
+      assert.throws(
+        () => parsePageGateFields({ custodyProvider: "fireblocks", ...otherGate }, "p"),
+        /only one of module, rampProvider or custodyProvider/
+      );
+    }
+    assert.throws(
+      () => parsePageGateFields({ custodyProvider: ["fireblocks"] }, "p"),
+      /invalid frontmatter/
+    );
+  });
+
   it("publishes Earn pages and shared listings through the ordinary module gate", () => {
     for (const [releaseChannel, published] of [
       ["stable", false],
@@ -155,9 +215,34 @@ describe("docs follow the release channel", () => {
     const experimental = expandDocsBlocks("<CustodyProviderTable />\n", "wallets.mdx", {
       surface: EXPERIMENTAL,
     });
-    assert.match(experimental, /\| \*\*Fireblocks\*\* \|/);
+    assert.match(
+      experimental,
+      /\| \*\*\[Fireblocks\]\(\/docs\/wallet-operations\/fireblocks\)\*\* \|/
+    );
     assert.match(experimental, /\| \*\*Turnkey\*\* \|/);
     assert.doesNotMatch(experimental, /Anchorage/);
+  });
+
+  it("keeps custody setup links consistent in Markdown, compiled pages and search", () => {
+    const source = "<CustodyProviderGuides />\n";
+    const beta: PublicSurface = { ...EXPERIMENTAL, releaseChannel: "beta" };
+    for (const surface of [STABLE, beta, EXPERIMENTAL]) {
+      const published = surface.custodyProviders.includes("fireblocks");
+      const markdown = expandDocsBlocks(source, "wallets.mdx", { surface });
+      const compiled = compiledText(source, surface);
+      const search = searchText(source, surface);
+      assert.equal(markdown.includes("/docs/wallet-operations/fireblocks"), published);
+      assert.equal(compiled.includes("/docs/wallet-operations/fireblocks"), published);
+      assert.equal(search.includes("Connect Fireblocks"), published);
+      assert.doesNotMatch(markdown, /CustodyProviderGuides/);
+      if (published) assert.match(markdown, /your own Fireblocks workspace for production custody/);
+    }
+    assert.match(
+      expandDocsBlocks(source, "wallets.mdx", {
+        surface: { ...STABLE, custodyProviders: ["privy", "fireblocks"] },
+      }),
+      /\[Connect Fireblocks\]\(\/docs\/wallet-operations\/fireblocks\)/
+    );
   });
 
   it("tables the wallet creates a same-key retry reruns, with each window", () => {
