@@ -12,8 +12,11 @@ controls approvals.
 Sign in as an SDP **organization admin**. Have a Fireblocks **workspace owner**
 available for API user approval. If Fireblocks isn't available, ask the SDP team.
 
-Choose **Sandbox** for devnet or **Production** for mainnet
-([mainnet access required](/docs/guides/go-to-mainnet)).
+Choose an SDP **Sandbox project** for devnet (`SOL_TEST`) or **Production
+project** for mainnet (`SOL`, [mainnet access required](/docs/guides/go-to-mainnet)).
+Each selected vault must already contain a Solana wallet on that network.
+SDP project environments are separate from Fireblocks workspace types; check
+workspace compatibility with the SDP team.
 
 1. **Generate a CSR in SDP.** Open **Integrations → Fireblocks → Add connection**,
    enter a **Connection name**, and click **Generate and download CSR**.
@@ -30,8 +33,9 @@ Choose **Sandbox** for devnet or **Production** for mainnet
    under **⋯ → Allowlist IP address** before continuing.
 
 3. **Import vaults in SDP.** Copy **API User (ID)** into SDP. Click **Load vaults**,
-   select up to **20 vaults**, then **Connect and verify**. SDP imports their
-   existing Solana wallets.
+   select up to **20 vaults**, then **Connect and verify**. SDP checks API access
+   and each wallet's address, then lists imported wallets on the connection page
+   and under **Wallets**. This does not test signing or transfer policies.
 
 ## Transfers
 
@@ -62,8 +66,12 @@ Complete the required approvals for both changes.
 Open **Accounts → Vault**, select the source vault's Solana wallet, and use its
 deposit address. Add **SOL for network fees**, including for USDC transfers.
 
-Send a [small payment](/docs/payments/send-basic-payment) from SDP and approve it
-in Fireblocks. SDP tracks it while approval is pending.
+Send a [small payment](/docs/payments/send-basic-payment), then open
+**Payments → Transactions** in SDP. While awaiting approval, it shows
+**Processing**; open it for the Fireblocks transaction ID and status.
+
+Approve the matching transaction in Fireblocks **Transaction history**. Confirm
+success when Fireblocks shows **COMPLETED** and SDP shows **Confirmed**.
 
 ## Manage your connection
 
