@@ -1,6 +1,11 @@
 import type { WaistMovement } from "@sdp/types/movements";
 import type { SdpModule } from "@sdp/types/release-channels";
 import type { TransactionSigner } from "@solana/kit";
+import type {
+  CustodyProposalReader,
+  CustodyTransferProposer,
+  TransferProposalIntent,
+} from "@/services/domain/signing/admitted-proposer";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { Env } from "@/types/env";
 
@@ -25,5 +30,42 @@ export async function createOrgSignerForCustodyWallet<Module extends SdpModule =
     projectId,
     custodyWalletId,
     movement
+  );
+}
+
+/**
+ * The same waist for a wallet whose provider builds and sends its own transfers (a Fireblocks
+ * BYOK Connection): the same prelude and the same live admission on every proposal as a
+ * signature gets. Returns `null` for every wallet that signs, which then uses
+ * {@link createOrgSignerForCustodyWallet} (PRO-2435 D2).
+ */
+export async function createOrgTransferProposerForCustodyWallet<Module extends SdpModule = never>(
+  env: Env,
+  orgId: string,
+  projectId: string,
+  custodyWalletId: string,
+  movement: WaistMovement<Module>
+): Promise<CustodyTransferProposer | null> {
+  return createSigningService(env).getTransferProposerForWalletRecord(
+    orgId,
+    projectId,
+    custodyWalletId,
+    movement
+  );
+}
+
+/** Read-only recovery for a recorded proposal, bound to its intent. It never creates a transfer. */
+export async function createOrgTransferProposalReader(
+  env: Env,
+  orgId: string,
+  projectId: string,
+  custodyWalletId: string,
+  binding: TransferProposalIntent & { sourceAddress: string | null }
+): Promise<CustodyProposalReader> {
+  return createSigningService(env).getTransferProposalReaderForWalletRecord(
+    orgId,
+    projectId,
+    custodyWalletId,
+    binding
   );
 }

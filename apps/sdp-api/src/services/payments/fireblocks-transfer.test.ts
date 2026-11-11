@@ -919,6 +919,38 @@ describe("native Fireblocks BYOK payment routes", () => {
     expect(mock).not.toHaveBeenCalled();
   });
 
+  it("decides admission in the custody waist at proposal time, refusing a movement disabled after preparation", async () => {
+    // PRO-2435 D2: the proposal goes through the same waist decision a signature does, so a
+    // project movement control (HOO-2334) landing between preparation and the POST still holds.
+    const mock = await ready();
+    const db = getDb(env);
+    const original = AuditService.prototype.beginCriticalWithin;
+    vi.spyOn(AuditService.prototype, "beginCriticalWithin").mockImplementation(async function (
+      this: AuditService,
+      ...args
+    ) {
+      const audit = await original.apply(this, args);
+      await db.execute(
+        "UPDATE projects SET disabled_movements = ARRAY['payments.transfer']::text[] WHERE id = ?",
+        [PROJECT_ID]
+      );
+      return audit;
+    });
+    const response = await send();
+    expect(response.status, await response.clone().text()).toBe(403);
+    expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    const row = await db.queryOne<{
+      status: string;
+      provider_reference: string | null;
+      code: string | null;
+    }>(
+      `SELECT status, provider_reference, provider_data->'executionFailure'->>'code' AS code
+         FROM payment_transfers WHERE organization_id = ?`,
+      [ORGANIZATION_ID]
+    );
+    expect(row).toMatchObject({ status: "failed", provider_reference: null, code: "FORBIDDEN" });
+  });
+
   it("refuses a disabled connection before contacting Fireblocks", async () => {
     const mock = await ready();
     await getDb(env).execute(
