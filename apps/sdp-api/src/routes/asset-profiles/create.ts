@@ -23,7 +23,7 @@ import { AuditService } from "@/services/audit.service";
 import { TokenService } from "@/services/token.service";
 import { mapToAssetProfile } from "./handlers";
 
-// POST /v1/issuance/asset-profiles: create token and profile in one transaction.
+// POST /v1/issuance/tokens/create-with-asset-profile: create token and profile in one transaction.
 export const createTokenWithAssetProfile = async (
   c: ValidatedBodyContext<typeof createTokenWithAssetProfileSchema>
 ) => {
