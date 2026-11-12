@@ -13,11 +13,11 @@ Set `SDP_API_URL` and `SDP_API_KEY` as shown in the
 
 ## 1. Choose a route
 
-[`POST /v1/earn/external-wallet/withdrawal-options`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-options)
+[`POST /v1/earn/withdrawals/caller-signed/options`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-options)
 reads each route from live provider state.
 
 ```bash title="Terminal"
-curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/withdrawal-options" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/withdrawals/caller-signed/options" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc"}'
@@ -67,10 +67,10 @@ does not check the wallet's balance.
 
 | Step | Request |
 | --- | --- |
-| Preview | [`POST /v1/earn/external-wallet/withdrawal-previews`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-preview) |
-| Build | [`POST /v1/earn/external-wallet/withdrawal-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-transaction) |
-| Submit | [`POST /v1/earn/external-wallet/withdrawals`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal), with an `Idempotency-Key` |
-| Track | [`GET /v1/earn/external-wallet/movements/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement) |
+| Preview | [`POST /v1/earn/withdrawals/caller-signed/preview`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-preview) |
+| Build | [`POST /v1/earn/withdrawals/build-unsigned-transaction`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-transaction) |
+| Submit | [`POST /v1/earn/withdrawals/submit-signed-transaction`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal), with an `Idempotency-Key` |
+| Track | [`GET /v1/earn/movements/caller-signed/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement) |
 
 The example uses the Quickstart's `earn-api.ts` and `test-wallet.ts`, and
 `floor.ts` from [Slippage floors](/docs/earn/integration-details#slippage-floors).
@@ -96,7 +96,7 @@ export async function withdraw(savedPosition: SavedPosition, shares: string) {
     const query = new URLSearchParams({ ownerAddress, limit: "100" });
     if (before !== null) query.set("before", before);
     const page: { positions: Position[]; nextCursor: string | null } = await earnRequest(
-      `/v1/earn/external-wallet/positions?${query}`,
+      `/v1/earn/positions/caller-signed?${query}`,
     );
     position = page.positions.find((p) => p.id === savedPosition.positionId);
     before = page.nextCursor;
@@ -105,7 +105,7 @@ export async function withdraw(savedPosition: SavedPosition, shares: string) {
     throw new Error("The saved position cannot withdraw right now");
   }
 
-  const preview = await earnRequest("/v1/earn/external-wallet/withdrawal-previews", {
+  const preview = await earnRequest("/v1/earn/withdrawals/caller-signed/preview", {
     positionId: position.id,
     shares,
   });
@@ -120,13 +120,13 @@ export async function withdraw(savedPosition: SavedPosition, shares: string) {
     : undefined;
 
   const { transaction: built } = await earnRequest(
-    "/v1/earn/external-wallet/withdrawal-transactions",
+    "/v1/earn/withdrawals/build-unsigned-transaction",
     { positionId: position.id, shares, minAmountOut },
   );
   const signedTransaction = await signWithTestWallet(built.transaction);
 
   const { withdrawal } = await earnRequest(
-    "/v1/earn/external-wallet/withdrawals",
+    "/v1/earn/withdrawals/submit-signed-transaction",
     { transactionId: built.transactionId, signedTransaction },
     randomUUID(),
   );
@@ -215,9 +215,9 @@ reports a blocking issue.
 
 | Step | Request |
 | --- | --- |
-| Preview | [`POST /v1/earn/external-wallet/queued-withdrawal-previews`](/docs/reference/api/earn/create-earn-external-wallet-queued-withdrawal-preview) |
-| Build | [`POST /v1/earn/external-wallet/withdrawal-request-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-transaction) |
-| Submit | [`POST /v1/earn/external-wallet/withdrawal-requests`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request), with an `Idempotency-Key` |
+| Preview | [`POST /v1/earn/withdrawal-requests/caller-signed/preview`](/docs/reference/api/earn/create-earn-external-wallet-queued-withdrawal-preview) |
+| Build | [`POST /v1/earn/withdrawal-requests/build-unsigned-transaction`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-transaction) |
+| Submit | [`POST /v1/earn/withdrawal-requests/submit-signed-transaction`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request), with an `Idempotency-Key` |
 
 Resolve every `blockingIssues` entry in the preview, then build, sign, and
 submit as for an instant withdrawal. Save the returned `withdrawalRequestId`.
@@ -234,7 +234,7 @@ build expires:
 
 ### Track a request
 
-Poll [`GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-request)
+Poll [`GET /v1/earn/withdrawal-requests/caller-signed/{withdrawalRequestId}`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-request)
 every minute or two. Status values spell it `cancelled`.
 
 | Status | Meaning | What to show |
@@ -256,7 +256,7 @@ stays `fulfillable` until its deadline, then becomes `expiredCancelable`, and
 its shares stay escrowed until the customer cancels it.
 
 On startup and after reconnecting, restore every open request:
-[`GET /v1/earn/external-wallet/withdrawal-requests?ownerAddress=<wallet>&settled=false`](/docs/reference/api/earn/list-earn-external-wallet-withdrawal-requests),
+[`GET /v1/earn/withdrawal-requests/caller-signed?ownerAddress=<wallet>&settled=false`](/docs/reference/api/earn/list-earn-external-wallet-withdrawal-requests),
 reading every page.
 
 <Callout type="warn">
@@ -274,8 +274,8 @@ it. Refresh the request first: a fulfillment can race the cancellation.
 
 | Step | Request |
 | --- | --- |
-| Build | [`POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancel-transaction) |
-| Submit | [`POST /v1/earn/external-wallet/withdrawal-request-cancellations`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancellation) |
+| Build | [`POST /v1/earn/withdrawal-requests/cancel/build-unsigned-transaction`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancel-transaction) |
+| Submit | [`POST /v1/earn/withdrawal-requests/cancel/submit-signed-transaction`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancellation) |
 
 Both steps take `earn.manage`, and cancellation stays available after
 production access is removed or new deposits are disabled. Use a new
