@@ -270,7 +270,7 @@ export async function runLive(rawConfig, mode, options = {}) {
   if (mode === "signer") {
     assert(
       payerLamports >= 10_000,
-      "Fund the local fee payer before the optional RAW signer check."
+      "Fund the local fee payer before the optional sign-only program-call signer check."
     );
     log(
       "Approve the memo signer check in Fireblocks now. This test never broadcasts or transfers funds."

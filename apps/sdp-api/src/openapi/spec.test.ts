@@ -955,19 +955,20 @@ describe("OpenAPI spec", () => {
 
   // A custody provider publishes where the channel offers it in either mode, and
   // local signing (self-hosted only) never does. Pinned so a promotion is a visible change.
-  it("names only Privy as a custody provider on stable, every one but local on experimental", () => {
+  it("publishes BYOK Fireblocks and Privy on stable, every provider but local on experimental", () => {
     const stable = createPublicOpenApiDocument({ releaseChannel: "stable" });
     const serialized = JSON.stringify(stable);
     expect(CUSTODY_PROVIDERS.filter((provider) => serialized.includes(`"${provider}"`))).toEqual([
+      "fireblocks",
       "privy",
     ]);
     // Prose too: no description names a provider stable does not offer.
-    const unpublishedLabels = CUSTODY_PROVIDERS.filter((provider) => provider !== "privy").map(
-      (provider) => CUSTODY_PROVIDER_CATALOG_BY_ID[provider].label
-    );
+    const unpublishedLabels = CUSTODY_PROVIDERS.filter(
+      (provider) => provider !== "privy" && provider !== "fireblocks"
+    ).map((provider) => CUSTODY_PROVIDER_CATALOG_BY_ID[provider].label);
     expect(unpublishedLabels.filter((label) => serialized.includes(label))).toEqual([]);
-    expect(serialized).not.toMatch(/fireblocks|coinbase/i);
-    expect(createPublicSurfaceManifest("stable").custodyProviders).toEqual(["privy"]);
+    expect(serialized).not.toMatch(/coinbase/i);
+    expect(createPublicSurfaceManifest("stable").custodyProviders).toEqual(["fireblocks", "privy"]);
 
     const paths = stable.paths;
     expect(paths).toBeDefined();
@@ -976,8 +977,16 @@ describe("OpenAPI spec", () => {
       .object({ properties: z.object({ provider: z.object({ enum: z.array(z.string()) }) }) })
       .parse(z.object({ anyOf: z.array(z.unknown()) }).parse(createBody).anyOf[0]);
     expect(managedOwner.properties.provider.enum).toEqual(["privy"]);
+    expect(serialized).not.toContain("x-sdp-custody-mode");
     // Session-only (wallets.configure), so no channel publishes it.
     expect(paths?.["/v1/wallets/initialize"]).toBeUndefined();
+    for (const path of [
+      "/internal/dashboard/custody/fireblocks/proposals",
+      "/internal/dashboard/custody/fireblocks/proposals/{kind}/{proposalId}/cancel",
+    ]) {
+      expect(paths?.[path]).toBeUndefined();
+      expect(createOpenApiDocument().paths?.[path]).toBeDefined();
+    }
     expect(createOpenApiDocument().paths?.["/v1/wallets/initialize"]?.post?.security).toEqual([
       { clerkBearerAuth: [] },
     ]);
@@ -1015,7 +1024,7 @@ describe("OpenAPI spec", () => {
     expect(notConfiguredModes).toEqual(families.map(() => oneOrMoreModes));
   });
 
-  it("drops a custody provider's own transfer fields where the channel does not publish it", () => {
+  it("publishes Fireblocks transfer fields on stable after the BYOK promotion", () => {
     const transfer = (releaseChannel: "stable" | "experimental") =>
       JSON.stringify(
         getJsonSchema(
@@ -1024,7 +1033,7 @@ describe("OpenAPI spec", () => {
           ]?.get?.responses?.["200"]
         )
       );
-    expect(transfer("stable")).not.toMatch(/fireblocks/i);
+    expect(transfer("stable")).toContain('"fireblocks"');
     expect(transfer("experimental")).toContain('"fireblocks"');
     expect(transfer("experimental")).not.toContain("x-sdp-custody-provider");
   });

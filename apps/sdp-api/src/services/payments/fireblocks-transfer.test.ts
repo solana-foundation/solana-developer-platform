@@ -11,9 +11,10 @@ import { AppError } from "@/lib/errors";
 import type { MoneyPrincipal } from "@/lib/money-principal";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { internalCustody } from "@/routes/internal-custody";
+import * as moneyPathEvents from "@/runtime/money-path-events";
 import { AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
-import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
+import { reconcileFireblocksProposals } from "@/services/jobs/reconcile-fireblocks-proposals";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
@@ -335,20 +336,52 @@ describe("native Fireblocks BYOK payment routes", () => {
     }
   );
 
-  it("blocks new payments in stable but still reconciles a payment submitted in beta", async () => {
+  it("reports provider outages as failed cron reads while preserving the pending transfer", async () => {
+    const mock = await ready();
+    const response = await send();
+    expect(response.status).toBe(200);
+    const transfer = (await response.json()).data.transfer;
+    mock.mockClear().mockRejectedValue(new Error("Provider unavailable"));
+    const log = vi.spyOn(moneyPathEvents, "logEvent");
+    await expect(
+      runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+        reconcileFireblocksProposals(testEnv)
+      )
+    ).rejects.toThrow("Fireblocks proposal reconciliation failed");
+    expect(log).toHaveBeenLastCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_fireblocks_reconciliation_tick",
+        failed: 1,
+        polled: 0,
+        pending: 1,
+      })
+    );
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock.mock.calls[0]?.[1]?.method).toBe("GET");
+    expect(
+      await getDb(env).queryOne(
+        "SELECT status, provider_data->>'fireblocksLastPolledAt' AS last_poll FROM payment_transfers WHERE id = ?",
+        [transfer.id]
+      )
+    ).toMatchObject({ status: "processing", last_poll: expect.any(String) });
+  });
+
+  it("accepts new payments in stable and reconciles a payment submitted in beta", async () => {
     const mock = await ready();
     const response = await send();
     expect(response.status).toBe(200);
     const transfer = (await response.json()).data.transfer;
     testEnv.SDP_RELEASE_CHANNEL = "stable";
     mock.mockClear();
-    const refused = await send("stable-new");
-    expect(refused.status).toBe(403);
-    expect(await refused.text()).toContain("custody_provider_not_in_release_channel");
-    expect(mock).not.toHaveBeenCalled();
     providerStatus = "COMPLETED";
     expect(await refresh(transfer.id)).toMatchObject({ status: "confirmed", signature: SIG });
     expect(mock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+    mock.mockClear();
+    providerStatus = "PENDING_AUTHORIZATION";
+    const accepted = await send("stable-new");
+    expect(accepted.status).toBe(200);
+    expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 
   it.each([
@@ -388,7 +421,7 @@ describe("native Fireblocks BYOK payment routes", () => {
       providerStatus = "COMPLETED";
       if (recovery === "cron") {
         await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-          trackPendingTransfers(testEnv)
+          reconcileFireblocksProposals(testEnv)
         );
         expect(
           await db.queryOne<{ status: string; signature: string }>(
@@ -691,7 +724,7 @@ describe("native Fireblocks BYOK payment routes", () => {
       transfer.id,
     ]);
     await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-      trackPendingTransfers(testEnv)
+      reconcileFireblocksProposals(testEnv)
     );
     expect(
       (
@@ -773,7 +806,7 @@ describe("native Fireblocks BYOK payment routes", () => {
           [transfer.id]
         );
         await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-          trackPendingTransfers(testEnv)
+          reconcileFireblocksProposals(testEnv)
         );
       } else {
         expect(await refresh(transfer.id)).toMatchObject({ status: "confirmed" });
@@ -1035,11 +1068,11 @@ describe("native Fireblocks BYOK payment routes", () => {
     expect((await send("cron-production", {}, projectId)).status).toBe(200);
     mock.mockClear();
     await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-      trackPendingTransfers(testEnv)
+      reconcileFireblocksProposals(testEnv)
     );
     expect(mock).not.toHaveBeenCalled();
     await runInClusterScope({ projectId: null, environment: "production" }, () =>
-      trackPendingTransfers(testEnv)
+      reconcileFireblocksProposals(testEnv)
     );
     expect(mock).toHaveBeenCalledTimes(1);
     expect(mock.mock.calls[0]?.[1]?.method).toBe("GET");
@@ -1229,4 +1262,51 @@ describe("native Fireblocks BYOK payment routes", () => {
     expect(response.status).toBeGreaterThanOrEqual(400);
     expect(mock).not.toHaveBeenCalled();
   });
+});
+
+describe("manual native Fireblocks cancellation", () => {
+  it.each(["CANCELLED", "PENDING_AUTHORIZATION", "COMPLETED"])(
+    "records %s without treating an acknowledgement as a final verdict",
+    async (resultStatus) => {
+      const mock = await ready();
+      const submitted = await send();
+      const transfer = (await submitted.json()).data.transfer;
+      const original = mock.getMockImplementation();
+      if (!original) throw new Error("Expected provider transport");
+      mock.mockImplementation(async (url, init) => {
+        if (String(url).endsWith("/cancel")) {
+          providerStatus = resultStatus;
+          return Response.json({ success: true });
+        }
+        return original(url, init);
+      });
+      const listed = await request(`/fireblocks/proposals?walletId=${walletId}&kind=transfer`);
+      expect(listed.status, await listed.clone().text()).toBe(200);
+      expect((await listed.json()).data.proposals).toMatchObject([
+        { id: transfer.id, kind: "transfer", canCancel: true },
+      ]);
+      const key = crypto.randomUUID();
+      const path = `/fireblocks/proposals/transfer/${transfer.id}/cancel`;
+      const response = await request(path, {}, PROJECT_ID, key);
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect((await response.json()).data).toMatchObject({
+        acknowledged: true,
+        proposal: { status: resultStatus },
+      });
+      expect((await request(path, {}, PROJECT_ID, key)).status).toBe(200);
+      expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(1);
+      const final = await getDb(env).queryOne<{ status: string; signature: string | null }>(
+        "SELECT status, signature FROM payment_transfers WHERE id = ?",
+        [transfer.id]
+      );
+      expect(final?.status).toBe(
+        resultStatus === "CANCELLED"
+          ? "failed"
+          : resultStatus === "COMPLETED"
+            ? "confirmed"
+            : "processing"
+      );
+      if (resultStatus === "COMPLETED") expect(final?.signature).toBe(SIG);
+    }
+  );
 });

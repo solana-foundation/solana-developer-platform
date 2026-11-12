@@ -1,4 +1,5 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
+import { fireblocksProposalSummarySchema } from "@sdp/types/fireblocks";
 import { z } from "zod";
 import { errorResponseSchema, walletIdParamSchema } from "@/openapi/schemas/base";
 import {
@@ -11,6 +12,10 @@ import {
   signerCheckRequestSchema,
   updateCustodyWalletRequestSchema,
 } from "@/openapi/schemas/custody";
+import {
+  cancelFireblocksProposalParams,
+  listFireblocksProposalsSchema,
+} from "@/routes/internal-custody/fireblocks/schemas";
 import {
   errorResponses,
   jsonContent,
@@ -80,6 +85,62 @@ export function registerCustodyAdministrationPaths(registry: OpenAPIRegistry) {
           "PROVIDER_NOT_CONFIGURED: the deployment holds no credentials for the provider in the project's environment (details.reason provider_not_configured).",
         content: jsonContent(errorResponseSchema),
       },
+    },
+  });
+  registry.registerPath({
+    method: "get",
+    path: "/internal/dashboard/custody/fireblocks/proposals",
+    tags: ["Wallets"],
+    summary: "List this wallet's Fireblocks proposals",
+    operationId: "listFireblocksProposals",
+    description:
+      "Dashboard administrators only. Lists signing requests or native transfers for an exact project wallet, 20 per page. Pending status reads are throttled to 15 seconds per proposal; unavailable provider reads preserve the last known state. Independent background reconciliation is scheduled every 30 seconds for transfers and signing requests, without resuming timed-out signing or imposing a pending-approval expiry. No Solana RPC is used.",
+    security: [{ clerkBearerAuth: [] }],
+    request: { headers: projectScopeHeaders, query: listFireblocksProposalsSchema },
+    responses: {
+      200: {
+        description: "Proposal page",
+        content: jsonContent(
+          z.object({
+            data: z.object({
+              proposals: z.array(fireblocksProposalSummarySchema),
+              hasMore: z.boolean(),
+            }),
+          })
+        ),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+  registry.registerPath({
+    method: "post",
+    path: "/internal/dashboard/custody/fireblocks/proposals/{kind}/{proposalId}/cancel",
+    tags: ["Wallets"],
+    summary: "Request cancellation of a Fireblocks proposal",
+    operationId: "cancelFireblocksProposal",
+    description:
+      "Dashboard administrators only. Checks project and wallet access before idempotency replay. Uses the proposal's stored connection, vault and external ID, including when execution is disabled. Acknowledgement is not confirmed cancellation: Fireblocks can still complete a racing transfer. A locally cancelled signing request cannot deliver a late signature. Unknown outcomes remain pending; inspect the final status before replacing a transaction.",
+    security: [{ clerkBearerAuth: [] }],
+    request: {
+      params: cancelFireblocksProposalParams,
+      headers: projectScopeWithDeclaredIdempotencyHeaders({
+        key: "required",
+        serverErrors: "store",
+      }),
+    },
+    responses: {
+      200: {
+        description: "Cancellation acknowledgement and last known proposal state",
+        content: jsonContent(
+          z.object({
+            data: z.object({
+              acknowledged: z.boolean(),
+              proposal: fireblocksProposalSummarySchema,
+            }),
+          })
+        ),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 }
@@ -245,7 +306,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Check signer via simulated memo transaction",
     operationId: "checkWalletSigner",
     description:
-      "Signs a server-authored memo message with the named wallet, verifies the signature, and simulates the transaction. Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.",
+      "Signs a server-authored memo transaction with the named wallet, verifies the signature, and simulates the transaction. Authorize transaction signing in the custody provider's policy and complete any approval within the bounded signing window (75 seconds by default, capped at 90). Fireblocks BYOK uses a sign-only program call; timeout triggers best-effort cancellation, not confirmation that the proposal was cancelled. Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyAcceptedHeaders,

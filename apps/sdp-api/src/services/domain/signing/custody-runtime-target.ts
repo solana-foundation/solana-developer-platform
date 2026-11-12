@@ -41,6 +41,7 @@ import {
   type ByokCredentialAuthentication,
   parseByokCredential,
 } from "@/services/custody/byok-credential";
+import { trackFireblocksProposals } from "@/services/custody/fireblocks-proposal-tracking";
 import {
   provisionFireblocksVaultAccount,
   provisionPrivyWallet,
@@ -67,9 +68,11 @@ import type { CustodyWalletIdempotency } from "@/services/stores/custody-config.
 import type { Env } from "@/types/env";
 import {
   admittedTransferProposer,
+  type CustodyProposalCanceller,
   type CustodyProposalReader,
   type CustodyTransferProposer,
   type ProposalAccess,
+  proposalCanceller,
   proposalReader,
   type TransferProposalIntent,
 } from "./admitted-proposer";
@@ -834,6 +837,30 @@ export class CustodyRuntimeTargets {
     return proposalReader(() => this.loadProposalAccess(target, binding));
   }
 
+  /**
+   * Cancellation for a recorded proposal. Like the reader it skips admission and runtime
+   * availability on purpose: disabling a Connection cannot unrequest a cancellation the provider
+   * already accepted, so cleanup must keep reaching the proposal. The live Connection must still
+   * match the recorded intent, checked before any credential is decrypted; credential revocation
+   * still applies.
+   */
+  async getTransferProposalCancellerForWalletRecord(
+    organizationId: string,
+    projectId: string,
+    custodyWalletId: string,
+    binding: TransferProposalIntent & { sourceAddress: string | null }
+  ): Promise<CustodyProposalCanceller> {
+    const target = await this.resolveRetainedWalletRecord(
+      organizationId,
+      projectId,
+      custodyWalletId
+    );
+    if (!target) throw notFound("Custody wallet");
+    if (!isProposingTarget(target))
+      throw conflict("Fireblocks connection does not match the payment intent");
+    return proposalCanceller(() => this.loadProposalAccess(target, binding));
+  }
+
   /** The exact custody-wallet row a money flow names, or the waist's not-found refusal. */
   private async resolveExactWalletRecord(
     organizationId: string,
@@ -1098,6 +1125,12 @@ export class CustodyRuntimeTargets {
             ...secret,
             walletId: wallet.walletId,
             requestDelayMs: row.request_delay_ms ?? undefined,
+            proposalTracking: trackFireblocksProposals(this.db, target, {
+              connectionId: target.connectionId,
+              walletId: wallet.walletId,
+              sourceAddress: wallet.publicKey,
+              accountFingerprint: row.provider_account_fingerprint,
+            }),
           })
         : createPrivyAdapterFromCredential(this.env, {
             ...secret,
@@ -1688,12 +1721,12 @@ function connectionCredentialBinding(
   };
 }
 
-function isUsableCredentialOwner(
-  row: Pick<
+function isUsableCredentialOwner<
+  T extends Pick<
     ConnectionCredentialRow,
     "connection_status" | "last_check_status" | "credential_status" | "provider_account_fingerprint"
-  >
-): boolean {
+  >,
+>(row: T): row is T & { provider_account_fingerprint: string } {
   return (
     row.connection_status === "active" &&
     row.last_check_status === "success" &&

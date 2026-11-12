@@ -1,12 +1,22 @@
 import { generateKeyPairSync, sign } from "node:crypto";
 import { isFullSigningPort } from "@sdp/custody/signing";
 import {
+  AccountRole,
   address,
+  appendTransactionMessageInstruction,
+  assertIsTransactionWithinSizeLimit,
   blockhash,
   compileTransaction,
+  createSignableMessage,
   createTransactionMessage,
+  generateKeyPairSigner,
   getBase58Decoder,
+  getBase64EncodedWireTransaction,
+  getTransactionDecoder,
+  isFullySignedTransaction,
+  isMessagePartialSigner,
   isTransactionPartialSigner,
+  partiallySignTransaction,
   pipe,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
@@ -44,11 +54,11 @@ const CREDENTIAL: Parameters<typeof createFireblocksAdapterFromCredential>[1] = 
 afterEach(() => vi.restoreAllMocks());
 aroundEach((runTest) => inSandboxScope(runTest));
 
-function testTransaction() {
-  return compileTransaction(
+function testTransaction(version: 0 | "legacy" = 0, payer = publicKey) {
+  const transaction = compileTransaction(
     pipe(
-      createTransactionMessage({ version: 0 }),
-      (message) => setTransactionMessageFeePayer(publicKey, message),
+      createTransactionMessage({ version }),
+      (message) => setTransactionMessageFeePayer(payer, message),
       (message) =>
         setTransactionMessageLifetimeUsingBlockhash(
           {
@@ -56,53 +66,252 @@ function testTransaction() {
             lastValidBlockHeight: 100n,
           },
           message
+        ),
+      (message) =>
+        appendTransactionMessageInstruction(
+          {
+            programAddress: address("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"),
+            accounts: [{ address: publicKey, role: AccountRole.READONLY_SIGNER }],
+            data: new TextEncoder().encode("arbitrary program instruction"),
+          },
+          message
         )
     )
   );
+  assertIsTransactionWithinSizeLimit(transaction);
+  return transaction;
 }
 
 describe("Fireblocks BYOK transaction proposals", () => {
-  it("uses solana-keychain RAW signing, waits for approval, verifies the signature and never broadcasts", async () => {
+  it.each(["stable", "beta", "experimental"])(
+    "proposes a sign-only PROGRAM_CALL in %s, waits for SIGNED and never broadcasts",
+    async (channel) => {
+      const transaction = testTransaction();
+      const signature = sign(null, Buffer.from(transaction.messageBytes), ed25519.privateKey);
+      const fetch = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(Response.json({ addresses: [{ address: publicKey }] }))
+        .mockResolvedValueOnce(Response.json({ id: "proposal-1", status: "PENDING_AUTHORIZATION" }))
+        .mockResolvedValueOnce(Response.json({ id: "proposal-1", status: "PENDING_AUTHORIZATION" }))
+        .mockResolvedValueOnce(
+          Response.json({
+            id: "proposal-1",
+            status: "SIGNED",
+            signedMessages: [{ signature: { fullSig: signature.toString("hex") } }],
+          })
+        );
+      const releaseEnv = { ...env, SDP_RELEASE_CHANNEL: channel };
+      const adapter = createFireblocksAdapterFromCredential(releaseEnv, CREDENTIAL);
+      if (!isFullSigningPort(adapter)) throw new Error("Expected signing adapter");
+      const signer = await adapter.getTransactionSigner("fb_42", publicKey);
+      expect(signer).not.toHaveProperty("signAndSendTransactions");
+      if (!("signTransactions" in signer)) throw new Error("Expected partial signer");
+      const signatures = await signer.signTransactions([transaction]);
+      expect(Buffer.from(signatures[0]?.[publicKey] ?? [])).toEqual(signature);
+      expect(fetch).toHaveBeenCalledTimes(4);
+      const proposal = fetch.mock.calls[1];
+      expect(proposal?.[0]).toBe(`${env.FIREBLOCKS_API_BASE_URL}/v1/transactions`);
+      expect(JSON.parse(String(proposal?.[1]?.body))).toEqual({
+        externalTxId: expect.stringMatching(/^sdp-sign-/),
+        operation: "PROGRAM_CALL",
+        assetId: "SOL_TEST",
+        source: { type: "VAULT_ACCOUNT", id: "42" },
+        extraParameters: {
+          programCallData: getBase64EncodedWireTransaction(transaction),
+          signOnly: true,
+          useDurableNonce: false,
+        },
+      });
+      for (const [url, init] of fetch.mock.calls) {
+        expect(String(url).startsWith(env.FIREBLOCKS_API_BASE_URL)).toBe(true);
+        expect(new Headers(init?.headers).get("X-API-Key")).toBe("tenant-key");
+      }
+      expect(await adapter.getTransactionSigner("fb_42", publicKey)).toBe(signer);
+      expect(fetch).toHaveBeenCalledTimes(4);
+    }
+  );
+
+  it.each([0, "legacy"] as const)(
+    "preserves message bytes and other signatures for %s transactions",
+    async (version) => {
+      const sponsor = await generateKeyPairSigner();
+      const transaction = await partiallySignTransaction(
+        [sponsor.keyPair],
+        testTransaction(version, sponsor.address)
+      );
+      const signature = sign(null, Buffer.from(transaction.messageBytes), ed25519.privateKey);
+      const fetch = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(Response.json({ addresses: [{ address: publicKey }] }))
+        .mockResolvedValueOnce(Response.json({ id: "proposal-sponsored", status: "SUBMITTED" }))
+        .mockResolvedValueOnce(
+          Response.json({
+            status: "SIGNED",
+            signedMessages: [{ signature: { fullSig: signature.toString("hex") } }],
+          })
+        );
+      const adapter = createFireblocksAdapterFromCredential(
+        { ...env, SDP_RELEASE_CHANNEL: "stable" },
+        CREDENTIAL
+      );
+      if (!isFullSigningPort(adapter)) throw new Error("Expected signing adapter");
+      const signer = await adapter.getTransactionSigner();
+      if (!isTransactionPartialSigner(signer)) throw new Error("Expected partial signer");
+      const [signatures] = await signer.signTransactions([transaction]);
+      const proposal = JSON.parse(String(fetch.mock.calls[1]?.[1]?.body));
+      const sent = getTransactionDecoder().decode(
+        new Uint8Array(Buffer.from(proposal.extraParameters.programCallData, "base64"))
+      );
+      expect(sent.messageBytes).toEqual(transaction.messageBytes);
+      expect(sent.signatures[sponsor.address]).toEqual(transaction.signatures[sponsor.address]);
+      expect(proposal.extraParameters).toMatchObject({ signOnly: true, useDurableNonce: false });
+      expect(
+        isFullySignedTransaction({
+          ...transaction,
+          signatures: { ...transaction.signatures, ...signatures },
+        })
+      ).toBe(true);
+      expect(fetch).toHaveBeenCalledTimes(3);
+    }
+  );
+
+  it("mints a distinct external ID for each proposal on a cached signer", async () => {
     const transaction = testTransaction();
     const signature = sign(null, Buffer.from(transaction.messageBytes), ed25519.privateKey);
+    const signed = () =>
+      Response.json({
+        status: "SIGNED",
+        signedMessages: [{ signature: { fullSig: signature.toString("hex") } }],
+      });
     const fetch = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(Response.json({ addresses: [{ address: publicKey }] }))
-      .mockResolvedValueOnce(Response.json({ id: "proposal-1", status: "PENDING_AUTHORIZATION" }))
-      .mockResolvedValueOnce(Response.json({ id: "proposal-1", status: "PENDING_AUTHORIZATION" }))
+      .mockResolvedValueOnce(Response.json({ id: "proposal-1" }))
+      .mockResolvedValueOnce(signed())
+      .mockResolvedValueOnce(Response.json({ id: "proposal-2" }))
+      .mockResolvedValueOnce(signed());
+    const adapter = createFireblocksAdapterFromCredential(env, {
+      ...CREDENTIAL,
+      requestDelayMs: 0,
+    });
+    if (!isFullSigningPort(adapter)) throw new Error("Expected signing adapter");
+    const signer = await adapter.getTransactionSigner();
+    if (!isTransactionPartialSigner(signer)) throw new Error("Expected partial signer");
+    await signer.signTransactions([transaction]);
+    expect(await adapter.getTransactionSigner()).toBe(signer);
+    await signer.signTransactions([transaction]);
+    const externalIds = fetch.mock.calls
+      .filter(([, init]) => init?.method === "POST")
+      .map(([, init]) => JSON.parse(String(init?.body)).externalTxId);
+    expect(externalIds).toHaveLength(2);
+    expect(new Set(externalIds).size).toBe(2);
+    expect(externalIds).toEqual([
+      expect.stringMatching(/^sdp-sign-/),
+      expect.stringMatching(/^sdp-sign-/),
+    ]);
+    expect(fetch).toHaveBeenCalledTimes(5);
+  });
+
+  it("keeps off-chain message signing on RAW when program calls are enabled", async () => {
+    const message = createSignableMessage("ownership proof");
+    const signature = sign(null, message.content, ed25519.privateKey);
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ addresses: [{ address: publicKey }] }))
+      .mockResolvedValueOnce(Response.json({ id: "message-1", status: "SUBMITTED" }))
       .mockResolvedValueOnce(
         Response.json({
-          id: "proposal-1",
+          id: "message-1",
           status: "COMPLETED",
           signedMessages: [{ signature: { fullSig: signature.toString("hex") } }],
         })
       );
     const adapter = createFireblocksAdapterFromCredential(env, CREDENTIAL);
-    if (!isFullSigningPort(adapter)) throw new Error("Expected signing adapter");
-    const signer = await adapter.getTransactionSigner("fb_42", publicKey);
-    expect(signer).not.toHaveProperty("signAndSendTransactions");
-    if (!("signTransactions" in signer)) throw new Error("Expected partial signer");
-    const signatures = await signer.signTransactions([transaction]);
-    expect(Buffer.from(signatures[0]?.[publicKey] ?? [])).toEqual(signature);
+    if (!isFullSigningPort(adapter)) throw new Error("Expected full signing port");
+    const signer = await adapter.getTransactionSigner();
+    if (!isMessagePartialSigner(signer)) throw new Error("Expected message signer");
+    const [signatures] = await signer.signMessages([message]);
+    expect(Buffer.from(signatures[publicKey])).toEqual(signature);
+    expect(JSON.parse(String(fetch.mock.calls[1]?.[1]?.body))).toMatchObject({ operation: "RAW" });
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("stops polling a pending proposal when the caller aborts", async () => {
+    const controller = new AbortController();
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ addresses: [{ address: publicKey }] }))
+      .mockResolvedValueOnce(Response.json({ id: "proposal-1", status: "SUBMITTED" }))
+      .mockImplementationOnce(async () => {
+        controller.abort(new Error("workflow deadline"));
+        return Response.json({ id: "proposal-1", status: "PENDING_AUTHORIZATION" });
+      })
+      .mockResolvedValueOnce(Response.json({ success: true }));
+    const adapter = createFireblocksAdapterFromCredential(env, CREDENTIAL);
+    if (!isFullSigningPort(adapter)) throw new Error("Expected full signing port");
+    const signer = await adapter.getTransactionSigner();
+    if (!isTransactionPartialSigner(signer)) throw new Error("Expected partial signer");
+    await expect(
+      signer.signTransactions([testTransaction()], {
+        abortSignal: controller.signal,
+      })
+    ).rejects.toThrow();
     expect(fetch).toHaveBeenCalledTimes(4);
-    const proposal = fetch.mock.calls[1];
-    expect(proposal?.[0]).toBe(`${env.FIREBLOCKS_API_BASE_URL}/v1/transactions`);
-    expect(JSON.parse(String(proposal?.[1]?.body))).toEqual({
-      operation: "RAW",
-      assetId: "SOL_TEST",
-      source: { type: "VAULT_ACCOUNT", id: "42" },
-      extraParameters: {
-        rawMessageData: {
-          messages: [{ content: Buffer.from(transaction.messageBytes).toString("hex") }],
-        },
-      },
-    });
-    for (const [url, init] of fetch.mock.calls) {
-      expect(String(url).startsWith(env.FIREBLOCKS_API_BASE_URL)).toBe(true);
-      expect(new Headers(init?.headers).get("X-API-Key")).toBe("tenant-key");
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(2);
+    expect(fetch.mock.calls[3]?.[0]).toBe(
+      `${env.FIREBLOCKS_API_BASE_URL}/v1/transactions/proposal-1/cancel`
+    );
+  });
+
+  it.each(["BROADCASTING", "CONFIRMING", "COMPLETED"])(
+    "refuses %s as a sign-only result",
+    async (status) => {
+      const transaction = testTransaction();
+      const signature = sign(null, Buffer.from(transaction.messageBytes), ed25519.privateKey);
+      const fetch = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(Response.json({ addresses: [{ address: publicKey }] }))
+        .mockResolvedValueOnce(Response.json({ id: "proposal-1", status: "SUBMITTED" }))
+        .mockResolvedValueOnce(
+          Response.json({
+            id: "proposal-1",
+            status,
+            signedMessages: [{ signature: { fullSig: signature.toString("hex") } }],
+          })
+        );
+      const adapter = createFireblocksAdapterFromCredential(env, CREDENTIAL);
+      if (!isFullSigningPort(adapter)) throw new Error("Expected signing adapter");
+      const signer = await adapter.getTransactionSigner();
+      if (!isTransactionPartialSigner(signer)) throw new Error("Expected partial signer");
+      await expect(signer.signTransactions([transaction])).rejects.toMatchObject({
+        code: "SIGNER_BROADCAST_UNCONFIRMED",
+        context: { providerTransactionId: "proposal-1" },
+      });
+      expect(fetch).toHaveBeenCalledTimes(3);
     }
-    expect(await adapter.getTransactionSigner("fb_42", publicKey)).toBe(signer);
-    expect(fetch).toHaveBeenCalledTimes(4);
+  );
+
+  it("rejects a signature over different message bytes without trying RAW", async () => {
+    const signature = sign(null, Buffer.from("changed transaction"), ed25519.privateKey);
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ addresses: [{ address: publicKey }] }))
+      .mockResolvedValueOnce(Response.json({ id: "proposal-1", status: "SUBMITTED" }))
+      .mockResolvedValueOnce(
+        Response.json({
+          id: "proposal-1",
+          status: "SIGNED",
+          signedMessages: [{ signature: { fullSig: signature.toString("hex") } }],
+        })
+      );
+    const adapter = createFireblocksAdapterFromCredential(env, CREDENTIAL);
+    if (!isFullSigningPort(adapter)) throw new Error("Expected signing adapter");
+    const signer = await adapter.getTransactionSigner();
+    if (!isTransactionPartialSigner(signer)) throw new Error("Expected partial signer");
+    await expect(signer.signTransactions([testTransaction()])).rejects.toMatchObject({
+      code: "SIGNER_SIGNING_FAILED",
+    });
+    expect(fetch).toHaveBeenCalledTimes(3);
   });
 });
 

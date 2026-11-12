@@ -1,0 +1,381 @@
+diff --git a/src/types.ts b/src/types.ts
+--- a/src/types.ts
++++ b/src/types.ts
+@@ -1,4 +1,11 @@
+ export interface FireblocksSignerConfig {
++    /** Mint one correlation id per proposal, never one id per cached signer. */
++    createExternalTxId?: (request: { operation: 'RAW' | 'PROGRAM_CALL'; assetId: string }) => string | Promise<string>;
++    /** Awaited before accepting a signature; a rejection prevents returning it to the caller. */
++    onSigningStatus?: (event: { externalTxId: string; providerTransactionId: string; status: string }) => Promise<void>;
++    /** Safe identifiers only; cancellation requested is not cancellation confirmed. */
++    onSigningCleanup?: (event: { externalTxId: string; providerTransactionId?: string; cancelRequested: boolean }) => void | Promise<void>;
++
+     /** API base URL (default: "https://api.fireblocks.io") */
+     apiBaseUrl?: string;
+ 
+@@ -42,6 +49,7 @@
+ export type CreateTransactionRequest = CreateProgramCallTransactionRequest | CreateRawTransactionRequest;
+ 
+ export interface CreateRawTransactionRequest {
++    externalTxId?: string;
+     assetId: string;
+     extraParameters: RawExtraParameters;
+     operation: 'RAW';
+@@ -49,6 +57,7 @@
+ }
+ 
+ export interface CreateProgramCallTransactionRequest {
++    externalTxId?: string;
+     assetId: string;
+     extraParameters: ProgramCallExtraParameters;
+     operation: 'PROGRAM_CALL';
+@@ -95,6 +104,7 @@
+  */
+ export interface TransactionResponse {
+     id: string;
++    subStatus?: string;
+     signedMessages?: SignedMessage[];
+     status: string;
+     txHash?: string;
+diff --git a/dist/types.d.ts b/dist/types.d.ts
+--- a/dist/types.d.ts
++++ b/dist/types.d.ts
+@@ -1,4 +1,11 @@
+ export interface FireblocksSignerConfig {
++    /** Mint one correlation id per proposal, never one id per cached signer. */
++    createExternalTxId?: (request: { operation: 'RAW' | 'PROGRAM_CALL'; assetId: string }) => string | Promise<string>;
++    /** Awaited before accepting a signature; a rejection prevents returning it to the caller. */
++    onSigningStatus?: (event: { externalTxId: string; providerTransactionId: string; status: string }) => Promise<void>;
++    /** Safe identifiers only; cancellation requested is not cancellation confirmed. */
++    onSigningCleanup?: (event: { externalTxId: string; providerTransactionId?: string; cancelRequested: boolean }) => void | Promise<void>;
++
+     /** API base URL (default: "https://api.fireblocks.io") */
+     apiBaseUrl?: string;
+     /** Fireblocks API key (used in X-API-Key header) */
+@@ -32,12 +39,14 @@
+ }
+ export type CreateTransactionRequest = CreateProgramCallTransactionRequest | CreateRawTransactionRequest;
+ export interface CreateRawTransactionRequest {
++    externalTxId?: string;
+     assetId: string;
+     extraParameters: RawExtraParameters;
+     operation: 'RAW';
+     source: TransactionSource;
+ }
+ export interface CreateProgramCallTransactionRequest {
++    externalTxId?: string;
+     assetId: string;
+     extraParameters: ProgramCallExtraParameters;
+     operation: 'PROGRAM_CALL';
+@@ -77,6 +86,7 @@
+  */
+ export interface TransactionResponse {
+     id: string;
++    subStatus?: string;
+     signedMessages?: SignedMessage[];
+     status: string;
+     txHash?: string;
+diff --git a/src/fireblocks-signer.ts b/src/fireblocks-signer.ts
+--- a/src/fireblocks-signer.ts
++++ b/src/fireblocks-signer.ts
+@@ -69,6 +69,10 @@
+ const DEFAULT_ASSET_ID = 'SOL';
+ const DEFAULT_POLL_INTERVAL_MS = 1000;
+ const DEFAULT_MAX_POLL_ATTEMPTS = 60;
++/** Keep a terminal transaction's documented sub-status code, never arbitrary provider text. */
++function terminalSubStatus(subStatus: unknown): string | undefined {
++    return typeof subStatus === 'string' && /^[A-Z0-9_]{1,100}$/.test(subStatus) ? subStatus : undefined;
++}
+ /**
+  * Fireblocks-based signer for Solana transactions
+  *
+@@ -99,6 +103,9 @@
+     private readonly maxPollAttempts: number;
+     private readonly requestDelayMs: number;
+     private readonly useProgramCall: boolean;
++    private readonly createExternalTxId: NonNullable<FireblocksSignerConfig["createExternalTxId"]>;
++    private readonly onSigningStatus: FireblocksSignerConfig["onSigningStatus"];
++    private readonly onSigningCleanup: FireblocksSignerConfig["onSigningCleanup"];
+     private initialized = false;
+ 
+     /**
+@@ -131,6 +138,9 @@
+             });
+         }
+ 
++        this.createExternalTxId = config.createExternalTxId ?? (() => crypto.randomUUID());
++        this.onSigningCleanup = config.onSigningCleanup;
++        this.onSigningStatus = config.onSigningStatus;
+         this.useProgramCall = config.useProgramCall === true;
+         this.apiKey = config.apiKey;
+         this.privateKeyPem = config.privateKeyPem;
+@@ -293,13 +303,7 @@
+             },
+         };
+ 
+-        const createResponse = await this.request<CreateTransactionResponse>(
+-            'POST',
+-            '/v1/transactions',
+-            request,
+-            abortSignal,
+-        );
+-        return await this.pollForSignature(createResponse.id, 'RAW', abortSignal);
++        return this.proposeSigningRequest(request, abortSignal);
+     }
+ 
+     /**
+@@ -334,34 +338,79 @@
+             },
+         };
+ 
+-        const createResponse = await this.request<CreateTransactionResponse>(
+-            'POST',
+-            '/v1/transactions',
+-            request,
+-            abortSignal,
+-        );
+-        if (typeof createResponse.id !== 'string' || createResponse.id.length === 0) {
+-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
+-                message: 'Fireblocks create response did not include a transaction id',
+-            });
+-        }
+-        return await this.pollForSignature(createResponse.id, 'PROGRAM_CALL', abortSignal);
+-    }
+-
+-    /**
+-     * Poll for transaction completion and extract a reusable signer-bound signature.
+-     */
++        return this.proposeSigningRequest(request, abortSignal);
++    }
++
++    /**
++     * Propose once, then request cancellation if the caller or poll budget expires.
++     */
++    private async proposeSigningRequest(request: CreateTransactionRequest, abortSignal?: AbortSignal): Promise<SignatureBytes> {
++        abortSignal?.throwIfAborted();
++        const externalTxId = await this.createExternalTxId({ operation: request.operation, assetId: request.assetId });
++        if (!/^[a-zA-Z0-9:_-]{1,255}$/.test(externalTxId)) {
++            throwSignerError(SignerErrorCode.CONFIG_ERROR, { message: 'Invalid signing externalTxId' });
++        }
++        let transactionId: string | undefined;
++        try {
++            const created = await this.request<CreateTransactionResponse>(
++                'POST', '/v1/transactions', { ...request, externalTxId }, abortSignal,
++            );
++            if (typeof created.id !== 'string' || !/^[a-zA-Z0-9:_-]{1,128}$/.test(created.id)) {
++                throwSignerError(SignerErrorCode.PARSING_ERROR, { message: 'Invalid Fireblocks transaction id' });
++            }
++            transactionId = created.id;
++            await this.onSigningStatus?.({ externalTxId, providerTransactionId: transactionId, status: 'SUBMITTED' });
++            const signature = await this.pollForSignature(transactionId, request.operation, externalTxId, abortSignal);
++            if (signature !== undefined) return signature;
++        } catch (cause) {
++            // Exhausting the poll budget returns undefined; all other failures retain
++            // their original error. An aborted create may have succeeded remotely.
++            if (!abortSignal?.aborted) throw cause;
++        }
++        const cleanupSignal = AbortSignal.timeout(5_000);
++        let cancelRequested = false;
++        try {
++            if (transactionId === undefined) {
++                const found = await this.request<TransactionResponse>(
++                    'GET', `/v1/transactions/external_tx_id/${encodeURIComponent(externalTxId)}`, undefined, cleanupSignal,
++                );
++                if (typeof found.id === 'string' && /^[a-zA-Z0-9:_-]{1,128}$/.test(found.id)) transactionId = found.id;
++            }
++            if (transactionId !== undefined) {
++                const result = await this.request<{ success?: boolean }>(
++                    'POST', `/v1/transactions/${encodeURIComponent(transactionId)}/cancel`, undefined, cleanupSignal,
++                );
++                cancelRequested = result?.success === true;
++            }
++        } catch {
++            // Cancellation is best effort; never label an ambiguous result CANCELLED.
++        }
++        try { await this.onSigningCleanup?.({ externalTxId, providerTransactionId: transactionId, cancelRequested }); } catch { /* diagnostics cannot change signing */ }
++        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
++            message: 'Fireblocks signing did not finish before its deadline',
++            externalTxId,
++            providerTransactionId: transactionId,
++            cancelRequested,
++        });
++    }
++
+     private async pollForSignature(
+         transactionId: string,
+         operation: 'PROGRAM_CALL' | 'RAW',
++        externalTxId: string,
+         abortSignal?: AbortSignal,
+-    ): Promise<SignatureBytes> {
++    ): Promise<SignatureBytes | undefined> {
+         const uri = `/v1/transactions/${encodeURIComponent(transactionId)}`;
+ 
++        let lastObservedStatus = 'SUBMITTED';
+         for (let attempt = 0; attempt < this.maxPollAttempts; attempt++) {
+             const txResponse = await this.request<TransactionResponse>('GET', uri, undefined, abortSignal);
+ 
+             const status = txResponse.status as FireblocksTransactionStatus;
++            if (typeof status === 'string' && status !== lastObservedStatus && /^[A-Z_]{1,100}$/.test(status)) {
++                await this.onSigningStatus?.({ externalTxId, providerTransactionId: transactionId, status });
++                lastObservedStatus = status;
++            }
+ 
+             if (operation === 'PROGRAM_CALL') {
+                 if (status === 'SIGNED') {
+@@ -381,16 +430,15 @@
+             if (isTerminalStatus(status)) {
+                 throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                     message: `Transaction failed with status: ${txResponse.status}`,
++                    status: txResponse.status,
++                    subStatus: terminalSubStatus(txResponse.subStatus),
+                 });
+             }
+ 
+             await abortableDelay(this.pollIntervalMs, abortSignal);
+         }
+ 
+-        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+-            message: `Transaction did not complete within ${this.maxPollAttempts} attempts`,
+-            providerTransactionId: transactionId,
+-        });
++        return undefined;
+     }
+ 
+     private extractSignature(txResponse: TransactionResponse, allowTxHashCarrier: boolean): SignatureBytes {
+diff --git a/dist/fireblocks-signer.js b/dist/fireblocks-signer.js
+--- a/dist/fireblocks-signer.js
++++ b/dist/fireblocks-signer.js
+@@ -26,6 +26,10 @@
+ const DEFAULT_ASSET_ID = 'SOL';
+ const DEFAULT_POLL_INTERVAL_MS = 1000;
+ const DEFAULT_MAX_POLL_ATTEMPTS = 60;
++/** Keep a terminal transaction's documented sub-status code, never arbitrary provider text. */
++function terminalSubStatus(subStatus) {
++    return typeof subStatus === 'string' && /^[A-Z0-9_]{1,100}$/.test(subStatus) ? subStatus : undefined;
++}
+ /**
+  * Fireblocks-based signer for Solana transactions
+  *
+@@ -70,6 +74,9 @@
+                 message: 'Missing required vaultAccountId field',
+             });
+         }
++        this.createExternalTxId = config.createExternalTxId ?? (() => crypto.randomUUID());
++        this.onSigningCleanup = config.onSigningCleanup;
++        this.onSigningStatus = config.onSigningStatus;
+         this.useProgramCall = config.useProgramCall === true;
+         this.apiKey = config.apiKey;
+         this.privateKeyPem = config.privateKeyPem;
+@@ -208,8 +215,7 @@
+                 type: 'VAULT_ACCOUNT',
+             },
+         };
+-        const createResponse = await this.request('POST', '/v1/transactions', request, abortSignal);
+-        return await this.pollForSignature(createResponse.id, 'RAW', abortSignal);
++        return this.proposeSigningRequest(request, abortSignal);
+     }
+     /**
+      * Sign a transaction with the PROGRAM_CALL operation in sign-only mode.
+@@ -237,22 +243,72 @@
+                 type: 'VAULT_ACCOUNT',
+             },
+         };
+-        const createResponse = await this.request('POST', '/v1/transactions', request, abortSignal);
+-        if (typeof createResponse.id !== 'string' || createResponse.id.length === 0) {
+-            throwSignerError(SignerErrorCode.PARSING_ERROR, {
+-                message: 'Fireblocks create response did not include a transaction id',
+-            });
+-        }
+-        return await this.pollForSignature(createResponse.id, 'PROGRAM_CALL', abortSignal);
+-    }
+-    /**
+-     * Poll for transaction completion and extract a reusable signer-bound signature.
+-     */
+-    async pollForSignature(transactionId, operation, abortSignal) {
++        return this.proposeSigningRequest(request, abortSignal);
++    }
++    /**
++     * Propose once, then request cancellation if the caller or poll budget expires.
++     */
++    async proposeSigningRequest(request, abortSignal) {
++        abortSignal?.throwIfAborted();
++        const externalTxId = await this.createExternalTxId({ operation: request.operation, assetId: request.assetId });
++        if (!/^[a-zA-Z0-9:_-]{1,255}$/.test(externalTxId)) {
++            throwSignerError(SignerErrorCode.CONFIG_ERROR, { message: 'Invalid signing externalTxId' });
++        }
++        let transactionId;
++        try {
++            const created = await this.request('POST', '/v1/transactions', { ...request, externalTxId }, abortSignal);
++            if (typeof created.id !== 'string' || !/^[a-zA-Z0-9:_-]{1,128}$/.test(created.id)) {
++                throwSignerError(SignerErrorCode.PARSING_ERROR, { message: 'Invalid Fireblocks transaction id' });
++            }
++            transactionId = created.id;
++            await this.onSigningStatus?.({ externalTxId, providerTransactionId: transactionId, status: 'SUBMITTED' });
++            const signature = await this.pollForSignature(transactionId, request.operation, externalTxId, abortSignal);
++            if (signature !== undefined)
++                return signature;
++        }
++        catch (cause) {
++            // Exhausting the poll budget returns undefined; all other failures retain
++            // their original error. An aborted create may have succeeded remotely.
++            if (!abortSignal?.aborted)
++                throw cause;
++        }
++        const cleanupSignal = AbortSignal.timeout(5000);
++        let cancelRequested = false;
++        try {
++            if (transactionId === undefined) {
++                const found = await this.request('GET', `/v1/transactions/external_tx_id/${encodeURIComponent(externalTxId)}`, undefined, cleanupSignal);
++                if (typeof found.id === 'string' && /^[a-zA-Z0-9:_-]{1,128}$/.test(found.id))
++                    transactionId = found.id;
++            }
++            if (transactionId !== undefined) {
++                const result = await this.request('POST', `/v1/transactions/${encodeURIComponent(transactionId)}/cancel`, undefined, cleanupSignal);
++                cancelRequested = result?.success === true;
++            }
++        }
++        catch {
++            // Cancellation is best effort; never label an ambiguous result CANCELLED.
++        }
++        try {
++            await this.onSigningCleanup?.({ externalTxId, providerTransactionId: transactionId, cancelRequested });
++        }
++        catch { /* diagnostics cannot change signing */ }
++        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
++            message: 'Fireblocks signing did not finish before its deadline',
++            externalTxId,
++            providerTransactionId: transactionId,
++            cancelRequested,
++        });
++    }
++    async pollForSignature(transactionId, operation, externalTxId, abortSignal) {
+         const uri = `/v1/transactions/${encodeURIComponent(transactionId)}`;
++        let lastObservedStatus = 'SUBMITTED';
+         for (let attempt = 0; attempt < this.maxPollAttempts; attempt++) {
+             const txResponse = await this.request('GET', uri, undefined, abortSignal);
+             const status = txResponse.status;
++            if (typeof status === 'string' && status !== lastObservedStatus && /^[A-Z_]{1,100}$/.test(status)) {
++                await this.onSigningStatus?.({ externalTxId, providerTransactionId: transactionId, status });
++                lastObservedStatus = status;
++            }
+             if (operation === 'PROGRAM_CALL') {
+                 if (status === 'SIGNED') {
+                     return this.extractSignature(txResponse, true);
+@@ -270,14 +326,13 @@
+             if (isTerminalStatus(status)) {
+                 throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+                     message: `Transaction failed with status: ${txResponse.status}`,
++                    status: txResponse.status,
++                    subStatus: terminalSubStatus(txResponse.subStatus),
+                 });
+             }
+             await abortableDelay(this.pollIntervalMs, abortSignal);
+         }
+-        throwSignerError(SignerErrorCode.SIGNING_FAILED, {
+-            message: `Transaction did not complete within ${this.maxPollAttempts} attempts`,
+-            providerTransactionId: transactionId,
+-        });
++        return undefined;
+     }
+     extractSignature(txResponse, allowTxHashCarrier) {
+         const fullSig = txResponse.signedMessages?.[0]?.signature?.fullSig;

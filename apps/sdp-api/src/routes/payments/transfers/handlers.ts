@@ -91,6 +91,7 @@ import {
   type AppContext,
   getCounterpartyAccountsRepository,
   getPaymentsRepository,
+  requestProposalLedger,
 } from "@/routes/payments/context";
 import { mapTransferRow } from "@/routes/payments/mappers";
 import { transferIdParamsSchema } from "@/routes/payments/schemas";
@@ -127,7 +128,6 @@ import {
 import { readSolanaCryptoWalletAddress } from "@/services/payments/counterparty-account-resolution";
 import {
   isFireblocksTransfer,
-  type ProposalLedger,
   refreshFireblocksTransfer,
   submitProposedTransfer,
 } from "@/services/payments/fireblocks-transfer";
@@ -1081,23 +1081,6 @@ function compareTransferRows(
 
   const createdAtComparison = right.created_at.localeCompare(left.created_at);
   return createdAtComparison || right.id.localeCompare(left.id);
-}
-
-/**
- * The request's ledger for proposed-transfer row state: a settle commits with its audit outcome
- * in the request's own ledger transaction.
- */
-function requestProposalLedger(
-  c: AppContext,
-  auditService: AuditService = new AuditService(getDb(c.env))
-): ProposalLedger {
-  return {
-    repo: getPaymentsRepository(c),
-    audited: (work) =>
-      auditService.logWithin(c, (tx) =>
-        work(createPostgresPaymentsRepository(tx, getRequestTenantScope(c)))
-      ),
-  };
 }
 
 async function executeProposedTransfer(
