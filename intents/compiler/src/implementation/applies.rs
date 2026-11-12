@@ -1,7 +1,8 @@
 //! `applies` hints: `{ "account", "owner", "discriminator" }`, `{ "value", "present" }`, and
 //! `{ "value", "equals" }`.
 
-use sdp_intents_spec::{AppliesKind, AppliesV1, ValueRefV1};
+use sdp_intents_spec::wire::{AppliesV1, ValueRefV1};
+use sdp_intents_spec::AppliesKind;
 
 use super::Build;
 use crate::diagnostic::{Code, Diagnostic};

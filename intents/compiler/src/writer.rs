@@ -7,9 +7,10 @@
 
 use bytemuck::{bytes_of, cast_slice, Pod};
 
-use sdp_intents_spec::{
-    Address, DocumentHeaderV1, DocumentKind, PodU16, PoolRefV1, RangeV1, TableRefV1, MAGIC, SPEC_MAJOR, SPEC_MINOR,
+use sdp_intents_spec::wire::{
+    DocumentHeaderV1, DocumentKind, PodU16, PoolRefV1, RangeV1, TableRefV1, MAGIC, SPEC_MAJOR, SPEC_MINOR,
 };
+use sdp_intents_spec::Address;
 
 #[derive(Debug, Default)]
 pub struct Pool {

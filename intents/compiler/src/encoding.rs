@@ -61,6 +61,25 @@ pub fn fits(encoding: Encoding, shape: Shape) -> bool {
     }
 }
 
+/// The little-endian encoding of an integer type at its own width.
+pub fn integer_encoding_of(base: BaseType) -> Option<Encoding> {
+    let encoding = match base {
+        BaseType::U8 => Encoding::U8,
+        BaseType::U16 => Encoding::U16Le,
+        BaseType::U32 => Encoding::U32Le,
+        BaseType::U64 => Encoding::U64Le,
+        BaseType::U128 => Encoding::U128Le,
+        BaseType::I8 => Encoding::I8,
+        BaseType::I16 => Encoding::I16Le,
+        BaseType::I32 => Encoding::I32Le,
+        BaseType::I64 => Encoding::I64Le,
+        BaseType::I128 => Encoding::I128Le,
+        _ => return None,
+    };
+
+    Some(encoding)
+}
+
 /// The bytes of a literal in `encoding`, or the reason that the text is not such a literal.
 pub fn literal_bytes(encoding: EncodingName, text: &str) -> Result<Vec<u8>, String> {
     let encoding = match encoding {

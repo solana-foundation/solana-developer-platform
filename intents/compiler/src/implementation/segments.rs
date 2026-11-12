@@ -1,6 +1,7 @@
 //! Data segments and seeds: `{ "value": "…", "encoding": "…" }` or `{ "read": { … } }`.
 
-use sdp_intents_spec::{BaseType, Encoding, Segment, SegmentV1, ValueRef};
+use sdp_intents_spec::wire::SegmentV1;
+use sdp_intents_spec::{BaseType, Encoding, Segment, ValueRef};
 
 use super::accounts::read_integer;
 use super::Build;

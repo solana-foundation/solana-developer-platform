@@ -1,17 +1,19 @@
-use sdp_intents_spec::{DocumentIdV1, DocumentKind, Implementation, ImplementationDocV1, LiteralV1};
+use sdp_intents_spec::wire::{DocumentIdV1, DocumentKind, ImplementationDocV1, LiteralV1};
+use sdp_intents_spec::Implementation;
 
 use super::recipe::Recipe;
-use super::{Build, Implements};
+use super::Build;
 use crate::diagnostic::{Code, Diagnostic};
 use crate::envelope::Envelope;
 use crate::limits;
+use crate::resolve::InterfaceMatch;
 use crate::writer::Writer;
 
 impl Build<'_, '_> {
     pub(super) fn write(
         &mut self,
         envelope: &Envelope,
-        implements: &Implements<'_>,
+        implements: &InterfaceMatch<'_>,
         message: &[u8],
         recipe: Recipe,
     ) -> Option<Vec<u8>> {

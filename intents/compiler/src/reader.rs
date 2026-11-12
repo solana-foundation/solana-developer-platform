@@ -90,7 +90,7 @@ impl<'v> Node<'v> {
 pub struct Object<'v> {
     map: &'v Map<String, Value>,
     pointer: String,
-    asked: Vec<&'static str>,
+    asked: Vec<String>,
 }
 
 impl<'v> Object<'v> {
@@ -98,13 +98,13 @@ impl<'v> Object<'v> {
         &self.pointer
     }
 
-    pub fn field(&mut self, key: &'static str) -> Option<Node<'v>> {
-        self.asked.push(key);
+    pub fn field(&mut self, key: &str) -> Option<Node<'v>> {
+        self.asked.push(key.to_owned());
 
         self.map.get(key).map(|value| Node { value, pointer: format!("{}/{}", self.pointer, escape_pointer(key)) })
     }
 
-    pub fn required(&mut self, key: &'static str, sink: &mut Sink) -> Option<Node<'v>> {
+    pub fn required(&mut self, key: &str, sink: &mut Sink) -> Option<Node<'v>> {
         let node = self.field(key);
 
         if node.is_none() {
@@ -121,18 +121,17 @@ impl<'v> Object<'v> {
     }
 
     pub fn finish(self, sink: &mut Sink) {
-        self.map
-            .keys()
-            .filter(|key| !self.asked.contains(&key.as_str()) && !IGNORED_KEYS.contains(&key.as_str()))
-            .for_each(|key| {
+        self.map.keys().filter(|key| !self.asked.contains(key) && !IGNORED_KEYS.contains(&key.as_str())).for_each(
+            |key| {
                 let pointer = format!("{}/{}", self.pointer, escape_pointer(key));
                 let diagnostic = Diagnostic::new(Code::UnknownKey, &pointer, format!("unknown key `{key}`")).at_key();
 
-                sink.push(match closest(key, self.asked.iter().copied()) {
+                sink.push(match closest(key, self.asked.iter().map(String::as_str)) {
                     Some(known) => diagnostic.help(format!("did you mean `{known}`?")),
                     None => diagnostic.help(format!("expected one of {}", list(&self.asked))),
                 });
-            });
+            },
+        );
     }
 }
 

@@ -437,16 +437,16 @@ at most 4 hints on the record. A record fits an intent when all of its hints hol
 | Input present | `{ "value": "{inputs.memo}", "present": false }` | The input is present or absent, as `present` says |
 | Input equals | `{ "value": "{inputs.mint}", "equals": "11111111111111111111111111111111" }` | The input equals the literal |
 
-1. An owner check is a hint. A wrong pick fails closed: the target program rejects the accounts, or
-   a builder refuses, and the postconditions still hold.
+1. Every check is enforced. `prepare` and `verify_intent` refuse an intent that breaks one, so a
+   wrong pick fails before the simulation with the index of the check. An owner check needs the
+   data of its account, and the engine reads it in the first fetch.
 2. `implementationsFor(interface, inputs, cluster)` returns the approved records (4.10) whose hints
    hold. It reads the interface's approved list, then batches the implementation indexes and the
    hint accounts. It ranks them: a builder in the target program (4.3), a static recipe, another
    builder, then a remote endpoint.
-3. An input check is enforced. `prepare` refuses an intent that breaks a `present` or `equals`
-   check, because a recipe that does not read an input cannot fail closed on it. For the same
-   reason, `prepare` refuses an optional input that the record does not use. The compiler records
-   which inputs each record uses.
+3. An input check matters most, because a recipe that does not read an input cannot fail on it.
+   For the same reason, `prepare` refuses an optional input that the record does not use. The
+   engine finds the inputs that a record reads in its sources, seeds, and segments.
 4. Preconditions, such as a balance or a paused mint, stay in builder refusals and in the target
    program.
 
@@ -521,8 +521,9 @@ argument.
    a list of variable length or a TLV extension.
 2. Account rule: every account is readonly, and no account is a payer. The compiler enforces this.
    The service rejects a `MoreAccounts` result that names a payer.
-3. Payers: a built instruction names a payer with `PAYER_FEE_PLACEHOLDER` or
-   `PAYER_RENT_PLACEHOLDER`. The service, or `verify_intent`, maps each placeholder to the payer.
+3. Payers: a built instruction names the rent payer with `PAYER_RENT_PLACEHOLDER`, and the service,
+   or `verify_intent`, maps it to the rent payer. No instruction names the fee payer, because the
+   runtime charges the fee and the v1 header holds the compute budget.
 4. Data: the record's segments. For the PYUSD transfer, the data is 17 bytes:
 
 ```
@@ -536,12 +537,13 @@ bd1c9adb8ca2623c   discriminator of build_transfer_v1
 
 | Mode | When | Result |
 | :-- | :-- | :-- |
-| Staged | Stack height 1: a top-level instruction, which only the service's simulation sends | The full result in scratch, and a `ResultPointerV1` in return data. `MoreAccounts` is valid. |
+| Staged | Stack height 1: a top-level instruction, which only a simulation sends | The full result in scratch, and a `ResultPointerV1` in return data. `MoreAccounts` is valid. |
 | Hashed | Stack height above 1: a CPI from `verify_intent` (4.6) or a wallet (4.7) | A `HashedReadyV1` in return data: the SHA-256 of the instruction section, the signers, and the outputs |
 
-In staged mode the service appends the scratch account as the last account. The record never names
-it. Scratch never exists onchain: the service creates it in its LiteSVM state, owned by the
-builder, with 10,240 bytes. No one pays rent for it, and no transaction locks it.
+In staged mode the simulation appends the scratch account as the last account, writable. The record
+never names it. The simulated transaction creates scratch first: a `createAccount` of 10,240 bytes,
+owned by the builder, funded by any account that holds the rent. A simulation does not verify
+signatures, so scratch needs no keypair. Nothing lands, so no one pays the rent.
 
 **Builder library.** A builder author writes one handler against `sdp-intents-anchor`:
 
@@ -568,7 +570,7 @@ pub fn build_transfer_v1(
    last account as scratch. The accounts struct holds only the accounts that the record names.
 2. `require_accounts` returns the accounts when they are present. Otherwise it ends the round with
    `MoreAccounts`, in staged mode only. In hashed mode a missing account is an error.
-3. `Payer::Fee` and `Payer::Rent` write the placeholders. `build.refuse(code, message)` returns
+3. `Payer::Rent` writes the placeholder. `build.refuse(code, message)` returns
    `Refused` in either mode.
 4. `finish` writes the staged result and the pointer, or hashes the instruction section and writes
    `HashedReadyV1`. `BuildReturn` sets the return data.
@@ -583,7 +585,6 @@ pub const RESULT_MORE_ACCOUNTS: u8 = 2;
 pub const RESULT_REFUSED: u8 = 3;
 pub const RESULT_HASHED_READY: u8 = 4;
 pub const RESULT_POINTER_LEN: usize = 10;
-pub const PAYER_FEE_PLACEHOLDER: [u8; 32] = *b"sdp-intents/payer/fee\0\0\0\0\0\0\0\0\0\0\0";
 pub const PAYER_RENT_PLACEHOLDER: [u8; 32] = *b"sdp-intents/payer/rent\0\0\0\0\0\0\0\0\0\0";
 
 #[repr(C)]
@@ -634,7 +635,7 @@ pub struct HashedReadyV1 {
    writable signer.
 3. A signer is a new account that the service signs for, such as a fresh keypair.
 4. The instruction section is the part of `Ready` after the signers: each `InstructionHeaderV1`,
-   its `AccountMetaV1` entries, and its data, with the payer placeholders in place. `HashedReadyV1`
+   its `AccountMetaV1` entries, and its data, with the rent placeholder in place. `HashedReadyV1`
    is followed by 32 bytes for each signer and by the outputs. Return data holds at most 1,024
    bytes, so the signers and the outputs fit in 988 bytes.
 
@@ -686,8 +687,11 @@ protection. A pin would also stop `prepare` after each upgrade until a new recor
 
 ### 4.4 Simulation and RPC
 
-The service simulates in LiteSVM over an account cache. The `intents/chain` crate holds both, and
-starts as a copy of relay's `chain-source` (4.14).
+The planner (4.14) runs `prepare` with no IO. It asks for accounts to fetch and for transactions to
+simulate, and its caller answers. The client answers with RPC: `getMultipleAccounts`, and
+`simulateTransaction` with `sigVerify` off, `replaceRecentBlockhash` on, and scratch in `accounts`.
+The service answers from an account cache, and simulates in LiteSVM over it. The `intents/chain`
+crate holds both, and starts as a copy of relay's `chain-source` (4.14).
 
 1. Reads use `processed`. The blockhash uses `confirmed`.
 2. A cached account is served only while a live subscription covers it. Other accounts are fetched
@@ -697,6 +701,12 @@ starts as a copy of relay's `chain-source` (4.14).
 4. A builder needs one simulation for each round. A Token-2022 transfer takes one, or two when the
    mint has a transfer hook. A Kamino deposit takes two: the vault, then its reserves and markets.
 5. A builder that runs out of compute or rounds fails `prepare`, with no retry.
+
+**Engine.** The engine never fetches. Each resolve returns the accounts whose data it needs next,
+which is one `hasOne` level, with every `read` account that is resolved. The service fetches them in
+one call with every resolved account that the cache does not hold, so the last fetch also loads the
+simulation. `verify_intent` answers from the accounts of its instruction, so one resolve completes
+or fails.
 
 **RPC.** Every read goes through the cache. Each step collects its cache misses and fetches them
 with one `getMultipleAccounts` call, split at 100 accounts. Concurrent requests for the same
@@ -782,13 +792,13 @@ accounts that the recipe names, including those of the last `MoreAccounts` round
 and the registry change together, so one program holds both.
 
 1. It checks that the registry owns both version accounts, that they match the intent, that the
-   version is approved unless the intent sets `allowUnapproved`, and the input checks of `applies`.
+   version is approved unless the intent sets `allowUnapproved`, and the checks of `applies`.
 2. Static recipe: it checks each account against its source, reads the `hasOne` and `read` bytes,
    and builds the instructions.
 3. Program recipe: it calls the builder by CPI with the record's data, and every account readonly
    and unsigned. The builder returns `HashedReadyV1` (4.2).
 4. It serializes the built instructions from the instructions sysvar into the instruction section,
-   with each payer address mapped back to its placeholder. For a static recipe it compares the
+   with the rent payer's address mapped back to the placeholder. For a static recipe it compares the
    bytes. For a program recipe it compares their SHA-256 with `instructions_hash`, and checks the
    signers. It also compares the Lighthouse instructions with the ones that the postconditions give.
 5. Any difference fails the transaction.
@@ -802,8 +812,9 @@ service.
    the instructions. Without `assertions`, the postconditions hold only in the simulation.
 2. The builder runs again at execution, on the state of that slot. If the state changed since
    `prepare`, the instructions differ and the transaction fails.
-3. The builder never sees a payer, so a payer can reach a built instruction only as a placeholder.
-   That makes the reverse mapping exact.
+3. The builder never sees a payer, so the rent payer can reach a built instruction only as the
+   placeholder. One placeholder maps to one address, so the reverse mapping is exact, also when one
+   address pays both the fee and the rent.
 4. A remote recipe cannot run onchain. `verify_intent` checks the registry part and the assertions
    only, so the instructions trust the endpoint, within the postconditions.
 5. Outputs still trust the builder, at execution.
@@ -828,7 +839,7 @@ for the static recipe and the binary layout. This design does not depend on it.
    `hasOne` and `read` bytes, and builds the instructions.
 4. Program: the proposer passes the built instructions in the proposal. `execute` calls the
    builder by CPI in hashed mode, as `verify_intent` does, and compares the hash with the
-   proposed instructions. `execute` replaces the payer placeholders. The builder never gets the
+   proposed instructions. `execute` replaces the rent placeholder. The builder never gets the
    vault's signature.
 5. `execute` signs and invokes the instructions, then checks the postconditions.
 
@@ -1025,7 +1036,7 @@ An interface and an intent use the same parts:
 | Document | Fixed part |
 | :-- | :-- |
 | `InterfaceDocV1` | Header, id, name, display, and a `TableRefV1` for inputs (`InputV1`: name, value type, flags, amount mint `ValueRefV1`), outputs (`OutputV1`: name, value type), post conditions, addresses, and literals |
-| `IntentDocV1` | Header, interface id, implementation id, fee payer, rent payer, priority fee, flags (`allowUnapproved`, `noAssertions`, `noVerifyIntent`), and a `TableRefV1` of one `PoolRefV1` for each input, in interface order. Each input is in `borsh`. |
+| `IntentDocV1` | Header, interface id, implementation id, fee payer, rent payer, priority fee, flags (`allowUnapproved`, `noAssertions`, `noVerifyIntent`), and a `TableRefV1` of one `PoolRefV1` for each input, in interface order. Each input is in `borsh`. The ids hold exact versions, which `prepare` pins. `cluster` is not stored, because a registry is on one cluster. |
 
 | Payload | Source | Payload |
 | :-- | :-- | :-- |
@@ -1352,6 +1363,7 @@ from implementation id to the approved versions:
 | Command | Effect |
 | :-- | :-- |
 | `sdp-intents lint [paths]` | Checks every definition, and exits with an error on a finding. `--format github` writes GitHub annotations. |
+| `sdp-intents prepare <intent> --rpc <url>` | Plans the intent over RPC and prints the plan. Until the registry exists, it reads the documents from the definitions, and refuses an intent that keeps `assertions` or `verifyIntent`, because neither program exists yet. |
 | `sdp-intents plan --cluster <url>` | Reads the registry and prints the instructions that make it match the definitions |
 | `sdp-intents apply --cluster <url> --keypair <path>` | Sends the plan, signed by the key |
 | `sdp-intents apply --cluster <url> --squads <multisig>` | Proposes the plan to a Squads v4 multisig instead of sending it |
@@ -1396,6 +1408,11 @@ intents/
   spec/                 sdp-intents-spec: binary documents, views, limits, and the zero-copy
                         builder ABI and result layout. no_std, bytemuck only.
   compiler/             sdp-intents-compiler: JSON to binary and back, and the lint checks
+  engine/               sdp-intents-engine: binds an intent to its records, resolves accounts, and
+                        builds instructions. no_std, no heap. The planner and verify_intent use it.
+  planner/              sdp-intents-planner: prepare with no IO. Asks for fetches and simulations,
+                        runs the builder rounds, and returns the plan.
+  client/               sdp-intents-client: the planner over RPC. No service, cache, or LiteSVM.
   spec-anchor/          sdp-intents-anchor: the spec for Anchor programs
   programs/             Anchor v2 workspace: Anchor.toml, Cargo.toml, Cargo.lock
     registry/           organizations, interfaces, implementations, approvals, versions, and
@@ -1404,8 +1421,8 @@ intents/
     jupiter-lend-builder/
     kamino-builder/     vault.deposit and vault.withdraw
   chain/                account cache, subscriptions, and LiteSVM simulation, copied from relay
-  service/              prepare, verify, static recipes, simulation rounds, remote client,
-                        assertions, rendering
+  service/              the planner over chain/, the HTTP API, verify, the remote client, and
+                        monitoring
   cli/                  sdp-intents: lint, plan, and apply, with Squads support (4.13)
   definitions/          organizations, interfaces, and implementations in JSON (4.13)
   fixtures/

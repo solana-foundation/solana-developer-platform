@@ -9,7 +9,7 @@
     { "value": "{inputs.mint}", "equals": "11111111111111111111111111111111" },
     { "value": "{inputs.memo}", "present": false }
   ],
-  "message": "transfer {inputs.amount} lamports from {inputs.from} to {inputs.to}",
+  "message": "transfer {inputs.amount} SOL from {inputs.from} to {inputs.to}",
   "recipe": {
     "kind": "static",
     "accounts": [

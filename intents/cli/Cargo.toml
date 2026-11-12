@@ -1,6 +1,6 @@
 [package]
 name = "sdp-intents-cli"
-description = "The sdp-intents command line: lints SDP intent definitions"
+description = "The sdp-intents command line: lints SDP intent definitions and prepares intents"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,8 +12,12 @@ name = "sdp-intents"
 path = "src/main.rs"
 
 [dependencies]
+base64.workspace = true
+bs58.workspace = true
 clap.workspace = true
+sdp-intents-client.workspace = true
 sdp-intents-compiler.workspace = true
+sdp-intents-planner.workspace = true
 sdp-intents-spec.workspace = true
 serde_json.workspace = true
 

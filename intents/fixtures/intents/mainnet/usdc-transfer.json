@@ -1,0 +1,16 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "intent",
+  "interface": "solana.org/token.transfer@^1",
+  "implementation": "solana.org/spl-token-transfer@^1",
+  "inputs": {
+    "from": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    "to": "5ZWj7a1f8tWkjBESHKgrLmXshuXxqeY9SYcfbshpAqPG",
+    "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "amount": "100000000",
+    "memo": null
+  },
+  "payers": { "fee": "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9" },
+  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "options": { "priorityFeeLamports": "5000", "assertions": false, "verifyIntent": false }
+}

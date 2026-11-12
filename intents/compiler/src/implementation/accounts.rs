@@ -1,6 +1,7 @@
 //! The account table, and the address sources that its entries use.
 
-use sdp_intents_spec::{AccountV1, AddressSource, BaseType, RangeV1, ValueRef, ValueSource};
+use sdp_intents_spec::wire::{AccountV1, RangeV1};
+use sdp_intents_spec::{AddressSource, BaseType, ValueRef, ValueSource};
 
 use super::Build;
 use crate::diagnostic::{Code, Diagnostic};
@@ -173,7 +174,7 @@ impl Build<'_, '_> {
         if reference.scope == Scope::Payers && table == Table::Builder {
             self.sink.push(
                 Diagnostic::new(Code::BuilderAccountPayer, &node.pointer, "a builder account cannot be a payer")
-                    .help("the builder names a payer in its instructions with `Payer::Fee` or `Payer::Rent`"),
+                    .help("the builder names the rent payer in its instructions with `Payer::Rent`"),
             );
 
             return None;

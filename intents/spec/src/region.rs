@@ -53,6 +53,48 @@ impl<'a> Pool<'a> {
     }
 }
 
+/// Reads consecutive structures from the front of some bytes, for the layouts that have no tables.
+#[derive(Clone, Copy)]
+pub(crate) struct Cursor<'a> {
+    rest: &'a [u8],
+}
+
+impl<'a> Cursor<'a> {
+    pub(crate) fn new(bytes: &'a [u8]) -> Self {
+        Self { rest: bytes }
+    }
+
+    pub(crate) fn take(&mut self, len: usize) -> Result<&'a [u8], SpecError> {
+        let (taken, rest) = self.rest.split_at_checked(len).ok_or(SpecError::Truncated)?;
+        self.rest = rest;
+
+        Ok(taken)
+    }
+
+    pub(crate) fn fixed<T: Pod>(&mut self) -> Result<&'a T, SpecError> {
+        bytemuck::try_from_bytes(self.take(core::mem::size_of::<T>())?).map_err(|_| SpecError::Truncated)
+    }
+
+    pub(crate) fn entries<T: Pod>(&mut self, count: usize) -> Result<&'a [T], SpecError> {
+        let len = core::mem::size_of::<T>().checked_mul(count).ok_or(SpecError::OutOfBounds)?;
+
+        bytemuck::try_cast_slice(self.take(len)?).map_err(|_| SpecError::Truncated)
+    }
+
+    pub(crate) fn rest(self) -> &'a [u8] {
+        self.rest
+    }
+
+    /// A layout ends where its last structure ends, so that one result has one encoding.
+    pub(crate) fn finish(self) -> Result<(), SpecError> {
+        if !self.rest.is_empty() {
+            return Err(SpecError::LengthMismatch);
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

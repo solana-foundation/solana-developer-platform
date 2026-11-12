@@ -1,6 +1,7 @@
 //! The recipe: a static list of instructions, a builder call, or a remote endpoint.
 
-use sdp_intents_spec::{AccountV1, AddressSource, InstructionV1, OutputBindingV1, RangeV1, RecipeKind, SegmentV1};
+use sdp_intents_spec::wire::{AccountV1, InstructionV1, OutputBindingV1, RangeV1, SegmentV1};
+use sdp_intents_spec::{AddressSource, RecipeKind};
 
 use super::accounts::Table;
 use super::Build;

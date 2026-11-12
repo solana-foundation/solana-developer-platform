@@ -1,7 +1,8 @@
 //! Resolves a reference such as `{inputs.amount}` to the `ValueRefV1` that the binary form holds,
 //! with the type of the value it names.
 
-use sdp_intents_spec::{BaseType, ValueRefV1, ValueSource, ValueType};
+use sdp_intents_spec::wire::ValueRefV1;
+use sdp_intents_spec::{BaseType, ValueSource, ValueType};
 
 use crate::diagnostic::{Code, Diagnostic};
 use crate::encoding::Shape;
@@ -71,6 +72,14 @@ impl<'s> Names<'s> {
                 Code::ReferenceNotAllowed,
                 pointer,
                 format!("`{}` cannot be named here", reference.scope.as_str()),
+            ));
+
+            return None;
+        }
+
+        if reference.scope == Scope::Payers && reference.name == "fee" {
+            sink.push(Diagnostic::new(Code::ReferenceNotAllowed, pointer, "a recipe cannot name the fee payer").help(
+                "the runtime charges the fee payer, so no instruction names it. Use `{payers.rent}` to fund an account",
             ));
 
             return None;
@@ -161,6 +170,16 @@ mod tests {
         assert_eq!(amount.value, ValueRefV1 { source: 1, index: 1 });
         assert_eq!(rent.value, ValueRefV1 { source: 3, index: 1 });
         assert!(sink.is_empty());
+    }
+
+    #[test]
+    fn a_recipe_cannot_name_the_fee_payer() {
+        let schema = schema();
+        let names = Names::new(&schema, &[], Allowed { payers: true, accounts: false });
+        let mut sink = Sink::default();
+
+        assert!(names.resolve(Reference { scope: Scope::Payers, name: "fee" }, "/x", &mut sink).is_none());
+        assert_eq!(sink.into_diagnostics().first().unwrap().code, Code::ReferenceNotAllowed);
     }
 
     #[test]

@@ -1,9 +1,9 @@
 //! Compiles an interface: its inputs and outputs, its display, and its post conditions.
 
-use sdp_intents_spec::{
-    BaseType, DocumentIdV1, DocumentKind, InputV1, Interface, InterfaceDocV1, LiteralV1, OutputV1, PostConditionV1,
-    SemverV1, ValueRefV1, ValueType,
+use sdp_intents_spec::wire::{
+    DocumentIdV1, DocumentKind, InputV1, InterfaceDocV1, LiteralV1, OutputV1, PostConditionV1, SemverV1, ValueRefV1,
 };
+use sdp_intents_spec::{BaseType, Interface, ValueType};
 use serde_json::Value;
 
 use crate::catalog::Catalog;
@@ -26,11 +26,11 @@ pub struct CompiledInterface {
     pub id: Id,
     pub version: SemverV1,
     pub document_id: DocumentIdV1,
-    pub schema: Schema,
+    pub(crate) schema: Schema,
     pub bytes: Vec<u8>,
 }
 
-pub fn compile_interface(text: &str, catalog: &Catalog) -> Result<CompiledInterface, Report> {
+pub(crate) fn compile_interface(text: &str, catalog: &Catalog) -> Result<CompiledInterface, Report> {
     let value = parse_json(text)?;
     let mut build = Build::default();
     let compiled = build.interface(&value, catalog);
@@ -317,8 +317,8 @@ pub fn check_unique<'n, 'v: 'n>(names: impl Iterator<Item = (&'n str, &'n Node<'
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostic::Code;
     use crate::test_support::{edit, publishers, TOKEN_TRANSFER};
-    use crate::Code;
 
     #[test]
     fn compiles_token_transfer() {

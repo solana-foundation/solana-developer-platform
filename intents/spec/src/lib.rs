@@ -1,46 +1,79 @@
-//! Wire format of SDP intents.
+//! The binary form of SDP intents: interfaces, implementations, and intents.
 //!
-//! Every document is alignment-1 pod: a header, a fixed part, tables of fixed-size entries, a byte
-//! pool, and an extension area. A `TableRefV1` and the pool's `PoolRefV1` are byte offsets from the
-//! start of the document. A `PoolRefV1` inside an entry is an offset from the start of the pool.
+//! Read a document with its view. [`Interface::parse`], [`Implementation::parse`], and
+//! [`Intent::parse`] validate the bytes once, then each accessor returns entries in place. An entry
+//! decodes its variant on demand into a small `Copy` value, such as [`AddressSource`] or
+//! [`Segment`]. Nothing allocates, so a program can read a document inside its 4 KB stack frame.
 //!
-//! A view such as [`Implementation`] holds two references into the document bytes. Its accessors
-//! return entries in place as `&[AccountV1]` and the like, and a wire struct decodes its variant
-//! into a small `Copy` enum on demand. Nothing allocates. `parse` validates every table, code,
-//! index, and range once. The accessors still return `Result`, so that no path can panic, but after
-//! a successful `parse` they always return `Ok`.
+//! ```
+//! use sdp_intents_spec::{AddressSource, Implementation, SpecError};
 //!
-//! The design is in `packages/sdp-intents/DESIGN.md`, section 4.9.
+//! fn count_derived_accounts(bytes: &[u8]) -> Result<usize, SpecError> {
+//!     let implementation = Implementation::parse(bytes)?;
+//!     let mut derived = 0;
+//!
+//!     for account in implementation.accounts()? {
+//!         if let AddressSource::Pda { .. } | AddressSource::Ata { .. } = account.address()? {
+//!             derived += 1;
+//!         }
+//!     }
+//!
+//!     Ok(derived)
+//! }
+//! ```
+//!
+//! [`wire`] holds the stored layouts, which a writer such as `sdp-intents-compiler` lays out.
+//! [`builder`] holds what a builder program returns. The design is in
+//! `packages/sdp-intents/DESIGN.md`, sections 4.2 and 4.9.
 
 #![cfg_attr(not(test), no_std)]
 
 mod address;
+pub mod builder;
 mod code;
 mod counts;
 mod document;
 mod error;
 mod implementation;
+mod intent;
 mod interface;
 mod literal;
 mod pod;
 mod post_condition;
 mod refs;
 mod region;
+mod role;
 mod value_type;
 
 #[cfg(test)]
 mod test_support;
 
 pub use address::Address;
-pub use document::{DocumentHeaderV1, DocumentIdV1, DocumentKind, SemverV1, MAGIC, SPEC_MAJOR, SPEC_MINOR};
 pub use error::SpecError;
-pub use implementation::{
-    AccountSourceKind, AccountV1, AddressSource, AppliesKind, AppliesV1, Encoding, Implementation, ImplementationDocV1,
-    InstructionV1, OutputBindingV1, RecipeKind, Segment, SegmentSourceKind, SegmentV1,
-};
-pub use interface::{InputV1, Interface, InterfaceDocV1, OutputV1};
-pub use literal::LiteralV1;
-pub use pod::{PodBool, PodU16, PodU32, PodU64};
-pub use post_condition::{CheckKind, PostConditionV1};
-pub use refs::{PoolRefV1, RangeV1, TableRefV1, ValueRef, ValueRefV1, ValueSource};
+pub use implementation::{AddressSource, AppliesKind, Encoding, Implementation, RecipeKind, Segment};
+pub use intent::{Intent, IntentOptions};
+pub use interface::Interface;
+pub use post_condition::CheckKind;
+pub use refs::{ValueRef, ValueSource};
+pub use role::AccountRole;
 pub use value_type::{BaseType, ValueType};
+
+/// The stored layout of each document: the fixed parts, the entry types, and the integers they
+/// hold. A view returns these entries in place. A writer, such as the compiler, lays them out.
+pub mod wire {
+    pub use crate::document::{DocumentHeaderV1, DocumentIdV1, DocumentKind, SemverV1, MAGIC, SPEC_MAJOR, SPEC_MINOR};
+    pub use crate::implementation::{
+        AccountV1, AppliesV1, ImplementationDocV1, InstructionV1, OutputBindingV1, SegmentV1,
+    };
+    pub use crate::intent::IntentDocV1;
+    pub use crate::interface::{InputV1, InterfaceDocV1, OutputV1};
+    pub use crate::literal::LiteralV1;
+    pub use crate::pod::{PodBool, PodU16, PodU32, PodU64};
+    pub use crate::post_condition::PostConditionV1;
+    pub use crate::refs::{PoolRefV1, RangeV1, TableRefV1, ValueRefV1};
+}
+
+// The modules of this crate name the wire types from the root.
+#[cfg(test)]
+pub(crate) use implementation::{AccountSourceKind, SegmentSourceKind};
+pub(crate) use wire::*;

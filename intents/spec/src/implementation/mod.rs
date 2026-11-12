@@ -12,6 +12,9 @@ pub use account::AddressSource;
 pub use segment::Segment;
 pub use view::Implementation;
 pub use wire::{
-    AccountSourceKind, AccountV1, AppliesKind, AppliesV1, Encoding, ImplementationDocV1, InstructionV1,
-    OutputBindingV1, RecipeKind, SegmentSourceKind, SegmentV1,
+    AccountV1, AppliesKind, AppliesV1, Encoding, ImplementationDocV1, InstructionV1, OutputBindingV1, RecipeKind,
+    SegmentV1,
 };
+
+#[cfg(test)]
+pub(crate) use wire::{AccountSourceKind, SegmentSourceKind};

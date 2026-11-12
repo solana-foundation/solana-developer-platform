@@ -1,7 +1,8 @@
 //! Post conditions, which interfaces and implementations write the same way:
 //! `{ "outflow": { "from": "{inputs.from}", "mint": "{inputs.mint}", "max": "{inputs.amount}" }, "message": "…" }`.
 
-use sdp_intents_spec::{Address, BaseType, CheckKind, PostConditionV1, RangeV1, ValueRefV1};
+use sdp_intents_spec::wire::{PostConditionV1, RangeV1, ValueRefV1};
+use sdp_intents_spec::{Address, BaseType, CheckKind};
 
 use crate::diagnostic::{Code, Diagnostic};
 use crate::encoding::address;

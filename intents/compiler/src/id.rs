@@ -2,7 +2,8 @@
 
 use sha2::{Digest, Sha256};
 
-use sdp_intents_spec::{Address, DocumentIdV1, PodU16, SemverV1};
+use sdp_intents_spec::wire::{DocumentIdV1, PodU16, SemverV1};
+use sdp_intents_spec::Address;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Id {
@@ -72,11 +73,13 @@ pub fn parse_range(text: &str) -> Result<SemverV1, String> {
     }
 }
 
-/// An id with a caret range, such as `solana.org/token.transfer@^1`.
+/// An id with a caret range, such as `solana.org/token.transfer@^1`, or with an exact version, such
+/// as `solana.org/token.transfer@1.0.0`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IdRange {
     pub id: Id,
     pub lowest: SemverV1,
+    pub exact: bool,
 }
 
 impl IdRange {
@@ -84,9 +87,25 @@ impl IdRange {
         let (id, range) = text.split_once('@').ok_or_else(|| {
             format!("`{text}` names no range. Write the id and a range, such as `solana.org/token.transfer@^1`.")
         })?;
+        let exact = !range.starts_with('^');
+        let lowest = if exact { parse_version(range)? } else { parse_range(range)? };
 
-        Ok(Self { id: Id::parse(id)?, lowest: parse_range(range)? })
+        Ok(Self { id: Id::parse(id)?, lowest, exact })
     }
+
+    pub fn covers(&self, version: SemverV1) -> bool {
+        if self.exact {
+            return version == self.lowest;
+        }
+
+        caret_covers(self.lowest, version)
+    }
+}
+
+/// Whether `^lowest` accepts `version`: the same major version, and no lower.
+pub fn caret_covers(lowest: SemverV1, version: SemverV1) -> bool {
+    version.major == lowest.major
+        && (version.minor.get(), version.patch.get()) >= (lowest.minor.get(), lowest.patch.get())
 }
 
 pub fn format_version(version: SemverV1) -> String {

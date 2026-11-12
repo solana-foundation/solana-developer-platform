@@ -1,0 +1,18 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "intent",
+  "interface": "solana.org/token.transfer@^1",
+  "implementation": "solana.org/token-2022-transfer@^1",
+  "inputs": {
+    "from": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+    "to": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    "mint": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
+    "amount": "100000000",
+    "memo": null
+  },
+  "payers": {
+    "fee": "5ZWj7a1f8tWkjBESHKgrLmXshuXxqeY9SYcfbshpAqPG",
+    "rent": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
+  },
+  "options": { "assertions": false, "verifyIntent": false }
+}

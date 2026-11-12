@@ -4,7 +4,7 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
-use sdp_intents_compiler::{Diagnostic, Location};
+use sdp_intents_compiler::diagnostic::{Diagnostic, Location};
 
 use crate::lint::FileReport;
 
@@ -89,7 +89,7 @@ fn escape_property(text: &str) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use sdp_intents_compiler::{Code, Report};
+    use sdp_intents_compiler::diagnostic::{Code, Report};
 
     use super::*;
     use crate::tree::{Definition, Position};

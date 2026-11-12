@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use sdp_intents_compiler::{compile_implementation, compile_interface, Catalog, Code, Diagnostic, Report};
+use sdp_intents_compiler::diagnostic::{Code, Diagnostic, Report};
+use sdp_intents_compiler::Catalog;
 use sdp_intents_spec::Address;
 
 use crate::output::{self, Format};
@@ -54,6 +55,17 @@ pub fn run(args: &LintArgs) -> Result<Outcome, String> {
 }
 
 pub fn lint(tree: &Tree) -> Vec<FileReport<'_>> {
+    compile_tree(tree).reports
+}
+
+/// Every definition of a tree, compiled into one catalog, with the findings of the files that did
+/// not compile.
+pub struct CompiledTree<'t> {
+    pub catalog: Catalog,
+    pub reports: Vec<FileReport<'t>>,
+}
+
+pub fn compile_tree(tree: &Tree) -> CompiledTree<'_> {
     let mut catalog = tree
         .organizations()
         .into_iter()
@@ -62,26 +74,16 @@ pub fn lint(tree: &Tree) -> Vec<FileReport<'_>> {
     let mut reports = Vec::new();
 
     for definition in tree.of_kind(Kind::Interface) {
-        let report = match compile_interface(&definition.text, &catalog) {
-            Ok(interface) => {
-                catalog.add_interface(interface);
-                Report::default()
-            }
-            Err(report) => {
-                catalog.add_failed_interface(&definition.position.id());
-                report
-            }
-        };
-
+        let report = catalog.compile_interface(&definition.text).err().unwrap_or_default();
         reports.push(with_position_findings(definition, report));
     }
 
-    reports.extend(tree.of_kind(Kind::Implementation).map(|definition| {
-        let report = compile_implementation(&definition.text, &catalog).err().unwrap_or_default();
-        with_position_findings(definition, report)
-    }));
+    for definition in tree.of_kind(Kind::Implementation) {
+        let report = catalog.compile_implementation(&definition.text).err().unwrap_or_default();
+        reports.push(with_position_findings(definition, report));
+    }
 
-    reports.into_iter().filter(|report| !report.report.is_empty()).collect()
+    CompiledTree { catalog, reports: reports.into_iter().filter(|report| !report.report.is_empty()).collect() }
 }
 
 fn with_position_findings(definition: &Definition, mut report: Report) -> FileReport<'_> {

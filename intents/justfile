@@ -7,6 +7,8 @@ fmt:
 check:
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets -- -D warnings
+    cargo build -q -p sdp-intents-engine --target thumbv7em-none-eabi
+    RUSTDOCFLAGS="-D warnings" cargo doc -q --no-deps --workspace
     cargo run -q -p sdp-intents-cli -- lint
 
 lint-definitions *paths:

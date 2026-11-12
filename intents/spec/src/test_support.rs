@@ -5,9 +5,9 @@ use bytemuck::{bytes_of, cast_slice, Pod};
 
 use crate::{
     AccountSourceKind, AccountV1, Address, AppliesV1, CheckKind, DocumentHeaderV1, DocumentKind, Encoding,
-    ImplementationDocV1, InputV1, InstructionV1, InterfaceDocV1, LiteralV1, OutputBindingV1, OutputV1, PodU16,
-    PoolRefV1, PostConditionV1, RangeV1, RecipeKind, SegmentSourceKind, SegmentV1, TableRefV1, ValueRefV1, MAGIC,
-    SPEC_MAJOR, SPEC_MINOR,
+    ImplementationDocV1, InputV1, InstructionV1, IntentDocV1, InterfaceDocV1, LiteralV1, OutputBindingV1, OutputV1,
+    PodU16, PoolRefV1, PostConditionV1, RangeV1, RecipeKind, SegmentSourceKind, SegmentV1, TableRefV1, ValueRefV1,
+    MAGIC, SPEC_MAJOR, SPEC_MINOR,
 };
 
 const WRITABLE: u8 = 1;
@@ -181,6 +181,44 @@ impl InterfaceFixture {
         let header = writer.header(DocumentKind::Interface);
 
         writer.finish(&InterfaceDocV1 { header, ..fixed })
+    }
+}
+
+pub(crate) struct IntentFixture {
+    pub(crate) inputs: Vec<PoolRefV1>,
+    pub(crate) flags: u8,
+    pool: Pool,
+}
+
+impl IntentFixture {
+    /// 100,000,000 base units from `from` to `to`, with no memo.
+    pub(crate) fn token_transfer() -> Self {
+        let mut pool = Pool::default();
+        let inputs = vec![
+            pool.text(&[1; 32]),
+            pool.text(&[2; 32]),
+            pool.text(&[3; 32]),
+            pool.text(&100_000_000u64.to_le_bytes()),
+            pool.text(&[0]),
+        ];
+
+        Self { inputs, flags: 0, pool }
+    }
+
+    pub(crate) fn build(&self) -> Vec<u8> {
+        let mut writer = Writer::new(core::mem::size_of::<IntentDocV1>());
+
+        let fixed = IntentDocV1 {
+            fee_payer: Address([9; 32]),
+            rent_payer: Address([9; 32]),
+            flags: self.flags,
+            inputs: writer.table(&self.inputs),
+            pool: writer.pool(&self.pool),
+            ..IntentDocV1::default()
+        };
+        let header = writer.header(DocumentKind::Intent);
+
+        writer.finish(&IntentDocV1 { header, ..fixed })
     }
 }
 

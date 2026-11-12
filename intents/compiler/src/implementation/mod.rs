@@ -6,37 +6,44 @@ mod recipe;
 mod segments;
 mod write;
 
-use sdp_intents_spec::{AccountV1, AppliesV1, InstructionV1, OutputBindingV1, PostConditionV1, SegmentV1, SemverV1};
+use sdp_intents_spec::wire::{
+    AccountV1, AppliesV1, DocumentIdV1, InstructionV1, OutputBindingV1, PostConditionV1, SegmentV1, SemverV1,
+};
 use serde_json::Value;
 
 use crate::catalog::Catalog;
-use crate::diagnostic::{Code, Diagnostic, Report};
+use crate::diagnostic::Report;
 use crate::encoding::address;
 use crate::envelope::{parse_json, read_envelope, reported, root};
-use crate::id::{format_version, IdRange};
-use crate::interface::CompiledInterface;
+use crate::id::Id;
 use crate::limits;
 use crate::post_condition::{read_post_condition, Output};
-use crate::reader::{list, Object, Sink};
+use crate::reader::{Object, Sink};
+use crate::resolve::read_implements;
 use crate::scope::{Allowed, Names, Schema};
 use crate::template::compile_template;
 use crate::writer::{AddressTable, Pool};
 
-pub fn compile_implementation(text: &str, catalog: &Catalog) -> Result<Vec<u8>, Report> {
-    let value = parse_json(text)?;
-    let mut sink = Sink::default();
-    let bytes = compile(&value, catalog, &mut sink);
-
-    match bytes {
-        Some(bytes) if sink.is_empty() => Ok(bytes),
-        _ => Err(Report { diagnostics: sink.into_diagnostics(), syntax: None }),
-    }
+/// An implementation in binary form, with the parts of it that an intent names.
+#[derive(Clone, Debug)]
+pub struct CompiledImplementation {
+    pub id: Id,
+    pub version: SemverV1,
+    pub document_id: DocumentIdV1,
+    /// The interface, at the lowest version that the record implements.
+    pub implements: DocumentIdV1,
+    pub bytes: Vec<u8>,
 }
 
-/// The interface that a record implements, and the lowest version of it that the record names.
-struct Implements<'c> {
-    interface: &'c CompiledInterface,
-    lowest: SemverV1,
+pub(crate) fn compile_implementation(text: &str, catalog: &Catalog) -> Result<CompiledImplementation, Report> {
+    let value = parse_json(text)?;
+    let mut sink = Sink::default();
+    let compiled = compile(&value, catalog, &mut sink);
+
+    match compiled {
+        Some(compiled) if sink.is_empty() => Ok(compiled),
+        _ => Err(Report { diagnostics: sink.into_diagnostics(), syntax: None }),
+    }
 }
 
 /// The tables of one record, as the compile adds to them. The steps are methods in the files of
@@ -57,7 +64,7 @@ struct Build<'c, 's> {
     output_bindings: Vec<OutputBindingV1>,
 }
 
-fn compile(value: &Value, catalog: &Catalog, sink: &mut Sink) -> Option<Vec<u8>> {
+fn compile(value: &Value, catalog: &Catalog, sink: &mut Sink) -> Option<CompiledImplementation> {
     let mut object = root(value, sink)?;
     let envelope = read_envelope(&mut object, "implementation", catalog, sink);
 
@@ -65,7 +72,7 @@ fn compile(value: &Value, catalog: &Catalog, sink: &mut Sink) -> Option<Vec<u8>>
         cluster.str(sink).and_then(|text| reported(address(text), &cluster, sink));
     }
 
-    let implements = read_implements(&mut object, catalog, sink)?;
+    let implements = object.required("implements", sink).and_then(|node| read_implements(&node, catalog, sink))?;
     let mut build = Build::new(&implements.interface.schema, sink);
 
     if let Some(applies) = object.field("applies") {
@@ -92,48 +99,15 @@ fn compile(value: &Value, catalog: &Catalog, sink: &mut Sink) -> Option<Vec<u8>>
         return None;
     }
 
-    build.write(&envelope, &implements, &message, recipe)
-}
+    let bytes = build.write(&envelope, &implements, &message, recipe)?;
 
-fn read_implements<'c>(object: &mut Object<'_>, catalog: &'c Catalog, sink: &mut Sink) -> Option<Implements<'c>> {
-    let node = object.required("implements", sink)?;
-    let range = reported(IdRange::parse(node.str(sink)?), &node, sink)?;
-    let id = range.id.to_string();
-
-    let Some(interface) = catalog.interface(&id) else {
-        sink.push(missing_interface(&id, &node.pointer, catalog));
-
-        return None;
-    };
-
-    let defined = interface.version;
-    let covered = range.lowest.major == defined.major
-        && (range.lowest.minor.get(), range.lowest.patch.get()) <= (defined.minor.get(), defined.patch.get());
-
-    if !covered {
-        sink.push(
-            Diagnostic::new(
-                Code::VersionMismatch,
-                &node.pointer,
-                format!("`{id}` is at version {}, which this range does not cover", format_version(defined)),
-            )
-            .help(format!("use `{id}@^{}`", defined.major.get())),
-        );
-
-        return None;
-    }
-
-    Some(Implements { interface, lowest: range.lowest })
-}
-
-fn missing_interface(id: &str, pointer: &str, catalog: &Catalog) -> Diagnostic {
-    if catalog.interface_failed(id) {
-        return Diagnostic::new(Code::InterfaceFailed, pointer, format!("interface `{id}` did not compile"))
-            .help(format!("fix the findings in `{id}` first"));
-    }
-
-    Diagnostic::new(Code::UnknownInterface, pointer, format!("no interface `{id}` is defined"))
-        .help(format!("the defined interfaces are {}", list(&catalog.interface_ids())))
+    Some(CompiledImplementation {
+        id: envelope.id,
+        version: envelope.version,
+        document_id: envelope.document_id,
+        implements: DocumentIdV1 { version: implements.lowest, ..implements.interface.document_id },
+        bytes,
+    })
 }
 
 impl<'c, 's> Build<'c, 's> {
@@ -193,26 +167,26 @@ mod tests {
     use sdp_intents_spec::{AddressSource, Implementation, RecipeKind, Segment};
 
     use super::compile_implementation;
+    use crate::diagnostic::Code;
     use crate::test_support::{catalog, edit, publishers, SPL_TOKEN_TRANSFER, SYSTEM_TRANSFER, TOKEN_2022_TRANSFER};
-    use crate::Code;
 
     #[test]
     fn compiles_the_system_transfer() {
-        let bytes = compile_implementation(SYSTEM_TRANSFER, &catalog()).unwrap();
-        let record = Implementation::parse(&bytes).unwrap();
+        let compiled = compile_implementation(SYSTEM_TRANSFER, &catalog()).unwrap();
+        let record = Implementation::parse(&compiled.bytes).unwrap();
         let instruction = record.instructions().unwrap().first().unwrap();
 
         assert_eq!(record.recipe(), Ok(RecipeKind::Static));
         assert_eq!(record.applies().unwrap().len(), 2);
         assert_eq!(record.accounts().unwrap().len(), 3);
         assert_eq!(record.instruction_accounts(instruction).unwrap(), &[0, 1]);
-        assert_eq!(record.message().unwrap(), b"transfer {i3} lamports from {i0} to {i1}");
+        assert_eq!(record.message().unwrap(), b"transfer {i3} SOL from {i0} to {i1}");
     }
 
     #[test]
     fn compiles_the_spl_token_transfer() {
-        let bytes = compile_implementation(SPL_TOKEN_TRANSFER, &catalog()).unwrap();
-        let record = Implementation::parse(&bytes).unwrap();
+        let compiled = compile_implementation(SPL_TOKEN_TRANSFER, &catalog()).unwrap();
+        let record = Implementation::parse(&compiled.bytes).unwrap();
         let instructions = record.instructions().unwrap();
         let transfer_data = record.instruction_segments(instructions.get(1).unwrap()).unwrap();
 
@@ -226,8 +200,8 @@ mod tests {
 
     #[test]
     fn compiles_the_token_2022_builder_call() {
-        let bytes = compile_implementation(TOKEN_2022_TRANSFER, &catalog()).unwrap();
-        let record = Implementation::parse(&bytes).unwrap();
+        let compiled = compile_implementation(TOKEN_2022_TRANSFER, &catalog()).unwrap();
+        let record = Implementation::parse(&compiled.bytes).unwrap();
         let call = record.instructions().unwrap().first().unwrap();
 
         assert_eq!(record.recipe(), Ok(RecipeKind::Program));

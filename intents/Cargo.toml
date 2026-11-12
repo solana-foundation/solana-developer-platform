@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["spec", "compiler", "cli"]
+members = ["spec", "compiler", "engine", "planner", "client", "cli"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,13 +10,18 @@ publish = false
 rust-version = "1.99"
 
 [workspace.dependencies]
+base64 = "=0.23.1"
 bs58 = "=0.5.1"
 clap = { version = "=4.6.7", features = ["derive"] }
 bytemuck = { version = "=1.25.2", features = ["derive", "min_const_generics"] }
 sdp-intents-compiler = { path = "compiler" }
+sdp-intents-client = { path = "client" }
+sdp-intents-engine = { path = "engine" }
+sdp-intents-planner = { path = "planner" }
 sdp-intents-spec = { path = "spec" }
 serde_json = { version = "=1.0.154", features = ["preserve_order"] }
 sha2 = "=0.11.1"
+solana-address = { version = "=2.9.0", default-features = false }
 
 [workspace.lints.rust]
 unused_imports = "deny"
