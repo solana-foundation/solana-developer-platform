@@ -8,8 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as csrActions from "@/app/(session)/dashboard/[projectId]/wallets/setup/fireblocks-csr-actions";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { dashboardDataResponse } from "@/test/dashboard-fetch";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { setPageRequest } from "@/test/request-project";
+import { FreshSWRCache } from "@/test/swr";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
@@ -24,14 +26,6 @@ import { type RotationState, rotatableLifecycle } from "./credential-actions";
 import { RotateCredentialsModal } from "./rotate-credentials-modal";
 
 beforeEach(() => {
-  vi.spyOn(csrActions, "loadFireblocksCsrAction").mockResolvedValue({
-    status: "success",
-    csr: {
-      id: "fbcsr_11111111-1111-4111-8111-111111111111",
-      csrPem: "public-csr",
-      expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
-    },
-  });
   vi.spyOn(csrActions, "generateFireblocksCsrAction");
   vi.spyOn(csrActions, "loadFireblocksVaultsAction").mockResolvedValue({
     status: "success",
@@ -76,14 +70,16 @@ function modal(
   if (!isByokCustodyProvider(provider)) throw new Error("Expected BYOK fixture");
   return (
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <RotateCredentialsModal
-        isOpen
-        onClose={onClose}
-        lifecycle={currentLifecycle}
-        provider={provider}
-        connectionId="cconn_1"
-        canRotate={canRotate}
-      />
+      <FreshSWRCache>
+        <RotateCredentialsModal
+          isOpen
+          onClose={onClose}
+          lifecycle={currentLifecycle}
+          provider={provider}
+          connectionId="cconn_1"
+          canRotate={canRotate}
+        />
+      </FreshSWRCache>
     </I18nProvider>
   );
 }
@@ -141,6 +137,16 @@ function mockApi() {
     vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       if (String(url).endsWith("/rotate")) {
         return rotation(String(url), init);
+      }
+      // Fireblocks' fields read the Project's pending registration through the dashboard route.
+      if (String(url) === "/api/dashboard/fireblocks/csr") {
+        return dashboardDataResponse(200, {
+          csr: {
+            id: "fbcsr_11111111-1111-4111-8111-111111111111",
+            csrPem: "public-csr",
+            expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+          },
+        });
       }
       throw new Error(`Unexpected API request: ${url}`);
     })

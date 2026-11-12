@@ -15,14 +15,19 @@ import {
 import * as csrActions from "@/app/(session)/dashboard/[projectId]/wallets/setup/fireblocks-csr-actions";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { dashboardDataResponse, stubDashboardFetch } from "@/test/dashboard-fetch";
 import { dashboardRouter, setDashboardUrl } from "@/test/dashboard-navigation";
 import { PRODUCTION_PROJECT } from "@/test/projects";
-import { generateFireblocksCsrAction, loadFireblocksCsrAction } from "./fireblocks-csr-actions";
+import { FreshSWRCache } from "@/test/swr";
+import { generateFireblocksCsrAction } from "./fireblocks-csr-actions";
 import { ByokCredentialForm } from "./privy-credential-form";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const WALLETS_HREF = `/dashboard/${PRODUCTION_PROJECT.id}/wallets`;
+
+/** The Project's pending registration, as the dashboard route answers each read. */
+const csrRead = vi.fn<() => Response | Promise<Response>>();
 
 function renderForm(
   provider: "privy" | "fireblocks" = "privy",
@@ -30,11 +35,13 @@ function renderForm(
 ) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <ByokCredentialForm
-        formId="byok-test-form"
-        provider={provider}
-        onPendingChange={onPendingChange}
-      />
+      <FreshSWRCache>
+        <ByokCredentialForm
+          formId="byok-test-form"
+          provider={provider}
+          onPendingChange={onPendingChange}
+        />
+      </FreshSWRCache>
     </I18nProvider>
   );
 }
@@ -71,7 +78,6 @@ describe("ByokCredentialForm", () => {
   beforeEach(() => {
     vi.spyOn(byokActions, "submitPrivyCredentialAction");
     vi.spyOn(byokActions, "recheckPrivyCredentialAction");
-    vi.spyOn(csrActions, "loadFireblocksCsrAction");
     vi.spyOn(csrActions, "generateFireblocksCsrAction");
     vi.spyOn(csrActions, "loadFireblocksVaultsAction").mockResolvedValue({
       status: "success",
@@ -86,31 +92,34 @@ describe("ByokCredentialForm", () => {
     dashboardRouter.push.mockClear();
     vi.mocked(submitPrivyCredentialAction).mockReset();
     vi.mocked(recheckPrivyCredentialAction).mockReset();
-    vi.mocked(loadFireblocksCsrAction)
-      .mockReset()
-      .mockResolvedValue({
-        status: "success",
+    csrRead.mockReset().mockImplementation(() =>
+      dashboardDataResponse(200, {
         csr: {
           id: "fbcsr_11111111-1111-4111-8111-111111111111",
           csrPem: "public-csr",
           expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
         },
-      });
+      })
+    );
+    stubDashboardFetch((request) => {
+      if (request.path === "/api/dashboard/fireblocks/csr") return csrRead();
+      throw new Error(`Unexpected dashboard request: ${request.path}`);
+    });
     vi.mocked(generateFireblocksCsrAction).mockReset();
   });
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
   it("keeps the host informed while registration and vault discovery are in flight", async () => {
-    const registration =
-      Promise.withResolvers<Awaited<ReturnType<typeof loadFireblocksCsrAction>>>();
+    const registration = Promise.withResolvers<Response>();
     const discovery =
       Promise.withResolvers<Awaited<ReturnType<typeof csrActions.loadFireblocksVaultsAction>>>();
-    vi.mocked(loadFireblocksCsrAction).mockReturnValueOnce(registration.promise);
+    csrRead.mockReturnValueOnce(registration.promise);
     vi.mocked(csrActions.loadFireblocksVaultsAction).mockReturnValueOnce(discovery.promise);
     const pending = vi.fn();
     const user = userEvent.setup();
@@ -120,14 +129,15 @@ describe("ByokCredentialForm", () => {
       "disabled",
       true
     );
-    registration.resolve({
-      status: "success",
-      csr: {
-        id: "fbcsr_pending",
-        csrPem: "public-csr",
-        expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
-      },
-    });
+    registration.resolve(
+      dashboardDataResponse(200, {
+        csr: {
+          id: "fbcsr_pending",
+          csrPem: "public-csr",
+          expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+        },
+      })
+    );
     await waitFor(() => expect(pending).toHaveBeenLastCalledWith(false));
     await user.type(screen.getByLabelText("API user ID"), "api-user");
     await user.click(screen.getByRole("button", { name: "Load vaults" }));
@@ -142,15 +152,17 @@ describe("ByokCredentialForm", () => {
   });
 
   it("reloads registration after every rejected Fireblocks attempt and connects with a fresh CSR", async () => {
+    // Only the clock and timeouts are faked; time still passes, so reads and RTL's waits settle.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
     const csrs = [1, 2, 3].map((attempt) => ({
       id: `fbcsr_attempt_${attempt}`,
       csrPem: `public-csr-${attempt}`,
       expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
     }));
-    vi.mocked(loadFireblocksCsrAction)
-      .mockResolvedValueOnce({ status: "success", csr: csrs[0] })
-      .mockResolvedValueOnce({ status: "success", csr: null })
-      .mockResolvedValueOnce({ status: "success", csr: null });
+    csrRead
+      .mockReturnValueOnce(dashboardDataResponse(200, { csr: csrs[0] }))
+      .mockReturnValueOnce(dashboardDataResponse(200, { csr: null }))
+      .mockReturnValueOnce(dashboardDataResponse(200, { csr: null }));
     vi.mocked(generateFireblocksCsrAction)
       .mockResolvedValueOnce({ status: "success", csr: csrs[1] })
       .mockResolvedValueOnce({ status: "success", csr: csrs[2] });
@@ -170,7 +182,7 @@ describe("ByokCredentialForm", () => {
       }
     );
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderForm("fireblocks");
 
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -200,6 +212,11 @@ describe("ByokCredentialForm", () => {
         expect(payload.get("connectionId")).toBe("cconn_test");
         expect(submittedKey(attempt)).not.toBe(submittedKey(attempt - 1));
       }
+      // A person takes longer than SWR's 2s dedupe window between the read and a rejection, so
+      // the remounted fields read the registration again instead of reusing the last answer.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
       // Finish the parent transition before interacting with the remounted CSR form.
       // The action being called (or the child appearing) does not mean it has settled.
       await act(async () => {
