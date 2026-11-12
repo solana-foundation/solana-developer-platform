@@ -692,10 +692,6 @@ describe("OpenAPI spec", () => {
     // them (the customer's wallet or the caller's own fee payer signs), so they
     // cannot answer SIGNING_REJECTED until SDP sponsors them (PRO-1744).
     const sponsored = [
-    // Earn's external-wallet submits are absent on purpose: no paymaster co-signs
-    // them (the customer's wallet or the caller's own fee payer signs), so they
-    // cannot answer SIGNING_REJECTED until SDP sponsors them (PRO-1744).
-    const sponsored = [
       ["/v1/payments/transfers/execute", "post"],
       ["/v1/issuance/tokens/{tokenId}/mint/execute", "post"],
       ["/v1/dvp/trades/{tradeId}/settle", "post"],
