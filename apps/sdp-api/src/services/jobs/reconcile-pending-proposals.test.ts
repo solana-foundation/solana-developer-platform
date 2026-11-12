@@ -258,6 +258,7 @@ function refuse(h: ReturnType<typeof harness>) {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -303,18 +304,54 @@ describe("reconcilePendingProposals", () => {
     expect(h.payment().status).toBe("processing");
   });
 
-  it("keeps sticky refusal and retries an ambiguous cancellation through another version claim", async () => {
+  it("keeps sticky refusal and backs off ambiguous cancellation retries", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
     const h = harness();
     h.recovery.admit.mockRejectedValueOnce(revoke()).mockResolvedValue(undefined);
     h.recovery.cancel.mockRejectedValueOnce(new Error("Ambiguous cancellation timeout"));
     await runRecovery();
     const first = h.state().state;
     expect(first.authorizationState).toBe("cancel_requested");
+    vi.setSystemTime("2026-11-12T00:01:00.000Z");
+    await runRecovery();
+    expect(h.recovery.cancel).toHaveBeenCalledOnce();
+    expect(h.state().state.cancelRequestedAt).toBe(first.cancelRequestedAt);
+    vi.setSystemTime("2026-11-12T00:05:00.000Z");
     await runRecovery();
     expect(h.recovery.admit).toHaveBeenCalledOnce();
     expect(h.recovery.cancel).toHaveBeenCalledTimes(2);
+    expect(h.recovery.read).toHaveBeenCalledTimes(3);
     expect(h.state().state.refusal).toEqual(first.refusal);
-    expect(h.state().state.cancelRequestedAt).toBe(first.cancelRequestedAt);
+    expect(h.state().state.cancelRequestedAt).toBe("2026-11-12T00:05:00.000Z");
+    expect(h.payment().status).toBe("processing");
+  });
+
+  it("observes declined cancellations each tick while throttling provider retries and audit pairs", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    const h = harness();
+    h.recovery.admit.mockRejectedValueOnce(revoke());
+    h.recovery.cancel.mockResolvedValue(false);
+    await runRecovery();
+    expect(h.state().state.authorizationState).toBe("refused");
+    for (let minute = 1; minute < 5; minute += 1) {
+      vi.setSystemTime(`2026-11-12T00:0${minute}:00.000Z`);
+      await runRecovery();
+    }
+    expect(h.recovery.cancel).toHaveBeenCalledOnce();
+    expect(h.recovery.read).toHaveBeenCalledTimes(5);
+    expect(
+      h.transition.mock.calls.filter(([input]) => input.event.type === "cancel_requested")
+    ).toHaveLength(1);
+    expect(
+      h.transition.mock.calls.filter(([input]) => input.event.type === "cancel_declined")
+    ).toHaveLength(1);
+    vi.setSystemTime("2026-11-12T00:05:00.000Z");
+    await runRecovery();
+    expect(h.recovery.cancel).toHaveBeenCalledTimes(2);
+    expect(h.recovery.admit).toHaveBeenCalledOnce();
+    expect(h.state().state.authorizationState).toBe("refused");
     expect(h.payment().status).toBe("processing");
   });
 

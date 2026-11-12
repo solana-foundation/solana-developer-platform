@@ -213,6 +213,36 @@ describe("proposalRecovery (PRO-2435 D4)", () => {
       expect(new Headers(init?.headers).get("X-API-Key")).toBe(access.apiKey);
   });
 
+  it("reloads account-bound access after the worker read before a cancellation mutation", async () => {
+    const { fetch, runtime: rt } = recoveryRuntime();
+    const loadAccess = vi
+      .fn(async () => access)
+      .mockResolvedValueOnce(access)
+      .mockRejectedValueOnce(new Error("Fireblocks connection binding changed"));
+    const recovery = proposalRecovery(loadAccess, intent, async () => {}, rt);
+    await recovery.read(request.externalId);
+    await expect(recovery.cancel(request.externalId)).rejects.toThrow("binding changed");
+    expect(loadAccess).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0]?.[1]?.method).toBe("GET");
+  });
+
+  it("rechecks provider progress across the durable claim before cancelling", async () => {
+    const fetch = vi
+      .fn<CustodyProvisioningRuntime["fetch"]>()
+      .mockResolvedValueOnce(Response.json(detail))
+      .mockResolvedValueOnce(Response.json({ ...detail, status: "COMPLETED" }));
+    const loadAccess = vi.fn(async () => access);
+    const recovery = proposalRecovery(loadAccess, intent, async () => {}, {
+      ...proposalRuntime,
+      fetch,
+    });
+    expect((await recovery.read(request.externalId))?.status).toBe("PENDING_SIGNATURE");
+    await expect(recovery.cancel(request.externalId)).resolves.toBe(false);
+    expect(loadAccess).toHaveBeenCalledTimes(2);
+    expect(fetch.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "GET"]);
+  });
+
   it.each([
     { externalTxId: "another-payment" },
     { operation: "RAW" },

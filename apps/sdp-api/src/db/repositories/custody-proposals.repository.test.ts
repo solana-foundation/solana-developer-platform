@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  CUSTODY_PROPOSAL_CANCELLATION_RETRY_INTERVAL_MS,
   type CustodyProposalState,
   createCustodyProposalState,
 } from "@sdp/types/custody-proposals";
@@ -242,7 +243,7 @@ describe("CustodyProposalsRepository", () => {
     ).toBeNull();
   });
 
-  it("increments the version for a cancellation retry even when state is unchanged", async () => {
+  it("enforces the cancellation cooldown and allows only one concurrent retry", async () => {
     const { proposal } = await seedProposal("cancel_retry");
     const refused = await repo.transition({
       ...identity("cancel_retry"),
@@ -256,19 +257,31 @@ describe("CustodyProposalsRepository", () => {
       event: { type: "cancel_requested", at: NOW },
     });
     assert(requested);
+    expect(
+      await repo.transition({
+        ...identity("cancel_retry"),
+        expectedVersion: requested.proposal.version,
+        event: { type: "cancel_requested", at: NOW },
+      })
+    ).toBeNull();
+    expect(await repo.getForTransfer(identity("cancel_retry"))).toEqual(requested.proposal);
+    const retryAt = new Date(
+      Date.parse(NOW) + CUSTODY_PROPOSAL_CANCELLATION_RETRY_INTERVAL_MS
+    ).toISOString();
     const retries = await Promise.all(
       [1, 2].map(() =>
         repo.transition({
           ...identity("cancel_retry"),
           expectedVersion: requested.proposal.version,
-          event: { type: "cancel_requested", at: NOW },
+          event: { type: "cancel_requested", at: retryAt },
         })
       )
     );
     expect(retries.filter(Boolean)).toHaveLength(1);
-    expect((await repo.getForTransfer(identity("cancel_retry")))?.version).toBe(
-      requested.proposal.version + 1
-    );
+    expect(await repo.getForTransfer(identity("cancel_retry"))).toMatchObject({
+      version: requested.proposal.version + 1,
+      state: { cancelRequestedAt: retryAt },
+    });
   });
 
   it("rolls back the lifecycle CAS with the surrounding payment/audit transaction", async () => {
@@ -304,6 +317,79 @@ describe("CustodyProposalsRepository", () => {
       "viewed",
     ]);
     expect(await repo.claimDue(claimInput)).toEqual([]);
+  });
+
+  it.each(["viewer", "revocation"] as const)(
+    "protects a fresh unsent payment adopted by a %s until its creator claims submission",
+    async (adopter) => {
+      const transfer = await seedTransfer({
+        id: "mid_create",
+        createdAt: new Date(
+          Date.parse(NOW) - CUSTODY_PROPOSAL_DISCOVERY_GRACE_MS + 1
+        ).toISOString(),
+      });
+      if (adopter === "viewer") {
+        await repo.ensureForTransfer({
+          transfer,
+          provider: "fireblocks",
+          binding: BINDING,
+          state: createCustodyProposalState(),
+          now: NOW,
+        });
+      } else {
+        await requestPendingProposalRecovery(getDb(env), {
+          organizationId: ORGANIZATION.id,
+          projectId,
+          principal: PRINCIPAL,
+          now: NOW,
+        });
+      }
+      const proposal = await repo.getForTransfer(identity(transfer.id));
+      assert(proposal);
+      expect(proposal.state.providerPhase).toBe("unsent");
+      const [poll, due] = await Promise.all([
+        repo.claimForPoll({ ...identity(transfer.id), now: NOW, polledBefore: BEFORE }),
+        repo.claimDue(claimInput),
+      ]);
+      expect(poll).toBeNull();
+      expect(due).toEqual([]);
+      expect(await repo.getForTransfer(identity(transfer.id))).toEqual(proposal);
+
+      const claimed = await repo.transition({
+        ...identity(transfer.id),
+        expectedVersion: proposal.version,
+        event: { type: "submission_claimed", at: NOW },
+      });
+      expect(claimed?.proposal.state.providerPhase).toBe("submitting");
+      // Once the creator claims, both observation paths can recover immediately,
+      // including a revocation queued while creation was still in progress.
+      expect(
+        await repo.claimForPoll({ ...identity(transfer.id), now: NOW, polledBefore: BEFORE })
+      ).not.toBeNull();
+      expect((await repo.claimDue(claimInput)).map((row) => row.payment_transfer_id)).toEqual([
+        transfer.id,
+      ]);
+    }
+  );
+
+  it("recovers unsent payments at their original creation grace boundary", async () => {
+    const transfer = await seedTransfer({
+      id: "old_unsent",
+      createdAt: new Date(Date.parse(NOW) - CUSTODY_PROPOSAL_DISCOVERY_GRACE_MS).toISOString(),
+    });
+    await repo.ensureForTransfer({
+      transfer,
+      provider: "fireblocks",
+      binding: BINDING,
+      state: createCustodyProposalState(),
+      now: NOW,
+    });
+    expect(
+      await repo.claimForPoll({ ...identity(transfer.id), now: NOW, polledBefore: BEFORE })
+    ).not.toBeNull();
+    expect((await repo.claimDue(claimInput)).map((row) => row.payment_transfer_id)).toEqual([
+      transfer.id,
+    ]);
   });
 
   it("prioritizes revocations but reserves fair progress for ordinary proposals", async () => {

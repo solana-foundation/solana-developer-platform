@@ -10,6 +10,7 @@ import {
   type CustodyWalletPurpose,
   type CustodyWalletStatus,
   isByokCustodyProvider,
+  isProviderCredentialRevoked,
   type ProviderCredentialStatus,
 } from "@sdp/types/custody";
 import type { MovementId } from "@sdp/types/movements";
@@ -60,7 +61,6 @@ import {
 import {
   assertCustodyProviderEntitled,
   assertManagedCustodyUseAllowed,
-  CustodySetupRefusedError,
   custodyProviderNotInReleaseChannel,
   getProviderAvailability,
   isCustodyProviderEntitled,
@@ -91,6 +91,7 @@ interface RuntimeWallet {
   walletId: string;
   publicKey: Address;
   purpose: CustodyWalletPurpose | null;
+  status: CustodyWalletStatus;
 }
 
 interface ConfigRuntimeTarget {
@@ -195,7 +196,7 @@ interface ConfigWalletRow extends ConfigRow {
   wallet_id: string;
   wallet_public_key: string;
   wallet_purpose: string | null;
-  wallet_status: string;
+  wallet_status: CustodyWalletStatus;
 }
 
 export interface CustodyConnectionRuntimeAvailabilityFacts {
@@ -258,10 +259,10 @@ function isConnectionOwnedWalletRow(
 interface ConnectionCredentialRow {
   connection_id: string;
   provider: string;
-  connection_status: string;
-  last_check_status: string | null;
+  connection_status: CustodyConnectionLifecycle;
+  last_check_status: CustodyConnectionCheckStatus | null;
   provider_credential_id: string;
-  credential_status: string;
+  credential_status: ProviderCredentialStatus;
   provider_account_fingerprint: string | null;
   request_delay_ms: number | null;
   credential_version: number;
@@ -889,9 +890,13 @@ export class CustodyRuntimeTargets {
               "proposal_binding_changed",
               conflict("Custody connection does not match the payment intent")
             );
-          this.assertRuntimeExecutionAllowed(target, custodyWalletId);
           const credential = await this.loadConnectionCredential(target);
-          if (!credential || !isUsableCredentialOwner(credential))
+          if (target.wallet.status !== "active" || credential?.connection_status === "deactivated")
+            throw new ProposalAdmissionRefusedError(
+              RUNTIME_EXECUTION_UNAVAILABLE_REASON,
+              conflict("Custody Connection is unavailable")
+            );
+          if (!credential || isProviderCredentialRevoked(credential.credential_status))
             throw new ProposalAdmissionRefusedError(
               "provider_credential_unavailable",
               conflict("Custody Connection is unavailable")
@@ -914,23 +919,22 @@ export class CustodyRuntimeTargets {
             projectId,
             subjectId: custodyWalletId,
           });
+          // Health checks and deployment gates do not revoke the recorded authority.
+          // Check them after live policy so a real revocation still cancels during an outage.
+          this.assertRuntimeExecutionAllowed(target, custodyWalletId);
+          if (!isUsableCredentialOwner(credential))
+            throw conflict("Custody Connection is unavailable", {
+              reason: RUNTIME_EXECUTION_UNAVAILABLE_REASON,
+            });
         } catch (error) {
           if (error instanceof MoneyMovementRefusedError)
             throw new ProposalAdmissionRefusedError(error.reason, error);
-          if (error instanceof CustodySetupRefusedError)
-            throw new ProposalAdmissionRefusedError(error.details.reason, error);
           if (
             error instanceof AppError &&
             error.code === "FORBIDDEN" &&
             error.details?.reason === "provider_not_entitled"
           )
             throw new ProposalAdmissionRefusedError("provider_not_entitled", error);
-          if (
-            error instanceof AppError &&
-            error.code === "CONFLICT" &&
-            error.details?.reason === RUNTIME_EXECUTION_UNAVAILABLE_REASON
-          )
-            throw new ProposalAdmissionRefusedError(RUNTIME_EXECUTION_UNAVAILABLE_REASON, error);
           throw error;
         }
       }
@@ -1443,6 +1447,7 @@ export class CustodyRuntimeTargets {
         walletId: row.wallet_id,
         publicKey: row.wallet_public_key as Address,
         purpose: parseWalletPurpose(row.wallet_purpose),
+        status: row.wallet_status,
       },
       isRuntimeAvailable: row.status === "active" && row.wallet_status === "active",
     };
@@ -1537,6 +1542,7 @@ export class CustodyRuntimeTargets {
         walletId: row.wallet_id,
         publicKey: row.wallet_public_key as Address,
         purpose: parseWalletPurpose(row.wallet_purpose),
+        status: row.wallet_status,
       },
       isRuntimeAvailable: this.isConnectionRuntimeAvailable(row) && row.wallet_status === "active",
     };

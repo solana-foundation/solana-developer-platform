@@ -9,7 +9,7 @@ import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
 import { type MoneyPrincipal, moneyPrincipalSchema } from "@/lib/money-principal";
 
-/** Give a live sender time to claim before adopting an orphaned native payment. */
+/** Give a live sender time to claim before recovery observes an unsent payment. */
 export const CUSTODY_PROPOSAL_DISCOVERY_GRACE_MS = 2 * 60 * 1000;
 
 const SUCCESSFUL_SQL = SUCCESSFUL_PAYMENT_TRANSFER_STATUSES.map((status) => `'${status}'`).join(
@@ -106,7 +106,7 @@ export async function adoptLegacyCustodyProposals(
        refused_at, refusal_reason, refusal_message, cancel_requested_at,
        cancel_acknowledged_at, alerted_at, next_check_at, created_at, updated_at
      ) SELECT
-       'cproposal_legacy_' || pt.id, pt.organization_id, pt.project_id, pt.custody_wallet_id,
+       'cproposal_legacy_' || gen_random_uuid()::text, pt.organization_id, pt.project_id, pt.custody_wallet_id,
        pt.id, 'fireblocks', jsonb_build_object('version', 1, 'provider', 'fireblocks',
          'connectionId', pt.provider_data #> '{fireblocksTransfer,connectionId}',
          'accountFingerprint', pt.provider_data #> '{fireblocksTransfer,accountFingerprint}',

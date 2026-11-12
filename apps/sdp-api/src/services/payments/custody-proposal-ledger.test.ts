@@ -369,9 +369,11 @@ describe("custody proposal event ledger", () => {
       cancelRequestedAt: LATER,
       cancelAcknowledgedAt: null,
     });
-    const retried = await apply({ type: "cancel_requested", at: LAST });
-    expect(retried.proposal.state.cancelRequestedAt).toBe(LATER);
-    const accepted = await apply({ type: "cancel_accepted", at: LAST });
+    expect((await apply({ type: "cancel_requested", at: LAST })).written).toBe(false);
+    const retryAt = "2026-11-12T10:06:00.000Z";
+    const retried = await apply({ type: "cancel_requested", at: retryAt });
+    expect(retried.proposal.state.cancelRequestedAt).toBe(retryAt);
+    const accepted = await apply({ type: "cancel_accepted", at: retryAt });
     expect(accepted.transfer).toMatchObject({
       status: "processing",
       audit_intent_id: auditIntentId,
@@ -379,7 +381,7 @@ describe("custody proposal event ledger", () => {
     expect(accepted.proposal.state).toMatchObject({
       providerPhase: "pending",
       authorizationState: "cancel_acknowledged",
-      cancelAcknowledgedAt: LAST,
+      cancelAcknowledgedAt: retryAt,
     });
     expect((await auditEvents()).map((entry) => entry.metadata.eventType)).toEqual([
       "proposal_refused",

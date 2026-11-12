@@ -900,6 +900,14 @@ export const PROVIDER_CREDENTIAL_STATUSES = [
 ] as const;
 export type ProviderCredentialStatus = (typeof PROVIDER_CREDENTIAL_STATUSES)[number];
 
+/**
+ * Whether credential lifecycle explicitly withdrew its authority, rather than
+ * awaiting validation.
+ */
+export function isProviderCredentialRevoked(status: ProviderCredentialStatus): boolean {
+  return status === "retired" || status === "deactivated";
+}
+
 export function isProviderCredentialCreationInProgress(status: ProviderCredentialStatus): boolean {
   return status === "creating";
 }

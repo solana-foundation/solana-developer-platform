@@ -7,6 +7,7 @@ import { z } from "zod";
 import { createApp } from "@/app";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
+import { requestPendingProposalRecovery } from "@/db/repositories/proposal-recovery.repository";
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
@@ -21,6 +22,7 @@ import { systemProposalLedger } from "@/services/jobs/proposal-recovery-ledger";
 import { reconcilePendingProposals } from "@/services/jobs/reconcile-pending-proposals";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -322,6 +324,72 @@ async function transferAudit(transferId: string) {
 }
 
 describe("native Fireblocks BYOK payment routes", () => {
+  it.each(["status read", "revocation wake"] as const)(
+    "lets create claim a young payment after an overlapping %s",
+    async (trigger) => {
+      const mock = await ready();
+      const db = getDb(env);
+      const paused = deferred<string>();
+      const resume = deferred<void>();
+      const original = AuditService.prototype.beginCriticalWithin;
+      vi.spyOn(AuditService.prototype, "beginCriticalWithin").mockImplementationOnce(
+        async function (this: AuditService, ...args) {
+          const audit = await original.apply(this, args);
+          const row = await db.queryOne<{ id: string }>(
+            "SELECT id FROM payment_transfers WHERE organization_id = ?",
+            [ORGANIZATION_ID]
+          );
+          if (row === null) throw new Error("Expected a payment before the submission claim");
+          paused.resolve(row.id);
+          await resume.promise;
+          return audit;
+        }
+      );
+      const creating = send(`fireblocks-create-overlap-${trigger}`);
+      const id = await paused.promise;
+      try {
+        readMissing = true;
+        if (trigger === "status read") {
+          expect(await refresh(id)).toMatchObject({ status: "processing" });
+        } else {
+          await db.transaction((tx) =>
+            requestPendingProposalRecovery(tx, {
+              organizationId: ORGANIZATION_ID,
+              projectId: PROJECT_ID,
+              principal: { kind: "member", userId: USER_ID },
+              now: new Date().toISOString(),
+            })
+          );
+          expect(await recoverPendingProposal(id)).toMatchObject({ status: "processing" });
+        }
+        const proposal = await db.queryOne<{ provider_phase: string }>(
+          "SELECT provider_phase FROM custody_proposals WHERE payment_transfer_id = ?",
+          [id]
+        );
+        expect(proposal?.provider_phase).toBe("unsent");
+        expect(
+          mock.mock.calls.filter(([url]) => String(url).includes("/transactions/external_tx_id/"))
+        ).toHaveLength(0);
+      } finally {
+        readMissing = false;
+        resume.resolve();
+        const response = await creating;
+        expect(response.status, await response.clone().text()).toBe(200);
+        expect((await response.json()).data.transfer).toMatchObject({ status: "processing" });
+      }
+      const proposal = await db.queryOne<{ provider_phase: string }>(
+        "SELECT provider_phase FROM custody_proposals WHERE payment_transfer_id = ?",
+        [id]
+      );
+      expect(proposal?.provider_phase).toBe("pending");
+      expect(
+        mock.mock.calls.filter(
+          ([url, init]) => String(url).endsWith("/v1/transactions") && init?.method === "POST"
+        )
+      ).toHaveLength(1);
+    }
+  );
+
   it.each([undefined, SIG])(
     "keeps a COMPLETED create response pending until a verified detail read (hash: %s)",
     async (txHash) => {
@@ -1346,6 +1414,51 @@ async function useTransferApiKey(apiKeyId: string, grants: readonly Action[]) {
 }
 
 describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
+  it.each(["running", "failed"] as const)(
+    "retries a %s connection check without refusing or cancelling its pending payment",
+    async (check) => {
+      const mock = await ready();
+      const response = await send(`fireblocks-recovery-check-${check}`);
+      expect(response.status, await response.clone().text()).toBe(200);
+      const transfer = (await response.json()).data.transfer;
+      await getDb(env).execute(
+        "UPDATE custody_connections SET status = ?, last_check_status = ?, activated_at = NULL WHERE organization_id = ?",
+        [check === "running" ? "checking" : "failed", check, ORGANIZATION_ID]
+      );
+      const pending = await recoverPendingProposal(transfer.id);
+      expect(pending.status).toBe("processing");
+      expect(pending.provider_data.proposalRefusal).toBeUndefined();
+      expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(0);
+      await getDb(env).execute(
+        "UPDATE custody_connections SET status = 'active', last_check_status = 'success', activated_at = sdp_iso_now() WHERE organization_id = ?",
+        [ORGANIZATION_ID]
+      );
+      providerStatus = "COMPLETED";
+      const completed = await recoverPendingProposal(transfer.id);
+      expect(completed).toMatchObject({ status: "confirmed", signature: SIG });
+      expect(completed.provider_data.proposalRefusal).toBeUndefined();
+      expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(0);
+    }
+  );
+
+  it("retries a temporary release-channel restriction without cancelling a pending payment", async () => {
+    const mock = await ready();
+    const response = await send("fireblocks-recovery-channel");
+    expect(response.status, await response.clone().text()).toBe(200);
+    const transfer = (await response.json()).data.transfer;
+    testEnv.SDP_RELEASE_CHANNEL = "stable";
+    const pending = await recoverPendingProposal(transfer.id);
+    expect(pending.status).toBe("processing");
+    expect(pending.provider_data.proposalRefusal).toBeUndefined();
+    expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(0);
+    testEnv.SDP_RELEASE_CHANNEL = "beta";
+    providerStatus = "COMPLETED";
+    expect(await recoverPendingProposal(transfer.id)).toMatchObject({
+      status: "confirmed",
+      signature: SIG,
+    });
+  });
+
   it("records key revocation before cancellation, keeps acknowledgment pending, and closes only on CANCELLED", async () => {
     const mock = await ready();
     const apiKeyId = "key_fireblocks_revoked_pending";

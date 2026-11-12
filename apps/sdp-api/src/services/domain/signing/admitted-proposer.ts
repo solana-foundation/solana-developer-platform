@@ -317,6 +317,9 @@ export function proposalRecovery(
     ...proposalReader(loadAccess, runtime),
     admit,
     async cancel(externalId) {
+      // Admission and the durable cancellation claim can outlive the worker's observation.
+      // Reload account-bound access and detail immediately before the POST: credential
+      // rotation or provider progress must not reuse that earlier read across this boundary.
       const access = await loadAccess();
       const transaction = await readFireblocksTransfer(runtime, access, externalId);
       if (transaction === null) return false;

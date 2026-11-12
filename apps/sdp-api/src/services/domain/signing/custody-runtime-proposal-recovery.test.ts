@@ -1,4 +1,5 @@
 import { generateKeyPairSync } from "node:crypto";
+import { CUSTODY_CONNECTION_CHECK_STATUSES } from "@sdp/types/custody";
 import { MOVEMENTS } from "@sdp/types/movements";
 import { afterEach, aroundEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
@@ -241,6 +242,18 @@ describe("retained proposal recovery waist", () => {
       "runtime_execution_unavailable",
     ],
     [
+      "deactivated credential",
+      "UPDATE provider_credentials SET status = 'deactivated', deactivated_at = sdp_iso_now() WHERE id = ?",
+      credentialId,
+      "provider_credential_unavailable",
+    ],
+    [
+      "retired credential",
+      "UPDATE provider_credentials SET status = 'retired' WHERE id = ?",
+      credentialId,
+      "provider_credential_unavailable",
+    ],
+    [
       "suspended organization",
       "UPDATE organizations SET status = 'suspended' WHERE id = ?",
       organizationId,
@@ -279,12 +292,59 @@ describe("retained proposal recovery waist", () => {
     });
   });
 
-  it("classifies a release-channel withdrawal as a durable refusal", async () => {
+  it.each([...CUSTODY_CONNECTION_CHECK_STATUSES, null])(
+    "retries pending connection check %s and recovers after activation",
+    async (status) => {
+      const controller = await recovery();
+      const secretRead = vi.spyOn(credentialSecretStore, "createCredentialSecretStore");
+      const fetch = vi.spyOn(globalThis, "fetch");
+      await getDb(env).execute(
+        "UPDATE custody_connections SET status = 'pending', activated_at = NULL, last_check_status = ? WHERE id = ?",
+        [status, connectionId]
+      );
+      const admission = asKey(() => controller.admit());
+      await expect(admission).rejects.toMatchObject({
+        code: "CONFLICT",
+        details: { reason: "runtime_execution_unavailable" },
+      });
+      await expect(admission).rejects.not.toBeInstanceOf(ProposalAdmissionRefusedError);
+      await getDb(env).execute(
+        "UPDATE custody_connections SET status = 'active', activated_at = sdp_iso_now(), last_check_status = 'success' WHERE id = ?",
+        [connectionId]
+      );
+      await expect(asKey(() => controller.admit())).resolves.toBeUndefined();
+      expect(secretRead).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+    }
+  );
+
+  it("retries a release-channel configuration failure after the channel is restored", async () => {
     const controller = await recovery();
+    const secretRead = vi.spyOn(credentialSecretStore, "createCredentialSecretStore");
+    const fetch = vi.spyOn(globalThis, "fetch");
     testEnv.SDP_RELEASE_CHANNEL = "stable";
+    const admission = asKey(() => controller.admit());
+    await expect(admission).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      details: { reason: "custody_provider_not_in_release_channel" },
+    });
+    await expect(admission).rejects.not.toBeInstanceOf(ProposalAdmissionRefusedError);
+    testEnv.SDP_RELEASE_CHANNEL = "beta";
+    await expect(asKey(() => controller.admit())).resolves.toBeUndefined();
+    expect(secretRead).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("still refuses a revoked principal while a connection check is running", async () => {
+    const controller = await recovery();
+    await getDb(env).execute(
+      "UPDATE custody_connections SET status = 'checking', activated_at = NULL, last_check_status = 'running' WHERE id = ?",
+      [connectionId]
+    );
+    await getDb(env).execute("UPDATE api_keys SET status = 'revoked' WHERE id = ?", [apiKeyId]);
     await expect(asKey(() => controller.admit())).rejects.toMatchObject({
       name: "ProposalAdmissionRefusedError",
-      reason: "custody_provider_not_in_release_channel",
+      reason: "principal_not_live",
     });
   });
 

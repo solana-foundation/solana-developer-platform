@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
 const START = "2026-11-12T12:00:00.000Z";
 const LATER = "2026-11-12T12:01:00.000Z";
 const LAST = "2026-11-12T12:02:00.000Z";
+const RETRY = "2026-11-12T12:06:00.000Z";
 
 type Observation = Extract<CustodyProposalEvent, { type: "observed" }>;
 
@@ -260,7 +261,7 @@ describe("custody proposal state transitions", () => {
     const cancellable = apply(unknown, observation("pending", LAST)).next;
     expect(cancellable.authorizationState).toBe("refused");
     expect(cancellable.refusal).toEqual(refused().refusal);
-    expect(canRequestCustodyProposalCancellation(cancellable)).toBe(true);
+    expect(canRequestCustodyProposalCancellation(cancellable, LAST)).toBe(true);
   });
 
   it("does not invent a refusal after executing or completed observations", () => {
@@ -283,7 +284,7 @@ describe("custody proposal state transitions", () => {
   });
 
   it("stages cancellation before provider I/O and retries ambiguity without duplicate audit", () => {
-    expect(canRequestCustodyProposalCancellation(pending())).toBe(false);
+    expect(canRequestCustodyProposalCancellation(pending(), LATER)).toBe(false);
     expect(
       transitionCustodyProposal(pending(), { type: "cancel_requested", at: LATER })
     ).toHaveProperty("rejected");
@@ -292,10 +293,18 @@ describe("custody proposal state transitions", () => {
       { type: "audit", event: "proposal_cancellation_requested" },
       { type: "request_cancel" },
     ]);
-    expect(canRequestCustodyProposalCancellation(staged.next)).toBe(true);
-    const retry = apply(staged.next, { type: "cancel_requested", at: LAST });
-    expect(retry.next.cancelRequestedAt).toBe(LATER);
+    expect(canRequestCustodyProposalCancellation(staged.next, LAST)).toBe(false);
+    expect(
+      transitionCustodyProposal(staged.next, { type: "cancel_requested", at: LAST })
+    ).toHaveProperty("rejected");
+    expect(canRequestCustodyProposalCancellation(staged.next, "2026-11-12T12:05:59.999Z")).toBe(
+      false
+    );
+    expect(canRequestCustodyProposalCancellation(staged.next, RETRY)).toBe(true);
+    const retry = apply(staged.next, { type: "cancel_requested", at: RETRY });
+    expect(retry.next.cancelRequestedAt).toBe(RETRY);
     expect(retry.effects).toEqual([{ type: "request_cancel" }]);
+    expect(canRequestCustodyProposalCancellation(retry.next, RETRY)).toBe(false);
   });
 
   it("does not settle or close the payment when cancellation is acknowledged", () => {
@@ -303,7 +312,7 @@ describe("custody proposal state transitions", () => {
     expect(accepted.next.providerPhase).toBe("pending");
     expect(accepted.next.authorizationState).toBe("cancel_acknowledged");
     expect(accepted.effects).toEqual([{ type: "audit", event: "proposal_cancellation_accepted" }]);
-    expect(canRequestCustodyProposalCancellation(accepted.next)).toBe(false);
+    expect(canRequestCustodyProposalCancellation(accepted.next, RETRY)).toBe(false);
     expect(apply(accepted.next, { type: "cancel_accepted", at: LAST }).effects).toEqual([]);
     expect(
       transitionCustodyProposal(accepted.next, { type: "cancel_requested", at: LAST })
@@ -322,9 +331,13 @@ describe("custody proposal state transitions", () => {
     expect(declined.next.authorizationState).toBe("refused");
     expect(declined.next.refusal).toEqual(refused().refusal);
     expect(declined.effects).toEqual([{ type: "audit", event: "proposal_cancellation_declined" }]);
-    expect(apply(declined.next, { type: "cancel_requested", at: LAST }).effects).toContainEqual({
-      type: "request_cancel",
-    });
+    expect(canRequestCustodyProposalCancellation(declined.next, LAST)).toBe(false);
+    expect(
+      transitionCustodyProposal(declined.next, { type: "cancel_requested", at: LAST })
+    ).toHaveProperty("rejected");
+    const retry = apply(declined.next, { type: "cancel_requested", at: RETRY });
+    expect(retry.next.cancelRequestedAt).toBe(RETRY);
+    expect(retry.effects).toEqual([{ type: "request_cancel" }]);
   });
 
   it("stages a critical alert only for completion after an already durable refusal", () => {

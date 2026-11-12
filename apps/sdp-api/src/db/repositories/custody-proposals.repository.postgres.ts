@@ -17,7 +17,10 @@ import type {
   CustodyProposalRow,
   CustodyProposalsRepository,
 } from "./custody-proposals.repository";
-import { adoptLegacyCustodyProposals } from "./proposal-recovery.repository";
+import {
+  adoptLegacyCustodyProposals,
+  CUSTODY_PROPOSAL_DISCOVERY_GRACE_MS,
+} from "./proposal-recovery.repository";
 
 const timestampSchema = z.string().datetime();
 const nullableTimestampSchema = timestampSchema.nullable();
@@ -123,6 +126,9 @@ const STATE_COLUMNS = [
 ];
 const ACTIVE_PHASES_SQL = CUSTODY_PROPOSAL_ACTIVE_PHASES.map((phase) => `'${phase}'`).join(", ");
 const WORKER_INTERVAL_MS = 60_000;
+// A status read or authority wake may adopt a payment before its creator has
+// claimed submission. Only recovery waits; the create transition stays immediate.
+const SUBMISSION_GRACE_SQL = "(cp.provider_phase <> 'unsent' OR pt.created_at <= ?)";
 
 function recoveryScopeWhere(input: CustodyProposalRecoveryScope): {
   clauses: string[];
@@ -291,14 +297,28 @@ export function createPostgresCustodyProposalsRepository(
     },
     async claimForPoll(input) {
       assertScope(input);
+      const now = timestampSchema.parse(input.now);
+      const submissionBefore = new Date(
+        Date.parse(now) - CUSTODY_PROPOSAL_DISCOVERY_GRACE_MS
+      ).toISOString();
       const row = await db.queryOne(
-        `UPDATE custody_proposals
+        `UPDATE custody_proposals cp
             SET last_polled_at = ?
-          WHERE payment_transfer_id = ? AND organization_id = ? AND project_id = ?
-            AND status = 'active' AND provider_phase IN (${ACTIVE_PHASES_SQL})
-            AND (last_polled_at IS NULL OR last_polled_at < ?)
-          RETURNING *`,
-        [input.now, input.transferId, input.organizationId, input.projectId, input.polledBefore]
+           FROM payment_transfers pt
+          WHERE pt.id = cp.payment_transfer_id
+            AND cp.payment_transfer_id = ? AND cp.organization_id = ? AND cp.project_id = ?
+            AND cp.status = 'active' AND cp.provider_phase IN (${ACTIVE_PHASES_SQL})
+            AND ${SUBMISSION_GRACE_SQL}
+            AND (cp.last_polled_at IS NULL OR cp.last_polled_at < ?)
+          RETURNING cp.*`,
+        [
+          now,
+          input.transferId,
+          input.organizationId,
+          input.projectId,
+          submissionBefore,
+          input.polledBefore,
+        ]
       );
       return row ? mapProposal(row) : null;
     },
@@ -307,10 +327,14 @@ export function createPostgresCustodyProposalsRepository(
       const now = timestampSchema.parse(input.now);
       const limit = z.number().int().positive().max(1000).parse(input.limit);
       const scope = recoveryScopeWhere(input);
+      const submissionBefore = new Date(
+        Date.parse(now) - CUSTODY_PROPOSAL_DISCOVERY_GRACE_MS
+      ).toISOString();
       const clauses = [
         "p.environment = ?",
         `cp.provider_phase IN (${ACTIVE_PHASES_SQL})`,
         "cp.status = 'active'",
+        SUBMISSION_GRACE_SQL,
         "(cp.recheck_requested_at IS NOT NULL OR cp.next_check_at <= ?)",
         ...scope.clauses,
       ];
@@ -342,10 +366,12 @@ export function createPostgresCustodyProposalsRepository(
                      due.recheck_requested_at, due.next_check_at, cp.id`,
         [
           input.environment,
+          submissionBefore,
           now,
           ...scope.values,
           priorityLimit,
           input.environment,
+          submissionBefore,
           now,
           ...scope.values,
           limit,

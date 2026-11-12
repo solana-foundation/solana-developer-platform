@@ -4,8 +4,13 @@ import type { MoneyPrincipal } from "@/lib/money-principal";
 import { env } from "@/test/helpers/env";
 import { organizationMember, seedOrganizationMembers } from "@/test/helpers/organization-members";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { holdTransaction, untilLockWaiters } from "@/test/helpers/row-locks";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { requestPendingProposalRecovery } from "./proposal-recovery.repository";
+import {
+  adoptLegacyCustodyProposals,
+  CUSTODY_PROPOSAL_DISCOVERY_GRACE_MS,
+  requestPendingProposalRecovery,
+} from "./proposal-recovery.repository";
 
 const ORGANIZATION = { id: "org_proposal_recovery", slug: "proposal-recovery" };
 const FOREIGN_ORGANIZATION = {
@@ -27,6 +32,7 @@ async function seedTransfer(input: {
   organizationId?: string;
   status?: "processing" | "confirmed" | "failed";
   native?: boolean;
+  createdAt?: string;
 }): Promise<void> {
   await getDb(env).execute(
     `INSERT INTO payment_transfers
@@ -40,8 +46,8 @@ async function seedTransfer(input: {
       input.organizationId ?? ORGANIZATION.id,
       input.projectId ?? sandboxProjectId,
       input.status ?? "processing",
-      NOW,
-      NOW,
+      input.createdAt ?? NOW,
+      input.createdAt ?? NOW,
       JSON.stringify(input.native === false ? {} : { fireblocksTransfer: {} }),
       input.principal === null ? null : JSON.stringify(input.principal),
       KEY.apiKeyId,
@@ -128,6 +134,49 @@ describe("requestPendingProposalRecovery", () => {
 
     expect(await queuedIds()).toEqual(["member_production", "member_sandbox"]);
   });
+
+  it.each(["worker", "revocation"] as const)(
+    "keeps concurrent worker/revocation adoption atomic when %s inserts first",
+    async (first) => {
+      await seedTransfer({
+        id: "concurrent_adoption",
+        principal: KEY,
+        createdAt: new Date(Date.parse(NOW) - CUSTODY_PROPOSAL_DISCOVERY_GRACE_MS).toISOString(),
+      });
+      const db = getDb(env);
+      const workerAdopt = (tx: DatabaseExecutor) =>
+        adoptLegacyCustodyProposals(tx, { environment: "sandbox", now: NOW, limit: 50 });
+      const revokeAndQueue = (tx: DatabaseExecutor) =>
+        requestPendingProposalRecovery(tx, {
+          organizationId: ORGANIZATION.id,
+          principal: KEY,
+          now: NOW,
+        });
+      const lock = await holdTransaction(db, async (tx) => {
+        if (first === "worker") await workerAdopt(tx);
+        else await revokeAndQueue(tx);
+      });
+      const competing = db.transaction(async (tx) => {
+        if (first === "worker") await revokeAndQueue(tx);
+        else await workerAdopt(tx);
+      });
+      try {
+        // The loser has the same missing-row snapshot and reaches the unique
+        // index while the winner's insert remains uncommitted.
+        await untilLockWaiters(db, { fragment: "WITH clock AS", count: 1 });
+      } finally {
+        await lock.commit();
+      }
+      await competing;
+      expect(
+        await db.queryMany(
+          "SELECT payment_transfer_id FROM custody_proposals WHERE payment_transfer_id = ?",
+          ["concurrent_adoption"]
+        )
+      ).toEqual([{ payment_transfer_id: "concurrent_adoption" }]);
+      expect(await queuedIds()).toEqual(["concurrent_adoption"]);
+    }
+  );
 
   it("rolls the enqueue back with its authority transaction", async () => {
     await seedTransfer({ id: "transaction", principal: KEY });

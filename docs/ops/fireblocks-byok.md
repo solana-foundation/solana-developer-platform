@@ -363,10 +363,13 @@ GET and one Solana `getMultipleAccounts` request; mainnet and confirmed-signatur
 Pending native transfers are re-admitted by the recovery worker as the stored
 initiating principal, using live status, actions, wallet scope, organization,
 project controls and custody eligibility. A refusal is persisted before any
-cancellation request and remains sticky if authority is restored. Legacy rows
-without a principal refuse in every environment, including stage and writes from
-an older API revision during a rolling deploy; the audit actor is never a
-fallback authority.
+cancellation request and remains sticky if authority is restored. Connection
+health checks and deployment release-channel restrictions are availability
+failures: recovery retries them without recording refusal or cancelling.
+Explicit wallet, connection or credential revocation still refuses admission.
+Legacy rows without a principal refuse in every environment, including stage
+and writes from an older API revision during a rolling deploy; the audit actor
+is never a fallback authority.
 
 `custody_proposals` owns provider progress, sticky authorization decisions and
 recovery scheduling. The initiating principal and public status stay on the
@@ -375,8 +378,11 @@ proposal, payment projection, audit and pending cancellation or alert together.
 A stale observation loses its version check and cannot overwrite newer state.
 New proposal creation and its submission claim share one transaction, before any
 provider call. A crash before that transaction leaves only the payment intent;
-the worker adopts it after two minutes and observes by `externalTxId`. It never
-submits it automatically. Unclaimed proposals use the same authenticated absence
+the worker adopts it after two minutes and observes by `externalTxId`. Viewer
+reads or revocation wakes can adopt it earlier, but neither polling claim can
+observe an unsent proposal until that same two-minute grace has passed. The
+creator can still claim submission immediately. Recovery never submits it
+automatically. Unclaimed proposals use the same authenticated absence
 horizon as ambiguous submissions.
 
 Key revocation and member removal enqueue affected proposals in their database
@@ -396,11 +402,16 @@ create attempt. Removing those keys is a later contract migration.
 
 Recovery reads the proposal, validates its recorded account and intent, and
 rechecks live admission while the provider reports a known cancellable state.
-Cancellation makes another bound detail GET before one cancel POST. Normal
-worker observation adds one provider GET, zero Solana RPC; refusal adds at most
-one GET and one POST in that pass. Provider acknowledgment remains `processing`;
-only a terminal provider outcome closes the payment. A timeout or rejected cancel
-keeps the durable refusal for retry. An acknowledged cancel is polled to outcome.
+Cancellation reloads the account-bound credential and makes another bound detail
+GET before one cancel POST. This catches credential, binding or provider-state
+changes during admission and the durable cancellation write. Normal worker
+observation adds one provider GET, zero Solana RPC; refusal adds at most one GET
+and one POST in that pass. Provider acknowledgment remains `processing`; only a
+terminal provider outcome closes the payment. The first cancellation attempt is
+immediate; a timeout or rejected cancel keeps the durable refusal and retries no
+sooner than five minutes after the last attempt. Observations continue every
+minute during that cooldown, including completion-after-refusal alerts.
+An acknowledged cancel is polled to outcome.
 Signed, broadcasting, cancelling and unfamiliar states are observation-only.
 
 The first refusal, staged cancellation, cancellation acknowledgment and critical

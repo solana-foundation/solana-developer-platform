@@ -98,10 +98,11 @@ async function recoverProposal(env: Env, ledger: ProposalLedger, snapshot: Custo
     });
     if (!current.written) return;
   }
-  if (!canRequestCustodyProposalCancellation(current.proposal.state)) return;
+  const cancellationAt = new Date().toISOString();
+  if (!canRequestCustodyProposalCancellation(current.proposal.state, cancellationAt)) return;
   current = await applyProposalEvent(ledger, current.transfer, current.proposal, {
     type: "cancel_requested",
-    at: new Date().toISOString(),
+    at: cancellationAt,
   });
   if (!current.written) return;
   // Only the durable CAS winner calls cancel. A timeout retains retry work; acknowledgment

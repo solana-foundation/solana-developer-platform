@@ -103,6 +103,7 @@ export const custodyProposalStateSchema = z.strictObject({
   submissionStartedAt: timestampSchema.nullable(),
   firstMissingAt: timestampSchema.nullable(),
   refusal: custodyProposalRefusalSchema.nullable(),
+  /** Latest durable cancellation attempt, including calls with an ambiguous result. */
   cancelRequestedAt: timestampSchema.nullable(),
   cancelAcknowledgedAt: timestampSchema.nullable(),
   alertedAt: timestampSchema.nullable(),
@@ -169,6 +170,9 @@ export type CustodyProposalTransition =
 /** Absence is conclusive only after repeated reads and without an accepted provider ID. */
 export const CUSTODY_PROPOSAL_ABSENCE_HORIZON_MS = 24 * 60 * 60 * 1000;
 
+/** Declined or ambiguous cancellations retry at most once per five minutes. */
+export const CUSTODY_PROPOSAL_CANCELLATION_RETRY_INTERVAL_MS = 5 * 60 * 1000;
+
 /** Starts an unclaimed proposal without assuming a provider accepted anything. */
 export function createCustodyProposalState(): CustodyProposalState {
   return {
@@ -196,14 +200,20 @@ export function isCancellableCustodyProposalPhase(phase: CustodyProposalProvider
   return CUSTODY_PROPOSAL_CANCELLABLE_PHASES.some((candidate) => candidate === phase);
 }
 
-/** A repeated requested state can claim a retry after an ambiguous provider call. */
-export function canRequestCustodyProposalCancellation(state: CustodyProposalState): boolean {
+/** The first cancellation is immediate; later claims share a durable retry cooldown. */
+export function canRequestCustodyProposalCancellation(
+  state: CustodyProposalState,
+  at: string
+): boolean {
   return (
     isCancellableCustodyProposalPhase(state.providerPhase) &&
     state.refusal !== null &&
     CUSTODY_PROPOSAL_CANCELLATION_READY_AUTHORIZATION_STATES.some(
       (candidate) => candidate === state.authorizationState
-    )
+    ) &&
+    (state.cancelRequestedAt === null ||
+      Date.parse(at) - Date.parse(state.cancelRequestedAt) >=
+        CUSTODY_PROPOSAL_CANCELLATION_RETRY_INTERVAL_MS)
   );
 }
 
@@ -279,11 +289,8 @@ function cancellation(
 ): CustodyProposalTransition {
   switch (event.type) {
     case "cancel_requested":
-      if (!canRequestCustodyProposalCancellation(state)) {
-        return rejected("Cancellation requires a pending refusal without acknowledgment");
-      }
-      if (state.authorizationState === "cancel_requested") {
-        return { next: state, effects: [{ type: "request_cancel" }] };
+      if (!canRequestCustodyProposalCancellation(state, event.at)) {
+        return rejected("Cancellation requires a pending refusal and an elapsed retry cooldown");
       }
       return {
         next: {
@@ -291,10 +298,13 @@ function cancellation(
           authorizationState: "cancel_requested",
           cancelRequestedAt: event.at,
         },
-        effects: [
-          { type: "audit", event: "proposal_cancellation_requested" },
-          { type: "request_cancel" },
-        ],
+        effects:
+          state.cancelRequestedAt === null
+            ? [
+                { type: "audit", event: "proposal_cancellation_requested" },
+                { type: "request_cancel" },
+              ]
+            : [{ type: "request_cancel" }],
       };
     case "cancel_accepted":
       if (isTerminalCustodyProposalPhase(state.providerPhase)) {
