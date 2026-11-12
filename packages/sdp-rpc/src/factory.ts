@@ -696,13 +696,17 @@ function managedPoolEndpoints(cluster: SolanaCluster): PoolEndpoint[] {
 }
 
 /**
- * Boot check for deployments that must serve every cluster: each cluster's managed pool names at
- * least one endpoint, so `createClusterRpc()` never answers `not_configured` at request time.
+ * Boot check for managed deployments: each cluster the deployment serves has a managed pool that
+ * names at least one endpoint, so `createClusterRpc()` never answers `not_configured` at request
+ * time.
  *
+ * @param clusters - The clusters this deployment serves; every cluster unless it admits fewer.
  * @throws RpcUnavailableError `not_configured` naming the first cluster with no endpoint.
  */
-export function assertManagedRpcConfigured(): void {
-  for (const cluster of SOLANA_CLUSTERS) {
+export function assertManagedRpcConfigured(
+  clusters: readonly SolanaCluster[] = SOLANA_CLUSTERS
+): void {
+  for (const cluster of clusters) {
     managedPoolEndpoints(cluster);
   }
 }

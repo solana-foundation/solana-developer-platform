@@ -11,7 +11,9 @@ import { pathToFileURL } from "node:url";
 import { type ServerType, serve } from "@hono/node-server";
 import { assertKoraConfigured } from "@sdp/fee-payment";
 import { assertManagedRpcConfigured } from "@sdp/rpc/factory";
+import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 
 import { createApp } from "@/app";
 import { assertCronConfig, type CronHandle, startCron } from "@/cron/runner";
@@ -19,6 +21,7 @@ import { parseDatabaseEnv } from "@/db/database-env";
 import { assertClerkConfigured, warmClerkSigningKeys } from "@/lib/clerk-token";
 import { assertSdpReleaseChannelConfigured } from "@/lib/feature-flags";
 import { resolveGatewayIdentityConfig } from "@/lib/gateway-identity";
+import { productionProjectsAllowed } from "@/lib/production-entitlement";
 import { getProcessEnv, isSelfHostedDeployment } from "@/lib/runtime-env";
 import { extraAllowedOrigins } from "@/middleware/cors";
 import { createNodeExecutionContext, NodeBackgroundRunner } from "@/runtime/background-node";
@@ -97,6 +100,16 @@ function shouldShutdownOnUnhandledRejection(): boolean {
 // and reach branches that gate dev-only behaviour on `ENVIRONMENT === "production"`.
 const ALLOWED_ENVIRONMENTS: ReadonlySet<string> = new Set(["development", "production"]);
 
+/**
+ * The clusters this deployment serves: both, unless it admits no production project, which
+ * serves devnet alone and mounts no mainnet RPC.
+ */
+function servedClusters(env: Env): SolanaCluster[] {
+  return SDP_ENVIRONMENTS.filter(
+    (environment) => environment !== "production" || productionProjectsAllowed(env)
+  ).map((environment) => CLUSTER_BY_SDP_ENVIRONMENT[environment]);
+}
+
 export function assertRequiredEnv(env: Env): void {
   if (!env.ENVIRONMENT) {
     throw new Error("ENVIRONMENT is required (set to 'development' or 'production')");
@@ -132,7 +145,7 @@ export function assertRequiredEnv(env: Env): void {
     requireCloudRunAudience: env.ENVIRONMENT === "production" && !isSelfHostedDeployment(env),
   });
   if (!isSelfHostedDeployment(env)) {
-    assertManagedRpcConfigured();
+    assertManagedRpcConfigured(servedClusters(env));
   }
 }
 
