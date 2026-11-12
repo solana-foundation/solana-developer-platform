@@ -62,12 +62,24 @@ function readMigration(migrationFile: string) {
 const LAST_SHARED_MIGRATION_NUMBER = 125;
 
 /**
- * Later numbers two merged files share. Both files have run wherever their revision deployed, and
- * renaming either would run it again, so a pair stays once it ships. Each pair here touches
- * different tables, so the suffix order between them changes nothing:
- * - 226: `payment_transfer_batches_drop_options` (#2849) and `payment_transfer_principal` (#2864).
+ * Later pairs of merged files that share a number. Both files have run wherever their revision
+ * deployed, and renaming either would run it again, so a pair stays once it ships. Each pair here
+ * touches different tables, so the suffix order between them changes nothing. Only these exact
+ * files share the number: a third file with it still fails.
+ * - 226: #2849 and #2864.
  */
-const SHIPPED_SHARED_MIGRATION_NUMBERS: ReadonlySet<number> = new Set([226]);
+const SHIPPED_SHARED_MIGRATIONS: ReadonlyMap<number, readonly string[]> = new Map([
+  [226, ["0226_payment_transfer_batches_drop_options.sql", "0226_payment_transfer_principal.sql"]],
+]);
+
+function isShippedPair(number: number, names: readonly string[]): boolean {
+  const shipped = SHIPPED_SHARED_MIGRATIONS.get(number);
+  return (
+    shipped !== undefined &&
+    names.length === shipped.length &&
+    [...names].sort().every((name, index) => name === shipped[index])
+  );
+}
 
 describe("Postgres migration numbering", () => {
   it("gives every migration after the historical pairs its own number", () => {
@@ -85,9 +97,7 @@ describe("Postgres migration numbering", () => {
     const shared = [...byNumber]
       .filter(
         ([number, names]) =>
-          number > LAST_SHARED_MIGRATION_NUMBER &&
-          !SHIPPED_SHARED_MIGRATION_NUMBERS.has(number) &&
-          names.length > 1
+          number > LAST_SHARED_MIGRATION_NUMBER && !isShippedPair(number, names) && names.length > 1
       )
       .map(([, names]) => names.sort());
     expect(shared).toEqual([]);
