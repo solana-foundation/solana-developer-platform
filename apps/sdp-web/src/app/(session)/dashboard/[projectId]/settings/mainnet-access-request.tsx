@@ -182,6 +182,45 @@ function MainnetAccessRequestModal({
     });
   };
 
+  const stepBody = (current: Exclude<Step, "sent">): ReactNode => {
+    switch (current) {
+      case "jurisdiction":
+        return (
+          <JurisdictionStep
+            countryCode={jurisdiction.values.countryCode}
+            onChange={(code) => jurisdiction.setField("countryCode", code)}
+          />
+        );
+      case "about":
+        return (
+          <AboutStep
+            hasContact={about.values.hasContact}
+            onHasContactChange={(answer) => about.setField("hasContact", answer)}
+            contactEmail={about.values.contactEmail}
+            onContactEmailChange={(email) => about.setField("contactEmail", email)}
+            contactEmailError={about.errors.contactEmail}
+            useCase={about.values.useCase}
+            onUseCaseChange={(useCase) => about.setField("useCase", useCase)}
+          />
+        );
+      case "terms":
+        return (
+          <TermsStep
+            organizationName={organizationName}
+            readToEnd={readToEnd}
+            onReadToEnd={() => setReadToEnd(true)}
+            accepted={terms.values.accepted}
+            onAcceptedChange={(accepted) => terms.setField("accepted", accepted)}
+            disabled={submitting}
+          />
+        );
+      default: {
+        const exhaustive: never = current;
+        throw new Error(`Unhandled mainnet request step: ${String(exhaustive)}`);
+      }
+    }
+  };
+
   return (
     <Modal
       isOpen
@@ -209,31 +248,7 @@ function MainnetAccessRequestModal({
             />
           </div>
 
-          {step === "jurisdiction" ? (
-            <JurisdictionStep
-              countryCode={jurisdiction.values.countryCode}
-              onChange={(code) => jurisdiction.setField("countryCode", code)}
-            />
-          ) : step === "about" ? (
-            <AboutStep
-              hasContact={about.values.hasContact}
-              onHasContactChange={(answer) => about.setField("hasContact", answer)}
-              contactEmail={about.values.contactEmail}
-              onContactEmailChange={(email) => about.setField("contactEmail", email)}
-              contactEmailError={about.errors.contactEmail}
-              useCase={about.values.useCase}
-              onUseCaseChange={(useCase) => about.setField("useCase", useCase)}
-            />
-          ) : (
-            <TermsStep
-              organizationName={organizationName}
-              readToEnd={readToEnd}
-              onReadToEnd={() => setReadToEnd(true)}
-              accepted={terms.values.accepted}
-              onAcceptedChange={(accepted) => terms.setField("accepted", accepted)}
-              disabled={submitting}
-            />
-          )}
+          {stepBody(step)}
 
           {error ? (
             <p className="text-sm text-destructive" role="alert">

@@ -28,17 +28,15 @@ const MAINNET_ACCESS_EVENTS = [
   "sdp_api_mainnet_access_request_notified",
   "sdp_api_mainnet_access_request_notify_failed",
 ];
-const REQUESTED_EVENT = [
-  "info",
-  {
-    event: "sdp_api_mainnet_access_requested",
-    organization_id: ORGANIZATION_ID,
-    user_id: TEST_USER.id,
-    country_code: "SG",
-    terms_version: SDP_TERMS.version,
-    foundation_contact_stated: false,
-  },
-];
+const REQUESTED_FIELDS = {
+  event: "sdp_api_mainnet_access_requested",
+  organization_id: ORGANIZATION_ID,
+  user_id: TEST_USER.id,
+  country_code: "SG",
+  terms_version: SDP_TERMS.version,
+  foundation_contact_stated: false,
+};
+const REQUESTED_EVENT = ["info", REQUESTED_FIELDS];
 const NOTIFIED_EVENT = [
   "info",
   { event: "sdp_api_mainnet_access_request_notified", organization_id: ORGANIZATION_ID },
@@ -326,7 +324,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
     expect(text).toContain("Solana Foundation contact: jo.bd@solana.org");
     expect(text).toContain("Building: Stablecoin payouts for freelancers in Southeast Asia");
     expect(loggedEvents()).toEqual([
-      [REQUESTED_EVENT[0], { ...(REQUESTED_EVENT[1] as object), foundation_contact_stated: true }],
+      ["info", { ...REQUESTED_FIELDS, foundation_contact_stated: true }],
       NOTIFIED_EVENT,
     ]);
   });
