@@ -41,6 +41,7 @@ export function registerHealthPaths(registry: OpenAPIRegistry) {
               timestamp: "2025-01-01T00:00:00.000Z",
               revision: "sdp-prod-api-public-00042-abc",
               commit: "0123456789abcdef0123456789abcdef01234567",
+              releaseChannel: "stable",
               checks: { database: "ok", redis: "error", egress: "ok" },
             },
           })

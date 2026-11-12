@@ -8,6 +8,7 @@ import { getDb } from "@/db/client";
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
+import type { MoneyPrincipal } from "@/lib/money-principal";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { internalCustody } from "@/routes/internal-custody";
 import { AuditService } from "@/services/audit.service";
@@ -273,6 +274,33 @@ async function refresh(id: string) {
   return (await response.json()).data.transfer;
 }
 
+/** The row's open audit intent and the outcomes appended for it, oldest first. */
+async function transferAudit(transferId: string) {
+  const db = getDb(env);
+  const row = await db.queryOne<{ audit_intent_id: string | null }>(
+    "SELECT audit_intent_id FROM payment_transfers WHERE id = ?",
+    [transferId]
+  );
+  const outcomes = await db.queryMany<{
+    status: string;
+    metadata: string | Record<string, unknown>;
+  }>(
+    `SELECT status, metadata FROM audit_logs
+      WHERE action = 'transfer' AND resource_type = 'payment_transfer' AND resource_id = ?
+        AND metadata::jsonb->>'auditPhase' = 'outcome'
+      ORDER BY ledger_sequence`,
+    [transferId]
+  );
+  return {
+    openIntent: row?.audit_intent_id != null,
+    outcomes: outcomes.map((outcome) => ({
+      status: outcome.status,
+      metadata:
+        typeof outcome.metadata === "string" ? JSON.parse(outcome.metadata) : outcome.metadata,
+    })),
+  };
+}
+
 describe("native Fireblocks BYOK payment routes", () => {
   it.each([undefined, SIG])(
     "keeps a COMPLETED create response pending until a verified detail read (hash: %s)",
@@ -496,6 +524,124 @@ describe("native Fireblocks BYOK payment routes", () => {
     expect(await refresh(transfer.id)).toMatchObject({ status: "confirmed", signature: SIG });
     expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
+  it.each(["member", "api_key"] as const)(
+    "records the initiating %s before the provider POST and keeps it on replay",
+    async (kind) => {
+      const mock = await ready();
+      const db = getDb(env);
+      const apiKeyId = "key_fireblocks_principal";
+      const principal: MoneyPrincipal =
+        kind === "member" ? { kind: "member", userId: USER_ID } : { kind: "api_key", apiKeyId };
+      if (kind === "api_key") {
+        const raw = `sk_test_${crypto.randomUUID().replaceAll("-", "")}`;
+        await seedProjectApiKey(db, testEnv, {
+          key: { id: apiKeyId, raw, prefix: raw.slice(0, 16) },
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          createdBy: USER_ID,
+          grants: ["transfers.execute"],
+        });
+        token = raw;
+      }
+      let principalAtSubmission: MoneyPrincipal | null | undefined;
+      const provider = mock.getMockImplementation();
+      if (!provider) throw new Error("Expected Fireblocks provider mock");
+      mock.mockImplementation(async (url, init) => {
+        if (String(url).endsWith("/v1/transactions") && init?.method === "POST") {
+          const proposal = z
+            .object({ externalTxId: z.string() })
+            .parse(JSON.parse(String(init.body)));
+          const row = await db.queryOne<{ initiated_by_principal: MoneyPrincipal | null }>(
+            "SELECT initiated_by_principal FROM payment_transfers WHERE id = ?",
+            [proposal.externalTxId]
+          );
+          principalAtSubmission = row?.initiated_by_principal;
+        }
+        return provider(url, init);
+      });
+      const key = `fireblocks-principal-${kind}`;
+      const response = await send(key);
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(principalAtSubmission).toEqual(principal);
+      const raw = await response.text();
+      const transfer = z
+        .object({ data: z.object({ transfer: z.object({ id: z.string() }) }) })
+        .parse(JSON.parse(raw)).data.transfer;
+      expect(raw).not.toContain('"initiated_by_principal"');
+      expect(raw).not.toContain('"initiatedByPrincipal"');
+
+      await expireIdempotencyKey(key);
+      const replay = await send(key);
+      expect(replay.status, await replay.clone().text()).toBe(200);
+      const replayRaw = await replay.text();
+      expect(JSON.parse(replayRaw).data.transfer.id).toBe(transfer.id);
+      expect(replayRaw).not.toContain('"initiated_by_principal"');
+      expect(replayRaw).not.toContain('"initiatedByPrincipal"');
+      const row = await db.queryOne<{ initiated_by_principal: MoneyPrincipal | null }>(
+        "SELECT initiated_by_principal FROM payment_transfers WHERE id = ?",
+        [transfer.id]
+      );
+      expect(row?.initiated_by_principal).toEqual(principal);
+      expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    }
+  );
+
+  it.each(["initiatedByPrincipal", "initiated_by_principal"])(
+    "rejects a caller-supplied %s before creating a transfer",
+    async (field) => {
+      const mock = await ready();
+      const response = await send("fireblocks-spoofed-principal", {
+        [field]: { kind: "api_key", apiKeyId: "another-principal" },
+      });
+      expect(response.status).toBe(400);
+      expect(mock).not.toHaveBeenCalled();
+      const row = await getDb(env).queryOne<{ count: number }>(
+        "SELECT COUNT(*)::int AS count FROM payment_transfers WHERE organization_id = ?",
+        [ORGANIZATION_ID]
+      );
+      expect(row?.count).toBe(0);
+    }
+  );
+
+  it("keeps the original principal private and unchanged when another principal reads the transfer", async () => {
+    const mock = await ready();
+    const response = await send("fireblocks-principal-viewer");
+    expect(response.status, await response.clone().text()).toBe(200);
+    const id = (await response.json()).data.transfer.id;
+    const db = getDb(env);
+    const raw = `sk_test_${crypto.randomUUID().replaceAll("-", "")}`;
+    await seedProjectApiKey(db, testEnv, {
+      key: { id: "key_fireblocks_viewer", raw, prefix: raw.slice(0, 16) },
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      createdBy: USER_ID,
+      grants: ["transfers.read"],
+    });
+    token = raw;
+    const detail = await refresh(id);
+    expect(detail.id).toBe(id);
+    expect(detail).not.toHaveProperty("initiated_by_principal");
+    expect(detail).not.toHaveProperty("initiatedByPrincipal");
+    const listed = await paymentApp.request(
+      `/v1/payments/transfers?custodyWalletId=${walletId}`,
+      { headers: { Authorization: `Bearer ${token}`, "X-Project-ID": PROJECT_ID } },
+      testEnv
+    );
+    expect(listed.status, await listed.clone().text()).toBe(200);
+    const listRaw = await listed.text();
+    expect(JSON.parse(listRaw).data).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id })])
+    );
+    expect(listRaw).not.toContain('"initiated_by_principal"');
+    expect(listRaw).not.toContain('"initiatedByPrincipal"');
+    const row = await db.queryOne<{ initiated_by_principal: MoneyPrincipal | null }>(
+      "SELECT initiated_by_principal FROM payment_transfers WHERE id = ?",
+      [id]
+    );
+    expect(row?.initiated_by_principal).toEqual({ kind: "member", userId: USER_ID });
+    expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
   it("maps USDC by exact mint and network and rejects unsupported assets and precision", async () => {
     const mock = await ready();
     const response = await send("usdc", { token: USDC, amount: "0.123456" });
@@ -606,6 +752,128 @@ describe("native Fireblocks BYOK payment routes", () => {
       expect(raw).not.toContain("private provider text");
     }
     expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+  it.each(["status read", "cron"] as const)(
+    "keeps the audit intent open while approval is pending and closes it once on settlement (%s)",
+    async (settledBy) => {
+      await ready();
+      const response = await send();
+      expect(response.status, await response.clone().text()).toBe(200);
+      const transfer = (await response.json()).data.transfer;
+      expect(await transferAudit(transfer.id)).toMatchObject({ openIntent: true, outcomes: [] });
+      // An observation that ends nothing leaves the intent for the settle.
+      providerStatus = "PENDING_SIGNATURE";
+      await refresh(transfer.id);
+      expect(await transferAudit(transfer.id)).toMatchObject({ openIntent: true, outcomes: [] });
+
+      providerStatus = settledBy === "cron" ? "REJECTED" : "COMPLETED";
+      if (settledBy === "cron") {
+        await getDb(env).execute(
+          "UPDATE payment_transfers SET provider_data = provider_data - 'fireblocksLastPolledAt' WHERE id = ?",
+          [transfer.id]
+        );
+        await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+          trackPendingTransfers(testEnv)
+        );
+      } else {
+        expect(await refresh(transfer.id)).toMatchObject({ status: "confirmed" });
+      }
+      const settled = await transferAudit(transfer.id);
+      expect(settled.openIntent).toBe(false);
+      expect(settled.outcomes).toHaveLength(1);
+      expect(settled.outcomes[0]).toMatchObject(
+        settledBy === "cron"
+          ? {
+              status: "failure",
+              metadata: {
+                auditPhase: "outcome",
+                status: "failed",
+                fireblocksStatus: "REJECTED",
+                fireblocksTransactionId: "fb-proposal",
+              },
+            }
+          : {
+              status: "success",
+              metadata: {
+                auditPhase: "outcome",
+                status: "confirmed",
+                fireblocksStatus: "COMPLETED",
+                fireblocksTransactionId: "fb-proposal",
+                signature: SIG,
+              },
+            }
+      );
+      // Later reads append nothing.
+      await refresh(transfer.id);
+      expect((await transferAudit(transfer.id)).outcomes).toHaveLength(1);
+    }
+  );
+  it("closes the audit intent once when Fireblocks blocks the proposal immediately", async () => {
+    await ready();
+    providerStatus = "BLOCKED";
+    createResultPatch = { subStatus: "BLOCKED_BY_POLICY" };
+    expect((await send()).status).toBe(422);
+    const row = await getDb(env).queryOne<{ id: string }>(
+      "SELECT id FROM payment_transfers WHERE organization_id = ?",
+      [ORGANIZATION_ID]
+    );
+    if (!row) throw new Error("Expected blocked payment");
+    const audit = await transferAudit(row.id);
+    expect(audit.openIntent).toBe(false);
+    expect(audit.outcomes).toEqual([
+      expect.objectContaining({
+        status: "failure",
+        metadata: expect.objectContaining({ status: "failed", fireblocksStatus: "BLOCKED" }),
+      }),
+    ]);
+  });
+  it("rolls the settle back when the audit append fails, and a retry records exactly one outcome", async () => {
+    await ready();
+    const response = await send();
+    expect(response.status, await response.clone().text()).toBe(200);
+    const transfer = (await response.json()).data.transfer;
+    providerStatus = "COMPLETED";
+    // Run the settle's real writes (transfer update, intent close), then fail inside the same
+    // transaction, as an audit append failure would.
+    const original = AuditService.prototype.logWithin;
+    vi.spyOn(AuditService.prototype, "logWithin").mockImplementationOnce(async function (
+      this: AuditService,
+      c,
+      work
+    ) {
+      return original.call(this, c, async (tx) => {
+        await work(tx);
+        throw new Error("audit append failed");
+      });
+    });
+    await getDb(env).execute(
+      "UPDATE payment_transfers SET provider_data = provider_data - 'fireblocksLastPolledAt' WHERE id = ?",
+      [transfer.id]
+    );
+    const failed = await paymentApp.request(
+      `/v1/payments/transfers/${transfer.id}`,
+      { headers: { Authorization: `Bearer ${token}`, "X-Project-ID": PROJECT_ID } },
+      testEnv
+    );
+    // The read degrades to the stored row rather than reporting an outcome it could not record.
+    expect(failed.status, await failed.clone().text()).toBe(200);
+    expect((await failed.json()).data.transfer).toMatchObject({ status: "processing" });
+    const row = await getDb(env).queryOne<{ status: string }>(
+      "SELECT status FROM payment_transfers WHERE id = ?",
+      [transfer.id]
+    );
+    expect(row?.status).toBe("processing");
+    expect(await transferAudit(transfer.id)).toMatchObject({ openIntent: true, outcomes: [] });
+
+    expect(await refresh(transfer.id)).toMatchObject({ status: "confirmed" });
+    const settled = await transferAudit(transfer.id);
+    expect(settled.openIntent).toBe(false);
+    expect(settled.outcomes).toEqual([
+      expect.objectContaining({
+        status: "success",
+        metadata: expect.objectContaining({ status: "confirmed", fireblocksStatus: "COMPLETED" }),
+      }),
+    ]);
   });
   it("does not expose credentials and blocks another project from reading or executing this wallet", async () => {
     const mock = await ready();
@@ -917,6 +1185,38 @@ describe("native Fireblocks BYOK payment routes", () => {
     expect(await refresh(row.id)).toMatchObject({ status: "failed" });
     await send();
     expect(mock).not.toHaveBeenCalled();
+  });
+
+  it("decides admission in the custody waist at proposal time, refusing a movement disabled after preparation", async () => {
+    // PRO-2435 D2: the proposal goes through the same waist decision a signature does, so a
+    // project movement control (HOO-2334) landing between preparation and the POST still holds.
+    const mock = await ready();
+    const db = getDb(env);
+    const original = AuditService.prototype.beginCriticalWithin;
+    vi.spyOn(AuditService.prototype, "beginCriticalWithin").mockImplementation(async function (
+      this: AuditService,
+      ...args
+    ) {
+      const audit = await original.apply(this, args);
+      await db.execute(
+        "UPDATE projects SET disabled_movements = ARRAY['payments.transfer']::text[] WHERE id = ?",
+        [PROJECT_ID]
+      );
+      return audit;
+    });
+    const response = await send();
+    expect(response.status, await response.clone().text()).toBe(403);
+    expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    const row = await db.queryOne<{
+      status: string;
+      provider_reference: string | null;
+      code: string | null;
+    }>(
+      `SELECT status, provider_reference, provider_data->'executionFailure'->>'code' AS code
+         FROM payment_transfers WHERE organization_id = ?`,
+      [ORGANIZATION_ID]
+    );
+    expect(row).toMatchObject({ status: "failed", provider_reference: null, code: "FORBIDDEN" });
   });
 
   it("refuses a disabled connection before contacting Fireblocks", async () => {

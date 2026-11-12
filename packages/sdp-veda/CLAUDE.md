@@ -3,8 +3,9 @@
 Kit-native deposit **instruction building** for Veda's SVM vaults, plus the live
 position read. It builds unsigned plans and reads chain state; it never signs,
 never submits, never touches a database, and holds no runtime credential —
-Veda's vaults are reached entirely on chain. Signing and submission belong to
-the API, which owns custody.
+Veda's vaults are reached entirely on chain. The API coordinates submission and
+signing: external owners sign with their wallet; Treasury uses the
+organization's configured custody provider.
 
 Read `packages/sdp-earn/CLAUDE.md` for the catalogue side (what a Veda vault row
 IS) and ADR 0002 for the pluggability invariants. `packages/sdp-kamino` is the

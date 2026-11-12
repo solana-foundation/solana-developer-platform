@@ -143,6 +143,7 @@ describe("POST /v1/organizations", () => {
     await clearKVStores(env);
     env.CLERK_API_URL = undefined;
     env.CLERK_SECRET_KEY = undefined;
+    env.SDP_ALLOW_PRODUCTION_PROJECTS = undefined;
   });
 
   it("creates a new person's organization in Clerk with no creator, then their admin membership and both projects, audited", async () => {
@@ -165,6 +166,24 @@ describe("POST /v1/organizations", () => {
       },
     ]);
     expect(await storedState(created.id)).toEqual(activeState(created));
+  });
+
+  it("creates only the sandbox project on a deployment that admits no production project", async () => {
+    env.SDP_ALLOW_PRODUCTION_PROJECTS = "false";
+
+    const { response, created } = await createActiveOrganization();
+
+    expect(response.status).toBe(201);
+    expect(await storedState(created.id)).toEqual({
+      ...activeState(created),
+      projectMembers: [
+        {
+          organization_id: created.id,
+          environment: "sandbox",
+          user_id: created.created_by_user_id,
+        },
+      ],
+    });
   });
 
   it("finishes a creation whose Clerk membership failed without creating the Clerk organization again", async () => {

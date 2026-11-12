@@ -103,13 +103,14 @@ describe("CustodyRuntimeTargets", () => {
     const wallet = await seedConfig({ provider: "fireblocks", projectId: PROJECT_ID });
     const read = mockStoredCredentialRead();
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+    // A Managed wallet signs: the waist resolves no proposer and reads no credential for it.
     await expect(
-      targets.getFireblocksTransferAccess({
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        custodyWalletId: `cwlt_${wallet.id}`,
-        forSubmission: true,
-      })
+      targets.getTransferProposerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        `cwlt_${wallet.id}`,
+        "payments.transfer"
+      )
     ).resolves.toBeNull();
     expect(read).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();

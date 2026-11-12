@@ -8,6 +8,12 @@ const descriptions = {
   "/docs/keys": "Create, rotate and revoke keys.",
   "/docs/payment": "Send a single token transfer.",
   "/docs/payouts": "Pay many recipients at once.",
+  "/docs/earn": "Earn yield on stablecoins.",
+  "/docs/earn/concepts": "Understand strategies, shares, value, and withdrawals.",
+  "/docs/earn/withdrawals": "Choose an exit and track funds back to the owner's wallet.",
+  "/docs/reference/api/earn": "Earn API operations.",
+  "/docs/reference/api/earn/get-earn-external-wallet-earnings": "Read balance and earned yield.",
+  "/docs/reference/api/earn/create-earn-vault-withdrawal": "Submit a custody withdrawal.",
 } as const satisfies Record<string, string>;
 
 type FixtureUrl = keyof typeof descriptions;
@@ -60,6 +66,80 @@ describe("search ranking", () => {
       rankTitlesFirst(results, "webhook", descriptionOf).map((result) => result.id),
       ["/docs/payouts", "/docs/tutorial"]
     );
+  });
+
+  it("puts the Earn overview before an earnings prefix and the family reference", () => {
+    const results = [
+      page("/docs/reference/api/earn/get-earn-external-wallet-earnings", "Get wallet earnings"),
+      page("/docs/reference/api/earn", "Earn"),
+      page("/docs/earn", "Earn"),
+    ];
+    assert.equal(rankTitlesFirst(results, "earn", descriptionOf)[0]?.url, "/docs/earn");
+  });
+
+  it("finds the withdrawal guide for withdrawal and withdrawal inflections", () => {
+    const results = [
+      page(
+        "/docs/reference/api/earn/create-earn-vault-withdrawal",
+        "Withdraw from a custody position"
+      ),
+      page("/docs/earn/withdrawals", "Withdraw funds"),
+    ];
+    for (const query of ["withdraw", "withdrawal", "withdrawals"]) {
+      assert.equal(
+        rankTitlesFirst(results, query, descriptionOf)[0]?.url,
+        "/docs/earn/withdrawals"
+      );
+    }
+  });
+
+  it("does not promote a distant prefix as a withdrawal match", () => {
+    const results = [
+      page("/docs/tutorial", "Build with SDP"),
+      page("/docs/earn/withdrawals", "Withdraw funds"),
+    ];
+    for (const query of ["withdraw", "withdrawal"]) {
+      assert.equal(
+        rankTitlesFirst(results, query, descriptionOf)[0]?.url,
+        "/docs/earn/withdrawals"
+      );
+    }
+  });
+
+  it("puts an exact endpoint owner before guides that mention its path", () => {
+    const endpointUrl = "/docs/reference/api/earn/create-earn-vault-withdrawal";
+    const results = [
+      page("/docs/earn/withdrawals", "Withdraw funds"),
+      passage("/docs/earn/withdrawals", "Submit through POST /v1/earn/vault-withdrawals."),
+      page(endpointUrl, "Withdraw from a custody position"),
+      passage(endpointUrl, "POST /v1/earn/vault-withdrawals"),
+    ];
+    for (const query of [
+      "/v1/earn/vault-withdrawals",
+      "POST /v1/earn/vault-withdrawals",
+      "create-earn-vault-withdrawal",
+      endpointUrl,
+    ]) {
+      const ranked = rankTitlesFirst(results, query, descriptionOf);
+      assert.equal(ranked[0]?.url, endpointUrl);
+      assert.equal(ranked[1]?.content, "POST /v1/earn/vault-withdrawals");
+    }
+  });
+
+  it("puts the guide's matching heading before a passing body mention", () => {
+    const results: SortedResult[] = [
+      page("/docs/tutorial", "Issue a stablecoin"),
+      passage("/docs/tutorial", "A token might be used by a DeFi strategy."),
+      page("/docs/earn/concepts", "How Earn works"),
+      {
+        id: "defi-heading",
+        type: "heading",
+        url: "/docs/earn/concepts#defi-and-real-world-assets",
+        content: "DeFi and real-world assets",
+      },
+    ];
+    assert.equal(rankTitlesFirst(results, "defi", descriptionOf)[0]?.url, "/docs/earn/concepts");
+    assert.equal(rankTitlesFirst(results, "defi", descriptionOf)[1]?.id, "defi-heading");
   });
 
   it("refuses a passage listed before any page", () => {

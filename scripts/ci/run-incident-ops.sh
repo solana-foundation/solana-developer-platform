@@ -49,9 +49,13 @@ if [[ -n "${execution:-}" ]]; then
       "${REGION}" "${execution}" "${PROJECT_ID}"
   } >> "${GITHUB_STEP_SUMMARY}"
   sleep 10
+  # The deploy SA reads logs only through the job-scoped log view (sdp-infra
+  # grants roles/logging.viewAccessor on it, not project-wide logging.viewer),
+  # so the read must name the view; without it this gets PERMISSION_DENIED.
   gcloud logging read \
     "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${OPS_JOB}\" AND labels.\"run.googleapis.com/execution_name\"=\"${execution}\"" \
-    --project "${PROJECT_ID}" --limit 300 --order asc \
+    --project "${PROJECT_ID}" --bucket=_Default --location=global --view "${OPS_JOB}" \
+    --limit 300 --order asc \
     --format 'value(textPayload)' >> "${GITHUB_STEP_SUMMARY}" || true
   printf '```\n' >> "${GITHUB_STEP_SUMMARY}"
 fi

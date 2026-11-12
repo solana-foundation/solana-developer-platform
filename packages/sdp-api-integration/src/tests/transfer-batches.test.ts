@@ -168,7 +168,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Transfer Batches 
           counterpartyAccountId,
           amount: RECIPIENT_AMOUNT_SOL,
         })),
-        options: { maxRecipientsPerTransaction: 2 },
       }),
     });
 
@@ -176,8 +175,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Transfer Batches 
     const created = (await createRes.json()) as TransferBatchApiResponse;
     expect(created.data.batch.status).toBe("processing");
     expect(created.data.batch.recipientCount).toBe(RECIPIENT_COUNT);
-    expect(created.data.batch.transactionCount).toBe(2);
-    expect(created.data.transfers).toHaveLength(2);
+    expect(created.data.batch.transactionCount).toBe(1);
+    expect(created.data.transfers).toHaveLength(1);
     expect(created.data.recipients.every((r) => r.status === "processing")).toBe(true);
 
     const signatures = created.data.transfers.map((transfer) => {
@@ -185,7 +184,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Transfer Batches 
       expect(transfer.signature).toMatch(/^[1-9A-HJ-NP-Za-km-z]{64,88}$/);
       return transfer.signature as Signature;
     });
-    expect(new Set(signatures).size).toBe(2);
 
     await waitForSignatureCommitment(signatures, "confirmed", 60_000);
     await trackPendingTransfers(env);

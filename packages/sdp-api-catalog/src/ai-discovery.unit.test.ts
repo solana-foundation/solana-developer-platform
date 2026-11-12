@@ -36,6 +36,25 @@ describe("llms.txt generation", () => {
     expect(docs).not.toContain("Unpublished");
   });
 
+  it("keeps authentication required when Earn is published", () => {
+    const api = renderLlmsTxt({
+      audience: "api",
+      document: {
+        ...document,
+        paths: {
+          ...document.paths,
+          "/v1/earn/strategies": { get: { tags: ["Earn"] } },
+          "/v1/earn/external-wallet/deposits": { post: { tags: ["Earn"] } },
+        },
+        tags: [...document.tags, { name: "Earn" }],
+      },
+    });
+
+    expect(familySection(api)).toContain("- Earn: https://api.solana.com/v1/earn");
+    expect(api).toContain("- Use `Authorization: Bearer <api_key>`.");
+    expect(api).not.toMatch(/anonymous|keyless/i);
+  });
+
   it("fails when a public operation has no family tag", () => {
     expect(() => apiDiscoveryFamilies({ paths: { "/v1/wallets": { get: {} } }, tags: [] })).toThrow(
       "GET /v1/wallets has no API family tag"

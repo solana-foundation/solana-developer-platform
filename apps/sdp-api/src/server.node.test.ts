@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import type { Env } from "@/types/env";
 import { assertRequiredEnv } from "./server";
@@ -86,6 +86,33 @@ describe("server boot checks", () => {
           makeEnv({ ...mainnetKora, SDP_DEPLOYMENT_MODE: "self_hosted", SIGNING_PROVIDER: "local" })
         )
       ).not.toThrow();
+    });
+  });
+
+  describe("managed RPC pools", () => {
+    it("refuses stage and prod without a mainnet pool", () => {
+      vi.stubEnv("SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL", "");
+
+      expect(() => assertRequiredEnv(makeEnv())).toThrow(/mainnet-beta/);
+      expect(() => assertRequiredEnv(makeEnv({ SDP_ALLOW_PRODUCTION_PROJECTS: "true" }))).toThrow(
+        /mainnet-beta/
+      );
+    });
+
+    it("boots a devnet-only deployment with no mainnet pool", () => {
+      vi.stubEnv("SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL", "");
+
+      expect(() =>
+        assertRequiredEnv(makeEnv({ SDP_ALLOW_PRODUCTION_PROJECTS: "false" }))
+      ).not.toThrow();
+    });
+
+    it("still refuses a devnet-only deployment without a devnet pool", () => {
+      vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", "");
+
+      expect(() => assertRequiredEnv(makeEnv({ SDP_ALLOW_PRODUCTION_PROJECTS: "false" }))).toThrow(
+        /devnet/
+      );
     });
   });
 });

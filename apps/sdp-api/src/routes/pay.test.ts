@@ -246,6 +246,24 @@ describe("Public payment request routes", () => {
     expect((await read()).solanaPayUrl).toBeNull();
   });
 
+  it("answers a production request as missing on a deployment that admits no production project", async () => {
+    const request = await createAwaitingPaymentRequest(await seedProductionRequestWallet());
+    const refusing = { ...env, SDP_ALLOW_PRODUCTION_PROJECTS: "false" };
+
+    const read = await app.request(`/pay/${request.public_token}`, {}, refusing);
+    const built = await app.request(
+      `/pay/${request.public_token}/tx`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account: TEST_SOLANA_ADDRESSES.wallet2 }),
+      },
+      refusing
+    );
+
+    expect([read.status, built.status]).toEqual([404, 404]);
+  });
+
   it("refuses to build a transaction for a canceled request", async () => {
     const sponsorship = stubSponsorship();
     const request = await cancelSeededPaymentRequest(

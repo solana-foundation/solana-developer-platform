@@ -25,6 +25,7 @@ import {
   assertMovementAdmitted,
   decideMovement,
   decideWalletPurpose,
+  type MoneyAdmissionDecision,
   readMovementFactsWith,
 } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
@@ -64,6 +65,14 @@ import {
 } from "@/services/provider-availability.service";
 import type { CustodyWalletIdempotency } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
+import {
+  admittedTransferProposer,
+  type CustodyProposalReader,
+  type CustodyTransferProposer,
+  type ProposalAccess,
+  proposalReader,
+  type TransferProposalIntent,
+} from "./admitted-proposer";
 import { privyWalletExternalId } from "./provider-wallet-lifecycle";
 import { boundSigningTime, custodySigningTimeoutMs } from "./signing-timeout";
 
@@ -97,6 +106,16 @@ interface ConnectionRuntimeTarget {
 }
 
 export type CustodyRuntimeTarget = ConfigRuntimeTarget | ConnectionRuntimeTarget;
+
+/**
+ * Whether the provider builds, signs and broadcasts this wallet's transfers itself, so the waist
+ * resolves a proposer for it rather than a signer: a Fireblocks BYOK Connection.
+ */
+function isProposingTarget(
+  target: CustodyRuntimeTarget
+): target is ConnectionRuntimeTarget & { wallet: RuntimeWallet } {
+  return target.kind === "connection" && target.provider === "fireblocks" && target.wallet !== null;
+}
 
 export type CustodyRuntimeWalletProjection = {
   id: string;
@@ -704,24 +723,14 @@ export class CustodyRuntimeTargets {
     movement: MovementId,
     getConfigAdapter: ConfigAdapterResolver
   ): Promise<TransactionSigner> {
-    const target = await this.resolveRetainedWalletRecord(
-      organizationId,
-      projectId,
-      custodyWalletId
-    );
-    if (!target) {
-      this.logMissingExactWallet({ organizationId, projectId, custodyWalletId });
-      throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
-    }
+    const target = await this.resolveExactWalletRecord(organizationId, projectId, custodyWalletId);
     this.assertRuntimeExecutionAllowed(target, custodyWalletId);
-    assertMovementAdmitted(decideWalletPurpose(movement, target.wallet.purpose), {
-      surface: "signer",
-      movement,
+    const decide = await this.admitWalletRecord(target, {
       organizationId,
       projectId,
-      subjectId: custodyWalletId,
+      custodyWalletId,
+      movement,
     });
-    await assertCustodyProviderEntitled(this.env, this.db, organizationId, target.provider);
 
     let adapter: SigningPort;
     let credential: AdmittedSignerContext["credential"] = null;
@@ -742,83 +751,167 @@ export class CustodyRuntimeTargets {
       custodySigningTimeoutMs(this.env)
     );
     this.assertSignerMatchesWallet(target, signer, custodyWalletId);
-    // Each signature reads the organization's and the ambient principal's
-    // live rows in one statement; an exit with no principal reads nothing.
-    const subject = { custodyWalletId };
-    return admittedSigner(
-      signer,
-      async () =>
-        decideMovement(
-          movement,
-          await readMovementFactsWith(this.db, { organizationId, projectId }, movement, subject),
-          subject
-        ),
+    return admittedSigner(signer, decide, {
+      movement,
+      organizationId,
+      projectId,
+      custodyWalletId,
+      provider: target.provider,
+      credential,
+    });
+  }
+
+  /**
+   * The proposing half of the same waist (PRO-2435 D2). A wallet whose provider builds and sends
+   * its own transfers (a Fireblocks BYOK Connection) gets a {@link CustodyTransferProposer}
+   * through the same prelude as a signer; every other wallet gets `null` and signs. Proposing
+   * decides admission again from live rows, as each signature does, so there is exactly one
+   * admission path for both.
+   */
+  async getTransferProposerForWalletRecord(
+    organizationId: string,
+    projectId: string,
+    custodyWalletId: string,
+    movement: MovementId
+  ): Promise<CustodyTransferProposer | null> {
+    const target = await this.resolveExactWalletRecord(organizationId, projectId, custodyWalletId);
+    // Managed Fireblocks wallets keep the existing sponsored-signing path.
+    if (!isProposingTarget(target)) return null;
+    this.assertRuntimeExecutionAllowed(target, custodyWalletId);
+    const decide = await this.admitWalletRecord(target, {
+      organizationId,
+      projectId,
+      custodyWalletId,
+      movement,
+    });
+    // Proposing re-resolves the exact wallet row: a wallet, Connection or credential that changed
+    // after resolution (an inactive wallet, a re-pointed vault) must refuse before any POST, as a
+    // credential change refuses a signature. Preparing reuses the row resolved just above.
+    const loadLiveAccess = async () => {
+      const live = await this.resolveRetainedWalletRecord(
+        organizationId,
+        projectId,
+        custodyWalletId
+      );
+      if (!live || !isProposingTarget(live))
+        throw conflict("Fireblocks connection does not match the payment intent");
+      this.assertRuntimeExecutionAllowed(live, custodyWalletId);
+      return this.loadProposalAccess(live, null);
+    };
+    return admittedTransferProposer(
+      { prepare: () => this.loadProposalAccess(target, null), propose: loadLiveAccess },
+      decide,
       {
         movement,
         organizationId,
         projectId,
         custodyWalletId,
-        provider: target.provider,
-        credential,
+        address: target.wallet.publicKey,
       }
     );
   }
 
-  /** Exact BYOK owner resolution for native Fireblocks payments; never deployment credentials. */
-  async getFireblocksTransferAccess(
-    params: {
+  /**
+   * Read-only recovery for a recorded proposal. It skips admission and runtime availability on
+   * purpose: disabling a Connection cannot cancel a transfer the provider already accepted, so
+   * reconciliation must keep reading it. The live Connection must still match the recorded
+   * intent, checked before any credential is decrypted; credential revocation still applies.
+   */
+  async getTransferProposalReaderForWalletRecord(
+    organizationId: string,
+    projectId: string,
+    custodyWalletId: string,
+    binding: TransferProposalIntent & { sourceAddress: string | null }
+  ): Promise<CustodyProposalReader> {
+    const target = await this.resolveRetainedWalletRecord(
+      organizationId,
+      projectId,
+      custodyWalletId
+    );
+    if (!target) throw notFound("Custody wallet");
+    if (!isProposingTarget(target))
+      throw conflict("Fireblocks connection does not match the payment intent");
+    return proposalReader(() => this.loadProposalAccess(target, binding));
+  }
+
+  /** The exact custody-wallet row a money flow names, or the waist's not-found refusal. */
+  private async resolveExactWalletRecord(
+    organizationId: string,
+    projectId: string,
+    custodyWalletId: string
+  ): Promise<CustodyRuntimeTarget> {
+    const target = await this.resolveRetainedWalletRecord(
+      organizationId,
+      projectId,
+      custodyWalletId
+    );
+    if (!target) {
+      this.logMissingExactWallet({ organizationId, projectId, custodyWalletId });
+      throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
+    }
+    return target;
+  }
+
+  /**
+   * The prelude every signer and proposer shares, after the caller asserted runtime
+   * availability: wallet purpose and provider entitlement, checked once at resolution. Returns the live admission decision that
+   * each signature or proposal runs again: the organization's and the ambient principal's rows,
+   * in one statement; an exit with no principal reads nothing.
+   */
+  private async admitWalletRecord(
+    target: CustodyRuntimeTarget & { wallet: RuntimeWallet },
+    ids: {
       organizationId: string;
       projectId: string;
       custodyWalletId: string;
-    } & (
-      | { forSubmission: true }
-      | {
-          forSubmission: false;
-          intent: {
-            connectionId: string;
-            accountFingerprint: string;
-            vaultAccountId: string;
-            sourceAddress: string | null;
-          };
-        }
-    )
-  ) {
-    const target = await this.resolveRetainedWalletRecord(
-      params.organizationId,
-      params.projectId,
-      params.custodyWalletId
-    );
-    if (!target) throw notFound("Custody wallet");
-    // Managed Fireblocks wallets keep the existing sponsored-signing path.
-    if (target.provider !== "fireblocks" || target.kind !== "connection") return null;
-    if (!target.wallet) throw conflict("Fireblocks wallet is unavailable");
-    if (params.forSubmission) {
-      this.assertRuntimeExecutionAllowed(target, params.custodyWalletId);
-      await assertCustodyProviderEntitled(
-        this.env,
-        this.db,
-        params.organizationId,
-        target.provider
-      );
+      movement: MovementId;
     }
+  ): Promise<() => Promise<MoneyAdmissionDecision>> {
+    const { organizationId, projectId, custodyWalletId, movement } = ids;
+    assertMovementAdmitted(decideWalletPurpose(movement, target.wallet.purpose), {
+      surface: "signer",
+      movement,
+      organizationId,
+      projectId,
+      subjectId: custodyWalletId,
+    });
+    await assertCustodyProviderEntitled(this.env, this.db, organizationId, target.provider);
+    const subject = { custodyWalletId };
+    return async () =>
+      decideMovement(
+        movement,
+        await readMovementFactsWith(
+          this.db,
+          this.env,
+          { organizationId, projectId },
+          movement,
+          subject
+        ),
+        subject
+      );
+  }
+
+  /**
+   * The Connection's live Fireblocks credential, never deployment credentials. With no binding
+   * (preparing or proposing) the Connection must be usable now. With a recorded binding
+   * (recovery) it need not be, but must still be the exact account and wallet the intent named.
+   */
+  private async loadProposalAccess(
+    target: ConnectionRuntimeTarget & { wallet: NonNullable<ConnectionRuntimeTarget["wallet"]> },
+    binding: (TransferProposalIntent & { sourceAddress: string | null }) | null
+  ): Promise<ProposalAccess> {
     const row = await this.loadConnectionCredential(target);
     if (row?.credential_status !== "active" || row.provider_account_fingerprint === null)
       throw conflict("Custody Connection is unavailable");
-    if (params.forSubmission) {
+    if (!binding) {
       if (!isUsableCredentialOwner(row)) throw conflict("Custody Connection is unavailable");
-    } else {
-      // Disabling a connection or failing a health check cannot cancel an accepted
-      // Fireblocks transfer. Recovery may read its retained credential, but only
-      // for the same account and wallet recorded in the pending payment intent.
-      // Check this binding before decrypting; credential revocation still applies.
-      const { intent } = params;
-      if (
-        target.connectionId !== intent.connectionId ||
-        row.provider_account_fingerprint !== intent.accountFingerprint ||
-        target.wallet.walletId !== `fb_${intent.vaultAccountId}` ||
-        target.wallet.publicKey !== intent.sourceAddress
-      )
-        throw conflict("Fireblocks connection does not match the payment intent");
+    } else if (
+      target.connectionId !== binding.connectionId ||
+      row.provider_account_fingerprint !== binding.accountFingerprint ||
+      target.wallet.walletId !== `fb_${binding.vaultAccountId}` ||
+      target.wallet.publicKey !== binding.sourceAddress
+    ) {
+      throw conflict("Fireblocks connection does not match the payment intent");
     }
     const secret = await this.readByokCredential(target, row);
     if (secret.provider !== "fireblocks" || !/^fb_\d+$/.test(target.wallet.walletId))

@@ -11,7 +11,9 @@ import {
   onboardingUploadSchema,
   onboardingWalletSchema,
 } from "@/routes/earn-onboarding/schemas";
+import { EARN_GROUPS } from "./earn-groups";
 import {
+  DOCS_GROUP,
   errorResponses,
   jsonContent,
   projectScopeHeaders,
@@ -70,6 +72,7 @@ export function registerEarnOnboardingPaths(registry: OpenAPIRegistry) {
       operationId,
       summary,
       tags: ["Earn"],
+      [DOCS_GROUP]: EARN_GROUPS.onboarding,
       security,
       description:
         "Authenticated project-scoped Moderator onboarding for an existing SDP counterparty. " +

@@ -56,6 +56,12 @@ export const DOCS_MODULES: readonly ModuleEntry[] = [
     capability: "Fiat on-ramps and off-ramps",
   },
   {
+    module: "earn",
+    name: "Earn",
+    summary: "Discover DeFi and RWA strategies for customer-wallet deposits and withdrawals",
+    capability: "DeFi and RWA strategies, customer-signed transactions, and positions",
+  },
+  {
     module: "compliance",
     name: "Compliance",
     summary: "Screen wallets and transactions against your regulatory program",
@@ -90,6 +96,13 @@ export const DOCS_TUTORIALS: readonly {
   },
 ];
 
+/** A custody provider's description and optional customer setup guide. */
+export type CustodyProviderEntry = {
+  name: string;
+  description: string;
+  guide?: { title: string; href: string; description: string };
+};
+
 /**
  * The custody providers `<CustodyProviderTable />` lists, in display order.
  * Local signing is left out: it runs only in a self-hosted deployment, which
@@ -98,7 +111,15 @@ export const DOCS_TUTORIALS: readonly {
  */
 export const DOCS_CUSTODY_PROVIDERS = {
   privy: { name: "Privy", description: "Embedded wallet infrastructure platform" },
-  fireblocks: { name: "Fireblocks", description: "Digital asset infrastructure company" },
+  fireblocks: {
+    name: "Fireblocks",
+    description: "Digital asset infrastructure company",
+    guide: {
+      title: "Connect Fireblocks",
+      href: "/docs/wallet-operations/fireblocks",
+      description: "Connect your own Fireblocks workspace for production custody.",
+    },
+  },
   coinbase_cdp: { name: "Coinbase CDP", description: "Embedded wallets for developers" },
   para: { name: "Para", description: "Wallet and authentication suite" },
   turnkey: { name: "Turnkey", description: "Non-custodial wallet infrastructure platform" },
@@ -109,7 +130,7 @@ export const DOCS_CUSTODY_PROVIDERS = {
   },
   anchorage: { name: "Anchorage", description: "Regulated institutional crypto custody" },
   utila: { name: "Utila", description: "Vault-backed wallet signing through service accounts" },
-} as const satisfies Record<ManagedCustodyProvider, { name: string; description: string }>;
+} as const satisfies Record<ManagedCustodyProvider, CustodyProviderEntry>;
 
 /** One ramp provider's capabilities; its page is /docs/payments/ramps-<provider>. */
 export type RampProviderEntry = {

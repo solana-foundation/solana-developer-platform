@@ -50,7 +50,7 @@ describe("IssuanceSection", () => {
 
     const heading = doc.querySelector("h2");
     expect(heading?.querySelector(".sr-only")?.textContent).toBe(
-      "Full programmatic asset control with built-in compliance"
+      "Full programmatic asset control, from mint to freeze"
     );
     expect(doc.body.textContent).toContain(
       "directly via the API using API keys, or from the dashboard."

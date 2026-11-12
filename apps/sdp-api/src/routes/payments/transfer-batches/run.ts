@@ -17,7 +17,6 @@ import { readSponsoredRentLimit } from "./sponsored-rent";
 import {
   buildInstructionGroups,
   chunkInstructionGroups,
-  DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
   type TransactionChunk,
 } from "./transaction";
 import type { RecentBlockhash, ResolvedBatchRequest } from "./types";
@@ -38,13 +37,10 @@ export interface PreparedBatchChunks {
  * Loads the custody signer and the sponsor through the signing waists
  * (ADR 0007) and chunks the resolved recipients into transactions. Signs
  * nothing: each chunk is signed in executeChunk, after its row is written.
- *
- * @param maxRecipientsPerTransaction - The batch's option, or the default.
  */
 export async function prepareBatchChunks(
   c: AppContext,
-  resolved: ResolvedBatchRequest,
-  maxRecipientsPerTransaction: number | undefined
+  resolved: ResolvedBatchRequest
 ): Promise<PreparedBatchChunks> {
   const feePayment = createSponsorshipFeePayment<"payments">(
     c.env,
@@ -84,10 +80,6 @@ export async function prepareBatchChunks(
     feePayer,
     lifetime,
     sponsoredRent,
-    maxRecipientsPerTransaction:
-      maxRecipientsPerTransaction === undefined
-        ? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION
-        : maxRecipientsPerTransaction,
   });
   return { feePayment, lifetime, chunks, attemptId: crypto.randomUUID() };
 }
@@ -116,7 +108,6 @@ export async function runBatchChunks(params: {
   batchId: string;
   prepared: PreparedBatchChunks;
   recipientRows: PaymentTransferRecipientRow[];
-  preflight: boolean;
 }): Promise<PaymentTransferBatchRow> {
   const { c, resolved, prepared } = params;
   const organizationId = resolved.scope.auth.organizationId;
@@ -137,7 +128,6 @@ export async function runBatchChunks(params: {
         feePayment: prepared.feePayment,
         lastValidBlockHeight: prepared.lifetime.lastValidBlockHeight,
         attemptId: prepared.attemptId,
-        preflight: params.preflight,
       })
     )
   );

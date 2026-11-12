@@ -54,6 +54,7 @@ function offrampRow(overrides: Partial<PaymentTransferRow> = {}): PaymentTransfe
     fee: null,
     error: null,
     initiated_by_key_id: null,
+    initiated_by_principal: null,
     idempotency_key: null,
     idempotency_fingerprint: null,
     confirmed_at: "2026-10-19T23:07:00.000Z",
@@ -66,6 +67,17 @@ function offrampRow(overrides: Partial<PaymentTransferRow> = {}): PaymentTransfe
 }
 
 describe("mapTransferRow payout and confirmation", () => {
+  it("keeps recorded execution authority off the public transfer", () => {
+    const wire = onTheWire(
+      offrampRow({
+        initiated_by_principal: { kind: "member", userId: "user_private_initiator" },
+      })
+    );
+    expect(wire).not.toHaveProperty("initiated_by_principal");
+    expect(wire).not.toHaveProperty("initiatedByPrincipal");
+    expect(JSON.stringify(wire)).not.toContain("user_private_initiator");
+  });
+
   it("shows the provider's payout beside the quote and the confirmation time", () => {
     expect(mapTransferRow(offrampRow())).toMatchObject({
       fiatAmount: "20.70",

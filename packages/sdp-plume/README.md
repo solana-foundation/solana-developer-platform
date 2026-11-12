@@ -12,7 +12,7 @@ published mainnet nOPAL deployment. nBND must be added only after Plume supplies
 slug, share mint, OFT store/escrow, composers, relayer, lookup table and decimals.
 There is no invented devnet deployment. Production-only vaults use the existing
 sandbox mirror behavior. Plume surfacing and money-in remain disabled until live
-validation; Earn's public publication hold remains unchanged.
+validation. Earn documentation follows its normal release-channel maturity.
 
 The API must already have its normal mainnet RPC, custody and optional sponsorship
 configuration. Plume's Predicate v2 attestation checks happen in the mint builder;

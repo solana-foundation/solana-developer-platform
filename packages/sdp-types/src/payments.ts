@@ -646,19 +646,12 @@ export interface PaymentTransferBatchRecipientRequest {
   amount: string;
 }
 
-export interface PaymentTransferBatchOptions {
-  maxRecipientsPerTransaction?: number;
-  priorityFee?: "none" | "low" | "medium" | "high" | "auto";
-  preflight?: boolean;
-}
-
 export interface PaymentTransferBatchRequest {
   projectId?: string;
   externalId?: string;
   sourceCustodyWalletId: string;
   token: string;
   recipients: PaymentTransferBatchRecipientRequest[];
-  options?: PaymentTransferBatchOptions;
 }
 
 export type PaymentTransferBatchEstimateRequest = PaymentTransferBatchRequest;

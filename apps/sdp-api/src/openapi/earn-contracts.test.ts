@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { earnRoutes } from "@/routes/earn";
+import { EARN_GROUPS } from "./paths/earn-groups";
+import { DOCS_GROUP } from "./paths/helpers";
 import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
 
 describe("Earn API contract coverage", () => {
@@ -28,16 +30,50 @@ describe("Earn API contract coverage", () => {
     expect([...documented].sort()).toEqual([...runtime].sort());
   });
 
-  it("keeps every Earn operation authenticated and unpublished", () => {
+  it("keeps every Earn operation authenticated and internal groups out of the public document", () => {
     const internal = createOpenApiDocument();
     const published = createPublicOpenApiDocument({ releaseChannel: "experimental" });
     for (const [path, item] of Object.entries(internal.paths)) {
       if (!path.startsWith("/v1/earn/")) continue;
-      expect(published.paths[path]).toBeUndefined();
-      for (const [method, operation] of Object.entries(item)) {
-        if (!["get", "post", "put"].includes(method)) continue;
-        expect(operation).toHaveProperty("security");
-        expect((operation as { security: object[] }).security).not.toContainEqual({});
+      for (const method of ["get", "post", "put", "patch", "delete"] as const) {
+        const operation = item[method];
+        if (!operation) continue;
+        expect(operation.security).toBeDefined();
+        expect(operation.security).not.toContainEqual({});
+        if (
+          operation[DOCS_GROUP] !== EARN_GROUPS.discovery &&
+          operation[DOCS_GROUP] !== EARN_GROUPS.embeddedYield
+        ) {
+          expect(published.paths[path]?.[method]).toBeUndefined();
+        }
+      }
+    }
+  });
+
+  it("groups every Earn operation for the reference without changing its publication scope", () => {
+    const groups = new Set<string>();
+    const internal = createOpenApiDocument();
+    for (const [path, item] of Object.entries(internal.paths)) {
+      if (!path.startsWith("/v1/earn/")) continue;
+      for (const method of ["get", "post", "put"] as const) {
+        const operation = item[method];
+        if (!operation) continue;
+        const group = operation[DOCS_GROUP];
+        expect(Object.values(EARN_GROUPS)).toContain(group);
+        if (typeof group === "string") groups.add(group);
+      }
+    }
+    expect([...groups].sort()).toEqual(Object.values(EARN_GROUPS).sort());
+
+    const partner = createPublicOpenApiDocument({
+      releaseChannel: "experimental",
+    });
+    for (const [path, item] of Object.entries(partner.paths)) {
+      if (!path.startsWith("/v1/earn/")) continue;
+      for (const method of ["get", "post"] as const) {
+        const operation = item[method];
+        if (!operation) continue;
+        expect([EARN_GROUPS.discovery, EARN_GROUPS.embeddedYield]).toContain(operation[DOCS_GROUP]);
       }
     }
   });

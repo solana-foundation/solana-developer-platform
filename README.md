@@ -23,7 +23,11 @@ The hosted platform is available at https://platform.solana.com and the public d
 - `infra`: local and deployment infrastructure helpers
 - `docs/ops`: operator and maintainer notes
 
-The supported public API areas are health, API keys, wallets, projects, issuance, payments, policies, and compliance. Earn is feature-complete but held out of every public surface until launch (PRO-2038); its [Embedded Yield guide](apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx) waits unpublished in the repo. Internal routes and provider-specific operational details are not part of the public surface.
+Each deployment publishes only the API families in its release channel. Earn
+appears on `beta` and `experimental`; `stable` leaves it out. Its
+[Embedded Yield guide](apps/sdp-docs/content/docs/guides/embedded-yield.mdx)
+documents the partner integration. Internal routes and provider-specific
+operational details are not part of the public surface.
 
 ## Local Development
 

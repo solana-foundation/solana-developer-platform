@@ -22,10 +22,14 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
+import type { Env } from "@/types/env";
 
 const WEBHOOK_SECRET = `whsec_${Buffer.from("test_clerk_webhook_secret_1234567890").toString("base64")}`;
 
-async function simulateClerkWebhook(event: { type: string; data: Record<string, unknown> }) {
+async function simulateClerkWebhook(
+  event: { type: string; data: Record<string, unknown> },
+  requestEnv: Env = env
+) {
   const payload = JSON.stringify(event);
   const timestamp = Math.floor(Date.now() / 1000);
   const messageId = `msg_${crypto.randomUUID()}`;
@@ -46,7 +50,7 @@ async function simulateClerkWebhook(event: { type: string; data: Record<string, 
       },
       body: payload,
     },
-    env
+    requestEnv
   );
 }
 
@@ -185,6 +189,30 @@ describe("Clerk webhooks", () => {
       { method: "GET", path: `/organizations/${KNOWN_CLERK_ORG_ID}`, body: null },
     ]);
     expect(await knownOrganizationState()).toEqual(before);
+  });
+  it("does not store a production entitlement Clerk grants on a deployment that admits no production project", async () => {
+    await seedKnownOrganization();
+    const clerk = stubClerkBackend(env);
+    clerk.answer({
+      status: 200,
+      body: {
+        id: KNOWN_CLERK_ORG_ID,
+        name: "Org",
+        slug: "org",
+        private_metadata: { sdp: { enableProductionProject: true } },
+      },
+    });
+
+    const response = await simulateClerkWebhook(
+      { type: "organization.updated", data: STALE_ORGANIZATION_EVENT },
+      { ...env, SDP_ALLOW_PRODUCTION_PROJECTS: "false" }
+    );
+
+    expect(response.status).toBe(200);
+    expect(await knownOrganizationState()).toMatchObject({ settings: null });
+    expect(
+      await readAuditActions(getDb(env), { type: "organization", id: KNOWN_ORGANIZATION.id })
+    ).toEqual([]);
   });
   it.each(["organizationMembership.created", "organizationMembership.updated"])(
     "%s writes no membership",
@@ -1396,6 +1424,30 @@ describe("MoonPay ramp webhook", () => {
       .bind(MOONPAY_TRANSACTION_ID)
       .first<{ failure_reason: string | null }>();
     expect(retired).toEqual({ failure_reason: "kyc_rejected" });
+  });
+  it("takes no production delivery on a deployment that admits no production project", async () => {
+    const body = JSON.stringify(completedPayload);
+    const res = await app.request(
+      "/webhooks/payments/ramps/production/moonpay",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Moonpay-Signature-V2": moonpaySignatureHeader(body, Math.floor(Date.now() / 1000), {
+            key: MOONPAY_WEBHOOK_KEY,
+          }),
+        },
+        body,
+      },
+      { ...env, SDP_ALLOW_PRODUCTION_PROJECTS: "false" }
+    );
+
+    expect(res.status).toBe(404);
+    expect(
+      await getDb(env).queryMany(
+        "SELECT id FROM ramp_webhook_events WHERE environment = 'production'"
+      )
+    ).toEqual([]);
   });
   it("rejects a moonpay webhook whose signed timestamp is outside the replay window", async () => {
     const body = JSON.stringify(completedPayload);

@@ -77,15 +77,11 @@ const VALUE_OWNERS = buildOwners();
 const HIDDEN_VALUES: ReadonlySet<string> = new Set(HIDDEN_ACTION_MODULES.flatMap(actionsInModule));
 
 /**
- * The modules a public document publishes: those in the release channel, less
- * Earn while its publication hold is on. Markets follows its sub-modules.
+ * The modules a public document publishes: those in the release channel.
+ * Markets follows its sub-modules.
  */
-export function publishedModules(
-  releaseChannel: SdpReleaseChannel,
-  publishEarn: boolean
-): ReadonlySet<SdpModule> {
+export function publishedModules(releaseChannel: SdpReleaseChannel): ReadonlySet<SdpModule> {
   const modules = new Set<SdpModule>(SDP_RELEASE_CHANNELS[releaseChannel]);
-  if (!publishEarn) modules.delete("earn");
   if (modules.has("earn") || modules.has("dvp")) modules.add("markets");
   else modules.delete("markets");
   return modules;
@@ -378,10 +374,9 @@ function pruneNode(node: Json, context: Context): Json | typeof EMPTY {
  */
 export function pruneUnpublishedValues(
   document: OpenAPIObject,
-  releaseChannel: SdpReleaseChannel,
-  publishEarn: boolean
+  releaseChannel: SdpReleaseChannel
 ): OpenAPIObject {
-  const modules = publishedModules(releaseChannel, publishEarn);
+  const modules = publishedModules(releaseChannel);
   // The generator's output is plain JSON; checking it as such types every node.
   const json = jsonSchema.parse(JSON.parse(JSON.stringify(document)));
   const pruned = pruneNode(json, {

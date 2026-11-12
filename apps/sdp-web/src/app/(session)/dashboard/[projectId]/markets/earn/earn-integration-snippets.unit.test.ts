@@ -320,6 +320,37 @@ describe("generated Embedded Yield integration", () => {
     );
   });
 
+  it("exposes the fields callers branch on when SDP refuses a request", async () => {
+    process.env.SDP_API_KEY = "sk_test_example";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json(
+          {
+            error: {
+              code: "FORBIDDEN",
+              message: "Kamino requires manual activation for this organization.",
+              details: { reason: "provider_not_entitled" },
+            },
+          },
+          { status: 403, headers: { "Retry-After": "2" } }
+        )
+      )
+    );
+
+    const generated = await loadGeneratedIntegration(strategy);
+    const error = await generated.previewEarnDeposit("1").catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      name: "EarnApiError",
+      message: "SDP 403 FORBIDDEN: Kamino requires manual activation for this organization.",
+      status: 403,
+      code: "FORBIDDEN",
+      details: { reason: "provider_not_entitled" },
+      retryAfter: "2",
+    });
+  });
+
   it("loads every strategy page and refuses pagination that makes no progress", async () => {
     process.env.SDP_API_KEY = "sk_test_example";
     const completePages = [

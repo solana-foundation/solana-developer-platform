@@ -4,7 +4,6 @@ import { getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";
 import { success } from "@/lib/response";
 import { isProjectProviderEntryInChannel } from "@/middleware/require-module";
-import { EARN_PUBLIC_SURFACE_PUBLISHED } from "@/openapi/spec";
 import { getProjectProviderAvailability } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 
@@ -13,12 +12,9 @@ type AppContext = Context<{ Bindings: Env }>;
 /**
  * Narrows a project's provider availability to the entries the deployment's
  * public API document publishes, so a client validating against it accepts the
- * response: Earn entries only when `EARN_PUBLIC_SURFACE_PUBLISHED` is true and
- * the release channel runs Earn, compliance entries only when the release
- * channel runs Compliance, ramp entries only for providers the release channel
- * runs, custody entries only for providers it offers in some custody mode, and
- * other families only when their module runs (the document prunes the others;
- * openapi/release-channel-values.ts).
+ * response. Families follow their module's release channel; ramp entries follow
+ * their provider's channel, and custody entries appear only for providers the
+ * channel offers in some custody mode (openapi/release-channel-values.ts).
  *
  * @param c - Request context, for the deployment's release channel.
  * @param availability - The project's availability across every family.
@@ -33,11 +29,7 @@ function publishedProviderAvailability(
     // Custody uses "offered", not the document's `isCustodyProviderPublished`: that
     // never names `local`, which a self-hosted dashboard sets up through this route.
     // The document's custody response enums are open, so a `local` entry still validates.
-    providers: availability.providers.filter(
-      (entry) =>
-        !(entry.family === "earn" && !EARN_PUBLIC_SURFACE_PUBLISHED) &&
-        isProjectProviderEntryInChannel(c, entry)
-    ),
+    providers: availability.providers.filter((entry) => isProjectProviderEntryInChannel(c, entry)),
   };
 }
 

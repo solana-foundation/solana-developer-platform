@@ -1,5 +1,6 @@
 import { getSdpDocsOrigin } from "@sdp/types/site";
 import { cors } from "hono/cors";
+import { z } from "zod";
 import type { Env } from "@/types/env";
 
 const PRODUCTION_ORIGINS = [
@@ -30,11 +31,41 @@ export function createOriginMatcher(
   return (origin) => exact.has(origin) || patterns.some((pattern) => pattern.test(origin));
 }
 
-export function corsMiddleware(env: Env["ENVIRONMENT"]) {
+/**
+ * The deployment's extra allowed origins (`CORS_EXTRA_ORIGIN`), for a
+ * deployment whose docs site is not the canonical one: none when unset, else
+ * exactly one https origin. Anything else throws, so the entrypoint fails at
+ * boot instead of serving without the origin it was given.
+ *
+ * @param value - The configured value.
+ * @returns The origins to add.
+ */
+export function extraAllowedOrigins(value: string | undefined): string[] {
+  const parsed = extraOriginSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error(`Invalid CORS_EXTRA_ORIGIN: "${value}". Expected one https origin.`);
+  }
+  return parsed.data === undefined ? [] : [parsed.data];
+}
+
+/** One https origin, exactly as a browser sends it: no path, query or trailing slash. */
+const extraOriginSchema = z
+  .string()
+  .trim()
+  .refine(
+    (origin) =>
+      URL.canParse(origin) &&
+      new URL(origin).protocol === "https:" &&
+      new URL(origin).origin === origin
+  )
+  .optional();
+
+export function corsMiddleware(env: Env["ENVIRONMENT"], extraOrigin?: string) {
   const isProduction = env === "production";
-  const exactOrigins = isProduction
-    ? [...PRODUCTION_ORIGINS, getSdpDocsOrigin()]
-    : DEVELOPMENT_ORIGINS;
+  const exactOrigins = [
+    ...(isProduction ? [...PRODUCTION_ORIGINS, getSdpDocsOrigin()] : DEVELOPMENT_ORIGINS),
+    ...extraAllowedOrigins(extraOrigin),
+  ];
   const wildcardPatterns = isProduction ? [] : DEVELOPMENT_ORIGIN_PATTERNS;
   const isAllowedOrigin = createOriginMatcher(exactOrigins, wildcardPatterns);
 

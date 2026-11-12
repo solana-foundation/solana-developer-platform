@@ -2,8 +2,9 @@
 
 Swap-plan **instruction building** for Ondo's USDY on Solana, plus the live
 position read. It builds unsigned plans and reads chain state; it never signs,
-never submits, never touches a database, and holds no credential. Signing and
-submission belong to the API, which owns custody.
+never submits, never touches a database, and holds no credential. The API
+coordinates submission and signing: external owners sign with their wallet;
+Treasury uses the organization's configured custody provider.
 
 Read `packages/sdp-earn/CLAUDE.md` for the catalogue side and ADR 0002 for the
 pluggability invariants. `packages/sdp-kamino` and `packages/sdp-veda` are the

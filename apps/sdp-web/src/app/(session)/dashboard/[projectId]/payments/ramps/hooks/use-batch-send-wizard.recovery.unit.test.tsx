@@ -13,6 +13,7 @@ import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { stubClerkSession } from "@/test/clerk";
+import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navigation";
 import { useBatchSendWizard } from "./use-batch-send-wizard";
 
 beforeEach(() => {
@@ -163,6 +164,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  resetDashboardNavigation();
   vi.clearAllMocks();
   vi.unstubAllGlobals();
 });
@@ -230,5 +232,24 @@ describe("useBatchSendWizard after a send it could not confirm", () => {
 
     act(() => result.current.handleBack());
     expect(result.current.currentStepId).toBe("RECIPIENTS");
+  });
+});
+
+describe("useBatchSendWizard request", () => {
+  it("estimates and sends the batch for the URL's Project", async () => {
+    setDashboardUrl("/dashboard/prj_batch_url/payments", {});
+    const { result } = renderWizard();
+    await openReview(result);
+    await act(async () => result.current.handlePrimary());
+
+    const posts = fetchMock.mock.calls
+      .filter(([input, init]) => String(input).startsWith(BATCH_PATH) && init?.method === "POST")
+      .map(([input, init]) => ({
+        path: String(input),
+        projectId: z.looseObject({ projectId: z.string() }).parse(JSON.parse(String(init?.body)))
+          .projectId,
+      }));
+    expect(posts).toContainEqual({ path: `${BATCH_PATH}/estimate`, projectId: "prj_batch_url" });
+    expect(posts).toContainEqual({ path: BATCH_PATH, projectId: "prj_batch_url" });
   });
 });

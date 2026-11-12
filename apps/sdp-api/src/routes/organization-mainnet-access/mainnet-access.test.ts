@@ -428,6 +428,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
   it("reads approved once an operator sets enableProductionProject in Clerk", async () => {
     expect((await post(SUBMISSION)).status).toBe(201);
     await syncProviderAccessFromClerk(getDb(env), {
+      productionProjectsAllowed: true,
       organizationId: ORGANIZATION_ID,
       clerkOrganization: {
         id: "org_clerk",
@@ -441,6 +442,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
 
   it("reads approved for an organization enabled without ever asking", async () => {
     await syncProviderAccessFromClerk(getDb(env), {
+      productionProjectsAllowed: true,
       organizationId: ORGANIZATION_ID,
       clerkOrganization: {
         id: "org_clerk",

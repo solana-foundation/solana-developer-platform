@@ -387,7 +387,8 @@ function sampleRequest(
 }
 
 /**
- * The code an error status answers with in the reference's examples. A 422 is
+ * The shared error code an error status answers with in the reference's examples.
+ * A 422 is
  * IDEMPOTENCY_KEY_REUSED where the route takes an Idempotency-Key and SIGNING_REJECTED elsewhere,
  * the two codes the API answers 422 with. `reference.test.ts` checks each code's status.
  */
@@ -407,12 +408,16 @@ export function exampleErrorCode(
       return "NOT_FOUND";
     case "409":
       return "CONFLICT";
+    case "413":
+      return "PAYLOAD_TOO_LARGE";
     case "422":
       return takesIdempotencyKey ? "IDEMPOTENCY_KEY_REUSED" : "SIGNING_REJECTED";
     case "429":
       return "RATE_LIMITED";
     case "500":
       return "INTERNAL_ERROR";
+    case "501":
+      return "NOT_IMPLEMENTED";
     case "502":
       return "SOLANA_RPC_ERROR";
     case "503":
@@ -472,15 +477,16 @@ function errorExample(
 ): Json {
   const codes = envelopeCodes(schema, document);
   if (codes === null) return jsonValueSchema.parse(sampleFromSchema(schema, document));
-  const error =
-    status === "403" && action !== null
-      ? missingAction(action)
-      : new AppError(exampleErrorCode(status, takesIdempotencyKey, where));
+  const code = exampleErrorCode(status, takesIdempotencyKey, where);
+  const error = status === "403" && action !== null ? missingAction(action) : new AppError(code);
   if (String(error.statusCode) !== status || !codes.has(error.code)) {
     throw new Error(`${where}: ${error.code} is not an answer the document allows for a ${status}`);
   }
   const envelope = errorEnvelopeSampleSchema.parse(sampleFromSchema(schema, document));
-  return { ...envelope, error: jsonValueSchema.parse(error.toResponse().error) };
+  return {
+    ...envelope,
+    error: jsonValueSchema.parse(error.toResponse().error),
+  };
 }
 
 function toApiResponses(

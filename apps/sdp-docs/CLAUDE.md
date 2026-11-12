@@ -95,8 +95,10 @@ import { DocsPage, DocsTitle, DocsDescription, DocsBody } from "@/components/doc
 
 `DevelopmentNotice` (`src/components/docs-shell/development-notice.tsx`) is the
 shared active development banner. The catch-all route places it below the
-description on the docs home and every `reference/api` page. Reuse the component
-for other placements; its marker, fill and border use the `--attention*` tokens.
+description on the docs home and every `reference/api` page. Earn pages use the
+same component with Earn-specific copy from `src/lib/development-notice.ts`;
+`expandDocsBlocks` includes that notice in Markdown and AI output too. Its
+marker, fill and border use the `--attention*` tokens.
 
 ### Page actions and the Markdown agents get
 
@@ -104,9 +106,34 @@ for other placements; its marker, fill and border use the `--attention*` tokens.
 
 Popovers (`fumadocs-ui/components/ui/popover`) render in a portal outside `.sdp-docs-shell`: give their content `.launch-popover`, which sets the type, surface, `--elevation-popover` and the motion-token animation.
 
-A guide's `<Tab>` (`tab.tsx`) stays mounted while another tab shows, hidden, so the table of contents and search can link to its headings; following such a link opens the tab. Fumadocs' `<Tabs>` reacts only to page load and `hashchange`, so the search dialog sets the hash itself for a result on the page already open (`router.push` fires none).
+A guide's `<Tab>` maps to `DocsTab` in `code-example.tsx`. Inactive panels stay
+mounted and hidden so search and heading links can open them. The table of
+contents shows only the visible path's headings and updates when tabs change.
+Fumadocs reacts to page load and `hashchange`, so the search dialog sets the hash
+itself for a result on the page already open (`router.push` fires none).
 
-A guide's `<Tabs>` panel is a card. A panel holding only a code block (` ```lang tab="…" ` fences, or a `<Tab>` with one block) is not: the tab card is the one frame, and an untitled block's copy button sits at the end of the tab row instead of over the code (`globals.css`, "Tab panels"). A panel with prose or several blocks keeps each block's own button.
+### Code examples and guide tabs
+
+The shared MDX mappings use `CodeExample`, `DocsCodeBlockTabs`, `DocsTabs` and
+`DocsTab` (`src/components/docs-shell/code-example.tsx`). Every code example
+has one frame and one header with its language and Copy button. Alternative
+languages use a dropdown; a single language uses a static label. Workflow steps
+and HTTP response statuses remain tabs. A panel with prose or several blocks
+keeps each block's own header. Do not nest another code frame or copy control.
+
+Keep the Shiki `data-language` transformer in `source.config.ts`: the shared
+components identify server-rendered code through that metadata and its Shiki
+class. Language choices synchronize across matching groups; optional browser
+storage must never be required for the controls to work.
+
+`expandDocsBlocks` unwraps `Tabs`, `Tab`, `Callout`, `details` and `summary` into
+plain Markdown. Every variant and closed helper remains in Copy page, `.md`
+and AI output. `EarnFlow` and `GuideCards` have equivalent Markdown too. Keep
+copyable source in MDX; do not depend on evaluated JSX to supply agent content.
+
+Earn guides say "choose a strategy" without recommending a provider. Filter
+examples by live availability and required capabilities, never provider name.
+Name a provider only to explain its specific behavior or show an API value.
 
 ### CSS classes (for custom elements within pages)
 
@@ -154,7 +181,22 @@ Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` 
 
 ### Search
 
-⌘K search: `RootProvider` (root `layout.tsx`) provides the hotkey and `DocsSearchDialog` (`search-dialog.tsx`), Fumadocs' default dialog pointed at `docsSearchApiPath` (`/docs/api/search`, `src/lib/site.ts`), the Orama route at `src/app/docs/api/search/route.ts`. It must stay under `/docs`: platform.solana.com forwards only `/docs/*` and a few root files here, so Fumadocs' default `/api/search` reaches the dashboard's sign-in redirect and every search fails (`site-urls.test.ts` pins it). The route leaves out text that 12 or more pages repeat word for word (shared header and envelope descriptions), gives each result its breadcrumb, and ranks pages whose title (then title and description) hold the query first (`rankTitlesFirst`, `src/lib/search-rank.ts`). The sidebar header has a "Search docs" trigger button (`.launch-docs-sidebar-search`). Only `content/docs/` MDX is indexed: JSX-rendered content like `DocsHome` is not. The sitemap is `/docs/sitemap.xml` (`src/app/docs/sitemap.ts`) for the same reason; `robots.txt` names it.
+`RootProvider` (root `layout.tsx`) supplies the search hotkey and
+`DocsSearchDialog` (`search-dialog.tsx`), pointed at `docsSearchApiPath`
+(`/docs/api/search`, `src/lib/site.ts`) and the Orama route at
+`src/app/docs/api/search/route.ts`. Keep it under `/docs`: the dashboard proxy
+does not forward `/api/search` (`site-urls.test.ts` pins this). The route removes
+text repeated across 12 or more pages and gives each result its breadcrumb.
+`rankTitlesFirst` (`src/lib/search-rank.ts`) prioritizes exact page URLs,
+operation names, endpoint labels and titles, then relevant headings and title
+or description matches. Guides win ties with API reference pages.
+
+Only admitted `content/docs/` MDX enters search; JSX-rendered content like
+`DocsHome` does not. Fumadocs normally omits code fences. For admitted Earn
+pages, `remarkDocsBlocks` also indexes code identifiers under their enclosing
+headings. Keep the module gate intact; private drafts must not enter the public
+index. The sitemap is `/docs/sitemap.xml` (`src/app/docs/sitemap.ts`), and
+`robots.txt` names it. The sidebar's trigger is `.launch-docs-sidebar-search`.
 
 ---
 
@@ -174,8 +216,8 @@ Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` 
 | `.launch-docs-nav-item.is-active` | Active page, or the top-level entry the page sits under: `--wash-strong` bg, `--ink`, weight 500                                  |
 | `.launch-docs-nav-folder`         | Folder container                                                                                                                  |
 | `.launch-docs-nav-folder-row`     | A folder's row and its one highlight, toggle included: `--wash` on hover, `--wash-strong` (`.is-active`) on the folder's own page |
-| `.launch-docs-nav-folder-btn`     | Non-linked folder label that toggles the folder: `--ink`, weight 500                                                              |
-| `.launch-docs-nav-folder-link`    | Linked folder: `--ink`, weight 500; a click opens the folder, or toggles it from the folder's own page                            |
+| `.launch-docs-nav-folder-btn`     | Non-linked folder toggle: same `--ink-secondary` and weight 400 as ordinary links                                                 |
+| `.launch-docs-nav-folder-link`    | Linked folder: ordinary link styling; inherits the row's selected-page highlight; click opens or toggles its folder               |
 | `.launch-docs-nav-toggle`         | Expand/collapse chevron button, 28px                                                                                              |
 | `.launch-docs-nav-children`       | Children container, 14px further in per level, highlights included                                                                |
 | `.launch-docs-sidebar-section`    | Section label: `--font-size-meta`, `--ink-tertiary`, sentence case                                                                |
@@ -206,14 +248,15 @@ Every MDX under `content/docs/` is built, served, indexed for search, and
 included in `llms-full.txt` when its release channel publishes it. Removing a
 nav entry only hides the sidebar link. To take a page down while keeping it in
 the repo:
-1. `git mv` it under `content/unpublished/` (same relative path). Nothing reads that directory.
+1. `git mv` it under `content/unpublished/` (same relative path). Production
+   builds and public generators do not read that directory.
 2. Remove it from the section `meta.json`.
 3. Repoint or drop inbound links from other pages; `check:links` fails on a link to a missing page.
 4. Run `pnpm generate:api && pnpm generate:ai` and commit `public/llms*.txt`; CI diffs them against the generated output.
 
 ## Release Channels
 
-Each docs deployment documents only what its release channel publishes. The API decides that (`createPublicSurfaceManifest` in `apps/sdp-api/src/openapi/spec.ts`: modules, ramp and custody providers and the actions an API key can be granted, Earn's hold included, plus the rate limits every channel enforces); `generate:api` writes it to `src/generated/public-surface.json` from `SDP_RELEASE_CHANNEL` (required on Vercel; `experimental` when unset elsewhere, which is what the committed file holds).
+Each docs deployment documents only what its release channel publishes. The API decides that (`createPublicSurfaceManifest` in `apps/sdp-api/src/openapi/spec.ts`: modules, ramp and custody providers and the actions an API key can be granted, plus the rate limits every channel enforces); `generate:api` writes it to `src/generated/public-surface.json` from `SDP_RELEASE_CHANNEL` (required on Vercel; `experimental` when unset elsewhere, which is what the committed file holds).
 
 Before documenting a new ramp provider, follow
 `docs/contributing/ramp-provider-safety.md` and verify its sandbox settlement
@@ -222,6 +265,9 @@ delivery.
 
 Gates follow module declarations, never sentences:
 - A page about one module takes `module: issuance` (or `ramps`, …) frontmatter; a page about one ramp provider takes `rampProvider: moonpay` (ramp provider pages are `payments/ramps-<provider>.mdx`). Outside the channel the page leaves `source` (it 404s and drops out of the sidebar, search, sitemap and the Markdown route) and the `llms*.txt` files.
+- A custody-provider guide takes `custodyProvider: fireblocks` frontmatter.
+  Link it from shared pages with `<CustodyProviderGuides />`; the page and
+  links follow the provider's publication in the API manifest.
 - Shared pages never name a module. Module-specific content lives on that module's pages; where a shared page lists modules, providers, tutorials or operations, it places a generated block instead: `<ModuleTable />`, `<ModuleCapabilities />`, `<RampProviderMatrix />`, `<CustodyProviderTable />`, `<TutorialLinks />`, `<ApiKeyGrantsTable />`, and `<RateLimitTable />` for the API's limits. The blocks render from `src/lib/docs-catalog.ts` (add a module or provider there) and the manifest.
 - `remarkDocsBlocks` (`src/lib/docs-blocks.ts`) expands the blocks before Fumadocs extracts headings and search text; `expandDocsBlocks` puts the same Markdown into raw MDX for the llms files, the Markdown route and the link checker. A `rotate-providers` code fence shows only published providers.
 - A guide request that matches the public operation's example uses
@@ -235,11 +281,11 @@ Gates follow module declarations, never sentences:
 - Committed generated files (`public/llms*.txt`, Postman, `reference/api/index.mdx`, `src/generated/public-surface.json`, `src/generated/api-examples.json`) are built at `experimental`; the deployment's build regenerates them for its channel. The root `content/docs/meta.json` is hand-maintained.
 - The docs skill (`public/SKILL.md`, and the same file at the repo's `skills/sdp-docs/SKILL.md`, which `npx skills add` installs from GitHub) is the exception: it names no module, so one copy fits every channel. `generate:ai` links only shared pages from it and fails on a gated or missing one; send readers to `llms.txt` for what a channel publishes.
 
-API reference pages are different: they are generated from the public OpenAPI document, a folder per tag, so a family appears and disappears with that document (`EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` is the one such switch). The docs keep no list of families of their own, and an untagged operation fails `generate:api`.
+API reference pages are different: they are generated from the public OpenAPI document, a folder per tag, so a family appears and disappears with its release channel. The docs keep no list of families of their own, and an untagged operation fails `generate:api`.
 `generate:ai` reads that channel's generated `apps/sdp-api/generated/openapi.json`
 after `generate:api`. `@sdp/api-catalog/ai-discovery` renders both the docs
 `llms.txt` and API `/llms.txt`, so their public endpoint family lists come from
-the same tags, including the Earn publication hold. Change that shared
+the same channel-filtered tags. Change that shared
 generator when changing family discovery, not either output alone.
 The generated API Reference index is a directory of published families: one
 link and description per family in `<ApiFamilyList>`. Shared API conventions
@@ -296,7 +342,23 @@ keep Swagger UI for their own release channel.
 
 Reference > Conventions (`content/docs/reference/conventions/`) holds the rules every route shares (errors, pagination, rate limits, versioning) and links the authentication, environments and idempotency guides; the API Reference index links it. It is written by hand, apart from `<RateLimitTable />`, names no module, and lives outside `reference/api/`, which `generate:api` rewrites.
 
-Currently unpublished: the whole Earn family, guide and API reference, until PRO-2038.
+`scripts/lib/ai-resource-pages.ts` orders admitted pages by navigation, resolves
+metadata paths relative to their folder, and includes unlisted pages once.
+Metadata never admits a gated page. Keep optional Earn discovery links behind
+the same filtered page map.
+
+### Earn docs
+
+Earn uses the same `module: earn` frontmatter and release-channel rules as
+every other module. Its guides live in `content/docs/earn`, with Embedded
+Yield in `content/docs/guides/embedded-yield.mdx`. The public API reference,
+Postman, playground and AI resources regenerate from the channel's public
+OpenAPI document. No branch or deployment-preview override admits content.
+
+The Treasury and provider-integration guides remain under
+`content/unpublished/earn` because they describe internal operations. Treasury, Programs and provider administration
+stay outside the pinned public API contract. A change to that contract needs
+security review; publication follows module maturity.
 
 ---
 

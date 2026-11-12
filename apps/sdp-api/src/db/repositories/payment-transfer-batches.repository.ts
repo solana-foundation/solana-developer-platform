@@ -78,7 +78,6 @@ export interface PaymentTransferBatchRow {
   total_amount: string | null;
   recipient_count: number;
   transaction_count: number;
-  options: Record<string, unknown>;
   error: string | null;
   initiated_by_key_id: string | null;
   idempotency_key: string | null;
@@ -116,7 +115,6 @@ export interface CreatePaymentTransferBatchInput {
   totalAmount?: string | null;
   recipientCount?: number;
   transactionCount?: number;
-  options?: Record<string, unknown>;
   error?: string | null;
   initiatedByKeyId?: string | null;
   idempotencyKey?: string | null;
@@ -139,7 +137,6 @@ export interface UpdatePaymentTransferBatchInput {
   totalAmount?: string | null;
   recipientCount?: number;
   transactionCount?: number;
-  options?: Record<string, unknown>;
   error?: string | null;
   initiatedByKeyId?: string | null;
 }

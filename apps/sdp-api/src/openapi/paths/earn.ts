@@ -1,6 +1,6 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
-import { errorResponseSchema } from "@/openapi/schemas/base";
 import {
+  earnCursorQueryParams,
   earnExternalWalletDepositResponse,
   earnExternalWalletDepositTransactionRequest,
   earnExternalWalletDepositTransactionResponse,
@@ -16,7 +16,9 @@ import {
   earnExternalWalletWithdrawalOptionsResponse,
   earnExternalWalletWithdrawalPreviewRequest,
   earnExternalWalletWithdrawalPreviewResponse,
+  earnExternalWalletWithdrawalRequestCancellationResponse,
   earnExternalWalletWithdrawalRequestCancelTransactionRequest,
+  earnExternalWalletWithdrawalRequestCancelTransactionResponse,
   earnExternalWalletWithdrawalRequestResponse,
   earnExternalWalletWithdrawalRequestsResponse,
   earnExternalWalletWithdrawalRequestTransactionRequest,
@@ -24,12 +26,23 @@ import {
   earnExternalWalletWithdrawalResponse,
   earnExternalWalletWithdrawalTransactionRequest,
   earnExternalWalletWithdrawalTransactionResponse,
+  earnMovementIdParam,
+  earnMovementStatusQueryParam,
+  earnOwnerAddressQueryParam,
   earnStrategiesResponse,
+  earnStrategyIdParam,
   earnStrategyResponse,
   earnVaultDepositPreviewRequest,
   earnVaultDepositPreviewResponse,
   earnVaultShareReconciliationResponse,
+  earnWithdrawalRequestIdParam,
 } from "@/openapi/schemas/earn";
+import {
+  EARN_CANCEL_SUBMIT_REQUEST_EXAMPLE,
+  EARN_DEPOSIT_SUBMIT_REQUEST_EXAMPLE,
+  EARN_WITHDRAWAL_REQUEST_SUBMIT_REQUEST_EXAMPLE,
+  EARN_WITHDRAWAL_SUBMIT_REQUEST_EXAMPLE,
+} from "@/openapi/schemas/earn-examples";
 import {
   earnExternalWalletEarningsQuerySchema,
   earnExternalWalletMovementParamsSchema,
@@ -41,11 +54,13 @@ import {
   earnVaultWithdrawalRequestParamsSchema,
   listEarnStrategiesQuerySchema,
 } from "@/routes/earn/schemas";
+import { earnErrorResponses } from "./earn-errors";
+import { EARN_GROUPS } from "./earn-groups";
 import { registerEarnOnboardingPaths } from "./earn-onboarding";
 import { registerEarnProviderActionPaths } from "./earn-provider-actions";
 import { registerEarnTreasuryPaths } from "./earn-treasury";
 import {
-  errorResponses,
+  DOCS_GROUP,
   jsonContent,
   projectScopeHeaders,
   projectScopeWithRequiredIdempotencyHeaders,
@@ -58,15 +73,15 @@ const earnConfigurationSecurity: EarnSecurity = [{ apiKeyAuth: [] }, { clerkBear
 const earnPublicSecurity: EarnSecurity = [{ apiKeyAuth: [] }];
 
 export function registerEarnPaths(registry: OpenAPIRegistry) {
-  registerEarnOnboardingPaths(registry);
-  registerEarnTreasuryPaths(registry, earnConfigurationSecurity);
-  registerEarnProviderActionPaths(registry, earnConfigurationSecurity);
   registerEarnStrategyPaths(registry, earnConfigurationSecurity);
   registerEarnDepositPreviewPath(registry, earnConfigurationSecurity);
+  registerEarnExternalWalletPaths(registry, earnConfigurationSecurity);
+  registerEarnTreasuryPaths(registry, earnConfigurationSecurity);
+  registerEarnProviderActionPaths(registry, earnConfigurationSecurity);
+  registerEarnOnboardingPaths(registry);
   // Treasury-facing, so the internal document only: partners hold no custody
   // wallets for this read to reconcile.
   registerEarnVaultShareReconciliationPath(registry, earnConfigurationSecurity);
-  registerEarnExternalWalletPaths(registry, earnConfigurationSecurity);
 }
 
 /** The partner-facing surface: the strategy catalogue plus the caller-signed money routes. */
@@ -86,15 +101,15 @@ function registerEarnStrategyPaths(
     method: "get",
     path: "/v1/earn/strategies",
     tags: ["Earn"],
-    summary: "List yield strategies",
+    [DOCS_GROUP]: EARN_GROUPS.discovery,
+    summary: "List strategies",
     operationId: "listEarnStrategies",
     description:
-      "Returns the strategy catalogue visible to the caller, ranked by deposit size (TVL " +
-      "descending). By default the list answers the environment's own cluster, the shelf the " +
-      "caller can act on; pass `?cluster=` to browse the other cluster's mirrored shelf " +
-      "(those rows stay `fundable: false`). The shelf is the caller's project environment. " +
-      "Catalogued is not the same as fundable: branch on `fundable` and `status` rather than " +
-      "assuming a listed strategy takes deposits.",
+      "Lists the strategies your project can see, largest first by total value locked. The " +
+      "list defaults to your project's cluster: devnet for sandbox, mainnet for production. " +
+      "Pass `cluster` to browse the other cluster's strategies; those rows are always " +
+      "`fundable: false`. A listed strategy is not always open for deposits, so check " +
+      "`fundable` and `status` before you offer it.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -102,10 +117,10 @@ function registerEarnStrategyPaths(
     },
     responses: {
       200: {
-        description: "One page of the strategy catalogue",
+        description: "One page of strategies",
         content: jsonContent(earnStrategiesResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 429, 500, 503]),
     },
   });
 
@@ -113,22 +128,23 @@ function registerEarnStrategyPaths(
     method: "get",
     path: "/v1/earn/strategies/{strategyId}",
     tags: ["Earn"],
-    summary: "Get one yield strategy",
+    [DOCS_GROUP]: EARN_GROUPS.discovery,
+    summary: "Get a strategy",
     operationId: "getEarnStrategy",
     description:
-      "Returns one catalogue row by id, whatever its cluster; `fundable` still answers " +
-      "whether the instrument exists on the caller's own cluster.",
+      "Gets one strategy by ID, on either cluster. `fundable` still reports whether the " +
+      "strategy exists on your project's cluster.",
     security,
     request: {
       headers: projectScopeHeaders,
-      params: earnStrategyIdParamsSchema,
+      params: earnStrategyIdParamsSchema.extend({ strategyId: earnStrategyIdParam }),
     },
     responses: {
       200: {
-        description: "One strategy-catalogue row",
+        description: "The strategy",
         content: jsonContent(earnStrategyResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 503]),
     },
   });
 }
@@ -141,14 +157,16 @@ function registerEarnDepositPreviewPath(
     method: "post",
     path: "/v1/earn/vault-deposit-previews",
     tags: ["Earn"],
-    summary: "Preview a direct vault deposit",
+    [DOCS_GROUP]: EARN_GROUPS.discovery,
+    summary: "Preview a deposit",
     operationId: "createEarnVaultDepositPreview",
     description:
-      "Quotes how many shares a direct vault deposit would mint from the provider's live " +
-      "accounting. Use it when the strategy's `depositSlippage.quoteRequired` is true, then " +
-      "derive `minSharesOut` from `sharesOut` minus the chosen tolerance. Read-only, no " +
-      "idempotency key, and 501 when the provider cannot quote deposits. Takes the deposit's " +
-      "own gates in the caller's project environment, provider entitlement included.",
+      "Quotes how many shares a deposit would receive right now, from the provider's live " +
+      "accounting. When the strategy's `depositSlippage` is not null, set `minSharesOut` " +
+      "from this quote: take your tolerance off `sharesOut`. Resolve every `blockingIssues` " +
+      "entry before you build. The preview is read-only, takes no Idempotency-Key, and " +
+      "applies a deposit's access checks, provider activation included. It returns 501 when " +
+      "the provider cannot quote deposits.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -162,7 +180,7 @@ function registerEarnDepositPreviewPath(
         description: "Live deposit quote",
         content: jsonContent(earnVaultDepositPreviewResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 501, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 501, 503]),
     },
   });
 }
@@ -175,7 +193,8 @@ function registerEarnVaultShareReconciliationPath(
     method: "get",
     path: "/v1/earn/vault-share-reconciliation",
     tags: ["Earn"],
-    summary: "Reconcile custody vault shares against recorded positions",
+    [DOCS_GROUP]: EARN_GROUPS.treasury,
+    summary: "Reconcile custody shares",
     operationId: "getEarnVaultShareReconciliation",
     description:
       "Report-only comparison of each scoped custody wallet's on-chain share balances against " +
@@ -192,7 +211,7 @@ function registerEarnVaultShareReconciliationPath(
         description: "Reconciliation report",
         content: jsonContent(earnVaultShareReconciliationResponse),
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 429, 500, 503]),
+      ...earnErrorResponses([401, 403, 429, 500, 503]),
     },
   });
 }
@@ -206,23 +225,23 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     method: "get",
     path: "/v1/earn/external-wallet/positions/summary",
     tags: ["Earn"],
-    summary: "Get external-wallet position totals",
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
+    summary: "Get position totals",
     operationId: "getEarnExternalWalletPositionSummary",
     description:
-      "Returns a complete live aggregate across the active partner project's end-user wallets, " +
-      "grouped by strategy and token. The service pages every stored claim before hydration. " +
-      "Owner addresses are omitted by default; pass `includeOwnerAddresses=true` to receive " +
-      "them, and add `includePositions=true` when a UI needs the already hydrated per-customer " +
-      "positions, which avoids a separate paid chain read for every owner. A total is omitted when any " +
-      "contributing live value is unavailable, never reported as zero or partial.",
+      "Gets live position totals across every customer wallet in your project, grouped by " +
+      "strategy and token. Wallet addresses are left out unless you pass " +
+      "`includeOwnerAddresses=true`; add `includePositions=true` to also receive each " +
+      "wallet's positions, which saves one read per wallet. A total that depends on an " +
+      "unavailable live value is left out, never reported as zero or partial.",
     security,
     request: { headers: projectScopeHeaders, query: earnExternalWalletPositionSummaryQuerySchema },
     responses: {
       200: {
-        description: "Complete external-wallet position aggregate",
+        description: "Position totals",
         content: jsonContent(earnExternalWalletPositionSummaryResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 429, 500, 503]),
     },
   });
 
@@ -230,26 +249,29 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     method: "get",
     path: "/v1/earn/external-wallet/positions",
     tags: ["Earn"],
-    summary: "List one external wallet's positions",
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
+    summary: "List positions",
     operationId: "listEarnExternalWalletPositions",
     description:
-      "Returns one strict keyset page of live positions for an end-user wallet in the active " +
-      "partner project. `ownerAddress` is required, the same query addressing every per-owner " +
-      "read on this surface uses. A wallet with no positions in the project's scope (never " +
-      "deposited, fully exited, or held under another organization) answers 200 with an empty " +
-      "`positions` list, never 404. Live fields are absent when provider hydration is " +
-      "unavailable, never replaced with zero.",
+      "Lists one customer wallet's live positions, one page at a time. `ownerAddress` is " +
+      "required. A wallet with no positions in your project (never deposited, fully " +
+      "withdrawn, or held under another organization) returns an empty `positions` list, " +
+      "not 404. Live fields are left out, never set to zero, when the provider read is " +
+      "unavailable.",
     security,
     request: {
       headers: projectScopeHeaders,
-      query: earnExternalWalletPositionsQuerySchema,
+      query: earnExternalWalletPositionsQuerySchema.extend({
+        ownerAddress: earnOwnerAddressQueryParam,
+        ...earnCursorQueryParams,
+      }),
     },
     responses: {
       200: {
-        description: "External-wallet position page",
+        description: "One page of positions",
         content: jsonContent(earnExternalWalletPositionsResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 429, 500, 503]),
     },
   });
 
@@ -257,28 +279,32 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     method: "get",
     path: "/v1/earn/external-wallet/movements",
     tags: ["Earn"],
-    summary: "List one external wallet's activity",
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
+    summary: "List movements",
     operationId: "listEarnExternalWalletMovements",
     description:
-      "Returns one keyset page of the wallet's recorded deposits and withdrawals, newest " +
-      "first, in ledger vocabulary (`requested`, `submitted`, `confirmed`, `finalized`, " +
-      "`failed`; only `finalized` and `failed` are terminal). `ownerAddress` is required; a " +
-      "wallet with no recorded movements in the active partner project answers 200 with an " +
-      "empty `movements` list, never 404. Each movement carries `tokenAmount` in `tokenMint` " +
-      "units for display (a withdrawal's observed payout once finalized) alongside the " +
-      "on-chain `amount`/`denomination`. Reports on money that already moved, so no provider " +
-      "gate applies.",
+      "Lists one customer wallet's deposits and withdrawals, newest first, one page at a " +
+      "time. Movement statuses are `requested`, `submitted`, `confirmed`, `finalized` and " +
+      "`failed`; only `finalized` and `failed` are final. `ownerAddress` is required, and a " +
+      "wallet with no movements returns an empty `movements` list, not 404. Show " +
+      "`tokenAmount` in `tokenMint` units: on a withdrawal it is the observed payout once " +
+      "finalized, while `amount` and `denomination` carry the onchain quantity, which is " +
+      "shares. Reads keep working after a provider stops taking deposits.",
     security,
     request: {
       headers: projectScopeHeaders,
-      query: earnExternalWalletMovementsQuerySchema,
+      query: earnExternalWalletMovementsQuerySchema.extend({
+        ownerAddress: earnOwnerAddressQueryParam,
+        status: earnMovementStatusQueryParam,
+        ...earnCursorQueryParams,
+      }),
     },
     responses: {
       200: {
-        description: "External-wallet movement page",
+        description: "One page of movements",
         content: jsonContent(earnExternalWalletMovementsResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 429, 500, 503]),
     },
   });
 
@@ -286,26 +312,27 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     method: "get",
     path: "/v1/earn/external-wallet/movements/{movementId}",
     tags: ["Earn"],
-    summary: "Get one external-wallet movement",
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
+    summary: "Get a movement",
     operationId: "getEarnExternalWalletMovement",
     description:
-      "Polls one recorded movement to a terminal state — the read that settles a submit whose " +
-      "outcome the caller never learned. Each poll observes the movement's exact signature on " +
-      "chain and advances the recorded status immediately, so state lands as fast as the " +
-      "network decides it; if the chain read is unavailable the last durable status is served " +
-      "and a background reconciler (about every minute) remains the recovery path. Keep " +
-      "polling until `finalized` or `failed` — those are the only terminal states.",
+      "Gets one deposit or withdrawal and refreshes its onchain status when it can. Use it " +
+      "to track a movement after submit, or to recover a submit whose response was lost. If " +
+      "the chain read fails, you get the last recorded status while SDP keeps reconciling " +
+      "in the background. An atomic movement can show as done at `confirmed`, but only " +
+      "`finalized` and `failed` are final. For `settlement: provider_order`, chain " +
+      "confirmation is not payout: the provider still has to complete the order.",
     security,
     request: {
       headers: projectScopeHeaders,
-      params: earnExternalWalletMovementParamsSchema,
+      params: earnExternalWalletMovementParamsSchema.extend({ movementId: earnMovementIdParam }),
     },
     responses: {
       200: {
         description: "Recorded movement",
         content: jsonContent(earnExternalWalletMovementDetailResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 503]),
     },
   });
 
@@ -313,30 +340,32 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     method: "get",
     path: "/v1/earn/external-wallet/earnings",
     tags: ["Earn"],
-    summary: "Get one external wallet's balance and earnings",
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
+    summary: "Get earnings",
     operationId: "getEarnExternalWalletEarnings",
     description:
-      "Returns live balance and total earned per deposit token for the required " +
-      "`ownerAddress`: `earned` is live value plus observed withdrawal payouts " +
-      "(`totalWithdrawn`) minus finalized SDP deposits (`totalDeposited`), stated only when " +
-      "exact. When it cannot be stated (live value unavailable, movements still settling, or " +
-      "a finalized withdrawal whose payout was not observed) the figure is absent with a " +
-      "named reason, never zero. A wallet with no positions in the project's scope answers " +
-      "200 with `positionCount: 0` and empty `totalsByToken`, never 404. Figures cover " +
-      "currently held positions: a fully exited position's history drops out (it stays on the " +
-      "movements list). Live value reads the owner's whole vault balance, so shares acquired " +
-      "outside SDP inflate it.",
+      "Gets one customer wallet's live balance and earnings per deposit token. `earned` is " +
+      "live value plus observed withdrawal payouts (`totalWithdrawn`) minus finalized " +
+      "deposits (`totalDeposited`), and appears only when it is exact. Otherwise it is left " +
+      "out with an `earnedUnavailableReason`, such as a live value that is unavailable, " +
+      "movements that are still settling, or a withdrawal payout SDP did not observe; never " +
+      "show it as zero. A wallet with no positions returns `positionCount: 0` and an empty " +
+      "`totalsByToken`, not 404. Totals cover the positions the wallet holds now: a fully " +
+      "withdrawn position drops out here but stays in the movements list. Live value reads " +
+      "the wallet's whole balance in the strategy, so shares acquired outside SDP raise it.",
     security,
     request: {
       headers: projectScopeHeaders,
-      query: earnExternalWalletEarningsQuerySchema,
+      query: earnExternalWalletEarningsQuerySchema.extend({
+        ownerAddress: earnOwnerAddressQueryParam,
+      }),
     },
     responses: {
       200: {
-        description: "External-wallet earnings",
+        description: "Earnings per deposit token",
         content: jsonContent(earnExternalWalletEarningsResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 429, 500, 503]),
     },
   });
 
@@ -344,13 +373,16 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     method: "post",
     path: "/v1/earn/external-wallet/deposit-transactions",
     tags: ["Earn"],
-    summary: "Build an unsigned external-wallet deposit transaction",
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
+    summary: "Build a deposit transaction",
     operationId: "createEarnExternalWalletDepositTransaction",
     description:
-      "Builds one unsigned vault deposit transaction for a wallet SDP does not custody. The " +
-      "build takes the provider entitlement, persists a submit-capable build, and may name a " +
-      "caller-controlled `feePayer` that signs alongside the owner. The transaction expires " +
-      "with its blockhash, and nothing moves during the build.",
+      "Builds an unsigned deposit transaction for the customer's wallet to sign. Nothing " +
+      "moves until you submit the signed transaction. The build applies provider access " +
+      "checks and can name your own `feePayer`, which then signs alongside the customer. A " +
+      "swap-funded deposit that cannot fit in one transaction returns a separate swap and " +
+      "follow-up deposit instead of `transaction`, so check the response before you request " +
+      "a signature.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -364,7 +396,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
         description: "Unsigned deposit transaction",
         content: jsonContent(earnExternalWalletDepositTransactionResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 501, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 501, 503]),
     },
   });
 
@@ -372,30 +404,36 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     method: "post",
     path: "/v1/earn/external-wallet/deposits",
     tags: ["Earn"],
-    summary: "Submit a signed external-wallet deposit",
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
+    summary: "Submit a deposit",
     operationId: "createEarnExternalWalletDeposit",
     description:
-      "Verifies the signed bytes are exactly the built transaction and that every required " +
-      "signature is genuine (the owner's, and the fee payer's when the build named one), " +
-      "records the movement, then broadcasts. Requires the Idempotency-Key header: " +
-      "a retry with the same key resolves the original movement (`replayed: true`), and each " +
-      "built transaction is consumable exactly once. Signed builds remain admissible after " +
-      "blockhash expiry because the owner may already have broadcast them. Retain the signed " +
-      "bytes and poll the recorded movement; do not replace an uncertain signed intent.",
+      "Submits a deposit transaction signed by the customer's wallet. SDP checks that the " +
+      "signed bytes match the built transaction and that every required signature is valid " +
+      "(the customer's, plus your fee payer's when the build named one), records the " +
+      "movement, then broadcasts. Idempotency-Key is required: a retry with the same key " +
+      "returns the original movement with `replayed: true`, and each built transaction can be " +
+      "submitted once. Reusing a key with a different body, or submitting one build under a " +
+      "second key, returns `409 CONFLICT`. Submit the original signed bytes even after the " +
+      "blockhash expires, since the wallet may already have broadcast them. After an " +
+      "uncertain response, retry with the same key and body, then read the movement; never " +
+      "replace a signed transaction whose outcome is unknown.",
     security,
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
       body: {
         required: true,
-        content: jsonContent(earnExternalWalletSubmitRequest),
+        content: jsonContent(
+          earnExternalWalletSubmitRequest.openapi({ example: EARN_DEPOSIT_SUBMIT_REQUEST_EXAMPLE })
+        ),
       },
     },
     responses: {
       200: {
-        description: "Recorded deposit movement",
+        description: "The recorded deposit",
         content: jsonContent(earnExternalWalletDepositResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 409, 429, 500, 503]),
     },
   });
 
@@ -403,15 +441,17 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     method: "post",
     path: "/v1/earn/external-wallet/withdrawal-previews",
     tags: ["Earn"],
-    summary: "Preview an external-wallet exit",
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
+    summary: "Preview a withdrawal",
     operationId: "createEarnExternalWalletWithdrawalPreview",
     description:
-      "Quotes what redeeming the shares would pay right now, from the vault's live " +
-      "accounting — the read a truthful `minAmountOut` floor is derived from (`assetsOut` " +
-      "minus your chosen tolerance, quantized to `assetDecimals`). Read-only, no idempotency " +
-      "key, and it takes the exit's own gates: a delisted strategy or a provider disabled for " +
-      "new deposits stays quotable. The request names its tenant position. POST because the " +
-      "parameters are a body; 501 when the provider cannot quote exits.",
+      "Quotes what withdrawing these shares would pay right now, from the strategy's live " +
+      "accounting. When the strategy's `withdrawalSlippage` is not null, set `minAmountOut` " +
+      "from this quote: take your tolerance off `assetsOut`, rounded down to " +
+      "`assetDecimals`. The preview is read-only, takes no Idempotency-Key, and still works " +
+      "after a strategy is deprecated or its provider stops taking deposits. It does not " +
+      "check the wallet's balance, so keep `shares` within the position's " +
+      "`withdrawableShares`. It returns 501 when the provider cannot quote withdrawals.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -422,10 +462,10 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     },
     responses: {
       200: {
-        description: "Live exit quote",
+        description: "Live withdrawal quote",
         content: jsonContent(earnExternalWalletWithdrawalPreviewResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 501, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 501, 503]),
     },
   });
 
@@ -433,13 +473,15 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     method: "post",
     path: "/v1/earn/external-wallet/withdrawal-transactions",
     tags: ["Earn"],
-    summary: "Build an unsigned external-wallet exit transaction",
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
+    summary: "Build a withdrawal transaction",
     operationId: "createEarnExternalWalletWithdrawalTransaction",
     description:
-      "Builds one unsigned external-wallet exit for a tenant position and persists a " +
-      "submit-capable build. ADR 0002 exit safety applies, so the exit works while the " +
-      "provider is disabled for new deposits. A strategy with a withdrawal slippage policy " +
-      "still requires `minAmountOut`.",
+      "Builds an unsigned withdrawal transaction for a position, for the customer's wallet " +
+      "to sign. Withdrawals keep working after a provider stops taking deposits. Send " +
+      "`minAmountOut` when the strategy's `withdrawalSlippage` is not null, and omit it " +
+      "when null. A provider-order route may not support a preview: it places an order that " +
+      "pays out later, not an instant redemption.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -450,10 +492,10 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     },
     responses: {
       200: {
-        description: "Unsigned exit transaction",
+        description: "Unsigned withdrawal transaction",
         content: jsonContent(earnExternalWalletWithdrawalTransactionResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 501, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 501, 503]),
     },
   });
 
@@ -461,27 +503,36 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     method: "post",
     path: "/v1/earn/external-wallet/withdrawals",
     tags: ["Earn"],
-    summary: "Submit a signed external-wallet withdrawal",
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
+    summary: "Submit a withdrawal",
     operationId: "createEarnExternalWalletWithdrawal",
     description:
-      "The exit mirror of the deposit submit: signature verified over the exact built message, " +
-      "movement recorded before broadcast, Idempotency-Key required, one submission per built " +
-      "transaction. Expired signed builds remain admissible for recovery of independently " +
-      "broadcast transactions. Authenticated exits remain available when Earn is disabled.",
+      "Submits a withdrawal transaction signed by the customer's wallet. It works like a " +
+      "deposit submit: SDP checks every signature against the exact built message, records " +
+      "the movement before broadcast, requires an Idempotency-Key, and accepts each built " +
+      "transaction once, with the same `409 CONFLICT` answers. Submit the original signed " +
+      "bytes even after the blockhash expires, since the wallet may already have broadcast " +
+      "them. After an uncertain response, retry with the same key and body, then read the " +
+      "movement instead of building a new withdrawal. Withdrawals stay available while Earn " +
+      "is disabled.",
     security,
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
       body: {
         required: true,
-        content: jsonContent(earnExternalWalletSubmitRequest),
+        content: jsonContent(
+          earnExternalWalletSubmitRequest.openapi({
+            example: EARN_WITHDRAWAL_SUBMIT_REQUEST_EXAMPLE,
+          })
+        ),
       },
     },
     responses: {
       200: {
-        description: "Recorded withdrawal movement",
+        description: "The recorded withdrawal",
         content: jsonContent(earnExternalWalletWithdrawalResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 409, 429, 500, 503]),
     },
   });
 
@@ -496,13 +547,16 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     method: "post",
     path: "/v1/earn/external-wallet/withdrawal-options",
     tags: ["Earn"],
-    summary: "Discover external-wallet withdrawal routes",
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
+    summary: "List withdrawal options",
     operationId: "getEarnExternalWalletWithdrawalOptions",
     description:
-      "Reads atomic, provider-order, solver-queue and operator-redemption routes independently from live provider state. " +
-      "Call this when the customer starts an exit and let them choose when more than one route " +
-      "is available. Never infer a route from the strategy's liquidity term. The request names " +
-      "its tenant position.",
+      "Lists the withdrawal routes a position supports right now: instant, provider order, " +
+      "solver queue and operator redemption, each read from live provider state. A position " +
+      "offers instant or provider order, never both; the withdrawal endpoints build " +
+      "whichever it offers. Call this when the customer starts a withdrawal, and let them " +
+      "choose when more than one route is available. Never infer a route from the " +
+      "strategy's `liquidityTerm`.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -513,10 +567,10 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     },
     responses: {
       200: {
-        description: "Live withdrawal routes and asynchronous-exit limits",
+        description: "Withdrawal options and their live terms",
         content: jsonContent(earnExternalWalletWithdrawalOptionsResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 501, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 501, 503]),
     },
   });
 
@@ -524,13 +578,16 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     method: "post",
     path: "/v1/earn/external-wallet/queued-withdrawal-previews",
     tags: ["Earn"],
-    summary: "Preview an asynchronous external-wallet withdrawal",
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
+    summary: "Preview a withdrawal request",
     operationId: "createEarnExternalWalletQueuedWithdrawalPreview",
     description:
-      "Quotes either a solver queue's discounted payout and timing or an operator redemption's " +
-      "intermediate-token conversion and par payout. Validate the selected mechanism against " +
-      "withdrawal-options first, then refuse any blockingIssues before asking the customer to " +
-      "confirm. Read-only and safe to retry.",
+      "Previews a withdrawal request: a solver queue's discounted payout and timing, or an " +
+      "operator redemption's intermediate-token conversion and payout. Check the mechanism " +
+      "against the position's withdrawal options first, and resolve every `blockingIssues` " +
+      "entry before the customer confirms. The preview is read-only and safe to retry. It " +
+      "does not check the wallet's balance, so keep `shares` within the position's " +
+      "`withdrawableShares`.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -541,10 +598,10 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     },
     responses: {
       200: {
-        description: "Expected asynchronous-withdrawal terms",
+        description: "Expected request terms",
         content: jsonContent(earnExternalWalletQueuedWithdrawalPreviewResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 501, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 501, 503]),
     },
   });
 
@@ -552,13 +609,15 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     method: "post",
     path: "/v1/earn/external-wallet/withdrawal-request-transactions",
     tags: ["Earn"],
-    summary: "Build an unsigned asynchronous-withdrawal request",
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
+    summary: "Build a withdrawal request transaction",
     operationId: "createEarnExternalWalletWithdrawalRequestTransaction",
     description:
-      "Builds a keyed, submit-capable asynchronous request for a tenant position. A solver " +
-      "request escrows shares; an operator redemption converts shares into a delegated " +
-      "intermediate token. Neither request transaction pays the customer. Persist the later " +
-      "withdrawalRequestId and track it through operator/solver fulfilment or cancellation.",
+      "Builds an unsigned withdrawal request transaction for a position, for the customer's " +
+      "wallet to sign. A solver queue request escrows shares; an operator redemption " +
+      "converts shares into an intermediate token that the operator settles later. Neither " +
+      "transaction pays the customer. Save the `withdrawalRequestId` the submit returns and " +
+      "track the request until it is fulfilled, canceled, or failed.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -569,10 +628,10 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     },
     responses: {
       200: {
-        description: "Unsigned asynchronous-withdrawal request transaction",
+        description: "Unsigned withdrawal request transaction",
         content: jsonContent(earnExternalWalletWithdrawalRequestTransactionResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 429, 500, 501, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 409, 429, 500, 501, 503]),
     },
   });
 
@@ -580,33 +639,44 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     method: "post",
     path: "/v1/earn/external-wallet/withdrawal-requests",
     tags: ["Earn"],
-    summary: "Submit a signed asynchronous-withdrawal request",
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
+    summary: "Submit a withdrawal request",
     operationId: "createEarnExternalWalletWithdrawalRequest",
     description:
-      "Verifies every signature over the exact built message, records the request before " +
-      "broadcast, then sends it. Idempotency-Key is required. A same-key retry returns the " +
-      "original durable request; the build is consumable exactly once. Expiry releases only " +
-      "the unsigned reservation, retaining the build for late submission. Reclaiming a released " +
-      "or replaced reservation requires successful finalized execution of the exact signed " +
-      "transaction. Until that proof is visible, retry the same bytes and key after a 409 CONFLICT. " +
-      "A par redemption whose original cycle already closed is refused for operator history " +
-      "reconciliation, so a late receipt cannot claim a newer request at the reused address. " +
-      "Finalized failed transactions found during recovery return 400 TRANSACTION_FAILED. " +
-      "Recovery RPC outages return 503 PROVIDER_UNAVAILABLE; retry the original bytes and key. An unresolved " +
-      "16-signature online history window returns 503 and requires support reconciliation. " +
-      "Expired par builds with unavailable creation history return 503; retain and retry " +
-      "the original signed intent rather than signing a replacement.",
+      "Submits a withdrawal request transaction signed by the customer's wallet. SDP checks " +
+      "every signature against the exact built message, records the request before broadcast, " +
+      "then sends it. Idempotency-Key is required: a retry with the same key returns the " +
+      "original request, and each built transaction can be submitted once. Reusing a key with " +
+      "a different body, or submitting one build under a second key, returns `409 CONFLICT`. " +
+      "An expired build can still be submitted late. If its reservation was released or " +
+      "replaced, SDP accepts it only once the exact signed transaction is finalized as " +
+      "successful, so after a `409 CONFLICT` retry the same bytes and key until that shows. A " +
+      "late operator redemption whose original cycle already closed is refused for operator " +
+      "reconciliation, so it cannot claim a newer request at the same address. A transaction " +
+      "that recovery finds finalized as failed returns `400 TRANSACTION_FAILED`; build a new " +
+      "one. A recovery RPC outage returns `503 PROVIDER_UNAVAILABLE`: retry the original " +
+      "bytes and key. An unresolved 16-signature history window returns `503` and needs " +
+      "support to reconcile. An expired operator redemption build whose creation history is " +
+      "unavailable also returns `503`: keep and retry the original signed intent rather than " +
+      "signing a replacement.",
     security,
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
-      body: { required: true, content: jsonContent(earnExternalWalletSubmitRequest) },
+      body: {
+        required: true,
+        content: jsonContent(
+          earnExternalWalletSubmitRequest.openapi({
+            example: EARN_WITHDRAWAL_REQUEST_SUBMIT_REQUEST_EXAMPLE,
+          })
+        ),
+      },
     },
     responses: {
       200: {
-        description: "Recorded asynchronous-withdrawal request",
+        description: "The recorded withdrawal request",
         content: jsonContent(earnExternalWalletWithdrawalRequestResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 409, 429, 500, 503]),
     },
   });
 
@@ -614,23 +684,28 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     method: "get",
     path: "/v1/earn/external-wallet/withdrawal-requests",
     tags: ["Earn"],
-    summary: "List an external wallet's asynchronous withdrawals",
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
+    summary: "List withdrawal requests",
     operationId: "listEarnExternalWalletWithdrawalRequests",
     description:
-      "Returns one strict keyset page for the required ownerAddress in the active project. " +
-      "Use settled=false on startup and after reconnecting to restore every request that still " +
-      "needs fulfilment, classification or cancellation. Page until hasMore is false.",
+      "Lists one customer wallet's withdrawal requests, one page at a time. `ownerAddress` " +
+      "is required. On startup and after reconnecting, pass `settled=false` to restore " +
+      "every request that still needs fulfillment, classification or cancellation, and page " +
+      "until `hasMore` is false.",
     security,
     request: {
       headers: projectScopeHeaders,
-      query: earnExternalWalletWithdrawalRequestsQuerySchema,
+      query: earnExternalWalletWithdrawalRequestsQuerySchema.extend({
+        ownerAddress: earnOwnerAddressQueryParam,
+        ...earnCursorQueryParams,
+      }),
     },
     responses: {
       200: {
-        description: "Asynchronous-withdrawal request page",
+        description: "One page of withdrawal requests",
         content: jsonContent(earnExternalWalletWithdrawalRequestsResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 429, 500, 503]),
     },
   });
 
@@ -638,24 +713,28 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     method: "get",
     path: "/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
     tags: ["Earn"],
-    summary: "Get one asynchronous-withdrawal request",
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
+    summary: "Get a withdrawal request",
     operationId: "getEarnExternalWalletWithdrawalRequest",
     description:
-      "Returns the last durable lifecycle observation. Request creation is share escrow or an " +
-      "intermediate-token conversion, not payout. Only fulfilled, cancelled and failed are " +
-      "terminal. Keep polling closedOrUnknown because SDP has not yet authenticated whether " +
-      "the closed request paid assets or recovered the owner's token claim.",
+      "Gets one withdrawal request with its latest recorded status. Creating a request " +
+      "escrows shares or converts them to an intermediate token; it does not pay out. Only " +
+      "`fulfilled`, `cancelled` and `failed` are final. Keep polling a `closedOrUnknown` " +
+      "request: SDP has not yet confirmed whether it paid out or returned the customer's " +
+      "tokens.",
     security,
     request: {
       headers: projectScopeHeaders,
-      params: earnVaultWithdrawalRequestParamsSchema,
+      params: earnVaultWithdrawalRequestParamsSchema.extend({
+        withdrawalRequestId: earnWithdrawalRequestIdParam,
+      }),
     },
     responses: {
       200: {
-        description: "Durable asynchronous-withdrawal request",
+        description: "The withdrawal request",
         content: jsonContent(earnExternalWalletWithdrawalRequestResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 503]),
     },
   });
 
@@ -663,15 +742,17 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     method: "post",
     path: "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
     tags: ["Earn"],
-    summary: "Build an unsigned asynchronous-withdrawal cancellation",
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
+    summary: "Build a cancellation transaction",
     operationId: "createEarnExternalWalletWithdrawalRequestCancelTransaction",
     description:
-      "Builds the owner-signed recovery transaction. A solver request becomes cancellable only " +
-      "at expiredCancelable because fulfilment is permitted through its deadline. A cancelable " +
-      "operator redemption may be revoked while pending; cancellation leaves the owner with " +
-      "the intermediate token rather than recreating the original shares. Requires earn.manage " +
-      "and remains available without production entitlement or when Earn is disabled. " +
-      "Organization suspension still blocks authentication.",
+      "Builds an unsigned transaction that cancels a withdrawal request, for the customer's " +
+      "wallet to sign. A solver queue request can be canceled only at `expiredCancelable`, " +
+      "because a solver may fulfill it until its deadline; before then the build returns `409 " +
+      "CONFLICT`. An operator redemption that allows cancellation can be canceled while " +
+      "`pending`, which leaves the customer holding the intermediate token, not the original " +
+      "shares. Requires `earn.manage`. Cancellation stays available without production access " +
+      "and while Earn is disabled; a suspended organization still cannot authenticate.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -682,10 +763,10 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     },
     responses: {
       200: {
-        description: "Unsigned asynchronous-withdrawal cancellation transaction",
-        content: jsonContent(earnExternalWalletWithdrawalRequestTransactionResponse),
+        description: "Unsigned cancellation transaction",
+        content: jsonContent(earnExternalWalletWithdrawalRequestCancelTransactionResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 429, 500, 501, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 409, 429, 500, 501, 503]),
     },
   });
 
@@ -693,25 +774,33 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     method: "post",
     path: "/v1/earn/external-wallet/withdrawal-request-cancellations",
     tags: ["Earn"],
-    summary: "Submit a signed asynchronous-withdrawal cancellation",
+    [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
+    summary: "Submit a cancellation",
     operationId: "createEarnExternalWalletWithdrawalRequestCancellation",
     description:
-      "Verifies the signed recovery transaction, records it before broadcast and returns the " +
-      "same durable request. Idempotency-Key is required. Keep polling until cancelled, " +
-      "fulfilled or failed because provider fulfilment may race recovery. Requires earn.manage " +
-      "and remains available without production entitlement or when Earn is disabled. " +
-      "Organization suspension still blocks authentication.",
+      "Submits a cancellation transaction signed by the customer's wallet. SDP verifies it, " +
+      "records it before broadcast, and returns the withdrawal request. Idempotency-Key is " +
+      "required, with the same `409 CONFLICT` answers as the other submits. Requires " +
+      "`earn.manage`, and stays available without production access and while Earn is " +
+      "disabled; a suspended organization still cannot authenticate. Keep polling until the " +
+      "request is `cancelled`, `fulfilled` or `failed`, because a fulfillment can race the " +
+      "cancellation.",
     security,
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
-      body: { required: true, content: jsonContent(earnExternalWalletSubmitRequest) },
+      body: {
+        required: true,
+        content: jsonContent(
+          earnExternalWalletSubmitRequest.openapi({ example: EARN_CANCEL_SUBMIT_REQUEST_EXAMPLE })
+        ),
+      },
     },
     responses: {
       200: {
-        description: "Recorded asynchronous-withdrawal cancellation",
-        content: jsonContent(earnExternalWalletWithdrawalRequestResponse),
+        description: "The withdrawal request with its cancellation recorded",
+        content: jsonContent(earnExternalWalletWithdrawalRequestCancellationResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 429, 500, 503]),
+      ...earnErrorResponses([400, 401, 403, 404, 409, 429, 500, 503]),
     },
   });
 }

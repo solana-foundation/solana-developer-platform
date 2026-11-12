@@ -23,11 +23,20 @@ import { AppError } from "@/lib/errors";
  *   source wallet), never by whoever created or activated it.
  * - `payment_request`: a `/pay` link, admitted by its own open request.
  */
-const moneyPrincipalSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("api_key"), apiKeyId: z.string() }),
-  z.object({ kind: z.literal("member"), userId: z.string() }),
-  z.object({ kind: z.literal("mandate"), recurringPaymentId: z.string() }),
-  z.object({ kind: z.literal("payment_request"), paymentRequestId: z.string() }),
+const moneyPrincipalIdSchema = z
+  .string()
+  .refine((id) => id.trim().length > 0, "A money principal needs an id");
+
+/**
+ * The same identity in ambient context and persisted movement rows. Stored
+ * identity never includes grants, roles or wallet access; admission reads those
+ * live. Parsing preserves the id exactly rather than changing who it names.
+ */
+export const moneyPrincipalSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("api_key"), apiKeyId: moneyPrincipalIdSchema }),
+  z.strictObject({ kind: z.literal("member"), userId: moneyPrincipalIdSchema }),
+  z.strictObject({ kind: z.literal("mandate"), recurringPaymentId: moneyPrincipalIdSchema }),
+  z.strictObject({ kind: z.literal("payment_request"), paymentRequestId: moneyPrincipalIdSchema }),
 ]);
 
 export type MoneyPrincipal = Readonly<z.infer<typeof moneyPrincipalSchema>>;

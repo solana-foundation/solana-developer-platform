@@ -15,6 +15,7 @@ import { tokenFilterAliases } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
 import { buildInClause, escapeLikePattern } from "@/db/postgres-utils";
+import { moneyPrincipalSchema } from "@/lib/money-principal";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";
 import { PAYMENT_TRANSACTION_KIND_SQL } from "./payments.kind";
@@ -235,6 +236,7 @@ function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransferRow {
     fee: (row.fee as number | null | undefined) ?? null,
     error: (row.error as string | null | undefined) ?? null,
     initiated_by_key_id: (row.initiated_by_key_id as string | null | undefined) ?? null,
+    initiated_by_principal: moneyPrincipalSchema.nullable().parse(row.initiated_by_principal),
     idempotency_key: (row.idempotency_key as string | null | undefined) ?? null,
     idempotency_fingerprint: (row.idempotency_fingerprint as string | null | undefined) ?? null,
     confirmed_at: (row.confirmed_at as string | null | undefined) ?? null,
@@ -471,12 +473,13 @@ export function createPostgresPaymentsRepository(
              slot,
              fee,
              initiated_by_key_id,
+             initiated_by_principal,
              idempotency_key,
              idempotency_fingerprint,
              confirmed_at,
              created_at,
              updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ?::boolean THEN sdp_iso_now() END, sdp_iso_now(), sdp_iso_now())
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, CASE WHEN ?::boolean THEN sdp_iso_now() END, sdp_iso_now(), sdp_iso_now())
            RETURNING *
            )
            SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
@@ -508,6 +511,9 @@ export function createPostgresPaymentsRepository(
           input.slot,
           input.fee ?? null,
           input.initiatedByKeyId,
+          input.initiatedByPrincipal == null
+            ? null
+            : JSON.stringify(moneyPrincipalSchema.parse(input.initiatedByPrincipal)),
           input.idempotencyKey ?? null,
           input.idempotencyFingerprint ?? null,
           input.status === "confirmed"

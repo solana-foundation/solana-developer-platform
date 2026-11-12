@@ -19,6 +19,13 @@ integrator's SDP API key.
   configuration failure. They say nothing about whether an integrator supplied
   an SDP API key.
 
+Earn guides live in `apps/sdp-docs/content/docs/earn` and
+`apps/sdp-docs/content/docs/guides/embedded-yield.mdx`. The normal docs generators render the
+public contract for the deployment's release channel: Earn appears on `beta`
+and `experimental`, and stays hidden on `stable`. Treasury, Programs and
+provider-action routes remain internal; promoting another route requires
+named security sign-off.
+
 ## Local development — the whole Earn stack
 
 **Absolute rule: local resources only.** Never point any of this at a shared or

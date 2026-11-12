@@ -92,19 +92,33 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
     totalAmount: "1",
     recipientCount: 1,
     transactionCount: 1,
-    options: {},
     initiatedByKeyId: null,
     idempotencyFingerprint: "fp-1",
   };
 
   it("persists idempotency metadata and finds a batch by organization, project, and key", async () => {
     const { batch: created } = await repo.createTransferBatchWithRecipients({
-      batch: { ...baseInput, projectId: TEST_PROJECT_ID, idempotencyKey: "batch-key-abc" },
+      batch: {
+        ...baseInput,
+        projectId: TEST_PROJECT_ID,
+        recipientCount: 3,
+        transactionCount: 2,
+        error: "batch_error",
+        idempotencyKey: "batch-key-abc",
+      },
       recipients: [],
     });
 
-    expect(created.idempotency_key).toBe("batch-key-abc");
-    expect(created.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
+    expect(created).toMatchObject({
+      source_custody_wallet_id: TEST_CUSTODY_WALLET_ID,
+      total_amount: "1",
+      recipient_count: 3,
+      transaction_count: 2,
+      error: "batch_error",
+      initiated_by_key_id: null,
+      idempotency_key: "batch-key-abc",
+      idempotency_fingerprint: "fp-1",
+    });
 
     const found = await repo.findTransferBatchByIdempotency({
       organizationId: TEST_ORG.id,
@@ -577,7 +591,6 @@ describe("PaymentTransferBatchesRepository.listStrandedTransferBatches (postgres
           totalAmount: "1",
           recipientCount: 1,
           transactionCount: 1,
-          options: {},
           initiatedByKeyId: null,
           idempotencyKey: `stranded-${environment}`,
           idempotencyFingerprint: `fp-stranded-${environment}`,

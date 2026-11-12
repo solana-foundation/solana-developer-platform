@@ -131,10 +131,10 @@ shares and creates a durable request, not a payout movement. SDP persists reques
 and cancellation actions before broadcast, reconciles provider state and lifecycle
 events, and projects a withdrawal movement only after verified fulfilment.
 
-The Embedded Yield guide (`apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx`,
-unpublished until PRO-2038) and the dashboard's configuration snippets document
-the same end-to-end flow. The treasury dashboard flows use the SDP-signed
-routes.
+The Embedded Yield guide
+(`apps/sdp-docs/content/docs/guides/embedded-yield.mdx`) and the dashboard's
+configuration snippets document the same end-to-end flow. The treasury
+dashboard flows use the SDP-signed routes.
 Deeper docs: gates and scoping in
 `apps/sdp-api/src/routes/earn/CLAUDE.md`; instruction building in
 `packages/sdp-kamino/CLAUDE.md`; the decision record in ADR 0002

@@ -45,6 +45,7 @@ import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-
 import type { EarnRepository } from "@/db/repositories/earn.repository";
 import { createEarnRepository } from "@/db/repositories/repository-factory";
 import { isEarnEnabled } from "@/lib/feature-flags";
+import { productionProjectsAllowed } from "@/lib/production-entitlement";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import type { KVStore } from "@/runtime/kv";
 import { createKVStoreSet } from "@/runtime/kv-redis";
@@ -139,7 +140,12 @@ async function syncProviderCatalogue(
   client: EarnVaultProvider,
   env: Env
 ): Promise<void> {
-  const production = await fetchAcceptedSnapshots(client, catalogueRuntime(env, "production"));
+  // A deployment that admits no production project reads no production shelf:
+  // the same steady state as production credentials being absent, so the
+  // mirror lane converges to empty.
+  const production: CatalogueFetch = productionProjectsAllowed(env)
+    ? await fetchAcceptedSnapshots(client, catalogueRuntime(env, "production"))
+    : { ok: false, steadyState: true };
   if (production.ok) {
     // The provider's own fetch is the total truth for production, so its
     // delist stays environment-wide and stray wrong-cluster rows converge away

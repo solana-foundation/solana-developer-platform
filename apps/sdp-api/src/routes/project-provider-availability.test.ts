@@ -46,18 +46,6 @@ vi.mock("@sdp/types/provider-access", async (importOriginal) => {
   );
 });
 
-const earnPublication = vi.hoisted(() => ({ published: true }));
-
-vi.mock("@/openapi/spec", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/openapi/spec")>();
-  return {
-    ...actual,
-    get EARN_PUBLIC_SURFACE_PUBLISHED() {
-      return earnPublication.published;
-    },
-  };
-});
-
 type CustodyUnavailableModes = Extract<
   ProjectProviderAvailabilityEntry,
   { family: "custody" }
@@ -415,7 +403,6 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     custodyReleaseChannel.stageOverride = null;
     providerMaturity.moduleMaturityOverride = null;
     providerMaturity.surfacedEarnProvider = null;
-    earnPublication.published = true;
     await seedTestDatabase(env);
     await clearKVStores(env);
     await seedFixture();
@@ -425,7 +412,7 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     await clearKVStores(env);
   });
 
-  it("lists every provider, Earn included, while the public Earn surface is published", async () => {
+  it("lists every provider with its availability for a Sandbox project", async () => {
     const response = await read(
       PROJECT_IDS.sandbox,
       apiKeyHeaders(API_KEYS.sandbox),
@@ -447,23 +434,19 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     expect(await response.json()).toEqual(availabilityBody(PRODUCTION_AVAILABILITY));
   });
 
-  it("omits Earn entries while the public Earn surface is unpublished", async () => {
-    earnPublication.published = false;
+  it.each(SDP_RELEASE_CHANNEL_NAMES)(
+    "lists Earn providers in %s only when the release channel runs Earn",
+    async (releaseChannel) => {
+      const availability = await readAvailability(
+        "sandbox",
+        deploymentEnv({ SDP_RELEASE_CHANNEL: releaseChannel })
+      );
 
-    const response = await read(
-      PROJECT_IDS.sandbox,
-      apiKeyHeaders(API_KEYS.sandbox),
-      deploymentEnv({})
-    );
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual(
-      availabilityBody({
-        ...SANDBOX_AVAILABILITY,
-        providers: SANDBOX_AVAILABILITY.providers.filter((entry) => entry.family !== "earn"),
-      })
-    );
-  });
+      expect(availability.providers.filter((entry) => entry.family === "earn")).toEqual(
+        releaseChannel === "stable" ? [] : EARN_AVAILABILITY
+      );
+    }
+  );
 
   it("reports custody providers the release channel leaves out as unavailable", async () => {
     custodyReleaseChannel.outOfChannelMode = "managed";

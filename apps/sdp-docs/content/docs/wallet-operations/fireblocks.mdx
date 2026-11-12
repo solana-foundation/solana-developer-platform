@@ -1,0 +1,157 @@
+---
+title: Connect Fireblocks
+description: Connect your Fireblocks workspace and import Solana wallets into SDP.
+custodyProvider: fireblocks
+---
+
+Use your Fireblocks wallets in SDP. Your workspace keeps the signing keys and
+controls approvals.
+
+## Connection setup
+
+Sign in as an SDP **organization admin**. Have a Fireblocks **workspace owner**
+available for API user approval. If Fireblocks isn't available, ask the SDP team.
+
+Choose an SDP **Sandbox project** for devnet (`SOL_TEST`) or **Production
+project** for mainnet (`SOL`, [mainnet access required](/docs/guides/go-to-mainnet)).
+Each selected vault must already contain a Solana wallet on that network.
+SDP project environments are separate from Fireblocks workspace types; check
+workspace compatibility with the SDP team.
+
+1. **Generate a CSR in SDP.** Open **Integrations → Fireblocks → Add connection**,
+   enter a **Connection name**, and click **Generate and download CSR**.
+   SDP creates the API authentication key. Share only the
+   [CSR](https://developers.fireblocks.com/docs/integrate-fireblocks-with-third-party-service-providers),
+   never a private key. Register within **seven days**.
+
+2. **Register an API user in Fireblocks.** Open **Developer center → API users →
+   Add API user**. Name it, choose **Editor**, upload the CSR, and click **Add user**.
+   Have the workspace owner approve it; wait until active.
+
+   For [IP-restricted keys](https://developers.fireblocks.com/docs/whitelist-ips-for-api-keys),
+   get SDP's outbound IPs from the SDP team. Have an authorized operator add them
+   under **⋯ → Allowlist IP address** before continuing.
+
+3. **Import vaults in SDP.** Copy **API User (ID)** into SDP. Click **Load vaults**,
+   select up to **20 vaults**, then **Connect and verify**. SDP checks API access
+   and each wallet's address, then lists imported wallets on the connection page
+   and under **Wallets**. This does not test signing or transfer policies.
+
+## Transfers
+
+These steps enable direct **SOL and canonical USDC transfers**. Fireblocks signs
+and broadcasts them. RAW signing and SDP fee sponsorship are not used.
+
+### Configure approvals
+
+Have an authorized Fireblocks operator open **Security → Policies → Transfer →
+Edit policy → Add rule**:
+
+- **Scope:** your SDP API user as **Initiator**, allowed vaults and destinations,
+  and an address type permitting one-time addresses.
+- **Funds:** allowed assets and amount limits.
+- **Action:** **Request approval**, your **Approver set** and **Threshold**, then
+  **Designated signer → Users** and your organization's signer.
+
+Publish the rule. SDP uses
+[one-time address transfers](https://developers.fireblocks.com/reference/transaction-sources-destinations#one_time_address),
+so set **Settings → General → One-time address transactions** to **Allow**.
+Complete the required approvals for both changes.
+
+**Check the policy yourself:** SDP's Editor user cannot read policies, and the
+**Pay** reminder does not detect a missing policy.
+
+### Fund and test
+
+Open **Accounts → Vault**, select the source vault's Solana wallet, and use its
+deposit address. Add **SOL for network fees**, including for USDC transfers.
+
+Send a [small payment](/docs/payments/send-basic-payment), then open
+**Payments → Transactions** in SDP. While awaiting approval, it shows
+**Processing**; open it for the Fireblocks transaction ID and status.
+
+Approve the matching transaction in Fireblocks. In **Transaction history**,
+confirm **COMPLETED**; SDP should show **Confirmed**.
+
+## Manage your connection
+
+<details>
+<summary>RAW signing and ownership checks</summary>
+
+Batch payments and the optional ownership check require workspace RAW signing
+and a RAW policy permitting the SDP API user with your designated signer.
+If disabled, ask your Fireblocks Customer Success Manager to enable it.
+An API Co-signer isn't required.
+
+Open the wallet's **Settings → Ownership → Prove ownership** and approve promptly
+in Fireblocks. SDP simulates the signed transaction without broadcasting.
+The check requires a configured, funded SDP fee payer.
+
+</details>
+
+<details>
+<summary>Rotate credentials</summary>
+
+In **Integrations → Fireblocks**, select the connection and **Rotate secret**.
+Generate a new CSR, register a replacement Editor user, and get owner approval.
+Before switching, add it to the old **Initiator** policies and set its IP
+allowlist.
+
+Select the original verification vault. SDP checks every wallet before switching.
+Keep the old user active and permitted for the **24-hour rollback window**.
+
+</details>
+
+<details>
+<summary>Disconnect</summary>
+
+In Fireblocks, choose **Developer center → API users → ⋯ → Delete** for the SDP
+API user. If unavailable, ask an authorized operator.
+
+SDP blocks connection deactivation while wallets are active and cannot deactivate
+Fireblocks wallets. Contact the SDP team for cleanup.
+
+Deleting the user does not cancel accepted payments. Reject or cancel them in
+Fireblocks too; cancellation can race execution.
+
+</details>
+
+<details>
+<summary>Credential storage</summary>
+
+API credentials default to GCP Secret Manager on hosted SDP and encrypted
+database storage when self-hosted. Pending CSR keys are encrypted and deleted
+after registration or expiry.
+
+</details>
+
+## Transfer troubleshooting
+
+<details>
+<summary>Blocked by policy</summary>
+
+In **Transaction history**, expand the transaction and check **Status** and
+**Sub-status**. **Inspect Policy** uses the current policy, which may differ
+from the original. Pending approval is not a refusal.
+
+Refused submissions and replays return **HTTP 422** with
+`error.code: "CUSTODY_POLICY_REFUSED"`. Later refusals mark the transfer failed;
+the dashboard shows a wallet-policy error.
+
+</details>
+
+<details>
+<summary>Recipient whitelisting</summary>
+
+Manage Fireblocks whitelists under **Whitelisted addresses**. Check the Solana
+network and address. Creating an SDP contact does not whitelist an address.
+
+</details>
+
+<details>
+<summary>Submission timed out</summary>
+
+Keep the original [Idempotency-Key](/docs/developing-with-sdp/idempotency) and
+check the existing payment before intentionally starting another.
+
+</details>

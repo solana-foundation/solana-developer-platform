@@ -1,106 +1,105 @@
 import { FireblocksApiError } from "@sdp/custody/provisioning/fireblocks-http";
-import {
-  createFireblocksTransfer,
-  type FireblocksTransferResult,
-  readFireblocksTransfer,
-  resolveFireblocksTransferAsset,
-} from "@sdp/custody/provisioning/fireblocks-transfers";
-import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
-import { currentClusterScope } from "@sdp/rpc/scope";
+import type { FireblocksTransferResult } from "@sdp/custody/provisioning/fireblocks-transfers";
 import { compareDecimalAmounts, parseDecimalAmount } from "@sdp/solana/amount";
-import {
-  fireblocksPaymentStatus,
-  isFireblocksPaymentMint,
-  isFireblocksPolicyRefusal,
-} from "@sdp/types/fireblocks";
+import { fireblocksPaymentStatus, isFireblocksPolicyRefusal } from "@sdp/types/fireblocks";
 import { assertIsSignature } from "@solana/kit";
-import { z } from "zod";
-import { getDb } from "@/db/client";
-import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
+import type {
+  PaymentsRepository,
+  PaymentTransferRow,
+  UpdatePaymentTransferInput,
+} from "@/db/repositories/payments.repository";
 import { AppError, badRequest, conflict, custodyPolicyRefusalMessage } from "@/lib/errors";
-import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
 import { describeError } from "@/runtime/money-path-events";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import { type AuditLogEntry, criticalOutcomeEntry } from "@/services/audit.service";
 import {
-  isNativePaymentToken,
-  type OutboundPaymentOperation,
-} from "@/services/payment-operation.service";
+  type CustodyTransferProposer,
+  transferProposalIntentSchema as intentSchema,
+  ProposalNotSentError,
+} from "@/services/domain/signing/admitted-proposer";
+import { createOrgTransferProposalReader } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
 
-const intentSchema = z.object({
-  connectionId: z.string(),
-  accountFingerprint: z.string(),
-  vaultAccountId: z.string(),
-  assetId: z.string(),
-});
-type Intent = z.infer<typeof intentSchema>;
-export interface PreparedFireblocksTransfer {
-  intent: Intent;
+/**
+ * Row state for transfers a custody provider builds and sends itself (PRO-2435 D2). Admission,
+ * credentials and the provider call all live in the custody waist (`admitted-proposer.ts`); this
+ * file only claims, records and reconciles the payment row, so a proposed transfer and a signed
+ * one share the transfer handler, its idempotency, its audit and its failure path.
+ */
+
+/**
+ * Where a proposed transfer's row state is written. Plain observations go to `repo`; a write that
+ * ends the payment commits through `audited`, with the outcome that closes the row's open audit
+ * intent, exactly as a signed transfer's settle does (HOO-2556). A request passes its own ledger
+ * transaction; the pending-transfers job builds one over the system audit service.
+ */
+export interface ProposalLedger {
+  repo: PaymentsRepository;
+  audited<T>(
+    work: (repo: PaymentsRepository) => Promise<{ entry: AuditLogEntry | null; result: T }>
+  ): Promise<T>;
 }
-const runtime: CustodyProvisioningRuntime = {
-  fetch: (input, init) => globalThis.fetch(input, init),
-  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-  now: () => Date.now(),
-  randomUUID: () => crypto.randomUUID(),
-  getRandomValues: (data) => crypto.getRandomValues(new Uint8Array(data)),
-  sha256: (data) => crypto.subtle.digest("SHA-256", new Uint8Array(data)),
-};
+
+/** The outcome that closes the intent the sending request opened, with Fireblocks' verdict. */
+function proposalAuditOutcome(
+  row: PaymentTransferRow,
+  auditIntentId: string,
+  settled: PaymentTransferRow
+): AuditLogEntry {
+  const metadata: Record<string, unknown> = {
+    status: settled.status,
+    fireblocksTransactionId: settled.provider_reference,
+    fireblocksStatus: settled.provider_data.fireblocksStatus ?? null,
+    signature: settled.signature,
+  };
+  if (settled.status === "failed") metadata.error = settled.error;
+  return criticalOutcomeEntry(
+    {
+      id: auditIntentId,
+      entry: {
+        organizationId: row.organization_id,
+        action: "transfer",
+        resourceType: "payment_transfer",
+        resourceId: row.id,
+      },
+    },
+    { status: settled.status === "failed" ? "failure" : "success", metadata }
+  );
+}
+
+/**
+ * Writes one guarded update. A terminal one closes the row's open audit intent in the same
+ * transaction: a ledger failure rolls the settle back, so the payment stays processing and the
+ * next read or run settles and audits it again. Clearing the intent is the claim, so of the
+ * request, a viewer and the cron only the first appends an outcome.
+ */
+async function writeTransfer(
+  ledger: ProposalLedger,
+  row: PaymentTransferRow,
+  update: UpdatePaymentTransferInput
+): Promise<PaymentTransferRow | null> {
+  const auditIntentId = row.audit_intent_id;
+  if (update.status === undefined || update.status === "processing" || auditIntentId === null)
+    return ledger.repo.updateTransfer(update);
+  return ledger.audited(async (repo) => {
+    const settled = await repo.updateTransfer(update);
+    const claimed =
+      settled !== null &&
+      (await repo.closeTransferAuditIntent({
+        transferId: row.id,
+        organizationId: row.organization_id,
+        projectId: row.project_id,
+        auditIntentId,
+      }));
+    return {
+      entry: claimed && settled ? proposalAuditOutcome(row, auditIntentId, settled) : null,
+      result: settled,
+    };
+  });
+}
 
 export function isFireblocksTransfer(row: PaymentTransferRow): boolean {
   return row.provider_data.fireblocksTransfer !== undefined;
-}
-
-/** Validate the exact owner, network and token before admitting a payment intent. */
-export async function prepareFireblocksTransfer(
-  env: Env,
-  organizationId: string,
-  projectId: string,
-  operation: OutboundPaymentOperation
-): Promise<PreparedFireblocksTransfer | null> {
-  const access = await new CustodyRuntimeTargets(
-    getDb(env),
-    env,
-    new Map()
-  ).getFireblocksTransferAccess({
-    organizationId,
-    projectId,
-    custodyWalletId: operation.sourceWallet.id,
-    forSubmission: true,
-  });
-  if (!access) return null;
-  if (access.publicKey !== operation.sourceAddress)
-    throw conflict("Fireblocks source wallet changed");
-  const network = currentClusterScope().cluster;
-  const expectedAsset = network === "mainnet-beta" ? "SOL" : "SOL_TEST";
-  if (access.assetId !== expectedAsset)
-    throw badRequest("Fireblocks connection does not match the Solana network");
-  const native = isNativePaymentToken(operation.token);
-  if (!native && !isFireblocksPaymentMint(operation.token, network))
-    throw badRequest("Fireblocks payments currently support SOL and USDC only");
-  const asset = await resolveFireblocksTransferAsset(
-    runtime,
-    access,
-    expectedAsset,
-    native ? null : operation.token
-  );
-  let units: bigint;
-  try {
-    units = parseDecimalAmount(operation.amount, asset.decimals);
-  } catch {
-    throw badRequest(`Payment amount must have at most ${asset.decimals} decimal places`);
-  }
-  if (units <= 0n || units > 18446744073709551615n)
-    throw badRequest("Payment amount is outside the supported range");
-  if (!access.accountFingerprint) throw conflict("Fireblocks connection is unverified");
-  return {
-    intent: {
-      connectionId: access.connectionId,
-      accountFingerprint: access.accountFingerprint,
-      vaultAccountId: access.vaultAccountId,
-      assetId: asset.id,
-    },
-  };
 }
 
 function providerFailure(result: FireblocksTransferResult): string {
@@ -132,7 +131,7 @@ function failureRecord(result: FireblocksTransferResult): {
 }
 
 async function persistResult(
-  repo: PaymentsRepository,
+  ledger: ProposalLedger,
   row: PaymentTransferRow,
   result: FireblocksTransferResult,
   detail: boolean
@@ -189,7 +188,7 @@ async function persistResult(
   const status = fireblocksPaymentStatus(result.status, completed);
   const failure = status === "failed" ? failureRecord(result) : null;
   return (
-    (await repo.updateTransfer({
+    (await writeTransfer(ledger, row, {
       transferId: row.id,
       organizationId: row.organization_id,
       projectId: row.project_id,
@@ -206,7 +205,7 @@ async function persistResult(
       },
       error: failure?.error ?? null,
       updatedAt: new Date().toISOString(),
-    })) ?? (await currentRow(repo, row))
+    })) ?? (await currentRow(ledger.repo, row))
   );
 }
 
@@ -221,93 +220,59 @@ async function currentRow(repo: PaymentsRepository, row: PaymentTransferRow) {
 }
 
 /** Exactly one create attempt per durable intent. Recovery never sends funds. */
-export async function submitFireblocksTransfer(
-  env: Env,
-  repo: PaymentsRepository,
-  row: PaymentTransferRow
+export async function submitProposedTransfer(
+  ledger: ProposalLedger,
+  row: PaymentTransferRow,
+  proposer: CustodyTransferProposer
 ): Promise<PaymentTransferRow> {
-  if (!row.destination_address || !row.amount || !row.project_id || !row.custody_wallet_id)
+  const { repo } = ledger;
+  if (!row.destination_address || !row.amount || !row.project_id || !row.source_address)
     throw badRequest("Incomplete payment intent");
-  const startedAt = new Date().toISOString();
   const claimed = await repo.claimFireblocksTransferSubmission({
     transferId: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
-    now: startedAt,
+    now: new Date().toISOString(),
   });
   if (!claimed) return currentRow(repo, row);
-  let submissionAttempted = false;
   try {
-    const intent = intentSchema.parse(claimed.provider_data.fireblocksTransfer);
-    // Preparation can precede asset discovery and durable payment/audit writes.
-    // Resolve fresh custody state after those awaits; never submit captured credentials.
-    const access = await new CustodyRuntimeTargets(
-      getDb(env),
-      env,
-      new Map()
-    ).getFireblocksTransferAccess({
-      organizationId: row.organization_id,
-      projectId: row.project_id,
-      custodyWalletId: row.custody_wallet_id,
-      forSubmission: true,
-    });
-    const expectedAsset = currentClusterScope().cluster === "mainnet-beta" ? "SOL" : "SOL_TEST";
-    if (
-      !access ||
-      access.connectionId !== intent.connectionId ||
-      access.accountFingerprint !== intent.accountFingerprint ||
-      access.vaultAccountId !== intent.vaultAccountId ||
-      access.publicKey !== claimed.source_address ||
-      access.assetId !== expectedAsset
-    )
-      throw conflict("Fireblocks connection does not match the payment intent");
-    await assertMoneyStartAdmitted(
-      env,
-      { organizationId: row.organization_id, projectId: row.project_id },
-      { surface: "http", movement: "payments.transfer", subjectId: row.id },
-      { custodyWalletId: row.custody_wallet_id }
-    );
-    submissionAttempted = true;
-    const result = await createFireblocksTransfer(runtime, access, {
-      operation: "TRANSFER",
-      externalTxId: row.id,
-      assetId: intent.assetId,
-      source: { type: "VAULT_ACCOUNT", id: intent.vaultAccountId },
-      destination: {
-        type: "ONE_TIME_ADDRESS",
-        oneTimeAddress: { address: row.destination_address },
-      },
+    // The waist admits and re-reads the live credential before it sends; nothing captured at
+    // prepare time is submitted.
+    const result = await proposer.propose({
+      externalId: row.id,
+      intent: intentSchema.parse(claimed.provider_data.fireblocksTransfer),
+      sourceAddress: row.source_address,
+      destination: row.destination_address,
       amount: row.amount,
-      treatAsGrossAmount: false,
-      // SDP's memo is a payment note, not an instruction added to the chain.
-      note: `SDP ${row.id}${row.memo ? `: ${row.memo}` : ""}`,
+      memo: row.memo,
     });
-    return await persistResult(repo, claimed, result, false);
+    return await persistResult(ledger, claimed, result, false);
   } catch (error) {
-    if (!submissionAttempted) {
-      // A local refusal is definitely unsent, unlike an ambiguous provider outcome.
-      await repo.updateTransfer({
+    if (error instanceof ProposalNotSentError) {
+      // A refusal before submission is definitely unsent, unlike an ambiguous provider outcome.
+      const refusal = error.cause;
+      await writeTransfer(ledger, claimed, {
         transferId: row.id,
         organizationId: row.organization_id,
         projectId: row.project_id,
         expectedStatus: "processing",
         status: "failed",
         error:
-          error instanceof AppError
-            ? error.toResponse().error.message
+          refusal instanceof AppError
+            ? refusal.toResponse().error.message
             : "Fireblocks admission failed before submission",
         providerData: {
-          executionFailure: { code: error instanceof AppError ? error.code : "INTERNAL_ERROR" },
+          executionFailure: { code: refusal instanceof AppError ? refusal.code : "INTERNAL_ERROR" },
         },
         updatedAt: new Date().toISOString(),
       });
-      throw error;
+      throw refusal;
     }
     // A timeout, duplicate-ID conflict, invalid response, or DB failure may follow acceptance.
     // Keep the claim and recover by externalTxId; never turn uncertainty into permission to resend.
     if (error instanceof FireblocksApiError && [400, 401, 403, 422, 429].includes(error.status)) {
       return (
-        (await repo.updateTransfer({
+        (await writeTransfer(ledger, claimed, {
           transferId: row.id,
           organizationId: row.organization_id,
           projectId: row.project_id,
@@ -329,7 +294,7 @@ export async function submitFireblocksTransfer(
 const MISSING_TRANSACTION_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** A known provider transaction can never be failed from an unavailable lookup. */
 async function recordMissingTransaction(
-  repo: PaymentsRepository,
+  ledger: ProposalLedger,
   row: PaymentTransferRow,
   now: number
 ) {
@@ -347,7 +312,7 @@ async function recordMissingTransaction(
   const absent = elapsed >= MISSING_TRANSACTION_WINDOW_MS;
   if (absent) getLogger().warn({ transferId: row.id }, "fireblocks_unaccepted_transfer_expired");
   return (
-    (await repo.updateTransfer({
+    (await writeTransfer(ledger, row, {
       transferId: row.id,
       organizationId: row.organization_id,
       projectId: row.project_id,
@@ -362,16 +327,17 @@ async function recordMissingTransaction(
         ? "Fireblocks still has no transaction for this payment after 24 hours of recovery. Review the payment in Fireblocks before intentionally starting a new transfer."
         : null,
       updatedAt: new Date(now).toISOString(),
-    })) ?? currentRow(repo, row)
+    })) ?? currentRow(ledger.repo, row)
   );
 }
 
 /** Dashboard and cron reconciliation. Neither path can POST or automatically resubmit. */
 export async function refreshFireblocksTransfer(
   env: Env,
-  repo: PaymentsRepository,
+  ledger: ProposalLedger,
   row: PaymentTransferRow
 ): Promise<PaymentTransferRow> {
+  const { repo } = ledger;
   if (
     !isFireblocksTransfer(row) ||
     row.status !== "processing" ||
@@ -390,22 +356,17 @@ export async function refreshFireblocksTransfer(
   if (!claimed) return currentRow(repo, row);
   try {
     const intent = intentSchema.parse(claimed.provider_data.fireblocksTransfer);
-    const access = await new CustodyRuntimeTargets(
-      getDb(env),
+    const reader = await createOrgTransferProposalReader(
       env,
-      new Map()
-    ).getFireblocksTransferAccess({
-      organizationId: row.organization_id,
-      projectId: row.project_id,
-      custodyWalletId: row.custody_wallet_id,
-      forSubmission: false,
-      intent: { ...intent, sourceAddress: row.source_address },
-    });
-    if (!access) throw conflict("Fireblocks connection does not match the payment intent");
-    const result = await readFireblocksTransfer(runtime, access, row.id);
+      row.organization_id,
+      row.project_id,
+      row.custody_wallet_id,
+      { ...intent, sourceAddress: row.source_address }
+    );
+    const result = await reader.read(row.id);
     return result
-      ? await persistResult(repo, claimed, result, true)
-      : await recordMissingTransaction(repo, claimed, now);
+      ? await persistResult(ledger, claimed, result, true)
+      : await recordMissingTransaction(ledger, claimed, now);
   } catch (error) {
     getLogger().warn(
       { transferId: row.id, ...describeError(error) },
