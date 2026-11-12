@@ -28,7 +28,7 @@ interface RegistrationProps {
 }
 function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) {
   const t = useTranslations();
-  const [now, setNow] = useState(() => Date.now());
+  const [expiredCsrId, setExpiredCsrId] = useState<string | null>(null);
   const {
     data,
     error: readError,
@@ -38,7 +38,6 @@ function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) 
     revalidateOnFocus: false,
     revalidateOnReconnect: false,
     shouldRetryOnError: false,
-    onSuccess: () => setNow(Date.now()),
   });
   const csr = data === undefined ? null : data.csr;
   const [generating, setGenerating] = useState(false);
@@ -46,7 +45,7 @@ function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) 
   const [error, setError] = useState<string | null>(null);
   const [readFailureCleared, setReadFailureCleared] = useState(false);
   const requestKey = useRef<string | null>(null);
-  const expired = csr !== null && Date.parse(csr.expiresAt) <= now;
+  const expired = csr !== null && csr.id === expiredCsrId;
   const ready = csr !== null && !expired && !loading && !generating;
   useEffect(() => {
     onReadyChange?.(false);
@@ -61,7 +60,7 @@ function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) 
     const remaining = Date.parse(csr.expiresAt) - Date.now();
     const timeout = setTimeout(
       () => {
-        setNow(Date.now());
+        setExpiredCsrId(csr.id);
         onReadyChange?.(false);
       },
       Math.max(0, remaining)
@@ -97,7 +96,6 @@ function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) 
         return;
       }
       await mutate({ csr: result.csr }, { revalidate: false });
-      setNow(Date.now());
       requestKey.current = crypto.randomUUID();
       downloadCsr(result.csr);
     } catch {
