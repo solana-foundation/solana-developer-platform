@@ -12,6 +12,6 @@ pub use account::AddressSource;
 pub use segment::Segment;
 pub use view::Implementation;
 pub use wire::{
-    AccountSourceKind, AccountV1, AppliesKind, AppliesV1, CheckKind, Encoding, ImplementationDocV1, InstructionV1,
-    LiteralV1, OutputBindingV1, PostConditionV1, RecipeKind, SegmentSourceKind, SegmentV1,
+    AccountSourceKind, AccountV1, AppliesKind, AppliesV1, Encoding, ImplementationDocV1, InstructionV1,
+    OutputBindingV1, RecipeKind, SegmentSourceKind, SegmentV1,
 };

@@ -21,6 +21,27 @@ pub enum Segment {
 }
 
 impl SegmentV1 {
+    /// Encodes a segment. It decodes back to the same `Segment`.
+    pub fn new(segment: Segment) -> Self {
+        let (source, encoding, payload) = match segment {
+            Segment::Literal(range) => {
+                let [a, b] = range.offset.0;
+                let [c, d] = range.len.0;
+                (SegmentSourceKind::Literal, 0, [a, b, c, d, 0, 0])
+            }
+            Segment::Reference { value, encoding } => {
+                let [a, b] = value.to_bytes();
+                (SegmentSourceKind::Reference, encoding.into(), [a, b, 0, 0, 0, 0])
+            }
+            Segment::AccountBytes { account, owner, offset, length } => {
+                let [c, d] = offset.to_le_bytes();
+                (SegmentSourceKind::AccountBytes, 0, [account, owner, c, d, length, 0])
+            }
+        };
+
+        Self { source: source.into(), encoding, payload }
+    }
+
     /// The encoding byte of a literal or account bytes segment is zero, because those bytes are
     /// already final.
     pub fn decode(&self) -> Result<Segment, SpecError> {
@@ -94,6 +115,20 @@ mod tests {
 
         assert_eq!(literal.decode(), Err(SpecError::BadCode));
         assert_eq!(too_long.decode(), Err(SpecError::BadCode));
+    }
+
+    #[test]
+    fn encoding_then_decoding_gives_the_same_segment() {
+        let segments = [
+            Segment::Literal(PoolRefV1 { offset: PodU16::new(9), len: PodU16::new(4) }),
+            Segment::Reference {
+                value: ValueRef { source: ValueSource::Payer, index: 1 },
+                encoding: Encoding::Address,
+            },
+            Segment::AccountBytes { account: 3, owner: 1, offset: 44, length: 1 },
+        ];
+
+        segments.into_iter().for_each(|segment| assert_eq!(SegmentV1::new(segment).decode(), Ok(segment)));
     }
 
     #[test]

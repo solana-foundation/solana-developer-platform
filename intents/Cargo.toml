@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["spec"]
+members = ["spec", "compiler", "cli"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,7 +10,13 @@ publish = false
 rust-version = "1.99"
 
 [workspace.dependencies]
+bs58 = "=0.5.1"
+clap = { version = "=4.6.7", features = ["derive"] }
 bytemuck = { version = "=1.25.2", features = ["derive", "min_const_generics"] }
+sdp-intents-compiler = { path = "compiler" }
+sdp-intents-spec = { path = "spec" }
+serde_json = { version = "=1.0.154", features = ["preserve_order"] }
+sha2 = "=0.11.1"
 
 [workspace.lints.rust]
 unused_imports = "deny"

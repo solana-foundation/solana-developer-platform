@@ -1,0 +1,21 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "interface",
+  "id": "solana.org/token.transfer",
+  "version": "1.0.0",
+  "inputs": [
+    { "name": "from", "type": "address", "signer": true },
+    { "name": "to", "type": "address" },
+    { "name": "mint", "type": "mint" },
+    { "name": "amount", "type": "u64", "display": { "amount": { "mint": "{inputs.mint}" } } },
+    { "name": "memo", "type": "string", "optional": true }
+  ],
+  "outputs": [],
+  "display": "Send {inputs.amount} {inputs.mint} to {inputs.to}",
+  "postConditions": [
+    { "outflow": { "from": "{inputs.from}", "mint": "{inputs.mint}", "max": "{inputs.amount}" },
+      "message": "{inputs.from} sends at most {inputs.amount} of {inputs.mint}" },
+    { "noOtherOutflows": { "from": "{inputs.from}" },
+      "message": "nothing else leaves {inputs.from}" }
+  ]
+}

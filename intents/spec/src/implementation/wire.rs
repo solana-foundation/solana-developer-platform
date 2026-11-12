@@ -59,16 +59,6 @@ wire_code! {
     }
 }
 
-wire_code! {
-    pub enum CheckKind {
-        Outflow = 1,
-        Inflow = 2,
-        NoOtherOutflows = 3,
-        NoAuthorityChange = 4,
-        InvokesOnly = 5,
-    }
-}
-
 pub(crate) const ACCOUNT_WRITABLE: u8 = 1;
 pub(crate) const ACCOUNT_SIGNER: u8 = 2;
 pub(crate) const MAX_ACCOUNT_BYTES: u8 = 32;
@@ -109,16 +99,6 @@ pub struct AppliesV1 {
     pub discriminator: [u8; 8],
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Pod, Zeroable)]
-pub struct PostConditionV1 {
-    pub check: u8,
-    pub args: [ValueRefV1; 3],
-    /// A range of the addresses table, for `InvokesOnly`.
-    pub programs: RangeV1,
-    pub message: PoolRefV1,
-}
-
 /// `payload` holds the source data, laid out as `AddressSource` reads it.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Pod, Zeroable)]
@@ -156,13 +136,6 @@ pub struct OutputBindingV1 {
     pub account: u8,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Pod, Zeroable)]
-pub struct LiteralV1 {
-    pub value_type: u8,
-    pub bytes: PoolRefV1,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,12 +144,10 @@ mod tests {
     #[test]
     fn entry_layouts_are_pinned() {
         assert_eq!(size_of::<AppliesV1>(), 13);
-        assert_eq!(size_of::<PostConditionV1>(), 13);
         assert_eq!(size_of::<AccountV1>(), 12);
         assert_eq!(size_of::<SegmentV1>(), 8);
         assert_eq!(size_of::<InstructionV1>(), 5);
         assert_eq!(size_of::<OutputBindingV1>(), 2);
-        assert_eq!(size_of::<LiteralV1>(), 5);
     }
 
     #[test]

@@ -4,19 +4,9 @@
 use super::account::AddressSource;
 use super::segment::Segment;
 use super::view::Implementation;
-use super::wire::{
-    AccountV1, AppliesKind, AppliesV1, CheckKind, InstructionV1, PostConditionV1, RecipeKind, SegmentV1,
-    MAX_DISCRIMINATOR,
-};
-use crate::{SpecError, ValueRef, ValueSource};
-
-/// The table lengths that bound an index.
-#[derive(Clone, Copy)]
-struct Counts {
-    accounts: usize,
-    addresses: usize,
-    literals: usize,
-}
+use super::wire::{AccountV1, AppliesKind, AppliesV1, InstructionV1, RecipeKind, SegmentV1, MAX_DISCRIMINATOR};
+use crate::counts::{check_index, Counts};
+use crate::{CheckKind, PostConditionV1, SpecError, ValueRef, ValueSource};
 
 impl Implementation<'_> {
     pub(super) fn validate(&self) -> Result<(), SpecError> {
@@ -25,6 +15,8 @@ impl Implementation<'_> {
         self.validate_recipe()?;
 
         let counts = Counts {
+            inputs: None,
+            outputs: None,
             accounts: self.accounts()?.len(),
             addresses: self.addresses()?.len(),
             literals: self.literals()?.len(),
@@ -68,14 +60,14 @@ impl Implementation<'_> {
         let earlier = Counts { accounts: position, ..counts };
 
         match account.address()? {
-            AddressSource::Value(value) => check_value(earlier, value),
+            AddressSource::Value(value) => earlier.check_value(value),
             AddressSource::Static { address } => check_index(address, counts.addresses),
             AddressSource::Pda { program, seeds } => {
-                check_value(earlier, program)?;
+                earlier.check_value(program)?;
                 self.seeds(seeds)?.iter().try_for_each(|seed| self.check_segment(earlier, seed))
             }
             AddressSource::Ata { owner, mint, token_program } => {
-                [owner, mint, token_program].into_iter().try_for_each(|value| check_value(earlier, value))
+                [owner, mint, token_program].into_iter().try_for_each(|value| earlier.check_value(value))
             }
             AddressSource::HasOne { account, owner, .. } => {
                 check_index(account, position)?;
@@ -96,7 +88,7 @@ impl Implementation<'_> {
     fn check_segment(&self, counts: Counts, segment: &SegmentV1) -> Result<(), SpecError> {
         match segment.decode()? {
             Segment::Literal(bytes) => self.text(bytes).map(|_| ()),
-            Segment::Reference { value, .. } => check_value(counts, value),
+            Segment::Reference { value, .. } => counts.check_value(value),
             Segment::AccountBytes { account, owner, .. } => {
                 check_index(account, counts.accounts)?;
                 check_index(owner, counts.addresses)
@@ -106,7 +98,7 @@ impl Implementation<'_> {
 
     fn check_post_condition(&self, counts: Counts, condition: &PostConditionV1) -> Result<(), SpecError> {
         self.text(condition.message)?;
-        condition.args.iter().try_for_each(|arg| check_value(counts, ValueRef::try_from(*arg)?))?;
+        condition.args.iter().try_for_each(|arg| counts.check_value(ValueRef::try_from(*arg)?))?;
 
         if CheckKind::try_from(condition.check)? == CheckKind::InvokesOnly {
             condition.programs.within(counts.addresses)?;
@@ -125,7 +117,7 @@ fn check_applies(counts: Counts, applies: &AppliesV1) -> Result<(), SpecError> {
 
     match AppliesKind::try_from(applies.kind)? {
         AppliesKind::Owner => {
-            check_value(counts, value)?;
+            counts.check_value(value)?;
             check_index(applies.owner, counts.addresses)
         }
         AppliesKind::InputEquals => {
@@ -136,36 +128,8 @@ fn check_applies(counts: Counts, applies: &AppliesV1) -> Result<(), SpecError> {
     }
 }
 
-/// An input or output index is checked against the interface, which this document does not hold.
-fn check_value(counts: Counts, value: ValueRef) -> Result<(), SpecError> {
-    let index = usize::from(value.index);
-
-    let exists = match value.source {
-        ValueSource::None => index == 0,
-        ValueSource::Input | ValueSource::Output => true,
-        ValueSource::Payer => index <= 1,
-        ValueSource::Account => index < counts.accounts,
-        ValueSource::Address => index < counts.addresses,
-        ValueSource::Literal => index < counts.literals,
-    };
-
-    if !exists {
-        return Err(SpecError::BadIndex);
-    }
-
-    Ok(())
-}
-
 fn check_input(value: ValueRef) -> Result<(), SpecError> {
     if value.source != ValueSource::Input {
-        return Err(SpecError::BadIndex);
-    }
-
-    Ok(())
-}
-
-fn check_index(index: u8, len: usize) -> Result<(), SpecError> {
-    if usize::from(index) >= len {
         return Err(SpecError::BadIndex);
     }
 

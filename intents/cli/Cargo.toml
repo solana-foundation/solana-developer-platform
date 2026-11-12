@@ -1,0 +1,21 @@
+[package]
+name = "sdp-intents-cli"
+description = "The sdp-intents command line: lints SDP intent definitions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "sdp-intents"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+sdp-intents-compiler.workspace = true
+sdp-intents-spec.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

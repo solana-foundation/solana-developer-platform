@@ -1,0 +1,30 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "implementation",
+  "id": "solana.org/system-transfer",
+  "version": "1.0.0",
+  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "implements": "solana.org/token.transfer@^1",
+  "applies": [
+    { "value": "{inputs.mint}", "equals": "11111111111111111111111111111111" },
+    { "value": "{inputs.memo}", "present": false }
+  ],
+  "message": "transfer {inputs.amount} lamports from {inputs.from} to {inputs.to}",
+  "recipe": {
+    "kind": "static",
+    "accounts": [
+      { "name": "from", "address": "{inputs.from}", "writable": true, "signer": true },
+      { "name": "to", "address": "{inputs.to}", "writable": true }
+    ],
+    "instructions": [
+      {
+        "program": "11111111111111111111111111111111",
+        "accounts": ["from", "to"],
+        "data": [
+          { "value": "02000000", "encoding": "hex" },
+          { "value": "{inputs.amount}", "encoding": "u64le" }
+        ]
+      }
+    ]
+  }
+}

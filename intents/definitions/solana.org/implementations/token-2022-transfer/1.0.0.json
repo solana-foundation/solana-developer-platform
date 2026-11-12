@@ -1,0 +1,37 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "implementation",
+  "id": "solana.org/token-2022-transfer",
+  "version": "1.0.0",
+  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "implements": "solana.org/token.transfer@^1",
+  "annotations": { "builder": "The address is a placeholder until token-2022-builder is deployed." },
+  "applies": [
+    { "account": "{inputs.mint}", "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" }
+  ],
+  "message": "transfer {inputs.amount} of {inputs.mint} from {inputs.from} to {inputs.to}",
+  "recipe": {
+    "kind": "program",
+    "program": "4pty1GwTYzz4q2cfpjWUDiKY15ydMLyVmLaGX4tmK3LT",
+    "accounts": [
+      { "name": "mint", "address": "{inputs.mint}" },
+      { "name": "from", "address": "{inputs.from}" },
+      { "name": "to", "address": "{inputs.to}" },
+      { "name": "source", "address": { "ata": { "owner": "{inputs.from}", "mint": "{inputs.mint}", "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" } } },
+      { "name": "destination", "address": { "ata": { "owner": "{inputs.to}", "mint": "{inputs.mint}", "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" } } }
+    ],
+    "data": [
+      { "value": "bd1c9adb8ca2623c", "encoding": "hex" },
+      { "value": "{inputs.amount}", "encoding": "u64le" },
+      { "value": "{inputs.memo}", "encoding": "borsh" }
+    ]
+  },
+  "postConditions": [
+    { "invokesOnly": [
+        "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+        "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
+      ],
+      "message": "only Token-2022, ATA, and Memo instructions run" }
+  ]
+}

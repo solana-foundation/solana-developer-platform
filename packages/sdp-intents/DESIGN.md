@@ -1184,25 +1184,28 @@ pub struct VersionIndexV1 {
 }
 ```
 
-1. `kind` is `KIND_INTERFACE` or `KIND_IMPLEMENTATION` (4.9), and is a seed, so one account type
+1. The update authority of an index publishes its new versions, moves its head, and removes its
+   versions. An update authority or an approve authority of `Address::default()` means the
+   organization authority, so that the index follows a change of the organization authority.
+2. `kind` is `KIND_INTERFACE` or `KIND_IMPLEMENTATION` (4.9), and is a seed, so one account type
    serves both.
-2. Two lists follow the fixed part, and neither has a limit: `version_count` entries of
+3. Two lists follow the fixed part, and neither has a limit: `version_count` entries of
    `VersionEntryV1`, sorted so that the last entry is the newest, then `approved_count` addresses.
    A reader casts each list to a slice in place. A version account address follows from the seeds,
    so the versions list stores no addresses.
-3. `head` is the released version, when `has_head` is set. It is a version and not a position,
+4. `head` is the released version, when `has_head` is set. It is a version and not a position,
    because an insert moves positions. Only `set_head` changes it.
-4. The approved list holds the index addresses of an interface's approved implementations. An
+5. The approved list holds the index addresses of an interface's approved implementations. An
    implementation index has none, leaves `approve_authority` and `approve_new_versions` at zero,
    and sets `interface` to the interface's index address, which never changes.
-5. `publish` grows the account by 15 bytes and inserts the entry in order. `remove` takes the entry
+6. `publish` grows the account by 15 bytes and inserts the entry in order. `remove` takes the entry
    out and shrinks the account. `approve` grows the account by 32 bytes and appends an address, and
    `unapprove` moves the last address into the gap and shrinks the account. Each shrink returns the
    rent. Growing the versions list moves the approved list, which costs one memory move.
-6. A version of an implementation is approved when the interface's list holds the implementation
+7. A version of an implementation is approved when the interface's list holds the implementation
    and the version entry's `approved` is set. Only the interface's approve authority changes
    either one. The list makes approved implementations discoverable with no `getProgramAccounts`.
-7. `approve_new_versions` is the interface's policy, and defaults to false. When it is true,
+8. `approve_new_versions` is the interface's policy, and defaults to false. When it is true,
    `publish` marks a new version of an approved implementation as approved. When it is false, each
    version needs its own approval.
 
@@ -1210,7 +1213,7 @@ pub struct VersionIndexV1 {
 | :-- | :-- | :-- |
 | `create_organization` | Any payer | Creates the organization with an authority. The name is first come. |
 | `set_organization_authority` | Organization authority | Changes the authority |
-| `create_interface` | Organization authority | Creates the index. The update authority and the approve authority default to the organization authority. |
+| `create_interface` | Organization authority | Creates the index, with an update authority and an approve authority |
 | `create_implementation` | Organization authority of the proposer | Creates the index for one interface, with an update authority |
 | `set_update_authority` | Update authority | Changes the update authority of an index |
 | `set_approve_authority` | Approve authority | Changes the approve authority of an interface |

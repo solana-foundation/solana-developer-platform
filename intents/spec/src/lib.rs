@@ -16,12 +16,17 @@
 
 mod address;
 mod code;
+mod counts;
 mod document;
 mod error;
 mod implementation;
+mod interface;
+mod literal;
 mod pod;
+mod post_condition;
 mod refs;
 mod region;
+mod value_type;
 
 #[cfg(test)]
 mod test_support;
@@ -30,9 +35,12 @@ pub use address::Address;
 pub use document::{DocumentHeaderV1, DocumentIdV1, DocumentKind, SemverV1, MAGIC, SPEC_MAJOR, SPEC_MINOR};
 pub use error::SpecError;
 pub use implementation::{
-    AccountSourceKind, AccountV1, AddressSource, AppliesKind, AppliesV1, CheckKind, Encoding, Implementation,
-    ImplementationDocV1, InstructionV1, LiteralV1, OutputBindingV1, PostConditionV1, RecipeKind, Segment,
-    SegmentSourceKind, SegmentV1,
+    AccountSourceKind, AccountV1, AddressSource, AppliesKind, AppliesV1, Encoding, Implementation, ImplementationDocV1,
+    InstructionV1, OutputBindingV1, RecipeKind, Segment, SegmentSourceKind, SegmentV1,
 };
+pub use interface::{InputV1, Interface, InterfaceDocV1, OutputV1};
+pub use literal::LiteralV1;
 pub use pod::{PodBool, PodU16, PodU32, PodU64};
+pub use post_condition::{CheckKind, PostConditionV1};
 pub use refs::{PoolRefV1, RangeV1, TableRefV1, ValueRef, ValueRefV1, ValueSource};
+pub use value_type::{BaseType, ValueType};

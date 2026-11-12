@@ -1,9 +1,9 @@
-use super::wire::{
-    AccountV1, AppliesV1, ImplementationDocV1, InstructionV1, LiteralV1, OutputBindingV1, PostConditionV1, RecipeKind,
-    SegmentV1,
-};
+use super::wire::{AccountV1, AppliesV1, ImplementationDocV1, InstructionV1, OutputBindingV1, RecipeKind, SegmentV1};
 use crate::region::Region;
-use crate::{Address, DocumentHeaderV1, DocumentIdV1, DocumentKind, PoolRefV1, RangeV1, SpecError, TableRefV1};
+use crate::{
+    Address, DocumentHeaderV1, DocumentIdV1, DocumentKind, LiteralV1, PoolRefV1, PostConditionV1, RangeV1, SpecError,
+    TableRefV1,
+};
 
 /// An implementation document that `parse` validated, borrowed from its bytes. The view holds two
 /// references. Each accessor finds its table from the fixed part, and returns entries in place.

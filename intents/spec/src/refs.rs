@@ -62,7 +62,17 @@ impl TryFrom<ValueRefV1> for ValueRef {
     }
 }
 
+impl From<ValueRef> for ValueRefV1 {
+    fn from(value: ValueRef) -> Self {
+        Self { source: value.source.into(), index: value.index }
+    }
+}
+
 impl ValueRef {
+    pub(crate) fn to_bytes(self) -> [u8; 2] {
+        [self.source.into(), self.index]
+    }
+
     pub(crate) fn from_bytes(bytes: [u8; 2]) -> Result<Self, SpecError> {
         let [source, index] = bytes;
 
