@@ -119,14 +119,16 @@ async function recoverDue(env: Env, ledger: ProposalLedger, scope: CustodyPropos
   const environment = currentClusterScope().environment;
   const now = new Date().toISOString();
   const adoption = await Promise.allSettled([
-    ledger.proposals.adoptLegacyTransfers({ environment, now, limit: RECOVERY_PAGE_SIZE }),
+    (async () => {
+      await ledger.proposals.adoptLegacyTransfers({ environment, now, limit: RECOVERY_PAGE_SIZE });
+    })(),
   ]);
   // A malformed legacy row cannot starve already-recorded proposals. Report the
   // bridge failure after processing them, so the cron still signals failed work.
   const recovery = await Promise.allSettled([
     recoverClaimedProposals(env, ledger, { ...scope, environment, now, limit: RECOVERY_PAGE_SIZE }),
   ]);
-  rethrowFailures<number | void>([...adoption, ...recovery]);
+  rethrowFailures([...adoption, ...recovery]);
 }
 
 async function recoverClaimedProposals(
@@ -178,7 +180,7 @@ async function emitRefusalAlert(
   });
 }
 
-function rethrowFailures<T>(outcomes: readonly PromiseSettledResult<T>[]) {
+function rethrowFailures(outcomes: readonly PromiseSettledResult<void>[]) {
   const failures = outcomes
     .filter((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected")
     .map((outcome) => outcome.reason);
