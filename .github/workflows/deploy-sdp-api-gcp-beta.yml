@@ -52,8 +52,11 @@ jobs:
         continue-on-error: true
         timeout-minutes: 2
         # The run's own ref (main): the scripts this job runs with credentials never come from the
-        # image_sha input, which only names the signed image to deploy.
+        # image_sha input, which only names the signed image to deploy. Full history orders
+        # breaking migrations against the commit beta serves.
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 0
 
       - name: Authenticate to GCP
         id: auth
@@ -216,9 +219,72 @@ jobs:
           echo "image=${resolved_image}" >> "${GITHUB_OUTPUT}"
           echo "Deploying ${tagged_image} as ${resolved_image}" >> "${GITHUB_STEP_SUMMARY}"
 
+      # A breaking migration drops what the serving image may still read, and it runs before
+      # the new revision takes traffic. Beta can skip merges (a failed or queued run), so apply
+      # one only while beta serves the commit before its last edit, as prod does.
+      - name: Refuse a breaking migration until beta serves its parent
+        id: breaking
+        if: steps.image.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          if ! git cat-file -e "${DEPLOY_IMAGE_SHA}^{commit}" 2>/dev/null; then
+            echo "${DEPLOY_IMAGE_SHA} is not in main's history." >&2
+            exit 1
+          fi
+          service_json="$(
+            gcloud run services describe "${BETA_SERVICE}" \
+              --region "${REGION}" --project "${PROJECT_ID}" --format=json
+          )"
+          serving_revision="$(
+            jq -er '
+              [.status.traffic[] | select((.percent // 0) > 0)]
+              | if length != 1 then error("beta traffic is not on exactly one revision")
+                elif (.[0].revisionName // "") == "" then error("the serving traffic target has no resolved revisionName")
+                else .[0].revisionName end
+            ' <<<"${service_json}"
+          )"
+          serving_image="$(
+            gcloud run revisions describe "${serving_revision}" \
+              --region "${REGION}" --project "${PROJECT_ID}" --format='value(status.imageDigest)'
+          )"
+          if [[ "${serving_image}" != "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public@"* ]]; then
+            echo "Beta serves ${serving_image:-no image} from outside ${REPO}, so no SDP build reads its schema yet."
+            exit 0
+          fi
+          serving=""
+          for attempt in 1 2 3; do
+            if serving="$(
+              curl --fail --silent --show-error --max-time 10 "${BETA_ORIGIN}/health/ready" |
+                jq -er --arg revision "${serving_revision}" 'select(.revision == $revision) | .commit'
+            )" && [[ "${serving}" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "${serving}^{commit}" 2>/dev/null; then
+              break
+            fi
+            serving=""
+            if [[ "${attempt}" -eq 3 ]]; then
+              echo "Could not read the commit ${serving_revision} serves from ${BETA_ORIGIN}/health/ready, so migrations cannot be ordered against it." >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          changed="$(git diff --name-only --no-renames --diff-filter=AM "${serving}" "${DEPLOY_IMAGE_SHA}" -- apps/sdp-api/src/db/migrations/postgres)"
+          for file in ${changed}; do
+            sql="$(git show "${DEPLOY_IMAGE_SHA}:${file}")"
+            if ! grep -Eq '^--[[:space:]]*sdp:migration-compat:[[:space:]]*breaking[[:space:]]*$' <<<"${sql}"; then
+              continue
+            fi
+            edited="$(git log --format=%H -n 1 "${serving}..${DEPLOY_IMAGE_SHA}" -- "${file}")"
+            if [[ -z "${edited}" ]] || ! git merge-base --is-ancestor "${edited}^" "${serving}"; then
+              echo "${file} is marked breaking, so it runs only once beta serves ${edited:-its last edit}^, the commit before its last pending edit. Beta serves ${serving}; deploy that parent first." >&2
+              exit 1
+            fi
+            echo "Applying breaking migration ${file}; beta serves ${serving}." >> "${GITHUB_STEP_SUMMARY}"
+          done
+
       - name: Run beta database migrations
         id: migrate
-        if: steps.image.outcome == 'success'
+        if: steps.breaking.outcome == 'success'
         continue-on-error: true
         timeout-minutes: 10
         env:

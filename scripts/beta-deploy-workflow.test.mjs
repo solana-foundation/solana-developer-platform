@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -71,7 +71,7 @@ function runBlock(step) {
     .join("\n");
 }
 
-function runScript(script, { stubs, env }) {
+function runScript(script, { stubs, env, cwd }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "beta-deploy-"));
   const output = path.join(dir, "output");
   const summary = path.join(dir, "summary.md");
@@ -86,6 +86,7 @@ function runScript(script, { stubs, env }) {
   }
   // Startup files can prepend system binaries ahead of the fixture stubs.
   const result = spawnSync("bash", ["--noprofile", "--norc", "-c", script], {
+    cwd,
     env: {
       PATH: `${dir}:${process.env.PATH}`,
       GITHUB_OUTPUT: output,
@@ -131,6 +132,7 @@ test("the beta workflow runs the beta steps in order", () => {
       "Log in to GHCR",
       "Verify and promote merge image",
       "Resolve immutable deploy image",
+      "Refuse a breaking migration until beta serves its parent",
       "Run beta database migrations",
       "Deploy beta service",
       "Verify beta revision readiness",
@@ -149,7 +151,11 @@ test("the beta workflow runs the beta steps in order", () => {
     ["Log in to GHCR", "steps.crane.outcome == 'success'"],
     ["Verify and promote merge image", "steps.ghcr.outcome == 'success'"],
     ["Resolve immutable deploy image", "steps.promote.outcome == 'success'"],
-    ["Run beta database migrations", "steps.image.outcome == 'success'"],
+    [
+      "Refuse a breaking migration until beta serves its parent",
+      "steps.image.outcome == 'success'",
+    ],
+    ["Run beta database migrations", "steps.breaking.outcome == 'success'"],
     ["Deploy beta service", "steps.migrate.outcome == 'success'"],
     ["Verify beta revision readiness", "steps.service.outcome == 'success'"],
     ["Check the beta release channel", "steps.ready.outcome == 'success'"],
@@ -413,4 +419,147 @@ test("only the beta workflow posts the beta gate", () => {
     .readdirSync(workflowsDir)
     .filter((fileName) => readWorkflow(fileName).includes(betaGateContext));
   assert.deepEqual(posters, [betaDeployFile]);
+});
+
+const migrations = "apps/sdp-api/src/db/migrations/postgres";
+const breakingStep = "Refuse a breaking migration until beta serves its parent";
+const betaServing = "sdp-beta-api-public-00041-old";
+const betaImage = `us-central1-docker.pkg.dev/solana-developer-platform-beta/sdp-beta/sdp-api-public@sha256:${"c".repeat(64)}`;
+
+function git(cwd, ...args) {
+  return execFileSync(
+    "git",
+    [
+      "-c",
+      "user.name=test",
+      "-c",
+      "user.email=test@example.com",
+      "-c",
+      "commit.gpgsign=false",
+      "-c",
+      "init.defaultBranch=main",
+      ...args,
+    ],
+    { cwd, encoding: "utf8" }
+  ).trim();
+}
+
+// base reads `legacy`; stopReading drops the read; drop is the contraction; head is unrelated.
+function migrationRepo() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "beta-breaking-"));
+  git(dir, "init", "-q");
+  const commit = (message, files) => {
+    for (const [file, content] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+      fs.writeFileSync(path.join(dir, file), content);
+    }
+    git(dir, "add", "-A");
+    git(dir, "commit", "-q", "-m", message);
+    return git(dir, "rev-parse", "HEAD");
+  };
+  const base = commit("base", {
+    "app.txt": "reads legacy\n",
+    [`${migrations}/0001_init.sql`]: "CREATE TABLE legacy (id int);\n",
+  });
+  const stopReading = commit("stop reading legacy", { "app.txt": "reads nothing\n" });
+  const drop = commit("drop legacy", {
+    [`${migrations}/0002_drop_legacy.sql`]:
+      "-- sdp:migration-compat: breaking\nDROP TABLE legacy;\n",
+  });
+  const head = commit("unrelated", { "app.txt": "reads nothing, faster\n" });
+  return { dir, base, stopReading, drop, head };
+}
+
+function runBreaking(repo, { serving, image = betaImage, healthJson, traffic }) {
+  return runScript(runBlock(stepBlock(betaJob(), breakingStep)), {
+    cwd: repo.dir,
+    env: {
+      ...findEnv,
+      PROJECT_ID: "solana-developer-platform-beta",
+      REPO: "sdp-beta",
+      BETA_ORIGIN: "https://api-beta.example",
+      DEPLOY_IMAGE_SHA: repo.head,
+      SERVICE_JSON: JSON.stringify({
+        status: { traffic: traffic ?? [{ revisionName: betaServing, percent: 100 }] },
+      }),
+      SERVING_IMAGE: image,
+      HEALTH_JSON:
+        healthJson ?? JSON.stringify({ status: "ready", revision: betaServing, commit: serving }),
+    },
+    stubs: {
+      gcloud: `if [[ "$2" == "services" ]]; then printf '%s' "$SERVICE_JSON"; else printf '%s\\n' "$SERVING_IMAGE"; fi`,
+      curl: `printf '%s' "$HEALTH_JSON"`,
+    },
+  });
+}
+
+test("beta applies a breaking migration once it serves the commit before it", () => {
+  const repo = migrationRepo();
+  const run = runBreaking(repo, { serving: repo.stopReading });
+  assert.equal(run.code, 0, run.stderr);
+  assert.match(run.summary, /Applying breaking migration .*0002_drop_legacy\.sql/);
+});
+
+test("beta refuses a breaking migration while it serves a commit that still reads what it drops", () => {
+  const repo = migrationRepo();
+  const run = runBreaking(repo, { serving: repo.base });
+  assert.equal(run.code, 1);
+  assert.match(
+    run.stderr,
+    new RegExp(
+      `0002_drop_legacy\\.sql is marked breaking, so it runs only once beta serves ${repo.drop}\\^`
+    )
+  );
+});
+
+test("beta deploys past a breaking migration it already serves", () => {
+  const repo = migrationRepo();
+  assert.equal(runBreaking(repo, { serving: repo.drop }).code, 0);
+});
+
+test("beta skips the ordering check while it serves no SDP image", () => {
+  const repo = migrationRepo();
+  const run = runBreaking(repo, {
+    serving: repo.base,
+    image: "us-docker.pkg.dev/cloudrun/container/hello@sha256:0",
+  });
+  assert.equal(run.code, 0, run.stderr);
+  assert.ok(!run.calls.some((call) => call.startsWith("curl ")));
+});
+
+test("beta fails closed when it cannot tell which commit it serves", () => {
+  const repo = migrationRepo();
+  for (const healthJson of [
+    JSON.stringify({
+      status: "ready",
+      revision: "sdp-beta-api-public-00039-other",
+      commit: repo.stopReading,
+    }),
+    JSON.stringify({ status: "ready", revision: betaServing, commit: "local" }),
+    JSON.stringify({ status: "ready", revision: betaServing, commit: "f".repeat(40) }),
+  ]) {
+    const run = runBreaking(repo, { healthJson });
+    assert.equal(run.code, 1, healthJson);
+    assert.match(run.stderr, /Could not read the commit sdp-beta-api-public-00041-old serves/);
+  }
+  const split = runBreaking(repo, {
+    serving: repo.stopReading,
+    traffic: [
+      { revisionName: betaServing, percent: 50 },
+      { revisionName: "sdp-beta-api-public-00042-new", percent: 50 },
+    ],
+  });
+  assert.notEqual(split.code, 0);
+  assert.match(split.stderr, /beta traffic is not on exactly one revision/);
+});
+
+test("beta reads the breaking directive exactly as prod does", () => {
+  const directive = (script) => script.match(/grep -Eq '([^']+)'/)[1];
+  const prodGate = runBlock(
+    stepBlock(
+      jobBlock(readWorkflow("deploy-sdp-api-gcp-prod.yml"), "deploy"),
+      "Refuse a breaking migration until prod serves its parent"
+    )
+  );
+  assert.equal(directive(runBlock(stepBlock(betaJob(), breakingStep))), directive(prodGate));
 });

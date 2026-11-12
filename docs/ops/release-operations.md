@@ -232,11 +232,12 @@ Once the stage deploy and smoke pass, the merge deploy's `Dispatch the beta depl
 1. Authenticates as the beta deployer (`BETA_DEPLOY_WIF_PROVIDER`, `BETA_DEPLOY_SA`); the merge deploy skips beta while those variables are unset.
 2. Finds `sdp-beta-api-public-migrate`, `sdp-beta-api-public` and `sdp-beta-worker`. While any of them does not exist, the job skips with a notice. It records the revision and digest beta served before this deploy in the run summary.
 3. Verifies the merge image's signature in GHCR and copies that digest into the `sdp-beta` registry, the same way the production deploy promotes it.
-4. Updates and executes the beta migration job with that image.
-5. Updates `sdp-beta-api-public` and waits for the revision to be Ready.
-6. Checks that `https://api-beta.solana.com/health` reports `releaseChannel: beta`.
-7. Updates `sdp-beta-worker`.
-8. Posts the `sdp-web beta gate` commit status once `/health/ready` reports the deployed revision, the same way `release-web` posts the production gate.
+4. Refuses a migration marked `-- sdp:migration-compat: breaking` until beta serves the commit before its last edit, read from `/health/ready` as the production deploy does. A beta run can skip merges (a failed or queued run), so the serving build may still read what the migration drops; deploy that parent to beta first. While beta serves no image from `sdp-beta`, nothing reads its schema and the check passes.
+5. Updates and executes the beta migration job with that image.
+6. Updates `sdp-beta-api-public` and waits for the revision to be Ready.
+7. Checks that `https://api-beta.solana.com/health` reports `releaseChannel: beta`.
+8. Updates `sdp-beta-worker`.
+9. Posts the `sdp-web beta gate` commit status once `/health/ready` reports the deployed revision, the same way `release-web` posts the production gate.
 
 Each step runs only after the previous one succeeded, and each continues on error within a timeout: a beta failure posts `[FAILED] Deploy sdp-api (beta)` to the deploy Slack channel and fails nothing else. Because beta is a separate run, no production job waits on it and it does not hold the merge deploy's concurrency slot: a slow beta delays neither production nor the next merge. Newer beta runs queue behind the current one, and the dispatch job's name sits outside the stage prefix the `Apply pending migrations to prod` approval checks. Once the deploy has found beta, `Beta API smoke` checks that `/health` reports the `beta` channel and `/health/ready` is ready. That pass is reported to Loki with `target="beta"` and never fails the run.
 
