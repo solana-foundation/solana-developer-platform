@@ -34,6 +34,7 @@ function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) 
   const [generating, setGenerating] = useState(false);
   const [vaultsPending, setVaultsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const requestKey = useRef<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const expired = csr !== null && Date.parse(csr.expiresAt) <= now;
@@ -51,7 +52,7 @@ function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) 
           setNow(Date.now());
         } else setError(result.message);
       } catch {
-        if (active) setError(t("DashboardCustody.fireblocksCsrFailed"));
+        if (active) setLoadFailed(true);
       } finally {
         if (active) {
           setLoading(false);
@@ -64,7 +65,10 @@ function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) 
       active = false;
       onPendingChange?.(false);
     };
-  }, [onPendingChange, onReadyChange, t]);
+    // The translator is left out on purpose: the load's server action makes the route render
+    // again, which hands every client component a new translator, and a load that followed the
+    // translator would then run again after each of its own responses.
+  }, [onPendingChange, onReadyChange]);
   useEffect(() => {
     if (!csr) return;
     const remaining = Date.parse(csr.expiresAt) - Date.now();
@@ -95,6 +99,7 @@ function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) 
     onPendingChange?.(true);
     onReadyChange?.(false);
     setError(null);
+    setLoadFailed(false);
     try {
       requestKey.current ??= crypto.randomUUID();
       const result = await generateFireblocksCsrAction(requestKey.current);
@@ -121,7 +126,7 @@ function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) 
     loading,
     generating,
     vaultsPending,
-    error,
+    error: error ?? (loadFailed ? t("DashboardCustody.fireblocksCsrFailed") : null),
     expired,
     generate,
     vaultPendingChanged,
