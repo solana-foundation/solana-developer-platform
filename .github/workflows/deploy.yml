@@ -214,6 +214,8 @@ jobs:
       vars.BETA_DEPLOY_WIF_PROVIDER != '' && vars.BETA_DEPLOY_SA != ''
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    # A failed dispatch must not fail the merge deploy run.
+    continue-on-error: true
     permissions:
       actions: write
     steps:

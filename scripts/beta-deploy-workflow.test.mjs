@@ -189,6 +189,8 @@ test("beta authenticates as its own deployer and promotes the merge image the wa
   );
   assertLine(auth, `          service_account: ${expression("vars.BETA_DEPLOY_SA")}`);
   assert.doesNotMatch(workflow, /STAGE_DEPLOY|sdp-stage|developer-platform-stg/);
+  // Scripts that run with the deploy credentials come from the run's ref, never from image_sha.
+  assert.doesNotMatch(workflow, /\n\s+ref:/);
   // The deployer's token is pinned to main with no GitHub environment.
   assert.doesNotMatch(workflow, /\n\s+environment:/);
   assert.match(beta, /\n {4}permissions:\n(?: {6}.+\n)* {6}packages: read\n/);
@@ -242,6 +244,7 @@ test("beta is dispatched as its own run after a green stage deploy and smoke", (
     betaCaller,
     /\n {4}if: >-\n {6}needs\.deploy-api-stage\.result == 'success' &&\n {6}vars\.BETA_DEPLOY_WIF_PROVIDER != '' && vars\.BETA_DEPLOY_SA != ''\n/
   );
+  assertLine(betaCaller, "    continue-on-error: true");
   // A called workflow would hold this run's concurrency slot, and with it the next merge's deploy.
   assert.doesNotMatch(betaCaller, /\n {4}uses: /);
   assert.match(betaCaller, /\n {4}permissions:\n {6}actions: write\n {4}steps:/);

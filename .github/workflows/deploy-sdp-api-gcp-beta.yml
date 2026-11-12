@@ -51,9 +51,9 @@ jobs:
       - name: Checkout
         continue-on-error: true
         timeout-minutes: 2
+        # The run's own ref (main): the scripts this job runs with credentials never come from the
+        # image_sha input, which only names the signed image to deploy.
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-        with:
-          ref: ${{ inputs.image_sha }}
 
       - name: Authenticate to GCP
         id: auth
@@ -369,7 +369,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          COMMIT="$(git log -1 --format='%h — %s' HEAD 2>/dev/null | cut -c1-140 || true)"
+          COMMIT="$(git log -1 --format='%h — %s' "${VERSION}" 2>/dev/null | cut -c1-140 || true)"
           export COMMIT
           ./scripts/notify-slack.sh
 
