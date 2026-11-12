@@ -1,7 +1,7 @@
 # Remove the signup waitlist
 
-Status: scoped; custody/add-on classification, activation ownership, and deployed-account plans need
-confirmation. RPC and ramp access is decided.
+Status: scoped; add-on classification, activation ownership, and deployed-account plans need
+confirmation. RPC, ramp, and custody access is decided.
 
 This map is about opening SDP signup while keeping selected third-party providers on manual
 onboarding. It must not introduce customer tiers or change token allowlists, destination allowlists,
@@ -97,25 +97,25 @@ Which provider choices should a newly created organization be able to use?
 
 Recommended launch classification, using today's lower-exposure set as the baseline:
 
-| Family           | Generally available                                               | Manual onboarding                                           |
-| ---------------- | ----------------------------------------------------------------- | ----------------------------------------------------------- |
-| Custody/signing  | Privy, Coinbase CDP, Para, Turnkey                                | Fireblocks, Dfns, IBM Digital Asset Haven, Anchorage, Utila |
-| RPC              | Default RPC, Alchemy, Helius, QuickNode, Triton, Validation Cloud | None                                                        |
-| Compliance       | None                                                              | Range, Elliptic, TRM, Chainalysis                           |
-| Ramps            | MoonPay, Stripe                                                   | None                                                        |
-| Payments add-ons | None pending contract review                                      | Kora fee payment, MagicBlock private payments               |
+| Family           | Generally available                                               | Manual onboarding                             |
+| ---------------- | ----------------------------------------------------------------- | --------------------------------------------- |
+| Custody/signing  | All custody providers, including local signing                    | None                                          |
+| RPC              | Default RPC, Alchemy, Helius, QuickNode, Triton, Validation Cloud | None                                          |
+| Compliance       | None                                                              | Range, Elliptic, TRM, Chainalysis             |
+| Ramps            | MoonPay, Stripe                                                   | None                                          |
+| Payments add-ons | None pending contract review                                      | Kora fee payment, MagicBlock private payments |
 
 Notes:
 
-- `local` signing is not a shared vendor account; keep it self-hosted/internal rather than presenting
-  it as a managed provider choice.
-- Fireblocks, Utila, Dfns, Anchorage, and all compliance providers are confirmed manual-onboarding
-  requirements from product direction.
+- Every custody provider is now generally available, superseding the earlier manual-onboarding
+  classification of Fireblocks, Utila, Dfns, Anchorage, IBM Digital Asset Haven, and `local`. An
+  organization override of `false` turns one off for that organization. The release channel, the
+  project's environment, and the deployment's credentials still decide whether a custody provider
+  is offered; `local` is configured only on a self-hosted deployment.
+- All compliance providers are confirmed manual-onboarding requirements from product direction.
 - The repository integrates Elliptic, not a provider named Ellipsis; this scope treats the user's
   “Ellipsis” reference as Elliptic unless another integration exists outside this repository.
-- Para is confirmed generally available. Its shared Beta project limits affect launch capacity, not
-  organization-specific access.
-- IBM Haven remains recommended manual because it currently sits with the contracted custody set.
+- Para's shared Beta project limits affect launch capacity, not organization-specific access.
 - All RPC and ramp providers are confirmed generally available. Their commercial onboarding,
   sandbox restrictions, and shared-account limits affect whether they are configured and usable,
   but do not create organization-specific access gates.
@@ -235,13 +235,13 @@ Automate an organization/provider matrix:
 - two newly created organizations receive the same base product surface and can create teams,
   projects, API keys, and dev-mode resources
 - both can use every configured generally available provider
-- both can use configured Para custody without an activation record
+- both can use every configured custody provider without an activation record
 - both can use every configured RPC and ramp provider without an activation record
 - a manual provider is visible with `Manual onboarding` and `Contact us`, but its API call fails with
   `PROVIDER_ACTIVATION_REQUIRED` before the vendor is called
 - clicking `Contact us` records `requested` with provider/source context
-- enabling Fireblocks for organization A changes only Fireblocks for A; it does not enable
-  compliance, other custody providers, or anything for organization B
+- enabling Range for organization A changes only Range for A; it does not enable other
+  compliance providers, or anything for organization B
 - disabling the activation revokes use without changing organization type
 - a configured-but-unactivated provider and an activated-but-unconfigured provider report different
   states
@@ -267,7 +267,7 @@ What order opens signup without losing access control or exhausting shared devne
 
 ### Answer
 
-1. Confirm the remaining custody/add-on classifications and activation owner; RPC and ramps are
+1. Confirm the remaining add-on classifications and activation owner; RPC, ramps, and custody are
    already confirmed general.
 2. Complete the deployed-account worksheet and bump launch-critical generally available accounts.
 3. Add activation states and materialize existing organizations' manual-provider access.
