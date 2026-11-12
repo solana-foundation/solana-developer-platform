@@ -172,10 +172,23 @@ export async function checkDueProviderPolicies(env: Env): Promise<void> {
 }
 
 /** Setup has already committed. The periodic queue recovers any interrupted observation. */
-export async function checkConnectedProviderPolicies(
-  c: AppContext,
-  connectionId: string
-): Promise<void> {
+export function checkConnectedProviderPolicies(c: AppContext, connectionId: string): void {
+  // Advisory work must not delay the response it follows, so the observation
+  // continues in the background. Without a request ExecutionContext (a bare
+  // app.request call in tests) nothing keeps the work alive past the response,
+  // so it does not start — the periodic queue claims these targets either way.
+  let waitUntil: (promise: Promise<unknown>) => void;
+  try {
+    const executionCtx = c.executionCtx;
+    waitUntil = (promise) => executionCtx.waitUntil(promise);
+  } catch {
+    return;
+  }
+  waitUntil(observeConnectionPolicies(c, connectionId));
+}
+
+/** Created under the request's database identity, so its audited writes keep it. */
+async function observeConnectionPolicies(c: AppContext, connectionId: string): Promise<void> {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   try {
