@@ -11,6 +11,7 @@ import type { ProviderPolicyCheck } from "@sdp/types/custody";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { type DatabaseClient, getDb } from "@/db/client";
 import { getAuth, requireProjectId } from "@/lib/auth";
+import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import type { AppContext } from "@/routes/custody/context";
 import { getLogger } from "@/runtime/logger";
 import {
@@ -27,6 +28,9 @@ import {
 import type { Env } from "@/types/env";
 import { parseByokCredential } from "./byok-credential";
 import { readPrivyWalletPolicy } from "./privy-policy";
+
+/** A batch claims up to 25 wallets; at most this many provider reads run at once. */
+const PROVIDER_READ_CONCURRENCY = 5;
 
 const runtime: CustodyProvisioningRuntime = {
   fetch: (input, init) => globalThis.fetch(input, init),
@@ -61,9 +65,7 @@ async function inspectBatch(
     });
     return parseByokCredential(target.provider, payload);
   }
-  const results: Array<{ target: PolicyCheckTarget; result: PolicyResult }> = [];
-  for (const target of targets) {
-    const record = (result: PolicyResult) => results.push({ target, result });
+  const inspect = async (target: PolicyCheckTarget): Promise<PolicyResult> => {
     try {
       let credentialRead = credentials.get(target.provider_credential_id);
       if (!credentialRead) {
@@ -72,8 +74,7 @@ async function inspectBatch(
       }
       const credential = await credentialRead;
       if (credential.provider === "privy") {
-        record(await readPrivyWalletPolicy(env, credential, target.wallet_id));
-        continue;
+        return await readPrivyWalletPolicy(env, credential, target.wallet_id);
       }
       let policyRead = policies.get(target.provider_credential_id);
       if (!policyRead) {
@@ -85,21 +86,12 @@ async function inspectBatch(
       }
       const policy = await policyRead;
       // Presence of a native Transfer rule. RAW signing is not proven by this check.
-      if ("error" in policy) {
-        record(policy.error);
-        continue;
-      }
+      if ("error" in policy) return policy.error;
       const vaultId = denormalizeFireblocksWalletId(target.wallet_id);
       const native = inspectFireblocksPolicy(policy.value, vaultId, [credential.assetId]);
-      if (native.status !== "missing") {
-        record(native);
-        continue;
-      }
+      if (native.status !== "missing") return native;
       // No rule for this vault at all: the token catalogue cannot change that answer.
-      if (inspectFireblocksPolicy(policy.value, vaultId, null).status === "missing") {
-        record(native);
-        continue;
-      }
+      if (inspectFireblocksPolicy(policy.value, vaultId, null).status === "missing") return native;
       const mint = wellKnownMint("USDC", currentClusterScope().cluster);
       if (!mint) throw new Error("No canonical USDC mint for this cluster");
       const usdc = await resolveFireblocksTransferAsset(
@@ -108,13 +100,22 @@ async function inspectBatch(
         credential.assetId,
         mint
       );
-      record(inspectFireblocksPolicy(policy.value, vaultId, [credential.assetId, usdc.id]));
+      return inspectFireblocksPolicy(policy.value, vaultId, [credential.assetId, usdc.id]);
     } catch {
       // Do not log provider bodies, credentials, secrets, or policy contents.
-      record({ status: "unknown", reason: "provider_unavailable" });
+      return { status: "unknown", reason: "provider_unavailable" };
     }
-  }
-  return results;
+  };
+  // One Privy read per wallet, one Fireblocks policy read per credential. The bound keeps
+  // a slow provider from holding the whole batch open for minutes.
+  const settled = await mapSettledWithConcurrency(targets, PROVIDER_READ_CONCURRENCY, inspect);
+  return settled.map((outcome, index) => ({
+    target: targets[index] as PolicyCheckTarget,
+    result:
+      outcome.status === "fulfilled"
+        ? outcome.value
+        : { status: "unknown", reason: "provider_unavailable" },
+  }));
 }
 
 async function checkPolicies(env: Env, scope: PolicyCheckScope, audit: AuditedWrite) {
@@ -122,27 +123,34 @@ async function checkPolicies(env: Env, scope: PolicyCheckScope, audit: AuditedWr
   const results = await inspectBatch(env, targets);
   for (const { target, result } of results) {
     const check: ProviderPolicyCheck = { ...result, checkedAt: new Date().toISOString() };
+    // The ledger keeps observations that change the picture; an unchanged hourly
+    // repeat updates the wallet silently while the log line stays hourly.
+    const changed =
+      target.previous_status !== check.status ||
+      target.previous_reason !== check.reason ||
+      target.previous_credential_id !== target.provider_credential_id;
     const recorded = await audit(async (tx) => {
       const saved = await new CustodyPolicyStore(tx).record(target, check);
       return {
         result: saved,
-        entry: saved
-          ? {
-              organizationId: target.organization_id,
-              action: "check",
-              resourceType: "custody_connection",
-              resourceId: target.custody_connection_id,
-              metadata: {
-                event: "custody_provider_policy_checked",
-                projectId: target.project_id,
-                walletId: target.id,
-                provider: target.provider,
-                environment: scope.environment,
-                ...check,
-              },
-              status: "success",
-            }
-          : null,
+        entry:
+          saved && changed
+            ? {
+                organizationId: target.organization_id,
+                action: "check",
+                resourceType: "custody_connection",
+                resourceId: target.custody_connection_id,
+                metadata: {
+                  event: "custody_provider_policy_checked",
+                  projectId: target.project_id,
+                  walletId: target.id,
+                  provider: target.provider,
+                  environment: scope.environment,
+                  ...check,
+                },
+                status: "success",
+              }
+            : null,
       };
     });
     if (recorded)
