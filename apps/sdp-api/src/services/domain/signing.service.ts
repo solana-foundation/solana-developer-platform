@@ -41,6 +41,11 @@ import {
   assertCustodyProviderCanCreateWallet,
   assertCustodyProviderCanDeleteWallet,
 } from "@/services/custody-provider-lifecycle.service";
+import type {
+  CustodyProposalReader,
+  CustodyTransferProposer,
+  TransferProposalIntent,
+} from "@/services/domain/signing/admitted-proposer";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createAdapterFromEncryptedConfig } from "@/services/domain/signing/provider-adapter-factory";
 import {
@@ -1285,6 +1290,36 @@ export class SigningService {
     );
   }
 
+  /** The proposing half of the custody waist; `null` for a wallet that signs (PRO-2435 D2). */
+  async getTransferProposerForWalletRecord(
+    orgId: string,
+    projectId: string,
+    custodyWalletId: string,
+    movement: MovementId
+  ): Promise<CustodyTransferProposer | null> {
+    return this.runtimeTargets.getTransferProposerForWalletRecord(
+      orgId,
+      projectId,
+      custodyWalletId,
+      movement
+    );
+  }
+
+  /** Read-only recovery for a recorded proposal; it can never create a transfer. */
+  async getTransferProposalReaderForWalletRecord(
+    orgId: string,
+    projectId: string,
+    custodyWalletId: string,
+    binding: TransferProposalIntent & { sourceAddress: string | null }
+  ): Promise<CustodyProposalReader> {
+    return this.runtimeTargets.getTransferProposalReaderForWalletRecord(
+      orgId,
+      projectId,
+      custodyWalletId,
+      binding
+    );
+  }
+
   /**
    * The project's active Managed custody configs, most recently updated first.
    *
@@ -1336,6 +1371,8 @@ export function createSigningService(env: Env, scope?: TenantScope): SigningServ
     "getPublicKey",
     "admitRuntimeExecution",
     "getTransactionSignerForWalletRecord",
+    "getTransferProposerForWalletRecord",
+    "getTransferProposalReaderForWalletRecord",
     "getConfigurations",
   ]);
 

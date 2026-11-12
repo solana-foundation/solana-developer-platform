@@ -114,6 +114,7 @@ import {
   type CriticalOutcome,
   criticalOutcomeEntry,
 } from "@/services/audit.service";
+import type { CustodyTransferProposer } from "@/services/domain/signing/admitted-proposer";
 import { callerInsufficientFundsError } from "@/services/fee-payment-errors";
 import {
   assertPaymentProjectScope,
@@ -125,16 +126,19 @@ import {
 import { readSolanaCryptoWalletAddress } from "@/services/payments/counterparty-account-resolution";
 import {
   isFireblocksTransfer,
-  prepareFireblocksTransfer,
+  type ProposalLedger,
   refreshFireblocksTransfer,
-  submitFireblocksTransfer,
+  submitProposedTransfer,
 } from "@/services/payments/fireblocks-transfer";
 import { signWithFreshBlockhash } from "@/services/payments/sign-with-fresh-blockhash";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import { assertNoSolRentShortfall } from "@/services/payments/sol-rent-minimum";
 import { SPONSORED_WALLET_FEE_LAMPORTS } from "@/services/payments/sponsored-fee";
 import { loadPaymentMint, parseStaticPaymentAmount } from "@/services/payments/token-amount";
-import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
+import {
+  createOrgSignerForCustodyWallet,
+  createOrgTransferProposerForCustodyWallet,
+} from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
   resolveRequestSponsorshipScope,
@@ -1073,9 +1077,27 @@ function compareTransferRows(
   return createdAtComparison || right.id.localeCompare(left.id);
 }
 
-async function executeFireblocksTransfer(
+/**
+ * The request's ledger for proposed-transfer row state: a settle commits with its audit outcome
+ * in the request's own ledger transaction.
+ */
+function requestProposalLedger(
+  c: AppContext,
+  auditService: AuditService = new AuditService(getDb(c.env))
+): ProposalLedger {
+  return {
+    repo: getPaymentsRepository(c),
+    audited: (work) =>
+      auditService.logWithin(c, (tx) =>
+        work(createPostgresPaymentsRepository(tx, getRequestTenantScope(c)))
+      ),
+  };
+}
+
+async function executeProposedTransfer(
   c: AppContext,
   transfer: TransferRow,
+  proposer: CustodyTransferProposer,
   auditService: AuditService,
   auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>>
 ) {
@@ -1083,20 +1105,22 @@ async function executeFireblocksTransfer(
   // transaction failure/rebroadcast path. The durable provider intent owns recovery.
   let updated: TransferRow;
   try {
-    updated = await submitFireblocksTransfer(c.env, getPaymentsRepository(c), transfer);
+    updated = await submitProposedTransfer(
+      requestProposalLedger(c, auditService),
+      transfer,
+      proposer
+    );
   } catch (error) {
+    // A refusal already closed the intent with its failed write; this covers anything earlier.
     await completeTransferAudit(c, auditService, transfer, auditIntent, {
       status: "failure",
       metadata: { status: "failed" },
     });
     throw error;
   }
-  if (updated.provider_reference || updated.status === "failed") {
-    await completeTransferAudit(c, auditService, transfer, auditIntent, {
-      status: updated.status === "failed" ? "failure" : "success",
-      metadata: { fireblocksTransactionId: updated.provider_reference, status: updated.status },
-    });
-  }
+  // A terminal write closed the audit intent in its own transaction. A proposal awaiting
+  // approval in Fireblocks leaves it open: the read or the cron that settles the payment closes
+  // it with the real outcome, as the pending-transfer job does for an ambiguous signed send.
   // The same code a replay of the key reads, so a confirmed policy block answers
   // 422 CUSTODY_POLICY_REFUSED both times (HOO-2478).
   if (updated.status === "failed")
@@ -1175,6 +1199,37 @@ async function completeTransferAudit(
   }
 }
 
+/**
+ * One waist for every custody wallet (PRO-2435 D2): a wallet whose provider builds and sends its
+ * own transfers resolves to a proposer through the same prelude a signer gets, and its intent is
+ * bound before the row; every other wallet gets `null` and signs.
+ */
+async function resolveTransferProposal(
+  c: AppContext,
+  operation: TransferResolved["operation"]
+): Promise<{
+  proposer: CustodyTransferProposer | null;
+  fireblocks: Awaited<ReturnType<CustodyTransferProposer["prepare"]>> | null;
+}> {
+  const proposer = await createOrgTransferProposerForCustodyWallet<"payments">(
+    c.env,
+    getAuth(c).organizationId,
+    requireProjectId(c),
+    operation.sourceWallet.id,
+    "payments.transfer"
+  );
+  if (!proposer) return { proposer: null, fireblocks: null };
+  // The same identity check a signer gets: the resolved wallet is the one authorize admitted.
+  if (proposer.address !== operation.sourceAddress)
+    throw conflict("Fireblocks source wallet changed");
+  const fireblocks = await proposer.prepare({
+    token: operation.token,
+    amount: operation.amount,
+    native: isNativePaymentToken(operation.token),
+  });
+  return { proposer, fireblocks };
+}
+
 export async function createTransfer(c: ValidatedBodyContext<typeof createTransferSchema>) {
   const body = c.req.valid("json");
   const { scope, operation, rampTransfer, counterpartyAccount } =
@@ -1184,12 +1239,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
   const fingerprint = getIdempotencyFingerprint(c);
   const idempotency =
     recordKey !== undefined && fingerprint !== undefined ? { key: recordKey, fingerprint } : null;
-  const fireblocks = await prepareFireblocksTransfer(
-    c.env,
-    scope.auth.organizationId,
-    requireProjectId(c),
-    operation
-  );
+  const { proposer, fireblocks } = await resolveTransferProposal(c, operation);
   // Reject unsupported Fireblocks mints before attempting an unused Solana read.
   // Before the row: a too-precise amount is the caller's 400, never a failed transfer.
   await parseStaticPaymentAmount(operation.amount, assertValidAddress(operation.token, "token"));
@@ -1286,7 +1336,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
     });
     throw error;
   }
-  if (fireblocks) return executeFireblocksTransfer(c, transfer, auditService, auditIntent);
+  if (proposer) return executeProposedTransfer(c, transfer, proposer, auditService, auditIntent);
   try {
     if (isNativePaymentToken(operation.token)) {
       const solResult = await executeSolTransfer(
@@ -1727,8 +1777,9 @@ export async function listTransfers(c: AppContext) {
   const pending = transferRows
     .filter((row) => isFireblocksTransfer(row) && row.status === "processing")
     .slice(0, 4);
+  const ledger = requestProposalLedger(c);
   const refreshed = await mapSettledWithConcurrency(pending, 4, (row) =>
-    refreshFireblocksTransfer(c.env, repo, row)
+    refreshFireblocksTransfer(c.env, ledger, row)
   );
   const byId = new Map(
     refreshed.flatMap((result) =>
@@ -1762,6 +1813,6 @@ export async function getTransfer(c: AppContext) {
     throw notFound("Transfer");
   }
 
-  const refreshed = await refreshFireblocksTransfer(c.env, repo, row);
+  const refreshed = await refreshFireblocksTransfer(c.env, requestProposalLedger(c), row);
   return success(c, { transfer: mapTransferRow(refreshed) });
 }

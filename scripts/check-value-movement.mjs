@@ -79,7 +79,7 @@ const KEYCHAIN_SDKS = [
 export const CAPABILITIES = [
   {
     id: "fireblocks-native-transfer",
-    why: "Creates a provider-signed payment; only the admitted Fireblocks submission service may.",
+    why: "Creates a provider-signed payment; only the custody waist's proposer may (PRO-2435 D2).",
     symbols: [
       {
         file: "packages/sdp-custody/src/provisioning/fireblocks-transfers.ts",
@@ -87,7 +87,7 @@ export const CAPABILITIES = [
       },
     ],
     owners: [CUSTODY_PACKAGE],
-    allow: [`${API}/services/payments/fireblocks-transfer.ts`],
+    allow: [`${API}/services/domain/signing/admitted-proposer.ts`],
   },
   {
     id: "config-signing-adapter",

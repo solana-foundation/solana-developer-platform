@@ -136,11 +136,20 @@ Before submission, SDP durably stores the intent and atomically claims a single 
 The SDP transfer ID is Fireblocks' permanent `externalTxId`; transaction creation does not
 send Fireblocks' time-limited `Idempotency-Key` header. SDP separately deduplicates the caller's
 request using its own idempotency key.
-Immediately before the provider POST, SDP resolves custody access again and checks the current
-connection, account, vault, source address and network against the stored intent, then rechecks
-the caller's live money authorization. A local refusal marks the intent failed without a POST;
-previously decrypted credentials are never carried from preparation into submission. This adds
-no Fireblocks or Solana RPC requests.
+The payment's critical audit intent stays open while the proposal awaits approval. The read or
+cron run that settles the payment (confirmed, failed, rejected or expired) closes it with
+Fireblocks' outcome in the same transaction as the status change, as the pending-transfer job
+does for a signed payment; acceptance alone is never audited as success.
+The payment goes through the same custody waist as every signed payment (ADR 0007). The
+waist resolves a Fireblocks BYOK wallet to a proposer rather than a signer
+(`services/domain/signing/admitted-proposer.ts`), with the same checks at resolution: runtime
+availability, wallet purpose and provider entitlement. Immediately before the provider POST, the
+proposer re-reads the wallet row and Connection, checks connection, account, vault, source address
+and network against the stored intent, and makes the same live money-admission decision a signature
+makes. A local refusal marks the intent failed without a POST. Credentials never leave the waist,
+and previously decrypted credentials are never carried from preparation into submission. Only the
+proposer may call `createFireblocksTransfer` (`pnpm check:value-movement`). This adds no Fireblocks
+or Solana RPC requests.
 The request returns `processing` while approval is pending. Dashboard transfer reads and the
 pending-transfer job reconcile with GET by external ID; they never POST. Unknown outcomes,
 including a timeout, missing proposal, or unavailable credentials, stay processing. Do not
