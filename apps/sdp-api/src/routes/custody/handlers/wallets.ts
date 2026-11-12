@@ -315,7 +315,7 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
         idempotency,
       });
       clearWalletCaches();
-      await checkConnectedProviderPolicies(c, body.connectionId);
+      checkConnectedProviderPolicies(c, body.connectionId);
       return created(c, { wallet } satisfies CustodyWalletResponse);
     }
 

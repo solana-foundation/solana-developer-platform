@@ -21,6 +21,11 @@ const policySchema = z.object({
     ),
   }),
 });
+/** A Transfer rule's asset selector is the provider's asset id or `*`. */
+const transferRuleSchema = z.object({
+  asset: z.string(),
+  src: z.unknown().optional(),
+});
 
 /**
  * The legacy active-policy API remains supported and returns all Transfer rules in one read.
@@ -37,12 +42,14 @@ export function inspectFireblocksPolicy(
   let unknown = false;
   for (const rule of parsed.data.policy.rules) {
     if (rule.type !== "TRANSFER") continue;
-    if (typeof rule.asset !== "string") {
+    const transfer = transferRuleSchema.safeParse(rule);
+    if (!transfer.success) {
       unknown = true;
       continue;
     }
-    if (assets !== null && rule.asset !== "*" && !assets.includes(rule.asset)) continue;
-    const src = z.object({ ids: z.array(sourceSchema) }).safeParse(rule.src);
+    if (assets !== null && transfer.data.asset !== "*" && !assets.includes(transfer.data.asset))
+      continue;
+    const src = z.object({ ids: z.array(sourceSchema) }).safeParse(transfer.data.src);
     if (!src.success) {
       unknown = true;
       continue;

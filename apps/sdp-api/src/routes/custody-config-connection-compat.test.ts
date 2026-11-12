@@ -157,6 +157,7 @@ function connectionWalletBody(isRuntimeExecutionAllowed: boolean) {
         purpose: "root",
         status: "active",
         createdAt: expect.any(String),
+        providerPolicy: { checkedAt: null, reason: "not_checked", status: "unknown" },
       },
     },
     meta: { requestId: expect.any(String), timestamp: expect.any(String) },
