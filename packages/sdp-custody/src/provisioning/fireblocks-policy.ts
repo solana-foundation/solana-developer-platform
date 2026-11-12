@@ -12,25 +12,63 @@ const sourceSchema = z.union([
 ]);
 const policySchema = z.object({
   policy: z.object({
-    rules: z.array(
-      z.object({
-        type: z.string(),
-        asset: z.unknown().optional(),
-        src: z.unknown().optional(),
-      })
-    ),
+    // Only the envelope is asserted here; the per-rule parsing is
+    // transferRuleSchema's, which needs the rule's action terms intact.
+    rules: z.array(z.object({ type: z.string() }).passthrough()),
   }),
 });
 /** A Transfer rule's asset selector is the provider's asset id or `*`. */
 const transferRuleSchema = z.object({
   asset: z.string(),
   src: z.unknown().optional(),
+  action: z.string(),
+  authorizers: z.array(z.string()).optional(),
+  authorizersCount: z.number().optional(),
+  authorizationGroups: z.object({ groups: z.array(z.unknown()).optional() }).optional(),
 });
+
+/**
+ * Whether a matching rule stops SDP's credential from moving funds alone.
+ * A `2-TIER` action requires approvers by definition and `BLOCK` allows nothing;
+ * a plain `ALLOW` needs the legacy `authorizers` fields or configured authorization
+ * groups. Unrecognised action terms return `null` and keep the rule unknown.
+ */
+function ruleRequiresApproval(rule: z.infer<typeof transferRuleSchema>): boolean | null {
+  if (rule.action === "2-TIER" || rule.action === "BLOCK") return true;
+  if (rule.action === "ALLOW") {
+    if (rule.authorizers?.length || (rule.authorizersCount ?? 0) > 0) return true;
+    if (rule.authorizationGroups) return (rule.authorizationGroups.groups ?? []).length > 0;
+    return false;
+  }
+  return null;
+}
+
+/** Whether a rule's source tuples select the vault. Unreadable selectors stay unknown. */
+function sourceMatchesVault(
+  sources: string[][],
+  vaultId: string
+): { matches: boolean; interpretable: boolean } {
+  let interpretable = true;
+  for (const source of sources) {
+    if (source.length === 1) return { matches: true, interpretable: true };
+    const [id, type, subtype] = source;
+    if (type !== "VAULT" && type !== "*") continue;
+    if (subtype !== undefined && subtype !== "*") {
+      interpretable = false;
+      continue;
+    }
+    if (id === vaultId || id === "*") return { matches: true, interpretable: true };
+  }
+  return { matches: false, interpretable: interpretable };
+}
 
 /**
  * The legacy active-policy API remains supported and returns all Transfer rules in one read.
  * Source tuples are [id, type, subtype], not [type, id]. Unrecognised selectors stay unknown.
- * Presence says nothing about initiators, limits, destinations, rule order or approvals.
+ * A matching rule proves coverage only when it stops SDP's credential from moving funds
+ * alone: it must require approval (a `2-TIER` action or configured approvers) or block the
+ * transfer. An `ALLOW` rule without approvers is missing. Presence says nothing about
+ * initiators, limits, destinations or rule order.
  */
 export function inspectFireblocksPolicy(
   value: unknown,
@@ -40,6 +78,8 @@ export function inspectFireblocksPolicy(
   const parsed = policySchema.safeParse(value);
   if (!parsed.success) return { status: "unknown", reason: "unsupported_response" };
   let unknown = false;
+  let gated = false;
+  let ungated = false;
   for (const rule of parsed.data.policy.rules) {
     if (rule.type !== "TRANSFER") continue;
     const transfer = transferRuleSchema.safeParse(rule);
@@ -54,17 +94,21 @@ export function inspectFireblocksPolicy(
       unknown = true;
       continue;
     }
-    for (const source of src.data.ids) {
-      if (source.length === 1) return { status: "present", reason: "policy_detected" };
-      const [id, type, subtype] = source;
-      if (type !== "VAULT" && type !== "*") continue;
-      if (subtype !== undefined && subtype !== "*") {
-        unknown = true;
-        continue;
-      }
-      if (id === vaultId || id === "*") return { status: "present", reason: "policy_detected" };
+    const source = sourceMatchesVault(src.data.ids, vaultId);
+    if (!source.interpretable) unknown = true;
+    if (!source.matches) continue;
+    const approval = ruleRequiresApproval(transfer.data);
+    if (approval === null) {
+      unknown = true;
+      continue;
     }
+    if (approval) gated = true;
+    else ungated = true;
   }
+  // An allow rule without approvers wins over any safer matching rule: the credential
+  // could move funds alone, so the wallet reports missing coverage.
+  if (ungated) return { status: "missing", reason: "no_policy" };
+  if (gated) return { status: "present", reason: "policy_detected" };
   return unknown
     ? { status: "unknown", reason: "unsupported_response" }
     : { status: "missing", reason: "no_policy" };

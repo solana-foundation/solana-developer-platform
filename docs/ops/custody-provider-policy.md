@@ -11,31 +11,41 @@ the next eligible pass. This is advisory: neither setup nor signing is blocked.
 ## What the result proves
 
 - **present:** Fireblocks returned a native Solana or canonical USDC `TRANSFER`
-  rule whose source includes the connected vault, or Privy returned at least one
-  `policy_ids` entry on that exact wallet. This does not assess rule ordering,
-  initiators, destinations, limits, approvers or policy strength. Fireblocks RAW
-  signing and program-call policies are outside this check.
-- **missing:** a successful provider read contains no matching policy. An empty
-  Privy app or policies attached to other wallets do not prove wallet coverage.
+  rule whose source includes the connected vault and whose action requires
+  approval (a `2-TIER` action or configured approvers) or blocks the transfer,
+  or Privy returned at least one `policy_ids` entry on that exact wallet. This
+  does not assess rule ordering, initiators, destinations, limits or policy
+  strength. Fireblocks RAW signing and program-call policies are outside this check.
+- **missing:** a successful provider read contains no matching policy, or the only
+  matching Fireblocks rule is an `ALLOW` with no approvers — the credential could
+  move funds alone. An empty Privy app or policies attached to other wallets do
+  not prove wallet coverage.
 - **unknown:** access was denied, the provider or credential store was unavailable,
   the response could not be interpreted, no check has completed, the credential
   changed, or the observation is at least two hours old.
 
-The documented Fireblocks Editor user cannot read policies. Expect `unknown` with
-`access_denied` for that setup. Do not elevate the signing credential merely to
-silence the warning; have an authorized operator inspect the published policy.
+The documented Fireblocks Editor user cannot read policies, so the check calls the
+active-policy endpoint in vain: expect `unknown` with `access_denied` for that setup.
+A workspace that wants the hourly check to verify on its own can register the
+connection with an API user whose role may read the workspace's active policy,
+accepting the wider permission on SDP's credential; the check only reads policies,
+never edits or publishes them. Do not elevate the signing credential merely to
+silence the warning; have an authorized operator inspect the published policy
+instead.
 
 Only status, reason, timestamp and the credential identity are stored on each
 wallet. The connection read aggregates its active wallets: any missing policy
-wins, then unknown, then present. The audit ledger records each observation under
-`custody_connection`, action `check`, event `custody_provider_policy_checked`, with
-the wallet and project IDs. An obsolete claim or credential cannot publish a new
-observation. Provider policies, response bodies and secrets are never persisted
-or logged. The wallet detail API returns only that wallet's observation, after
-the usual project and wallet-grant authorization.
+wins, then unknown, then present. The audit ledger records each changed observation
+under `custody_connection`, action `check`, event `custody_provider_policy_checked`,
+with the wallet and project IDs; an unchanged hourly repeat refreshes the wallet's
+observation without a new ledger row, while the log line stays hourly. An obsolete
+claim or credential cannot publish a new observation. Provider policies, response
+bodies and secrets are never persisted or logged. The wallet detail API returns only
+that wallet's observation, after the usual project and wallet-grant authorization.
 
-Provider reads per batch: previously zero; now one Privy wallet GET per due wallet,
-or one Fireblocks active-policy GET per credential shared by its due vaults. If a
+Provider reads per batch: previously zero; now one Privy wallet GET per due wallet
+(reads run five wallets at a time), or one Fireblocks active-policy GET per
+credential shared by its due vaults. If a
 vault has only asset-specific transfer rules outside native SOL, the existing
 five-minute successful asset-catalogue cache resolves canonical USDC (at most one
 additional GET per credential per cache interval). Solana RPC calls remain zero.
@@ -59,7 +69,8 @@ investigate an absent checker. Merge the application change before the infra rul
    policies attached to the specific wallet, including any signer overrides.
 3. Configure the intended restrictions in the provider. SDP does not edit them.
    The next hourly observation should report present. Confirm the actual rules
-   separately; a permissive rule also counts as present.
+   separately; a rule that allows transfers without approvers is reported as
+   missing.
 4. For unknown, check API permissions and provider availability. A 403, timeout,
    rate limit or malformed response must never be treated as proof of absence.
 5. Confirm the new ledger observation and Grafana state. If checks stop, inspect

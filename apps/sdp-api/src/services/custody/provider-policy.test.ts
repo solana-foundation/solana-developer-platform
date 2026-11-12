@@ -21,7 +21,11 @@ const run = () =>
     checkDueProviderPolicies(env)
   );
 
-async function seed(name: string, environment: "sandbox" | "production" = "sandbox") {
+async function seed(
+  name: string,
+  environment: "sandbox" | "production" = "sandbox",
+  extraWallets = 0
+) {
   const organizationId = `org_${name}`;
   const projectId = `prj_${name}_${environment}`;
   const userId = `usr_${name}`;
@@ -68,11 +72,39 @@ async function seed(name: string, environment: "sandbox" | "production" = "sandb
           purpose: null,
           status: "active",
         },
+        ...Array.from({ length: extraWallets }, (_, index) => ({
+          id: `${walletId}_${index + 2}`,
+          walletId: `privy_${name}_${index + 2}`,
+          publicKey: "So11111111111111111111111111111111111111112",
+          label: `${name}_${index + 2}`,
+          purpose: null,
+          status: "active" as const,
+        })),
       ],
     })
   );
   return { organizationId, projectId, connectionId, credentialId, walletId };
 }
+
+/** Rewinds the claim and observation timestamp so the next run re-checks the wallet. */
+async function reDue(walletId: string) {
+  await db().execute(
+    `UPDATE custody_wallets
+     SET policy_check_claimed_at = NOW() - INTERVAL '6 minutes',
+       provider_policy = jsonb_set(
+         provider_policy,
+         '{checkedAt}',
+         to_jsonb((NOW() - INTERVAL '2 hours')::timestamptz::text)
+       )
+     WHERE id = ?`,
+    [walletId]
+  );
+}
+
+const auditRows = () =>
+  db().queryOne<{ count: number }>(
+    "SELECT COUNT(*)::int AS count FROM audit_logs WHERE resource_type = 'custody_connection' AND action = 'check'"
+  );
 
 describe("BYOK provider policy observations", () => {
   beforeEach(async () => {
@@ -101,6 +133,48 @@ describe("BYOK provider policy observations", () => {
     ).toMatchObject({ resource_id: scope.connectionId });
     await run();
     expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("audits an observation only when it changes and keeps the hourly log line", async () => {
+    const scope = await seed("audited");
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => Response.json({ id: "audited", policy_ids: [] }));
+    await run();
+    expect(
+      await store().read(scope.organizationId, scope.projectId, { walletId: scope.walletId })
+    ).toMatchObject({ status: "missing", reason: "no_policy" });
+    expect(await auditRows()).toMatchObject({ count: 1 });
+    // The same observation an hour later is not a new ledger fact.
+    await reDue(scope.walletId);
+    await run();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(await auditRows()).toMatchObject({ count: 1 });
+    // A changed observation is.
+    fetch.mockResolvedValue(Response.json({ id: "audited", policy_ids: ["p"] }));
+    await reDue(scope.walletId);
+    await run();
+    expect(
+      await store().read(scope.organizationId, scope.projectId, { walletId: scope.walletId })
+    ).toMatchObject({ status: "present", reason: "policy_detected" });
+    expect(await auditRows()).toMatchObject({ count: 2 });
+  });
+
+  it("runs one provider read per wallet within a bounded concurrency", async () => {
+    await seed("busy", "sandbox", 5);
+    let inFlight = 0;
+    let peak = 0;
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      inFlight -= 1;
+      return Response.json({ id: String(url).split("/").at(-1), policy_ids: ["p"] });
+    });
+    await run();
+    expect(fetch).toHaveBeenCalledTimes(6);
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(5);
   });
 
   it("isolates environments and connection reads by tenant and project", async () => {
