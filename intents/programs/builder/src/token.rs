@@ -4,13 +4,14 @@
 use pinocchio::account::AccountView;
 use pinocchio::address::Address;
 
-use crate::programs::{ASSOCIATED_TOKEN, SYSTEM};
+use crate::programs::{ASSOCIATED_TOKEN, SYSTEM, TOKEN, TOKEN_2022};
 use crate::{Build, BuildError, Meta};
 
 const CREATE_IDEMPOTENT: u8 = 1;
 const TRANSFER_CHECKED: u8 = 12;
 /// A mint's decimals are byte 44 of its data.
 const MINT_DECIMALS_OFFSET: usize = 44;
+const TOKEN_ACCOUNT_AMOUNT_OFFSET: usize = 64;
 
 /// `None` in the statistically improbable case that no bump gives an address off the curve.
 pub fn associated_token_address(owner: &Address, mint: &Address, token_program: &Address) -> Option<Address> {
@@ -26,6 +27,23 @@ pub fn mint_decimals(mint: &AccountView) -> Result<u8, BuildError> {
     data.get(MINT_DECIMALS_OFFSET).copied().ok_or(BuildError::WrongAccounts)
 }
 
+/// The amount in a token account of either token program, or `None` when the account does not
+/// exist. Another owner is an error. The caller checks the mint and the token owner.
+pub fn token_account_amount(account: &AccountView) -> Result<Option<u64>, BuildError> {
+    if account.lamports() == 0 && account.is_data_empty() {
+        return Ok(None);
+    }
+
+    if !(account.owned_by(&TOKEN) || account.owned_by(&TOKEN_2022)) {
+        return Err(BuildError::WrongAccounts);
+    }
+
+    let data = account.try_borrow().map_err(|_| BuildError::WrongAccounts)?;
+    let amount = data.get(TOKEN_ACCOUNT_AMOUNT_OFFSET..).and_then(|rest| rest.first_chunk::<8>());
+
+    amount.map(|bytes| Some(u64::from_le_bytes(*bytes))).ok_or(BuildError::WrongAccounts)
+}
+
 impl Build<'_> {
     /// Creates the associated token account of `owner` for `mint` when it does not exist, with the
     /// rent payer funding it. Returns its address.
@@ -36,18 +54,32 @@ impl Build<'_> {
         token_program: &Address,
     ) -> Result<Address, BuildError> {
         let account = associated_token_address(owner, mint, token_program).ok_or(BuildError::WrongAccounts)?;
+
+        self.create_associated_token_account_idempotent_at(&account, owner, mint, token_program)?;
+
+        Ok(account)
+    }
+
+    /// The same instruction for an `account` that the caller already holds, such as an associated
+    /// token account that the record derives. It saves the derivation. The ATA program checks
+    /// that `account` is the associated token account of `owner` and `mint`.
+    pub fn create_associated_token_account_idempotent_at(
+        &mut self,
+        account: &Address,
+        owner: &Address,
+        mint: &Address,
+        token_program: &Address,
+    ) -> Result<(), BuildError> {
         let accounts = [
             Meta::rent_payer(),
-            Meta::writable(&account),
+            Meta::writable(account),
             Meta::readonly(owner),
             Meta::readonly(mint),
             Meta::readonly(&SYSTEM),
             Meta::readonly(token_program),
         ];
 
-        self.instruction(&ASSOCIATED_TOKEN, &accounts, &[CREATE_IDEMPOTENT])?;
-
-        Ok(account)
+        self.instruction(&ASSOCIATED_TOKEN, &accounts, &[CREATE_IDEMPOTENT])
     }
 
     /// `transferChecked`, with `extra_accounts` after the four that it names, such as the accounts
@@ -88,7 +120,6 @@ pub struct TransferChecked<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::programs::TOKEN;
 
     fn address(text: &str) -> Address {
         Address::from_str_const(text)
