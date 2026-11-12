@@ -116,14 +116,14 @@ const amount = "25"; // in the deposit token
 
 ## 2. Preview the deposit
 
-[`POST /v1/earn/vault-deposit-previews`](/docs/reference/api/earn/create-earn-vault-deposit-preview)
+[`POST /v1/earn/deposits/preview`](/docs/reference/api/earn/create-earn-vault-deposit-preview)
 quotes the shares the deposit would receive right now. It moves nothing.
 
 <Tabs items={["cURL", "TypeScript"]} groupId="earn-code-language">
 <Tab value="cURL">
 
 ```bash title="Terminal"
-curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/vault-deposit-previews" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/deposits/preview" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d "$(jq -nc --arg strategyId "$STRATEGY_ID" --arg amount "$AMOUNT" \
@@ -136,7 +136,7 @@ jq -e '.data.blockingIssues == []' preview.json || echo "Resolve blockingIssues 
 <Tab value="TypeScript">
 
 ```typescript title="deposit.ts (continued)"
-const preview = await earnRequest("/v1/earn/vault-deposit-previews", {
+const preview = await earnRequest("/v1/earn/deposits/preview", {
   strategyId: strategy.id,
   amount,
 });
@@ -169,14 +169,14 @@ movements, and your customer's wallet pays its own fees unless you set a
 
 ## 3. Build the transaction
 
-[`POST /v1/earn/external-wallet/deposit-transactions`](/docs/reference/api/earn/create-earn-external-wallet-deposit-transaction)
+[`POST /v1/earn/deposits/build-unsigned-transaction`](/docs/reference/api/earn/create-earn-external-wallet-deposit-transaction)
 returns an unsigned transaction for the customer's wallet.
 
 <Tabs items={["cURL", "TypeScript"]} groupId="earn-code-language">
 <Tab value="cURL">
 
 ```bash title="Terminal"
-curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/deposit-transactions" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/deposits/build-unsigned-transaction" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d "$(jq -nc --arg strategyId "$STRATEGY_ID" --arg ownerAddress "$OWNER_ADDRESS" \
@@ -190,7 +190,7 @@ curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wall
 
 ```typescript title="deposit.ts (continued)"
 const { transaction: built } = await earnRequest(
-  "/v1/earn/external-wallet/deposit-transactions",
+  "/v1/earn/deposits/build-unsigned-transaction",
   { strategyId: strategy.id, ownerAddress, amount },
 );
 ```
@@ -250,7 +250,7 @@ const signedTransaction = await signWithTestWallet(built.transaction);
 
 ## 5. Submit it
 
-[`POST /v1/earn/external-wallet/deposits`](/docs/reference/api/earn/create-earn-external-wallet-deposit)
+[`POST /v1/earn/deposits/submit-signed-transaction`](/docs/reference/api/earn/create-earn-external-wallet-deposit)
 takes the signed transaction. SDP checks it against the build, records the
 deposit, then broadcasts it. The `Idempotency-Key` header is required.
 
@@ -263,7 +263,7 @@ export IDEMPOTENCY_KEY="$(node -e 'console.log(crypto.randomUUID())')"
 jq -nc --arg transactionId "$TRANSACTION_ID" --arg signedTransaction "$SIGNED_TRANSACTION" \
   '{transactionId: $transactionId, signedTransaction: $signedTransaction}' > submit.json
 
-curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/deposits" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/deposits/submit-signed-transaction" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
@@ -277,7 +277,7 @@ curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wall
 // Save the idempotency key with the signed body before the first send; retry with both.
 const idempotencyKey = randomUUID();
 const { deposit } = await earnRequest(
-  "/v1/earn/external-wallet/deposits",
+  "/v1/earn/deposits/submit-signed-transaction",
   { transactionId: built.transactionId, signedTransaction },
   idempotencyKey,
 );
@@ -320,7 +320,7 @@ cases.
 
 ## 6. Track it to finality
 
-Poll [`GET /v1/earn/external-wallet/movements/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement)
+Poll [`GET /v1/earn/movements/caller-signed/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement)
 until the status is `finalized` or `failed`.
 
 <Tabs items={["cURL", "TypeScript"]} groupId="earn-code-language">
@@ -330,7 +330,7 @@ until the status is `finalized` or `failed`.
 MOVEMENT_ID="$(jq -r '.data.deposit.movementId' deposit.json)"
 # Every second for a minute, then every five seconds, for up to three minutes.
 for attempt in $(seq 84); do
-  curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/movements/$MOVEMENT_ID" \
+  curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/movements/caller-signed/$MOVEMENT_ID" \
     -H "Authorization: Bearer $SDP_API_KEY" > movement.json
   jq -e '.data.movement.status | IN("finalized", "failed")' movement.json >/dev/null && break
   if [ "$attempt" -le 60 ]; then sleep 1; else sleep 5; fi
@@ -376,14 +376,14 @@ while you keep tracking to `finalized`. A `provider_order` deposit stays
 
 ## 7. Read the position
 
-[`GET /v1/earn/external-wallet/positions`](/docs/reference/api/earn/list-earn-external-wallet-positions)
+[`GET /v1/earn/positions/caller-signed`](/docs/reference/api/earn/list-earn-external-wallet-positions)
 returns the wallet's live positions.
 
 <Tabs items={["cURL", "TypeScript"]} groupId="earn-code-language">
 <Tab value="cURL">
 
 ```bash title="Terminal"
-curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/positions" \
+curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/positions/caller-signed" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   --data-urlencode "ownerAddress=$OWNER_ADDRESS"
 ```
@@ -393,7 +393,7 @@ curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/externa
 
 ```typescript title="deposit.ts (continued)"
 const { positions } = await earnRequest(
-  `/v1/earn/external-wallet/positions?${new URLSearchParams({ ownerAddress })}`,
+  `/v1/earn/positions/caller-signed?${new URLSearchParams({ ownerAddress })}`,
 );
 console.log(JSON.stringify(positions, null, 2));
 ```

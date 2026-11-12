@@ -69,8 +69,8 @@ Save `movementId` and `positionId`. Never send tokens to a strategy's
 
 | Task | Request | Stop at |
 | --- | --- | --- |
-| Track it | [`GET /v1/earn/vault-deposits/{movementId}`](/docs/reference/api/earn/get-earn-vault-deposit) returns `data.deposit`. | `confirmed` or `failed` |
-| Check settlement | [`GET /v1/earn/movements?positionId=...`](/docs/reference/api/earn/list-earn-movements) lists the movement. | `finalized` or `failed` |
+| Track it | [`GET /v1/earn/deposits/provider-signed/{movementId}`](/docs/reference/api/earn/get-earn-vault-deposit) returns `data.deposit`. | `confirmed` or `failed` |
+| Check settlement | [`GET /v1/earn/treasury/movements?positionId=...`](/docs/reference/api/earn/list-earn-movements) lists the movement. | `finalized` or `failed` |
 | Recover a lost response | Retry with the same idempotency key and body, or [list deposits](/docs/reference/api/earn/list-earn-vault-deposits) with `requestId` set to your `Idempotency-Key`, not the `meta.requestId` trace ID. | |
 
 The deposit record keeps the older status names: `pending` means SDP recorded
@@ -84,7 +84,7 @@ current state with `replayed: true`. The same idempotency key with a
 different body returns `409 CONFLICT`.
 
 After the deposit confirms, refresh
-[`GET /v1/earn/vault-positions`](/docs/reference/api/earn/list-earn-vault-positions).
+[`GET /v1/earn/positions/provider-signed`](/docs/reference/api/earn/list-earn-vault-positions).
 Pass `afterMovementIds` to require a read at or after those movements'
 slots; `balanceReadContext` echoes the bound. Show the refreshed position,
 never a requested amount added to an old balance. If live values come back
@@ -96,9 +96,9 @@ Read the position's live `withdrawableShares`, then:
 
 | Step | Request | Body |
 | --- | --- | --- |
-| Choose a route | [`POST /v1/earn/vault-withdrawal-options`](/docs/reference/api/earn/get-earn-vault-withdrawal-options) | `positionId` |
-| Preview | [`POST /v1/earn/vault-withdrawal-previews`](/docs/reference/api/earn/create-earn-vault-withdrawal-preview) | `positionId`, `shares` |
-| Withdraw instantly | [`POST /v1/earn/vault-withdrawals`](/docs/reference/api/earn/create-earn-vault-withdrawal) | `positionId`, `shares`, and `minAmountOut` when `withdrawalSlippage` requires it |
+| Choose a route | [`POST /v1/earn/withdrawals/provider-signed/options`](/docs/reference/api/earn/get-earn-vault-withdrawal-options) | `positionId` |
+| Preview | [`POST /v1/earn/withdrawals/provider-signed/preview`](/docs/reference/api/earn/create-earn-vault-withdrawal-preview) | `positionId`, `shares` |
+| Withdraw instantly | [`POST /v1/earn/withdrawals/provider-signed`](/docs/reference/api/earn/create-earn-vault-withdrawal) | `positionId`, `shares`, and `minAmountOut` when `withdrawalSlippage` requires it |
 
 `withdrawalSlippage` lives on the strategy: match the position's `provider`
 and `providerReference` to the catalog, or keep the `strategy.id` from the
@@ -110,7 +110,7 @@ to the same custody wallet. The response nests the record under
 `data.withdrawal`. Use a new `Idempotency-Key` for each withdrawal and retry
 an uncertain response with the same idempotency key and body.
 
-Track it with [`GET /v1/earn/vault-withdrawals/{movementId}`](/docs/reference/api/earn/get-earn-vault-withdrawal)
+Track it with [`GET /v1/earn/withdrawals/provider-signed/{movementId}`](/docs/reference/api/earn/get-earn-vault-withdrawal)
 until `finalized` or `failed`, or recover it by listing withdrawals with
 `requestId`. Its `shares` is what you asked to withdraw; the payout is
 `tokenAmount` on the [movements feed](/docs/reference/api/earn/list-earn-movements).
@@ -123,10 +123,10 @@ explains each route's terms, timing, and statuses.
 
 | Step | Request |
 | --- | --- |
-| Preview | [`POST /v1/earn/vault-queued-withdrawal-previews`](/docs/reference/api/earn/create-earn-vault-queued-withdrawal-preview) |
-| Create | [`POST /v1/earn/vault-withdrawal-requests`](/docs/reference/api/earn/create-earn-vault-withdrawal-request), with an `Idempotency-Key` |
-| Track | [`GET /v1/earn/vault-withdrawal-requests/{withdrawalRequestId}`](/docs/reference/api/earn/get-earn-vault-withdrawal-request) |
-| Restore | [`GET /v1/earn/vault-withdrawal-requests?settled=false`](/docs/reference/api/earn/list-earn-vault-withdrawal-requests), every page |
+| Preview | [`POST /v1/earn/withdrawal-requests/provider-signed/preview`](/docs/reference/api/earn/create-earn-vault-queued-withdrawal-preview) |
+| Create | [`POST /v1/earn/withdrawal-requests/provider-signed`](/docs/reference/api/earn/create-earn-vault-withdrawal-request), with an `Idempotency-Key` |
+| Track | [`GET /v1/earn/withdrawal-requests/provider-signed/{withdrawalRequestId}`](/docs/reference/api/earn/get-earn-vault-withdrawal-request) |
+| Restore | [`GET /v1/earn/withdrawal-requests/provider-signed?settled=false`](/docs/reference/api/earn/list-earn-vault-withdrawal-requests), every page |
 
 Only `fulfilled`, `cancelled`, and `failed` are final, and only `fulfilled`
 pays out. Keep tracking a `closedOrUnknown` request.
@@ -134,7 +134,7 @@ pays out. Keep tracking a `closedOrUnknown` request.
 ## Cancel a request
 
 With `earn.manage`, call
-[`POST /v1/earn/vault-withdrawal-requests/{withdrawalRequestId}/cancel`](/docs/reference/api/earn/cancel-earn-vault-withdrawal-request)
+[`POST /v1/earn/withdrawal-requests/{withdrawalRequestId}/cancel/execute`](/docs/reference/api/earn/cancel-earn-vault-withdrawal-request)
 with a new `Idempotency-Key`. SDP builds and signs the cancellation.
 
 Offer it for a solver queue request only at `expiredCancelable`. An operator
