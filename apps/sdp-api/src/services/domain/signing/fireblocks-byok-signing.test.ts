@@ -11,6 +11,7 @@ import {
   generateKeyPairSigner,
   getBase58Decoder,
   getBase64EncodedWireTransaction,
+  getBase64Encoder,
   getTransactionDecoder,
   getTransactionEncoder,
   isFullySignedTransaction,
@@ -285,7 +286,7 @@ describe("Earn execution through Fireblocks BYOK", () => {
               },
             });
             const transaction = getTransactionDecoder().decode(
-              Buffer.from(proposal.extraParameters.programCallData, "base64")
+              getBase64Encoder().encode(proposal.extraParameters.programCallData)
             );
             proposalMessage = new Uint8Array(transaction.messageBytes);
             return Response.json({ id: "earn-proposal", status: "SUBMITTED" });

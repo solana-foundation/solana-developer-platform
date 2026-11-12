@@ -13,6 +13,7 @@ import {
   createTransactionMessage,
   generateKeyPairSigner,
   getBase64EncodedWireTransaction,
+  getBase64Encoder,
   getTransactionDecoder,
   type Instruction,
   pipe,
@@ -72,7 +73,7 @@ export async function assertFireblocksProposal(
     })),
     data:
       typeof instruction.data === "string"
-        ? Buffer.from(instruction.data, "base64")
+        ? getBase64Encoder().encode(instruction.data)
         : instruction.data,
   }));
   const transaction = compileTransaction(
@@ -156,7 +157,7 @@ export async function assertFireblocksTransaction(
       getBase64EncodedWireTransaction(transaction)
     );
     const decoded = getTransactionDecoder().decode(
-      Buffer.from(proposal.extraParameters.programCallData, "base64")
+      getBase64Encoder().encode(proposal.extraParameters.programCallData)
     );
     assert.deepEqual(Buffer.from(decoded.messageBytes), Buffer.from(transaction.messageBytes));
     assert.equal("signAndSendTransactions" in signer, false);
