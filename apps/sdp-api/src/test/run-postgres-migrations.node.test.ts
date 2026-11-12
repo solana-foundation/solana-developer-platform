@@ -61,6 +61,14 @@ function readMigration(migrationFile: string) {
  */
 const LAST_SHARED_MIGRATION_NUMBER = 125;
 
+/**
+ * Later numbers two merged files share. Both files have run wherever their revision deployed, and
+ * renaming either would run it again, so a pair stays once it ships. Each pair here touches
+ * different tables, so the suffix order between them changes nothing:
+ * - 226: `payment_transfer_batches_drop_options` (#2849) and `payment_transfer_principal` (#2864).
+ */
+const SHIPPED_SHARED_MIGRATION_NUMBERS: ReadonlySet<number> = new Set([226]);
+
 describe("Postgres migration numbering", () => {
   it("gives every migration after the historical pairs its own number", () => {
     const testDir = path.dirname(fileURLToPath(import.meta.url));
@@ -75,7 +83,12 @@ describe("Postgres migration numbering", () => {
       byNumber.set(number, [...(byNumber.get(number) ?? []), file]);
     }
     const shared = [...byNumber]
-      .filter(([number, names]) => number > LAST_SHARED_MIGRATION_NUMBER && names.length > 1)
+      .filter(
+        ([number, names]) =>
+          number > LAST_SHARED_MIGRATION_NUMBER &&
+          !SHIPPED_SHARED_MIGRATION_NUMBERS.has(number) &&
+          names.length > 1
+      )
       .map(([, names]) => names.sort());
     expect(shared).toEqual([]);
   });
