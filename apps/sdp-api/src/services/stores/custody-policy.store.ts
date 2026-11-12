@@ -29,6 +29,10 @@ export interface PolicyCheckTarget {
   secret_version_ref: string | null;
   encrypted_secret_payload: string | null;
   claim: string;
+  /** The observation the wallet already holds, if any; audited writes compare against it. */
+  previous_status: string | null;
+  previous_reason: string | null;
+  previous_credential_id: string | null;
 }
 export type PolicyCheckScope = {
   environment: SdpEnvironment;
@@ -66,7 +70,10 @@ export class CustodyPolicyStore {
       )
       SELECT w.id, w.wallet_id, c.organization_id, c.project_id, w.custody_connection_id,
         c.provider, c.provider_credential_id, pc.source, pc.storage_backend, pc.secret_ref,
-        pc.secret_version_ref, pc.encrypted_secret_payload, w.policy_check_claimed_at::text AS claim
+        pc.secret_version_ref, pc.encrypted_secret_payload, w.policy_check_claimed_at::text AS claim,
+        w.provider_policy->>'status' AS previous_status,
+        w.provider_policy->>'reason' AS previous_reason,
+        w.provider_policy->>'credentialId' AS previous_credential_id
       FROM claimed w JOIN custody_connections c ON c.id = w.custody_connection_id
       JOIN provider_credentials pc ON pc.id = c.provider_credential_id`,
       [
