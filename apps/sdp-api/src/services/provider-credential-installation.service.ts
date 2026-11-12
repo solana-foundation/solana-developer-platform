@@ -323,7 +323,7 @@ export async function completeProviderCredentialInstallation(
   const context = createInstallationContext(c);
   const loaded = await loadInstallation(context, connectionId);
   if (loaded.decisions.complete.kind === "replay") {
-    await checkConnectedProviderPolicies(c, connectionId);
+    checkConnectedProviderPolicies(c, connectionId);
     return completionResult(loaded);
   }
   if (loaded.decisions.complete.kind === "disabled") {
@@ -425,7 +425,7 @@ export async function completeProviderCredentialInstallation(
         throw conflict("Custody wallet cannot be reconciled");
       }
     }
-    if (outcome.kind === "success") await checkConnectedProviderPolicies(c, connectionId);
+    if (outcome.kind === "success") checkConnectedProviderPolicies(c, connectionId);
     return completionResult(completed);
   } catch (error) {
     if (completionPersistencePending) {

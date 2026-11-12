@@ -11,6 +11,7 @@ import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { createCredentialSecretStore } from "@/services/credential-secret-store";
 import { eraseExpiredFireblocksCsrs } from "@/services/custody/fireblocks-registration.service";
+import { checkDueProviderPolicies } from "@/services/custody/provider-policy";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { ProviderCredentialSecretCleanupStore } from "@/services/stores/provider-credential-secret-cleanup.store";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
@@ -198,6 +199,8 @@ describe("Fireblocks BYOK lifecycle", () => {
   it("encrypts credentials, attaches the vault and checks its policy and replays completion", async () => {
     const fetch = providerResponse();
     const connected = await connect();
+    // The observation follows setup in the background; the periodic queue does the same work.
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(fetch).toHaveBeenCalledWith(
       `${testEnv.FIREBLOCKS_API_BASE_URL}/v1/vault/accounts/0/SOL_TEST/addresses_paginated`,
@@ -363,6 +366,8 @@ describe("Fireblocks BYOK lifecycle", () => {
   it("resolves only the owned wallet through the keychain Fireblocks signer", async () => {
     const fetch = providerResponse();
     const connected = await connect();
+    // The observation follows setup in the background; the periodic queue does the same work.
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
     const wallet = await getDb(env).queryOne<{ id: string }>(
       "SELECT id FROM custody_wallets WHERE custody_connection_id = ?",
       [connected.connectionId]
@@ -942,6 +947,8 @@ describe("Fireblocks vault discovery and selection", () => {
     const { connectionId } = (await submitted.json()).data;
     const complete = await request(`/connections/${connectionId}/complete`, {});
     expect((await complete.json()).data.completion.status).toBe("success");
+    // The observation follows setup in the background; the periodic queue does the same work.
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
     expect(fetch).toHaveBeenCalledTimes(5);
     const wallets = await getDb(env).queryMany(
       "SELECT wallet_id, public_key, label, purpose FROM custody_wallets WHERE custody_connection_id = ? ORDER BY wallet_id",

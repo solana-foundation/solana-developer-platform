@@ -324,7 +324,11 @@ describe("custody Connection deactivation", () => {
       projectId: PROJECT,
       method: "GET",
     });
-    expect((await read.json()).data.connection).toEqual(body.data.custodyConnection);
+    // The read adds the connection's advisory policy observation to the same projection.
+    expect((await read.json()).data.connection).toEqual({
+      ...body.data.custodyConnection,
+      providerPolicy: { checkedAt: null, reason: "not_checked", status: "unknown" },
+    });
     expect(await lifecycleAudits()).toMatchObject([{ action: "deactivate", status: "success" }]);
     expect(
       await getDb(env).queryOne(
