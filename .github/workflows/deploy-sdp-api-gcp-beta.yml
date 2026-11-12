@@ -253,21 +253,17 @@ jobs:
             echo "Beta serves ${serving_image:-no image} from outside ${REPO}, so no SDP build reads its schema yet."
             exit 0
           fi
-          serving=""
-          for attempt in 1 2 3; do
-            if serving="$(
-              curl --fail --silent --show-error --max-time 10 "${BETA_ORIGIN}/health/ready" |
-                jq -er --arg revision "${serving_revision}" 'select(.revision == $revision) | .commit'
-            )" && [[ "${serving}" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "${serving}^{commit}" 2>/dev/null; then
-              break
-            fi
-            serving=""
-            if [[ "${attempt}" -eq 3 ]]; then
-              echo "Could not read the commit ${serving_revision} serves from ${BETA_ORIGIN}/health/ready, so migrations cannot be ordered against it." >&2
-              exit 1
-            fi
-            sleep 10
-          done
+          # The image records the commit it was built from, so a broken beta (failing readiness)
+          # can still be repaired: nothing here depends on the serving API answering.
+          serving="$(
+            crane config "${serving_image}" |
+              jq -r '.config.Env[]? | select(startswith("SDP_BUILD_SHA=")) | ltrimstr("SDP_BUILD_SHA=")' |
+              head -n 1 | tr -d '[:space:]'
+          )" || serving=""
+          if [[ ! "${serving}" =~ ^[0-9a-f]{40}$ ]] || ! git cat-file -e "${serving}^{commit}" 2>/dev/null; then
+            echo "Could not read the commit ${serving_revision} was built from (${serving_image}), so migrations cannot be ordered against it." >&2
+            exit 1
+          fi
           changed="$(git diff --name-only --no-renames --diff-filter=AM "${serving}" "${DEPLOY_IMAGE_SHA}" -- apps/sdp-api/src/db/migrations/postgres)"
           for file in ${changed}; do
             sql="$(git show "${DEPLOY_IMAGE_SHA}:${file}")"
@@ -404,7 +400,8 @@ jobs:
           steps.find.outcome == 'failure' || steps.docker.outcome == 'failure' ||
           steps.cosign.outcome == 'failure' || steps.crane.outcome == 'failure' ||
           steps.ghcr.outcome == 'failure' || steps.promote.outcome == 'failure' ||
-          steps.image.outcome == 'failure' || steps.migrate.outcome == 'failure' ||
+          steps.image.outcome == 'failure' || steps.breaking.outcome == 'failure' ||
+          steps.migrate.outcome == 'failure' ||
           steps.service.outcome == 'failure' || steps.ready.outcome == 'failure' ||
           steps.channel.outcome == 'failure' || steps.worker.outcome == 'failure' ||
           steps.gate.outcome == 'failure'

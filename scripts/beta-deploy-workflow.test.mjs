@@ -470,25 +470,26 @@ function migrationRepo() {
   return { dir, base, stopReading, drop, head };
 }
 
-function runBreaking(repo, { serving, image = betaImage, healthJson, traffic }) {
+function runBreaking(repo, { serving, image = betaImage, configJson, craneExitCode = 0, traffic }) {
   return runScript(runBlock(stepBlock(betaJob(), breakingStep)), {
     cwd: repo.dir,
     env: {
       ...findEnv,
       PROJECT_ID: "solana-developer-platform-beta",
       REPO: "sdp-beta",
-      BETA_ORIGIN: "https://api-beta.example",
       DEPLOY_IMAGE_SHA: repo.head,
       SERVICE_JSON: JSON.stringify({
         status: { traffic: traffic ?? [{ revisionName: betaServing, percent: 100 }] },
       }),
       SERVING_IMAGE: image,
-      HEALTH_JSON:
-        healthJson ?? JSON.stringify({ status: "ready", revision: betaServing, commit: serving }),
+      CONFIG_JSON:
+        configJson ??
+        JSON.stringify({ config: { Env: ["PATH=/usr/bin", `SDP_BUILD_SHA=${serving}`] } }),
     },
     stubs: {
       gcloud: `if [[ "$2" == "services" ]]; then printf '%s' "$SERVICE_JSON"; else printf '%s\\n' "$SERVING_IMAGE"; fi`,
-      curl: `printf '%s' "$HEALTH_JSON"`,
+      crane: `printf '%s' "$CONFIG_JSON"; exit ${craneExitCode}`,
+      curl: "exit 7",
     },
   });
 }
@@ -524,24 +525,34 @@ test("beta skips the ordering check while it serves no SDP image", () => {
     image: "us-docker.pkg.dev/cloudrun/container/hello@sha256:0",
   });
   assert.equal(run.code, 0, run.stderr);
+  assert.ok(!run.calls.some((call) => call.startsWith("crane ")));
+});
+
+test("beta reads the serving commit from its image, so a broken beta can still be repaired", () => {
+  const repo = migrationRepo();
+  const run = runBreaking(repo, { serving: repo.stopReading });
+  assert.equal(run.code, 0, run.stderr);
+  assert.ok(run.calls.includes(`crane config ${betaImage}`));
   assert.ok(!run.calls.some((call) => call.startsWith("curl ")));
 });
 
 test("beta fails closed when it cannot tell which commit it serves", () => {
   const repo = migrationRepo();
-  for (const healthJson of [
-    JSON.stringify({
-      status: "ready",
-      revision: "sdp-beta-api-public-00039-other",
-      commit: repo.stopReading,
-    }),
-    JSON.stringify({ status: "ready", revision: betaServing, commit: "local" }),
-    JSON.stringify({ status: "ready", revision: betaServing, commit: "f".repeat(40) }),
+  for (const configJson of [
+    JSON.stringify({ config: { Env: ["PATH=/usr/bin"] } }),
+    JSON.stringify({ config: { Env: ["SDP_BUILD_SHA=local"] } }),
+    JSON.stringify({ config: { Env: [`SDP_BUILD_SHA=${"f".repeat(40)}`] } }),
   ]) {
-    const run = runBreaking(repo, { healthJson });
-    assert.equal(run.code, 1, healthJson);
-    assert.match(run.stderr, /Could not read the commit sdp-beta-api-public-00041-old serves/);
+    const run = runBreaking(repo, { configJson });
+    assert.equal(run.code, 1, configJson);
+    assert.match(
+      run.stderr,
+      /Could not read the commit sdp-beta-api-public-00041-old was built from/
+    );
   }
+  const unreadable = runBreaking(repo, { serving: repo.stopReading, craneExitCode: 1 });
+  assert.equal(unreadable.code, 1);
+  assert.match(unreadable.stderr, /Could not read the commit/);
   const split = runBreaking(repo, {
     serving: repo.stopReading,
     traffic: [
@@ -562,4 +573,18 @@ test("beta reads the breaking directive exactly as prod does", () => {
     )
   );
   assert.equal(directive(runBlock(stepBlock(betaJob(), breakingStep))), directive(prodGate));
+});
+
+test("every beta deploy step that can fail starts the Slack alert", () => {
+  const beta = betaJob();
+  const alert = stepBlock(beta, "Install Doppler CLI");
+  const alertIndex = steps(beta).findIndex(({ name }) => name === "Install Doppler CLI");
+  for (const step of steps(beta).slice(0, alertIndex)) {
+    const id = step.block.match(/\n {8}id: ([\w-]+)\n/)?.[1];
+    if (!id) continue;
+    assert.ok(
+      alert.includes(`steps.${id}.outcome == 'failure'`),
+      `${step.name} (${id}) sends no alert`
+    );
+  }
 });
