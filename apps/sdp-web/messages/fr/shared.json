@@ -408,7 +408,6 @@
     "capabilitySigning": "Signature de transactions",
     "connectSelfServe": "Connectez ce fournisseur vous-même avec les identifiants de votre propre compte. Les secrets sont en écriture seule et ne sont plus jamais affichés après leur envoi.",
     "connectYouWillNeed": "Vous aurez besoin de",
-    "connectByArrangement": "Disponible sur arrangement. L'équipe SDP accorde l'accès et configure la connexion avec votre organisation.",
     "connectManaged": "Approvisionné par déploiement. Ce fournisseur est configuré par votre opérateur SDP plutôt qu'en libre-service.",
     "rpcByokTitle": "Vos propres identifiants",
     "rpcByokDescription": "Acheminez le RPC de ce projet via un compte qui vous appartient. Les clés sont chiffrées et ne sont plus jamais affichées.",
