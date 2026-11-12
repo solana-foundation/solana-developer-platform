@@ -24,11 +24,14 @@ import {
   notFound,
 } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
+import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { rampRuntime } from "@/routes/payments/context";
 import { admitRamp } from "@/routes/payments/ramps/admission";
 import { resolveScope, resolveWalletByCustodyWalletId } from "@/routes/payments/wallets";
 import { AuditService } from "@/services/audit.service";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
+import { createRampCustomerLinkStore } from "@/services/ramps/customer-link-store";
 import {
   type AppContext,
   getCounterpartiesRepository,
@@ -43,6 +46,17 @@ import {
   type submitCounterpartyRequirementsSchema,
   type updateCounterpartySchema,
 } from "./schemas";
+
+/**
+ * A requirements read for a provider that onboards the customer itself calls that provider.
+ * Every project shares its partner credential, so reads are metered too.
+ * Their quota is apart from submissions', sized for the dashboard's onboarding poll every 10 seconds.
+ */
+const RAMP_REQUIREMENTS_READ_QUOTA = {
+  name: "ramp-requirements-read",
+  actorMax: 60,
+  orgMax: 240,
+} as const;
 
 function mapToCounterparty(row: CounterpartyRow): Counterparty {
   return {
@@ -197,14 +211,13 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     throw notFound("Counterparty");
   }
 
-  const providerAccount = await createPostgresCounterpartyProviderAccountsRepository(
-    getDb(c.env)
-  ).getProviderAccount({
+  const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
+  const linkScope = {
     organizationId: auth.organizationId,
     projectId,
     counterpartyId: counterparty.id,
     provider: query.data.provider,
-  });
+  };
 
   let destinationWalletAddress: string | undefined;
   if (query.data.direction === "onramp") {
@@ -216,19 +229,30 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     destinationWalletAddress = destinationWallet.publicKey;
   }
 
-  const requirements = RAMP_PROVIDER_CLIENTS[query.data.provider].validateCounterparty(
-    mapToCounterparty(counterparty),
-    {
-      direction: query.data.direction,
-      providerData: counterparty.provider_data,
-      cryptoToken: getCryptoRailAssetLabel(query.data.assetRail),
-      fiatCurrency: query.data.fiatCurrency,
-      ...(destinationWalletAddress === undefined ? {} : { destinationWalletAddress }),
-      ...(providerAccount === null
-        ? {}
-        : { providerCustomerReference: providerAccount.provider_customer_reference }),
-    }
-  );
+  const client = RAMP_PROVIDER_CLIENTS[query.data.provider];
+  if (client.requirements !== undefined) {
+    await enforceMeteredQuota(c, RAMP_REQUIREMENTS_READ_QUOTA);
+    return success(
+      c,
+      await client.requirements.describe(rampRuntime(c, query.data.provider), {
+        counterparty: mapToCounterparty(counterparty),
+        direction: query.data.direction,
+        customerLink: createRampCustomerLinkStore(accounts, linkScope),
+      })
+    );
+  }
+
+  const providerAccount = await accounts.getProviderAccount(linkScope);
+  const requirements = client.validateCounterparty(mapToCounterparty(counterparty), {
+    direction: query.data.direction,
+    providerData: counterparty.provider_data,
+    cryptoToken: getCryptoRailAssetLabel(query.data.assetRail),
+    fiatCurrency: query.data.fiatCurrency,
+    ...(destinationWalletAddress === undefined ? {} : { destinationWalletAddress }),
+    ...(providerAccount === null
+      ? {}
+      : { providerCustomerReference: providerAccount.provider_customer_reference }),
+  });
   return success(c, requirements);
 };
 
@@ -259,6 +283,29 @@ export const submitCounterpartyRequirements = async (
   }
 
   const input = body;
+  if (input.provider === "hercle") {
+    const requirements = RAMP_PROVIDER_CLIENTS.hercle.requirements;
+    if (requirements === undefined) {
+      throw internalError("Hercle settles its requirements through its requirements member.");
+    }
+    return success(
+      c,
+      await requirements.submit(rampRuntime(c, input.provider), {
+        counterparty: mapToCounterparty(counterparty),
+        direction: input.direction,
+        customerLink: createRampCustomerLinkStore(
+          createPostgresCounterpartyProviderAccountsRepository(getDb(c.env)),
+          {
+            organizationId: auth.organizationId,
+            projectId,
+            counterpartyId: counterparty.id,
+            provider: input.provider,
+          }
+        ),
+        collectedData: input.collectedData,
+      })
+    );
+  }
   const requirements = RAMP_PROVIDER_CLIENTS[input.provider].validateCounterparty(
     mapToCounterparty(counterparty),
     { direction: input.direction, providerData: counterparty.provider_data }

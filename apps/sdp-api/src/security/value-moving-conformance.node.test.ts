@@ -580,7 +580,8 @@ const valueMovingSourceRoots = [
 ];
 
 function readSource(relativePath: string): string {
-  return readFileSync(path.join(repositoryRoot, relativePath), "utf8");
+  // Line endings are not part of the source the sections describe, so it is read as LF.
+  return readFileSync(path.join(repositoryRoot, relativePath), "utf8").replaceAll("\r\n", "\n");
 }
 
 function sourceFiles(directory: string): string[] {
@@ -617,7 +618,8 @@ function discoverSigningSinks(): Record<string, string[]> {
         (match) => match[1] ?? match[2]
       );
       if (sinks.length > 0) {
-        inventory[path.relative(repositoryRoot, file)] = sinks;
+        // Posix-separated, so the inventory keys match on every platform.
+        inventory[path.relative(repositoryRoot, file).split(path.sep).join("/")] = sinks;
       }
     }
   }

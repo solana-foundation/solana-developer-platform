@@ -290,6 +290,7 @@ describe("release channels", () => {
     const stripeInBeta: SdpRampProviderMaturity = {
       moonpay: "experimental",
       stripe: "beta",
+      hercle: "experimental",
     };
     expect(isModuleInReleaseChannel("beta", "ramps", stripeInBeta)).toBe(true);
     expect(isModuleInReleaseChannel("stable", "ramps", stripeInBeta)).toBe(false);

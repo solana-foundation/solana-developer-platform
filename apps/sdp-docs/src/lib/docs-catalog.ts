@@ -165,6 +165,17 @@ export const DOCS_RAMP_PROVIDERS: readonly RampProviderEntry[] = [
     bestFor: "Widget/session-embedded onramp UI; onramp only.",
     notes: "No separate sandbox credentials: supply a Stripe test-mode secret key.",
   },
+  {
+    provider: "hercle",
+    name: "Hercle",
+    onramp: "✓",
+    offramp: "✗",
+    sandbox: "✓ (sandbox only)",
+    deliveryMode: "manual_instructions",
+    bestFor:
+      "Business on-ramps by bank wire: EUR, USD and GBP into USDC and SOL (USDT on mainnet only).",
+    notes: "Swiss and EEA businesses only, after Hercle's business verification.",
+  },
 ];
 
 /**

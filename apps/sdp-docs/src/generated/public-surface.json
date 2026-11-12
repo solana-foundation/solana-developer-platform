@@ -14,7 +14,7 @@
     "private_channels",
     "helius_rings"
   ],
-  "rampProviders": ["moonpay", "stripe"],
+  "rampProviders": ["moonpay", "stripe", "hercle"],
   "custodyProviders": [
     "fireblocks",
     "privy",
@@ -132,7 +132,7 @@
     "private_channels",
     "helius_rings"
   ],
-  "allRampProviders": ["moonpay", "stripe"],
+  "allRampProviders": ["moonpay", "stripe", "hercle"],
   "rateLimits": {
     "windowSeconds": 60,
     "apiKeyTiers": {

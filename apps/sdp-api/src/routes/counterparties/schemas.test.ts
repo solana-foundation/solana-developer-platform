@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createCounterpartySchema, updateCounterpartySchema } from "./schemas";
+import {
+  createCounterpartySchema,
+  submitCounterpartyRequirementsSchema,
+  updateCounterpartySchema,
+} from "./schemas";
 
 describe("createCounterpartySchema", () => {
   it.each(["individual", "business"] as const)("accepts a %s counterparty", (entityType) => {
@@ -48,5 +52,21 @@ describe("updateCounterpartySchema", () => {
 
   it("rejects an empty update", () => {
     expect(updateCounterpartySchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe("submitCounterpartyRequirementsSchema", () => {
+  const submission = (accepted: unknown) => ({
+    provider: "hercle",
+    direction: "onramp",
+    collectedData: { acceptHercleTerms: accepted },
+  });
+
+  it('takes a consent as the string "true"', () => {
+    expect(submitCounterpartyRequirementsSchema.safeParse(submission("true")).success).toBe(true);
+  });
+
+  it("refuses a consent sent as a JSON boolean", () => {
+    expect(submitCounterpartyRequirementsSchema.safeParse(submission(true)).success).toBe(false);
   });
 });

@@ -18,18 +18,26 @@ import type { Env } from "@/types/env";
 const PUBLIC_KEY_TERMS = {
   moonpay: "API_KEY",
   stripe: "PUBLISHABLE_KEY",
+  hercle: "CLIENT_ID",
 } as const satisfies Record<RampProviderId, string>;
 
-const ROLE_TERMS = {
-  secretKey: "SECRET_KEY",
-  webhookSecret: "WEBHOOK_SECRET",
-} as const satisfies Record<Exclude<ManagedRampKeyRole, "publicKey">, string>;
+const SECRET_KEY_TERM = "SECRET_KEY";
+
+/**
+ * Each provider's term for the key that verifies its webhooks.
+ * It is a shared signing secret, or the public key of a provider that signs asymmetrically.
+ */
+const WEBHOOK_KEY_TERMS = {
+  moonpay: "WEBHOOK_SECRET",
+  stripe: "WEBHOOK_SECRET",
+  hercle: "WEBHOOK_PUBLIC_KEY",
+} as const satisfies Record<RampProviderId, string>;
 
 /** A key of a provider's account, as its key formats declare it. */
 export type ManagedRampKeyRole = keyof RampKeyFormat;
 
 type ManagedRampKeyNameOf<Provider extends RampProviderId> =
-  `${Uppercase<Provider>}_${Uppercase<SdpEnvironment>}_${(typeof PUBLIC_KEY_TERMS)[Provider] | (typeof ROLE_TERMS)[keyof typeof ROLE_TERMS]}`;
+  `${Uppercase<Provider>}_${Uppercase<SdpEnvironment>}_${(typeof PUBLIC_KEY_TERMS)[Provider] | typeof SECRET_KEY_TERM | (typeof WEBHOOK_KEY_TERMS)[Provider]}`;
 
 /** Every env var a managed ramp key can live under. */
 export type ManagedRampKeyName = {
@@ -43,8 +51,8 @@ export type ManagedRampKeyName = {
 export type ManagedRampKeysEnv = Readonly<Partial<Pick<Env, ManagedRampKeyName>>>;
 
 /**
- * The env var SDP keeps `provider`'s `role` key for `mode` under:
- * `<PROVIDER>_<MODE>_<ROLE>`, with the public key under the provider's own term.
+ * The env var SDP keeps `provider`'s `role` key for `mode` under: `<PROVIDER>_<MODE>_<ROLE>`.
+ * The public key and the webhook key take the provider's own terms.
  *
  * @param provider - The ramp provider.
  * @param mode - The mode the key serves.
@@ -56,10 +64,25 @@ export function managedRampKeyName(
   mode: SdpEnvironment,
   role: ManagedRampKeyRole
 ): ManagedRampKeyName {
-  const term = role === "publicKey" ? PUBLIC_KEY_TERMS[provider] : ROLE_TERMS[role];
-  // SAFETY: provider and mode are the lowercase literals the template type upper-cases, and
-  // term is that provider's public-key term or a role term, so the result is a ManagedRampKeyName.
+  const term = managedRampKeyTerm(provider, role);
+  // SAFETY: provider and mode are the lowercase literals the template type upper-cases.
+  // `term` is one of that provider's key terms, so the result is a ManagedRampKeyName.
   return `${provider.toUpperCase()}_${mode.toUpperCase()}_${term}` as ManagedRampKeyName;
+}
+
+function managedRampKeyTerm(provider: RampProviderId, role: ManagedRampKeyRole): string {
+  switch (role) {
+    case "publicKey":
+      return PUBLIC_KEY_TERMS[provider];
+    case "secretKey":
+      return SECRET_KEY_TERM;
+    case "webhookSecret":
+      return WEBHOOK_KEY_TERMS[provider];
+    default: {
+      const exhaustive: never = role;
+      throw new Error(`Unhandled managed ramp key role: ${String(exhaustive)}`);
+    }
+  }
 }
 
 /** The key roles `provider` declares, in the order a refusal names them. */

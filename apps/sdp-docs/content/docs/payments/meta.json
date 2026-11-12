@@ -15,6 +15,7 @@
     "ramps",
     "ramps-providers",
     "ramps-moonpay",
-    "ramps-stripe"
+    "ramps-stripe",
+    "ramps-hercle"
   ]
 }

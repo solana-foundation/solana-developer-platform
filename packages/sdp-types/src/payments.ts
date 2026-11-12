@@ -236,6 +236,34 @@ export const FUNDABLE_RAMP_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filter(
   (status) => RAMP_TRANSFER_STATUS_FUNDABLE[status]
 );
 
+/**
+ * Whether a ramp transfer in each status still waits for its pay-in, so funding instructions still apply.
+ * A `settling` transfer is still fundable but no longer waits: the provider already holds the money.
+ * A sandbox pay-in simulation may start only from a status that still waits.
+ */
+export const RAMP_TRANSFER_STATUS_AWAITING_PAY_IN = {
+  pending: true,
+  processing: false,
+  confirmed: false,
+  finalized: false,
+  failed: false,
+  awaiting_payment: true,
+  settling: false,
+  completed: false,
+  canceled: false,
+  expired: false,
+} as const satisfies Record<PaymentTransferStatus, boolean>;
+
+/** Reports whether a ramp transfer in the given status still waits for its pay-in. */
+export function isAwaitingPayInRampTransferStatus(status: PaymentTransferStatus): boolean {
+  return RAMP_TRANSFER_STATUS_AWAITING_PAY_IN[status];
+}
+
+/** The statuses that still wait for their pay-in, for a status-guarded claim such as the sandbox simulation's. */
+export const AWAITING_PAY_IN_RAMP_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filter(
+  (status) => RAMP_TRANSFER_STATUS_AWAITING_PAY_IN[status]
+);
+
 /** One legal ramp transfer status change: where it may start, where it lands, and the ramp types it applies to. */
 export interface RampTransferTransition {
   readonly from: readonly PaymentTransferStatus[];
@@ -1653,7 +1681,28 @@ export interface CryptoDepositPaymentRampInstruction {
   instructionsNotes?: string;
 }
 
-export type PaymentRampInstruction = never;
+export interface HercleBankFundingDetails {
+  /** The business's own account at Hercle's bank; Hercle attributes a wire by the account it lands on. */
+  iban: string;
+  bic?: string;
+  bankName?: string;
+  accountHolder?: string;
+  /** Wire reference the sender must include so Hercle can match the payment to the order. */
+  paymentReference: string;
+  /** The holder the wire must come from: the business itself. The bank returns a wire from anyone else. */
+  payerAccountHolder: string;
+}
+
+/** On-ramp: wire fiat to the Hercle-issued account to receive crypto. */
+export interface HercleFiatFundingInstruction {
+  provider: "hercle";
+  kind: "fiat_funding";
+  fiatCurrency: string;
+  bankAccount: HercleBankFundingDetails;
+  instructionsNotes: string;
+}
+
+export type PaymentRampInstruction = HercleFiatFundingInstruction;
 
 export const RAMP_DIRECTIONS = ["onramp", "offramp"] as const;
 
@@ -1804,4 +1853,11 @@ export type PaymentRampQuote =
       sessionId: string;
       publishableKey: string;
       redirectUrl?: string;
+    })
+  | (BasePaymentRampQuote & {
+      provider: "hercle";
+      deliveryMode: "manual_instructions";
+      paymentInstructions: HercleFiatFundingInstruction[];
+      /** When the order's funding window closes; a wire after it is not matched to the order. */
+      expiresAt?: string;
     });

@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
@@ -88,7 +88,8 @@ export function checkSource(source, path) {
 
 function checkDirectory(directory, violations) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    const path = join(directory, entry.name);
+    // Posix on every platform, to match `delegatedReads` and the test-directory checks.
+    const path = posix.join(directory, entry.name);
     if (entry.isDirectory()) {
       if (entry.name !== "node_modules" && entry.name !== "dist") {
         checkDirectory(path, violations);

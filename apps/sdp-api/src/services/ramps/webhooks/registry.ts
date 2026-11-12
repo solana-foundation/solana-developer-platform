@@ -1,5 +1,6 @@
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { badRequest } from "@/lib/errors";
+import { hercleWebhook } from "./hercle";
 import { moonpayWebhook } from "./moonpay";
 import type { WebhookProcessor } from "./processor";
 import { stripeWebhook } from "./stripe";
@@ -7,6 +8,7 @@ import { stripeWebhook } from "./stripe";
 export const RAMP_PROVIDER_WEBHOOK_PROCESSOR = {
   moonpay: moonpayWebhook,
   stripe: stripeWebhook,
+  hercle: hercleWebhook,
 } as const satisfies Record<RampProviderId, WebhookProcessor<unknown>>;
 
 export type WebhookRampProvider = keyof typeof RAMP_PROVIDER_WEBHOOK_PROCESSOR;

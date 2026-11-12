@@ -49,8 +49,7 @@ Pick the live provider closest to yours, under `packages/sdp-payments/src/ramps/
 
 - `moonpay`: a hosted widget URL in both directions, looked up by SDP's transfer id, with a per-transaction ordering field.
 - `stripe`: a session widget, onramp only, looked up by the provider's session id, with no ordering field.
-
-Manual-instruction and multi-step onboarding providers were removed; one that returns uses ADR 0008's optional members (`docs/decisions/0008-ramp-provider-contract.md`).
+- `hercle`: business KYB through the optional `requirements` member and its customer-link store, `manual_instructions` bank-wire quotes, ECDSA-signed webhooks, looked up by the provider's order id. The reference for any provider that onboards its customers (ADR 0008, `docs/decisions/0008-ramp-provider-contract.md`).
 
 ## Rules that aren't optional (shared by every step)
 

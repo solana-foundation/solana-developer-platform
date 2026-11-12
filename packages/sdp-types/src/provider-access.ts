@@ -22,16 +22,16 @@ import {
 export const COMPLIANCE_PROVIDERS = ["range", "elliptic", "trm", "chainalysis"] as const;
 export type ComplianceProviderId = (typeof COMPLIANCE_PROVIDERS)[number];
 
-export const RAMP_PROVIDERS = ["moonpay", "stripe"] as const;
+export const RAMP_PROVIDERS = ["moonpay", "stripe", "hercle"] as const;
 export type RampProviderId = (typeof RAMP_PROVIDERS)[number];
 
 /**
- * Ramp providers SDP no longer integrates. Their stored transfers, provider
- * accounts and webhook events stay readable, but nothing writes or dispatches
- * to them. A removed provider moves here, and an id is never reused.
+ * Ramp providers SDP no longer integrates.
+ * Their stored transfers, provider accounts and webhook events stay readable, but nothing writes or dispatches to them.
+ * A removed provider moves here, and an id is never reused for another provider.
+ * An id leaves the list only when the provider it named returns, as Hercle did.
  */
 export const RETIRED_RAMP_PROVIDERS = [
-  "hercle",
   "mural",
   "moneygram",
   "lightspark",
@@ -592,6 +592,9 @@ export type RampProviderSurfacing = boolean | "sandbox";
 export const RAMP_PROVIDER_SURFACING: Readonly<Record<RampProviderId, RampProviderSurfacing>> = {
   moonpay: true,
   stripe: true,
+  // Sandbox only: Hercle still settles its on-ramp orders on simulated bank rails.
+  // A production surface would offer a corridor that cannot settle.
+  hercle: "sandbox",
 };
 
 export function isRampProviderSurfaced(provider: string, environment: SdpEnvironment): boolean {

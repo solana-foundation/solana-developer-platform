@@ -1,9 +1,13 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
+import type { ParsedTransaction } from "@sdp/rpc/solana";
 import type { PaymentTransferStatus } from "@sdp/types/payments";
 import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
+import { type RampChainReader, verifyRampDeliveries } from "@/services/jobs/verify-ramp-deliveries";
 import type { ManagedRampKeysEnv } from "@/services/ramps/runtime";
 import { env } from "@/test/helpers/env";
+import { installHercleTestEnv } from "@/test/helpers/hercle-env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { installStripeTestEnv } from "@/test/helpers/stripe-env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -38,9 +42,17 @@ function minutesAgo(minutes: number): string {
   return new Date(Date.now() - minutes * 60_000).toISOString();
 }
 
+type SweptProvider = "moonpay" | "stripe" | "hercle";
+
+const DELIVERY_MODES = {
+  moonpay: "hosted",
+  stripe: "session_widget",
+  hercle: "manual_instructions",
+} as const satisfies Record<SweptProvider, string>;
+
 interface SeedTransfer {
   id: string;
-  provider: "moonpay" | "stripe";
+  provider: SweptProvider;
   type?: "onramp" | "offramp";
   status?: PaymentTransferStatus;
   reference?: string | null;
@@ -70,7 +82,7 @@ async function seedTransfer(input: SeedTransfer): Promise<void> {
       "wallet_ramp_status_sweep",
       type === "offramp" ? WALLET : null,
       type === "onramp" ? WALLET : null,
-      input.token ?? (input.provider === "stripe" ? USDC : SOL_MINT),
+      input.token ?? (input.provider === "moonpay" ? SOL_MINT : USDC),
       type === "offramp" ? "1" : null,
       type,
       type === "onramp" ? "inbound" : "outbound",
@@ -78,7 +90,7 @@ async function seedTransfer(input: SeedTransfer): Promise<void> {
       input.provider,
       input.reference ?? null,
       input.observedAt ?? null,
-      input.provider === "stripe" ? "session_widget" : "hosted",
+      DELIVERY_MODES[input.provider],
       input.providerData ?? {},
       input.createdAt ?? updatedAt,
       updatedAt
@@ -149,7 +161,7 @@ function session(id: string, status: string, details: Record<string, unknown>) {
   };
 }
 
-function resultFor(results: RampStatusSweepResult[], provider: "moonpay" | "stripe") {
+function resultFor(results: RampStatusSweepResult[], provider: SweptProvider) {
   const found = results.find((result) => result.provider === provider);
   if (!found) throw new Error(`no ${provider} tally`);
   return found;
@@ -161,6 +173,8 @@ function sweep() {
 
 describe("sweepRampTransferStatuses", () => {
   installStripeTestEnv();
+
+  installHercleTestEnv();
 
   let savedMoonpay: ManagedRampKeysEnv;
 
@@ -256,6 +270,159 @@ describe("sweepRampTransferStatuses", () => {
     expect(recovered.provider_data.providerSettlement).toMatchObject({
       onchain: { signature: SIG, destinationAddress: WALLET },
     });
+  });
+
+  it("moves a Hercle order whose settlement webhook never arrived, in one request", async () => {
+    await seedTransfer({ id: "xfr_lost_order", provider: "hercle", reference: "ord_lost" });
+    answer("/partner/v1/orders/ord_lost", 200, {
+      orderId: "ord_lost",
+      direction: "onramp",
+      status: "settled",
+      fiatCurrency: "USD",
+      fiatAmount: "10.00",
+      error: null,
+    });
+
+    const results = await sweep();
+
+    expect(requestsTo("publicapi.sandbox.hercle.financial")).toBe(1);
+    expect(resultFor(results, "hercle")).toMatchObject({ polled: 1, applied: 1, expired: 0 });
+    const settling = await row("xfr_lost_order");
+    expect(settling.status).toBe("settling");
+    expect(settling.provider_data.providerSettlement).toMatchObject({ reference: "ord_lost" });
+  });
+
+  it("expires a quiet Hercle order Hercle no longer holds, but never on a bare 404", async () => {
+    await seedTransfer({ id: "xfr_gone_order", provider: "hercle", reference: "ord_gone" });
+    answer("/partner/v1/orders/ord_gone", 404, {
+      code: "ORDER_NOT_FOUND",
+      message: "Order not found",
+      traceId: "trace_sweep",
+    });
+    // An unanswered path gets a bare 404, which is Hercle's ramp surface being off.
+    await seedTransfer({ id: "xfr_surface_off", provider: "hercle", reference: "ord_dark" });
+
+    const results = await sweep();
+
+    expect(resultFor(results, "hercle")).toMatchObject({ polled: 2, failed: 1, expired: 1 });
+    expect((await row("xfr_gone_order")).status).toBe("expired");
+    expect((await row("xfr_surface_off")).status).toBe("pending");
+  });
+
+  it("hands a lost Hercle order's delivery from the pull to the chain verifier, which completes it", async () => {
+    await seedTransfer({
+      id: "xfr_pulled_delivery",
+      provider: "hercle",
+      reference: "ord_delivered",
+    });
+    answer("/partner/v1/orders/ord_delivered", 200, {
+      orderId: "ord_delivered",
+      direction: "onramp",
+      status: "settled",
+      fiatCurrency: "USD",
+      fiatAmount: "10.00",
+      error: null,
+      txHash: SIG,
+      destinationWalletAddress: WALLET,
+    });
+    const getTransaction = vi.fn<RampChainReader["getTransaction"]>();
+    const getSignatureStatuses = vi.fn<RampChainReader["getSignatureStatuses"]>();
+    const delivery: ParsedTransaction = {
+      slot: 42n,
+      blockTime: BigInt(Date.parse(LONG_AGO) / 1000 + 300),
+      accountKeys: ["hercle-delivery-signer"],
+      executionResultKnown: true,
+      err: null,
+      preTokenBalances: [],
+      postTokenBalances: [
+        { accountIndex: 0, mint: USDC, owner: WALLET, amount: "9850000", decimals: 6 },
+      ],
+      instructions: [],
+    };
+    getTransaction.mockResolvedValue(delivery);
+
+    const results = await sweep();
+    expect(resultFor(results, "hercle")).toMatchObject({ polled: 1, applied: 1 });
+    expect(await row("xfr_pulled_delivery")).toMatchObject({ status: "settling", signature: SIG });
+
+    await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      verifyRampDeliveries(env, { getTransaction, getSignatureStatuses })
+    );
+
+    expect(requestsTo("publicapi.sandbox.hercle.financial")).toBe(1);
+    expect(getTransaction).toHaveBeenCalledExactlyOnceWith(SIG);
+    expect(getSignatureStatuses).not.toHaveBeenCalled();
+    expect((await row("xfr_pulled_delivery")).status).toBe("completed");
+  });
+
+  it("expires a Hercle order that only repeats it awaits its wire, once a banking day passes", async () => {
+    await seedTransfer({ id: "xfr_unfunded_order", provider: "hercle", reference: "ord_unfunded" });
+    await seedTransfer({
+      id: "xfr_recent_order",
+      provider: "hercle",
+      reference: "ord_recent",
+      updatedAt: minutesAgo(60),
+    });
+    for (const orderId of ["ord_unfunded", "ord_recent"]) {
+      answer(`/partner/v1/orders/${orderId}`, 200, {
+        orderId,
+        direction: "onramp",
+        status: "awaiting_payment",
+        fiatCurrency: "EUR",
+        fiatAmount: "100.00",
+        error: null,
+      });
+    }
+
+    const results = await sweep();
+
+    // An untimed "not paid yet" is no activity, so it neither restarts nor extends the horizon.
+    expect(requestsTo("publicapi.sandbox.hercle.financial")).toBe(2);
+    expect(resultFor(results, "hercle")).toMatchObject({ polled: 2, applied: 0, expired: 1 });
+    expect((await row("xfr_unfunded_order")).status).toBe("expired");
+    expect((await row("xfr_recent_order")).status).toBe("pending");
+  });
+
+  it("revives an expired Hercle order when a late wire settles it", async () => {
+    await seedTransfer({
+      id: "xfr_late_wire",
+      provider: "hercle",
+      status: "expired",
+      reference: "ord_late_wire",
+      updatedAt: minutesAgo(2 * 24 * 60),
+    });
+    answer("/partner/v1/orders/ord_late_wire", 200, {
+      orderId: "ord_late_wire",
+      direction: "onramp",
+      status: "settled",
+      fiatCurrency: "EUR",
+      fiatAmount: "100.00",
+      error: null,
+    });
+
+    const results = await sweep();
+
+    expect(resultFor(results, "hercle")).toMatchObject({ polled: 1, applied: 1 });
+    expect((await row("xfr_late_wire")).status).toBe("settling");
+  });
+
+  it("never reads Hercle's refusal of SDP's keys as an order it does not hold", async () => {
+    await seedTransfer({
+      id: "xfr_keys_refused",
+      provider: "hercle",
+      reference: "ord_keys_refused",
+    });
+    // Hercle's sandbox answer on 2026-11-04 to a request signed outside its 300-second window.
+    answer("/partner/v1/orders/ord_keys_refused", 401, {
+      code: "AUTH_STALE_TIMESTAMP",
+      message: "Timestamp outside the ±300s window",
+      traceId: "trace_sweep",
+    });
+
+    const results = await sweep();
+
+    expect(resultFor(results, "hercle")).toMatchObject({ polled: 1, failed: 1, expired: 0 });
+    expect((await row("xfr_keys_refused")).status).toBe("pending");
   });
 
   it("leaves settling rows the chain verifier already holds evidence for", async () => {

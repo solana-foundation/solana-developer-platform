@@ -1,12 +1,16 @@
+import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import { COUNTERPARTY_PROVIDER_ACCOUNT_LISTED_KINDS } from "@sdp/types/counterparties";
+import { z } from "zod";
 import type { DatabaseClient as AppDb } from "@/db/client";
 import { buildInClause } from "@/db/postgres-utils";
 import { internalError } from "@/lib/errors";
 import type {
   CounterpartyProviderAccountRow,
   CounterpartyProviderAccountsRepository,
+  FindCustomerLinkByProviderReferenceInput,
   GetCounterpartyProviderAccountInput,
   ListProviderAccountsInput,
+  RecordCustomerLinkStatusInput,
   UpsertCounterpartyProviderAccountInput,
 } from "./counterparty-provider-account.repository";
 import {
@@ -28,23 +32,25 @@ function parseProviderAccountRows(
 export function createPostgresCounterpartyProviderAccountsRepository(
   db: AppDb
 ): CounterpartyProviderAccountsRepository {
-  return {
-    async getProviderAccount(input: GetCounterpartyProviderAccountInput) {
-      const row = await db
-        .prepare(
-          `SELECT * FROM counterparty_provider_accounts
-           WHERE organization_id = ?
-             AND project_id = ?
-             AND counterparty_id = ?
-             AND provider = ?
-             AND kind = 'customer_link'
-             AND status = 'active'`
-        )
-        .bind(input.organizationId, input.projectId, input.counterpartyId, input.provider)
-        .first<Record<string, unknown>>();
+  async function getProviderAccount(input: GetCounterpartyProviderAccountInput) {
+    const row = await db
+      .prepare(
+        `SELECT * FROM counterparty_provider_accounts
+         WHERE organization_id = ?
+           AND project_id = ?
+           AND counterparty_id = ?
+           AND provider = ?
+           AND kind = 'customer_link'
+           AND status = 'active'`
+      )
+      .bind(input.organizationId, input.projectId, input.counterpartyId, input.provider)
+      .first<Record<string, unknown>>();
 
-      return row === null ? null : parseProviderAccountRow(row);
-    },
+    return row === null ? null : parseProviderAccountRow(row);
+  }
+
+  return {
+    getProviderAccount,
     async upsertProviderAccount(input: UpsertCounterpartyProviderAccountInput) {
       const metadataColumns = input.metadata === undefined ? "" : ", metadata";
       const metadataValues = input.metadata === undefined ? "" : ", ?";
@@ -91,6 +97,76 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         throw internalError("Counterparty provider-account upsert escaped its tenant scope.");
       }
       return parseProviderAccountRow(row);
+    },
+
+    async recordCustomerLinkStatus(input: RecordCustomerLinkStatusInput) {
+      const { observation } = input;
+      const recorded = await db
+        .prepare(
+          `UPDATE counterparty_provider_accounts
+           SET provider_status = ?, provider_status_observed_at = ?, updated_at = sdp_iso_now()
+           WHERE organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND kind = 'customer_link'
+             AND status = 'active'
+             AND (provider_status_observed_at IS NULL
+                  OR provider_status_observed_at::timestamptz < ?::timestamptz
+                  OR (provider_status_observed_at::timestamptz = ?::timestamptz
+                      AND ?::boolean
+                      AND provider_status IS DISTINCT FROM ?))
+             AND (provider_status IS NULL OR provider_status <> ALL(?::text[]))
+           RETURNING id`
+        )
+        .bind(
+          observation.providerStatus,
+          observation.observedAt,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider,
+          observation.observedAt,
+          observation.observedAt,
+          observation.winsTie,
+          observation.providerStatus,
+          [...observation.preserves]
+        )
+        .first<{ id: string }>();
+      if (recorded !== null) {
+        return "recorded";
+      }
+      return (await getProviderAccount(input)) === null ? "missing" : "stale";
+    },
+
+    async findCustomerLinkByProviderReference(input: FindCustomerLinkByProviderReferenceInput) {
+      const rows = await db
+        .prepare(
+          `SELECT cpa.*, prj.environment AS project_environment
+             FROM counterparty_provider_accounts cpa
+             JOIN counterparties c
+               ON c.id = cpa.counterparty_id
+              AND c.organization_id = cpa.organization_id
+              AND c.project_id = cpa.project_id
+             JOIN projects prj ON prj.id = cpa.project_id
+            WHERE cpa.provider = ?
+              AND cpa.provider_customer_reference = ?
+              AND cpa.kind = 'customer_link'
+              AND cpa.status = 'active'
+              AND c.status = 'active'
+            ORDER BY cpa.id
+            LIMIT 2`
+        )
+        .bind(input.provider, input.providerCustomerReference)
+        .all<Record<string, unknown>>();
+      const [row] = rows.results;
+      if (row === undefined || rows.results.length !== 1) {
+        return null;
+      }
+      return {
+        link: parseProviderAccountRow(row),
+        environment: z.enum(SDP_ENVIRONMENTS).parse(row.project_environment),
+      };
     },
 
     async listProviderAccounts(input: ListProviderAccountsInput) {

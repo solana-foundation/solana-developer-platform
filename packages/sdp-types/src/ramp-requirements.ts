@@ -58,6 +58,19 @@ export type RequirementField =
       required: boolean;
       /** Nested parts collected under dotted keys, e.g. `customer.address.line1`. */
       fields: RequirementField[];
+    }
+  | {
+      /**
+       * An affirmative acceptance of a provider document (terms of service, privacy policy), collected as `"true"`.
+       * The label is the sentence up to the document's name, and `documentLabel` completes it as a link to `documentUrl`.
+       * The person reads what they accept where they accept it.
+       */
+      kind: "consent";
+      key: string;
+      label: string;
+      required: boolean;
+      documentUrl: string;
+      documentLabel?: string;
     };
 
 export type RequirementFieldKind = RequirementField["kind"];
@@ -105,10 +118,45 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: RampProviderId; status: "ready" }
   | { provider: RampProviderId; status: "collect"; fields: RequirementField[] }
   | { provider: RampProviderId; status: "unsupported"; reason: string }
+  | {
+      provider: "hercle";
+      status: "customer_verification_required";
+      /** Hercle's hosted KYB link, minted for this answer and never stored. */
+      verificationUrl: string;
+    }
+  | { provider: "hercle"; status: "customer_verifying" }
+  | { provider: "hercle"; status: "customer_verification_failed" }
 );
 
-export const COUNTERPARTY_REQUIREMENTS_POLL_STATUSES =
-  [] as const satisfies readonly CounterpartyRequirements["status"][];
+/** Hercle's verdicts on a business's KYB, as its verification endpoints and its verification webhook report them. */
+export const HERCLE_VERIFICATION_STATUSES = [
+  "action_required",
+  "pending",
+  "rejected",
+  "approved",
+] as const;
+export type HercleVerificationStatus = (typeof HERCLE_VERIFICATION_STATUSES)[number];
+
+/** The verdict that lets a business place orders; Hercle refuses an order under any other. */
+export const HERCLE_APPROVED_VERIFICATION_STATUS = "approved" satisfies HercleVerificationStatus;
+
+/**
+ * The status SDP records for a business whose financial operations Hercle has suspended.
+ * Hercle refuses its orders with `ACCOUNT_SUSPENDED` whatever its verdict.
+ * Its account read reports `financialStatus: "Suspended"`.
+ * Hercle sends no event for it, so SDP learns it from a refused order and sees it lifted only by reading the account.
+ */
+export const HERCLE_SUSPENDED_ACCOUNT_STATUS = "suspended";
+
+export function isHercleVerificationStatus(status: string): status is HercleVerificationStatus {
+  return HERCLE_VERIFICATION_STATUSES.some((verdict) => verdict === status);
+}
+
+/** Statuses the provider moves on its own, so a client re-reads requirements until they change. */
+export const COUNTERPARTY_REQUIREMENTS_POLL_STATUSES = [
+  "customer_verification_required",
+  "customer_verifying",
+] as const satisfies readonly CounterpartyRequirements["status"][];
 
 export type CounterpartyRequirementsPollStatus =
   (typeof COUNTERPARTY_REQUIREMENTS_POLL_STATUSES)[number];

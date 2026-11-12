@@ -355,9 +355,10 @@ function discoverWorkspaceDirectories(repositoryRoot) {
       return [];
     }
 
+    // Posix paths on every platform, to compare against the `directory` values in MODULE_METADATA.
     return readdirSync(parentDirectory, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
-      .map((entry) => path.join(parent, entry.name))
+      .map((entry) => path.posix.join(parent, entry.name))
       .filter((directory) => existsSync(path.join(repositoryRoot, directory, "package.json")))
       .sort((left, right) => left.localeCompare(right));
   });

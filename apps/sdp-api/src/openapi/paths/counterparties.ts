@@ -175,7 +175,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     summary: "Get counterparty ramp requirements",
     operationId: "getCounterpartyRequirements",
     description:
-      "Evaluates whether a counterparty is ready to create a quote with the selected ramp provider and returns any fields or provider-hosted actions still required.",
+      "Evaluates whether a counterparty is ready to create a quote with the selected ramp provider and returns any fields or provider-hosted actions still required. For a provider that verifies the customer itself, the read asks that provider, so it is metered per caller and per organization and answers `429 RATE_LIMITED` past the limit.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -189,7 +189,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
         description: "Counterparty ramp requirements",
         content: jsonContent(counterpartyRequirementsResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
     },
   });
 

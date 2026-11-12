@@ -6,6 +6,7 @@ import { hashString } from "@sdp/payments/hash";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
+import type { CounterpartyEntityType } from "@sdp/types/counterparties";
 import type { SdpModule } from "@sdp/types/release-channels";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { getBase58Codec } from "@solana/codecs";
@@ -368,6 +369,7 @@ export async function seedCounterparty(params?: {
   externalId?: string | null;
   providerData?: Record<string, unknown>;
   projectId?: string;
+  entityType?: CounterpartyEntityType;
 }): Promise<string> {
   const id = params?.id ?? `cpty_${crypto.randomUUID()}`;
   const externalId = params?.externalId ?? null;
@@ -391,7 +393,7 @@ export async function seedCounterparty(params?: {
       TEST_ORG.id,
       params?.projectId ?? TEST_PROJECT.id,
       externalId,
-      "individual",
+      params?.entityType ?? "individual",
       "MoonPay Test Counterparty",
       providerData,
       TEST_USER.id

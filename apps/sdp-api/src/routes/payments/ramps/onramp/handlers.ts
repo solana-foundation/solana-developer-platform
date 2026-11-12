@@ -3,6 +3,8 @@ import { ONRAMP_SUPPORT, RAMP_SUPPORT_HASH } from "@sdp/types/generated/ramp";
 import type { PaymentRampQuote } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
+import { getDb } from "@/db/client";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError, badRequestQuery, internalError } from "@/lib/errors";
@@ -24,6 +26,7 @@ import {
 } from "@/routes/payments/ramps/shared";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { auditedRampWrite } from "@/services/payments/ramp-audit";
+import { createRampCustomerLinkStore } from "@/services/ramps/customer-link-store";
 import {
   type createOnrampQuoteSchema,
   type estimateOnrampSchema,
@@ -46,14 +49,14 @@ export async function extractOnrampQuoteRequest(
   c: ValidatedBodyContext<typeof createOnrampQuoteSchema>
 ): Promise<RequestGateExtraction> {
   const input = c.req.valid("json");
-  const { scope, projectId, counterparty, wallet, walletAddress } = await resolveRampQuoteRequest(
+  const resolved: RampQuoteResolved = await resolveRampQuoteRequest(
     c,
     "onramp",
     input,
     input.destinationCustodyWalletId
   );
 
-  return { body: input, resolved: { scope, projectId, counterparty, wallet, walletAddress } };
+  return { body: input, resolved };
 }
 
 export async function estimateOnramp(c: ValidatedBodyContext<typeof estimateOnrampSchema>) {
@@ -61,7 +64,7 @@ export async function estimateOnramp(c: ValidatedBodyContext<typeof estimateOnra
   const row = ONRAMP_SUPPORT.find(
     (pair) => pair.source === input.fiatCurrency && pair.dest === input.assetRail
   );
-  const providers = row ? filterProviders(c, row.providers) : [];
+  const providers = row ? filterProviders(c, input.assetRail, row.providers) : [];
 
   const estimates = await estimateAcrossProviders(c, "onramp", providers, (client, ctx) =>
     client.estimateOnramp(ctx, {
@@ -83,12 +86,15 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       counterparty,
       wallet: destinationWallet,
       walletAddress: destinationWalletAddress,
+      customerLink,
     },
   } = getRequestGateContext<CreateOnrampQuoteBody, RampQuoteResolved>(c);
 
   // Requirements have succeeded. Reserve the ID now so the provider
   // quote and the eventual transfer row share the same internal transfer ID.
   const reservedTransferId = generatePaymentTransferId();
+  // A token this cluster has no mint for (USDT on devnet) is refused before any provider opens an order for it.
+  rampTransferTokenMint(input.assetRail);
   let quote: PaymentRampQuote;
   let precreatedTransferId: string | undefined;
   switch (input.provider) {
@@ -174,6 +180,30 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       });
       break;
     }
+    case "hercle": {
+      if (customerLink === null) {
+        throw internalError("A Hercle quote requires the business's cleared Hercle account.");
+      }
+      // The order acts for the business's own Hercle account, keyed on the transfer id it is stored under.
+      quote = await rampClientFor("hercle", "onramp").createOnrampQuote(rampRuntime(c, "hercle"), {
+        assetRail: input.assetRail,
+        fiatCurrency: input.fiatCurrency,
+        fiatAmount: input.fiatAmount,
+        destinationWalletAddress,
+        externalCustomerId: customerLink.providerCustomerReference,
+        paymentTransferId: reservedTransferId,
+        customerLink: createRampCustomerLinkStore(
+          createPostgresCounterpartyProviderAccountsRepository(getDb(c.env)),
+          {
+            organizationId: scope.auth.organizationId,
+            projectId,
+            counterpartyId: counterparty.id,
+            provider: "hercle",
+          }
+        ),
+      });
+      break;
+    }
     default: {
       const exhaustive: never = input.provider;
       throw new AppError(
@@ -220,7 +250,7 @@ export async function listOnrampCurrencies(c: AppContext) {
   const pairs: OnrampCurrencyPair[] = ONRAMP_SUPPORT.flatMap((row) => {
     if (source && row.source !== source) return [];
     if (dest && row.dest !== dest) return [];
-    const providers = filterProviders(c, row.providers, provider);
+    const providers = filterProviders(c, row.dest, row.providers, provider);
     if (providers.length === 0) return [];
     return [{ source: row.source, dest: row.dest, providers }];
   });

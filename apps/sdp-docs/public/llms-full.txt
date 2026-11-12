@@ -4941,7 +4941,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `projec
 
           - **`family`** · `string` · required · always `ramps`
 
-          - **`provider`** · `string` · required · one of `moonpay`, `stripe`
+          - **`provider`** · `string` · required · one of `moonpay`, `stripe`, `hercle`
 
           - **`available`** · `boolean` · required · always `true`
 
@@ -4949,7 +4949,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `projec
 
           - **`family`** · `string` · required · always `ramps`
 
-          - **`provider`** · `string` · required · one of `moonpay`, `stripe`
+          - **`provider`** · `string` · required · one of `moonpay`, `stripe`, `hercle`
 
           - **`available`** · `boolean` · required · always `false`
 
@@ -5232,7 +5232,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `projec
 
         - **`integrations`** · `object[]` · required · min items 1
 
-          - **`provider`** · `string` · required · one of `moonpay`, `stripe`
+          - **`provider`** · `string` · required · one of `moonpay`, `stripe`, `hercle`
 
           - **`state`** · `object` · required
 
@@ -17406,7 +17406,7 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 
       - **`deliveryMode`** · `string` · one of `hosted`, `manual_instructions`, `session_widget` · example `session_widget`
 
-        How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `session_widget` in a provider SDK session. `manual_instructions` appears only on a retired provider's records.
+        How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `manual_instructions` by funding the instructions its quote returned, `session_widget` in a provider SDK session.
 
       - **`fiatCurrency`** · `string` · example `USD`
 
@@ -17809,7 +17809,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
   Filter transfers tied to a specific counterparty.
 
-- **`provider`** · `string` · one of `moonpay`, `stripe` · example `moonpay`
+- **`provider`** · `string` · one of `moonpay`, `stripe`, `hercle` · example `moonpay`
 
   Filter ramp transfers by provider.
 
@@ -17991,7 +17991,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
     - **`deliveryMode`** · `string` · one of `hosted`, `manual_instructions`, `session_widget` · example `session_widget`
 
-      How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `session_widget` in a provider SDK session. `manual_instructions` appears only on a retired provider's records.
+      How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `manual_instructions` by funding the instructions its quote returned, `session_widget` in a provider SDK session.
 
     - **`fiatCurrency`** · `string` · example `USD`
 
@@ -18493,7 +18493,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`deliveryMode`** · `string` · one of `hosted`, `manual_instructions`, `session_widget` · example `session_widget`
 
-        How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `session_widget` in a provider SDK session. `manual_instructions` appears only on a retired provider's records.
+        How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `manual_instructions` by funding the instructions its quote returned, `session_widget` in a provider SDK session.
 
       - **`fiatCurrency`** · `string` · example `USD`
 
@@ -19424,7 +19424,7 @@ Create a custody-executed outbound transfer batch.
 
       - **`deliveryMode`** · `string` · one of `hosted`, `manual_instructions`, `session_widget` · example `session_widget`
 
-        How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `session_widget` in a provider SDK session. `manual_instructions` appears only on a retired provider's records.
+        How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `manual_instructions` by funding the instructions its quote returned, `session_widget` in a provider SDK session.
 
       - **`fiatCurrency`** · `string` · example `USD`
 
@@ -20375,7 +20375,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`deliveryMode`** · `string` · one of `hosted`, `manual_instructions`, `session_widget` · example `session_widget`
 
-        How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `session_widget` in a provider SDK session. `manual_instructions` appears only on a retired provider's records.
+        How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `manual_instructions` by funding the instructions its quote returned, `session_widget` in a provider SDK session.
 
       - **`fiatCurrency`** · `string` · example `USD`
 
@@ -21023,7 +21023,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`deliveryMode`** · `string` · one of `hosted`, `manual_instructions`, `session_widget` · example `session_widget`
 
-        How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `session_widget` in a provider SDK session. `manual_instructions` appears only on a retired provider's records.
+        How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `manual_instructions` by funding the instructions its quote returned, `session_widget` in a provider SDK session.
 
       - **`fiatCurrency`** · `string` · example `USD`
 
@@ -23955,7 +23955,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
       - **`deliveryMode`** · `string` · one of `hosted`, `manual_instructions`, `session_widget` · example `session_widget`
 
-        How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `session_widget` in a provider SDK session. `manual_instructions` appears only on a retired provider's records.
+        How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `manual_instructions` by funding the instructions its quote returned, `session_widget` in a provider SDK session.
 
       - **`fiatCurrency`** · `string` · example `USD`
 
@@ -30034,7 +30034,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/list-payment-onr
 
 `GET /v1/payments/ramps/onramp/currency`
 
-Supports optional source, destination rail, and provider filters.
+Supports optional source, destination rail, and provider filters. A rail whose asset has no mint on the project's cluster is left out, since SDP refuses its quote there (devnet has no USDT).
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `onramp.read` action.
 
@@ -30048,7 +30048,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `onramp
 
   Optional Solana crypto rail destination filter.
 
-- **`provider`** · `string` · one of `moonpay`, `stripe` · example `moonpay`
+- **`provider`** · `string` · one of `moonpay`, `stripe`, `hercle` · example `moonpay`
 
   Optional ramp provider filter.
 
@@ -30090,7 +30090,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `onramp
 
         Destination crypto rail.
 
-      - **`providers`** · `string[]` · required · each one of `moonpay`, `stripe`
+      - **`providers`** · `string[]` · required · each one of `moonpay`, `stripe`, `hercle`
 
         Providers that support this on-ramp pair.
 
@@ -30313,7 +30313,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/list-payment-off
 
 `GET /v1/payments/ramps/offramp/currency`
 
-Supports optional source rail, destination fiat, and provider filters.
+Supports optional source rail, destination fiat, and provider filters. A rail whose asset has no mint on the project's cluster is left out, since SDP refuses its quote there.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `offramp.read` action.
 
@@ -30327,7 +30327,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `offram
 
   Optional fiat destination currency filter.
 
-- **`provider`** · `string` · one of `moonpay`, `stripe` · example `moonpay`
+- **`provider`** · `string` · one of `moonpay`, `stripe`, `hercle` · example `moonpay`
 
   Optional ramp provider filter.
 
@@ -30369,7 +30369,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `offram
 
         Fiat destination currency code.
 
-      - **`providers`** · `string[]` · required · each one of `moonpay`, `stripe`
+      - **`providers`** · `string[]` · required · each one of `moonpay`, `stripe`, `hercle`
 
         Providers that support this off-ramp pair.
 
@@ -30591,7 +30591,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/create-payment-o
 
 `POST /v1/payments/ramps/onramp/quote`
 
-`quote.deliveryMode` says how to hand the customer to the provider: `hosted` returns a provider-hosted URL, and `session_widget` a provider session to mount.
+`quote.deliveryMode` says how to hand the customer to the provider: `hosted` returns a provider-hosted URL, `manual_instructions` funding instructions to show, and `session_widget` a provider session to mount.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `onramp.execute` action.
 
@@ -30599,11 +30599,11 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `onramp
 
 `application/json` · required
 
-Create an on-ramp quote. The response's `quote.deliveryMode` says whether to open a provider-hosted page (`hosted`) or mount a provider session widget (`session_widget`).
+Create an on-ramp quote. The response's `quote.deliveryMode` says whether to open a provider-hosted page (`hosted`), show funding instructions (`manual_instructions`) or mount a provider session widget (`session_widget`).
 
-- **`provider`** · `string` · required · one of `moonpay`, `stripe` · example `moonpay`
+- **`provider`** · `string` · required · one of `moonpay`, `stripe`, `hercle` · example `moonpay`
 
-  Ramp provider to quote with. The response's `quote.deliveryMode` says how that provider hands off: a hosted URL or a session widget.
+  Ramp provider to quote with. The response's `quote.deliveryMode` says how that provider hands off: a hosted URL, funding instructions or a session widget.
 
 - **`counterpartyId`** · `string` · required · min length 1 · example `cpty_example`
 
@@ -30647,7 +30647,7 @@ Create an on-ramp quote. The response's `quote.deliveryMode` says whether to ope
 
         Quote identifier.
 
-      - **`provider`** · `string` · required · one of `moonpay`, `stripe` · example `moonpay`
+      - **`provider`** · `string` · required · one of `moonpay`, `stripe`, `hercle` · example `moonpay`
 
         Provider that created the quote.
 
@@ -30655,13 +30655,59 @@ Create an on-ramp quote. The response's `quote.deliveryMode` says whether to ope
 
         Always `pending`: a quote opens its transfer before the customer pays, and SDP never updates the quote. Follow the transfer for progress.
 
-      - **`deliveryMode`** · `string` · required · one of `hosted`, `session_widget` · example `hosted`
+      - **`deliveryMode`** · `string` · required · one of `manual_instructions`, `hosted`, `session_widget` · example `hosted`
 
-        `hosted` means open `hostedUrl`; `session_widget` means mount the provider SDK session.
+        `hosted` means open `hostedUrl`; `manual_instructions` means display `paymentInstructions`; `session_widget` means mount the provider SDK session.
 
       - **`hostedUrl`** · `string` · format `uri`
 
         Provider-hosted URL for hosted quote delivery.
+
+      - **`paymentInstructions`** · `object[]`
+
+        Funding instructions for `manual_instructions` delivery.
+
+        - **`provider`** · `string` · required · always `hercle` · example `hercle`
+
+          Provider that produced this instruction.
+
+        - **`kind`** · `string` · required · always `fiat_funding` · example `fiat_funding`
+
+          Wire fiat to the business's Hercle account to receive crypto.
+
+        - **`fiatCurrency`** · `string` · required · example `EUR`
+
+          Fiat currency the business wires.
+
+        - **`bankAccount`** · `object` · required
+
+          Where and how to wire the order's fiat.
+
+          - **`iban`** · `string` · required
+
+            The business's own account at Hercle's bank; Hercle attributes the wire by it.
+
+          - **`bic`** · `string`
+
+          - **`bankName`** · `string`
+
+          - **`accountHolder`** · `string`
+
+          - **`paymentReference`** · `string` · required
+
+            Reference the wire must carry so Hercle matches it to the order.
+
+          - **`payerAccountHolder`** · `string` · required
+
+            The account holder the wire must come from: the business itself. The bank returns a wire from any other account.
+
+        - **`instructionsNotes`** · `string` · required
+
+          Additional human-readable funding instructions.
+
+      - **`expiresAt`** · `string`
+
+        For `manual_instructions`, when the order's funding window closes; a wire after it is not matched to the order.
 
       - **`clientSecret`** · `string`
 
@@ -30811,7 +30857,8 @@ r = requests.post("https://api.solana.com/v1/payments/ramps/onramp/quote",
       "id": "ramp_quote_example",
       "provider": "moonpay",
       "status": "pending",
-      "deliveryMode": "hosted"
+      "deliveryMode": "hosted",
+      "hostedUrl": "https://buy-sandbox.moonpay.com/?apiKey=pk_test_example"
     },
     "transferId": "transfer_example"
   },
@@ -30844,13 +30891,17 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Simulate sandbox transfer
 Source: https://platform.solana.com/docs/reference/api/payments/simulate-sandbox-transfer
 
-> Sandbox-only, and unavailable for every ramp provider SDP integrates: none offers a simulated pay-in, so a transfer that passes the checks below gets 400.
+> Sandbox-only.
 
 `POST /v1/payments/ramps/sandbox/simulate`
 
-To complete a sandbox on-ramp, pay in the provider's own hosted page or session with its test payment details.
+Simulates the fiat pay-in for an on-ramp transfer that still awaits it, when its provider offers a simulated pay-in. With any other provider, pay in the provider's own hosted page or session with its test payment details.
 
-After the action check (`403`) and body validation (`400`), the checks run in order: a project outside Sandbox gets `403`, an unknown transfer `404`, a transfer that isn't an on-ramp `400`, one that isn't `awaiting_payment` `409`, and one whose provider the project can't use `403` or `503`.
+After the action check (`403`) and body validation (`400`), the checks run in order: a project outside Sandbox gets `403`, an unknown transfer `404`, a transfer that isn't an on-ramp `400`, one no longer awaiting its pay-in (`pending` or `awaiting_payment`) `409`, one whose provider the project can't use `403` or `503`, and one whose provider offers no simulated pay-in `400`.
+
+A simulation asks the provider, so it is metered per caller and per organization, like a quote: past the limit, the request answers `429 RATE_LIMITED` after body validation and before the transfer is read.
+
+Each transfer is simulated at most once: a later request, or one sent at the same time, answers `409`. Only a simulation the provider refused outright can be sent again. After any other failure the provider may still have delivered the crypto, so quote again if the transfer never settles.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `ramp_transfers.manage` action.
 
@@ -30872,7 +30923,9 @@ Names the sandbox on-ramp transfer. Only the transfer ID is accepted.
 
 ## Responses
 
-- **`400`** An invalid body, a transfer that isn't an on-ramp, or one that passes every check: no ramp provider SDP integrates offers a simulated pay-in.
+- **`204`** Sandbox pay-in requested from the provider
+
+- **`400`** An invalid body, a transfer that isn't an on-ramp, or one whose provider offers no simulated pay-in.
 
   - **`error`** · `object` · required
 
@@ -30911,6 +30964,10 @@ Names the sandbox on-ramp transfer. Only the transfer ID is accepted.
   Same fields as `400`.
 
 - **`409`** Conflict
+
+  Same fields as `400`.
+
+- **`429`** Too Many Requests
 
   Same fields as `400`.
 
@@ -32452,6 +32509,8 @@ Source: https://platform.solana.com/docs/reference/api/counterparties/get-counte
 
 `GET /v1/counterparties/{counterpartyId}/requirements`
 
+For a provider that verifies the customer itself, the read asks that provider, so it is metered per caller and per organization and answers `429 RATE_LIMITED` past the limit.
+
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `counterparties.read` action.
 
 ## Path parameters
@@ -32468,7 +32527,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
   Any of:
 
-  - **string** · one of `moonpay`, `stripe`
+  - **string** · one of `moonpay`, `stripe`, `hercle`
 
   - **string** · always `moonpay`
 
@@ -32500,7 +32559,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
   - **`data`** · `object` · required
 
-    Current provider-specific readiness state and any fields or actions required before creating a ramp quote.
+    Current provider-specific readiness state and any fields or actions required before creating a ramp quote. A provider that verifies the counterparty itself can withdraw a `ready` later, by revoking its verdict or suspending the account, and give it back when it reinstates the counterparty.
 
     Any of:
 
@@ -32510,7 +32569,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
         Ramp direction evaluated for this counterparty.
 
-      - **`provider`** · `string` · required · one of `moonpay`, `stripe`
+      - **`provider`** · `string` · required · one of `moonpay`, `stripe`, `hercle`
 
       - **`status`** · `string` · required · always `ready`
 
@@ -32520,7 +32579,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
         Ramp direction evaluated for this counterparty.
 
-      - **`provider`** · `string` · required · one of `moonpay`, `stripe`
+      - **`provider`** · `string` · required · one of `moonpay`, `stripe`, `hercle`
 
       - **`status`** · `string` · required · always `collect`
 
@@ -32603,6 +32662,24 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
           - **`required`** · `boolean` · required
 
           - **`before`** · `string`
+
+        - **kind: "consent"**
+
+          - **`kind`** · `string` · required · always `consent`
+
+          - **`key`** · `string` · required
+
+          - **`label`** · `string` · required
+
+            The sentence up to the document's name; `documentLabel` completes it.
+
+          - **`required`** · `boolean` · required
+
+          - **`documentUrl`** · `string` · required
+
+            The provider document the counterparty accepts. Submit the string `"true"` as the field's `collectedData` value to accept; a JSON boolean is refused. An optional consent also takes `"false"` or `""`.
+
+          - **`documentLabel`** · `string`
 
         - **kind: "address"**
 
@@ -32700,11 +32777,47 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
         Ramp direction evaluated for this counterparty.
 
-      - **`provider`** · `string` · required · one of `moonpay`, `stripe`
+      - **`provider`** · `string` · required · one of `moonpay`, `stripe`, `hercle`
 
       - **`status`** · `string` · required · always `unsupported`
 
       - **`reason`** · `string` · required
+
+        Why the provider does not serve this counterparty in this direction. Some reasons are temporary, such as the provider suspending the counterparty's account, so read the requirements again later.
+
+    - **status: "customer_verification_required"**
+
+      - **`direction`** · `string` · required · one of `onramp`, `offramp` · example `onramp`
+
+        Ramp direction evaluated for this counterparty.
+
+      - **`provider`** · `string` · required · always `hercle`
+
+      - **`status`** · `string` · required · always `customer_verification_required`
+
+      - **`verificationUrl`** · `string` · required
+
+        Hercle's hosted business verification. Minted for this response and never stored; read the requirements again for a fresh link.
+
+    - **status: "customer_verifying"**
+
+      - **`direction`** · `string` · required · one of `onramp`, `offramp` · example `onramp`
+
+        Ramp direction evaluated for this counterparty.
+
+      - **`provider`** · `string` · required · always `hercle`
+
+      - **`status`** · `string` · required · always `customer_verifying`
+
+    - **status: "customer_verification_failed"**
+
+      - **`direction`** · `string` · required · one of `onramp`, `offramp` · example `onramp`
+
+        Ramp direction evaluated for this counterparty.
+
+      - **`provider`** · `string` · required · always `hercle`
+
+      - **`status`** · `string` · required · always `customer_verification_failed`
 
   - **`meta`** · `object` · required
 
@@ -32756,7 +32869,15 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
   Same fields as `400`.
 
+- **`429`** Too Many Requests
+
+  Same fields as `400`.
+
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
 
   Same fields as `400`.
 
@@ -33364,7 +33485,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
 ## Query parameters
 
-- **`provider`** · `string` · one of `moonpay`, `stripe` · example `moonpay`
+- **`provider`** · `string` · one of `moonpay`, `stripe`, `hercle` · example `moonpay`
 
   Filter by ramp provider.
 
@@ -45597,6 +45718,7 @@ curl "https://api.solana.com/v1/payments/ramps/onramp/currency?source=USD&dest=u
 | `provider` | Narrow to one provider. |
 
 `pairs` lists the providers for each source and destination. `providerDetails` gives each provider's support for the direction: amount limits per currency, country coverage, and the entity types it accepts.
+A rail whose asset has no mint on the project's cluster is left out, since SDP refuses its quote there: devnet has no USDT, so a Sandbox project sees no `usdt.solana` pair. Its estimate lists no provider either.
 
 ## Estimating a rate
 
@@ -45814,6 +45936,7 @@ The project's environment picks the mode for every request: a Sandbox project us
 | --- | --- | --- | --- | --- | --- |
 | [MoonPay](/docs/payments/ramps-moonpay) | ✓ | ✓ | ✓ | `hosted` | Fast sandbox iteration; broad payment-method coverage (corridor-dependent). |
 | [Stripe](/docs/payments/ramps-stripe) | ✓ | ✗ | ✓ (shared credentials) | `session_widget` | Widget/session-embedded onramp UI; onramp only. |
+| [Hercle](/docs/payments/ramps-hercle) | ✓ | ✗ | ✓ (sandbox only) | `manual_instructions` | Business on-ramps by bank wire: EUR, USD and GBP into USDC and SOL (USDT on mainnet only). |
 
 Each provider's page covers its configuration and limits. The **Best for** column compares the providers this deployment offers.
 
@@ -45892,6 +46015,65 @@ A Sandbox project uses the `STRIPE_SANDBOX_*` keys, and a Production project the
 - Onramp only: an offramp quote naming Stripe returns `400 UNSUPPORTED_CORRIDOR`.
 - An onramp buys `usdc.solana` or `sol.solana` with `USD`, for individuals in the US.
 - Quotes return `deliveryMode: "session_widget"`, with `clientSecret`, `sessionId`, and `publishableKey` to mount Stripe's crypto onramp session, plus an optional `redirectUrl`.
+
+---
+
+### Hercle
+Source: https://platform.solana.com/docs/payments/ramps-hercle
+
+> Configure Hercle as an SDP ramp provider — credentials, business onboarding, wire instructions, and limits.
+
+Hercle is one of SDP's ramp providers. Its capabilities sit beside the others' in the [capability matrix](/docs/payments/ramps-providers#capability-matrix); quotes go through [Ramps](/docs/payments/ramps) with `"provider": "hercle"`.
+
+A Sandbox project uses the `HERCLE_SANDBOX_*` keys and a Production project the `HERCLE_PRODUCTION_*` keys. Hercle runs in a mode only while all three of its keys are set and fit that mode; otherwise it answers `PROVIDER_NOT_CONFIGURED`. Hercle is offered in sandbox only for now: its bank settlement is still simulated, so a production project does not see it, and a request that names it answers `403 FORBIDDEN` (`provider_not_offered`).
+
+## Configuration
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `HERCLE_SANDBOX_CLIENT_ID` | conditional | Sandbox client id (`hpk_test_…`). Every request carries it with an HMAC-SHA256 signature over the timestamp, method, path and body. A live client id is refused before any request. |
+| `HERCLE_SANDBOX_SECRET_KEY` | conditional | Sandbox signing secret for that client id. |
+| `HERCLE_SANDBOX_WEBHOOK_PUBLIC_KEY` | conditional | Hercle's ECDSA P-256 public key (SPKI PEM) for the endpoint Hercle calls at `/webhooks/payments/ramps/sandbox/hercle`. It verifies `X-Signature` over `X-Timestamp.rawBody`, and refuses a timestamp more than five minutes off. |
+| `HERCLE_PRODUCTION_CLIENT_ID` | conditional | Production client id (`hpk_live_…`). A sandbox client id is refused before any request. |
+| `HERCLE_PRODUCTION_SECRET_KEY` | conditional | Production signing secret. |
+| `HERCLE_PRODUCTION_WEBHOOK_PUBLIC_KEY` | conditional | Public key for the endpoint Hercle calls at `/webhooks/payments/ramps/production/hercle`. |
+
+## Business onboarding
+
+Hercle serves business counterparties registered in Switzerland or the EEA; an individual counterparty gets `unsupported`. Each business becomes its own Hercle account, which SDP opens and verifies on the business's behalf; every order then acts for that account. The counterparty is Hercle's customer, and the project's custody wallet is only the crypto side of the ramp.
+
+1. `GET /v1/counterparties/{counterpartyId}/requirements` answers `collect` with the registered company name, company registration number, country of registration, registered address, and the business's acceptance of Hercle's Terms & Conditions and Privacy Policy (`consent` fields, accepted with the string `"true"`, not a JSON boolean).
+2. Submitting those fields opens the Hercle account and starts its verification. The answer is `customer_verification_required` with a hosted `verificationUrl`, minted for that answer and never stored.
+3. While Hercle reviews the business the answer is `customer_verifying`, and `customer_verification_failed` if Hercle declines it. Read the requirements again to follow it: until Hercle approves the business, each read asks Hercle for its current verdict, records it, and never starts anything. If a submission opened the account but stopped before its verification started, the read answers `collect` again, and the next submission starts it.
+4. The answer is `ready` once Hercle reports the business `approved`, the verdict under which Hercle accepts its orders. A quote reads the verdict SDP recorded and does not ask Hercle: until a requirements read or submission has answered `ready`, a quote is refused with `409 CONFLICT` before Hercle is called.
+
+SDP keeps the verdict it recorded, and a read for an approved business answers `ready` without asking Hercle. The verdict changes when Hercle's `customer.verification.status_changed` webhook reports a new one, or when Hercle refuses a quote: `ACCOUNT_SUSPENDED` records the business as suspended, and a refusal for want of verification makes SDP read the verdict again. An older event never overwrites a newer verdict.
+
+A read or submission answers with the status SDP keeps, the one a quote reads. If a newer event lands while it asks Hercle, it answers with that event's verdict instead. When that verdict asks the business to act, SDP holds no link for it yet, so the request answers `503 PROVIDER_UNAVAILABLE`; read again to get the link.
+
+A suspended business answers `unsupported`, and each read asks Hercle whether the suspension still holds. Once Hercle lifts it, the read records the verdict again, and an approved business answers `ready`.
+
+The registered company name is the name Hercle's bank expects on the wire, so give the legal name, not the counterparty's display name. Once Hercle has opened the account, a later submission never changes its details. SDP keys the account and its verification on the counterparty, so a retried submission resumes them instead of opening a second account.
+
+Submissions are metered per caller and per organization, because each one can make up to three Hercle calls on a partner credential every project shares. Reads are metered too, on a quota of their own sized for polling every 10 seconds, because a read for a business Hercle has not approved asks Hercle. Past either limit, the request answers `429 RATE_LIMITED` before Hercle is called.
+
+SDP stores the Hercle account id and its verification status, never the collected details.
+
+## Quotes and settlement
+
+Hercle is on-ramp only: EUR, USD and GBP into `usdc.solana`, `usdt.solana` and `sol.solana`. A Sandbox project runs on devnet, which has no USDT, so it is never offered `usdt.solana`: the currency listing and estimates leave it out, and a quote for it is refused with `400 BAD_REQUEST` before Hercle is called. While Hercle is offered in sandbox only, that leaves `usdc.solana` and `sol.solana`.
+
+A quote is a Hercle order with `deliveryMode: "manual_instructions"`. Its `fiat_funding` instruction names the business's own account at Hercle's bank, the payment reference the wire must carry, and `payerAccountHolder`, the business itself. The bank returns a wire from any other account, and the order fails. `expiresAt` is when the order's funding window closes. An order without the account, the reference or the payer answers `502 PROVIDER_RESPONSE_INVALID`, since nobody could fund it.
+
+Every quote opens its own Hercle order, keyed on the transfer SDP creates for it, so a quote sent twice opens two orders. Fund only the order whose instructions you show; an order nobody funds expires.
+
+Hercle's refusals of the business answer `409 CONFLICT`: not verified, suspended, or its bank account still opening. A currency pair Hercle does not offer answers `400 BAD_REQUEST`.
+
+Hercle reports the order's progress by webhook, and SDP also asks Hercle for the order when a webhook is missed. A settled order names the transaction that delivered the crypto and moves the transfer to `settling`. It completes once SDP finds that delivery on chain. When Hercle fails or expires the order, the transfer's `error` gives the reason, such as a wire from another account or a funding window that closed before the wire arrived.
+
+In a Sandbox project, `POST /v1/payments/ramps/sandbox/simulate` has Hercle settle the order as its bank would, from the moment it is quoted, and answers `204`. The transfer then moves through the same webhook and status pull as a real wire.
+
+Hercle sends the order's devnet crypto when it settles the simulation, so SDP simulates a transfer once. A second request answers `409 CONFLICT`, including one sent at the same time. Only a simulation Hercle refused outright can be sent again: after any other failure Hercle may still have sent the crypto, so quote again if the transfer never settles. Simulations are metered per caller and per organization, like quotes, and answer `429 RATE_LIMITED` past the limit.
 
 ---
 

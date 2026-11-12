@@ -170,6 +170,127 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       })
     ).toEqual([]);
   });
+
+  describe("customer link status order", () => {
+    const at = (seconds: number) => new Date(Date.UTC(2026, 10, 4, 12, 0, seconds)).toISOString();
+
+    async function linkHercle(externalId: string, reference: string) {
+      const counterparty = await seedCounterparty(externalId);
+      const scope = {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "hercle" as const,
+      };
+      await repository.upsertProviderAccount({ ...scope, providerCustomerReference: reference });
+      const record = (
+        providerStatus: string | null,
+        observedAt: string,
+        winsTie = true,
+        preserves: string[] = []
+      ) =>
+        repository.recordCustomerLinkStatus({
+          ...scope,
+          observation: { providerStatus, observedAt, winsTie, preserves },
+        });
+      const read = async () => (await repository.getProviderAccount(scope))?.provider_status;
+      return { counterparty, scope, record, read };
+    }
+
+    it("keeps the newest report and refuses an older one", async () => {
+      const link = await linkHercle("cpacc_order_newest", "acct_order_newest");
+
+      expect(await link.record("pending", at(10))).toBe("recorded");
+      expect(await link.record("approved", at(20))).toBe("recorded");
+      expect(await link.record("pending", at(15))).toBe("stale");
+
+      expect(await link.read()).toBe("approved");
+      expect((await repository.getProviderAccount(link.scope))?.provider_status_observed_at).toBe(
+        at(20)
+      );
+    });
+
+    it("settles a same-instant tie on the report that wins it", async () => {
+      const link = await linkHercle("cpacc_order_tie", "acct_order_tie");
+      await link.record("approved", at(10), false);
+
+      expect(await link.record("approved", at(10), false)).toBe("stale");
+      expect(await link.record("rejected", at(10), true)).toBe("recorded");
+      // A duplicate of the stored report changes nothing.
+      expect(await link.record("rejected", at(10), true)).toBe("stale");
+      expect(await link.record("approved", at(10), false)).toBe("stale");
+      expect(await link.read()).toBe("rejected");
+    });
+
+    it("leaves a status the report preserves, however new the report", async () => {
+      const link = await linkHercle("cpacc_order_preserve", "acct_order_preserve");
+      await link.record("suspended", at(10));
+
+      expect(await link.record("approved", at(50), false, ["suspended"])).toBe("stale");
+      expect(await link.record(null, at(50), true, ["suspended"])).toBe("stale");
+      expect(await link.record("approved", at(50), false)).toBe("recorded");
+      expect(await link.read()).toBe("approved");
+    });
+
+    it("answers missing for a link that is not active in scope", async () => {
+      const link = await linkHercle("cpacc_order_missing", "acct_order_missing");
+      await getDb(env)
+        .prepare(
+          "UPDATE counterparty_provider_accounts SET status = 'archived' WHERE counterparty_id = ?"
+        )
+        .bind(link.counterparty.id)
+        .run();
+
+      expect(await link.record("approved", at(10))).toBe("missing");
+      expect(
+        await repository.recordCustomerLinkStatus({
+          ...link.scope,
+          organizationId: "org_not_owned",
+          observation: {
+            providerStatus: "approved",
+            observedAt: at(10),
+            winsTie: true,
+            preserves: [],
+          },
+        })
+      ).toBe("missing");
+    });
+
+    it("finds the one active link a provider reference names, with its project's environment", async () => {
+      const link = await linkHercle("cpacc_order_find", "acct_order_find");
+
+      expect(
+        await repository.findCustomerLinkByProviderReference({
+          provider: "hercle",
+          providerCustomerReference: "acct_order_find",
+        })
+      ).toEqual({
+        link: expect.objectContaining({
+          counterparty_id: link.counterparty.id,
+          organization_id: TEST_ORG.id,
+          project_id: TEST_PROJECT_ID,
+        }),
+        environment: "sandbox",
+      });
+      expect(
+        await repository.findCustomerLinkByProviderReference({
+          provider: "moonpay",
+          providerCustomerReference: "acct_order_find",
+        })
+      ).toBeNull();
+
+      await getDb(env)
+        .prepare("UPDATE counterparties SET status = 'archived' WHERE id = ?")
+        .bind(link.counterparty.id)
+        .run();
+      expect(
+        await repository.findCustomerLinkByProviderReference({
+          provider: "hercle",
+          providerCustomerReference: "acct_order_find",
+        })
+      ).toBeNull();
+    });
+  });
 });
 
 describe("counterpartyProviderAccountUuid", () => {

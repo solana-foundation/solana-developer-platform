@@ -245,10 +245,18 @@ If the failed event reports a deposit hash, the row moves to `settling`, holds
 the reported hash in `provider_data` and its reference, leaves any SDP-signed
 deposit signature untouched, and withdraws the instruction for review.
 
+## Ramps: customer link status order
+
+A provider that onboards the customer itself (Hercle) keeps its verdict in the customer link's `provider_status`, which the quote gate reads.
+- **The newest report wins.** `recordCustomerLinkStatus` writes only a report newer than `provider_status_observed_at` (migration 0211), compared in the same UPDATE, so a webhook applied late or replayed from the inbox never undoes a newer one. A report's time is the provider's event time or when SDP sent the read that returned it.
+- **Ties fail closed.** At the same instant, only a report that `winsTie` replaces the stored one; the provider's mapping gives that to every status that holds quotes back, never to the one that lets them run.
+- **A report leaves what it cannot see.** `preserves` names stored statuses it may not replace: a Hercle verdict never lifts `suspended`, which only Hercle's account read or an order refusal shows.
+- **Webhooks resolve the tenant from the link.** `findCustomerLinkByProviderReference` is a system read for provider webhooks; it answers only when exactly one active link of an active counterparty names the reference (unique per migration 0091), and the caller checks the project's environment against the endpoint's.
+
 ## Ramps: retired provider ids
 
-A removed ramp provider's id moves from `RAMP_PROVIDERS` to
-`RETIRED_RAMP_PROVIDERS` (`@sdp/types/provider-access`) and is never reused.
+A removed ramp provider's id moves from `RAMP_PROVIDERS` to `RETIRED_RAMP_PROVIDERS` (`@sdp/types/provider-access`) and is never reused for another provider.
+It returns to `RAMP_PROVIDERS` only when the provider it named comes back, as Hercle did; its historical rows then read as live ones.
 - **Reads parse, writes stay live.** `mapTransferRow`, the provider-account row
   schema and the `ramp_webhook_events` row parse `provider` against
   `PERSISTED_RAMP_PROVIDERS`, so a retired provider's rows still read; an id

@@ -53,4 +53,5 @@ export const {
   earn,
   rampProviderMoonpay,
   rampProviderStripe,
+  rampProviderHercle,
 } = flags;

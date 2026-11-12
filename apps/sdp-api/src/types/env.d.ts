@@ -268,6 +268,12 @@ export interface Env extends ManagedRpcEnv {
   STRIPE_PRODUCTION_PUBLISHABLE_KEY?: string;
   STRIPE_PRODUCTION_SECRET_KEY?: string;
   STRIPE_PRODUCTION_WEBHOOK_SECRET?: string;
+  HERCLE_SANDBOX_CLIENT_ID?: string;
+  HERCLE_SANDBOX_SECRET_KEY?: string;
+  HERCLE_SANDBOX_WEBHOOK_PUBLIC_KEY?: string;
+  HERCLE_PRODUCTION_CLIENT_ID?: string;
+  HERCLE_PRODUCTION_SECRET_KEY?: string;
+  HERCLE_PRODUCTION_WEBHOOK_PUBLIC_KEY?: string;
 
   // Optional Hastra PRIME -> wYLDS -> Jupiter -> USDC exit. Off by default;
   // Hastra's operator-settled par redemption remains available independently.

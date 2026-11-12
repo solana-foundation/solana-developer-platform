@@ -8,6 +8,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import * as THREE from "three";
 import { feature } from "topojson-client/dist/topojson-client.js";
@@ -186,12 +187,17 @@ export const LAND: readonly LandLine[] = ${JSON.stringify(lines)};
 `;
 }
 
+// Run the root's biome through node: `pnpm` is a .cmd shim on Windows, which execFileSync cannot spawn.
+const biomeCli = createRequire(path.join(repositoryRoot, "package.json")).resolve(
+  "@biomejs/biome/bin/biome"
+);
+
 function format(text) {
-  return execFileSync(
-    "pnpm",
-    ["--dir", repositoryRoot, "exec", "biome", "format", `--stdin-file-path=${outputPath}`],
-    { input: text, encoding: "utf8" }
-  );
+  return execFileSync(process.execPath, [biomeCli, "format", `--stdin-file-path=${outputPath}`], {
+    cwd: repositoryRoot,
+    input: text,
+    encoding: "utf8",
+  });
 }
 
 const expected = format(source(coasts()));

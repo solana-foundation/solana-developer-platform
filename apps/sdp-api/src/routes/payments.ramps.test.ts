@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import { z } from "zod";
 import { createApp } from "@/app";
 import { getDb } from "@/db/client";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import { app } from "@/index";
 import { errorResponseSchema } from "@/openapi/schemas/base";
 import * as tokenLabels from "@/routes/payments/token-labels";
@@ -21,6 +22,8 @@ import {
   tokenAccountsByOwnerResult,
 } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
+import { installHercleTestEnv } from "@/test/helpers/hercle-env";
+import { seedHercleLink } from "@/test/helpers/hercle-links";
 import { stubOfframpQuoteReads } from "@/test/helpers/offramp-quote";
 import {
   installPaymentsRouteTestHooks,
@@ -53,6 +56,60 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
     await importOriginal<typeof import("@sdp/types/release-channels")>(),
     RAMP_PROVIDERS
   );
+});
+
+/** The fields the Hercle quote tests read from an on-ramp quote's answer. */
+const quotedTransferSchema = z.object({
+  data: z.object({
+    transferId: z.string(),
+    quote: z.object({
+      id: z.string(),
+      deliveryMode: z.string(),
+      paymentInstructions: z.array(z.unknown()),
+    }),
+  }),
+});
+
+const onrampEstimatesSchema = z.object({ data: z.object({ estimates: z.array(z.unknown()) }) });
+
+const rampCurrencySupportData = z.object({
+  currencies: z.object({ sources: z.array(z.string()), destinations: z.array(z.string()) }),
+  pairs: z.array(
+    z.object({ source: z.string(), dest: z.string(), providers: z.array(z.string()) })
+  ),
+});
+
+const rampCurrencySupportSchema = z.object({ data: rampCurrencySupportData });
+
+const hashedRampCurrencySupportSchema = z.object({
+  data: rampCurrencySupportData.extend({ supportHash: z.string() }),
+});
+
+const hostedQuoteSchema = z.object({
+  data: z.object({
+    transferId: z.string(),
+    quote: z.object({
+      id: z.string(),
+      provider: z.string(),
+      status: z.string(),
+      deliveryMode: z.string(),
+      hostedUrl: z.string(),
+    }),
+  }),
+});
+
+const memoTransferSchema = z.object({
+  data: z.object({
+    transfer: z.object({
+      id: z.string(),
+      providerReference: z.string().optional(),
+      rampsMemo: z.record(z.string(), z.string()),
+    }),
+  }),
+});
+
+const canceledTransferSchema = z.object({
+  data: z.object({ transfer: z.object({ id: z.string(), status: z.string() }) }),
 });
 
 const TEST_CONNECTION_WALLET_ID = "privy_payments_connection_wallet";
@@ -164,7 +221,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: { message: string } };
+    const body = errorResponseSchema.parse(await response.json());
     expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
   });
 
@@ -186,7 +243,7 @@ describe("Payments routes — ramps", () => {
       );
 
       expect(response.status).toBe(403);
-      const body = (await response.json()) as { error: { code: string } };
+      const body = errorResponseSchema.parse(await response.json());
       expect(body.error.code).toBe("INSUFFICIENT_PERMISSIONS");
     }
   });
@@ -210,7 +267,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: { message: string } };
+    const body = errorResponseSchema.parse(await response.json());
     expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
   });
 
@@ -233,7 +290,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: { message: string } };
+    const body = errorResponseSchema.parse(await response.json());
     expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
   });
 
@@ -259,7 +316,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: { message: string } };
+    const body = errorResponseSchema.parse(await response.json());
     expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
   });
 
@@ -289,7 +346,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: { message: string } };
+    const body = errorResponseSchema.parse(await response.json());
     expect(body.error.message).toContain('Unrecognized key: "destinationWallet"');
   });
   it("rejects a provider walletId value passed as destinationCustodyWalletId", async () => {
@@ -585,13 +642,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: {
-        currencies: { sources: string[]; destinations: string[] };
-        pairs: Array<{ source: string; dest: string; providers: string[] }>;
-        supportHash: string;
-      };
-    };
+    const body = hashedRampCurrencySupportSchema.parse(await res.json());
 
     expect(body.data.currencies.sources).toContain("USD");
     expect(body.data.currencies.destinations).toContain("usdc.solana");
@@ -615,12 +666,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: {
-        currencies: { sources: string[]; destinations: string[] };
-        pairs: Array<{ source: string; dest: string; providers: string[] }>;
-      };
-    };
+    const body = rampCurrencySupportSchema.parse(await res.json());
 
     expect(body.data.currencies.sources).toContain("usdc.solana");
     expect(body.data.currencies.destinations).toContain("USD");
@@ -656,18 +702,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: {
-        quote: {
-          id: string;
-          provider: string;
-          status: string;
-          deliveryMode: string;
-          hostedUrl: string;
-        };
-        transferId: string;
-      };
-    };
+    const body = hostedQuoteSchema.parse(await res.json());
 
     expect(body.data.quote.id).toBe(body.data.transferId);
     expect(body.data.transferId.startsWith("xfr_")).toBe(true);
@@ -698,15 +733,7 @@ describe("Payments routes — ramps", () => {
       env
     );
     expect(transfersRes.status).toBe(200);
-    const transfersBody = (await transfersRes.json()) as {
-      data: {
-        transfer: {
-          id: string;
-          providerReference?: string;
-          rampsMemo: Record<string, string>;
-        };
-      };
-    };
+    const transfersBody = memoTransferSchema.parse(await transfersRes.json());
     expect(transfersBody.data.transfer.id).toBe(body.data.transferId);
     expect(transfersBody.data.transfer.providerReference).toBeUndefined();
     expect(transfersBody.data.transfer.rampsMemo).toEqual({ invoice: "INV-123", po: "PO-9" });
@@ -743,18 +770,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      data: {
-        quote: {
-          id: string;
-          provider: string;
-          status: string;
-          deliveryMode: string;
-          hostedUrl: string;
-        };
-        transferId: string;
-      };
-    };
+    const body = hostedQuoteSchema.parse(await response.json());
     expect(body.data.quote.id).toBe(body.data.transferId);
     expect(body.data.transferId.startsWith("xfr_")).toBe(true);
 
@@ -869,7 +885,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { message: string } };
+    const body = errorResponseSchema.parse(await res.json());
     expect(body.error.message).toContain("rampsMemo must contain at most 20 key-value pairs");
   });
 
@@ -1033,7 +1049,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { data: { transfer: { id: string; status: string } } };
+    const body = canceledTransferSchema.parse(await res.json());
     expect(body.data.transfer.status).toBe("canceled");
 
     const row = await getDb(env)
@@ -1065,7 +1081,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { code: string } };
+    const body = errorResponseSchema.parse(await res.json());
     expect(body.error.code).toBe("BAD_REQUEST");
 
     const row = await getDb(env)
@@ -1261,8 +1277,8 @@ describe("Payments routes — ramps", () => {
         .run();
     }
 
-    // The public document lists no 2xx for this route: pin that every live provider refuses.
-    it.each(RAMP_PROVIDERS)(
+    // Hercle is the one provider with a simulated pay-in, and its own suite below covers it.
+    it.each(RAMP_PROVIDERS.filter((provider) => provider !== "hercle"))(
       "answers 400 for a %s on-ramp awaiting payment and leaves it unpaid",
       async (provider) => {
         const transferId = `xfr_simulate_${provider}`;
@@ -1324,7 +1340,7 @@ describe("Payments routes — ramps", () => {
       );
 
       expect(res.status).toBe(429);
-      const body = (await res.json()) as { error: { code: string } };
+      const body = errorResponseSchema.parse(await res.json());
       expect(body.error.code).toBe("RATE_LIMITED");
     });
 
@@ -1352,6 +1368,31 @@ describe("Payments routes — ramps", () => {
       );
 
       expect(res.status).toBe(429);
+    });
+
+    it("429s a simulation once the actor's metered quota is exhausted, before the transfer is read", async () => {
+      await seedRateLimit(
+        env,
+        `metered:ramp-sandbox-simulate:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`,
+        20
+      );
+
+      const res = await app.request(
+        "/v1/payments/ramps/sandbox/simulate",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ transferId: "xfr_quota_unknown" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(429);
+      const body = errorResponseSchema.parse(await res.json());
+      expect(body.error.code).toBe("RATE_LIMITED");
     });
   });
 
@@ -1393,7 +1434,7 @@ describe("Payments routes — ramps", () => {
       const res = await simulateAsClerk(TEST_PRODUCTION_PROJECT_ID, NONEXISTENT_SIMULATE_BODY);
 
       expect(res.status).toBe(403);
-      const body = (await res.json()) as { error: { message: string } };
+      const body = errorResponseSchema.parse(await res.json());
       expect(body.error.message).toContain("only available in sandbox mode");
     });
 
@@ -1403,7 +1444,7 @@ describe("Payments routes — ramps", () => {
       const res = await simulateAsClerk(TEST_PROJECT.id, NONEXISTENT_SIMULATE_BODY);
 
       expect(res.status).toBe(404);
-      const body = (await res.json()) as { error: { code: string } };
+      const body = errorResponseSchema.parse(await res.json());
       expect(body.error.code).toBe("NOT_FOUND");
     });
   });
@@ -1478,7 +1519,7 @@ describe("Payments routes — ramps", () => {
 
       const mutated = await createStripeOnrampQuote(counterpartyId, "26");
       expect(mutated.status).toBe(409);
-      const body = (await mutated.json()) as { error: { message: string } };
+      const body = errorResponseSchema.parse(await mutated.json());
       expect(body.error.message).toContain("already bound");
       fetchSpy.mockRestore();
     });
@@ -1523,9 +1564,392 @@ describe("Payments routes — ramps", () => {
       const res = await createStripeOnrampQuote(counterpartyId, "25");
 
       expect(res.status).toBe(409);
-      const body = (await res.json()) as { error: { message: string } };
+      const body = errorResponseSchema.parse(await res.json());
       expect(body.error.message).toContain("already bound");
       fetchSpy.mockRestore();
+    });
+  });
+
+  describe("Hercle business on-ramp", () => {
+    installHercleTestEnv();
+
+    const HERCLE_ORDER = {
+      orderId: "ord_route_test",
+      fiatCurrency: "EUR",
+      fiatAmount: "100.00",
+      bankAccount: {
+        iban: "CH9300762011623852957",
+        bic: "HRCLCHZZ",
+        bankName: "Route Test Bank",
+        accountHolder: "Hercle SA",
+        paymentReference: "HRC-ROUTE-TEST",
+        payerAccountHolder: "Route Test Business AG",
+      },
+      expiresAt: "2026-10-30T10:15:00Z",
+    };
+
+    async function linkHercleAccount(counterpartyId: string, providerStatus: string) {
+      await seedHercleLink(
+        { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id, counterpartyId },
+        "acct_route_test",
+        providerStatus
+      );
+    }
+
+    function readHercleLink(counterpartyId: string) {
+      return createPostgresCounterpartyProviderAccountsRepository(getDb(env)).getProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        counterpartyId,
+        provider: "hercle",
+      });
+    }
+
+    async function createHercleOnrampQuote(
+      counterpartyId: string,
+      assetRail = "usdc.solana"
+    ): Promise<Response> {
+      return app.request(
+        "/v1/payments/ramps/onramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "hercle",
+            counterpartyId,
+            destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            assetRail,
+            fiatCurrency: "EUR",
+            fiatAmount: "100",
+          }),
+        },
+        env
+      );
+    }
+
+    it("refuses a token the cluster has no mint for before Hercle opens an order", async () => {
+      const counterpartyId = await seedCounterparty({ entityType: "business" });
+      await linkHercleAccount(counterpartyId, "approved");
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const res = await createHercleOnrampQuote(counterpartyId, "usdt.solana");
+
+      expect(res.status).toBe(400);
+      expect(errorResponseSchema.parse(await res.json()).error.message).toContain(
+        "USDT is not available"
+      );
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("estimates no token the cluster has no mint for, and asks Hercle nothing", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const res = await app.request(
+        "/v1/payments/ramps/onramp/estimate",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            assetRail: "usdt.solana",
+            fiatCurrency: "EUR",
+            fiatAmount: "100",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(onrampEstimatesSchema.parse(await res.json()).data).toEqual({ estimates: [] });
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    async function simulateHercleTransfer(transferId: string): Promise<Response> {
+      return app.request(
+        "/v1/payments/ramps/sandbox/simulate",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ transferId }),
+        },
+        env
+      );
+    }
+
+    async function quoteHercleOrder(requests: Request[]): Promise<string> {
+      const counterpartyId = await seedCounterparty({ entityType: "business" });
+      await linkHercleAccount(counterpartyId, "approved");
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        requests.push(new Request(String(input), init));
+        const body = requests.length === 1 ? HERCLE_ORDER : { orderId: "ord_route_test" };
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+      const quoted = await createHercleOnrampQuote(counterpartyId);
+      expect(quoted.status).toBe(200);
+      return quotedTransferSchema.parse(await quoted.json()).data.transferId;
+    }
+
+    it("asks Hercle to settle a sandbox order as soon as it is quoted", async () => {
+      const requests: Request[] = [];
+      const transferId = await quoteHercleOrder(requests);
+      const quotedRow = await getDb(env)
+        .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+        .bind(transferId)
+        .first<{ status: string }>();
+      // Hercle reports no "awaiting payment" moment, so the transfer is still the quote's `pending`.
+      expect(quotedRow?.status).toBe("pending");
+
+      const res = await simulateHercleTransfer(transferId);
+
+      expect(res.status).toBe(204);
+      expect(requests[1]?.url).toBe(
+        "https://publicapi.sandbox.hercle.financial/partner/v1/orders/ord_route_test/simulate-settlement"
+      );
+      expect(await requests[1]?.json()).toEqual({ status: "settled" });
+    });
+
+    it("refuses to simulate an order whose money is already moving", async () => {
+      const requests: Request[] = [];
+      const transferId = await quoteHercleOrder(requests);
+      await getDb(env)
+        .prepare("UPDATE payment_transfers SET status = 'settling' WHERE id = ?")
+        .bind(transferId)
+        .run();
+
+      const res = await simulateHercleTransfer(transferId);
+
+      expect(res.status).toBe(409);
+      expect(requests).toHaveLength(1);
+    });
+
+    /** Answers every later Hercle call with `status` and `body`, recording it in `requests`. */
+    function answerHercle(requests: Request[], status: number, body: Record<string, unknown>) {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        requests.push(new Request(String(input), init));
+        return new Response(JSON.stringify(body), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+    }
+
+    it("simulates a transfer's pay-in once, refusing a second request before Hercle", async () => {
+      const requests: Request[] = [];
+      const transferId = await quoteHercleOrder(requests);
+
+      const first = await simulateHercleTransfer(transferId);
+      const second = await simulateHercleTransfer(transferId);
+
+      expect(first.status).toBe(204);
+      expect(second.status).toBe(409);
+      expect(errorResponseSchema.parse(await second.json()).error.message).toContain(
+        "already simulated"
+      );
+      expect(requests).toHaveLength(2);
+    });
+
+    it("lets one of two concurrent requests reach Hercle", async () => {
+      const requests: Request[] = [];
+      const transferId = await quoteHercleOrder(requests);
+
+      const statuses = await Promise.all([
+        simulateHercleTransfer(transferId),
+        simulateHercleTransfer(transferId),
+      ]).then((responses) => responses.map((response) => response.status).sort());
+
+      expect(statuses).toEqual([204, 409]);
+      expect(
+        requests.filter((request) => request.url.endsWith("/simulate-settlement"))
+      ).toHaveLength(1);
+    });
+
+    it("lets a simulation Hercle refused outright run again", async () => {
+      const requests: Request[] = [];
+      const transferId = await quoteHercleOrder(requests);
+      answerHercle(requests, 404, { code: "ORDER_NOT_FOUND", message: "Order not found" });
+
+      const refused = await simulateHercleTransfer(transferId);
+      const retried = await simulateHercleTransfer(transferId);
+
+      expect(refused.status).toBe(400);
+      expect(retried.status).toBe(400);
+      expect(
+        requests.filter((request) => request.url.endsWith("/simulate-settlement"))
+      ).toHaveLength(2);
+    });
+
+    it("keeps the claim when Hercle's failure leaves the delivery unknown", async () => {
+      const requests: Request[] = [];
+      const transferId = await quoteHercleOrder(requests);
+      answerHercle(requests, 502, { code: "DELIVERY_FAILED", message: "retry the settlement" });
+
+      const failed = await simulateHercleTransfer(transferId);
+      const retried = await simulateHercleTransfer(transferId);
+
+      expect(failed.status).toBe(503);
+      expect(retried.status).toBe(409);
+      expect(
+        requests.filter((request) => request.url.endsWith("/simulate-settlement"))
+      ).toHaveLength(1);
+    });
+
+    it("refuses a business with no Hercle account before calling Hercle", async () => {
+      const counterpartyId = await seedCounterparty({ entityType: "business" });
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const res = await createHercleOnrampQuote(counterpartyId);
+
+      expect(res.status).toBe(409);
+      expect(errorResponseSchema.parse(await res.json()).error.message).toContain(
+        "not provisioned for hercle onramp"
+      );
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    function hercleRefusesOrders(replies: readonly { status: number; body: unknown }[]) {
+      const requests: Request[] = [];
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        requests.push(new Request(String(input), init));
+        const reply = replies[requests.length - 1];
+        if (reply === undefined) {
+          throw new Error(`Unexpected Hercle call ${String(input)}`);
+        }
+        return new Response(JSON.stringify(reply.body), {
+          status: reply.status,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+      return requests;
+    }
+
+    it("records a suspension Hercle refuses an order for, and quotes no more", async () => {
+      const counterpartyId = await seedCounterparty({ entityType: "business" });
+      await linkHercleAccount(counterpartyId, "approved");
+      const requests = hercleRefusesOrders([
+        { status: 403, body: { code: "ACCOUNT_SUSPENDED", message: "suspended" } },
+      ]);
+
+      const refused = await createHercleOnrampQuote(counterpartyId);
+
+      expect(refused.status).toBe(409);
+      expect(errorResponseSchema.parse(await refused.json()).error.message).toBe(
+        "Hercle has suspended the business's account."
+      );
+      expect(requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+        "POST https://publicapi.sandbox.hercle.financial/partner/v1/orders/onramp",
+      ]);
+      expect((await readHercleLink(counterpartyId))?.provider_status).toBe("suspended");
+
+      const again = await createHercleOnrampQuote(counterpartyId);
+
+      expect(again.status).toBe(409);
+      expect(errorResponseSchema.parse(await again.json()).error.message).toContain(
+        "not provisioned for hercle onramp"
+      );
+      expect(requests).toHaveLength(1);
+    });
+
+    it("reads the verdict again when Hercle refuses an order for want of verification", async () => {
+      const counterpartyId = await seedCounterparty({ entityType: "business" });
+      await linkHercleAccount(counterpartyId, "approved");
+      const requests = hercleRefusesOrders([
+        { status: 403, body: { code: "ACCOUNT_NOT_VERIFIED", message: "not verified" } },
+        { status: 200, body: { status: "rejected" } },
+      ]);
+
+      const refused = await createHercleOnrampQuote(counterpartyId);
+
+      expect(refused.status).toBe(409);
+      expect(requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+        "POST https://publicapi.sandbox.hercle.financial/partner/v1/orders/onramp",
+        "GET https://publicapi.sandbox.hercle.financial/partner/v1/accounts/acct_route_test/verification",
+      ]);
+      expect((await readHercleLink(counterpartyId))?.provider_status).toBe("rejected");
+
+      const again = await createHercleOnrampQuote(counterpartyId);
+
+      expect(again.status).toBe(409);
+      expect(requests).toHaveLength(2);
+    });
+
+    it("keeps the link when Hercle refuses an order for a reason that is not the business's standing", async () => {
+      const counterpartyId = await seedCounterparty({ entityType: "business" });
+      await linkHercleAccount(counterpartyId, "approved");
+      const requests = hercleRefusesOrders([
+        { status: 409, body: { code: "BANK_ACCOUNT_NOT_PROVISIONED", message: "opening" } },
+      ]);
+
+      const refused = await createHercleOnrampQuote(counterpartyId);
+
+      expect(refused.status).toBe(409);
+      expect(requests).toHaveLength(1);
+      expect((await readHercleLink(counterpartyId))?.provider_status).toBe("approved");
+    });
+
+    it("refuses a business Hercle has not approved before calling Hercle", async () => {
+      const counterpartyId = await seedCounterparty({ entityType: "business" });
+      await linkHercleAccount(counterpartyId, "pending");
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const res = await createHercleOnrampQuote(counterpartyId);
+
+      expect(res.status).toBe(409);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("opens the order for the approved business and stores the transfer under its id", async () => {
+      const counterpartyId = await seedCounterparty({ entityType: "business" });
+      await linkHercleAccount(counterpartyId, "approved");
+      const requests: Request[] = [];
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        requests.push(new Request(String(input), init));
+        return new Response(JSON.stringify(HERCLE_ORDER), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+
+      const res = await createHercleOnrampQuote(counterpartyId);
+
+      expect(res.status).toBe(200);
+      const { quote, transferId } = quotedTransferSchema.parse(await res.json()).data;
+      expect(quote).toMatchObject({ id: "ord_route_test", deliveryMode: "manual_instructions" });
+      expect(quote.paymentInstructions).toEqual([
+        expect.objectContaining({
+          provider: "hercle",
+          kind: "fiat_funding",
+          bankAccount: expect.objectContaining({ paymentReference: "HRC-ROUTE-TEST" }),
+        }),
+      ]);
+      const [order] = requests;
+      expect(order?.url).toBe(
+        "https://publicapi.sandbox.hercle.financial/partner/v1/orders/onramp"
+      );
+      expect(order?.headers.get("on-behalf-of")).toBe("acct_route_test");
+      expect(order?.headers.get("Idempotency-Key")).toBe(`sdp-onramp-${transferId}`);
+      const row = await getDb(env)
+        .prepare(
+          "SELECT provider, provider_reference, delivery_mode, status FROM payment_transfers WHERE id = ?"
+        )
+        .bind(transferId)
+        .first<Record<string, unknown>>();
+      expect(row).toEqual({
+        provider: "hercle",
+        provider_reference: "ord_route_test",
+        delivery_mode: "manual_instructions",
+        status: "pending",
+      });
     });
   });
 });

@@ -1022,7 +1022,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "List on-ramp currency support",
     operationId: "listPaymentOnrampCurrencies",
     description:
-      "Lists generated fiat-to-crypto on-ramp pairs and the providers that support each pair. Supports optional source, destination rail, and provider filters.",
+      "Lists generated fiat-to-crypto on-ramp pairs and the providers that support each pair. Supports optional source, destination rail, and provider filters. A rail whose asset has no mint on the project's cluster is left out, since SDP refuses its quote there (devnet has no USDT).",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -1045,7 +1045,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "List off-ramp currency support",
     operationId: "listPaymentOfframpCurrencies",
     description:
-      "Lists generated crypto-to-fiat off-ramp pairs and the providers that support each pair. Supports optional source rail, destination fiat, and provider filters.",
+      "Lists generated crypto-to-fiat off-ramp pairs and the providers that support each pair. Supports optional source rail, destination fiat, and provider filters. A rail whose asset has no mint on the project's cluster is left out, since SDP refuses its quote there.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -1068,7 +1068,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create on-ramp quote",
     operationId: "createPaymentOnrampQuote",
     description:
-      "Creates an on-ramp quote with the provider you name, and the transfer that follows it. `quote.deliveryMode` says how to hand the customer to the provider: `hosted` returns a provider-hosted URL, and `session_widget` a provider session to mount.",
+      "Creates an on-ramp quote with the provider you name, and the transfer that follows it. `quote.deliveryMode` says how to hand the customer to the provider: `hosted` returns a provider-hosted URL, `manual_instructions` funding instructions to show, and `session_widget` a provider session to mount.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -1093,8 +1093,10 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Simulate sandbox transfer",
     operationId: "simulateSandboxTransfer",
     description:
-      "Sandbox-only, and unavailable for every ramp provider SDP integrates: none offers a simulated pay-in, so a transfer that passes the checks below gets `400`. To complete a sandbox on-ramp, pay in the provider's own hosted page or session with its test payment details.\n\n" +
-      "After the action check (`403`) and body validation (`400`), the checks run in order: a project outside Sandbox gets `403`, an unknown transfer `404`, a transfer that isn't an on-ramp `400`, one that isn't `awaiting_payment` `409`, and one whose provider the project can't use `403` or `503`.",
+      "Sandbox-only. Simulates the fiat pay-in for an on-ramp transfer that still awaits it, when its provider offers a simulated pay-in. With any other provider, pay in the provider's own hosted page or session with its test payment details.\n\n" +
+      "After the action check (`403`) and body validation (`400`), the checks run in order: a project outside Sandbox gets `403`, an unknown transfer `404`, a transfer that isn't an on-ramp `400`, one no longer awaiting its pay-in (`pending` or `awaiting_payment`) `409`, one whose provider the project can't use `403` or `503`, and one whose provider offers no simulated pay-in `400`.\n\n" +
+      "A simulation asks the provider, so it is metered per caller and per organization, like a quote: past the limit, the request answers `429 RATE_LIMITED` after body validation and before the transfer is read.\n\n" +
+      "Each transfer is simulated at most once: a later request, or one sent at the same time, answers `409`. Only a simulation the provider refused outright can be sent again. After any other failure the provider may still have delivered the crypto, so quote again if the transfer never settles.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -1104,10 +1106,11 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       },
     },
     responses: {
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 409, 500, 503]),
+      204: { description: "Sandbox pay-in requested from the provider" },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 409, 429, 500, 503]),
       400: {
         description:
-          "An invalid body, a transfer that isn't an on-ramp, or one that passes every check: no ramp provider SDP integrates offers a simulated pay-in.",
+          "An invalid body, a transfer that isn't an on-ramp, or one whose provider offers no simulated pay-in.",
         content: jsonContent(errorResponseSchema),
       },
     },

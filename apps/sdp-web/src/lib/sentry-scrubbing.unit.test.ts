@@ -49,9 +49,11 @@ describe("Sentry initialization", () => {
       )
       .filter((filePath) => readFileSync(filePath, "utf8").includes("Sentry.init("));
 
-    expect(initFiles.map((filePath) => path.relative(APP_ROOT, filePath)).sort()).toEqual(
-      [...SENTRY_INIT_FILES].sort()
+    // Posix-separated, to compare against SENTRY_INIT_FILES on every platform.
+    const initPaths = initFiles.map((filePath) =>
+      path.relative(APP_ROOT, filePath).split(path.sep).join("/")
     );
+    expect(initPaths.sort()).toEqual([...SENTRY_INIT_FILES].sort());
   });
 });
 

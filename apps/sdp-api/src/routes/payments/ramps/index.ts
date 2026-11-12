@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { meteredQuota } from "@/middleware/metered-quota";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
@@ -21,5 +22,6 @@ ramps.post(
   "/sandbox/simulate",
   requireAction("ramp_transfers.manage"),
   validateBody(simulateSandboxTransferSchema),
+  meteredQuota({ name: "ramp-sandbox-simulate", actorMax: 20, orgMax: 60 }),
   simulateSandboxTransfer
 );

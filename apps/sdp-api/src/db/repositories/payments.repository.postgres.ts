@@ -1,5 +1,6 @@
 import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import {
+  AWAITING_PAY_IN_RAMP_TRANSFER_STATUSES,
   type PaymentTransferStatus,
   PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES,
   RAMP_DELIVERY_RETRYABLE_MISMATCH_REASONS,
@@ -1328,6 +1329,59 @@ export function createPostgresPaymentsRepository(
           input.now,
           ...scope.values
         )
+        .first<PaymentTransferProjectionRow>();
+      return row ? mapTransferRow(row) : null;
+    },
+
+    async claimRampSandboxSettlement(input) {
+      assertScope(input);
+      const scope = buildTransferScopeWhere({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+        extraClauses: [
+          "id = ?",
+          "type = 'onramp'",
+          "status = ANY(?)",
+          "provider_reference = ?",
+          "provider_data->>'sandboxSettlementRequestedAt' IS NULL",
+        ],
+        extraValues: [
+          input.transferId,
+          [...AWAITING_PAY_IN_RAMP_TRANSFER_STATUSES],
+          input.providerReference,
+        ],
+      });
+      const row = await db
+        .prepare(`WITH pt AS (
+        UPDATE payment_transfers SET provider_data = provider_data || ?::jsonb, updated_at = ?
+        WHERE ${scope.where} RETURNING *
+      ) SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`)
+        .bind(
+          JSON.stringify({ sandboxSettlementRequestedAt: input.requestedAt }),
+          input.requestedAt,
+          ...scope.values
+        )
+        .first<PaymentTransferProjectionRow>();
+      return row ? mapTransferRow(row) : null;
+    },
+
+    async releaseRampSandboxSettlement(input) {
+      assertScope(input);
+      const scope = buildTransferScopeWhere({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+        extraClauses: ["id = ?", "provider_data->>'sandboxSettlementRequestedAt' = ?"],
+        extraValues: [input.transferId, input.requestedAt],
+      });
+      const row = await db
+        .prepare(`WITH pt AS (
+        UPDATE payment_transfers
+        SET provider_data = provider_data - 'sandboxSettlementRequestedAt', updated_at = ?
+        WHERE ${scope.where} RETURNING *
+      ) SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`)
+        .bind(input.updatedAt, ...scope.values)
         .first<PaymentTransferProjectionRow>();
       return row ? mapTransferRow(row) : null;
     },

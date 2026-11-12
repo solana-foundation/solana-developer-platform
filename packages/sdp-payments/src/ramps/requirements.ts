@@ -107,6 +107,16 @@ export function dateField(args: {
   return { kind: "date", ...args };
 }
 
+export function consentField(args: {
+  key: string;
+  label: string;
+  required: boolean;
+  documentUrl: string;
+  documentLabel?: string;
+}): RequirementField {
+  return { kind: "consent", ...args };
+}
+
 export function fieldToZod(field: RequirementField): z.ZodTypeAny {
   switch (field.kind) {
     case "text": {
@@ -146,6 +156,16 @@ export function fieldToZod(field: RequirementField): z.ZodTypeAny {
           ? z.iso.date()
           : z.iso.date().refine((value) => value < before, `Must be a date before ${before}`);
       return field.required ? schema : schema.optional();
+    }
+    case "consent": {
+      // Only the affirmative literal satisfies a required consent.
+      // The web form sends an unticked optional one as "", and a headless caller may send "false" or omit it.
+      if (field.required) {
+        return z.literal("true", {
+          error: `${field.documentLabel ?? field.label} must be accepted`,
+        });
+      }
+      return z.enum(["true", "false", ""]).optional();
     }
     case "address":
       throw new Error(

@@ -1,6 +1,7 @@
 import type { CounterpartyEntityType } from "./counterparties";
 import type { RampFiatCurrency } from "./generated/ramp.generated";
 import type { RampProviderId } from "./provider-access";
+import { type SolanaCluster, wellKnownMint } from "./well-known-tokens";
 
 export const SOLANA_CRYPTO_RAILS = [
   "sol.solana",
@@ -30,6 +31,18 @@ export type CryptoAssetSymbol = (typeof CRYPTO_RAIL_ASSET_LABELS)[CryptoRailId];
 
 export function getCryptoRailAssetLabel(assetRail: CryptoRailId): CryptoAssetSymbol {
   return CRYPTO_RAIL_ASSET_LABELS[assetRail];
+}
+
+/**
+ * The mint a rail's asset has on `cluster`, or undefined where it has none (USDT on devnet).
+ * SDP records and verifies a ramp transfer by its mint, so a rail without one is not offered on that cluster.
+ * One support matrix serves both clusters, so this rule applies wherever the matrix is read.
+ */
+export function cryptoRailMint(
+  assetRail: CryptoRailId,
+  cluster: SolanaCluster
+): string | undefined {
+  return wellKnownMint(getCryptoRailAssetLabel(assetRail), cluster);
 }
 
 export interface OnrampPairSupport<FiatCurrency extends RampFiatCurrency = RampFiatCurrency> {

@@ -121,7 +121,10 @@ export type RampCredentialsResolution =
 export interface RampKeyFormat {
   readonly publicKey: RegExp;
   readonly secretKey: RegExp;
-  /** Absent for a provider that only polls and takes no webhooks. */
+  /**
+   * The key that verifies the provider's webhooks: a shared signing secret, or a public key for asymmetric signing.
+   * Absent for a provider that only polls.
+   */
   readonly webhookSecret?: RegExp;
 }
 
@@ -285,6 +288,8 @@ export interface RampOnrampQuoteInput {
   customerIpAddress?: string;
   /** Identity pre-fill for an embedded on-ramp widget (Stripe). */
   customerDetails?: RampCustomerDetails;
+  /** The link of a customer the provider onboards itself (Hercle), on which a refused order records what it shows. */
+  customerLink?: RampCustomerLinkStore;
 }
 
 export interface RampOfframpQuoteInput {
@@ -316,6 +321,88 @@ export type ValidateCounterpartyOptions =
       providerCustomerReference?: string;
       collectedData?: CollectedFieldData;
     };
+
+/**
+ * A counterparty's customer at one provider, as the core keeps it in the `customer_link` row (ADR 0008).
+ * Nothing in it is PII.
+ */
+export interface RampCustomerLink {
+  providerCustomerReference: string;
+  /** The provider's lifecycle status for the customer, verbatim; null until it reports one. */
+  providerStatus: string | null;
+}
+
+/**
+ * One report of a linked customer's status at the provider: an event the provider sent, or the answer to a read SDP made.
+ * The link keeps the newest report, so a late or replayed one never undoes a newer one.
+ */
+export interface RampCustomerStatusObservation {
+  /** The provider's status for the customer, verbatim; null while the provider holds none. */
+  providerStatus: string | null;
+  /** When the provider reported it: the event's own time, or when SDP sent the read that returned it. */
+  observedAt: string;
+  /**
+   * Whether it replaces a status observed at the same instant.
+   * A status that holds quotes back does, so a tie never lets a quote run.
+   */
+  winsTie: boolean;
+  /** Recorded statuses the report cannot see, which it leaves in place. */
+  preserves: readonly string[];
+}
+
+/** A provider's event about one of its customers, keyed on the provider's id for the customer. */
+export interface RampCustomerStatusEvent {
+  provider: RampProviderId;
+  kind: "customer_status";
+  providerCustomerReference: string;
+  observation: RampCustomerStatusObservation;
+}
+
+/**
+ * The core's store for one counterparty's customer link with one provider.
+ * A provider's requirements member keeps its state here and never touches the database.
+ */
+export interface RampCustomerLinkStore {
+  read: () => Promise<RampCustomerLink | null>;
+  /** Links the provider's customer. The first reference stored stays canonical. */
+  link: (providerCustomerReference: string) => Promise<RampCustomerLink>;
+  /**
+   * Records the provider's status for the linked customer, unless the link holds a newer report.
+   * It answers with the status the link then holds: the report's, or the newer one it kept.
+   */
+  recordStatus: (observation: RampCustomerStatusObservation) => Promise<string | null>;
+}
+
+export interface RampRequirementsInput {
+  counterparty: Counterparty;
+  direction: RampDirection;
+  customerLink: RampCustomerLinkStore;
+}
+
+export interface RampRequirementsSubmission extends RampRequirementsInput {
+  /** The fields the requirements asked for. They go to the provider and are never stored. */
+  collectedData: CollectedFieldData;
+}
+
+/**
+ * Requirements a provider settles with its own API: a business it onboards, a verification it runs.
+ * `validateCounterparty` answers what the counterparty alone shows; these members ask the provider.
+ * The quote gate reads the link they keep.
+ */
+export interface RampProviderRequirements {
+  /** What the counterparty needs now, with the provider's current verdict. */
+  describe: (
+    ctx: RampRuntimeContext,
+    input: RampRequirementsInput
+  ) => Promise<CounterpartyRequirements>;
+  /** Provisions what the collected fields allow, then answers as `describe` does. */
+  submit: (
+    ctx: RampRuntimeContext,
+    input: RampRequirementsSubmission
+  ) => Promise<CounterpartyRequirements>;
+  /** Whether a quote may run for the linked customer. A link the provider has not cleared may not. */
+  isCustomerReady: (link: RampCustomerLink) => boolean;
+}
 
 /** What the provider answered when SDP canceled the sale it holds for a canceled transfer. */
 export type RampProviderCancelOutcome = "canceled" | "not_found" | "not_cancelable";
@@ -427,6 +514,14 @@ export interface RampProvider<Event extends RampSettlementEvent = RampSettlement
     counterparty: Counterparty,
     options: ValidateCounterpartyOptions
   ) => CounterpartyRequirements;
+  /** Optional: requirements the provider settles itself, for a provider that onboards customers. */
+  requirements?: RampProviderRequirements;
+  /**
+   * Optional, sandbox only: has the provider settle the order it holds under `providerReference` as its rail would.
+   * The provider then reports it like a real one, so its webhook and status pull drive SDP's settlement.
+   * Throws in production.
+   */
+  simulateSandboxSettlement?: (ctx: RampRuntimeContext, providerReference: string) => Promise<void>;
 }
 
 /**

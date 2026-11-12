@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Before a quote, the platform asks your provider what a counterparty still needs — KYC, a payout account, or nothing at all. `validateCounterparty` answers that. It is **pure and synchronous**: it reads the counterparty + handler-resolved state and returns a `CounterpartyRequirements`. No HTTP, no DB — the actual provisioning happens later, in the advance flow.
 
-Use this skill for every provider, including providers that always return `ready`. The dashboard calls the requirements GET and POST flow before requesting a quote, so both schemas and an `advanceCounterpartyRequirements` branch must admit the provider even when there is no KYC or provisioning work to perform.
+Use this skill for every provider, including providers that always return `ready`. The dashboard calls the requirements GET and POST flow before requesting a quote, so both schemas must admit the provider even when there is no KYC or provisioning work to perform.
 
 Canonical examples live in `packages/sdp-payments/src/ramps/providers/` — before writing yours, read the existing provider whose lifecycle is closest: inline ready decisions, collected-field KYC, customer-link → payout-tree provisioning, and hosted onboarding lifecycles are all represented.
 
@@ -59,10 +59,11 @@ The full status union, discriminated on `(provider, status)`:
 | Provider | Statuses |
 |---|---|
 | every provider | `ready`, `collect(fields)`, `unsupported(reason)` |
+| `hercle` | `customer_verification_required(verificationUrl)`, `customer_verifying`, `customer_verification_failed` |
 
 The authoritative union is `CounterpartyRequirements` in `packages/sdp-types/src/ramp-requirements.ts` — re-read it before editing; this table goes stale. Extend it only when generic `ready` / `collect` / `unsupported` cannot represent the provider.
 
-`RequirementField` kinds (same module): `text`, `select`, `country`, `date`, and `address` (nested dotted-key parts). `country` is codes-only on the wire — the server never inlines a country option list; the client renders its own dropdown from `COUNTRIES` with flag labels; values are ISO 3166-1 alpha-2 both ways. Build fields with `textField`, `selectField`, `countryField`, `dateField`, and `readyCounterparty` from `packages/sdp-payments/src/ramps/requirements.ts`; don't hand-roll the shape.
+`RequirementField` kinds (same module): `text`, `select`, `country`, `date`, `consent` (acceptance of a provider document, collected as the literal `"true"`; `consentField`), and `address` (nested dotted-key parts). `country` is codes-only on the wire — the server never inlines a country option list; the client renders its own dropdown from `COUNTRIES` with flag labels; values are ISO 3166-1 alpha-2 both ways. Build fields with `textField`, `selectField`, `countryField`, `dateField`, and `readyCounterparty` from `packages/sdp-payments/src/ramps/requirements.ts`; don't hand-roll the shape.
 
 ## The decision (archetypes)
 
@@ -70,7 +71,7 @@ Simplest first — pick the closest and mirror its decision function:
 
 - Always `readyCounterparty(...)` — no KYC gating.
 - `collect` KYC fields, `ready` once the provider verifies the customer.
-- Provider-hosted onboarding (ToS/verification URLs) advanced to `ready` by webhook events.
+- Provider-hosted onboarding (ToS/verification URLs) advanced to `ready` by the provider's verdict, which `hercle` reads in `requirements.describe` and another provider may push by webhook events.
 
 ## The advance / submit flow
 
@@ -79,7 +80,7 @@ Both requirement routes must admit the provider before its client can run:
 - `GET /v1/counterparties/:counterpartyId/requirements`: update the direction-specific provider lists in `apps/sdp-api/src/routes/counterparties/schemas.ts`.
 - `POST /v1/counterparties/:counterpartyId/requirements`: add a provider arm to `submitCounterpartyRequirementsSchema` in `apps/sdp-api/src/routes/counterparties/schemas.ts`.
 
-The POST handler re-runs `validateCounterparty`, validates submitted `collectedData`, then calls `advanceCounterpartyRequirements` in `apps/sdp-api/src/routes/payments/ramps/shared.ts`, which dispatches to the DB-side `ensure*` helper. The helper's job: provider HTTP with the collected PII, then persist the *result* as a `counterparty_provider_accounts` row.
+A provider with no onboarding answers both routes from `validateCounterparty`. A provider that onboards its customers implements the optional `requirements` member (ADR 0008; `hercle` is the reference): the GET calls `requirements.describe`, and both run on a `RampCustomerLinkStore` (`apps/sdp-api/src/services/ramps/customer-link-store.ts`) that keeps the provider's customer as the counterparty's `customer_link` row. The POST calls `requirements.submit` from a provider branch in `submitCounterpartyRequirements` (`apps/sdp-api/src/routes/counterparties/handlers.ts`), because only the provider's schema arm carries `collectedData`; add both. The member validates the collected fields (`parseCollectedFields`), makes the provider calls with them, and records only the provider's customer id and its verbatim status (`provider_status`). The GET runs under a read grant (`counterparties.read`), so `describe` only reads at the provider; anything the provider must start begins in `submit`. `requirements.isCustomerReady` is the quote gate: `resolveRampQuoteRequest` refuses a quote with `counterpartyNotProvisioned` until it accepts the link. The gate reads only the stored status, so `describe` and `submit` record every verdict change with `recordStatus`.
 
 **Hard rule: collected KYC is never persisted.** `collectedData` (SSN, IBAN, CDD, tax id) flows into the provider API call only. What lands in the account row is metadata — provider references, status, corridor, rail. Raw secrets are transient.
 

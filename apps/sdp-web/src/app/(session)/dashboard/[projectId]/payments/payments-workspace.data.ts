@@ -758,6 +758,32 @@ export async function fetchCounterpartyAccounts(
   return body.data?.accounts ?? [];
 }
 
+type SandboxTransferSimulationInput = { transferId: string };
+
+export async function simulateSandboxTransfer(
+  input: SandboxTransferSimulationInput,
+  t: Translate
+): Promise<void> {
+  const response = await dashboardRequest("/api/dashboard/payments/ramps/sandbox/simulate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      getApiError(
+        await response.json().catch(() => null),
+        t("DashboardPayments.workspace.sandboxSimulationRequestFailed", {
+          status: response.status,
+        })
+      )
+    );
+  }
+}
+
 export async function runComplianceCheck(
   address: string,
   intent: ComplianceIntent

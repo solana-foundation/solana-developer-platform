@@ -98,6 +98,7 @@ export type SdpRampProviderMaturity = Record<RampProviderId, SdpReleaseChannel>;
 export const SDP_RAMP_PROVIDER_MATURITY = {
   moonpay: "experimental",
   stripe: "experimental",
+  hercle: "experimental",
 } as const satisfies SdpRampProviderMaturity;
 
 const sdpReleaseChannelSchema = z.enum(SDP_RELEASE_CHANNEL_NAMES);

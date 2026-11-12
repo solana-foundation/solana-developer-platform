@@ -381,13 +381,18 @@ describe("caller authorization goes through actions only", () => {
   } as const satisfies Record<string, string>;
   const root = path.resolve(__dirname, "..");
 
+  /** Posix-separated, so it matches the ROUTE_EXEMPTIONS keys on every platform. */
+  function relativeToRoot(file: string): string {
+    return path.relative(root, file).split(path.sep).join("/");
+  }
+
   function offendersOf(files: string[], patterns: RegExp[]): string[] {
     return files.flatMap((file) =>
       readFileSync(file, "utf8")
         .split("\n")
         .flatMap((line, index) =>
           patterns.some((pattern) => pattern.test(line))
-            ? [`${path.relative(root, file)}:${index + 1}: ${line.trim()}`]
+            ? [`${relativeToRoot(file)}:${index + 1}: ${line.trim()}`]
             : []
         )
     );
@@ -399,7 +404,7 @@ describe("caller authorization goes through actions only", () => {
 
   it("has no role or decision-function check of the caller in route code", () => {
     const files = sourceFiles(path.join(root, "routes")).filter(
-      (file) => !(path.relative(root, file) in ROUTE_EXEMPTIONS)
+      (file) => !(relativeToRoot(file) in ROUTE_EXEMPTIONS)
     );
     expect(offendersOf(files, BANNED_IN_ROUTES)).toEqual([]);
   });

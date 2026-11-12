@@ -228,6 +228,7 @@ export const PROVIDER_SETUP_REGISTRY = {
   ramps: {
     moonpay: rampSetup("moonpay"),
     stripe: rampSetup("stripe"),
+    hercle: rampSetup("hercle"),
   },
 } as const satisfies ProviderSetupRegistryShape;
 
