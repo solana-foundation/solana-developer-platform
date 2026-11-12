@@ -3,6 +3,7 @@ import { WALLET_TRANSFER_TYPES } from "@sdp/types/payments";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
+import type { MoneyPrincipal } from "@/lib/money-principal";
 import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
@@ -132,6 +133,49 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
   beforeEach(async () => {
     projects = await resetPaymentFixtures();
     repo = createPostgresPaymentsRepository(getDb(env));
+  });
+
+  it.each<MoneyPrincipal>([
+    { kind: "api_key", apiKeyId: "key_initiator" },
+    { kind: "member", userId: "user_initiator" },
+    { kind: "mandate", recurringPaymentId: "rpmt_initiator" },
+    { kind: "payment_request", paymentRequestId: "preq_initiator" },
+  ])("keeps the effective $kind identity through reads and status updates", async (principal) => {
+    const input = {
+      ...transferInput({ suffix: `principal_${principal.kind}` }),
+      // A mandate may have been created by a key; that key is not its authority.
+      initiatedByKeyId: "audit_creator",
+      initiatedByPrincipal: principal,
+    };
+    const created = await repo.createTransfer(input);
+    expect(created?.initiated_by_principal).toEqual(principal);
+    expect(created?.initiated_by_key_id).toBe("audit_creator");
+
+    await repo.updateTransfer({
+      transferId: input.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      status: "confirmed",
+      providerData: { observed: true },
+      updatedAt: new Date().toISOString(),
+    });
+    const replay = await repo.findTransferByIdempotency({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      idempotencyKey: input.idempotencyKey,
+    });
+    expect(replay?.initiated_by_principal).toEqual(principal);
+    expect(replay?.initiated_by_key_id).toBe("audit_creator");
+    expect(replay?.status).toBe("confirmed");
+  });
+
+  it("leaves unrecorded authority null without inferring from an audit identity", async () => {
+    const created = await repo.createTransfer({
+      ...transferInput({ suffix: "legacy_principal" }),
+      initiatedByKeyId: "ambiguous_key_or_user_id",
+    });
+    expect(created?.initiated_by_principal).toBeNull();
+    expect(created?.initiated_by_key_id).toBe("ambiguous_key_or_user_id");
   });
 
   it.for([

@@ -116,6 +116,10 @@ describe("Payments routes — transfer idempotency", () => {
     expect(secondJson.data.transfer.id).toBe(firstJson.data.transfer.id);
     const stored = await readTransferRow(firstJson.data.transfer.id);
     expect(stored.custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
+    expect(stored.initiated_by_principal).toEqual({
+      kind: "api_key",
+      apiKeyId: TEST_API_KEY.id,
+    });
     // The row records the key layer's fingerprint, which replayFromRecord compares.
     const keyRecord = await getDb(env)
       .prepare("SELECT fingerprint FROM idempotency_keys WHERE idempotency_key = ?")
@@ -173,7 +177,16 @@ describe("Payments routes — transfer idempotency", () => {
       auth: { kind: "api_key", raw: otherKey.raw },
     });
     expect(otherCredential.status).toBe(200);
-    expect((await readTransferResponse(otherCredential)).data.transfer.id).not.toBe(firstId);
+    const otherId = (await readTransferResponse(otherCredential)).data.transfer.id;
+    expect(otherId).not.toBe(firstId);
+    expect((await readTransferRow(firstId)).initiated_by_principal).toEqual({
+      kind: "api_key",
+      apiKeyId: TEST_API_KEY.id,
+    });
+    expect((await readTransferRow(otherId)).initiated_by_principal).toEqual({
+      kind: "api_key",
+      apiKeyId: otherKey.id,
+    });
     expect(await countTransferRows()).toBe(2);
   });
 
