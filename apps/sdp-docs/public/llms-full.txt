@@ -17274,7 +17274,7 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 
       - **`fireblocks`** · `object`
 
-        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
+        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. SDP rechecks the initiating principal on a minute schedule, prioritizing recorded access changes, and requests cancellation if access is lost before signing. Queued work and provider delays can extend recovery latency. A cancellation request remains processing until Fireblocks confirms its outcome and can race execution. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
 
         - **`transactionId`** · `string | null` · required
 
@@ -17859,7 +17859,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
     - **`fireblocks`** · `object`
 
-      Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
+      Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. SDP rechecks the initiating principal on a minute schedule, prioritizing recorded access changes, and requests cancellation if access is lost before signing. Queued work and provider delays can extend recovery latency. A cancellation request remains processing until Fireblocks confirms its outcome and can race execution. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
 
       - **`transactionId`** · `string | null` · required
 
@@ -18361,7 +18361,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`fireblocks`** · `object`
 
-        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
+        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. SDP rechecks the initiating principal on a minute schedule, prioritizing recorded access changes, and requests cancellation if access is lost before signing. Queued work and provider delays can extend recovery latency. A cancellation request remains processing until Fireblocks confirms its outcome and can race execution. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
 
         - **`transactionId`** · `string | null` · required
 
@@ -19292,7 +19292,7 @@ Create a custody-executed outbound transfer batch.
 
       - **`fireblocks`** · `object`
 
-        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
+        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. SDP rechecks the initiating principal on a minute schedule, prioritizing recorded access changes, and requests cancellation if access is lost before signing. Queued work and provider delays can extend recovery latency. A cancellation request remains processing until Fireblocks confirms its outcome and can race execution. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
 
         - **`transactionId`** · `string | null` · required
 
@@ -20243,7 +20243,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`fireblocks`** · `object`
 
-        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
+        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. SDP rechecks the initiating principal on a minute schedule, prioritizing recorded access changes, and requests cancellation if access is lost before signing. Queued work and provider delays can extend recovery latency. A cancellation request remains processing until Fireblocks confirms its outcome and can race execution. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
 
         - **`transactionId`** · `string | null` · required
 
@@ -20891,7 +20891,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`fireblocks`** · `object`
 
-        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
+        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. SDP rechecks the initiating principal on a minute schedule, prioritizing recorded access changes, and requests cancellation if access is lost before signing. Queued work and provider delays can extend recovery latency. A cancellation request remains processing until Fireblocks confirms its outcome and can race execution. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
 
         - **`transactionId`** · `string | null` · required
 
@@ -23823,7 +23823,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
       - **`fireblocks`** · `object`
 
-        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
+        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. SDP rechecks the initiating principal on a minute schedule, prioritizing recorded access changes, and requests cancellation if access is lost before signing. Queued work and provider delays can extend recovery latency. A cancellation request remains processing until Fireblocks confirms its outcome and can race execution. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
 
         - **`transactionId`** · `string | null` · required
 
@@ -48040,6 +48040,13 @@ Send a [small payment](/docs/payments/send-basic-payment), then open
 
 Approve the matching transaction in Fireblocks. In **Transaction history**,
 confirm **COMPLETED**; SDP should show **Confirmed**.
+
+SDP rechecks the initiating member or API key every minute while approval is
+pending, prioritizing recorded access changes. Provider delays and queued work
+can extend this interval. If access is lost, SDP requests cancellation. The payment stays **Processing** until
+Fireblocks confirms cancellation or execution. Cancellation can race signing;
+check the outcome before starting a replacement payment. During an incident,
+reject pending transfers directly in Fireblocks as well.
 
 ## Manage your connection
 

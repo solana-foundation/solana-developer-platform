@@ -18,6 +18,7 @@ import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import type { DatabaseClient } from "@/db/client";
+import { currentDatabaseIdentity } from "@/db/identity";
 import { isCustodyWalletRequestRecorded } from "@/db/postgres-utils";
 import { AppError, conflict, internalError, notFound, providerUnavailable } from "@/lib/errors";
 import { isCustodyProviderAvailable } from "@/lib/feature-flags";
@@ -26,6 +27,7 @@ import {
   decideMovement,
   decideWalletPurpose,
   type MoneyAdmissionDecision,
+  MoneyMovementRefusedError,
   readMovementFactsWith,
 } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
@@ -58,6 +60,7 @@ import {
 import {
   assertCustodyProviderEntitled,
   assertManagedCustodyUseAllowed,
+  CustodySetupRefusedError,
   custodyProviderNotInReleaseChannel,
   getProviderAvailability,
   isCustodyProviderEntitled,
@@ -68,9 +71,12 @@ import type { Env } from "@/types/env";
 import {
   admittedTransferProposer,
   type CustodyProposalReader,
+  type CustodyProposalRecovery,
   type CustodyTransferProposer,
   type ProposalAccess,
+  ProposalAdmissionRefusedError,
   proposalReader,
+  proposalRecovery,
   type TransferProposalIntent,
 } from "./admitted-proposer";
 import { privyWalletExternalId } from "./provider-wallet-lifecycle";
@@ -834,6 +840,103 @@ export class CustodyRuntimeTargets {
     return proposalReader(() => this.loadProposalAccess(target, binding));
   }
 
+  /**
+   * Trusted-worker recovery does not admit during construction: a refused principal or disabled
+   * wallet must still be able to cancel an accepted proposal using its retained account binding.
+   */
+  async getTransferProposalRecoveryForWalletRecord(
+    organizationId: string,
+    projectId: string,
+    custodyWalletId: string,
+    binding: TransferProposalIntent & { sourceAddress: string | null },
+    movement: MovementId
+  ): Promise<CustodyProposalRecovery> {
+    const identity = currentDatabaseIdentity();
+    if (identity?.kind !== "system" || identity.component !== "cron:reconcile-custody-proposals") {
+      throw new AppError(
+        "INTERNAL_ERROR",
+        "Custody proposal recovery requires the recovery worker"
+      );
+    }
+    const retainedTarget = async () => {
+      const target = await this.resolveRetainedWalletRecord(
+        organizationId,
+        projectId,
+        custodyWalletId
+      );
+      if (!target) throw notFound("Custody wallet");
+      if (!isProposingTarget(target))
+        throw conflict("Fireblocks connection does not match the payment intent");
+      return target;
+    };
+    return proposalRecovery(
+      async () => this.loadProposalAccess(await retainedTarget(), binding),
+      binding,
+      async () => {
+        try {
+          const target = await this.resolveRetainedWalletRecord(
+            organizationId,
+            projectId,
+            custodyWalletId
+          );
+          if (!target)
+            throw new ProposalAdmissionRefusedError(
+              "custody_wallet_missing",
+              notFound("Custody wallet")
+            );
+          if (!isProposingTarget(target))
+            throw new ProposalAdmissionRefusedError(
+              "proposal_binding_changed",
+              conflict("Custody connection does not match the payment intent")
+            );
+          this.assertRuntimeExecutionAllowed(target, custodyWalletId);
+          const credential = await this.loadConnectionCredential(target);
+          if (!credential || !isUsableCredentialOwner(credential))
+            throw new ProposalAdmissionRefusedError(
+              "provider_credential_unavailable",
+              conflict("Custody Connection is unavailable")
+            );
+          if (!this.proposalBindingMatches(target, credential, binding))
+            throw new ProposalAdmissionRefusedError(
+              "proposal_binding_changed",
+              conflict("Custody connection does not match the payment intent")
+            );
+          const decide = await this.admitWalletRecord(target, {
+            organizationId,
+            projectId,
+            custodyWalletId,
+            movement,
+          });
+          assertMovementAdmitted(await decide(), {
+            surface: "signer",
+            movement,
+            organizationId,
+            projectId,
+            subjectId: custodyWalletId,
+          });
+        } catch (error) {
+          if (error instanceof MoneyMovementRefusedError)
+            throw new ProposalAdmissionRefusedError(error.reason, error);
+          if (error instanceof CustodySetupRefusedError)
+            throw new ProposalAdmissionRefusedError(error.details.reason, error);
+          if (
+            error instanceof AppError &&
+            error.code === "FORBIDDEN" &&
+            error.details?.reason === "provider_not_entitled"
+          )
+            throw new ProposalAdmissionRefusedError("provider_not_entitled", error);
+          if (
+            error instanceof AppError &&
+            error.code === "CONFLICT" &&
+            error.details?.reason === RUNTIME_EXECUTION_UNAVAILABLE_REASON
+          )
+            throw new ProposalAdmissionRefusedError(RUNTIME_EXECUTION_UNAVAILABLE_REASON, error);
+          throw error;
+        }
+      }
+    );
+  }
+
   /** The exact custody-wallet row a money flow names, or the waist's not-found refusal. */
   private async resolveExactWalletRecord(
     organizationId: string,
@@ -905,12 +1008,7 @@ export class CustodyRuntimeTargets {
       throw conflict("Custody Connection is unavailable");
     if (!binding) {
       if (!isUsableCredentialOwner(row)) throw conflict("Custody Connection is unavailable");
-    } else if (
-      target.connectionId !== binding.connectionId ||
-      row.provider_account_fingerprint !== binding.accountFingerprint ||
-      target.wallet.walletId !== `fb_${binding.vaultAccountId}` ||
-      target.wallet.publicKey !== binding.sourceAddress
-    ) {
+    } else if (!this.proposalBindingMatches(target, row, binding)) {
       throw conflict("Fireblocks connection does not match the payment intent");
     }
     const secret = await this.readByokCredential(target, row);
@@ -924,6 +1022,19 @@ export class CustodyRuntimeTargets {
       accountFingerprint: row.provider_account_fingerprint,
       apiBaseUrl: this.env.FIREBLOCKS_API_BASE_URL,
     };
+  }
+
+  private proposalBindingMatches(
+    target: ConnectionRuntimeTarget & { wallet: RuntimeWallet },
+    credential: ConnectionCredentialRow,
+    binding: TransferProposalIntent & { sourceAddress: string | null }
+  ): boolean {
+    return (
+      target.connectionId === binding.connectionId &&
+      credential.provider_account_fingerprint === binding.accountFingerprint &&
+      target.wallet.walletId === `fb_${binding.vaultAccountId}` &&
+      target.wallet.publicKey === binding.sourceAddress
+    );
   }
 
   private async resolveConnection(
@@ -1160,6 +1271,8 @@ export class CustodyRuntimeTargets {
        JOIN provider_credentials pc
          ON pc.id = c.provider_credential_id
         AND pc.project_id = c.project_id
+        AND pc.organization_id = c.organization_id
+        AND pc.provider = c.provider
        WHERE c.id = ?
          AND c.organization_id = ?
          AND c.project_id = ?

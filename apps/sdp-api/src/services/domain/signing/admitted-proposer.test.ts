@@ -8,6 +8,7 @@ import {
   type ProposalAccess,
   ProposalNotSentError,
   proposalReader,
+  proposalRecovery,
   proposalRuntime,
 } from "./admitted-proposer";
 
@@ -158,5 +159,160 @@ describe("admittedTransferProposer (PRO-2435 D2)", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(String(fetch.mock.calls[0]?.[0])).toContain("/v1/transactions/external_tx_id/xfr_1");
     expect(fetch.mock.calls[0]?.[1]?.method ?? "GET").toBe("GET");
+  });
+});
+
+describe("proposalRecovery (PRO-2435 D4)", () => {
+  const detail = {
+    id: "provider-transaction",
+    externalTxId: request.externalId,
+    status: "PENDING_SIGNATURE",
+    operation: "TRANSFER",
+    assetId: intent.assetId,
+    source: { type: "VAULT_ACCOUNT", id: intent.vaultAccountId },
+  };
+
+  function recoveryRuntime(patch: Record<string, unknown> = {}) {
+    const fetch = vi.fn<CustodyProvisioningRuntime["fetch"]>(async (_url, init) =>
+      Response.json(init?.method === "POST" ? { success: true } : { ...detail, ...patch })
+    );
+    return { fetch, runtime: { ...proposalRuntime, fetch } };
+  }
+
+  it("separates admission from read and cancellation without exposing a submission method", async () => {
+    const { fetch, runtime: rt } = recoveryRuntime();
+    const admit = vi.fn(async () => {});
+    const loadAccess = vi.fn(async () => access);
+    const recovery = proposalRecovery(loadAccess, intent, admit, rt);
+    expect(Object.keys(recovery).sort()).toEqual(["admit", "cancel", "read"]);
+    expect(admit).not.toHaveBeenCalled();
+    expect(loadAccess).not.toHaveBeenCalled();
+    await recovery.admit();
+    expect(admit).toHaveBeenCalledTimes(1);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(loadAccess).not.toHaveBeenCalled();
+    await recovery.read(request.externalId);
+    expect(admit).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves and verifies the external id before cancelling with retained tenant credentials", async () => {
+    const { fetch, runtime: rt } = recoveryRuntime();
+    const admit = vi.fn(async () => {
+      throw new Error("principal revoked");
+    });
+    const recovery = proposalRecovery(async () => access, intent, admit, rt);
+    await expect(recovery.admit()).rejects.toThrow("principal revoked");
+    await expect(recovery.cancel(request.externalId)).resolves.toBe(true);
+    expect(admit).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls.map(([url, init]) => [String(url), init?.method])).toEqual([
+      [`${access.apiBaseUrl}/v1/transactions/external_tx_id/${request.externalId}`, "GET"],
+      [`${access.apiBaseUrl}/v1/transactions/${detail.id}/cancel`, "POST"],
+    ]);
+    for (const [, init] of fetch.mock.calls)
+      expect(new Headers(init?.headers).get("X-API-Key")).toBe(access.apiKey);
+  });
+
+  it.each([
+    { externalTxId: "another-payment" },
+    { operation: "RAW" },
+    { assetId: "another-asset" },
+    { source: { type: "EXCHANGE_ACCOUNT", id: intent.vaultAccountId } },
+    { source: { type: "VAULT_ACCOUNT", id: "another-vault" } },
+    { source: null },
+  ])(
+    "never cancels transaction detail that conflicts with its recorded intent: %j",
+    async (patch) => {
+      const { fetch, runtime: rt } = recoveryRuntime(patch);
+      const recovery = proposalRecovery(
+        async () => access,
+        intent,
+        async () => {},
+        rt
+      );
+      await expect(recovery.cancel(request.externalId)).rejects.toThrow(
+        "does not match the payment intent"
+      );
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(fetch.mock.calls[0]?.[1]?.method).toBe("GET");
+    }
+  );
+
+  it.each(["BROADCASTING", "CONFIRMING", "COMPLETED", "CANCELLING", "CANCELLED", "NEW_STATE"])(
+    "observes %s without a cancellation POST",
+    async (status) => {
+      const { fetch, runtime: rt } = recoveryRuntime({ status });
+      const recovery = proposalRecovery(
+        async () => access,
+        intent,
+        async () => {},
+        rt
+      );
+      await expect(recovery.cancel(request.externalId)).resolves.toBe(false);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it("re-reads the bound transaction before retrying a negative cancellation acknowledgment", async () => {
+    let cancellationAttempts = 0;
+    const fetch = vi.fn<CustodyProvisioningRuntime["fetch"]>(async (_url, init) => {
+      if (init?.method !== "POST") return Response.json(detail);
+      cancellationAttempts += 1;
+      return Response.json({ success: cancellationAttempts > 1 });
+    });
+    const recovery = proposalRecovery(
+      async () => access,
+      intent,
+      async () => {},
+      {
+        ...proposalRuntime,
+        fetch,
+      }
+    );
+    await expect(recovery.cancel(request.externalId)).resolves.toBe(false);
+    await expect(recovery.cancel(request.externalId)).resolves.toBe(true);
+    expect(fetch.mock.calls.map(([, init]) => init?.method)).toEqual([
+      "GET",
+      "POST",
+      "GET",
+      "POST",
+    ]);
+  });
+
+  it("does not cancel an external id missing from the provider", async () => {
+    const fetch = vi.fn<CustodyProvisioningRuntime["fetch"]>(async () =>
+      Response.json({}, { status: 404 })
+    );
+    const recovery = proposalRecovery(
+      async () => access,
+      intent,
+      async () => {},
+      {
+        ...proposalRuntime,
+        fetch,
+      }
+    );
+    await expect(recovery.cancel(request.externalId)).resolves.toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates an ambiguous cancellation failure without retrying or claiming a terminal result", async () => {
+    const fetch = vi.fn<CustodyProvisioningRuntime["fetch"]>(async (_url, init) => {
+      if (init?.method === "POST") throw new Error("connection lost after acceptance");
+      return Response.json(detail);
+    });
+    const recovery = proposalRecovery(
+      async () => access,
+      intent,
+      async () => {},
+      {
+        ...proposalRuntime,
+        fetch,
+      }
+    );
+    await expect(recovery.cancel(request.externalId)).rejects.toThrow(
+      "connection lost after acceptance"
+    );
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 });

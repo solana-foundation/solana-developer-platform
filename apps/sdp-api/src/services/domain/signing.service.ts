@@ -43,6 +43,7 @@ import {
 } from "@/services/custody-provider-lifecycle.service";
 import type {
   CustodyProposalReader,
+  CustodyProposalRecovery,
   CustodyTransferProposer,
   TransferProposalIntent,
 } from "@/services/domain/signing/admitted-proposer";
@@ -1320,6 +1321,23 @@ export class SigningService {
     );
   }
 
+  /** Recovery capabilities for trusted workers; construction never admits new execution. */
+  async getTransferProposalRecoveryForWalletRecord(
+    orgId: string,
+    projectId: string,
+    custodyWalletId: string,
+    binding: TransferProposalIntent & { sourceAddress: string | null },
+    movement: MovementId
+  ): Promise<CustodyProposalRecovery> {
+    return this.runtimeTargets.getTransferProposalRecoveryForWalletRecord(
+      orgId,
+      projectId,
+      custodyWalletId,
+      binding,
+      movement
+    );
+  }
+
   /**
    * The project's active Managed custody configs, most recently updated first.
    *
@@ -1373,6 +1391,8 @@ export function createSigningService(env: Env, scope?: TenantScope): SigningServ
     "getTransactionSignerForWalletRecord",
     "getTransferProposerForWalletRecord",
     "getTransferProposalReaderForWalletRecord",
+    // biome-ignore lint/security/noSecrets: tenant-scoped method name, not a credential.
+    "getTransferProposalRecoveryForWalletRecord",
     "getConfigurations",
   ]);
 

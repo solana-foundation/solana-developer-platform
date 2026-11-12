@@ -1,0 +1,3 @@
+ALTER TABLE custody_proposals VALIDATE CONSTRAINT custody_proposals_payment_fk;
+ALTER TABLE custody_proposals VALIDATE CONSTRAINT custody_proposals_project_fk;
+ALTER TABLE custody_proposals VALIDATE CONSTRAINT custody_proposals_wallet_fk;

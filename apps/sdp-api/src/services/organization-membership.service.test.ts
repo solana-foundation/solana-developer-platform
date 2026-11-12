@@ -1,6 +1,7 @@
 import type { MemberStatus } from "@sdp/types/organizations";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
+import type { MoneyPrincipal } from "@/lib/money-principal";
 import {
   applyMembershipChange,
   type MembershipChange,
@@ -58,6 +59,84 @@ describe("applyMembershipChange", () => {
       members: [ADMIN_A, ADMIN_B, MEMBER_C],
     });
   });
+
+  it.each(["remove", "leave", "clerk"] as const)(
+    "queues only the removed member's proposals across projects (%s)",
+    async (kind) => {
+      const db = getDb(env);
+      const projects = await seedDefaultProjects(db, {
+        organizationId: ORGANIZATION.id,
+        createdBy: ADMIN_A.userId,
+        members: [ADMIN_A.userId, MEMBER_C.userId],
+      });
+      const identities: Array<{ id: string; principal: MoneyPrincipal | null; projectId: string }> =
+        [
+          {
+            id: "member_sandbox",
+            principal: { kind: "member", userId: MEMBER_C.userId },
+            projectId: projects.sandbox.id,
+          },
+          {
+            id: "member_production",
+            principal: { kind: "member", userId: MEMBER_C.userId },
+            projectId: projects.production.id,
+          },
+          {
+            id: "different_member",
+            principal: { kind: "member", userId: ADMIN_A.userId },
+            projectId: projects.sandbox.id,
+          },
+          {
+            id: "created_key",
+            principal: { kind: "api_key", apiKeyId: "key_member_created" },
+            projectId: projects.sandbox.id,
+          },
+          {
+            id: "mandate",
+            principal: { kind: "mandate", recurringPaymentId: "recurring_member_created" },
+            projectId: projects.sandbox.id,
+          },
+          { id: "legacy_audit_id", principal: null, projectId: projects.sandbox.id },
+        ];
+      for (const row of identities) {
+        await db.execute(
+          `INSERT INTO payment_transfers
+             (id, organization_id, project_id, wallet_id, source_address,
+              destination_address, token, amount, type, direction, status,
+              created_at, updated_at, provider_data, initiated_by_principal, initiated_by_key_id)
+           VALUES (?, ?, ?, 'provider-wallet', 'Source', 'Destination', 'SOL', '1',
+                   'transfer', 'outbound', 'processing', sdp_iso_now(), sdp_iso_now(),
+                   '{"fireblocksTransfer":{"connectionId":"recovery-connection","accountFingerprint":"recovery-account","vaultAccountId":"0","assetId":"SOL_TEST"}}'::jsonb, ?::jsonb, ?)`,
+          [
+            row.id,
+            ORGANIZATION.id,
+            row.projectId,
+            row.principal === null ? null : JSON.stringify(row.principal),
+            MEMBER_C.userId,
+          ]
+        );
+      }
+      if (kind === "clerk") {
+        await db.transaction((tx) =>
+          mirrorClerkMembershipDeletion(tx, {
+            organizationId: ORGANIZATION.id,
+            userId: MEMBER_C.userId,
+            heldInClerk: async () => false,
+          })
+        );
+      } else {
+        await change(
+          kind === "leave" ? MEMBER_C : ADMIN_A,
+          kind === "leave" ? { kind: "leave" } : { kind: "remove", memberId: MEMBER_C.memberId }
+        );
+      }
+      expect(
+        await db.queryMany(
+          "SELECT payment_transfer_id AS id FROM custody_proposals WHERE recheck_requested_at IS NOT NULL ORDER BY payment_transfer_id"
+        )
+      ).toEqual([{ id: "member_production" }, { id: "member_sandbox" }]);
+    }
+  );
 
   it.each([
     {

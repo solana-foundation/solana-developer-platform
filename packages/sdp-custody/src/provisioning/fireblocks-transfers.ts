@@ -168,3 +168,27 @@ export async function readFireblocksTransfer(
     throw error;
   }
 }
+
+/**
+ * Request cancellation of a known transaction before broadcast. Acknowledgment is not a
+ * terminal outcome: callers must keep reading the original external transaction id.
+ */
+export async function cancelFireblocksTransfer(
+  runtime: CustodyProvisioningRuntime,
+  access: FireblocksTransferAccess,
+  transactionId: string
+): Promise<boolean> {
+  const response = await fireblocksRequest<unknown>(runtime, {
+    ...config(access),
+    method: "POST",
+    uri: `/v1/transactions/${encodeURIComponent(transactionId)}/cancel`,
+    // Cancellation cannot create another transfer. Do not cache a success:false reply for
+    // 24 hours: every retry must ask the provider to evaluate cancellation again.
+    // https://developers.fireblocks.com/api-reference/transactions/cancel-a-transaction
+  });
+  const parsed = z.object({ success: z.boolean() }).safeParse(response);
+  if (!parsed.success) {
+    throw new SigningError("Invalid Fireblocks cancellation response", "NETWORK_ERROR");
+  }
+  return parsed.data.success;
+}

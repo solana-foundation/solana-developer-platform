@@ -53,6 +53,21 @@ describe("CRON_DEFINITIONS", () => {
     expect(byName.get("expire-payment-requests")?.schedule).toBe("* * * * *");
   });
 
+  it("reconciles custody proposals every minute in an independent environment-scoped registration", () => {
+    const proposals = CRON_DEFINITIONS.find(
+      (definition) => definition.name === "reconcile-custody-proposals"
+    );
+    const chain = CRON_DEFINITIONS.find(
+      (definition) => definition.name === "track-pending-transfers"
+    );
+    expect(proposals).toMatchObject({
+      schedule: "* * * * *",
+      scope: "cluster",
+      effect: "finishes",
+    });
+    expect(proposals?.run).not.toBe(chain?.run);
+  });
+
   it("gives every definition a schedule node-cron accepts", () => {
     const invalid = CRON_DEFINITIONS.filter((definition) => !validate(definition.schedule)).map(
       (definition) => definition.name

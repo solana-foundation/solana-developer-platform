@@ -241,14 +241,6 @@ export interface PaymentsRepository {
     projectId: string;
     now: string;
   }): Promise<PaymentTransferRow | null>;
-  /** Throttle and serialize provider reads across dashboard requests and cron workers. */
-  claimFireblocksTransferPoll(input: {
-    transferId: string;
-    organizationId: string;
-    projectId: string | null;
-    polledBefore: string;
-    now: string;
-  }): Promise<PaymentTransferRow | null>;
   createTransfer(input: CreatePaymentTransferInput): Promise<PaymentTransferRow | null>;
   /**
    * Claims an awaiting off-ramp row for its crypto deposit transaction through

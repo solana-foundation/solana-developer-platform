@@ -5,17 +5,47 @@ export function isFireblocksPaymentMint(mint: string, cluster: SolanaCluster): b
   return mint === SOL_MINT || mint === wellKnownMint("USDC", cluster);
 }
 
+/** Provider spellings that prove a terminal cancellation. */
+export const FIREBLOCKS_CANCELLED_TRANSACTION_STATUSES = ["CANCELLED", "CANCELED"] as const;
+const cancelledTransactions: ReadonlySet<string> = new Set(
+  FIREBLOCKS_CANCELLED_TRANSACTION_STATUSES
+);
+
+/** Acknowledgment or CANCELLING alone never proves cancellation. */
+export function isFireblocksTransactionCancelled(status: string): boolean {
+  return cancelledTransactions.has(status);
+}
+
 /** Provider states shared by parsing, persistence and presentation. */
 export const FIREBLOCKS_FAILED_TRANSACTION_STATUSES = [
   "FAILED",
   "REJECTED",
-  "CANCELLED",
-  "CANCELED",
+  ...FIREBLOCKS_CANCELLED_TRANSACTION_STATUSES,
   "BLOCKED",
 ] as const;
 const failedTransactions: ReadonlySet<string> = new Set(FIREBLOCKS_FAILED_TRANSACTION_STATUSES);
 export function isFireblocksTransactionFailed(status: string): boolean {
   return failedTransactions.has(status);
+}
+
+/** Known states before broadcast where a cancellation request may still stop execution. */
+export const FIREBLOCKS_CANCELLABLE_TRANSACTION_STATUSES = [
+  "SUBMITTED",
+  "PENDING_AML_SCREENING",
+  "PENDING_ENRICHMENT",
+  "PENDING_AUTHORIZATION",
+  "QUEUED",
+  "PENDING_SIGNATURE",
+  "PENDING_3RD_PARTY_MANUAL_APPROVAL",
+  "PENDING_3RD_PARTY",
+] as const;
+const cancellableTransactions: ReadonlySet<string> = new Set(
+  FIREBLOCKS_CANCELLABLE_TRANSACTION_STATUSES
+);
+
+/** Unknown states and cancellation acknowledgments never authorize another cancellation POST. */
+export function isFireblocksTransactionCancellable(status: string): boolean {
+  return cancellableTransactions.has(status);
 }
 
 /**

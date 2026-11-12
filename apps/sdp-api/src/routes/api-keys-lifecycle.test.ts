@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
+import { ApiKeyService } from "@/services/api-key.service";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
@@ -190,6 +192,61 @@ describe("API key lifecycle", () => {
     await getDb(env).execute(
       `ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS ${AUDIT_FAILURE_CONSTRAINT}`
     );
+  });
+
+  it("commits a pending proposal recovery request with the key revocation", async () => {
+    await insertKey({ id: TARGET_KEY_ID });
+    const db = getDb(env);
+    await db.execute(
+      `INSERT INTO payment_transfers
+         (id, organization_id, project_id, wallet_id, source_address,
+          destination_address, token, amount, type, direction, status,
+          created_at, updated_at, provider_data, initiated_by_principal)
+       VALUES ('trf_key_recovery', ?, ?, 'provider-wallet', 'Source', 'Destination',
+               'SOL', '1', 'transfer', 'outbound', 'processing', sdp_iso_now(), sdp_iso_now(),
+               '{"fireblocksTransfer":{"connectionId":"recovery-connection","accountFingerprint":"recovery-account","vaultAccountId":"0","assetId":"SOL_TEST"}}'::jsonb, ?::jsonb)`,
+      [ORGANIZATION_ID, PROJECT_ID, JSON.stringify({ kind: "api_key", apiKeyId: TARGET_KEY_ID })]
+    );
+    const revokeWithin = async () =>
+      db.transaction(async (tx) => {
+        const result = await new ApiKeyService(
+          tx,
+          createTenantScope({
+            organizationId: ORGANIZATION_ID,
+            projectId: PROJECT_ID,
+          })
+        ).revokeApiKey(TARGET_KEY_ID, ORGANIZATION_ID, PROJECT_ID);
+        expect(result).toMatchObject({ alreadyRevoked: false });
+        expect(
+          await tx.queryOne(
+            "SELECT recheck_requested_at FROM custody_proposals WHERE payment_transfer_id = 'trf_key_recovery'"
+          )
+        ).toEqual({ recheck_requested_at: expect.any(String) });
+        throw new Error("authority write rolled back");
+      });
+    await expect(revokeWithin()).rejects.toThrow("authority write rolled back");
+    expect((await readKey(TARGET_KEY_ID))?.status).toBe("active");
+    expect(
+      await db.queryOne(
+        "SELECT recheck_requested_at FROM custody_proposals WHERE payment_transfer_id = 'trf_key_recovery'"
+      )
+    ).toBeNull();
+
+    await db.transaction((tx) =>
+      new ApiKeyService(
+        tx,
+        createTenantScope({
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+        })
+      ).revokeApiKey(TARGET_KEY_ID, ORGANIZATION_ID, PROJECT_ID)
+    );
+    expect((await readKey(TARGET_KEY_ID))?.status).toBe("deactivated");
+    expect(
+      await db.queryOne(
+        "SELECT recheck_requested_at FROM custody_proposals WHERE payment_transfer_id = 'trf_key_recovery'"
+      )
+    ).toEqual({ recheck_requested_at: expect.any(String) });
   });
 
   describe("rotation", () => {

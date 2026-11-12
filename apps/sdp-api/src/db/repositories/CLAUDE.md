@@ -293,3 +293,27 @@ A removed ramp provider's id moves from `RAMP_PROVIDERS` to
   `ramp-support:generate`. Never build on `automation/ramp-support-refresh`:
   the job force-pushes it and opens its PR as the release app, minting that
   token only after install and discovery.
+
+## Pending proposal recovery (PRO-2435 D4)
+
+`custody-proposals.repository.ts` owns proposal state and scheduling.
+`claimDue` is system-only: it clears existing invalidations before external I/O
+and reserves ordinary sweep capacity behind priority revocations. Later flags
+survive the claim. Viewer throttling never advances the worker clock.
+
+The pure reducer in `@sdp/types/custody-proposals` owns legal transitions. Only
+`custody-proposal-ledger.ts` commits them with the payment projection, audit and
+intent closure. Its version CAS rejects stale observations. Lifecycle writes
+lock the payment before its proposal; immutable provider IDs and signatures are
+rechecked after that lock because older revisions do not bump proposal versions.
+
+Refusal is sticky, cancellation intent precedes provider I/O, and cancellation
+acknowledgment remains nonterminal. Completed proposals stay in the independent
+critical-alert outbox until emission is acknowledged. Delivery can repeat after
+a crash. Audit failure rolls back every associated state/projection write.
+
+The rolling bridge adopts older revisions' pending payments and advances only
+previously unsent proposals from their submission facts. Legacy payment JSON and
+its submission guard remain compatibility projections until those revisions
+drain; remove them only in a later contract migration. Principal identity stays
+on the payment and is restored only by the dedicated registered worker.

@@ -3,6 +3,7 @@ import {
   readFireblocksAddressBook,
 } from "@sdp/custody/provisioning/fireblocks-address-book";
 import {
+  cancelFireblocksTransfer,
   createFireblocksTransfer,
   type FireblocksTransferAccess,
   type FireblocksTransferResult,
@@ -12,10 +13,10 @@ import {
 import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import { isFireblocksPaymentMint } from "@sdp/types/fireblocks";
+import { isFireblocksPaymentMint, isFireblocksTransactionCancellable } from "@sdp/types/fireblocks";
 import type { MovementId } from "@sdp/types/movements";
 import { z } from "zod";
-import { badRequest, conflict, serviceUnavailable } from "@/lib/errors";
+import { type AppError, badRequest, conflict, serviceUnavailable } from "@/lib/errors";
 import { assertMovementAdmitted, type MoneyAdmissionDecision } from "@/lib/money-admission";
 
 /**
@@ -122,6 +123,28 @@ export function destinationState(
 /** Read-only recovery for a recorded proposal. It can never create or resubmit a transfer. */
 export interface CustodyProposalReader {
   read(externalId: string): Promise<FireblocksTransferResult | null>;
+}
+
+/** A known live-policy refusal, distinct from a temporarily unavailable admission read. */
+export class ProposalAdmissionRefusedError extends Error {
+  constructor(
+    readonly reason: string,
+    cause: AppError
+  ) {
+    super(cause.toResponse().error.message, { cause });
+    this.name = "ProposalAdmissionRefusedError";
+  }
+}
+
+/**
+ * Trusted-worker recovery capabilities. Admission checks the original principal's live access;
+ * cancellation can unwind a refused proposal, but cannot create, sign or resubmit a transfer.
+ * HTTP viewers receive only {@link CustodyProposalReader}.
+ */
+export interface CustodyProposalRecovery extends CustodyProposalReader {
+  admit(): Promise<void>;
+  /** True acknowledges a cancellation request; it never proves that execution stopped. */
+  cancel(externalId: string): Promise<boolean>;
 }
 
 export const proposalRuntime: CustodyProvisioningRuntime = {
@@ -275,6 +298,38 @@ export function proposalReader(
   return {
     async read(externalId) {
       return readFireblocksTransfer(runtime, await loadAccess(), externalId);
+    },
+  };
+}
+
+/**
+ * Recovery uses retained account-bound access, independently of new-execution admission.
+ * Cancellation resolves the provider id itself and verifies the exact recorded intent before
+ * its only mutation; an arbitrary provider transaction id is never accepted from the caller.
+ */
+export function proposalRecovery(
+  loadAccess: () => Promise<ProposalAccess>,
+  binding: TransferProposalIntent,
+  admit: () => Promise<void>,
+  runtime: CustodyProvisioningRuntime = proposalRuntime
+): CustodyProposalRecovery {
+  return {
+    ...proposalReader(loadAccess, runtime),
+    admit,
+    async cancel(externalId) {
+      const access = await loadAccess();
+      const transaction = await readFireblocksTransfer(runtime, access, externalId);
+      if (transaction === null) return false;
+      if (
+        transaction.externalTxId !== externalId ||
+        transaction.operation !== "TRANSFER" ||
+        transaction.assetId !== binding.assetId ||
+        transaction.source?.type !== "VAULT_ACCOUNT" ||
+        transaction.source.id !== binding.vaultAccountId
+      )
+        throw conflict("Fireblocks transaction does not match the payment intent");
+      if (!isFireblocksTransactionCancellable(transaction.status)) return false;
+      return cancelFireblocksTransfer(runtime, access, transaction.id);
     },
   };
 }
