@@ -383,6 +383,7 @@
     "capabilitySigning": "Ký giao dịch",
     "connectSelfServe": "Tự kết nối nhà cung cấp này bằng credential từ tài khoản của bạn. Secrets chỉ ghi và không hiển thị lại sau khi gửi.",
     "connectYouWillNeed": "Bạn sẽ cần",
+    "connectByArrangement": "Có sẵn theo thỏa thuận. Nhóm SDP cấp quyền truy cập và thiết lập kết nối với tổ chức của bạn.",
     "connectManaged": "Cấp phát theo từng deployment. Nhà cung cấp này do operator SDP cấu hình, không phải tự phục vụ.",
     "privacyTitle": "Privacy",
     "privacyDescription": "Hạ tầng Privacy được cấu hình theo từng project cho thực thi và thanh toán riêng tư.",

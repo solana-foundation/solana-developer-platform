@@ -403,6 +403,7 @@
     "capabilitySigning": "Firma de transacciones",
     "connectSelfServe": "Conecta este proveedor tú mismo usando credenciales de tu propia cuenta. Los secretos son de solo escritura y no se vuelven a mostrar después de enviarlos.",
     "connectYouWillNeed": "Necesitarás",
+    "connectByArrangement": "Disponible mediante acuerdo. El equipo de SDP otorga el acceso y configura la conexión con tu organización.",
     "connectManaged": "Aprovisionado por despliegue. Este proveedor lo configura tu operador de SDP en lugar de hacerlo tú mismo.",
     "rpcByokTitle": "Tus propias credenciales",
     "rpcByokDescription": "Enruta el RPC de este proyecto a través de una cuenta que sea tuya. Las claves se cifran y no se vuelven a mostrar.",
