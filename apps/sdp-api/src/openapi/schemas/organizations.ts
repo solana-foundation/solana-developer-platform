@@ -309,7 +309,15 @@ export const mainnetAccessSchema = z
     }),
     available: z.boolean().openapi({
       description:
-        "Whether this deployment takes requests. While false, a request or resend is refused with 503.",
+        "Whether this deployment takes requests. While false, a request or resend is refused: with 403 when `sandboxOnly`, otherwise with 503.",
+    }),
+    sandboxOnly: z.boolean().openapi({
+      description:
+        "True on a deployment that admits no production project (the sandbox). Mainnet access is requested on the production deployment instead.",
+    }),
+    mainnetOnly: z.boolean().openapi({
+      description:
+        "True on a deployment that admits no sandbox project. Until `state` is `approved`, the organization can only read its organization, projects and members, and request mainnet access.",
     }),
     countryCode: z.enum(COUNTRY_CODES).nullable(),
     request: z

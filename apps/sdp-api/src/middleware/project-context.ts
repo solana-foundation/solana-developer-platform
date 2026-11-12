@@ -7,6 +7,8 @@ import {
   isProductionEntitled,
   productionNotEnabled,
   productionProjectsAllowed,
+  sandboxNotAvailable,
+  sandboxProjectsAllowed,
 } from "@/lib/production-entitlement";
 import type { Env } from "@/types/env";
 
@@ -60,6 +62,10 @@ export function projectContextMiddleware(options: ProjectContextOptions = {}) {
         (!isProductionEntitled(c) && !(await options.allowUnentitledProduction?.(c))))
     ) {
       throw productionNotEnabled();
+    }
+    // A mainnet-only deployment refuses its sandbox projects the same way.
+    if (scope.environment === "sandbox" && !sandboxProjectsAllowed(c.env)) {
+      throw sandboxNotAvailable();
     }
 
     c.set("projectId", scope.projectId);

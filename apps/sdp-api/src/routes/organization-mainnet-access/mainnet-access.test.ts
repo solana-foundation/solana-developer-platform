@@ -211,6 +211,8 @@ describe("Organization mainnet access (HOO-2427)", () => {
     expect((await response.json()).data).toEqual({
       state: "not_requested",
       available: true,
+      sandboxOnly: false,
+      mainnetOnly: false,
       countryCode: null,
       request: null,
       contactEmail: "mainnet@example.org",
@@ -542,6 +544,22 @@ describe("Organization mainnet access (HOO-2427)", () => {
       .all();
     expect(requested.results).toEqual([]);
     expect(sentEmails()).toHaveLength(0);
+  });
+
+  it("sends an organization on a sandbox-only deployment to the production deployment", async () => {
+    env.SDP_ALLOW_PRODUCTION_PROJECTS = "false";
+    try {
+      expect((await (await get()).json()).data).toMatchObject({
+        available: false,
+        sandboxOnly: true,
+      });
+      expect((await post(SUBMISSION)).status).toBe(403);
+      expect((await notify()).status).toBe(403);
+      expect(await storedRow()).toBeNull();
+      expect(sentEmails()).toHaveLength(0);
+    } finally {
+      env.SDP_ALLOW_PRODUCTION_PROJECTS = undefined;
+    }
   });
 
   it("refuses a member who is not an admin", async () => {

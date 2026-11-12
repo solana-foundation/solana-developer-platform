@@ -144,6 +144,7 @@ describe("POST /v1/organizations", () => {
     env.CLERK_API_URL = undefined;
     env.CLERK_SECRET_KEY = undefined;
     env.SDP_ALLOW_PRODUCTION_PROJECTS = undefined;
+    env.SDP_ALLOW_SANDBOX_PROJECTS = undefined;
   });
 
   it("creates a new person's organization in Clerk with no creator, then their admin membership and both projects, audited", async () => {
@@ -180,6 +181,24 @@ describe("POST /v1/organizations", () => {
         {
           organization_id: created.id,
           environment: "sandbox",
+          user_id: created.created_by_user_id,
+        },
+      ],
+    });
+  });
+
+  it("creates only the production project on a mainnet-only deployment", async () => {
+    env.SDP_ALLOW_SANDBOX_PROJECTS = "false";
+
+    const { response, created } = await createActiveOrganization();
+
+    expect(response.status).toBe(201);
+    expect(await storedState(created.id)).toEqual({
+      ...activeState(created),
+      projectMembers: [
+        {
+          organization_id: created.id,
+          environment: "production",
           user_id: created.created_by_user_id,
         },
       ],

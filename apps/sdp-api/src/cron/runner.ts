@@ -32,7 +32,7 @@ import { secretRetirementsCron } from "@/cron/secret-retirements";
 import { sponsorshipBudgetsCron } from "@/cron/sponsorship-budgets";
 import { subscriptionAuthoritiesCron } from "@/cron/subscription-authorities";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
-import { productionProjectsAllowed } from "@/lib/production-entitlement";
+import { assertProjectEnvironmentsConfig, environmentAllowed } from "@/lib/production-entitlement";
 import type { BackgroundRunner } from "@/runtime/background";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import { runWithLogContext } from "@/runtime/logger";
@@ -125,34 +125,35 @@ function isCronDisabled(env: Pick<Env, "DISABLE_CRON" | "K_SERVICE">): boolean {
 }
 
 /**
- * Throws on an invalid DISABLE_CRON or SDP_ALLOW_PRODUCTION_PROJECTS, so the entrypoint fails
- * before it opens sockets.
+ * Throws on an invalid DISABLE_CRON, SDP_ALLOW_PRODUCTION_PROJECTS or SDP_ALLOW_SANDBOX_PROJECTS,
+ * so the entrypoint fails before it opens sockets.
  */
 export function assertCronConfig(
-  env: Pick<Env, "DISABLE_CRON" | "K_SERVICE" | "SDP_ALLOW_PRODUCTION_PROJECTS">
+  env: Pick<
+    Env,
+    "DISABLE_CRON" | "K_SERVICE" | "SDP_ALLOW_PRODUCTION_PROJECTS" | "SDP_ALLOW_SANDBOX_PROJECTS"
+  >
 ): void {
   isCronDisabled(env);
-  productionProjectsAllowed(env);
+  assertProjectEnvironmentsConfig(env);
 }
 
 /**
  * The Environments a definition is registered for: one per Environment for `cluster`, a single
- * environment-less registration for `global`. A deployment that admits no production project
- * registers no production work.
+ * environment-less registration for `global`. A deployment registers no work for an environment
+ * whose projects it does not admit.
  *
  * @param definition - The definition to register.
- * @param env - Process environment naming whether production projects are admitted.
+ * @param env - Process environment naming which project environments are admitted.
  * @returns One entry per registration.
  */
 function registrationEnvironments(
   definition: CronDefinition,
-  env: Pick<Env, "SDP_ALLOW_PRODUCTION_PROJECTS">
+  env: Pick<Env, "SDP_ALLOW_PRODUCTION_PROJECTS" | "SDP_ALLOW_SANDBOX_PROJECTS">
 ): readonly (SdpEnvironment | null)[] {
   switch (definition.scope) {
     case "cluster":
-      return productionProjectsAllowed(env)
-        ? SDP_ENVIRONMENTS
-        : SDP_ENVIRONMENTS.filter((environment) => environment !== "production");
+      return SDP_ENVIRONMENTS.filter((environment) => environmentAllowed(env, environment));
     case "global":
       return [null];
     default: {

@@ -11,6 +11,9 @@ import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch
 export const mainnetAccessSchema = z.object({
   state: z.enum(MAINNET_ACCESS_STATES),
   available: z.boolean(),
+  // Older API revisions omit it; they serve both environments.
+  sandboxOnly: z.boolean().default(false),
+  mainnetOnly: z.boolean().default(false),
   countryCode: z.enum(COUNTRY_CODES).nullable(),
   request: z
     .object({

@@ -70,6 +70,11 @@ export interface Env extends ManagedRpcEnv {
   // entitlement says (a devnet-only deployment).
   SDP_ALLOW_PRODUCTION_PROJECTS?: string;
 
+  // Whether this deployment may admit a sandbox project. Unset allows; "false"
+  // makes the deployment mainnet-only: no sandbox projects, and only
+  // organizations with the production entitlement are admitted.
+  SDP_ALLOW_SANDBOX_PROJECTS?: string;
+
   // One extra origin the CORS allowlist admits, as an exact https origin, for a
   // deployment whose docs site is not the canonical one.
   CORS_EXTRA_ORIGIN?: string;

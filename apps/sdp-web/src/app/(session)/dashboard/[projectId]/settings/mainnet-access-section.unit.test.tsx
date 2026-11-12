@@ -46,6 +46,8 @@ describe("MainnetAccessSection", () => {
     await renderSection({
       state: "not_requested",
       available,
+      sandboxOnly: false,
+      mainnetOnly: false,
       countryCode: null,
       request: null,
       contactEmail: "mainnet@example.test",
@@ -63,6 +65,8 @@ describe("MainnetAccessSection", () => {
     await renderSection({
       state: "approved",
       available: true,
+      sandboxOnly: false,
+      mainnetOnly: false,
       countryCode: null,
       request: {
         requestedAt: "2026-11-01T12:00:00.000Z",
@@ -88,6 +92,8 @@ describe("MainnetAccessSection", () => {
     await renderSection({
       state: "pending",
       available: true,
+      sandboxOnly: false,
+      mainnetOnly: false,
       countryCode: "SG",
       request: {
         requestedAt: "2026-11-01T12:00:00.000Z",

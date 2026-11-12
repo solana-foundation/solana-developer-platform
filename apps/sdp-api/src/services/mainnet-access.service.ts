@@ -15,6 +15,7 @@ import {
   type MainnetAccessRow,
 } from "@/db/repositories/mainnet-access.repository";
 import { conflict } from "@/lib/errors";
+import { productionProjectsAllowed, sandboxProjectsAllowed } from "@/lib/production-entitlement";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { createSystemAuditService } from "@/services/audit.service";
 import {
@@ -42,9 +43,12 @@ export function toMainnetAccess(
   row: MainnetAccessRow | null,
   entitled: boolean
 ): MainnetAccess {
+  const sandboxOnly = !productionProjectsAllowed(env);
   return {
     state: mainnetAccessState(row, entitled),
-    available: mainnetAccessEmailConfig(env) !== null,
+    available: !sandboxOnly && mainnetAccessEmailConfig(env) !== null,
+    sandboxOnly,
+    mainnetOnly: !sandboxProjectsAllowed(env),
     countryCode: row ? row.country_code : null,
     request: row
       ? {

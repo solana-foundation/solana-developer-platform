@@ -131,8 +131,21 @@ export type MainnetAccessRequest = {
 /** `GET /v1/organizations/{orgId}/mainnet-access`. */
 export type MainnetAccess = {
   state: MainnetAccessState;
-  /** Whether this deployment takes requests; false while its request email is not configured. */
+  /**
+   * Whether this deployment takes requests; false while its request email is not configured, and
+   * always on a sandbox-only deployment.
+   */
   available: boolean;
+  /**
+   * True on a deployment that admits no production project (the sandbox): mainnet access is
+   * requested on the production deployment instead.
+   */
+  sandboxOnly: boolean;
+  /**
+   * True on a deployment that admits no sandbox project: until approved, the organization can only
+   * read its organization, projects and members, and request mainnet access.
+   */
+  mainnetOnly: boolean;
   /** Self-declared; SDP does not verify it. */
   countryCode: CountryCode | null;
   request: MainnetAccessRequest | null;

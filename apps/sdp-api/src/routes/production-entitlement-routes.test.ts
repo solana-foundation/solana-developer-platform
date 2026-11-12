@@ -6,48 +6,20 @@ import { getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { authenticateTestClerkUser, ensureTestClerkIssuer } from "@/test/helpers/clerk";
 import { env as baseEnv } from "@/test/helpers/env";
+import {
+  NO_PROJECT_ROUTES,
+  probeMethod,
+  projectRoutePath,
+} from "@/test/helpers/project-route-probe";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import { isEarnExitOrRead } from "./earn/exits";
 
-/**
- * Routes that act on no project, so the production entitlement has nothing
- * to refuse. Every other route must refuse a production project without the
- * entitlement (APE-351). Each entry says why; a new route lands in this list
- * only on purpose.
- */
-const NO_PROJECT_ROUTES: readonly (readonly [RegExp, string])[] = [
-  [/^\/(health|docs|openapi\.json|llms\.txt)?(\/|$)/, "public metadata"],
-  [/^\/webhooks\//, "provider- or Clerk-signed inbound events; they finish money already moving"],
-  [/^\/pay(\/|$)/, "public payment page; admits its own money movement (lib/money-admission.ts)"],
-  [/^\/admin\//, "operator routes behind their own credential"],
-  [/^\/v1\/(organizations|onboarding|places)(\/|$)/, "organization-scoped, no project"],
-  [/^\/v1\/members(\/me)?$/, "membership reads and leaving, no project (ADR 0012)"],
-  [
-    /^\/v1\/members\/:memberId\/api-keys$/,
-    "reads one member's keys across every project, so no single project (HOO-2301)",
-  ],
-  [/^\/internal\/dashboard\/network(\/|$)/, "chain-wide public figures; reads no tenant data"],
-  [/^\/v1\/projects$/, "lists projects; hides production without the entitlement"],
-  [
-    /^\/v1\/issuance\/tokens\/:tokenId\/metadata\.json$/,
-    "public token metadata that issued tokens point to on chain; serves, never acts",
-  ],
-];
-
 const PRODUCTION_PROJECT_ID = `prj_${TEST_ORG.id}_production`;
 
-function probeMethod(method: string): string {
-  return method === "ALL" ? "GET" : method;
-}
-
-/** A concrete URL: `:projectId` is the production project, every other param a placeholder. */
 function concretePath(path: string): string {
-  return path
-    .replace(/:projectId(\{[^}]*\})?\??/g, PRODUCTION_PROJECT_ID)
-    .replace(/:[A-Za-z0-9_]+(\{[^}]*\})?\??/g, "x1")
-    .replace(/\*/g, "x1");
+  return projectRoutePath(path, PRODUCTION_PROJECT_ID);
 }
 
 /**

@@ -2,6 +2,7 @@ import { type Action, isApiKeyGrantableAction } from "@sdp/types/actions";
 import type { Context, MiddlewareHandler } from "hono";
 import { authMayPerform, getOptionalAuth } from "@/lib/auth";
 import { AppError, missingAction } from "@/lib/errors";
+import { isOrganizationAdmitted, organizationNotAdmitted } from "@/lib/production-entitlement";
 import type { Env } from "@/types/env";
 
 /**
@@ -56,6 +57,28 @@ function named(
 }
 
 /**
+ * What an organization a mainnet-only deployment does not admit may still do: read its own
+ * organization, projects (it has none it can see) and members, and request mainnet access, which
+ * takes `organizations.manage`. Everything else, inviting members included, waits for approval.
+ */
+const NOT_ADMITTED_ACTIONS: ReadonlySet<Action> = new Set<Action>([
+  "organizations.read",
+  "organizations.manage",
+  "projects.read",
+  "members.read",
+]);
+
+/**
+ * Refuses an action a mainnet-only deployment keeps from an organization without mainnet access.
+ * Runs after the caller is known to hold the action, so a missing grant is still named as such.
+ */
+function assertOrganizationAdmittedFor(c: Context<{ Bindings: Env }>, action: Action): void {
+  if (!NOT_ADMITTED_ACTIONS.has(action) && !isOrganizationAdmitted(c)) {
+    throw organizationNotAdmitted();
+  }
+}
+
+/**
  * The route's action. Mount it after authentication and before body
  * validation or any handler work, so a refused caller learns nothing about
  * the request and nothing is written.
@@ -63,6 +86,7 @@ function named(
 export function requireAction(action: Action): MiddlewareHandler<{ Bindings: Env }> {
   return named(`requireAction(${action})`, async (c, next) => {
     assertCallerMayPerform(c, action);
+    assertOrganizationAdmittedFor(c, action);
     await next();
   });
 }

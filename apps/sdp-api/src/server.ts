@@ -21,7 +21,10 @@ import { parseDatabaseEnv } from "@/db/database-env";
 import { assertClerkConfigured, warmClerkSigningKeys } from "@/lib/clerk-token";
 import { assertSdpReleaseChannelConfigured } from "@/lib/feature-flags";
 import { resolveGatewayIdentityConfig } from "@/lib/gateway-identity";
-import { productionProjectsAllowed } from "@/lib/production-entitlement";
+import {
+  assertProjectEnvironmentsConfig,
+  productionProjectsAllowed,
+} from "@/lib/production-entitlement";
 import { getProcessEnv, isSelfHostedDeployment } from "@/lib/runtime-env";
 import { extraAllowedOrigins } from "@/middleware/cors";
 import { createNodeExecutionContext, NodeBackgroundRunner } from "@/runtime/background-node";
@@ -139,6 +142,7 @@ export function assertRequiredEnv(env: Env): void {
   assertCustodyEncryptionScheme(env);
   assertSigningProviderAllowed(env);
   assertSdpReleaseChannelConfigured(env);
+  assertProjectEnvironmentsConfig(env);
   // Stage and prod run ENVIRONMENT=production on Cloud Run, where Kora admits only IAM
   // invokers; dev, local and self-hosted reach Kora without an identity token.
   assertKoraConfigured(env, {
