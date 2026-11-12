@@ -1,19 +1,35 @@
 "use client";
 
 import { COUNTRIES, COUNTRY_CODES } from "@sdp/types/countries";
-import { SDP_TERMS } from "@sdp/types/mainnet-access";
+import {
+  foundationContactEmailSchema,
+  MAINNET_USE_CASE_MAX_LENGTH,
+  SDP_TERMS,
+} from "@sdp/types/mainnet-access";
 import { regionFlagEmoji } from "@sdp/types/payment-rails";
 import { SDP_TERMS_PATH } from "@sdp/types/site";
 import { Button } from "@sdp/ui/button";
 import { Combobox, type ComboboxOption } from "@sdp/ui/combobox";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
+import { Textarea } from "@sdp/ui/textarea";
 import { WizardStepProgress } from "@sdp/ui/wizard-step-progress";
 import { CheckCircle2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { type ReactNode, type UIEvent, useCallback, useRef, useState, useTransition } from "react";
+import {
+  type ReactNode,
+  type UIEvent,
+  useCallback,
+  useId,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { z } from "zod";
 import { RecordSection } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
 import { SdpTermsContent } from "@/components/sdp-terms-content";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
 import { useZodForm } from "@/lib/use-zod-form";
@@ -27,13 +43,41 @@ const COUNTRY_OPTIONS: readonly ComboboxOption[] = COUNTRIES.map((country) => {
 /** How close to the end of the reader counts as read, so sub-pixel rounding never blocks it. */
 const READ_TO_END_SLACK_PX = 8;
 
-type Step = "jurisdiction" | "terms" | "sent";
+type Step = "jurisdiction" | "about" | "terms" | "sent";
+const FORM_STEPS = ["jurisdiction", "about", "terms"] as const satisfies readonly Step[];
+
+const CONTACT_ANSWERS = ["no", "yes"] as const;
+type ContactAnswer = (typeof CONTACT_ANSWERS)[number];
+const CONTACT_EMAIL_INVALID = "Shared.mainnetAccess.contactEmailInvalid" satisfies MessageKey;
 
 /** Step 1: the picker answers with any string, so the form parses it into a known country. */
 const JURISDICTION_SCHEMA = z.object({
   countryCode: z.string().nullable().pipe(z.enum(COUNTRY_CODES)),
 });
-/** Step 2: the admin accepts the terms on the organization's behalf. */
+/**
+ * Step 2 (PRO-2481): whether someone at the Solana Foundation knows the organization, and who, and
+ * an optional line on what it builds. "No" is an answer, so the step always says one or the other.
+ */
+const ABOUT_SCHEMA = z
+  .object({
+    hasContact: z.enum(CONTACT_ANSWERS).nullable().pipe(z.enum(CONTACT_ANSWERS)),
+    contactEmail: z.string(),
+    useCase: z.string(),
+  })
+  .transform((values, ctx) => {
+    let foundationContactEmail: string | null = null;
+    if (values.hasContact === "yes") {
+      const contact = foundationContactEmailSchema.safeParse(values.contactEmail);
+      if (!contact.success) {
+        ctx.addIssue({ code: "custom", path: ["contactEmail"], message: CONTACT_EMAIL_INVALID });
+        return z.NEVER;
+      }
+      foundationContactEmail = contact.data;
+    }
+    const useCase = values.useCase.trim().slice(0, MAINNET_USE_CASE_MAX_LENGTH);
+    return { foundationContactEmail, useCase: useCase === "" ? null : useCase };
+  });
+/** Step 3: the admin accepts the terms on the organization's behalf. */
 const TERMS_SCHEMA = z.object({ accepted: z.boolean().refine((accepted) => accepted) });
 
 interface RequestProps {
@@ -72,8 +116,9 @@ export function MainnetAccessRequestHost({
 }
 
 /**
- * Two steps, then done: the organization's jurisdiction, then the Terms and Conditions read to
- * the end and accepted. Nothing is sent until the last step, so closing early leaves no trace.
+ * Three steps, then done: the organization's jurisdiction, its Solana Foundation contact and what
+ * it builds, then the Terms and Conditions read to the end and accepted. Nothing is sent until the
+ * last step, so closing early leaves no trace.
  */
 function MainnetAccessRequestModal({
   organizationId,
@@ -84,6 +129,11 @@ function MainnetAccessRequestModal({
   const router = useRouter();
   const [step, setStep] = useState<Step>("jurisdiction");
   const jurisdiction = useZodForm(JURISDICTION_SCHEMA, { countryCode: null });
+  const about = useZodForm(
+    ABOUT_SCHEMA,
+    { hasContact: null, contactEmail: "", useCase: "" },
+    (message) => (message === CONTACT_EMAIL_INVALID ? t(CONTACT_EMAIL_INVALID) : message)
+  );
   const terms = useZodForm(TERMS_SCHEMA, { accepted: false });
   const [error, setError] = useState<string | null>(null);
   const [submitting, startSubmit] = useTransition();
@@ -97,21 +147,30 @@ function MainnetAccessRequestModal({
     if (attempted.current) refreshKeepingDashboardUrl(router);
   };
 
-  const steps = [t("Shared.mainnetAccess.stepJurisdiction"), t("Shared.mainnetAccess.stepTerms")];
-  const stepIndex = step === "jurisdiction" ? 0 : 1;
+  const steps = [
+    t("Shared.mainnetAccess.stepJurisdiction"),
+    t("Shared.mainnetAccess.stepAbout"),
+    t("Shared.mainnetAccess.stepTerms"),
+  ];
+  const stepIndex = step === "sent" ? FORM_STEPS.length - 1 : FORM_STEPS.indexOf(step);
 
-  const continueToTerms = () => {
-    if (jurisdiction.validate().ok) setStep("terms");
+  const continueFrom = () => {
+    if (step === "jurisdiction" && jurisdiction.validate().ok) setStep("about");
+    else if (step === "about" && about.validate().ok) setStep("terms");
   };
+  const back = () => setStep(step === "terms" ? "about" : "jurisdiction");
 
   const submit = () => {
     const country = jurisdiction.validate();
-    if (!country.ok || !terms.validate().ok) return;
+    const answers = about.validate();
+    if (!country.ok || !answers.ok || !terms.validate().ok) return;
     setError(null);
     startSubmit(async () => {
       const result = await requestMainnetAccess(organizationId, {
         countryCode: country.data.countryCode,
         termsVersion: SDP_TERMS.version,
+        foundationContactEmail: answers.data.foundationContactEmail,
+        useCase: answers.data.useCase,
       });
       attempted.current = true;
       if (result.ok) {
@@ -155,6 +214,16 @@ function MainnetAccessRequestModal({
               countryCode={jurisdiction.values.countryCode}
               onChange={(code) => jurisdiction.setField("countryCode", code)}
             />
+          ) : step === "about" ? (
+            <AboutStep
+              hasContact={about.values.hasContact}
+              onHasContactChange={(answer) => about.setField("hasContact", answer)}
+              contactEmail={about.values.contactEmail}
+              onContactEmailChange={(email) => about.setField("contactEmail", email)}
+              contactEmailError={about.errors.contactEmail}
+              useCase={about.values.useCase}
+              onUseCaseChange={(useCase) => about.setField("useCase", useCase)}
+            />
           ) : (
             <TermsStep
               organizationName={organizationName}
@@ -174,12 +243,16 @@ function MainnetAccessRequestModal({
 
           <RequestFooter
             step={step}
-            canContinue={jurisdiction.values.countryCode !== null}
+            canContinue={
+              step === "jurisdiction"
+                ? jurisdiction.values.countryCode !== null
+                : about.values.hasContact !== null
+            }
             canSubmit={terms.values.accepted}
             submitting={submitting}
             onCancel={onClose}
-            onContinue={continueToTerms}
-            onBack={() => setStep("jurisdiction")}
+            onContinue={continueFrom}
+            onBack={back}
             onSubmit={submit}
           />
         </div>
@@ -222,26 +295,26 @@ function RequestFooter({
   onSubmit: () => void;
 }) {
   const t = useTranslations();
-  if (step === "jurisdiction") {
-    return (
-      <div className="flex items-center justify-end gap-2 border-t border-border-default pt-4">
+  return (
+    <div className="flex items-center justify-end gap-2 border-t border-border-default pt-4">
+      {step === "jurisdiction" ? (
         <Button type="button" variant="secondary" onClick={onCancel}>
           {t("Shared.mainnetAccess.cancel")}
         </Button>
+      ) : (
+        <Button type="button" variant="secondary" disabled={submitting} onClick={onBack}>
+          {t("Shared.mainnetAccess.back")}
+        </Button>
+      )}
+      {step === "terms" ? (
+        <Button type="button" disabled={!canSubmit} loading={submitting} onClick={onSubmit}>
+          {t("Shared.mainnetAccess.submit")}
+        </Button>
+      ) : (
         <Button type="button" disabled={!canContinue} onClick={onContinue}>
           {t("Shared.mainnetAccess.continue")}
         </Button>
-      </div>
-    );
-  }
-  return (
-    <div className="flex items-center justify-end gap-2 border-t border-border-default pt-4">
-      <Button type="button" variant="secondary" disabled={submitting} onClick={onBack}>
-        {t("Shared.mainnetAccess.back")}
-      </Button>
-      <Button type="button" disabled={!canSubmit} loading={submitting} onClick={onSubmit}>
-        {t("Shared.mainnetAccess.submit")}
-      </Button>
+      )}
     </div>
   );
 }
@@ -273,6 +346,118 @@ function JurisdictionStep({
         required
       />
       <p className="text-xs text-tertiary">{t("Shared.mainnetAccess.jurisdictionFinal")}</p>
+    </div>
+  );
+}
+
+const CONTACT_OPTION_KEYS = {
+  no: { label: "Shared.mainnetAccess.contactNo", help: "Shared.mainnetAccess.contactNoHelp" },
+  yes: { label: "Shared.mainnetAccess.contactYes", help: "Shared.mainnetAccess.contactYesHelp" },
+} as const satisfies Record<ContactAnswer, { label: MessageKey; help: MessageKey }>;
+
+/**
+ * Who at the Solana Foundation knows the organization, if anyone, and what it builds. Both go to
+ * the reviewer with the request; the API takes a contact only at the Foundation's domain.
+ */
+function AboutStep({
+  hasContact,
+  onHasContactChange,
+  contactEmail,
+  onContactEmailChange,
+  contactEmailError,
+  useCase,
+  onUseCaseChange,
+}: {
+  hasContact: ContactAnswer | null;
+  onHasContactChange: (answer: ContactAnswer) => void;
+  contactEmail: string;
+  onContactEmailChange: (email: string) => void;
+  contactEmailError: string | undefined;
+  useCase: string;
+  onUseCaseChange: (useCase: string) => void;
+}) {
+  const t = useTranslations();
+  const ids = useId();
+  const contactEmailId = `${ids}-contact-email`;
+  const useCaseId = `${ids}-use-case`;
+  return (
+    <div className="space-y-5">
+      <div className="space-y-1">
+        <h3 className="text-base font-medium text-primary">
+          {t("Shared.mainnetAccess.aboutHeading")}
+        </h3>
+        <p className="text-sm text-secondary">{t("Shared.mainnetAccess.aboutBody")}</p>
+      </div>
+
+      <fieldset className="space-y-3">
+        <legend className="mb-2 text-sm font-medium text-primary">
+          {t("Shared.mainnetAccess.contactLegend")}
+        </legend>
+        {CONTACT_ANSWERS.map((answer) => (
+          <label
+            key={answer}
+            className="flex cursor-pointer items-start gap-3 rounded-lg border border-border-default p-3"
+          >
+            <input
+              type="radio"
+              name={`${ids}-contact`}
+              value={answer}
+              checked={hasContact === answer}
+              onChange={() => onHasContactChange(answer)}
+              className="mt-1"
+            />
+            <span>
+              <span className="block text-sm font-medium text-primary">
+                {t(CONTACT_OPTION_KEYS[answer].label)}
+              </span>
+              <span className="mt-1 block text-xs text-secondary">
+                {t(CONTACT_OPTION_KEYS[answer].help)}
+              </span>
+            </span>
+          </label>
+        ))}
+        {hasContact === "yes" ? (
+          <div className="grid gap-2 pt-1">
+            <Label htmlFor={contactEmailId}>{t("Shared.mainnetAccess.contactEmailLabel")}</Label>
+            <Input
+              id={contactEmailId}
+              type="email"
+              autoComplete="off"
+              spellCheck={false}
+              value={contactEmail}
+              onChange={(event) => onContactEmailChange(event.currentTarget.value)}
+              placeholder={t("Shared.mainnetAccess.contactEmailPlaceholder")}
+              error={contactEmailError}
+            />
+          </div>
+        ) : null}
+      </fieldset>
+
+      <div className="grid gap-2">
+        <div className="flex items-baseline justify-between gap-3">
+          <Label htmlFor={useCaseId}>
+            {t("Shared.mainnetAccess.useCaseLabel")}{" "}
+            <span className="font-normal text-tertiary">
+              {t("Shared.mainnetAccess.useCaseOptional")}
+            </span>
+          </Label>
+          <span className="text-xs text-tertiary" aria-live="polite">
+            {t("Shared.mainnetAccess.useCaseCount", {
+              length: String(useCase.length),
+              max: String(MAINNET_USE_CASE_MAX_LENGTH),
+            })}
+          </span>
+        </div>
+        <Textarea
+          id={useCaseId}
+          rows={3}
+          maxLength={MAINNET_USE_CASE_MAX_LENGTH}
+          value={useCase}
+          onChange={(event) => onUseCaseChange(event.currentTarget.value)}
+          placeholder={t("Shared.mainnetAccess.useCasePlaceholder")}
+          className="resize-none"
+        />
+      </div>
     </div>
   );
 }

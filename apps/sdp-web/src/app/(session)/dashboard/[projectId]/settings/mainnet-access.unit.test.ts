@@ -10,6 +10,13 @@ import {
 } from "@/test/dashboard-fetch";
 import { notifyMainnetAccess, requestMainnetAccess } from "./mainnet-access";
 
+const REQUEST_INPUT = {
+  countryCode: "SG",
+  termsVersion: SDP_TERMS.version,
+  foundationContactEmail: "jo@solana.org",
+  useCase: null,
+} as const;
+
 const PENDING = {
   state: "pending",
   available: true,
@@ -36,15 +43,22 @@ describe("mainnet access requests", () => {
   it("posts the jurisdiction and the accepted terms version", async () => {
     const fetchMock = stubDashboardFetch(() => dashboardDataResponse(201, PENDING));
 
-    expect(
-      await requestMainnetAccess("org_sdp", { countryCode: "SG", termsVersion: SDP_TERMS.version })
-    ).toEqual({ ok: true, access: PENDING });
+    expect(await requestMainnetAccess("org_sdp", { ...REQUEST_INPUT })).toEqual({
+      ok: true,
+      access: PENDING,
+    });
     expect(sentDashboardRequests(fetchMock)).toEqual([
       {
         path: "/api/dashboard/organizations/org_sdp/mainnet-access",
         method: "POST",
         idempotencyKey: expect.any(String),
-        body: { countryCode: "SG", termsVersion: SDP_TERMS.version, acceptTerms: true },
+        body: {
+          countryCode: "SG",
+          termsVersion: SDP_TERMS.version,
+          acceptTerms: true,
+          foundationContactEmail: "jo@solana.org",
+          useCase: null,
+        },
       },
     ]);
   });
@@ -54,9 +68,10 @@ describe("mainnet access requests", () => {
       dashboardErrorResponse(409, "This organization already requested mainnet access")
     );
 
-    expect(
-      await requestMainnetAccess("org_sdp", { countryCode: "SG", termsVersion: SDP_TERMS.version })
-    ).toEqual({ ok: false, error: "This organization already requested mainnet access" });
+    expect(await requestMainnetAccess("org_sdp", { ...REQUEST_INPUT })).toEqual({
+      ok: false,
+      error: "This organization already requested mainnet access",
+    });
   });
 
   it("sends an unsent request with a body-less notify", async () => {
