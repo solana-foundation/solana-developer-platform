@@ -3,12 +3,11 @@
 import { Button } from "@sdp/ui/button";
 import { DownloadIcon, ExternalLinkIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import useSWR from "swr";
+import { custodyQueryKeys } from "@/app/(session)/dashboard/[projectId]/wallets/custody-query-key";
 import { useTranslations } from "@/i18n/provider";
-import {
-  type FireblocksCsr,
-  generateFireblocksCsrAction,
-  loadFireblocksCsrAction,
-} from "./fireblocks-csr-actions";
+import { fetchPendingFireblocksCsr } from "./fireblocks-csr.data";
+import { type FireblocksCsr, generateFireblocksCsrAction } from "./fireblocks-csr-actions";
 import { FireblocksVaultPicker } from "./fireblocks-vault-picker";
 
 function downloadCsr(csr: FireblocksCsr) {
@@ -29,46 +28,34 @@ interface RegistrationProps {
 }
 function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) {
   const t = useTranslations();
-  const [csr, setCsr] = useState<FireblocksCsr | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [now, setNow] = useState(() => Date.now());
+  const {
+    data,
+    error: readError,
+    isValidating: loading,
+    mutate,
+  } = useSWR(custodyQueryKeys.pendingFireblocksCsr(), fetchPendingFireblocksCsr, {
+    revalidateOnFocus: false,
+    revalidateOnReconnect: false,
+    shouldRetryOnError: false,
+    onSuccess: () => setNow(Date.now()),
+  });
+  const csr = data === undefined ? null : data.csr;
   const [generating, setGenerating] = useState(false);
   const [vaultsPending, setVaultsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
+  const [readFailureCleared, setReadFailureCleared] = useState(false);
   const requestKey = useRef<string | null>(null);
-  const [now, setNow] = useState(() => Date.now());
   const expired = csr !== null && Date.parse(csr.expiresAt) <= now;
   const ready = csr !== null && !expired && !loading && !generating;
   useEffect(() => {
-    let active = true;
-    async function load() {
-      onPendingChange?.(true);
-      onReadyChange?.(false);
-      try {
-        const result = await loadFireblocksCsrAction();
-        if (!active) return;
-        if (result.status === "success") {
-          setCsr(result.csr);
-          setNow(Date.now());
-        } else setError(result.message);
-      } catch {
-        if (active) setLoadFailed(true);
-      } finally {
-        if (active) {
-          setLoading(false);
-          onPendingChange?.(false);
-        }
-      }
-    }
-    void load();
-    return () => {
-      active = false;
-      onPendingChange?.(false);
-    };
-    // The translator is left out on purpose: the load's server action makes the route render
-    // again, which hands every client component a new translator, and a load that followed the
-    // translator would then run again after each of its own responses.
-  }, [onPendingChange, onReadyChange]);
+    onReadyChange?.(false);
+  }, [onReadyChange]);
+  useEffect(() => {
+    if (!loading) return;
+    onPendingChange?.(true);
+    return () => onPendingChange?.(false);
+  }, [loading, onPendingChange]);
   useEffect(() => {
     if (!csr) return;
     const remaining = Date.parse(csr.expiresAt) - Date.now();
@@ -99,7 +86,7 @@ function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) 
     onPendingChange?.(true);
     onReadyChange?.(false);
     setError(null);
-    setLoadFailed(false);
+    setReadFailureCleared(true);
     try {
       requestKey.current ??= crypto.randomUUID();
       const result = await generateFireblocksCsrAction(requestKey.current);
@@ -109,7 +96,7 @@ function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) 
         );
         return;
       }
-      setCsr(result.csr);
+      await mutate({ csr: result.csr }, { revalidate: false });
       setNow(Date.now());
       requestKey.current = crypto.randomUUID();
       downloadCsr(result.csr);
@@ -126,7 +113,11 @@ function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) 
     loading,
     generating,
     vaultsPending,
-    error: error ?? (loadFailed ? t("DashboardCustody.fireblocksCsrFailed") : null),
+    error:
+      error ??
+      (readError !== undefined && !readFailureCleared
+        ? t("DashboardCustody.fireblocksCsrFailed")
+        : null),
     expired,
     generate,
     vaultPendingChanged,
