@@ -62,7 +62,10 @@ import {
   createSystemAuditService,
   criticalOutcomeEntry,
 } from "@/services/audit.service";
-import { refreshFireblocksTransfer } from "@/services/payments/fireblocks-transfer";
+import {
+  refreshFireblocksTransfer,
+  systemProposalLedger,
+} from "@/services/payments/fireblocks-transfer";
 import type { Env } from "@/types/env";
 
 // Allow 5 minutes before treating a signature-less "processing" transfer as stuck.
@@ -389,7 +392,7 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
     limit: 50,
   });
   await mapSettledWithConcurrency(fireblocks, 5, (transfer) =>
-    refreshFireblocksTransfer(env, repo, transfer)
+    refreshFireblocksTransfer(env, systemProposalLedger(env, repo), transfer)
   );
 }
 

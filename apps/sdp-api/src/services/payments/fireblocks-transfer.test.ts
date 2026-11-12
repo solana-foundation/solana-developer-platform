@@ -273,6 +273,33 @@ async function refresh(id: string) {
   return (await response.json()).data.transfer;
 }
 
+/** The row's open audit intent and the outcomes appended for it, oldest first. */
+async function transferAudit(transferId: string) {
+  const db = getDb(env);
+  const row = await db.queryOne<{ audit_intent_id: string | null }>(
+    "SELECT audit_intent_id FROM payment_transfers WHERE id = ?",
+    [transferId]
+  );
+  const outcomes = await db.queryMany<{
+    status: string;
+    metadata: string | Record<string, unknown>;
+  }>(
+    `SELECT status, metadata FROM audit_logs
+      WHERE action = 'transfer' AND resource_type = 'payment_transfer' AND resource_id = ?
+        AND metadata::jsonb->>'auditPhase' = 'outcome'
+      ORDER BY ledger_sequence`,
+    [transferId]
+  );
+  return {
+    openIntent: row?.audit_intent_id != null,
+    outcomes: outcomes.map((outcome) => ({
+      status: outcome.status,
+      metadata:
+        typeof outcome.metadata === "string" ? JSON.parse(outcome.metadata) : outcome.metadata,
+    })),
+  };
+}
+
 describe("native Fireblocks BYOK payment routes", () => {
   it.each([undefined, SIG])(
     "keeps a COMPLETED create response pending until a verified detail read (hash: %s)",
@@ -606,6 +633,80 @@ describe("native Fireblocks BYOK payment routes", () => {
       expect(raw).not.toContain("private provider text");
     }
     expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+  it.each(["status read", "cron"] as const)(
+    "keeps the audit intent open while approval is pending and closes it once on settlement (%s)",
+    async (settledBy) => {
+      await ready();
+      const response = await send();
+      expect(response.status, await response.clone().text()).toBe(200);
+      const transfer = (await response.json()).data.transfer;
+      expect(await transferAudit(transfer.id)).toMatchObject({ openIntent: true, outcomes: [] });
+      // An observation that ends nothing leaves the intent for the settle.
+      providerStatus = "PENDING_SIGNATURE";
+      await refresh(transfer.id);
+      expect(await transferAudit(transfer.id)).toMatchObject({ openIntent: true, outcomes: [] });
+
+      providerStatus = settledBy === "cron" ? "REJECTED" : "COMPLETED";
+      if (settledBy === "cron") {
+        await getDb(env).execute(
+          "UPDATE payment_transfers SET provider_data = provider_data - 'fireblocksLastPolledAt' WHERE id = ?",
+          [transfer.id]
+        );
+        await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+          trackPendingTransfers(testEnv)
+        );
+      } else {
+        expect(await refresh(transfer.id)).toMatchObject({ status: "confirmed" });
+      }
+      const settled = await transferAudit(transfer.id);
+      expect(settled.openIntent).toBe(false);
+      expect(settled.outcomes).toHaveLength(1);
+      expect(settled.outcomes[0]).toMatchObject(
+        settledBy === "cron"
+          ? {
+              status: "failure",
+              metadata: {
+                auditPhase: "outcome",
+                status: "failed",
+                fireblocksStatus: "REJECTED",
+                fireblocksTransactionId: "fb-proposal",
+              },
+            }
+          : {
+              status: "success",
+              metadata: {
+                auditPhase: "outcome",
+                status: "confirmed",
+                fireblocksStatus: "COMPLETED",
+                fireblocksTransactionId: "fb-proposal",
+                signature: SIG,
+              },
+            }
+      );
+      // Later reads append nothing.
+      await refresh(transfer.id);
+      expect((await transferAudit(transfer.id)).outcomes).toHaveLength(1);
+    }
+  );
+  it("closes the audit intent once when Fireblocks blocks the proposal immediately", async () => {
+    await ready();
+    providerStatus = "BLOCKED";
+    createResultPatch = { subStatus: "BLOCKED_BY_POLICY" };
+    expect((await send()).status).toBe(422);
+    const row = await getDb(env).queryOne<{ id: string }>(
+      "SELECT id FROM payment_transfers WHERE organization_id = ?",
+      [ORGANIZATION_ID]
+    );
+    if (!row) throw new Error("Expected blocked payment");
+    const audit = await transferAudit(row.id);
+    expect(audit.openIntent).toBe(false);
+    expect(audit.outcomes).toEqual([
+      expect.objectContaining({
+        status: "failure",
+        metadata: expect.objectContaining({ status: "failed", fireblocksStatus: "BLOCKED" }),
+      }),
+    ]);
   });
   it("does not expose credentials and blocks another project from reading or executing this wallet", async () => {
     const mock = await ready();

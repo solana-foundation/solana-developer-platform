@@ -136,6 +136,10 @@ Before submission, SDP durably stores the intent and atomically claims a single 
 The SDP transfer ID is Fireblocks' permanent `externalTxId`; transaction creation does not
 send Fireblocks' time-limited `Idempotency-Key` header. SDP separately deduplicates the caller's
 request using its own idempotency key.
+The payment's critical audit intent stays open while the proposal awaits approval. The read or
+cron run that settles the payment (confirmed, failed, rejected or expired) closes it with
+Fireblocks' outcome in the same transaction as the status change, as the pending-transfer job
+does for a signed payment; acceptance alone is never audited as success.
 The payment goes through the same custody waist as every signed payment (ADR 0007). The
 waist resolves a Fireblocks BYOK wallet to a proposer rather than a signer
 (`services/domain/signing/admitted-proposer.ts`), with the same checks at resolution: runtime
