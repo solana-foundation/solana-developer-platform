@@ -1,0 +1,18 @@
+default:
+    @just --list
+
+fmt:
+    cargo fmt --all
+
+check:
+    cargo fmt --all -- --check
+    cargo clippy --workspace --all-targets -- -D warnings
+
+build:
+    cargo build --workspace
+
+test:
+    cargo test --workspace
+
+unit-test:
+    cargo test --workspace --lib

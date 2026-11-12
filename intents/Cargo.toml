@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = ["spec"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+rust-version = "1.99"
+
+[workspace.dependencies]
+bytemuck = { version = "=1.25.2", features = ["derive", "min_const_generics"] }
+
+[workspace.lints.rust]
+unused_imports = "deny"
+dead_code = "warn"
+unused_variables = "warn"
+deprecated = "warn"
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"

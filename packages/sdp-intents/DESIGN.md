@@ -896,8 +896,8 @@ and hashes the same.
 
 ### 4.9 Binary form and limits
 
-The binary form is canonical. JSON is the authoring form, and `sdp-intents-spec` compiles each to
-the other. Digests, the registry, and onchain wallets use only the binary form.
+The binary form is canonical. JSON is the authoring form, and `sdp-intents-compiler` compiles each
+to the other. Digests, the registry, and onchain wallets use only the binary form.
 
 **Layout.** Each document is alignment-1 pod, as the builder result is. The rules:
 
@@ -1049,50 +1049,52 @@ An interface and an intent use the same parts:
 5. `name_hash` is the SHA-256 of the name. `publisher` is the organization address, which the
    compiler derives from the organization name (4.10).
 
-**Views.** Callers never touch the wire structs. `sdp-intents-spec` wraps each document in a view
-that borrows its bytes and turns indexes, ranges, and tags into references and enums:
+**Views.** A view reads a document in place. It never allocates, and it never copies an entry out
+of the bytes:
 
 ```rust
 pub struct Implementation<'a> {
-    bytes: &'a [u8],
+    body: &'a [u8],
     fixed: &'a ImplementationDocV1,
 }
 
 impl<'a> Implementation<'a> {
     pub fn parse(bytes: &'a [u8]) -> Result<Self, SpecError>;
-    pub fn from_registry(owner: &Address, data: &'a [u8]) -> Result<Self, SpecError>;
-    pub fn message(&self) -> Template<'a>;
-    pub fn account(&self, index: u8) -> Account<'a>;
-    pub fn accounts(&self) -> impl ExactSizeIterator<Item = Account<'a>> + 'a;
-    pub fn instructions(&self) -> impl ExactSizeIterator<Item = Instruction<'a>> + 'a;
+    pub fn text(&self, range: PoolRefV1) -> Result<&'a [u8], SpecError>;
+    pub fn accounts(&self) -> Result<&'a [AccountV1], SpecError>;
+    pub fn instructions(&self) -> Result<&'a [InstructionV1], SpecError>;
+    pub fn instruction_accounts(&self, instruction: &InstructionV1) -> Result<&'a [u8], SpecError>;
+    pub fn instruction_segments(&self, instruction: &InstructionV1) -> Result<&'a [SegmentV1], SpecError>;
+    pub fn seeds(&self, seeds: RangeV1) -> Result<&'a [SegmentV1], SpecError>;
 }
 
-pub struct Account<'a> {
-    pub name: &'a str,
-    pub writable: bool,
-    pub signer: bool,
-    pub address: AddressSource<'a>,
+impl AccountV1 {
+    pub fn address(&self) -> Result<AddressSource, SpecError>;
 }
 
-pub enum AddressSource<'a> {
-    Value(Value<'a>),
-    Static(&'a Address),
-    Pda { program: Value<'a>, seeds: Segments<'a> },
-    Ata { owner: Value<'a>, mint: Value<'a>, token_program: Value<'a> },
-    HasOne { account: u8, owner: &'a Address, offset: u16 },
+pub enum AddressSource {
+    Value(ValueRef),
+    Static { address: u8 },
+    Pda { program: ValueRef, seeds: RangeV1 },
+    Ata { owner: ValueRef, mint: ValueRef, token_program: ValueRef },
+    HasOne { account: u8, owner: u8, offset: u16 },
 }
 ```
 
-1. `parse` validates every tag, index, and range once. After it, every accessor is infallible and
-   returns references into the bytes.
-2. `from_registry` checks that the registry program owns the version account and skips the full
+1. The view holds two references, 24 bytes. Each accessor finds its table from the fixed part
+   with one bounds check and a cast.
+2. A wire struct decodes its own variant on demand, such as `AccountV1::address` and
+   `SegmentV1::decode`. The decoded value is a `Copy` enum of at most 8 bytes. Tests pin these
+   sizes.
+3. `parse` validates every table, code, index, and range once. After it, every accessor returns
+   `Ok`. The accessors return `Result` so that no path can panic.
+4. `from_registry` checks that the registry program owns the version account and skips the full
    validation, because the registry validated the document at publish (4.10). An onchain wallet
    uses this form.
-3. A view decodes an entry only when a caller reads it. An entry is at most 13 bytes, so reading one
-   is a few loads. A wallet that runs one instruction reads only that instruction's accounts and
-   segments.
-4. The offchain service and the compiler use owned serde types for JSON. The compiler converts
-   between those types and the binary form.
+5. Nothing recurses, and no frame holds more than a few decoded values, so a reader fits the SBF
+   stack frame of 4 KB.
+6. The compiler uses owned serde types for JSON, in the `sdp-intents-compiler` crate. The spec
+   crate stays `no_std` and depends only on `bytemuck`.
 
 | Code | Value type | Code | Encoding |
 | :-- | :-- | :-- | :-- |
@@ -1388,8 +1390,9 @@ intents/
   Cargo.toml
   rust-toolchain.toml
   justfile
-  spec/                 sdp-intents-spec: binary documents, the JSON compiler, limits, and the
-                        zero-copy builder ABI and result layout
+  spec/                 sdp-intents-spec: binary documents, views, limits, and the zero-copy
+                        builder ABI and result layout. no_std, bytemuck only.
+  compiler/             sdp-intents-compiler: JSON to binary and back, and the lint checks
   spec-anchor/          sdp-intents-anchor: the spec for Anchor programs
   programs/             Anchor v2 workspace: Anchor.toml, Cargo.toml, Cargo.lock
     registry/           organizations, interfaces, implementations, approvals, versions, and
