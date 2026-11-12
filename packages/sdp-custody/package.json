@@ -118,6 +118,11 @@
       "types": "./src/provisioning/fireblocks-credential.ts",
       "import": "./src/provisioning/fireblocks-credential.ts",
       "default": "./src/provisioning/fireblocks-credential.ts"
+    },
+    "./provisioning/fireblocks-policy": {
+      "types": "./src/provisioning/fireblocks-policy.ts",
+      "import": "./src/provisioning/fireblocks-policy.ts",
+      "default": "./src/provisioning/fireblocks-policy.ts"
     }
   },
   "imports": {

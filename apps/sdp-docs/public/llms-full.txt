@@ -252,6 +252,22 @@ Create a custody wallet, check its balances, and use API key grants to control w
 
 See the [Wallets API reference](/docs/reference/api/wallets) for request and response details.
 
+## Provider policy checks
+
+For supported BYOK wallets, the connection and wallet detail pages show
+an advisory policy state. SDP checks after connection and wallet creation, then
+hourly. A missing policy warns without blocking signing. A failed or denied read
+shows **Provider policy not verified**. Review the policy in the provider before
+sending funds.
+
+`GET /v1/wallets/{walletId}` includes `providerPolicy` for these wallets, including
+when `includeBalance=false`. It contains `status` (`present`, `missing`, or
+`unknown`), `reason`, and nullable `checkedAt`. Managed wallets omit this field.
+`present` means the provider reports a policy attached to the wallet or a native
+transfer rule covering its vault and supported assets. It does not
+verify policy strength or permission to sign. Replaced credentials and results
+older than two hours are `unknown`.
+
 ---
 
 ### Payments
@@ -4010,6 +4026,18 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
       - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
         ISO 8601 timestamp.
+
+      - **`providerPolicy`** · `object`
+
+        Advisory policy presence for supported BYOK wallets. present means a provider policy attached to the wallet, or a native Transfer rule covering its vault and supported assets, was observed; it does not verify policy strength, initiators, limits or permission to sign. missing means no matching policy was found in a successful read. unknown covers denied access, provider failures, unsupported responses, unchecked wallets, replaced credentials and observations older than two hours. Checks run on connection and wallet creation, then hourly. This does not block signing. Omitted for managed custody.
+
+        - **`status`** · `string` · required · one of `present`, `missing`, `unknown`
+
+        - **`reason`** · `string` · required · one of `policy_detected`, `no_policy`, `access_denied`, `provider_unavailable`, `unsupported_response`, `not_checked`, `stale`, `credential_changed`
+
+        - **`checkedAt`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+          ISO 8601 timestamp.
 
       - **`balance`** · `object`
 
@@ -48026,8 +48054,14 @@ Publish the rule. SDP uses
 so set **Settings → General → One-time address transactions** to **Allow**.
 Complete the required approvals for both changes.
 
-**Check the policy yourself:** SDP's Editor user cannot read policies, and the
-**Pay** reminder does not detect a missing policy.
+**Check the policy yourself:** SDP checks policy presence after connection and
+hourly. The connection and wallet detail pages show the result. The Editor user
+cannot read policies, so this setup shows **Provider policy not verified**; ask an
+authorized operator to review the published policy. A read that confirms no
+matching Transfer rule shows **No provider policy detected**.
+
+Neither warning blocks signing. A detected rule does not prove its approvals or limits are
+appropriate, and this check does not verify RAW signing policies.
 
 ### Fund and test
 

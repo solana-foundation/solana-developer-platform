@@ -9,6 +9,7 @@ import { ChevronDownIcon, RefreshCwIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useMemo, useState, useTransition } from "react";
 import { recheckPrivyCredentialAction } from "@/app/(session)/dashboard/[projectId]/wallets/byok-actions";
+import { ProviderPolicyCallout } from "@/app/(session)/dashboard/[projectId]/wallets/provider-policy-callout";
 import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
 import { formatCreatedDate } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-format-utils";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
@@ -510,6 +511,9 @@ export function ConnectionDetailView({
           ) : null}
         </div>
 
+        {connection.status === "active" ? (
+          <ProviderPolicyCallout check={connection.providerPolicy} provider={provider} />
+        ) : null}
         <ConnectionWalletsCard
           wallets={wallets}
           walletsUnavailable={walletsUnavailable}
