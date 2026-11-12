@@ -1392,7 +1392,7 @@ function stakeRedeemInstruction(args: {
       {
         // Anchor 0.31's Option<Account> sentinel is the executing program id.
         address: args.legacyTicket?.toBase58() ?? args.config.deployment.vaultStakeProgramAddress,
-        role: 1,
+        role: args.legacyTicket === null ? 0 : 1,
       },
       { address: args.userWylds.toBase58(), role: 1 },
       { address: args.userPrime.toBase58(), role: 1 },

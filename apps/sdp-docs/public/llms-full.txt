@@ -2094,6 +2094,23 @@ the fee payer before it signs.
 The catalog's `feeSponsored` describes deposits and withdrawals from a Treasury custody
 wallet. It never applies to a customer's wallet.
 
+### Fireblocks Treasury wallets
+
+Fireblocks BYOK custody wallets propose deposits and withdrawals as sign-only
+`PROGRAM_CALL` transactions on beta and experimental deployments, matching
+Earn's release channel. Connect a hot wallet and configure its program-call
+approvals using the [Fireblocks setup guide](/docs/wallet-operations/fireblocks).
+The provider's eligibility and availability rules still apply; custody support
+does not enable a provider that is not yet offered.
+
+Approve promptly: Treasury's current workflow has a 20-second budget shared
+by building, simulation and signing. These are synchronous proposals. A late
+approval does not cause Fireblocks to broadcast. If the request times out,
+check its movement before retrying with the same idempotency key and payload.
+SDP preserves the approved message, adds any sponsor signature, records the
+signed transaction and submits it. A provider-order withdrawal still awaits
+the provider's payout after its on-chain request succeeds.
+
 A full withdrawal from a Kamino strategy leaves the empty share account open.
 The customer's wallet can close it to recover the rent; do not promise an
 automatic refund.
@@ -3714,11 +3731,11 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Check signer via simulated memo transaction
 Source: https://platform.solana.com/docs/reference/api/wallets/check-wallet-signer
 
-> Signs a server-authored memo message with the named wallet, verifies the signature, and simulates the transaction.
+> Signs a server-authored memo transaction with the named wallet, verifies the signature, and simulates the transaction.
 
 `POST /v1/wallets/signer-check`
 
-Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.
+Authorize transaction signing in the custody provider's policy and complete any approval within the synchronous signing window. Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallets.execute` action.
 
@@ -48043,16 +48060,23 @@ confirm **COMPLETED**; SDP should show **Confirmed**.
 
 ## Manage your connection
 
-RAW signing and ownership checks
+Program calls and ownership checks
 
-Batch payments and the optional ownership check require workspace RAW signing
-and a RAW policy permitting the SDP API user with your designated signer.
-If disabled, ask your Fireblocks Customer Success Manager to enable it.
-An API Co-signer isn't required.
+On beta and experimental deployments, transaction signing uses
+[sign-only program calls](https://developers.fireblocks.com/reference/interact-with-solana-programs).
+Enable program calls for the workspace and use a hot wallet. Configure a
+**Program Call** policy permitting the SDP API user, vault, programs and
+destinations, with your required approvers and designated signer. Transfer
+policies alone do not authorize program calls.
+
+SDP sends the complete transaction for approval, verifies the returned signature,
+then handles fee sponsorship and broadcast where applicable. Fireblocks does
+not broadcast these proposals. Off-chain message signing still requires RAW.
 
 Open the wallet's **Settings → Ownership → Prove ownership** and approve promptly
 in Fireblocks. SDP simulates the signed transaction without broadcasting.
 The check requires a configured, funded SDP fee payer.
+Approval must complete within the operation's synchronous signing window.
 
 Rotate credentials
 

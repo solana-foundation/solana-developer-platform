@@ -116,7 +116,6 @@
     "tsx": "4.23.15",
     "typescript": "6.0.3",
     "vitest": "4.1.12",
-    "@solana/keychain-core": "1.4.0",
-    "@solana/keychain-fireblocks": "1.4.0"
+    "@solana/keychain-core": "1.4.0"
   }
 }

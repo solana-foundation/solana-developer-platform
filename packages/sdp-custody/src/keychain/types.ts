@@ -34,6 +34,9 @@ export interface KeychainFireblocksConfig {
 
   /** Optional delay in ms between concurrent signing requests (default: 0) */
   requestDelayMs?: number;
+
+  /** Propose transactions with sign-only PROGRAM_CALL; messages still use RAW. */
+  useProgramCall?: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

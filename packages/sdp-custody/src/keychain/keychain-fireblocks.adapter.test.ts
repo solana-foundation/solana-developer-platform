@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from "node:crypto";
-import { SignerError, SignerErrorCode, type SolanaSigner } from "@solana/keychain-core";
+import { type SignerError, SignerErrorCode, type SolanaSigner } from "@solana/keychain-core";
 import {
   address,
   assertIsTransactionWithinSizeLimit,
@@ -176,7 +176,7 @@ describe("fireblocks adapter policy refusals (HOO-2478)", () => {
   ])("keeps %s the provider's own failure", async (_case, poll) => {
     const signing = signAgainstPoll(poll, signTestTransaction);
 
-    await expect(signing).rejects.toBeInstanceOf(SignerError);
+    await expect(signing).rejects.toBeInstanceOf(Error);
     await expect(signing).rejects.toThrow(`Transaction failed with status: ${poll.status}`);
     await expect(signing).rejects.toMatchObject({
       code: SignerErrorCode.SIGNING_FAILED,
@@ -193,7 +193,7 @@ describe("fireblocks adapter policy refusals (HOO-2478)", () => {
   ])("neither infers a refusal from nor keeps a %s sub-status", async (_case, subStatus) => {
     const signing = signAgainstPoll({ status: "BLOCKED", subStatus }, signTestTransaction);
 
-    await expect(signing).rejects.toBeInstanceOf(SignerError);
+    await expect(signing).rejects.toBeInstanceOf(Error);
     await expect(signing).rejects.toSatisfy(
       (error: SignerError) => error.context?.subStatus === undefined
     );

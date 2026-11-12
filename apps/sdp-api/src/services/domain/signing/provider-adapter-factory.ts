@@ -26,6 +26,7 @@ import {
   isTransactionSendingSigner,
   type TransactionSigner,
 } from "@solana/kit";
+import { isEarnEnabled } from "@/lib/feature-flags";
 import {
   instrumentVendorPort,
   logVendorCallFailure,
@@ -411,6 +412,8 @@ export function createFireblocksAdapterFromCredential(
       apiSecretPem: input.apiSecretPem,
       vaultAccountId: input.walletId.startsWith("fb_") ? input.walletId.slice(3) : input.walletId,
       assetId: input.assetId,
+      // Follow Earn's maturity even if Fireblocks BYOK is promoted independently.
+      useProgramCall: isEarnEnabled(env),
       apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
       requestDelayMs: input.requestDelayMs,
     })

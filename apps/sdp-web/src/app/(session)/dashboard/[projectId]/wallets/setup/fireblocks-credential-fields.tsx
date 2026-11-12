@@ -214,16 +214,16 @@ export function FireblocksCredentialFields(props: RegistrationProps) {
           {t("DashboardCustody.fireblocksTestingTitle")}
         </summary>
         <div className="mt-3 space-y-3 leading-5 text-secondary">
-          <p>{t("DashboardCustody.fireblocksRawRequirement")}</p>
+          <p>{t("DashboardCustody.fireblocksSigningRequirement")}</p>
           <p>{t("DashboardCustody.fireblocksIpRequirement")}</p>
           <p>{t("DashboardCustody.fireblocksTestingInstructions")}</p>
           <a
-            href="https://developers.fireblocks.com/docs/raw-signing"
+            href="https://developers.fireblocks.com/reference/interact-with-solana-programs"
             target="_blank"
             rel="noopener noreferrer"
             className="text-primary underline underline-offset-4"
           >
-            {t("DashboardCustody.fireblocksRawGuide")}
+            {t("DashboardCustody.fireblocksSigningGuide")}
           </a>
         </div>
       </details>
