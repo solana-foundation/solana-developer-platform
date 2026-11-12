@@ -130,11 +130,11 @@ describe("IntegrationDetailView", () => {
     expect(markup).not.toContain("/wallets/setup");
   });
 
-  it("says a manual provider is set up by the SDP team, by arrangement", async () => {
+  it("says a provider without self-service setup is set up by the deployment's operator", async () => {
     const markup = await renderWithoutConnections(ANCHORAGE_NOT_CONFIGURED, true);
     expect(markup).toContain(`${PROJECT_PATH}/wallets/setup?provider=anchorage`);
-    expect(recordLine(markup, "Set up by")).toBe("The SDP team, by arrangement");
-    expect(markup).toContain("Available by arrangement");
+    expect(recordLine(markup, "Set up by")).toBe("Your SDP operator");
+    expect(markup).toContain("Provisioned per deployment.");
   });
 
   it("puts the signing count in the band and the list below it, with no band action", async () => {

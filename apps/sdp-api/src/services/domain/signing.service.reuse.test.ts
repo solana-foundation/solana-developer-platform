@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AppError } from "@/lib/errors";
+import { forbidden } from "@/lib/errors";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
 import {
   provisionCoinbaseCdpAccount,
@@ -161,16 +161,14 @@ describe("signing.service custody provider enablement", () => {
       .mockResolvedValue();
     const assertCustodyProviderEnabled = vi
       .spyOn(providerAvailability, "assertCustodyProviderEnabled")
-      .mockRejectedValue(
-        new AppError("FORBIDDEN", "Privy requires manual activation for this organization.")
-      );
+      .mockRejectedValue(forbidden("Privy is turned off for this organization."));
 
     await expect(
       service.createWallet(orgId, PROJECT_ID, { provider: "privy", purpose: "transfer" })
     ).rejects.toMatchObject({
       name: "SigningError",
       code: "INVALID_REQUEST",
-      message: "Privy requires manual activation for this organization.",
+      message: "Privy is turned off for this organization.",
     });
     expect(assertManagedCustodyUseAllowed).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
       organizationId: orgId,
