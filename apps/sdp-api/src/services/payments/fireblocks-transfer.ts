@@ -8,15 +8,10 @@ import type {
   PaymentTransferRow,
   UpdatePaymentTransferInput,
 } from "@/db/repositories/payments.repository";
-import { createSystemTransactionalPaymentsRepository } from "@/db/repositories/repository-factory";
 import { AppError, badRequest, conflict, custodyPolicyRefusalMessage } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { describeError } from "@/runtime/money-path-events";
-import {
-  type AuditLogEntry,
-  createSystemAuditService,
-  criticalOutcomeEntry,
-} from "@/services/audit.service";
+import { type AuditLogEntry, criticalOutcomeEntry } from "@/services/audit.service";
 import {
   type CustodyTransferProposer,
   transferProposalIntentSchema as intentSchema,
@@ -36,24 +31,13 @@ import type { Env } from "@/types/env";
  * Where a proposed transfer's row state is written. Plain observations go to `repo`; a write that
  * ends the payment commits through `audited`, with the outcome that closes the row's open audit
  * intent, exactly as a signed transfer's settle does (HOO-2556). A request passes its own ledger
- * transaction; the cron passes {@link systemProposalLedger}.
+ * transaction; the pending-transfers job builds one over the system audit service.
  */
 export interface ProposalLedger {
   repo: PaymentsRepository;
   audited<T>(
     work: (repo: PaymentsRepository) => Promise<{ entry: AuditLogEntry | null; result: T }>
   ): Promise<T>;
-}
-
-/** The ledger for jobs, which run under a system database identity. */
-export function systemProposalLedger(env: Env, repo: PaymentsRepository): ProposalLedger {
-  return {
-    repo,
-    audited: (work) =>
-      createSystemAuditService(env).logSystemWithin((tx) =>
-        work(createSystemTransactionalPaymentsRepository(tx))
-      ),
-  };
 }
 
 /** The outcome that closes the intent the sending request opened, with Fireblocks' verdict. */

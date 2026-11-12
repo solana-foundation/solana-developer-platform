@@ -708,6 +708,54 @@ describe("native Fireblocks BYOK payment routes", () => {
       }),
     ]);
   });
+  it("rolls the settle back when the audit append fails, and a retry records exactly one outcome", async () => {
+    await ready();
+    const response = await send();
+    expect(response.status, await response.clone().text()).toBe(200);
+    const transfer = (await response.json()).data.transfer;
+    providerStatus = "COMPLETED";
+    // Run the settle's real writes (transfer update, intent close), then fail inside the same
+    // transaction, as an audit append failure would.
+    const original = AuditService.prototype.logWithin;
+    vi.spyOn(AuditService.prototype, "logWithin").mockImplementationOnce(async function (
+      this: AuditService,
+      c,
+      work
+    ) {
+      return original.call(this, c, async (tx) => {
+        await work(tx);
+        throw new Error("audit append failed");
+      });
+    });
+    await getDb(env).execute(
+      "UPDATE payment_transfers SET provider_data = provider_data - 'fireblocksLastPolledAt' WHERE id = ?",
+      [transfer.id]
+    );
+    const failed = await paymentApp.request(
+      `/v1/payments/transfers/${transfer.id}`,
+      { headers: { Authorization: `Bearer ${token}`, "X-Project-ID": PROJECT_ID } },
+      testEnv
+    );
+    // The read degrades to the stored row rather than reporting an outcome it could not record.
+    expect(failed.status, await failed.clone().text()).toBe(200);
+    expect((await failed.json()).data.transfer).toMatchObject({ status: "processing" });
+    const row = await getDb(env).queryOne<{ status: string }>(
+      "SELECT status FROM payment_transfers WHERE id = ?",
+      [transfer.id]
+    );
+    expect(row?.status).toBe("processing");
+    expect(await transferAudit(transfer.id)).toMatchObject({ openIntent: true, outcomes: [] });
+
+    expect(await refresh(transfer.id)).toMatchObject({ status: "confirmed" });
+    const settled = await transferAudit(transfer.id);
+    expect(settled.openIntent).toBe(false);
+    expect(settled.outcomes).toEqual([
+      expect.objectContaining({
+        status: "success",
+        metadata: expect.objectContaining({ status: "confirmed", fireblocksStatus: "COMPLETED" }),
+      }),
+    ]);
+  });
   it("does not expose credentials and blocks another project from reading or executing this wallet", async () => {
     const mock = await ready();
     const response = await send();

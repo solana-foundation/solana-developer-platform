@@ -63,10 +63,21 @@ import {
   criticalOutcomeEntry,
 } from "@/services/audit.service";
 import {
+  type ProposalLedger,
   refreshFireblocksTransfer,
-  systemProposalLedger,
 } from "@/services/payments/fireblocks-transfer";
 import type { Env } from "@/types/env";
+
+/** The ledger for jobs, which run under a system database identity. */
+function systemProposalLedger(env: Env, repo: PaymentsRepository): ProposalLedger {
+  return {
+    repo,
+    audited: (work) =>
+      createSystemAuditService(env).logSystemWithin((tx) =>
+        work(createSystemTransactionalPaymentsRepository(tx))
+      ),
+  };
+}
 
 // Allow 5 minutes before treating a signature-less "processing" transfer as stuck.
 export const STUCK_PROCESSING_AFTER_MS = 5 * 60 * 1000;
