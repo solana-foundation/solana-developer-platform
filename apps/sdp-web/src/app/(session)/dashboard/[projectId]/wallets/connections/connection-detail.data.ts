@@ -4,6 +4,8 @@ import {
   type CustodyProvider,
   type CustodyWalletSummary,
   PROVIDER_CREDENTIAL_STATUSES,
+  PROVIDER_POLICY_REASONS,
+  PROVIDER_POLICY_STATUSES,
 } from "@sdp/types/custody";
 import { z } from "zod";
 import type { SdpApiClient } from "@/lib/sdp-api";
@@ -28,6 +30,13 @@ const installationConnectionSchema = z.object({
   label: z.string(),
   status: z.enum(CUSTODY_CONNECTION_LIFECYCLES),
   completion: completionSchema.nullable(),
+  providerPolicy: z
+    .object({
+      status: z.enum(PROVIDER_POLICY_STATUSES),
+      reason: z.enum(PROVIDER_POLICY_REASONS),
+      checkedAt: z.string().datetime().nullable(),
+    })
+    .optional(),
   walletLabel: z.string().optional(),
   canComplete: z.boolean(),
   canReplaceCredentials: z.boolean(),
