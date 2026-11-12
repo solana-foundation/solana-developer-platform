@@ -38,6 +38,9 @@ function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) 
     revalidateOnFocus: false,
     revalidateOnReconnect: false,
     shouldRetryOnError: false,
+    // Every mount reads again: a rejected attempt remounts these fields, and the registration
+    // it used is claimed by then, so a cached answer would offer a registration that cannot connect.
+    dedupingInterval: 0,
   });
   const csr = data === undefined ? null : data.csr;
   const [generating, setGenerating] = useState(false);
