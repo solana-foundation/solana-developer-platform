@@ -165,10 +165,24 @@ checks, beta gating, and audit logs. These controls do not close the revocation
 race. SDP does not claim that its API user's RSA authentication key approves or
 signs blockchain transfers, and does not change Fireblocks policies for users.
 
-Alternatives: disable native transfers; use a provider signing flow with a
-supported enforceable execution callback; or add best-effort cancellation on SDP
-revocation as an additional mitigation. Cancellation alone does not satisfy the
-accepted atomic pre-sign admission requirement.
+D4 adds best-effort cancellation as a mitigation, not an enforceable pre-sign
+callback. The recovery worker restores only the durable initiating principal,
+re-admits through the custody waist and persists a sticky refusal before asking
+the provider to cancel a known pending proposal. Revocation and member removal
+try to enqueue matching principals in a savepoint; a failed wake cannot keep
+the key or membership live. A dedicated every-minute worker drains those flags
+and rechecks known proposals even if legacy adoption fails, without borrowing
+an HTTP viewer's authority. Provider-neutral
+proposal state, payment projection and audit commit through one versioned path. Cancel acknowledgment
+never proves non-execution; recovery records verified settlement even when it
+wins the race and emits `fireblocks_transfer_committed_after_refusal` at CRITICAL
+severity. Operational bounds and credential limitations are in
+[Fireblocks recovery](../ops/fireblocks-byok.md#submission-recovery-and-access-revocation).
+
+Alternatives remain disabling native transfers or using a provider signing flow
+with a supported enforceable execution callback. Cancellation alone does not
+satisfy the accepted atomic pre-sign admission requirement or supply the pending
+security-owner approval.
 
 Approval record (must be completed by the security owner): reviewer name,
 review date, PR/comment link, accepted exposure, and approval of both this

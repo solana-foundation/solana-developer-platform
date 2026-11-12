@@ -143,9 +143,9 @@ money context before proposing. It uses the canonical `MoneyPrincipal` identity
 The field is internal and stays unchanged on retries, status reads and settlement;
 `initiated_by_key_id` remains separate audit evidence. Migration `0226` leaves
 historical rows null and accepts writes from the previous API revision. Never
-reconstruct their authority from the ambiguous audit ID. Worker restoration and
-D4 re-admission/cancellation follow this persistence slice of PRO-2435; neither
-is enabled by this change.
+reconstruct their authority from the ambiguous audit ID. D4 restores this
+principal for live re-admission and best-effort cancellation; see
+[submission recovery](#submission-recovery-and-access-revocation).
 
 The payment's critical audit intent stays open while the proposal awaits approval. The read or
 cron run that settles the payment (confirmed, failed, rejected or expired) closes it with
@@ -162,18 +162,21 @@ makes. A local refusal marks the intent failed without a POST. Credentials never
 and previously decrypted credentials are never carried from preparation into submission. Only the
 proposer may call `createFireblocksTransfer` (`pnpm check:value-movement`). This adds no Fireblocks
 or Solana RPC requests.
-The request returns `processing` while approval is pending. Dashboard transfer reads and the
-pending-transfer job reconcile with GET by external ID; they never POST. Unknown outcomes,
-including a timeout, missing proposal, or unavailable credentials, stay processing. Do not
-create a replacement until the original has been reconciled. A crash before the create call
-may require manual reconciliation; automatic resubmission is deliberately not implemented.
+The request returns `processing` while approval is pending. Dashboard transfer
+reads reconcile with GET by external ID. The recovery worker can also POST a
+cancellation after recording a live-admission refusal. Unknown outcomes, including
+a timeout, missing proposal, or unavailable credentials, stay processing. Do not
+create a replacement until the original has been reconciled. A crash before the
+create call may require manual reconciliation; automatic resubmission is
+deliberately not implemented.
 
 Connection deactivation or a failed connection check blocks new payments but does not stop
 these status reads. Recovery verifies the stored connection, provider account, vault and source
 address before reading the retained active credential. It does not require an active wallet or
 a healthy connection, and it stops polling once the payment settles. Credential revocation or
-loss of provider access still requires operator intervention; disabling a connection does not
-cancel a transfer already accepted by Fireblocks.
+loss of provider access still requires operator intervention. A disabled connection
+refuses worker re-admission and triggers best-effort cancellation; it cannot
+guarantee that an accepted transfer stops.
 
 Fireblocks transaction ID, status and substatus are visible in SDP. COMPLETED with a valid
 Solana signature records confirmation only after the external ID, vault, asset, destination,
@@ -357,9 +360,92 @@ checks still apply. It skips execution eligibility and funding checks; `prefligh
 `payment` retain them. Compared with the previous status command, this removes one SDP wallet-list
 GET and one Solana `getMultipleAccounts` request; mainnet and confirmed-signature checks remain.
 
-Native transfers can execute in Fireblocks after SDP access is revoked. Cancel or reject pending
-transfers in Fireblocks as part of revocation/incident response; cancellation can race execution.
-See the **proposed, not yet approved** [ADR 0007 exception](../decisions/0007-money-admission.md#proposed-exception-fireblocks-native-transfers-pr-2455).
+Pending native transfers are re-admitted by the recovery worker as the stored
+initiating principal, using live status, actions, wallet scope, organization,
+project controls and custody eligibility. A refusal is persisted before any
+cancellation request and remains sticky if authority is restored. Connection
+health checks and deployment release-channel restrictions are availability
+failures: recovery retries them without recording refusal or cancelling.
+Explicit wallet, connection or credential revocation still refuses admission.
+Legacy rows without a principal refuse in every environment, including stage
+and writes from an older API revision during a rolling deploy; the audit actor
+is never a fallback authority.
+
+`custody_proposals` owns provider progress, sticky authorization decisions and
+recovery scheduling. The initiating principal and public status stay on the
+payment. One shared reducer selects transitions; versioned writes commit the
+proposal, payment projection, audit and pending cancellation or alert together.
+A stale observation loses its version check and cannot overwrite newer state.
+New proposal creation and its submission claim share one transaction, before any
+provider call. A crash before that transaction leaves only the payment intent;
+the worker adopts it after two minutes and observes by `externalTxId`. Viewer
+reads or revocation wakes can adopt it earlier, but neither polling claim can
+observe an unsent proposal until that same two-minute grace has passed. The
+creator can still claim submission immediately. Recovery never submits it
+automatically. Unclaimed proposals use the same authenticated absence
+horizon as ambiguous submissions.
+
+Key revocation and member removal try to enqueue affected proposals in a
+savepoint inside their database transaction. A failed wake rolls back only its
+adoption and flags; authority withdrawal still commits. The error event
+`proposal_recovery_wake_failed` records tenant scope and SQLSTATE without raw
+provider data. The minute worker retries discovery and continues checking known
+proposals even when legacy adoption fails; it still reports that failure.
+Malformed legacy records need repair before they can be adopted.
+
+The dedicated `reconcile-custody-proposals` cron runs every minute,
+claims at most 50 rows per environment and makes five concurrent provider calls.
+Flagged revocations take priority with capacity reserved for ordinary progress.
+Dashboard refresh has a separate 15-second throttle and cannot postpone worker
+admission. Backlog, upstream timeouts and credential availability extend recovery
+latency; a one-minute schedule is not a cancellation guarantee. HTTP handlers do
+not run recovery. Provider webhooks are deferred.
+
+During rolling deployment, a bounded bridge adopts pending payments written by
+the previous API revision, including writes after migration. Existing payment
+JSON remains a compatibility projection until that revision drains; the legacy
+submission claim still participates in the new transaction to prevent a second
+create attempt. Removing those keys is a later contract migration.
+
+Recovery reads the proposal, validates its recorded account and intent, and
+rechecks live admission while the provider reports a known cancellable state.
+Cancellation reloads the account-bound credential and makes another bound detail
+GET before one cancel POST. This catches credential, binding or provider-state
+changes during admission and the durable cancellation write. Normal worker
+observation adds one provider GET, zero Solana RPC; refusal adds at most one GET
+and one POST in that pass. Provider acknowledgment remains `processing`; only a
+terminal provider outcome closes the payment. The first cancellation attempt is
+immediate; a timeout or rejected cancel keeps the durable refusal and retries no
+sooner than five minutes after the last attempt. Observations continue every
+minute during that cooldown, including completion-after-refusal alerts.
+An acknowledged cancel is polled to outcome.
+Signed, broadcasting, cancelling and unfamiliar states are observation-only.
+
+The first refusal, first cancellation request, first definitive decline,
+cancellation acknowledgment and critical event acknowledgment each commit with
+a system audit entry in the same database transaction. Ambiguous attempts do
+not consume the first-decline audit; later declines keep that original marker
+without appending another entry. Cancellation intent commits before provider
+I/O. A failed audit write rolls back its marker so recovery can retry. These
+intermediate events do not close the original payment audit intent; only
+terminal settlement does.
+
+A payment that completes after a recorded refusal emits the CRITICAL structured
+event `fireblocks_transfer_committed_after_refusal`. The row remains an alert
+outbox until emission is acknowledged, including completions first observed by a
+viewer. Delivery is at least once: deduplicate on transfer ID. Configure on-call
+routing for this event before rollout; this repository does not deploy that rule.
+Monitor `proposal_recovery_unavailable` for stalled mitigation. Each recovery
+failure includes `pending_age_seconds` from the durable payment creation time,
+plus organization, project and transfer IDs. Route repeated failures for aging
+payments to on-call before rollout; a newly failed old payment can alert too.
+Recovery cannot use a revoked provider credential; restore account-bound
+read/cancel access or act directly in Fireblocks.
+
+Native transfers can still execute after SDP access is revoked. Cancel or reject
+pending transfers in Fireblocks during incident response. Cancellation races
+signing and broadcasting and cannot guarantee containment. See the
+**proposed, not yet approved** [ADR 0007 exception](../decisions/0007-money-admission.md#proposed-exception-fireblocks-native-transfers-pr-2455).
 
 Live-test receipts bind the payment to the SDP API key via a slow one-way fingerprint. Keep the
 same key and receipt when retrying; a changed key or legacy unbound receipt is refused. The

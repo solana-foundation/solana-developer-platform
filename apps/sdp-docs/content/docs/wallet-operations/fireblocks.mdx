@@ -73,6 +73,17 @@ Send a [small payment](/docs/payments/send-basic-payment), then open
 Approve the matching transaction in Fireblocks. In **Transaction history**,
 confirm **COMPLETED**; SDP should show **Confirmed**.
 
+SDP rechecks the initiating member or API key every minute while approval is
+pending, prioritizing recorded access changes. Provider delays and queued work
+can extend this interval. If access is lost, SDP requests cancellation. Connection
+health checks do not trigger cancellation. Failed cancellation attempts retry at
+least five minutes apart while status checks continue.
+
+The payment stays **Processing** until Fireblocks confirms cancellation or
+execution. Cancellation can race signing; check the outcome before starting a
+replacement payment. During an incident, reject pending transfers directly in
+Fireblocks as well.
+
 ## Manage your connection
 
 <details>

@@ -32,6 +32,8 @@
  * It also pins who may set the money principal (HOO-2099): the ambient
  * identity the waists check a signature against. Only the entry points that
  * authenticated it set it, so no handler can name a more privileged one.
+ * Restoring a durable transfer's recorded principal is a separate capability,
+ * restricted to the trusted pending-proposal recovery worker.
  *
  * Adding a file to any list below is a security-reviewed change.
  */
@@ -88,6 +90,36 @@ export const CAPABILITIES = [
     ],
     owners: [CUSTODY_PACKAGE],
     allow: [`${API}/services/domain/signing/admitted-proposer.ts`],
+  },
+  {
+    id: "fireblocks-transfer-cancellation",
+    why: "Cancels a provider transfer; only the account-bound recovery waist may (PRO-2435 D4).",
+    symbols: [
+      {
+        file: "packages/sdp-custody/src/provisioning/fireblocks-transfers.ts",
+        name: "cancelFireblocksTransfer",
+      },
+    ],
+    owners: [CUSTODY_PACKAGE],
+    allow: [`${API}/services/domain/signing/admitted-proposer.ts`],
+  },
+  {
+    id: "custody-proposal-recovery",
+    why: "Obtains cancellation authority; only the registered recovery worker may (PRO-2435 D4).",
+    symbols: [
+      { file: `${API}/services/solana/signer.ts`, name: "createOrgTransferProposalRecovery" },
+    ],
+    owners: [`${API}/services/solana/signer.ts`],
+    allow: [`${API}/services/jobs/reconcile-pending-proposals.ts`],
+  },
+  {
+    id: "custody-proposal-recovery-construction",
+    why: "Builds cancellation authority from retained access; only the custody runtime waist may.",
+    symbols: [
+      { file: `${API}/services/domain/signing/admitted-proposer.ts`, name: "proposalRecovery" },
+    ],
+    owners: [`${API}/services/domain/signing/admitted-proposer.ts`],
+    allow: [`${API}/services/domain/signing/custody-runtime-target.ts`],
   },
   {
     id: "config-signing-adapter",
@@ -181,6 +213,26 @@ export const CAPABILITIES = [
       // A `/pay` link, as the payment request its token names.
       `${API}/routes/pay/context.ts`,
     ],
+  },
+  {
+    id: "custody-proposal-worker",
+    why: "Reconciles and cancels provider proposals under the registered cron identity; HTTP handlers cannot run this workload.",
+    symbols: [
+      {
+        file: `${API}/services/jobs/reconcile-pending-proposals.ts`,
+        name: "reconcilePendingProposals",
+      },
+    ],
+    owners: [`${API}/services/jobs/reconcile-pending-proposals.ts`],
+    allow: [`${API}/cron/reconcile-custody-proposals.ts`],
+  },
+  {
+    id: "recorded-money-principal",
+    why: "Restores a durable transfer's identity; only the trusted pending-proposal recovery worker may (PRO-2435 D4).",
+    // biome-ignore lint/security/noSecrets: a function name, not a secret.
+    symbols: [{ file: `${API}/lib/money-principal.ts`, name: "runAsRecordedMoneyPrincipal" }],
+    owners: [`${API}/lib/money-principal.ts`],
+    allow: [`${API}/services/jobs/reconcile-pending-proposals.ts`],
   },
   {
     id: "keypair-signer",

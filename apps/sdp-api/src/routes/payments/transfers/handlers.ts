@@ -50,6 +50,10 @@ import {
   type PaymentTransferRow as TransferRow,
 } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
+import {
+  createCustodyProposalsRepository,
+  createTransactionalCustodyProposalsRepository,
+} from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import {
@@ -125,9 +129,9 @@ import {
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
 import { readSolanaCryptoWalletAddress } from "@/services/payments/counterparty-account-resolution";
+import type { ProposalLedger } from "@/services/payments/custody-proposal-ledger";
 import {
   isFireblocksTransfer,
-  type ProposalLedger,
   refreshFireblocksTransfer,
   submitProposedTransfer,
 } from "@/services/payments/fireblocks-transfer";
@@ -1093,9 +1097,13 @@ function requestProposalLedger(
 ): ProposalLedger {
   return {
     repo: getPaymentsRepository(c),
+    proposals: createCustodyProposalsRepository(c.env, getRequestTenantScope(c)),
     audited: (work) =>
       auditService.logWithin(c, (tx) =>
-        work(createPostgresPaymentsRepository(tx, getRequestTenantScope(c)))
+        work(
+          createPostgresPaymentsRepository(tx, getRequestTenantScope(c)),
+          createTransactionalCustodyProposalsRepository(tx, getRequestTenantScope(c))
+        )
       ),
   };
 }

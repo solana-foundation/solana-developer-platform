@@ -8,6 +8,8 @@ import type { CounterpartiesRepository } from "./counterparty.repository";
 import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
 import type { CounterpartyAccountsRepository } from "./counterparty-account.repository";
 import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
+import type { CustodyProposalsRepository } from "./custody-proposals.repository";
+import { createPostgresCustodyProposalsRepository } from "./custody-proposals.repository.postgres";
 import type { DvpTradeRepository } from "./dvp-trade.repository";
 import { createPostgresDvpTradeRepository } from "./dvp-trade.repository.postgres";
 import type { EarnRepository } from "./earn.repository";
@@ -329,4 +331,39 @@ export function createPrivateChannelSettlementObservationRepository(
 
 export function createOrganizationRepository(env: Env): OrganizationRepository {
   return createPostgresOrganizationRepository(getDb(env));
+}
+
+const CUSTODY_PROPOSALS_SYSTEM_ONLY_METHODS = ["claimDue", "listUnalerted", "adoptLegacyTransfers"];
+
+/** Tenant proposals bound to the authenticated project. */
+export function createCustodyProposalsRepository(
+  env: Env,
+  scope: TenantScope
+): CustodyProposalsRepository {
+  return createTransactionalCustodyProposalsRepository(getDb(env), scope);
+}
+
+/** Proposal writes share the payment projection and audit transaction. */
+export function createTransactionalCustodyProposalsRepository(
+  db: AppDb,
+  scope: TenantScope
+): CustodyProposalsRepository {
+  return bindRepositoryToTenant(
+    createPostgresCustodyProposalsRepository(db, scope),
+    scope,
+    "CustodyProposalsRepository",
+    CUSTODY_PROPOSALS_SYSTEM_ONLY_METHODS
+  );
+}
+
+/** Cross-tenant queue access for registered system workers. */
+export function createSystemCustodyProposalsRepository(env: Env): CustodyProposalsRepository {
+  return createPostgresCustodyProposalsRepository(getDb(env));
+}
+
+/** Proposal writes on the system payment and audit transaction's connection. */
+export function createSystemTransactionalCustodyProposalsRepository(
+  db: AppDb
+): CustodyProposalsRepository {
+  return createPostgresCustodyProposalsRepository(db);
 }

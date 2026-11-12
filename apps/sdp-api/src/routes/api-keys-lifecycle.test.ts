@@ -2,8 +2,11 @@ import type { ApiKeyStatus } from "@sdp/types/api-keys";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
+import { createPostgresCustodyProposalsRepository } from "@/db/repositories/custody-proposals.repository.postgres";
 import { app } from "@/index";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
+import { ApiKeyService } from "@/services/api-key.service";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
@@ -21,6 +24,7 @@ const PROJECT_ID = "prj_api_key_lifecycle";
 const USER_ID = "usr_api_key_lifecycle";
 const TARGET_KEY_ID = "key_lifecycle_target";
 const AUDIT_FAILURE_CONSTRAINT = "sdp_test_fail_api_key_audit";
+const RECOVERY_FAILURE_CONSTRAINT = "sdp_test_fail_key_recovery_wake";
 
 let headers: Record<string, string>;
 
@@ -54,6 +58,34 @@ async function insertKey(
       overrides.expires_at ?? null,
       overrides.rotation_deadline ?? null,
       overrides.rotated_from ?? null,
+    ]
+  );
+}
+
+async function seedPendingKeyTransfer(providerData: Record<string, unknown> = {}): Promise<void> {
+  await getDb(env).execute(
+    `INSERT INTO payment_transfers
+       (id, organization_id, project_id, wallet_id, source_address,
+        destination_address, token, amount, type, direction, status,
+        created_at, updated_at, provider_reference, provider_data, initiated_by_principal)
+     VALUES ('trf_key_recovery', ?, ?, 'provider-wallet', 'Source', 'Destination',
+             'SOL', '1', 'transfer', 'outbound', 'processing',
+             '2026-01-01T00:00:00.000Z', sdp_iso_now(), 'fireblocks_pending', ?::jsonb, ?::jsonb)`,
+    [
+      ORGANIZATION_ID,
+      PROJECT_ID,
+      JSON.stringify({
+        fireblocksTransfer: {
+          connectionId: "recovery-connection",
+          accountFingerprint: "recovery-account",
+          vaultAccountId: "0",
+          assetId: "SOL_TEST",
+        },
+        fireblocksStatus: "PENDING_AUTHORIZATION",
+        fireblocksSubStatus: "private_provider_detail_do_not_log",
+        ...providerData,
+      }),
+      JSON.stringify({ kind: "api_key", apiKeyId: TARGET_KEY_ID }),
     ]
   );
 }
@@ -190,6 +222,151 @@ describe("API key lifecycle", () => {
     await getDb(env).execute(
       `ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS ${AUDIT_FAILURE_CONSTRAINT}`
     );
+    await getDb(env).execute(
+      `ALTER TABLE custody_proposals DROP CONSTRAINT IF EXISTS ${RECOVERY_FAILURE_CONSTRAINT}`
+    );
+  });
+
+  it("commits a pending proposal recovery request with the key revocation", async () => {
+    await insertKey({ id: TARGET_KEY_ID });
+    const db = getDb(env);
+    await seedPendingKeyTransfer();
+    const revokeWithin = async () =>
+      db.transaction(async (tx) => {
+        const result = await new ApiKeyService(
+          tx,
+          createTenantScope({
+            organizationId: ORGANIZATION_ID,
+            projectId: PROJECT_ID,
+          })
+        ).revokeApiKey(TARGET_KEY_ID, ORGANIZATION_ID, PROJECT_ID);
+        expect(result).toMatchObject({ alreadyRevoked: false });
+        expect(
+          await tx.queryOne(
+            "SELECT recheck_requested_at FROM custody_proposals WHERE payment_transfer_id = 'trf_key_recovery'"
+          )
+        ).toEqual({ recheck_requested_at: expect.any(String) });
+        throw new Error("authority write rolled back");
+      });
+    await expect(revokeWithin()).rejects.toThrow("authority write rolled back");
+    expect((await readKey(TARGET_KEY_ID))?.status).toBe("active");
+    expect(
+      await db.queryOne(
+        "SELECT recheck_requested_at FROM custody_proposals WHERE payment_transfer_id = 'trf_key_recovery'"
+      )
+    ).toBeNull();
+
+    await db.transaction((tx) =>
+      new ApiKeyService(
+        tx,
+        createTenantScope({
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+        })
+      ).revokeApiKey(TARGET_KEY_ID, ORGANIZATION_ID, PROJECT_ID)
+    );
+    expect((await readKey(TARGET_KEY_ID))?.status).toBe("deactivated");
+    expect(
+      await db.queryOne(
+        "SELECT recheck_requested_at FROM custody_proposals WHERE payment_transfer_id = 'trf_key_recovery'"
+      )
+    ).toEqual({ recheck_requested_at: expect.any(String) });
+  });
+
+  it.each(["adoption", "wake"] as const)(
+    "keeps a key revocable when proposal %s fails in PostgreSQL",
+    async (failure) => {
+      await insertKey({ id: TARGET_KEY_ID });
+      const db = getDb(env);
+      await seedPendingKeyTransfer(
+        failure === "adoption"
+          ? { proposalRefusal: { at: "2026-01-01T00:00:00.000Z", reason: "permission_revoked" } }
+          : {}
+      );
+      if (failure === "wake") {
+        await db.execute(
+          `ALTER TABLE custody_proposals ADD CONSTRAINT ${RECOVERY_FAILURE_CONSTRAINT}
+             CHECK (recheck_requested_at IS NULL)`
+        );
+      }
+      const error = vi.spyOn(getLogger(), "error");
+
+      expect((await revoke(TARGET_KEY_ID)).status).toBe(200);
+      expect((await readKey(TARGET_KEY_ID))?.status).toBe("deactivated");
+      expect(await apiKeyAudits()).toEqual([
+        expect.objectContaining({ action: "delete", resource_id: TARGET_KEY_ID }),
+      ]);
+      // The UPDATE failure happens after adoption, so absence proves the
+      // savepoint rolls back all wake writes, not just the failing statement.
+      expect(
+        await db.queryOne(
+          "SELECT id FROM custody_proposals WHERE payment_transfer_id = 'trf_key_recovery'"
+        )
+      ).toBeNull();
+      expect(error).toHaveBeenCalledWith(
+        {
+          event: "proposal_recovery_wake_failed",
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          principal: `api_key:${TARGET_KEY_ID}`,
+          sqlstate: "23514",
+        },
+        expect.any(String)
+      );
+      expect(JSON.stringify(error.mock.calls)).not.toContain("private_provider_detail_do_not_log");
+
+      // Once the bridge fault is repaired, the ordinary minute-sweep lane
+      // discovers this payment without a wake flag or a second revocation.
+      await db.execute(
+        `ALTER TABLE custody_proposals DROP CONSTRAINT IF EXISTS ${RECOVERY_FAILURE_CONSTRAINT}`
+      );
+      await db.execute(
+        "UPDATE payment_transfers SET provider_data = provider_data - 'proposalRefusal' WHERE id = 'trf_key_recovery'"
+      );
+      const proposals = createPostgresCustodyProposalsRepository(db);
+      const now = new Date().toISOString();
+      expect(await proposals.adoptLegacyTransfers({ environment: "sandbox", now, limit: 50 })).toBe(
+        1
+      );
+      expect(
+        (await proposals.claimDue({ environment: "sandbox", now, limit: 50 })).map(
+          (proposal) => proposal.payment_transfer_id
+        )
+      ).toEqual(["trf_key_recovery"]);
+    }
+  );
+
+  it.each([
+    "SAVEPOINT custody_proposal_recovery_wake",
+    "ROLLBACK TO SAVEPOINT custody_proposal_recovery_wake",
+    "RELEASE SAVEPOINT custody_proposal_recovery_wake",
+  ])("propagates a failed %s instead of committing an unsafe transaction", async (command) => {
+    await insertKey({ id: TARGET_KEY_ID });
+    await seedPendingKeyTransfer();
+    const db = getDb(env);
+    await db.execute(
+      `ALTER TABLE custody_proposals ADD CONSTRAINT ${RECOVERY_FAILURE_CONSTRAINT}
+         CHECK (recheck_requested_at IS NULL)`
+    );
+    await expect(
+      db.transaction(async (tx) => {
+        const execute = tx.execute.bind(tx);
+        vi.spyOn(tx, "execute").mockImplementation(async (query, params) => {
+          if (query === command) throw new Error("Savepoint connection failed");
+          return execute(query, params);
+        });
+        await new ApiKeyService(
+          tx,
+          createTenantScope({ organizationId: ORGANIZATION_ID, projectId: PROJECT_ID })
+        ).revokeApiKey(TARGET_KEY_ID, ORGANIZATION_ID, PROJECT_ID);
+      })
+    ).rejects.toThrow("Savepoint connection failed");
+    expect((await readKey(TARGET_KEY_ID))?.status).toBe("active");
+    expect(
+      await db.queryOne(
+        "SELECT id FROM custody_proposals WHERE payment_transfer_id = 'trf_key_recovery'"
+      )
+    ).toBeNull();
   });
 
   describe("rotation", () => {

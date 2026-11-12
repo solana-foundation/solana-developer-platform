@@ -54,12 +54,33 @@ function readMigration(migrationFile: string) {
   return readFileSync(path.join(testDir, "../db/migrations/postgres", migrationFile), "utf8");
 }
 
-/**
- * The last migration number that two files share. The runner records each file
- * by its full name, so those historical pairs apply; a new duplicate means two
- * branches picked the same number and their order is down to the suffix.
- */
+/** Legacy migrations through 0125 already share numbers; never renumber them. */
 const LAST_SHARED_MIGRATION_NUMBER = 125;
+
+// Both files merged before their collision was noticed. Their full filenames
+// are deployed migration identities; this exception must never accept a third.
+const MERGED_0226_MIGRATION_PAIR = [
+  "0226_payment_transfer_batches_drop_options.sql",
+  "0226_payment_transfer_principal.sql",
+] as const;
+
+function invalidSharedMigrationNumbers(files: readonly string[]): string[][] {
+  const byNumber = new Map<number, string[]>();
+  for (const file of files) {
+    const prefix = /^(\d{4})/.exec(file)?.[1];
+    if (prefix === undefined) throw new Error(`Migration ${file} has no four-digit number`);
+    const number = Number(prefix);
+    byNumber.set(number, [...(byNumber.get(number) ?? []), file]);
+  }
+  return [...byNumber]
+    .filter(([number, names]) => number > LAST_SHARED_MIGRATION_NUMBER && names.length > 1)
+    .map(([, names]) => names.sort())
+    .filter(
+      (names) =>
+        names.length !== MERGED_0226_MIGRATION_PAIR.length ||
+        names.some((name, index) => name !== MERGED_0226_MIGRATION_PAIR[index])
+    );
+}
 
 describe("Postgres migration numbering", () => {
   it("gives every migration after the historical pairs its own number", () => {
@@ -67,17 +88,17 @@ describe("Postgres migration numbering", () => {
     const files = readdirSync(path.join(testDir, "../db/migrations/postgres")).filter((file) =>
       file.endsWith(".sql")
     );
-    const byNumber = new Map<number, string[]>();
-    for (const file of files) {
-      const prefix = /^(\d{4})/.exec(file)?.[1];
-      if (prefix === undefined) throw new Error(`Migration ${file} has no four-digit number`);
-      const number = Number(prefix);
-      byNumber.set(number, [...(byNumber.get(number) ?? []), file]);
-    }
-    const shared = [...byNumber]
-      .filter(([number, names]) => number > LAST_SHARED_MIGRATION_NUMBER && names.length > 1)
-      .map(([, names]) => names.sort());
-    expect(shared).toEqual([]);
+    expect(invalidSharedMigrationNumbers(files)).toEqual([]);
+  });
+
+  it("grandfathers only the exact merged 0226 pair", () => {
+    expect(invalidSharedMigrationNumbers(MERGED_0226_MIGRATION_PAIR)).toEqual([]);
+    const third = [...MERGED_0226_MIGRATION_PAIR, "0226_another_migration.sql"].sort();
+    expect(invalidSharedMigrationNumbers(third)).toEqual([third]);
+    const replacement = [MERGED_0226_MIGRATION_PAIR[0], "0226_another_migration.sql"].sort();
+    expect(invalidSharedMigrationNumbers(replacement)).toEqual([replacement]);
+    const newCollision = ["0227_first.sql", "0227_second.sql"];
+    expect(invalidSharedMigrationNumbers(newCollision)).toEqual([newCollision]);
   });
 });
 

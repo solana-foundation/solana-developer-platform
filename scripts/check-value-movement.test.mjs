@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { findValueMovementViolations } from "./check-value-movement.mjs";
+import { CAPABILITIES, findValueMovementViolations } from "./check-value-movement.mjs";
 
 function fixture(files) {
   const rootDir = mkdtempSync(path.join(tmpdir(), "value-movement-"));
@@ -332,4 +332,85 @@ ns[name]();
 
   const lines = found.map((violation) => violation.split(": ")[0]).sort();
   assert.deepEqual(lines, ["src/allowed.ts:5", "src/allowed.ts:6", "src/allowed.ts:8"]);
+});
+
+test("recorded principals are a separate capability restricted to the recovery worker", () => {
+  const recorded = CAPABILITIES.find((capability) => capability.id === "recorded-money-principal");
+  assert.ok(recorded);
+  assert.deepEqual(recorded.symbols, [
+    // biome-ignore lint/security/noSecrets: a function name, not a secret.
+    { file: "apps/sdp-api/src/lib/money-principal.ts", name: "runAsRecordedMoneyPrincipal" },
+  ]);
+  assert.deepEqual(recorded.owners, ["apps/sdp-api/src/lib/money-principal.ts"]);
+  assert.deepEqual(recorded.allow, [
+    "apps/sdp-api/src/services/jobs/reconcile-pending-proposals.ts",
+  ]);
+  const authenticated = CAPABILITIES.find((capability) => capability.id === "money-principal");
+  assert.ok(authenticated);
+  assert.deepEqual(authenticated.allow, [
+    "apps/sdp-api/src/middleware/auth.ts",
+    "apps/sdp-api/src/middleware/clerk-auth.ts",
+    "apps/sdp-api/src/services/jobs/collect-recurring-payments.ts",
+    "apps/sdp-api/src/routes/pay/context.ts",
+  ]);
+
+  const found = violations(
+    {
+      "src/lib/cap.ts": `export function runAsRecordedMoneyPrincipal(): void {}\n`,
+      "src/jobs/recovery.ts": `import { runAsRecordedMoneyPrincipal } from "../lib/cap";\nrunAsRecordedMoneyPrincipal();\n`,
+      "src/routes/viewer.ts": `import { runAsRecordedMoneyPrincipal as restore } from "../lib/cap";\nrestore();\n`,
+      "src/jobs/other.ts": `import * as principal from "../lib/cap";\nprincipal.runAsRecordedMoneyPrincipal();\n`,
+    },
+    [
+      {
+        ...recorded,
+        // biome-ignore lint/security/noSecrets: a function name, not a secret.
+        symbols: [{ file: "src/lib/cap.ts", name: "runAsRecordedMoneyPrincipal" }],
+        owners: ["src/lib/cap.ts"],
+        allow: ["src/jobs/recovery.ts"],
+      },
+    ]
+  );
+  assert.deepEqual([...new Set(found.map((violation) => violation.split(":")[0]))].sort(), [
+    "src/jobs/other.ts",
+    "src/routes/viewer.ts",
+  ]);
+});
+
+for (const id of [
+  "fireblocks-transfer-cancellation",
+  "custody-proposal-recovery",
+  "custody-proposal-recovery-construction",
+  "custody-proposal-worker",
+]) {
+  test(`${id} cannot escape through a tenant handler`, () => {
+    const capability = CAPABILITIES.find((candidate) => candidate.id === id);
+    assert.ok(capability);
+    assert.equal(capability.allow.length, 1);
+    const found = violations(
+      {
+        "src/lib/cap.ts": "export function cancel(): void {}\n",
+        "src/allowed.ts": 'import { cancel } from "./lib/cap";\ncancel();\n',
+        "src/routes/viewer.ts": 'import { cancel as unwind } from "../lib/cap";\nunwind();\n',
+      },
+      [
+        {
+          ...capability,
+          symbols: [{ file: "src/lib/cap.ts", name: "cancel" }],
+          owners: ["src/lib/cap.ts"],
+          allow: ["src/allowed.ts"],
+        },
+      ]
+    );
+    assert.deepEqual(
+      [...new Set(found.map((value) => value.split(":")[0]))],
+      ["src/routes/viewer.ts"]
+    );
+  });
+}
+
+test("the proposal worker is callable only by its dedicated cron definition", () => {
+  const capability = CAPABILITIES.find((candidate) => candidate.id === "custody-proposal-worker");
+  assert.ok(capability);
+  assert.deepEqual(capability.allow, ["apps/sdp-api/src/cron/reconcile-custody-proposals.ts"]);
 });

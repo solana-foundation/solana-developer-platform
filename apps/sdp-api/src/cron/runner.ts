@@ -26,6 +26,7 @@ import { providerCredentialSecretCleanupCron } from "@/cron/provider-credential-
 import { rampDeliveriesCron } from "@/cron/ramp-deliveries";
 import { rampTransferStatusesCron } from "@/cron/ramp-transfer-statuses";
 import { rampTransfersCron } from "@/cron/ramp-transfers";
+import { custodyProposalsCron } from "@/cron/reconcile-custody-proposals";
 import { recurringPaymentsCron } from "@/cron/recurring-payments";
 import { ringsIndexingCron } from "@/cron/rings-indexing";
 import { secretRetirementsCron } from "@/cron/secret-retirements";
@@ -52,6 +53,7 @@ export interface CronHandle {
 /** Every Cron Definition the Worker runs. */
 export const CRON_DEFINITIONS: readonly CronDefinition[] = [
   pendingTransfersCron,
+  custodyProposalsCron,
   paymentRequestsHotCron,
   paymentRequestsCron,
   paymentRequestsExpiryCron,

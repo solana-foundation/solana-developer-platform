@@ -337,7 +337,7 @@ export const transferSchema = z
       .openapi({
         [CUSTODY_PROVIDER_GATE]: "fireblocks",
         description:
-          "Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.",
+          "Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. SDP rechecks the initiating principal on a minute schedule, prioritizing recorded access changes, and requests cancellation if access is lost before signing. Connection health checks do not trigger cancellation. Failed cancellation attempts retry at least five minutes apart while status checks continue. Queued work and provider delays can extend recovery latency. A cancellation request remains processing until Fireblocks confirms its outcome and can race execution. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.",
       }),
     id: transferIdParamSchema,
     organizationId: orgIdParamSchema,
