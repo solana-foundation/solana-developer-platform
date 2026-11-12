@@ -1,14 +1,19 @@
 name: Deploy sdp-api to Cloud Run (beta)
 
-# Beta (api-beta.solana.com) is the devnet sandbox. The merge deploy calls this once the stage
-# deploy and smoke pass, alongside prod, so it never holds prod up. It runs in its own GCP project
+# Beta (api-beta.solana.com) is the devnet sandbox. The merge deploy dispatches this as its own run
+# once the stage deploy and smoke pass, so a slow or stuck beta never holds prod or the next merge's
+# deploy (the merge deploy's concurrency slot) up. It runs in its own GCP project
 # with its own registry, services and database, and deploys the signed merge image the prod deploy
 # promotes. Every step continues on error and skips while those resources do not exist yet: a
 # failure reports to Slack (deploy) or Loki with target=beta (smoke).
 
 on:
   workflow_dispatch:
-  workflow_call:
+    inputs:
+      image_sha:
+        description: "40-character main commit whose signed merge image to deploy"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -22,7 +27,7 @@ concurrency:
 jobs:
   deploy:
     name: Deploy beta
-    if: github.repository == 'solana-foundation/solana-developer-platform'
+    if: github.repository == 'solana-foundation/solana-developer-platform' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 135
     continue-on-error: true
@@ -41,11 +46,14 @@ jobs:
       BETA_WORKER_SERVICE: sdp-beta-worker
       BETA_MIGRATE_JOB: sdp-beta-api-public-migrate
       BETA_ORIGIN: https://api-beta.solana.com
+      DEPLOY_IMAGE_SHA: ${{ inputs.image_sha }}
     steps:
       - name: Checkout
         continue-on-error: true
         timeout-minutes: 2
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ inputs.image_sha }}
 
       - name: Authenticate to GCP
         id: auth
@@ -70,6 +78,10 @@ jobs:
         timeout-minutes: 2
         run: |
           set -euo pipefail
+          if [[ ! "${DEPLOY_IMAGE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "image_sha must be a lowercase 40-character Git SHA." >&2
+            exit 1
+          fi
           err="$(mktemp)"
           missing=()
           describe() {
@@ -140,8 +152,6 @@ jobs:
         if: steps.ghcr.outcome == 'success'
         continue-on-error: true
         timeout-minutes: 75
-        env:
-          DEPLOY_IMAGE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           SRC_BASE="ghcr.io/${{ github.repository_owner }}/sdp/sdp-api"
@@ -183,7 +193,6 @@ jobs:
         continue-on-error: true
         timeout-minutes: 2
         env:
-          DEPLOY_IMAGE_SHA: ${{ github.sha }}
           SRC_DIGEST: ${{ steps.promote.outputs.src_digest }}
         run: |
           set -euo pipefail
@@ -294,7 +303,7 @@ jobs:
         timeout-minutes: 2
         env:
           GH_TOKEN: ${{ github.token }}
-          IMAGE_SHA: ${{ github.sha }}
+          IMAGE_SHA: ${{ inputs.image_sha }}
           DEPLOYED_REVISION: ${{ steps.ready.outputs.revision }}
         run: |
           set -euo pipefail
@@ -355,7 +364,7 @@ jobs:
           SERVICE: sdp-api
           ENV: beta
           STATUS: failure
-          VERSION: ${{ github.sha }}
+          VERSION: ${{ inputs.image_sha }}
           ACTOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RUN_ID: ${{ github.run_id }}

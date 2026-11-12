@@ -28,11 +28,9 @@ function jobBlocks(workflow) {
       header[1],
       jobsSection.slice(
         header.index,
-        index + 1 < headers.length
-          ? headers[index + 1].index
-          : jobsSection.length,
+        index + 1 < headers.length ? headers[index + 1].index : jobsSection.length
       ),
-    ]),
+    ])
   );
 }
 
@@ -82,7 +80,7 @@ function runScript(script, { stubs, env }) {
   for (const [name, body] of Object.entries({ sleep: "exit 0", ...stubs })) {
     fs.writeFileSync(
       path.join(dir, name),
-      `#!/usr/bin/env bash\nprintf '%s %s\\n' '${name}' "$*" >> '${calls}'\n${body}\n`,
+      `#!/usr/bin/env bash\nprintf '%s %s\\n' '${name}' "$*" >> '${calls}'\n${body}\n`
     );
     fs.chmodSync(path.join(dir, name), 0o755);
   }
@@ -142,13 +140,10 @@ test("the beta workflow runs the beta steps in order", () => {
       "Install Doppler CLI",
       "Doppler OIDC login",
       "Notify Slack — beta deploy failed",
-    ],
+    ]
   );
   const chain = [
-    [
-      "Configure Docker for Artifact Registry",
-      "steps.find.outputs.present == 'true'",
-    ],
+    ["Configure Docker for Artifact Registry", "steps.find.outputs.present == 'true'"],
     ["Install Cosign", "steps.docker.outcome == 'success'"],
     ["Install crane", "steps.cosign.outcome == 'success'"],
     ["Log in to GHCR", "steps.crane.outcome == 'success'"],
@@ -171,16 +166,16 @@ test("the beta workflow runs the beta steps in order", () => {
   ]) {
     assertLine(
       stepBlock(beta, stepName),
-      `          IMAGE: ${expression("steps.image.outputs.image")}`,
+      `          IMAGE: ${expression("steps.image.outputs.image")}`
     );
   }
   assert.match(
     stepBlock(beta, "Check the beta release channel"),
-    /"\$\{BETA_ORIGIN\}\/health" \| jq -er '\.releaseChannel'/,
+    /"\$\{BETA_ORIGIN\}\/health" \| jq -er '\.releaseChannel'/
   );
   assert.match(
     stepBlock(beta, "Check the beta release channel"),
-    /\[\[ "\$\{channel\}" == "beta" \]\]/,
+    /\[\[ "\$\{channel\}" == "beta" \]\]/
   );
 });
 
@@ -190,16 +185,10 @@ test("beta authenticates as its own deployer and promotes the merge image the wa
   const auth = stepBlock(beta, "Authenticate to GCP");
   assertLine(
     auth,
-    `          workload_identity_provider: ${expression("vars.BETA_DEPLOY_WIF_PROVIDER")}`,
+    `          workload_identity_provider: ${expression("vars.BETA_DEPLOY_WIF_PROVIDER")}`
   );
-  assertLine(
-    auth,
-    `          service_account: ${expression("vars.BETA_DEPLOY_SA")}`,
-  );
-  assert.doesNotMatch(
-    workflow,
-    /STAGE_DEPLOY|sdp-stage|developer-platform-stg/,
-  );
+  assertLine(auth, `          service_account: ${expression("vars.BETA_DEPLOY_SA")}`);
+  assert.doesNotMatch(workflow, /STAGE_DEPLOY|sdp-stage|developer-platform-stg/);
   // The deployer's token is pinned to main with no GitHub environment.
   assert.doesNotMatch(workflow, /\n\s+environment:/);
   assert.match(beta, /\n {4}permissions:\n(?: {6}.+\n)* {6}packages: read\n/);
@@ -207,25 +196,22 @@ test("beta authenticates as its own deployer and promotes the merge image the wa
   const prod = jobBlock(readWorkflow("deploy-sdp-api-gcp-prod.yml"), "deploy");
   const runOf = (block, name) => runBlock(stepBlock(block, name));
   assert.equal(
-    runOf(beta, "Verify and promote merge image").replace(
-      'echo "src_digest=${SRC_DIGEST}" >> "${GITHUB_OUTPUT}"',
-      'echo "SRC_DIGEST=${SRC_DIGEST}" >> "${GITHUB_ENV}"',
-    ),
+    // Beta hands the digest on as a step output; prod sets it in the job env.
+    runOf(beta, "Verify and promote merge image")
+      .replace('echo "src_digest=', 'echo "SRC_DIGEST=')
+      .replace('"$' + '{GITHUB_OUTPUT}"', '"$' + '{GITHUB_ENV}"'),
     runOf(prod, "Verify and promote merge image"),
-    "the beta image promotion drifted from prod's",
+    "the beta image promotion drifted from prod's"
   );
   for (const stepName of ["Install Cosign", "Install crane"]) {
     assert.equal(
       stepBlock(beta, stepName).match(/\n {8}uses: (.+)\n/)[1],
-      stepBlock(prod, stepName).match(/\n {8}uses: (.+)\n/)[1],
+      stepBlock(prod, stepName).match(/\n {8}uses: (.+)\n/)[1]
     );
   }
   const resolve = stepBlock(beta, "Resolve immutable deploy image");
   assert.match(resolve, /\[\[ "\$\{digest\}" != "\$\{SRC_DIGEST\}" \]\]/);
-  assertLine(
-    resolve,
-    `          SRC_DIGEST: ${expression("steps.promote.outputs.src_digest")}`,
-  );
+  assertLine(resolve, `          SRC_DIGEST: ${expression("steps.promote.outputs.src_digest")}`);
 });
 
 test("a beta failure stays in its job: every job and step continues on error within a timeout", () => {
@@ -244,60 +230,48 @@ test("a beta failure stays in its job: every job and step continues on error wit
     assert.ok(steps(block).length > 0, `${label} has no steps`);
     // A hung step must fail on its own and continue; a job timeout would fail the job.
     const jobMinutes = Number(block.match(/\n {4}timeout-minutes: (\d+)\n/)[1]);
-    assert.ok(
-      stepMinutes < jobMinutes,
-      `${label} steps can outlast the job timeout`,
-    );
+    assert.ok(stepMinutes < jobMinutes, `${label} steps can outlast the job timeout`);
   }
 });
 
-test("beta deploys only after a green stage deploy and smoke, alongside prod", () => {
+test("beta is dispatched as its own run after a green stage deploy and smoke", () => {
   const deployWorkflow = readWorkflow("deploy.yml");
-  const betaCaller = jobBlock(deployWorkflow, "deploy-api-beta");
-  assertLine(betaCaller, "    needs: [changes, deploy-api-stage]");
+  const betaCaller = jobBlock(deployWorkflow, "dispatch-api-beta");
+  assertLine(betaCaller, "    needs: deploy-api-stage");
   assert.match(
     betaCaller,
-    /\n {4}if: >-\n {6}always\(\) && needs\.deploy-api-stage\.result == 'success' &&\n {6}vars\.BETA_DEPLOY_WIF_PROVIDER != '' && vars\.BETA_DEPLOY_SA != ''\n/,
+    /\n {4}if: >-\n {6}needs\.deploy-api-stage\.result == 'success' &&\n {6}vars\.BETA_DEPLOY_WIF_PROVIDER != '' && vars\.BETA_DEPLOY_SA != ''\n/
   );
-  assert.match(
+  // A called workflow would hold this run's concurrency slot, and with it the next merge's deploy.
+  assert.doesNotMatch(betaCaller, /\n {4}uses: /);
+  assert.match(betaCaller, /\n {4}permissions:\n {6}actions: write\n {4}steps:/);
+  assertLine(
     betaCaller,
-    /\n {4}permissions:\n(?: {6}.+\n)* {6}packages: read\n/,
+    `        run: gh workflow run ${betaDeployFile} --repo "${expression("github.repository")}" --ref main -f image_sha="${expression("github.sha")}"`
   );
-  assertLine(betaCaller, `    uses: ./.github/workflows/${betaDeployFile}`);
-  assert.match(
-    betaCaller,
-    /\n {4}permissions:\n(?: {6}.+\n)* {6}statuses: write\n/,
-  );
+  const betaWorkflow = readWorkflow(betaDeployFile);
+  assert.doesNotMatch(betaWorkflow, /workflow_call/);
+  assert.match(betaWorkflow, /\n {2}workflow_dispatch:\n {4}inputs:\n {6}image_sha:\n/);
+  assertLine(betaWorkflow, "  group: sdp-api-gcp-deploy-beta");
+  assertLine(betaWorkflow, "  cancel-in-progress: false");
+  assert.match(betaJob(), /\n {4}permissions:\n(?: {6}.+\n)* {6}statuses: write\n/);
   // The migration approval run requires every job under the stage caller's name to succeed.
-  const stageName = jobBlock(deployWorkflow, "deploy-api-stage").match(
-    /\n {4}name: (.+)\n/,
-  )[1];
+  const stageName = jobBlock(deployWorkflow, "deploy-api-stage").match(/\n {4}name: (.+)\n/)[1];
   const betaName = betaCaller.match(/\n {4}name: (.+)\n/)[1];
+  assert.ok(!betaName.startsWith(stageName), `${betaName} falls under the stage gate`);
   assert.ok(
-    !betaName.startsWith(stageName),
-    `${betaName} falls under the stage gate`,
-  );
-  assert.match(
-    readWorkflow("apply-prod-migrations.yml"),
-    new RegExp(`startswith\\("${stageName.replace(/[+]/g, "\\+")}"\\)`),
+    readWorkflow("apply-prod-migrations.yml").includes(`startswith("${stageName}")`),
+    "the approval run no longer gates on the stage job name"
   );
 
-  for (const jobName of [
-    "schema",
-    "deploy-api-prod",
-    "request-schema-approval",
-    "notify-end",
-  ]) {
+  for (const jobName of ["schema", "deploy-api-prod", "request-schema-approval", "notify-end"]) {
     assert.doesNotMatch(
       jobBlock(deployWorkflow, jobName),
-      /needs:.*deploy-api-beta/,
-      `${jobName} waits on beta`,
+      /needs:.*dispatch-api-beta/,
+      `${jobName} waits on beta`
     );
   }
-  assert.doesNotMatch(
-    jobBlock(deployWorkflow, "deploy-api-stage"),
-    /statuses: write/,
-  );
+  assert.doesNotMatch(jobBlock(deployWorkflow, "deploy-api-stage"), /statuses: write/);
   assert.doesNotMatch(readWorkflow(stageDeployFile), /beta/i);
   assert.doesNotMatch(readWorkflow("sdp-stage-smoke.yml"), /beta/i);
   for (const fileName of [
@@ -305,11 +279,7 @@ test("beta deploys only after a green stage deploy and smoke, alongside prod", (
     "apply-prod-migrations.yml",
     "rollback-sdp-api-gcp-prod.yml",
   ]) {
-    assert.doesNotMatch(
-      readWorkflow(fileName),
-      /beta/i,
-      `${fileName} mentions beta`,
-    );
+    assert.doesNotMatch(readWorkflow(fileName), /beta/i, `${fileName} mentions beta`);
   }
   assert.match(jobBlock(deployWorkflow, "changes"), /\(-prod\|-stage\|-beta\)/);
 });
@@ -327,25 +297,20 @@ test("the beta smoke follows a deploy that found beta, asserts the channel and r
       "Install Doppler CLI",
       "Doppler OIDC login",
       "Report beta run to Loki",
-    ],
+    ]
   );
-  assert.match(
-    stepBlock(betaSmoke, "Probe the beta API"),
-    /jq -e '\.releaseChannel == "beta"'/,
-  );
+  assert.match(stepBlock(betaSmoke, "Probe the beta API"), /jq -e '\.releaseChannel == "beta"'/);
   const loki = stepBlock(betaSmoke, "Report beta run to Loki");
-  assertLine(
-    loki,
-    `          SMOKE_OUTCOME: ${expression("steps.smoke.outcome")}`,
-  );
+  assertLine(loki, `          SMOKE_OUTCOME: ${expression("steps.smoke.outcome")}`);
   assert.match(
     loki,
-    /--preserve-env=SMOKE_OUTCOME,SMOKE_TARGET,RUN_ID,RUN_URL -- \.\/scripts\/report-smoke-to-loki\.sh/,
+    /--preserve-env=SMOKE_OUTCOME,SMOKE_TARGET,RUN_ID,RUN_URL -- \.\/scripts\/report-smoke-to-loki\.sh/
   );
 });
 
 const findScript = () => runBlock(stepBlock(betaJob(), "Find beta resources"));
 const findEnv = {
+  DEPLOY_IMAGE_SHA: "b".repeat(40),
   REGION: "us-central1",
   PROJECT_ID: "example-project",
   BETA_SERVICE: "sdp-beta-api-public",
@@ -363,6 +328,16 @@ test("the beta deploy skips without failing while a beta resource is not found",
   assert.equal(run.code, 0, run.stderr);
   assert.equal(run.output, "present=false\n");
   assert.match(run.stdout, /missing: sdp-beta-worker/);
+});
+
+test("the beta deploy refuses an image_sha that is not a full commit SHA", () => {
+  const run = runScript(findScript(), {
+    stubs: { gcloud: "exit 0" },
+    env: { ...findEnv, DEPLOY_IMAGE_SHA: "main" },
+  });
+  assert.equal(run.code, 1);
+  assert.equal(run.output, "");
+  assert.deepEqual(run.calls, []);
 });
 
 test("the beta deploy fails on any other describe error", () => {
@@ -387,10 +362,7 @@ esac`,
   });
   assert.equal(run.code, 0, run.stderr);
   assert.equal(run.output, "present=true\n");
-  assert.match(
-    run.summary,
-    /sdp-beta-api-public-00007-abc \(sha256:previous\)/,
-  );
+  assert.match(run.summary, /sdp-beta-api-public-00007-abc \(sha256:previous\)/);
 });
 
 const repository = "example-org/example-repo";
@@ -402,18 +374,15 @@ function runGate({ serving, ghExitCode = 0 }) {
   const curl = serving
     ? `printf '%s' '${JSON.stringify({ status: "ready", revision: serving })}'`
     : "exit 22";
-  const run = runScript(
-    runBlock(stepBlock(betaJob(), "Post the sdp-web beta gate status")),
-    {
-      stubs: { curl, gh: `exit ${ghExitCode}` },
-      env: {
-        BETA_ORIGIN: "https://api-beta.solana.com",
-        GITHUB_REPOSITORY: repository,
-        IMAGE_SHA: imageSha,
-        DEPLOYED_REVISION: deployedRevision,
-      },
+  const run = runScript(runBlock(stepBlock(betaJob(), "Post the sdp-web beta gate status")), {
+    stubs: { curl, gh: `exit ${ghExitCode}` },
+    env: {
+      BETA_ORIGIN: "https://api-beta.solana.com",
+      GITHUB_REPOSITORY: repository,
+      IMAGE_SHA: imageSha,
+      DEPLOYED_REVISION: deployedRevision,
     },
-  );
+  });
   return { ...run, posts: run.calls.filter((call) => call.startsWith("gh ")) };
 }
 

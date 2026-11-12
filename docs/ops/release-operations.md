@@ -7,7 +7,7 @@
 | Event                                                             | Target              | Result                                                                                                                                                                                                                                                                                                               |
 | ----------------------------------------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Push to `main`                                                    | Stage               | Builds a SHA-tagged image, runs migrations, updates the stage service and worker, then runs the stage smoke                                                                                                                                                                                                          |
-| Push to `main`                                                    | Beta                | After the stage smoke passes, alongside production: copies the signed merge image into its own project, runs the beta migrations, updates the beta service and worker, posts the `sdp-web beta gate` status and smokes beta. Never gates production                                                                  |
+| Push to `main`                                                    | Beta                | After the stage smoke passes, as its own run alongside production: copies the signed merge image into its own project, runs the beta migrations, updates the beta service and worker, posts the `sdp-web beta gate` status and smokes beta. Never gates production or the next merge's deploy                        |
 | Push to `main` with repo variable `CONTINUOUS_PROD_DEPLOY=true`   | Production API      | After the stage smoke passes, runs migrations and promotes the signed per-merge image. When `main` carries migrations production has not applied yet, the merge deploy is held instead and dispatches `Apply pending migrations to prod`, which deploys that commit once a `release-production` reviewer approves it |
 | `chore(main): release X.Y.Z` commit on `main`                     | Release publication | Creates the `vX.Y.Z` tag, publishes the GitHub release, and triggers release-image/checksum workflows. Deploys nothing itself: the commit reaches production through the per-merge pipeline like any other push                                                                                                      |
 | Push to `main`                                                    | Production web      | Vercel's git integration builds sdp-web from that commit and holds it until the `sdp-web production gate` commit status passes, which the production API deploy of that same commit posts once it serves traffic                                                                                                     |
@@ -227,7 +227,7 @@ Beta (`https://api-beta.solana.com`) is a devnet-only environment in its own GCP
 
 ### Beta deploy
 
-The merge deploy calls [`deploy-sdp-api-gcp-beta.yml`](../../.github/workflows/deploy-sdp-api-gcp-beta.yml) once the stage deploy and smoke pass, in parallel with production, including while production is held for pending migrations (beta migrates its own database). Its `Deploy beta` job:
+Once the stage deploy and smoke pass, the merge deploy's `Dispatch the beta deploy` job starts [`deploy-sdp-api-gcp-beta.yml`](../../.github/workflows/deploy-sdp-api-gcp-beta.yml) as its own run with `image_sha` set to the merge commit. It runs in parallel with production, including while production is held for pending migrations (beta migrates its own database). Its `Deploy beta` job:
 
 1. Authenticates as the beta deployer (`BETA_DEPLOY_WIF_PROVIDER`, `BETA_DEPLOY_SA`); the merge deploy skips beta while those variables are unset.
 2. Finds `sdp-beta-api-public-migrate`, `sdp-beta-api-public` and `sdp-beta-worker`. While any of them does not exist, the job skips with a notice. It records the revision and digest beta served before this deploy in the run summary.
@@ -238,7 +238,7 @@ The merge deploy calls [`deploy-sdp-api-gcp-beta.yml`](../../.github/workflows/d
 7. Updates `sdp-beta-worker`.
 8. Posts the `sdp-web beta gate` commit status once `/health/ready` reports the deployed revision, the same way `release-web` posts the production gate.
 
-Each step runs only after the previous one succeeded, and each continues on error within a timeout: a beta failure posts `[FAILED] Deploy sdp-api (beta)` to the deploy Slack channel and fails nothing else. No production job waits on beta, so beta adds no time to production, and its job name sits outside the stage prefix the `Apply pending migrations to prod` approval checks. Once the deploy has found beta, `Beta API smoke` checks that `/health` reports the `beta` channel and `/health/ready` is ready. That pass is reported to Loki with `target="beta"` and never fails the run.
+Each step runs only after the previous one succeeded, and each continues on error within a timeout: a beta failure posts `[FAILED] Deploy sdp-api (beta)` to the deploy Slack channel and fails nothing else. Because beta is a separate run, no production job waits on it and it does not hold the merge deploy's concurrency slot: a slow beta delays neither production nor the next merge. Newer beta runs queue behind the current one, and the dispatch job's name sits outside the stage prefix the `Apply pending migrations to prod` approval checks. Once the deploy has found beta, `Beta API smoke` checks that `/health` reports the `beta` channel and `/health/ready` is ready. That pass is reported to Loki with `target="beta"` and never fails the run.
 
 ### Beta rollback
 
@@ -265,7 +265,7 @@ gcloud run services update sdp-beta-worker \
   --region us-central1 --project solana-developer-platform-beta --image "${DIGEST}"
 ```
 
-Re-pinning moves images, not SQL: the previous image must run on the schema the beta migration already applied, which [Schema compatibility](#schema-compatibility) guarantees. The next merge deploys beta again, so fix `main` before it lands.
+Re-pinning moves images, not SQL. Before running the rollback commands, confirm that the previous image can run on the schema beta has already applied. [Schema compatibility](#schema-compatibility) allows migrations marked `-- sdp:migration-compat: breaking`, so compatibility is not guaranteed. If a breaking migration made the previous image incompatible, fix forward instead. The next merge deploys beta again, so fix `main` before it lands.
 
 ## Production Rollback
 
