@@ -127,6 +127,7 @@ import {
 import { readSolanaCryptoWalletAddress } from "@/services/payments/counterparty-account-resolution";
 import {
   isFireblocksTransfer,
+  type ProposalLedger,
   refreshFireblocksTransfer,
   submitProposedTransfer,
 } from "@/services/payments/fireblocks-transfer";
@@ -1082,6 +1083,23 @@ function compareTransferRows(
   return createdAtComparison || right.id.localeCompare(left.id);
 }
 
+/**
+ * The request's ledger for proposed-transfer row state: a settle commits with its audit outcome
+ * in the request's own ledger transaction.
+ */
+function requestProposalLedger(
+  c: AppContext,
+  auditService: AuditService = new AuditService(getDb(c.env))
+): ProposalLedger {
+  return {
+    repo: getPaymentsRepository(c),
+    audited: (work) =>
+      auditService.logWithin(c, (tx) =>
+        work(createPostgresPaymentsRepository(tx, getRequestTenantScope(c)))
+      ),
+  };
+}
+
 async function executeProposedTransfer(
   c: AppContext,
   transfer: TransferRow,
@@ -1093,20 +1111,22 @@ async function executeProposedTransfer(
   // transaction failure/rebroadcast path. The durable provider intent owns recovery.
   let updated: TransferRow;
   try {
-    updated = await submitProposedTransfer(getPaymentsRepository(c), transfer, proposer);
+    updated = await submitProposedTransfer(
+      requestProposalLedger(c, auditService),
+      transfer,
+      proposer
+    );
   } catch (error) {
+    // A refusal already closed the intent with its failed write; this covers anything earlier.
     await completeTransferAudit(c, auditService, transfer, auditIntent, {
       status: "failure",
       metadata: { status: "failed" },
     });
     throw error;
   }
-  if (updated.provider_reference || updated.status === "failed") {
-    await completeTransferAudit(c, auditService, transfer, auditIntent, {
-      status: updated.status === "failed" ? "failure" : "success",
-      metadata: { fireblocksTransactionId: updated.provider_reference, status: updated.status },
-    });
-  }
+  // A terminal write closed the audit intent in its own transaction. A proposal awaiting
+  // approval in Fireblocks leaves it open: the read or the cron that settles the payment closes
+  // it with the real outcome, as the pending-transfer job does for an ambiguous signed send.
   // The same code a replay of the key reads, so a confirmed policy block answers
   // 422 CUSTODY_POLICY_REFUSED both times (HOO-2478).
   if (updated.status === "failed")
@@ -1763,8 +1783,9 @@ export async function listTransfers(c: AppContext) {
   const pending = transferRows
     .filter((row) => isFireblocksTransfer(row) && row.status === "processing")
     .slice(0, 4);
+  const ledger = requestProposalLedger(c);
   const refreshed = await mapSettledWithConcurrency(pending, 4, (row) =>
-    refreshFireblocksTransfer(c.env, repo, row)
+    refreshFireblocksTransfer(c.env, ledger, row)
   );
   const byId = new Map(
     refreshed.flatMap((result) =>
@@ -1798,6 +1819,6 @@ export async function getTransfer(c: AppContext) {
     throw notFound("Transfer");
   }
 
-  const refreshed = await refreshFireblocksTransfer(c.env, repo, row);
+  const refreshed = await refreshFireblocksTransfer(c.env, requestProposalLedger(c), row);
   return success(c, { transfer: mapTransferRow(refreshed) });
 }

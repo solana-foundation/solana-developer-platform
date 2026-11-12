@@ -3,10 +3,15 @@ import type { FireblocksTransferResult } from "@sdp/custody/provisioning/fireblo
 import { compareDecimalAmounts, parseDecimalAmount } from "@sdp/solana/amount";
 import { fireblocksPaymentStatus, isFireblocksPolicyRefusal } from "@sdp/types/fireblocks";
 import { assertIsSignature } from "@solana/kit";
-import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
+import type {
+  PaymentsRepository,
+  PaymentTransferRow,
+  UpdatePaymentTransferInput,
+} from "@/db/repositories/payments.repository";
 import { AppError, badRequest, conflict, custodyPolicyRefusalMessage } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { describeError } from "@/runtime/money-path-events";
+import { type AuditLogEntry, criticalOutcomeEntry } from "@/services/audit.service";
 import {
   type CustodyTransferProposer,
   transferProposalIntentSchema as intentSchema,
@@ -21,6 +26,77 @@ import type { Env } from "@/types/env";
  * file only claims, records and reconciles the payment row, so a proposed transfer and a signed
  * one share the transfer handler, its idempotency, its audit and its failure path.
  */
+
+/**
+ * Where a proposed transfer's row state is written. Plain observations go to `repo`; a write that
+ * ends the payment commits through `audited`, with the outcome that closes the row's open audit
+ * intent, exactly as a signed transfer's settle does (HOO-2556). A request passes its own ledger
+ * transaction; the pending-transfers job builds one over the system audit service.
+ */
+export interface ProposalLedger {
+  repo: PaymentsRepository;
+  audited<T>(
+    work: (repo: PaymentsRepository) => Promise<{ entry: AuditLogEntry | null; result: T }>
+  ): Promise<T>;
+}
+
+/** The outcome that closes the intent the sending request opened, with Fireblocks' verdict. */
+function proposalAuditOutcome(
+  row: PaymentTransferRow,
+  auditIntentId: string,
+  settled: PaymentTransferRow
+): AuditLogEntry {
+  const metadata: Record<string, unknown> = {
+    status: settled.status,
+    fireblocksTransactionId: settled.provider_reference,
+    fireblocksStatus: settled.provider_data.fireblocksStatus ?? null,
+    signature: settled.signature,
+  };
+  if (settled.status === "failed") metadata.error = settled.error;
+  return criticalOutcomeEntry(
+    {
+      id: auditIntentId,
+      entry: {
+        organizationId: row.organization_id,
+        action: "transfer",
+        resourceType: "payment_transfer",
+        resourceId: row.id,
+      },
+    },
+    { status: settled.status === "failed" ? "failure" : "success", metadata }
+  );
+}
+
+/**
+ * Writes one guarded update. A terminal one closes the row's open audit intent in the same
+ * transaction: a ledger failure rolls the settle back, so the payment stays processing and the
+ * next read or run settles and audits it again. Clearing the intent is the claim, so of the
+ * request, a viewer and the cron only the first appends an outcome.
+ */
+async function writeTransfer(
+  ledger: ProposalLedger,
+  row: PaymentTransferRow,
+  update: UpdatePaymentTransferInput
+): Promise<PaymentTransferRow | null> {
+  const auditIntentId = row.audit_intent_id;
+  if (update.status === undefined || update.status === "processing" || auditIntentId === null)
+    return ledger.repo.updateTransfer(update);
+  return ledger.audited(async (repo) => {
+    const settled = await repo.updateTransfer(update);
+    const claimed =
+      settled !== null &&
+      (await repo.closeTransferAuditIntent({
+        transferId: row.id,
+        organizationId: row.organization_id,
+        projectId: row.project_id,
+        auditIntentId,
+      }));
+    return {
+      entry: claimed && settled ? proposalAuditOutcome(row, auditIntentId, settled) : null,
+      result: settled,
+    };
+  });
+}
 
 export function isFireblocksTransfer(row: PaymentTransferRow): boolean {
   return row.provider_data.fireblocksTransfer !== undefined;
@@ -55,7 +131,7 @@ function failureRecord(result: FireblocksTransferResult): {
 }
 
 async function persistResult(
-  repo: PaymentsRepository,
+  ledger: ProposalLedger,
   row: PaymentTransferRow,
   result: FireblocksTransferResult,
   detail: boolean
@@ -112,7 +188,7 @@ async function persistResult(
   const status = fireblocksPaymentStatus(result.status, completed);
   const failure = status === "failed" ? failureRecord(result) : null;
   return (
-    (await repo.updateTransfer({
+    (await writeTransfer(ledger, row, {
       transferId: row.id,
       organizationId: row.organization_id,
       projectId: row.project_id,
@@ -129,7 +205,7 @@ async function persistResult(
       },
       error: failure?.error ?? null,
       updatedAt: new Date().toISOString(),
-    })) ?? (await currentRow(repo, row))
+    })) ?? (await currentRow(ledger.repo, row))
   );
 }
 
@@ -145,10 +221,11 @@ async function currentRow(repo: PaymentsRepository, row: PaymentTransferRow) {
 
 /** Exactly one create attempt per durable intent. Recovery never sends funds. */
 export async function submitProposedTransfer(
-  repo: PaymentsRepository,
+  ledger: ProposalLedger,
   row: PaymentTransferRow,
   proposer: CustodyTransferProposer
 ): Promise<PaymentTransferRow> {
+  const { repo } = ledger;
   if (!row.destination_address || !row.amount || !row.project_id || !row.source_address)
     throw badRequest("Incomplete payment intent");
   const claimed = await repo.claimFireblocksTransferSubmission({
@@ -169,12 +246,12 @@ export async function submitProposedTransfer(
       amount: row.amount,
       memo: row.memo,
     });
-    return await persistResult(repo, claimed, result, false);
+    return await persistResult(ledger, claimed, result, false);
   } catch (error) {
     if (error instanceof ProposalNotSentError) {
       // A refusal before submission is definitely unsent, unlike an ambiguous provider outcome.
       const refusal = error.cause;
-      await repo.updateTransfer({
+      await writeTransfer(ledger, claimed, {
         transferId: row.id,
         organizationId: row.organization_id,
         projectId: row.project_id,
@@ -195,7 +272,7 @@ export async function submitProposedTransfer(
     // Keep the claim and recover by externalTxId; never turn uncertainty into permission to resend.
     if (error instanceof FireblocksApiError && [400, 401, 403, 422, 429].includes(error.status)) {
       return (
-        (await repo.updateTransfer({
+        (await writeTransfer(ledger, claimed, {
           transferId: row.id,
           organizationId: row.organization_id,
           projectId: row.project_id,
@@ -217,7 +294,7 @@ export async function submitProposedTransfer(
 const MISSING_TRANSACTION_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** A known provider transaction can never be failed from an unavailable lookup. */
 async function recordMissingTransaction(
-  repo: PaymentsRepository,
+  ledger: ProposalLedger,
   row: PaymentTransferRow,
   now: number
 ) {
@@ -235,7 +312,7 @@ async function recordMissingTransaction(
   const absent = elapsed >= MISSING_TRANSACTION_WINDOW_MS;
   if (absent) getLogger().warn({ transferId: row.id }, "fireblocks_unaccepted_transfer_expired");
   return (
-    (await repo.updateTransfer({
+    (await writeTransfer(ledger, row, {
       transferId: row.id,
       organizationId: row.organization_id,
       projectId: row.project_id,
@@ -250,16 +327,17 @@ async function recordMissingTransaction(
         ? "Fireblocks still has no transaction for this payment after 24 hours of recovery. Review the payment in Fireblocks before intentionally starting a new transfer."
         : null,
       updatedAt: new Date(now).toISOString(),
-    })) ?? currentRow(repo, row)
+    })) ?? currentRow(ledger.repo, row)
   );
 }
 
 /** Dashboard and cron reconciliation. Neither path can POST or automatically resubmit. */
 export async function refreshFireblocksTransfer(
   env: Env,
-  repo: PaymentsRepository,
+  ledger: ProposalLedger,
   row: PaymentTransferRow
 ): Promise<PaymentTransferRow> {
+  const { repo } = ledger;
   if (
     !isFireblocksTransfer(row) ||
     row.status !== "processing" ||
@@ -287,8 +365,8 @@ export async function refreshFireblocksTransfer(
     );
     const result = await reader.read(row.id);
     return result
-      ? await persistResult(repo, claimed, result, true)
-      : await recordMissingTransaction(repo, claimed, now);
+      ? await persistResult(ledger, claimed, result, true)
+      : await recordMissingTransaction(ledger, claimed, now);
   } catch (error) {
     getLogger().warn(
       { transferId: row.id, ...describeError(error) },
