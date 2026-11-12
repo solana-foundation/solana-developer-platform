@@ -1,8 +1,7 @@
 import type { CustodyProposalState } from "@sdp/types/custody-proposals";
 import { FIREBLOCKS_CANCELLED_TRANSACTION_STATUSES } from "@sdp/types/fireblocks";
 import {
-  isSuccessfulPaymentTransferStatus,
-  PAYMENT_TRANSFER_STATUSES,
+  PAYMENT_TRANSFER_STATUSES_WITHOUT_EXECUTION_OUTCOME,
   type PaymentTransferStatus,
   SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
 } from "@sdp/types/payments";
@@ -75,16 +74,15 @@ describe("legacy Fireblocks proposal compatibility", () => {
     expect(state.authorizationState).toBe("authorized");
   });
 
-  it.each(
-    PAYMENT_TRANSFER_STATUSES.filter(
-      (status) => !isSuccessfulPaymentTransferStatus(status) && status !== "failed"
-    )
-  )("uses provider progress while the legacy payment status is %s", (status) => {
-    const state = legacyFireblocksProposalState(
-      payment(status, "fb-transaction", { fireblocksStatus: "PENDING_AUTHORIZATION" })
-    );
-    expect(state.providerPhase).toBe("pending");
-  });
+  it.each(PAYMENT_TRANSFER_STATUSES_WITHOUT_EXECUTION_OUTCOME)(
+    "uses provider progress while the legacy payment status is %s",
+    (status) => {
+      const state = legacyFireblocksProposalState(
+        payment(status, "fb-transaction", { fireblocksStatus: "PENDING_AUTHORIZATION" })
+      );
+      expect(state.providerPhase).toBe("pending");
+    }
+  );
 
   const providerCases = [
     {
