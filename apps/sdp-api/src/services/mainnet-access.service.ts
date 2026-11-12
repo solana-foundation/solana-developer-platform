@@ -151,6 +151,8 @@ function requestEmail(
     countryName: countryByCode(row.country_code).name,
     termsVersion: row.terms_version,
     requestedAt: row.requested_at,
+    foundationContactEmail: row.foundation_contact_email,
+    useCase: row.use_case,
   };
 }
 
@@ -215,6 +217,9 @@ export async function correctMainnetAccess(
         requestedAt: before.requested_at,
         requestedByUserId: before.requested_by_user_id,
         notifiedAt: before.notified_at,
+        // The address itself is personal data the audit scrubber redacts; whether one was named is not.
+        foundationContactStated: before.foundation_contact_email !== null,
+        useCase: before.use_case,
       },
       operator: input.operator,
       reason: input.reason,

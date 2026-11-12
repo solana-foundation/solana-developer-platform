@@ -290,8 +290,14 @@ export const requestMainnetAccessRequestSchema = requestMainnetAccessSchemaBase.
   "RequestMainnetAccessRequest",
   {
     description:
-      "The organization's self-declared jurisdiction (its primary registered geography for business) and the SDP Terms and Conditions version the admin read and accepted.",
-    example: { countryCode: "US", termsVersion: "2026-10-placeholder", acceptTerms: true },
+      "The organization's self-declared jurisdiction (its primary registered geography for business) and the SDP Terms and Conditions version the admin read and accepted. Optionally, the requester's contact at the Solana Foundation (`foundationContactEmail`, an `@solana.org` address, stored lowercased) and up to 150 characters on what the organization is building (`useCase`); omit either, or send null, when there is none. Both go to the reviewer with the request and grant nothing.",
+    example: {
+      countryCode: "US",
+      termsVersion: "2026-10-placeholder",
+      acceptTerms: true,
+      foundationContactEmail: "jo.bd@solana.org",
+      useCase: "Stablecoin payouts for freelancers in Southeast Asia",
+    },
   }
 );
 

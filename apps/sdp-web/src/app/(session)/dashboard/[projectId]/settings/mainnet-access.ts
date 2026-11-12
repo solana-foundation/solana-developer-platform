@@ -1,5 +1,10 @@
 import { COUNTRY_CODES, type CountryCode } from "@sdp/types/countries";
-import { MAINNET_ACCESS_STATES, type MainnetAccess } from "@sdp/types/mainnet-access";
+import {
+  foundationContactEmailSchema,
+  MAINNET_ACCESS_STATES,
+  type MainnetAccess,
+  mainnetUseCaseSchema,
+} from "@sdp/types/mainnet-access";
 import { z } from "zod";
 import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch";
 
@@ -21,6 +26,8 @@ export const mainnetAccessSchema = z.object({
 const requestInputSchema = z.object({
   countryCode: z.enum(COUNTRY_CODES),
   termsVersion: z.string().min(1).max(64),
+  foundationContactEmail: foundationContactEmailSchema.nullable(),
+  useCase: mainnetUseCaseSchema.nullable(),
 });
 
 const requestMainnetAccessResultSchema = z.discriminatedUnion("ok", [
@@ -43,13 +50,20 @@ function accessAnswer(result: DashboardFetchResult<unknown>): RequestMainnetAcce
 }
 
 /**
- * Sends the one-time request: the jurisdiction and the terms version the admin accepted. The
+ * Sends the one-time request: the jurisdiction, the Solana Foundation contact and what the
+ * organization builds (each null when the admin gave none), and the terms version the admin
+ * accepted. The
  * API refuses a second request, so a retried submit cannot ask twice; a request whose email
  * did not go out is sent with {@link notifyMainnetAccess}.
  */
 export async function requestMainnetAccess(
   organizationId: string,
-  input: { countryCode: CountryCode; termsVersion: string }
+  input: {
+    countryCode: CountryCode;
+    termsVersion: string;
+    foundationContactEmail: string | null;
+    useCase: string | null;
+  }
 ): Promise<RequestMainnetAccessResult> {
   const parsed = requestInputSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: z.prettifyError(parsed.error) };
@@ -60,6 +74,8 @@ export async function requestMainnetAccess(
         countryCode: parsed.data.countryCode,
         termsVersion: parsed.data.termsVersion,
         acceptTerms: true,
+        foundationContactEmail: parsed.data.foundationContactEmail,
+        useCase: parsed.data.useCase,
       },
     })
   );

@@ -65,6 +65,8 @@ export const requestMainnetAccess = async (
       userId,
       countryCode: body.countryCode,
       termsVersion: body.termsVersion,
+      foundationContactEmail: body.foundationContactEmail ?? null,
+      useCase: body.useCase ?? null,
     });
     return {
       result: recorded,
@@ -77,6 +79,8 @@ export const requestMainnetAccess = async (
           countryCode: recorded.country_code,
           termsVersion: recorded.terms_version,
           requestedAt: recorded.requested_at,
+          foundationContactStated: recorded.foundation_contact_email !== null,
+          useCase: recorded.use_case,
         },
       },
     };
@@ -87,6 +91,7 @@ export const requestMainnetAccess = async (
     user_id: userId,
     country_code: row.country_code,
     terms_version: row.terms_version,
+    foundation_contact_stated: row.foundation_contact_email !== null,
   });
 
   const notified = await notifyMainnetAccessRequest(c.env, getDb(c.env), row.organization_id);

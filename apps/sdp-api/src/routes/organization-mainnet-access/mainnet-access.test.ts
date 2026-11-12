@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { correctMainnetAccess } from "@/services/mainnet-access.service";
+import { requesterEmailDomain } from "@/services/mainnet-access-email";
 import { syncProviderAccessFromClerk } from "@/services/provider-availability.service";
 import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -27,16 +28,15 @@ const MAINNET_ACCESS_EVENTS = [
   "sdp_api_mainnet_access_request_notified",
   "sdp_api_mainnet_access_request_notify_failed",
 ];
-const REQUESTED_EVENT = [
-  "info",
-  {
-    event: "sdp_api_mainnet_access_requested",
-    organization_id: ORGANIZATION_ID,
-    user_id: TEST_USER.id,
-    country_code: "SG",
-    terms_version: SDP_TERMS.version,
-  },
-];
+const REQUESTED_FIELDS = {
+  event: "sdp_api_mainnet_access_requested",
+  organization_id: ORGANIZATION_ID,
+  user_id: TEST_USER.id,
+  country_code: "SG",
+  terms_version: SDP_TERMS.version,
+  foundation_contact_stated: false,
+};
+const REQUESTED_EVENT = ["info", REQUESTED_FIELDS];
 const NOTIFIED_EVENT = [
   "info",
   { event: "sdp_api_mainnet_access_request_notified", organization_id: ORGANIZATION_ID },
@@ -152,7 +152,9 @@ async function storedRow() {
       `SELECT jurisdiction_country_code AS country_code, terms_accepted_version AS terms_version,
               mainnet_requested_at AS requested_at,
               mainnet_requested_by_user_id AS requested_by_user_id,
-              mainnet_request_notified_at AS notified_at
+              mainnet_request_notified_at AS notified_at,
+              mainnet_foundation_contact_email AS foundation_contact_email,
+              mainnet_use_case AS use_case
        FROM organizations WHERE id = ?`
     )
     .bind(ORGANIZATION_ID)
@@ -220,6 +222,16 @@ describe("Organization mainnet access (HOO-2427)", () => {
     ["an unknown country", { ...SUBMISSION, countryCode: "XX" }],
     ["the terms not accepted", { countryCode: "SG", termsVersion: SDP_TERMS.version }],
     ["the terms declined", { ...SUBMISSION, acceptTerms: false }],
+    [
+      "a Foundation contact outside solana.org",
+      { ...SUBMISSION, foundationContactEmail: "bd@solana.com" },
+    ],
+    [
+      "a Foundation contact that is not an address",
+      { ...SUBMISSION, foundationContactEmail: "Jo" },
+    ],
+    ["a blank use case", { ...SUBMISSION, useCase: "   " }],
+    ["a use case over 150 characters", { ...SUBMISSION, useCase: "a".repeat(151) }],
   ])("refuses a request with %s, recording and sending nothing", async (_, body) => {
     const response = await post(body);
     expect(response.status).toBe(400);
@@ -280,7 +292,10 @@ describe("Organization mainnet access (HOO-2427)", () => {
       `Requested by: Ada Admin (${TEST_USER.email})`,
       `Requester user ID: ${TEST_USER.id}`,
       `Requested at: ${requestedAt} UTC`,
+      "Email domain: example.com",
       "Jurisdiction: Singapore (SG), self-declared",
+      "Solana Foundation contact: None stated",
+      "Building: Not stated",
       `Terms: Version ${SDP_TERMS.version}, accepted with the request`,
     ]) {
       expect(text).toContain(field);
@@ -291,6 +306,55 @@ describe("Organization mainnet access (HOO-2427)", () => {
 
     expect((await (await get()).json()).data.state).toBe("pending");
     expect(loggedEvents()).toEqual([REQUESTED_EVENT, NOTIFIED_EVENT]);
+  });
+
+  it("records the Foundation contact and what the organization builds, and emails both (PRO-2481)", async () => {
+    const loggedEvents = recordLoggedEvents(MAINNET_ACCESS_EVENTS);
+    const response = await post({
+      ...SUBMISSION,
+      foundationContactEmail: "  Jo.BD@Solana.org ",
+      useCase: "  Stablecoin payouts for freelancers in Southeast Asia ",
+    });
+    expect(response.status).toBe(201);
+    expect(await storedRow()).toMatchObject({
+      foundation_contact_email: "jo.bd@solana.org",
+      use_case: "Stablecoin payouts for freelancers in Southeast Asia",
+    });
+    const text = String(sentEmails()[0]?.fields.body);
+    expect(text).toContain("Solana Foundation contact: jo.bd@solana.org");
+    expect(text).toContain("Building: Stablecoin payouts for freelancers in Southeast Asia");
+    expect(loggedEvents()).toEqual([
+      ["info", { ...REQUESTED_FIELDS, foundation_contact_stated: true }],
+      NOTIFIED_EVENT,
+    ]);
+  });
+
+  it("takes an explicit null for no Foundation contact and no use case", async () => {
+    const response = await post({ ...SUBMISSION, foundationContactEmail: null, useCase: null });
+    expect(response.status).toBe(201);
+    expect(await storedRow()).toMatchObject({ foundation_contact_email: null, use_case: null });
+  });
+
+  it("accepts a use case of exactly 150 characters", async () => {
+    expect((await post({ ...SUBMISSION, useCase: "a".repeat(150) })).status).toBe(201);
+  });
+
+  it.each([
+    ["test@example.com", "example.com"],
+    ["someone@Gmail.com", "gmail.com (free email provider)"],
+    ["someone@proton.me", "proton.me (free email provider)"],
+    [null, null],
+  ])("labels the requester's email domain %s for the reviewer", (email, label) => {
+    expect(requesterEmailDomain(email)).toBe(label);
+  });
+
+  it("rejects request details on an organization that never asked, at the database", async () => {
+    await expect(
+      getDb(env)
+        .prepare("UPDATE organizations SET mainnet_use_case = 'Payouts' WHERE id = ?")
+        .bind(ORGANIZATION_ID)
+        .run()
+    ).rejects.toThrow(/organizations_mainnet_request_details_check/);
   });
 
   it("is a one-time request: a second submit is refused and sends nothing", async () => {
@@ -515,7 +579,10 @@ describe("Organization mainnet access (HOO-2427)", () => {
     });
 
     it("resets a request so the organization can ask again", async () => {
-      expect((await post(SUBMISSION)).status).toBe(201);
+      expect(
+        (await post({ ...SUBMISSION, foundationContactEmail: "jo@solana.org", useCase: "Payouts" }))
+          .status
+      ).toBe(201);
       await correctMainnetAccess(env, {
         organizationId: ORGANIZATION_ID,
         operation: "reset",
@@ -523,6 +590,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
       });
       expect((await (await get()).json()).data.state).toBe("not_requested");
       expect((await post({ ...SUBMISSION, countryCode: "US" })).status).toBe(201);
+      expect(await storedRow()).toMatchObject({ foundation_contact_email: null, use_case: null });
       expect(sentEmails().map((email) => email.fields.subject)).toEqual([
         `Mainnet access request: ${TEST_ORG.name}`,
         `Mainnet access request reset: ${TEST_ORG.name}`,
@@ -605,6 +673,8 @@ describe("Organization mainnet access (HOO-2427)", () => {
             requestedAt: requested?.requested_at,
             requestedByUserId: TEST_USER.id,
             notifiedAt: requested?.notified_at,
+            foundationContactStated: false,
+            useCase: null,
           },
           ticket: "HOO-2427",
         }),

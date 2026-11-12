@@ -2,7 +2,8 @@
  * An organization's mainnet access request (HOO-2427), stored on the organization's row (migration 0201):
  * the declared jurisdiction, the Terms and Conditions version accepted with it, and the request.
  * The migration's check keeps them whole, so a request exists exactly when `mainnet_requested_at`
- * is set.
+ * is set. The Foundation contact and the line on what the organization builds (migration 0227,
+ * PRO-2481) are optional answers on the request.
  */
 import { type CountryCode, isCountryCode } from "@sdp/types/countries";
 import type { DatabaseExecutor } from "@/db/client";
@@ -15,6 +16,10 @@ export interface MainnetAccessRow {
   requested_at: string;
   requested_by_user_id: string;
   notified_at: string | null;
+  /** The requester's Solana Foundation contact; null when they named none. */
+  foundation_contact_email: string | null;
+  /** What the organization says it builds; null when it said nothing. */
+  use_case: string | null;
 }
 
 export interface MainnetAccessClaim {
@@ -22,6 +27,8 @@ export interface MainnetAccessClaim {
   userId: string;
   countryCode: CountryCode;
   termsVersion: string;
+  foundationContactEmail: string | null;
+  useCase: string | null;
 }
 
 /** A held send of the request email: the request as claimed, and the claim's own timestamp. */
@@ -40,7 +47,8 @@ export interface MainnetAccessEmailContext {
 const COLUMNS = `id AS organization_id, jurisdiction_country_code AS country_code,
   terms_accepted_version AS terms_version,
   mainnet_requested_at AS requested_at, mainnet_requested_by_user_id AS requested_by_user_id,
-  mainnet_request_notified_at AS notified_at`;
+  mainnet_request_notified_at AS notified_at,
+  mainnet_foundation_contact_email AS foundation_contact_email, mainnet_use_case AS use_case`;
 
 /**
  * How long a send claim holds. The send gives up after 10 seconds, so only a process that died
@@ -71,6 +79,8 @@ function requestOf(columns: StoredColumns): MainnetAccessRow | null {
     requested_at,
     requested_by_user_id,
     notified_at: columns.notified_at,
+    foundation_contact_email: columns.foundation_contact_email,
+    use_case: columns.use_case,
   };
 }
 
@@ -99,10 +109,18 @@ export class MainnetAccessRepository {
       `UPDATE organizations
        SET jurisdiction_country_code = ?, terms_accepted_version = ?,
            mainnet_requested_at = sdp_iso_now(), mainnet_requested_by_user_id = ?,
+           mainnet_foundation_contact_email = ?, mainnet_use_case = ?,
            updated_at = sdp_datetime_now()
        WHERE id = ? AND mainnet_requested_at IS NULL
        RETURNING ${COLUMNS}`,
-      [claim.countryCode, claim.termsVersion, claim.userId, claim.organizationId]
+      [
+        claim.countryCode,
+        claim.termsVersion,
+        claim.userId,
+        claim.foundationContactEmail,
+        claim.useCase,
+        claim.organizationId,
+      ]
     );
     return columns ? requestOf(columns) : null;
   }
@@ -194,6 +212,7 @@ export class MainnetAccessRepository {
        SET jurisdiction_country_code = NULL, terms_accepted_version = NULL,
            mainnet_requested_at = NULL, mainnet_requested_by_user_id = NULL,
            mainnet_request_notified_at = NULL, mainnet_request_sending_at = NULL,
+           mainnet_foundation_contact_email = NULL, mainnet_use_case = NULL,
            updated_at = sdp_datetime_now()
        WHERE id = ?`,
       [organizationId]

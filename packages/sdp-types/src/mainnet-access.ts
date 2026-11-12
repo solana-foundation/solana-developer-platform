@@ -88,6 +88,29 @@ export const SDP_TERMS: {
 };
 
 /**
+ * The Solana Foundation's email domain. A mainnet request names its Foundation contact (PRO-2481)
+ * only by an address here, so the reviewer can reach someone who knows the requester, and the
+ * field never names an outside address.
+ */
+export const SOLANA_FOUNDATION_EMAIL_DOMAIN = "solana.org";
+
+/** The longest "what are you building" line a mainnet request carries (PRO-2481). */
+export const MAINNET_USE_CASE_MAX_LENGTH = 150;
+
+/** The requester's Solana Foundation contact: an address at {@link SOLANA_FOUNDATION_EMAIL_DOMAIN}. */
+export const foundationContactEmailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .pipe(z.email())
+  .refine((email) => email.endsWith(`@${SOLANA_FOUNDATION_EMAIL_DOMAIN}`), {
+    message: `Enter a Solana Foundation address ending in @${SOLANA_FOUNDATION_EMAIL_DOMAIN}`,
+  });
+
+/** What the organization says it is building, in one short line. */
+export const mainnetUseCaseSchema = z.string().trim().min(1).max(MAINNET_USE_CASE_MAX_LENGTH);
+
+/**
  * Where an organization's mainnet access stands. `approved` is the
  * `enableProductionProject` entitlement an operator sets in Clerk, whether or
  * not the organization ever asked; `pending` is a request sent and not yet

@@ -42,6 +42,15 @@ function giveReaderOverflow() {
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(300);
 }
 
+/** Picks Singapore and moves on to the About step. */
+async function chooseJurisdiction(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "Request mainnet access…" }));
+  await user.click(screen.getByRole("button", { name: /Country or region/ }));
+  await user.type(screen.getByPlaceholderText("Search countries"), "Singa");
+  await user.keyboard("{Enter}");
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+}
+
 function scrollReader(to: "top" | "end") {
   const reader = screen.getByRole("document");
   reader.scrollTop = to === "end" ? 700 : 0;
@@ -66,6 +75,11 @@ describe("MainnetAccessRequestHost", () => {
     await user.keyboard("{Enter}");
     expect(proceed).toHaveProperty("disabled", false);
     await user.click(proceed);
+
+    const next = screen.getByRole("button", { name: "Continue" });
+    expect(next).toHaveProperty("disabled", true);
+    await user.click(screen.getByRole("radio", { name: /^No/ }));
+    await user.click(next);
 
     const accept = screen.getByRole("checkbox");
     scrollReader("top");
@@ -101,10 +115,8 @@ describe("MainnetAccessRequestHost", () => {
       const user = userEvent.setup();
       renderHost();
 
-      await user.click(screen.getByRole("button", { name: "Request mainnet access…" }));
-      await user.click(screen.getByRole("button", { name: /Country or region/ }));
-      await user.type(screen.getByPlaceholderText("Search countries"), "Singa");
-      await user.keyboard("{Enter}");
+      await chooseJurisdiction(user);
+      await user.click(screen.getByRole("radio", { name: /^No/ }));
       await user.click(screen.getByRole("button", { name: "Continue" }));
       scrollReader("end");
       await user.click(await screen.findByRole("checkbox"));
@@ -114,8 +126,58 @@ describe("MainnetAccessRequestHost", () => {
       expect(request).toHaveBeenCalledWith("org_sdp", {
         countryCode: "SG",
         termsVersion: SDP_TERMS.version,
+        foundationContactEmail: null,
+        useCase: null,
       });
       expect(dashboardRouter.replace).toHaveBeenCalledOnce();
     }
   );
+
+  it("sends the Foundation contact and what the organization builds (PRO-2481)", async () => {
+    giveReaderOverflow();
+    const request = vi
+      .spyOn(mainnetAccess, "requestMainnetAccess")
+      .mockResolvedValue({ ok: false, error: "unused" });
+    const user = userEvent.setup();
+    renderHost();
+
+    await chooseJurisdiction(user);
+    await user.click(screen.getByRole("radio", { name: /^Yes/ }));
+    await user.type(screen.getByLabelText("Their email"), "Jo@Solana.org");
+    const useCase = screen.getByLabelText(/What are you building\?/);
+    await user.type(useCase, " Payouts to freelancers ");
+    expect(useCase).toHaveProperty("maxLength", 150);
+    expect(screen.getByText("24/150")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    scrollReader("end");
+    await user.click(await screen.findByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: "Send request" }));
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith("org_sdp", {
+        countryCode: "SG",
+        termsVersion: SDP_TERMS.version,
+        foundationContactEmail: "jo@solana.org",
+        useCase: "Payouts to freelancers",
+      })
+    );
+  });
+
+  it("keeps the About step until a Foundation contact ends in @solana.org", async () => {
+    const user = userEvent.setup();
+    renderHost();
+
+    await chooseJurisdiction(user);
+    await user.click(screen.getByRole("radio", { name: /^Yes/ }));
+    await user.type(screen.getByLabelText("Their email"), "jo@gmail.com");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(
+      screen.getByText("Enter their Solana Foundation email, ending in @solana.org.")
+    ).toBeTruthy();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByRole("button", { name: /Country or region/ })).toBeTruthy();
+  });
 });

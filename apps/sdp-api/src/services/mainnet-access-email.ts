@@ -21,6 +21,41 @@ export interface MainnetAccessRequestEmail {
   countryName: string;
   termsVersion: string;
   requestedAt: string;
+  /** The requester's Solana Foundation contact (PRO-2481); null when they named none. */
+  foundationContactEmail: string | null;
+  /** What the organization says it builds; null when it said nothing. */
+  useCase: string | null;
+}
+
+/**
+ * Free and personal mailbox providers. A requester on one gives the reviewer no organization to
+ * recognize, so the email says so; it is a hint for the reviewer, never a refusal.
+ */
+const FREE_EMAIL_DOMAINS: ReadonlySet<string> = new Set([
+  "163.com",
+  "aol.com",
+  "gmail.com",
+  "gmx.com",
+  "googlemail.com",
+  "hotmail.com",
+  "icloud.com",
+  "live.com",
+  "mail.com",
+  "me.com",
+  "outlook.com",
+  "pm.me",
+  "proton.me",
+  "protonmail.com",
+  "qq.com",
+  "yahoo.com",
+  "yandex.com",
+]);
+
+/** The requester's email domain, marked when it is a free provider; null without an email. */
+export function requesterEmailDomain(email: string | null): string | null {
+  const domain = email?.split("@").at(1)?.trim().toLowerCase();
+  if (!domain) return null;
+  return FREE_EMAIL_DOMAINS.has(domain) ? `${domain} (free email provider)` : domain;
 }
 
 const aliasSchema = z.string().trim().pipe(z.email());
@@ -41,13 +76,21 @@ function requesterLabel(requester: MainnetAccessRequestEmail["requester"]): stri
   return requester.name ?? requester.email ?? "Unknown";
 }
 
+function emailDomainDetail(email: string | null): { label: string; value: string }[] {
+  const domain = requesterEmailDomain(email);
+  return domain ? [{ label: "Email domain", value: domain }] : [];
+}
+
 const REQUESTED_AT_FORMAT = new Intl.DateTimeFormat("en-GB", {
   dateStyle: "medium",
   timeStyle: "short",
   timeZone: "UTC",
 });
 
-/** The email an operator reads: who asked, from where, under which terms, and how to approve. */
+/**
+ * The email an operator reads: who asked, from where, who at the Foundation knows them, what they
+ * build, under which terms, and how to approve.
+ */
 export function mainnetAccessRequestEmailContent(request: MainnetAccessRequestEmail): EmailContent {
   return {
     preheader: `${request.organizationName} accepted the SDP terms and asked to use mainnet.`,
@@ -58,6 +101,7 @@ export function mainnetAccessRequestEmailContent(request: MainnetAccessRequestEm
       { label: "Organization ID", value: request.organizationId },
       { label: "Requested by", value: requesterLabel(request.requester) },
       { label: "Requester user ID", value: request.requester.userId },
+      ...emailDomainDetail(request.requester.email),
       {
         label: "Requested at",
         value: `${REQUESTED_AT_FORMAT.format(new Date(request.requestedAt))} UTC`,
@@ -66,6 +110,11 @@ export function mainnetAccessRequestEmailContent(request: MainnetAccessRequestEm
         label: "Jurisdiction",
         value: `${request.countryName} (${request.countryCode}), self-declared`,
       },
+      {
+        label: "Solana Foundation contact",
+        value: request.foundationContactEmail ?? "None stated",
+      },
+      { label: "Building", value: request.useCase ?? "Not stated" },
       { label: "Terms", value: `Version ${request.termsVersion}, accepted with the request` },
     ],
     action: { label: "Open Clerk", url: "https://dashboard.clerk.com" },
