@@ -105,6 +105,8 @@ export const custodyProposalStateSchema = z.strictObject({
   refusal: custodyProposalRefusalSchema.nullable(),
   /** Latest durable cancellation attempt, including calls with an ambiguous result. */
   cancelRequestedAt: timestampSchema.nullable(),
+  /** First definitive cancellation decline; ambiguous attempts never set it. */
+  cancelDeclinedAt: timestampSchema.nullable(),
   cancelAcknowledgedAt: timestampSchema.nullable(),
   alertedAt: timestampSchema.nullable(),
 });
@@ -185,6 +187,7 @@ export function createCustodyProposalState(): CustodyProposalState {
     firstMissingAt: null,
     refusal: null,
     cancelRequestedAt: null,
+    cancelDeclinedAt: null,
     cancelAcknowledgedAt: null,
     alertedAt: null,
   };
@@ -332,8 +335,15 @@ function cancellation(
         return rejected("Only a staged nonterminal cancellation can be declined");
       }
       return {
-        next: { ...state, authorizationState: "refused" },
-        effects: [{ type: "audit", event: "proposal_cancellation_declined" }],
+        next: {
+          ...state,
+          authorizationState: "refused",
+          cancelDeclinedAt: state.cancelDeclinedAt ?? event.at,
+        },
+        effects:
+          state.cancelDeclinedAt === null
+            ? [{ type: "audit", event: "proposal_cancellation_declined" }]
+            : [],
       };
     default: {
       const exhaustive: never = event;

@@ -391,6 +391,48 @@ describe("custody proposal event ledger", () => {
     expect(await outcomes()).toEqual([]);
   });
 
+  it("audits only the winning first decline, including after ambiguous retries", async () => {
+    await apply(REFUSAL);
+    await apply({ type: "cancel_requested", at: LATER });
+    // No response was recorded for that call. A later definitive decline is still the first.
+    const retryAt = "2026-11-12T10:06:00.000Z";
+    await apply({ type: "cancel_requested", at: retryAt });
+    const payment = await transfer();
+    const staged = await proposal();
+    const results = await Promise.all([
+      applyProposalEvent(ledger, payment, staged, { type: "cancel_declined", at: retryAt }),
+      applyProposalEvent(ledger, payment, staged, { type: "cancel_declined", at: retryAt }),
+    ]);
+    expect(results.filter((result) => result.written)).toHaveLength(1);
+    expect((await proposal()).state).toMatchObject({
+      authorizationState: "refused",
+      cancelRequestedAt: retryAt,
+      cancelDeclinedAt: retryAt,
+      refusal: { at: REFUSAL.at, reason: REFUSAL.reason },
+    });
+    expect((await apply({ type: "cancel_requested", at: retryAt })).written).toBe(false);
+    const laterAt = "2026-11-12T10:11:00.000Z";
+    await apply({ type: "cancel_requested", at: laterAt });
+    const declinedAgain = await apply({ type: "cancel_declined", at: laterAt });
+    expect(declinedAgain.written).toBe(true);
+    expect((await proposal()).state).toMatchObject({
+      authorizationState: "refused",
+      cancelRequestedAt: laterAt,
+      cancelDeclinedAt: retryAt,
+      refusal: { at: REFUSAL.at, reason: REFUSAL.reason },
+    });
+    expect((await auditEvents()).map((entry) => entry.metadata.eventType)).toEqual([
+      "proposal_refused",
+      "proposal_cancellation_requested",
+      "proposal_cancellation_declined",
+    ]);
+    expect(await transfer()).toMatchObject({
+      status: "processing",
+      audit_intent_id: auditIntentId,
+    });
+    expect(await outcomes()).toEqual([]);
+  });
+
   it.each(SUCCESSFUL_PAYMENT_TRANSFER_STATUSES)(
     "recovers an older revision's %s outcome after refusal without downgrading the payment",
     async (status) => {
@@ -506,11 +548,18 @@ describe("custody proposal event ledger", () => {
     expect(await outcomes()).toHaveLength(1);
   });
 
-  it.each(["refusal", "cancel request", "cancel acknowledgment", "settlement", "alert"] as const)(
+  it.each([
+    "refusal",
+    "cancel request",
+    "cancel decline",
+    "cancel acknowledgment",
+    "settlement",
+    "alert",
+  ] as const)(
     "rolls back proposal, payment and intent mutations when the %s audit fails",
     async (step) => {
       if (step !== "refusal") await apply(REFUSAL);
-      if (step === "cancel acknowledgment") {
+      if (step === "cancel acknowledgment" || step === "cancel decline") {
         await apply({ type: "cancel_requested", at: LATER });
       }
       if (step === "alert") await apply(COMPLETED);
@@ -520,6 +569,8 @@ describe("custody proposal event ledger", () => {
             return REFUSAL;
           case "cancel request":
             return { type: "cancel_requested", at: LATER };
+          case "cancel decline":
+            return { type: "cancel_declined", at: LAST };
           case "cancel acknowledgment":
             return { type: "cancel_accepted", at: LAST };
           case "settlement":

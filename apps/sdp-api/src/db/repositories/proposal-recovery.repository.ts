@@ -5,9 +5,15 @@ import {
   FIREBLOCKS_FAILED_TRANSACTION_STATUSES,
 } from "@sdp/types/fireblocks";
 import { SUCCESSFUL_PAYMENT_TRANSFER_STATUSES } from "@sdp/types/payments";
+import { DatabaseError } from "pg";
 import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
-import { type MoneyPrincipal, moneyPrincipalSchema } from "@/lib/money-principal";
+import {
+  describeMoneyPrincipal,
+  type MoneyPrincipal,
+  moneyPrincipalSchema,
+} from "@/lib/money-principal";
+import { getLogger } from "@/runtime/logger";
 
 /** Give a live sender time to claim before recovery observes an unsent payment. */
 export const CUSTODY_PROPOSAL_DISCOVERY_GRACE_MS = 2 * 60 * 1000;
@@ -189,4 +195,37 @@ export async function requestPendingProposalRecovery(
       JSON.stringify(principal),
     ]
   );
+}
+
+/**
+ * Expedite recovery after withdrawing authority, without making withdrawal
+ * depend on legacy adoption. The caller must hold an open transaction and
+ * complete its authority writes first. The minute sweep remains the fallback.
+ * Savepoint failures propagate because the outer transaction is then unsafe.
+ */
+export async function wakePendingProposalRecoveryBestEffort(
+  tx: DatabaseExecutor,
+  input: Parameters<typeof requestPendingProposalRecovery>[1]
+): Promise<void> {
+  await tx.execute("SAVEPOINT custody_proposal_recovery_wake");
+  try {
+    await requestPendingProposalRecovery(tx, input);
+  } catch (error) {
+    await tx.execute("ROLLBACK TO SAVEPOINT custody_proposal_recovery_wake");
+    await tx.execute("RELEASE SAVEPOINT custody_proposal_recovery_wake");
+    // A PostgreSQL CHECK failure can include the full row in its DETAIL.
+    // Never log that error, its message, or legacy provider metadata.
+    getLogger().error(
+      {
+        event: "proposal_recovery_wake_failed",
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        principal: describeMoneyPrincipal(input.principal),
+        sqlstate: error instanceof DatabaseError ? error.code : undefined,
+      },
+      "Proposal recovery wake failed; the minute sweep will retry"
+    );
+    return;
+  }
+  await tx.execute("RELEASE SAVEPOINT custody_proposal_recovery_wake");
 }

@@ -43,6 +43,7 @@ const proposalColumnsSchema = z.object({
   refusal_reason: z.string().min(1).nullable(),
   refusal_message: z.string().min(1).nullable(),
   cancel_requested_at: nullableTimestampSchema,
+  cancel_declined_at: nullableTimestampSchema,
   cancel_acknowledged_at: nullableTimestampSchema,
   alerted_at: nullableTimestampSchema,
   version: z.number().int().nonnegative(),
@@ -69,6 +70,7 @@ function mapProposal(value: Record<string, unknown>): CustodyProposalRow {
         ? null
         : { at: row.refused_at, reason: row.refusal_reason, message: row.refusal_message },
     cancelRequestedAt: row.cancel_requested_at,
+    cancelDeclinedAt: row.cancel_declined_at,
     cancelAcknowledgedAt: row.cancel_acknowledged_at,
     alertedAt: row.alerted_at,
   });
@@ -104,6 +106,7 @@ function stateValues(state: CustodyProposalRow["state"]): readonly unknown[] {
     state.refusal?.reason ?? null,
     state.refusal?.message ?? null,
     state.cancelRequestedAt,
+    state.cancelDeclinedAt,
     state.cancelAcknowledgedAt,
     state.alertedAt,
   ];
@@ -121,6 +124,7 @@ const STATE_COLUMNS = [
   "refusal_reason",
   "refusal_message",
   "cancel_requested_at",
+  "cancel_declined_at",
   "cancel_acknowledged_at",
   "alerted_at",
 ];

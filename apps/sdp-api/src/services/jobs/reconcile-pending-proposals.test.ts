@@ -502,23 +502,49 @@ describe("reconcilePendingProposals", () => {
     expect(h.state("xfr_second").state.alertedAt).toEqual(expect.any(String));
   });
 
-  it("drains terminal alerts even when the active recovery queue fails", async () => {
+  it("rechecks and cancels known proposals before reporting a failed legacy adoption", async () => {
     const h = harness();
-    refuse(h);
-    const row = h.state();
-    h.states.set(row.payment_transfer_id, {
-      ...row,
-      state: {
-        ...row.state,
-        providerPhase: "completed",
-        authorizationState: "committed_after_refusal",
-      },
-    });
-    h.claim.mockRejectedValue(new Error("Active queue unavailable"));
-    await expect(runRecovery()).rejects.toThrow("Active queue unavailable");
-    expect(h.alert).toHaveBeenCalledOnce();
-    expect(h.state().state.alertedAt).toEqual(expect.any(String));
+    h.adopt.mockRejectedValue(new Error("Legacy adoption unavailable"));
+    h.recovery.admit.mockRejectedValue(revoke());
+    await expect(runRecovery()).rejects.toThrow("Legacy adoption unavailable");
+    expect(h.claim).toHaveBeenCalledOnce();
+    expect(h.recovery.read).toHaveBeenCalledOnce();
+    expect(h.recovery.cancel).toHaveBeenCalledOnce();
+    expect(h.state().state.authorizationState).toBe("cancel_acknowledged");
+    expect(h.state().state.refusal?.reason).toBe("principal_not_live");
   });
+
+  it("reports both legacy adoption and known-proposal queue failures", async () => {
+    const h = harness();
+    const adoptionError = new Error("Legacy adoption unavailable");
+    const claimError = new Error("Active queue unavailable");
+    h.adopt.mockRejectedValue(adoptionError);
+    h.claim.mockRejectedValue(claimError);
+    await expect(runRecovery()).rejects.toMatchObject({ errors: [adoptionError, claimError] });
+  });
+
+  it.each(["active queue", "legacy adoption"] as const)(
+    "drains terminal alerts even when the %s fails",
+    async (failure) => {
+      const h = harness();
+      refuse(h);
+      const row = h.state();
+      h.states.set(row.payment_transfer_id, {
+        ...row,
+        state: {
+          ...row.state,
+          providerPhase: "completed",
+          authorizationState: "committed_after_refusal",
+        },
+      });
+      const error = new Error("Recovery queue unavailable");
+      if (failure === "active queue") h.claim.mockRejectedValue(error);
+      else h.adopt.mockRejectedValue(error);
+      await expect(runRecovery()).rejects.toThrow(error);
+      expect(h.alert).toHaveBeenCalledOnce();
+      expect(h.state().state.alertedAt).toEqual(expect.any(String));
+    }
+  );
 
   it("passes the authority-reduction filter to the independent worker and alert queues", async () => {
     const h = harness([]);

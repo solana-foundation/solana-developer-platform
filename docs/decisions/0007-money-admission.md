@@ -169,8 +169,10 @@ D4 adds best-effort cancellation as a mitigation, not an enforceable pre-sign
 callback. The recovery worker restores only the durable initiating principal,
 re-admits through the custody waist and persists a sticky refusal before asking
 the provider to cancel a known pending proposal. Revocation and member removal
-enqueue matching principals atomically. A dedicated every-minute worker drains
-those flags without borrowing an HTTP viewer's authority. Provider-neutral
+try to enqueue matching principals in a savepoint; a failed wake cannot keep
+the key or membership live. A dedicated every-minute worker drains those flags
+and rechecks known proposals even if legacy adoption fails, without borrowing
+an HTTP viewer's authority. Provider-neutral
 proposal state, payment projection and audit commit through one versioned path. Cancel acknowledgment
 never proves non-execution; recovery records verified settlement even when it
 wins the race and emits `fireblocks_transfer_committed_after_refusal` at CRITICAL

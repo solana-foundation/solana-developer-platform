@@ -18,7 +18,7 @@ import type { OrganizationRole } from "@sdp/types/roles";
 import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
-import { requestPendingProposalRecovery } from "@/db/repositories/proposal-recovery.repository";
+import { wakePendingProposalRecoveryBestEffort } from "@/db/repositories/proposal-recovery.repository";
 import { hashApiKey } from "@/lib/api-key-hash";
 import { apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
@@ -737,7 +737,7 @@ export class ApiKeyService {
       return { revokedAt: existing.revoked_at, alreadyRevoked: true };
     }
 
-    await requestPendingProposalRecovery(this.db, {
+    await wakePendingProposalRecoveryBestEffort(this.db, {
       organizationId,
       projectId,
       principal: { kind: "api_key", apiKeyId: keyId },

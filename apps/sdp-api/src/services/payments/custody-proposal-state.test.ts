@@ -330,6 +330,7 @@ describe("custody proposal state transitions", () => {
     expect(declined.next.providerPhase).toBe("pending");
     expect(declined.next.authorizationState).toBe("refused");
     expect(declined.next.refusal).toEqual(refused().refusal);
+    expect(declined.next.cancelDeclinedAt).toBe(LAST);
     expect(declined.effects).toEqual([{ type: "audit", event: "proposal_cancellation_declined" }]);
     expect(canRequestCustodyProposalCancellation(declined.next, LAST)).toBe(false);
     expect(
@@ -338,6 +339,36 @@ describe("custody proposal state transitions", () => {
     const retry = apply(declined.next, { type: "cancel_requested", at: RETRY });
     expect(retry.next.cancelRequestedAt).toBe(RETRY);
     expect(retry.effects).toEqual([{ type: "request_cancel" }]);
+  });
+
+  it("audits the first definitive decline after ambiguous attempts, then retains it through retries", () => {
+    // The first call had no definitive result; its retry must not hide the first decline.
+    const ambiguous = requested();
+    expect(ambiguous.cancelDeclinedAt).toBeNull();
+    const retry = apply(ambiguous, { type: "cancel_requested", at: RETRY });
+    expect(retry.effects).toEqual([{ type: "request_cancel" }]);
+    const declined = apply(retry.next, { type: "cancel_declined", at: RETRY });
+    expect(declined.next.cancelDeclinedAt).toBe(RETRY);
+    expect(declined.effects).toEqual([{ type: "audit", event: "proposal_cancellation_declined" }]);
+    expect(declined.next.refusal).toEqual(ambiguous.refusal);
+
+    const executing = apply(declined.next, observation("executing", RETRY)).next;
+    const cancellable = apply(executing, observation("pending", RETRY)).next;
+    expect(cancellable.cancelDeclinedAt).toBe(RETRY);
+    expect(canRequestCustodyProposalCancellation(cancellable, RETRY)).toBe(false);
+    const laterAt = "2026-11-12T12:11:00.000Z";
+    const staged = apply(cancellable, { type: "cancel_requested", at: laterAt });
+    expect(staged.next.cancelRequestedAt).toBe(laterAt);
+    expect(staged.effects).toEqual([{ type: "request_cancel" }]);
+    const repeated = apply(staged.next, { type: "cancel_declined", at: laterAt });
+    expect(repeated.next.cancelDeclinedAt).toBe(RETRY);
+    expect(repeated.next.refusal).toEqual(ambiguous.refusal);
+    expect(repeated.next.authorizationState).toBe("refused");
+    expect(repeated.effects).toEqual([]);
+    expect(canRequestCustodyProposalCancellation(repeated.next, laterAt)).toBe(false);
+    expect(apply(repeated.next, observation("completed", laterAt)).next.authorizationState).toBe(
+      "committed_after_refusal"
+    );
   });
 
   it("stages a critical alert only for completion after an already durable refusal", () => {

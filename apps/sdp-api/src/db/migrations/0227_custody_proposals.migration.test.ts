@@ -57,21 +57,23 @@ async function insertProposal(
     phase?: string;
     authorization?: string;
     refusedAt?: string;
+    cancelDeclinedAt?: string;
     cancelAcknowledgedAt?: string;
   } = {}
 ): Promise<void> {
   await client.query(
     `INSERT INTO custody_proposals
        (id, organization_id, project_id, payment_transfer_id, provider, binding,
-        provider_phase, authorization_state, refused_at, cancel_acknowledged_at,
+        provider_phase, authorization_state, refused_at, cancel_declined_at, cancel_acknowledged_at,
         next_check_at, created_at, updated_at)
-     VALUES ('proposal', $1, $2, 'payment', 'fireblocks', '{}', $3, $4, $5, $6, $7, $7, $7)`,
+     VALUES ('proposal', $1, $2, 'payment', 'fireblocks', '{}', $3, $4, $5, $6, $7, $8, $8, $8)`,
     [
       overrides.organization ?? "org",
       overrides.project ?? "project",
       overrides.phase ?? "unsent",
       overrides.authorization ?? "authorized",
       overrides.refusedAt ?? null,
+      overrides.cancelDeclinedAt ?? null,
       overrides.cancelAcknowledgedAt ?? null,
       "2026-11-11T00:00:00.000Z",
     ]
@@ -115,6 +117,10 @@ describe("0227 custody proposals", () => {
   it("rejects invalid state combinations before a worker can read them", async () => {
     await expectRejected(() => insertProposal({ phase: "not_a_phase" }), "23514");
     await expectRejected(() => insertProposal({ authorization: "refused" }), "23514");
+    await expectRejected(
+      () => insertProposal({ cancelDeclinedAt: "2026-11-11T00:00:00.000Z" }),
+      "23514"
+    );
     await expectRejected(
       () => insertProposal({ cancelAcknowledgedAt: "2026-11-11T00:00:00.000Z" }),
       "23514"

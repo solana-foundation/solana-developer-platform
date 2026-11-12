@@ -50,6 +50,7 @@ describe("legacy Fireblocks proposal compatibility", () => {
         firstMissingAt: MISSING,
         refusal: REFUSAL,
         cancelRequestedAt: ACKNOWLEDGED,
+        cancelDeclinedAt: null,
         cancelAcknowledgedAt: ACKNOWLEDGED,
         alertedAt: ALERTED,
       });

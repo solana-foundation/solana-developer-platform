@@ -20,6 +20,7 @@ CREATE TABLE custody_proposals (
   refusal_reason TEXT,
   refusal_message TEXT,
   cancel_requested_at TEXT,
+  cancel_declined_at TEXT,
   cancel_acknowledged_at TEXT,
   alerted_at TEXT,
   version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
@@ -34,6 +35,7 @@ CREATE TABLE custody_proposals (
   CHECK ((authorization_state = 'authorized') = (refused_at IS NULL)),
   CHECK (authorization_state <> 'committed_after_refusal' OR provider_phase = 'completed'),
   CHECK (alerted_at IS NULL OR authorization_state = 'committed_after_refusal'),
+  CHECK (cancel_declined_at IS NULL OR cancel_requested_at IS NOT NULL),
   CHECK (cancel_acknowledged_at IS NULL OR cancel_requested_at IS NOT NULL),
   CHECK (provider_phase <> 'completed' OR provider_transaction_id IS NOT NULL)
 );

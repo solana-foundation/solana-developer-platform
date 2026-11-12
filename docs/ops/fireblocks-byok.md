@@ -385,8 +385,15 @@ creator can still claim submission immediately. Recovery never submits it
 automatically. Unclaimed proposals use the same authenticated absence
 horizon as ambiguous submissions.
 
-Key revocation and member removal enqueue affected proposals in their database
-transaction. The dedicated `reconcile-custody-proposals` cron runs every minute,
+Key revocation and member removal try to enqueue affected proposals in a
+savepoint inside their database transaction. A failed wake rolls back only its
+adoption and flags; authority withdrawal still commits. The error event
+`proposal_recovery_wake_failed` records tenant scope and SQLSTATE without raw
+provider data. The minute worker retries discovery and continues checking known
+proposals even when legacy adoption fails; it still reports that failure.
+Malformed legacy records need repair before they can be adopted.
+
+The dedicated `reconcile-custody-proposals` cron runs every minute,
 claims at most 50 rows per environment and makes five concurrent provider calls.
 Flagged revocations take priority with capacity reserved for ordinary progress.
 Dashboard refresh has a separate 15-second throttle and cannot postpone worker
@@ -414,11 +421,14 @@ minute during that cooldown, including completion-after-refusal alerts.
 An acknowledged cancel is polled to outcome.
 Signed, broadcasting, cancelling and unfamiliar states are observation-only.
 
-The first refusal, staged cancellation, cancellation acknowledgment and critical
-event acknowledgment each commit with a system audit entry in the same database
-transaction. Cancellation intent commits before provider I/O. A failed audit
-write rolls back its marker so recovery can retry. These intermediate events do
-not close the original payment audit intent; only terminal settlement does.
+The first refusal, first cancellation request, first definitive decline,
+cancellation acknowledgment and critical event acknowledgment each commit with
+a system audit entry in the same database transaction. Ambiguous attempts do
+not consume the first-decline audit; later declines keep that original marker
+without appending another entry. Cancellation intent commits before provider
+I/O. A failed audit write rolls back its marker so recovery can retry. These
+intermediate events do not close the original payment audit intent; only
+terminal settlement does.
 
 A payment that completes after a recorded refusal emits the CRITICAL structured
 event `fireblocks_transfer_committed_after_refusal`. The row remains an alert

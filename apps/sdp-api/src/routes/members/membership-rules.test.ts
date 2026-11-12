@@ -16,6 +16,7 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
+const AUDIT_FAILURE_CONSTRAINT = "sdp_test_fail_member_removal_audit";
 const ORGANIZATION = { id: "org_membership_rules", slug: "membership-rules" };
 const ADMIN_A = organizationMember("rules_admin_a", "admin");
 const ADMIN_B = organizationMember("rules_admin_b", "admin");
@@ -101,6 +102,9 @@ describe("organization membership rules", () => {
 
   afterEach(async () => {
     vi.restoreAllMocks();
+    await getDb(env).execute(
+      `ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS ${AUDIT_FAILURE_CONSTRAINT}`
+    );
     await clearKVStores(env);
     env.CLERK_SECRET_KEY = undefined;
     env.CLERK_API_URL = undefined;
@@ -223,6 +227,38 @@ describe("organization membership rules", () => {
       userId: ADMIN_B.userId,
       previousRole: "admin",
     });
+  });
+
+  it("rolls membership and its successful recovery wake back when the outer audit fails", async () => {
+    const db = getDb(env);
+    await db.execute(
+      `INSERT INTO payment_transfers
+         (id, organization_id, project_id, wallet_id, source_address,
+          destination_address, token, amount, type, direction, status,
+          created_at, updated_at, provider_reference, provider_data, initiated_by_principal)
+       VALUES ('trf_member_audit_failure', ?, ?, 'provider-wallet', 'Source', 'Destination',
+               'SOL', '1', 'transfer', 'outbound', 'processing', sdp_iso_now(), sdp_iso_now(),
+               'fireblocks_pending',
+               '{"fireblocksTransfer":{"connectionId":"recovery-connection","accountFingerprint":"recovery-account","vaultAccountId":"0","assetId":"SOL_TEST"},"fireblocksStatus":"PENDING_AUTHORIZATION"}'::jsonb,
+               ?::jsonb)`,
+      [ORGANIZATION.id, sandboxProjectId, JSON.stringify({ kind: "member", userId: MEMBER.userId })]
+    );
+    const membershipsBefore = await projectMemberships(MEMBER);
+    await db.execute(
+      `ALTER TABLE audit_logs ADD CONSTRAINT ${AUDIT_FAILURE_CONSTRAINT}
+         CHECK (resource_type <> 'member') NOT VALID`
+    );
+
+    expect((await requestAs(ADMIN_A, "DELETE", MEMBER.memberId, null)).status).toBe(500);
+    expect(await membership(MEMBER)).toEqual({ role: "member", status: "active" });
+    expect(await projectMemberships(MEMBER)).toEqual(membershipsBefore);
+    expect(
+      await db.queryOne(
+        "SELECT id FROM custody_proposals WHERE payment_transfer_id = 'trf_member_audit_failure'"
+      )
+    ).toBeNull();
+    expect(await readAuditActions(db, { type: "member", id: MEMBER.memberId })).toEqual([]);
+    expect(clerk.requests).toEqual([]);
   });
 
   it("commits and audits a removal whose Clerk half fails, and a retry finishes only the Clerk half", async () => {

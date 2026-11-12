@@ -5,6 +5,7 @@ import {
   isCancellableCustodyProposalPhase,
 } from "@sdp/types/custody-proposals";
 import type {
+  ClaimCustodyProposalsInput,
   CustodyProposalRecoveryScope,
   CustodyProposalRow,
 } from "@/db/repositories/custody-proposals.repository";
@@ -117,13 +118,23 @@ async function recoverProposal(env: Env, ledger: ProposalLedger, snapshot: Custo
 async function recoverDue(env: Env, ledger: ProposalLedger, scope: CustodyProposalRecoveryScope) {
   const environment = currentClusterScope().environment;
   const now = new Date().toISOString();
-  await ledger.proposals.adoptLegacyTransfers({ environment, now, limit: RECOVERY_PAGE_SIZE });
-  const proposals = await ledger.proposals.claimDue({
-    ...scope,
-    environment,
-    now,
-    limit: RECOVERY_PAGE_SIZE,
-  });
+  const adoption = await Promise.allSettled([
+    ledger.proposals.adoptLegacyTransfers({ environment, now, limit: RECOVERY_PAGE_SIZE }),
+  ]);
+  // A malformed legacy row cannot starve already-recorded proposals. Report the
+  // bridge failure after processing them, so the cron still signals failed work.
+  const recovery = await Promise.allSettled([
+    recoverClaimedProposals(env, ledger, { ...scope, environment, now, limit: RECOVERY_PAGE_SIZE }),
+  ]);
+  rethrowFailures<number | void>([...adoption, ...recovery]);
+}
+
+async function recoverClaimedProposals(
+  env: Env,
+  ledger: ProposalLedger,
+  input: ClaimCustodyProposalsInput
+) {
+  const proposals = await ledger.proposals.claimDue(input);
   await mapSettledWithConcurrency(proposals, RECOVERY_CONCURRENCY, async (proposal) => {
     try {
       await recoverProposal(env, ledger, proposal);
@@ -167,7 +178,7 @@ async function emitRefusalAlert(
   });
 }
 
-function rethrowFailures(outcomes: readonly PromiseSettledResult<void>[]) {
+function rethrowFailures<T>(outcomes: readonly PromiseSettledResult<T>[]) {
   const failures = outcomes
     .filter((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected")
     .map((outcome) => outcome.reason);

@@ -7,7 +7,7 @@ import {
 import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types/roles";
 import { z } from "zod";
 import type { DatabaseClient, DatabaseExecutor } from "@/db/client";
-import { requestPendingProposalRecovery } from "@/db/repositories/proposal-recovery.repository";
+import { wakePendingProposalRecoveryBestEffort } from "@/db/repositories/proposal-recovery.repository";
 import {
   AppError,
   conflict,
@@ -647,7 +647,7 @@ async function removeMembership(
     )
     .bind(organizationId, member.user_id)
     .run();
-  await requestPendingProposalRecovery(tx, {
+  await wakePendingProposalRecoveryBestEffort(tx, {
     organizationId,
     principal: { kind: "member", userId: member.user_id },
     now: new Date().toISOString(),

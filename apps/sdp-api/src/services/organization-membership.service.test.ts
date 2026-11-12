@@ -1,7 +1,9 @@
 import type { MemberStatus } from "@sdp/types/organizations";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
+import { createPostgresCustodyProposalsRepository } from "@/db/repositories/custody-proposals.repository.postgres";
 import type { MoneyPrincipal } from "@/lib/money-principal";
+import { getLogger } from "@/runtime/logger";
 import {
   applyMembershipChange,
   type MembershipChange,
@@ -22,6 +24,7 @@ const ORGANIZATION = { id: "org_membership_race", slug: "membership-race" };
 const ADMIN_A = organizationMember("race_admin_a", "admin");
 const ADMIN_B = organizationMember("race_admin_b", "admin");
 const MEMBER_C = organizationMember("race_member_c", "member");
+const RECOVERY_FAILURE_CONSTRAINT = "sdp_test_fail_member_recovery_wake";
 const MISSING_MANAGE = {
   code: "INSUFFICIENT_PERMISSIONS",
   message: "Missing action: members.manage",
@@ -59,6 +62,107 @@ describe("applyMembershipChange", () => {
       members: [ADMIN_A, ADMIN_B, MEMBER_C],
     });
   });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await getDb(env).execute(
+      `ALTER TABLE custody_proposals DROP CONSTRAINT IF EXISTS ${RECOVERY_FAILURE_CONSTRAINT}`
+    );
+  });
+
+  it.each(["remove", "leave", "clerk"] as const)(
+    "withdraws membership when the recovery wake fails in PostgreSQL (%s)",
+    async (kind) => {
+      const db = getDb(env);
+      const projects = await seedDefaultProjects(db, {
+        organizationId: ORGANIZATION.id,
+        createdBy: ADMIN_A.userId,
+        members: [ADMIN_A.userId, MEMBER_C.userId],
+      });
+      await db.execute(
+        `INSERT INTO payment_transfers
+           (id, organization_id, project_id, wallet_id, source_address,
+            destination_address, token, amount, type, direction, status,
+            created_at, updated_at, provider_reference, provider_data, initiated_by_principal)
+         VALUES ('trf_member_wake_failure', ?, ?, 'provider-wallet', 'Source', 'Destination',
+                 'SOL', '1', 'transfer', 'outbound', 'processing',
+                 '2026-01-01T00:00:00.000Z', sdp_iso_now(), 'fireblocks_pending',
+                 '{"fireblocksTransfer":{"connectionId":"recovery-connection","accountFingerprint":"recovery-account","vaultAccountId":"0","assetId":"SOL_TEST"},"fireblocksStatus":"PENDING_AUTHORIZATION","fireblocksSubStatus":"private_provider_detail_do_not_log"}'::jsonb,
+                 ?::jsonb)`,
+        [
+          ORGANIZATION.id,
+          projects.sandbox.id,
+          JSON.stringify({ kind: "member", userId: MEMBER_C.userId }),
+        ]
+      );
+      await seedInvitation(db, {
+        id: "inv_failed_member_wake",
+        organizationId: ORGANIZATION.id,
+        email: MEMBER_C.email,
+        role: "member",
+        invitedBy: ADMIN_A.userId,
+        status: "pending",
+        expiresInDays: 7,
+      });
+      await db.execute(
+        `ALTER TABLE custody_proposals ADD CONSTRAINT ${RECOVERY_FAILURE_CONSTRAINT}
+           CHECK (recheck_requested_at IS NULL)`
+      );
+      const error = vi.spyOn(getLogger(), "error");
+
+      if (kind === "clerk") {
+        await db.transaction((tx) =>
+          mirrorClerkMembershipDeletion(tx, {
+            organizationId: ORGANIZATION.id,
+            userId: MEMBER_C.userId,
+            heldInClerk: async () => false,
+          })
+        );
+      } else {
+        await change(
+          kind === "leave" ? MEMBER_C : ADMIN_A,
+          kind === "leave" ? { kind: "leave" } : { kind: "remove", memberId: MEMBER_C.memberId }
+        );
+      }
+      expect(
+        await db.queryOne("SELECT status FROM organization_members WHERE id = ?", [
+          MEMBER_C.memberId,
+        ])
+      ).toEqual({ status: "removed" });
+      expect(
+        await db.queryMany("SELECT id FROM project_members WHERE user_id = ?", [MEMBER_C.userId])
+      ).toEqual([]);
+      expect(await readInvitationStatus(db, "inv_failed_member_wake")).toBe("revoked");
+      expect(
+        await db.queryOne(
+          "SELECT id FROM custody_proposals WHERE payment_transfer_id = 'trf_member_wake_failure'"
+        )
+      ).toBeNull();
+      expect(error).toHaveBeenCalledWith(
+        {
+          event: "proposal_recovery_wake_failed",
+          organizationId: ORGANIZATION.id,
+          projectId: undefined,
+          principal: `member:${MEMBER_C.userId}`,
+          sqlstate: "23514",
+        },
+        expect.any(String)
+      );
+      expect(JSON.stringify(error.mock.calls)).not.toContain("private_provider_detail_do_not_log");
+
+      await db.execute(
+        `ALTER TABLE custody_proposals DROP CONSTRAINT ${RECOVERY_FAILURE_CONSTRAINT}`
+      );
+      const proposals = createPostgresCustodyProposalsRepository(db);
+      const now = new Date().toISOString();
+      await proposals.adoptLegacyTransfers({ environment: "sandbox", now, limit: 50 });
+      expect(
+        (await proposals.claimDue({ environment: "sandbox", now, limit: 50 })).map(
+          (proposal) => proposal.payment_transfer_id
+        )
+      ).toEqual(["trf_member_wake_failure"]);
+    }
+  );
 
   it.each(["remove", "leave", "clerk"] as const)(
     "queues only the removed member's proposals across projects (%s)",
