@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from "node:crypto";
-import { SignerError, SignerErrorCode, type SolanaSigner } from "@solana/keychain-core";
+import { type SignerError, SignerErrorCode } from "@solana/keychain-core";
 import {
   address,
   assertIsTransactionWithinSizeLimit,
@@ -16,6 +16,8 @@ import type { MockInstance } from "vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SigningError } from "#/signing";
 import { KeychainFireblocksAdapter } from "./keychain-fireblocks.adapter";
+
+type SolanaSigner = Awaited<ReturnType<KeychainFireblocksAdapter["getTransactionSigner"]>>;
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const CONFIG = {
@@ -36,7 +38,10 @@ function collectLogLines(...sinks: MockInstance[]): string {
     .join("\n");
 }
 
-function signTestTransaction(signer: SolanaSigner) {
+function signTestTransaction(
+  signer: SolanaSigner,
+  config?: Parameters<SolanaSigner["signTransactions"]>[1]
+) {
   const transaction = compileTransaction(
     pipe(
       createTransactionMessage({ version: 0 }),
@@ -52,11 +57,14 @@ function signTestTransaction(signer: SolanaSigner) {
     )
   );
   assertIsTransactionWithinSizeLimit(transaction);
-  return signer.signTransactions([transaction]);
+  return signer.signTransactions([transaction], config);
 }
 
-function signTestMessage(signer: SolanaSigner) {
-  return signer.signMessages([createSignableMessage("Fireblocks policy check")]);
+function signTestMessage(
+  signer: SolanaSigner,
+  config?: Parameters<SolanaSigner["signMessages"]>[1]
+) {
+  return signer.signMessages([createSignableMessage("Fireblocks policy check")], config);
 }
 
 /** A Fireblocks status read, including malformed sub-statuses the patch must drop. */
@@ -176,7 +184,7 @@ describe("fireblocks adapter policy refusals (HOO-2478)", () => {
   ])("keeps %s the provider's own failure", async (_case, poll) => {
     const signing = signAgainstPoll(poll, signTestTransaction);
 
-    await expect(signing).rejects.toBeInstanceOf(SignerError);
+    await expect(signing).rejects.toBeInstanceOf(Error);
     await expect(signing).rejects.toThrow(`Transaction failed with status: ${poll.status}`);
     await expect(signing).rejects.toMatchObject({
       code: SignerErrorCode.SIGNING_FAILED,
@@ -193,7 +201,7 @@ describe("fireblocks adapter policy refusals (HOO-2478)", () => {
   ])("neither infers a refusal from nor keeps a %s sub-status", async (_case, subStatus) => {
     const signing = signAgainstPoll({ status: "BLOCKED", subStatus }, signTestTransaction);
 
-    await expect(signing).rejects.toBeInstanceOf(SignerError);
+    await expect(signing).rejects.toBeInstanceOf(Error);
     await expect(signing).rejects.toSatisfy(
       (error: SignerError) => error.context?.subStatus === undefined
     );
@@ -240,4 +248,141 @@ describe("fireblocks adapter policy refusals (HOO-2478)", () => {
       expect(collectLogLines(...sinks)).not.toContain(secret);
     }
   });
+});
+
+describe.each([
+  ["RAW", signTestMessage],
+  ["PROGRAM_CALL", signTestTransaction],
+] as const)("Fireblocks %s proposal cancellation", (operation, sign) => {
+  function adapter(onSigningCleanup = vi.fn()) {
+    return new KeychainFireblocksAdapter({
+      ...CONFIG,
+      useProgramCall: true,
+      maxPollAttempts: 1,
+      pollIntervalMs: 1,
+      createExternalTxId: () => "sdp-test-request-1",
+      onSigningCleanup,
+    });
+  }
+
+  it.each([true, false])(
+    "requests cancellation once on poll exhaustion (acknowledged: %s)",
+    async (success) => {
+      const cleanup = vi.fn();
+      const fetch = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
+        .mockResolvedValueOnce(Response.json({ id: "tx-1" }))
+        .mockResolvedValueOnce(Response.json({ status: "PENDING_AUTHORIZATION" }))
+        .mockResolvedValueOnce(Response.json({ success }));
+      const signer = await adapter(cleanup).getTransactionSigner();
+      await expect(sign(signer)).rejects.toMatchObject({
+        code: "SIGNER_SIGNING_FAILED",
+        context: {
+          externalTxId: "sdp-test-request-1",
+          providerTransactionId: "tx-1",
+          cancelRequested: success,
+        },
+      });
+      expect(JSON.parse(String(fetch.mock.calls[1]?.[1]?.body))).toMatchObject({
+        operation,
+        externalTxId: "sdp-test-request-1",
+      });
+      expect(fetch.mock.calls[3]?.[0]).toBe(
+        "https://api.fireblocks.io/v1/transactions/tx-1/cancel"
+      );
+      expect(fetch.mock.calls[3]?.[1]?.method).toBe("POST");
+      expect(fetch).toHaveBeenCalledTimes(4);
+      expect(cleanup).toHaveBeenCalledExactlyOnceWith({
+        externalTxId: "sdp-test-request-1",
+        providerTransactionId: "tx-1",
+        cancelRequested: success,
+      });
+    }
+  );
+
+  it("looks up an aborted create by external ID and cancels without resubmitting", async () => {
+    const controller = new AbortController();
+    const cleanup = vi.fn();
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
+      .mockImplementationOnce(async () => {
+        controller.abort();
+        throw new DOMException("Aborted", "AbortError");
+      })
+      .mockResolvedValueOnce(Response.json({ id: "tx-1" }))
+      .mockImplementationOnce(async (_url, init) => {
+        expect(init?.signal?.aborted).toBe(false);
+        return Response.json({ success: true });
+      });
+    const signer = await adapter(cleanup).getTransactionSigner();
+    await expect(sign(signer, { abortSignal: controller.signal })).rejects.toThrow(
+      "did not finish before its deadline"
+    );
+    expect(fetch.mock.calls[2]?.[0]).toBe(
+      "https://api.fireblocks.io/v1/transactions/external_tx_id/sdp-test-request-1"
+    );
+    expect(fetch.mock.calls[3]?.[0]).toBe("https://api.fireblocks.io/v1/transactions/tx-1/cancel");
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(cleanup).toHaveBeenCalledExactlyOnceWith({
+      externalTxId: "sdp-test-request-1",
+      providerTransactionId: "tx-1",
+      cancelRequested: true,
+    });
+  });
+
+  it("retains the timeout and identifiers when cancellation fails", async () => {
+    const cleanup = vi.fn();
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
+      .mockResolvedValueOnce(Response.json({ id: "tx-1" }))
+      .mockResolvedValueOnce(Response.json({ status: "PENDING_AUTHORIZATION" }))
+      .mockRejectedValueOnce(new TypeError("secret provider diagnostic"));
+    const signer = await adapter(cleanup).getTransactionSigner();
+    await expect(sign(signer)).rejects.toMatchObject({
+      context: {
+        externalTxId: "sdp-test-request-1",
+        providerTransactionId: "tx-1",
+        cancelRequested: false,
+      },
+    });
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(JSON.stringify(cleanup.mock.calls)).not.toContain("secret provider diagnostic");
+  });
+
+  it("does not propose anything for an already aborted caller", async () => {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }));
+    const signer = await adapter().getTransactionSigner();
+    await expect(sign(signer, { abortSignal: AbortSignal.abort() })).rejects.toThrow();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+it("awaits the proposal acceptance hook before delivering a valid signature", async () => {
+  const wallet = await generateKeyPairSigner();
+  const message = createSignableMessage("cancelled signing request");
+  const [signatures] = await wallet.signMessages([message]);
+  vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(Response.json({ addresses: [{ address: wallet.address }] }))
+    .mockResolvedValueOnce(Response.json({ id: "proposal-1" }))
+    .mockResolvedValueOnce(
+      Response.json({
+        status: "COMPLETED",
+        signedMessages: [
+          { signature: { fullSig: Buffer.from(signatures[wallet.address]).toString("hex") } },
+        ],
+      })
+    );
+  const adapter = new KeychainFireblocksAdapter({
+    ...CONFIG,
+    onSigningStatus: async ({ status }) => {
+      if (status === "COMPLETED") throw new Error("Proposal cancelled locally");
+    },
+  });
+  const signer = await adapter.getTransactionSigner();
+  await expect(signer.signMessages([message])).rejects.toThrow("Proposal cancelled locally");
 });

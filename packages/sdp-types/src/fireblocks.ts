@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { SOL_MINT, type SolanaCluster, wellKnownMint } from "./well-known-tokens";
 
 /** The native TRANSFER path supports only SOL and this cluster's canonical USDC mint. */
@@ -55,3 +56,28 @@ export function fireblocksPaymentStatus(
       return isFireblocksTransactionFailed(status) ? "failed" : "processing";
   }
 }
+
+/** Signing and provider-broadcast proposals cannot be cancelled once they start broadcasting. */
+export function isFireblocksProposalCancellable(status: string): boolean {
+  return [
+    "SUBMITTED",
+    "QUEUED",
+    "PENDING_AML_SCREENING",
+    "PENDING_AUTHORIZATION",
+    "PENDING_SIGNATURE",
+    "PENDING_3RD_PARTY_MANUAL_APPROVAL",
+    "PENDING_3RD_PARTY",
+  ].includes(status);
+}
+
+export const fireblocksProposalSummarySchema = z.object({
+  id: z.string(),
+  kind: z.enum(["signing", "transfer"]),
+  operation: z.string(),
+  status: z.string(),
+  transactionId: z.string().nullable(),
+  createdAt: z.string(),
+  cancellationRequestedAt: z.string().nullable(),
+  canCancel: z.boolean(),
+});
+export type FireblocksProposalSummary = z.infer<typeof fireblocksProposalSummarySchema>;

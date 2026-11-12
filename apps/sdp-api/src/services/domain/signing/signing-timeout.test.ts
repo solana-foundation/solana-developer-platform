@@ -1,10 +1,12 @@
 import { SigningError } from "@sdp/custody/signing";
 import {
   address,
+  isTransactionModifyingSigner,
   isTransactionPartialSigner,
   isTransactionSendingSigner,
   type SignatureBytes,
   type SignatureDictionary,
+  type TransactionModifyingSigner,
   type TransactionPartialSigner,
   type TransactionSendingSigner,
 } from "@solana/kit";
@@ -42,6 +44,50 @@ describe("boundSigningTime", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("aborts the provider when the local signing deadline expires", async () => {
+    vi.useFakeTimers();
+    try {
+      let signal: AbortSignal | undefined;
+      const signer: TransactionPartialSigner = {
+        address: SIGNER_ADDRESS,
+        signTransactions: vi.fn((_transactions, config) => {
+          signal = config?.abortSignal;
+          return new Promise<never>(() => undefined);
+        }),
+      };
+      const bounded = boundSigningTime(signer, 100);
+      if (!isTransactionPartialSigner(bounded)) throw new Error("Expected partial signer");
+      const rejected = expect(bounded.signTransactions([])).rejects.toMatchObject({
+        code: "NETWORK_ERROR",
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      await rejected;
+      expect(signal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves the caller's abort signal for modifying signers", async () => {
+    const controller = new AbortController();
+    let signal: AbortSignal | undefined;
+    const signer: TransactionModifyingSigner = {
+      address: SIGNER_ADDRESS,
+      modifyAndSignTransactions: vi.fn(async (_transactions, config) => {
+        signal = config?.abortSignal;
+        controller.abort();
+        signal?.throwIfAborted();
+        return [];
+      }),
+    };
+    const bounded = boundSigningTime(signer);
+    if (!isTransactionModifyingSigner(bounded)) throw new Error("Expected modifying signer");
+    await expect(
+      bounded.modifyAndSignTransactions([], { abortSignal: controller.signal })
+    ).rejects.toThrow();
+    expect(signal?.aborted).toBe(true);
   });
 
   it("keeps everything it does not bound, including a sending method on the prototype", async () => {

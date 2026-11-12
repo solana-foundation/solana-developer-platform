@@ -168,3 +168,18 @@ export async function readFireblocksTransfer(
     throw error;
   }
 }
+
+/** Acknowledgement only: cancellation can race signing/broadcast and is not a final status. */
+export async function cancelFireblocksTransaction(
+  runtime: CustodyProvisioningRuntime,
+  access: FireblocksTransferAccess,
+  transactionId: string
+): Promise<boolean> {
+  const response = await fireblocksRequest<unknown>(runtime, {
+    ...config(access),
+    method: "POST",
+    uri: `/v1/transactions/${encodeURIComponent(transactionId)}/cancel`,
+  });
+  const parsed = z.object({ success: z.boolean() }).safeParse(response);
+  return parsed.success ? parsed.data.success : invalid();
+}

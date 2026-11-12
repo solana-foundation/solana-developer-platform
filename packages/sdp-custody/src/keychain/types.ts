@@ -4,13 +4,15 @@
  * Configuration types for Solana Keychain signing backends.
  * These map to the underlying @solana/keychain-* package configs.
  */
+
 import type { DfnsApiClient } from "#/dfns/client";
+import type { FireblocksProposalTracking } from "#/fireblocks-proposals";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Fireblocks Configuration
 // ═══════════════════════════════════════════════════════════════════════════
 
-export interface KeychainFireblocksConfig {
+export interface KeychainFireblocksConfig extends FireblocksProposalTracking {
   /** Fireblocks API key */
   apiKey: string;
 
@@ -34,6 +36,9 @@ export interface KeychainFireblocksConfig {
 
   /** Optional delay in ms between concurrent signing requests (default: 0) */
   requestDelayMs?: number;
+
+  /** Propose transactions with sign-only PROGRAM_CALL; messages still use RAW. */
+  useProgramCall?: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

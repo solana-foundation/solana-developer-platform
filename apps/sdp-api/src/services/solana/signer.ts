@@ -2,6 +2,7 @@ import type { WaistMovement } from "@sdp/types/movements";
 import type { SdpModule } from "@sdp/types/release-channels";
 import type { TransactionSigner } from "@solana/kit";
 import type {
+  CustodyProposalCanceller,
   CustodyProposalReader,
   CustodyTransferProposer,
   TransferProposalIntent,
@@ -63,6 +64,22 @@ export async function createOrgTransferProposalReader(
   binding: TransferProposalIntent & { sourceAddress: string | null }
 ): Promise<CustodyProposalReader> {
   return createSigningService(env).getTransferProposalReaderForWalletRecord(
+    orgId,
+    projectId,
+    custodyWalletId,
+    binding
+  );
+}
+
+/** Read-and-cancel recovery for a recorded proposal, bound to its intent. It never creates. */
+export async function createOrgTransferProposalCanceller(
+  env: Env,
+  orgId: string,
+  projectId: string,
+  custodyWalletId: string,
+  binding: TransferProposalIntent & { sourceAddress: string | null }
+): Promise<CustodyProposalCanceller> {
+  return createSigningService(env).getTransferProposalCancellerForWalletRecord(
     orgId,
     projectId,
     custodyWalletId,

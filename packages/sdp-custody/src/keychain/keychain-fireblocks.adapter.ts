@@ -1,12 +1,12 @@
 /**
  * Keychain Fireblocks Adapter
  *
- * Wraps @solana/keychain-fireblocks FireblocksSigner to implement SigningPort.
+ * Wraps @solana/keychain-fireblocks to implement SigningPort.
  * Fireblocks provides enterprise-grade MPC custody with approval workflows.
  *
  * The Keychain FireblocksSigner handles:
  * - JWT authentication with Fireblocks API
- * - RAW signing operation
+ * - RAW or sign-only PROGRAM_CALL proposals
  * - Polling for transaction completion
  *
  * A Fireblocks policy block on any signing call surfaces as a `POLICY_REFUSED`
@@ -14,8 +14,8 @@
  */
 
 import { isFireblocksPolicyRefusal } from "@sdp/types/fireblocks";
-import { SignerError, SignerErrorCode, type SolanaSigner } from "@solana/keychain-core";
-import { FireblocksSigner } from "@solana/keychain-fireblocks";
+import { SignerErrorCode } from "@solana/keychain-core";
+import { createFireblocksSigner } from "@solana/keychain-fireblocks";
 import type { Address } from "@solana/kit";
 import { z } from "zod";
 import { SigningError } from "#/signing";
@@ -25,13 +25,18 @@ import type { KeychainFireblocksConfig } from "./types";
 /**
  * The context keychain attaches when a Fireblocks transaction ends in a
  * terminal failure. The pinned patch
- * (`patches/@solana__keychain-fireblocks@1.4.0.patch`) keeps the status and
+ * (`patches/@solana__keychain-fireblocks@2.0.0.patch`) keeps the status and
  * the sub-status, the latter only when it is a bare code.
  */
-const fireblocksTerminalContextSchema = z.object({
-  status: z.string(),
-  subStatus: z.string().optional(),
+const fireblocksTerminalErrorSchema = z.object({
+  code: z.literal(SignerErrorCode.SIGNING_FAILED),
+  context: z.object({
+    status: z.string(),
+    subStatus: z.string().optional(),
+  }),
 });
+
+type FireblocksSigner = Awaited<ReturnType<typeof createFireblocksSigner>>;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Adapter Implementation
@@ -41,7 +46,7 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
   readonly providerId = "fireblocks";
 
   private readonly config: KeychainFireblocksConfig;
-  private readonly signerByVaultAccountId = new Map<string, Promise<SolanaSigner>>();
+  private readonly signerByVaultAccountId = new Map<string, Promise<FireblocksSigner>>();
 
   constructor(config: KeychainFireblocksConfig) {
     super();
@@ -50,13 +55,16 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
 
   /**
    * Get the Fireblocks signer for direct use with @solana/kit. It signs with
-   * keychain's RAW operation and never broadcasts.
+   * keychain's configured proposal operation and never broadcasts.
    */
-  async getTransactionSigner(walletId?: string, _walletPublicKey?: Address): Promise<SolanaSigner> {
+  async getTransactionSigner(
+    walletId?: string,
+    _walletPublicKey?: Address
+  ): Promise<FireblocksSigner> {
     return this.getFireblocksSigner(walletId);
   }
 
-  private getFireblocksSigner(walletId?: string): Promise<SolanaSigner> {
+  private getFireblocksSigner(walletId?: string): Promise<FireblocksSigner> {
     const vaultAccountId = walletId
       ? denormalizeFireblocksWalletId(walletId)
       : this.config.vaultAccountId;
@@ -78,7 +86,7 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
   }
 
   private async createInitializedSigner(vaultAccountId: string): Promise<FireblocksSigner> {
-    const signer = new FireblocksSigner({
+    return createFireblocksSigner({
       apiKey: this.config.apiKey,
       privateKeyPem: this.config.apiSecretPem,
       vaultAccountId,
@@ -87,11 +95,12 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
       pollIntervalMs: this.config.pollIntervalMs,
       maxPollAttempts: this.config.maxPollAttempts,
       requestDelayMs: this.config.requestDelayMs,
-      // RAW returns a signature; SDP owns fee sponsorship and broadcast.
-      useProgramCall: false,
+      // Both modes return a signature; SDP owns sponsorship and broadcast.
+      useProgramCall: this.config.useProgramCall,
+      createExternalTxId: this.config.createExternalTxId,
+      onSigningCleanup: this.config.onSigningCleanup,
+      onSigningStatus: this.config.onSigningStatus,
     });
-    await signer.init();
-    return signer;
   }
 }
 
@@ -106,7 +115,7 @@ function denormalizeFireblocksWalletId(walletId: string): string {
  * @param signer - The initialized Fireblocks signer.
  * @returns A signer with the same address and availability check.
  */
-function refusingPolicyBlocks(signer: FireblocksSigner): SolanaSigner {
+function refusingPolicyBlocks(signer: FireblocksSigner): FireblocksSigner {
   return {
     address: signer.address,
     isAvailable: () => signer.isAvailable(),
@@ -128,15 +137,15 @@ function refusingPolicyBlocks(signer: FireblocksSigner): SolanaSigner {
  * @returns Never; it always throws.
  */
 function rethrowFireblocksSigningError(cause: unknown): never {
-  if (cause instanceof SignerError && cause.code === SignerErrorCode.SIGNING_FAILED) {
-    const context = fireblocksTerminalContextSchema.safeParse(cause.context);
-    if (context.success && isFireblocksPolicyRefusal(context.data)) {
-      throw new SigningError(
-        "Fireblocks blocked the signing request by policy",
-        "POLICY_REFUSED",
-        cause
-      );
-    }
+  // Fireblocks uses keychain 2; the other providers still use keychain 1.
+  // Parse the SDK error contract rather than comparing different class identities.
+  const error = fireblocksTerminalErrorSchema.safeParse(cause);
+  if (cause instanceof Error && error.success && isFireblocksPolicyRefusal(error.data.context)) {
+    throw new SigningError(
+      "Fireblocks blocked the signing request by policy",
+      "POLICY_REFUSED",
+      cause
+    );
   }
   throw cause;
 }
