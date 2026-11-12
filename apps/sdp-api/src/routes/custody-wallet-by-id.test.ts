@@ -167,6 +167,31 @@ describe("Custody wallet by ID route", () => {
     return clusterRpc.requests.filter(({ method }) => method === "getAccountInfo");
   }
 
+  it("returns only the selected wallet's advisory and never the credential identity", async () => {
+    const connection = await seedConnectionWallet();
+    await getDb(env).execute("UPDATE custody_wallets SET provider_policy = ?::jsonb WHERE id = ?", [
+      JSON.stringify({
+        credentialId: "pcred_wallet_by_id_connection",
+        status: "missing",
+        reason: "no_policy",
+        checkedAt: new Date().toISOString(),
+      }),
+      connection.walletRecordId,
+    ]);
+    const response = await app.request(
+      `/v1/wallets/${connection.walletId}?includeBalance=false`,
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result.data.wallet.providerPolicy).toMatchObject({
+      status: "missing",
+      reason: "no_policy",
+    });
+    expect(result.data.wallet.providerPolicy).not.toHaveProperty("credentialId");
+  });
+
   it("reads and labels a Connection wallet without exposing a Config owner", async () => {
     const connection = await seedConnectionWallet();
 

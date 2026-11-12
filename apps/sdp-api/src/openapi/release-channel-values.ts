@@ -265,7 +265,9 @@ function pruneProperties(
     if (kept === EMPTY) {
       const gated =
         isJsonObject(schema) &&
-        (schema[MODULE_GATE] !== undefined || schema[CUSTODY_PROVIDER_GATE] !== undefined);
+        (schema[MODULE_GATE] !== undefined ||
+          schema[CUSTODY_PROVIDER_GATE] !== undefined ||
+          schema[CUSTODY_MODE_GATE] !== undefined);
       if (!gated) dropped.add(name);
     } else properties[name] = kept;
   }
@@ -403,6 +405,7 @@ export function pruneUnpublishedValues(
   // The generator's output is plain JSON; checking it as such types every node.
   const json = jsonSchema.parse(JSON.parse(JSON.stringify(document)));
   const pruned = pruneNode(json, {
+    releaseChannel,
     // Only strings name modules; numbers, booleans and null are always kept.
     published: (value) =>
       typeof value !== "string" || isValuePublished(value, modules, releaseChannel),

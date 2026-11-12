@@ -22,6 +22,10 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
+vi.mock("@/services/custody/privy-policy", () => ({
+  readPrivyWalletPolicy: vi.fn(async () => ({ status: "present", reason: "policy_detected" })),
+}));
+
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
   return mockCustodyReleaseChannels(
