@@ -507,8 +507,8 @@ Silent drift needs a discriminator that the program reuses with a new meaning. T
 bound that case.
 
 **Builder instruction.** The ABI is the `no_std` crate `sdp-intents-spec`, which depends only on
-`bytemuck`, so any program can use it. `sdp-intents-anchor` wraps it for Anchor v2. The result
-types and staging helpers start as a copy of `relay-spec` (4.14).
+`bytemuck`, so any program can use it. `sdp-intents-builder` writes the results, over pinocchio, so
+Anchor v2 and other programs use it.
 
 SDP builders use Anchor v2 (`github.com/otter-sec/anchor`, branch `anchor-next`). Anchor v2 keeps
 the 8-byte discriminator and reads arguments as Borsh, so a `borsh` segment is an Anchor v2
@@ -545,35 +545,35 @@ never names it. The simulated transaction creates scratch first: a `createAccoun
 owned by the builder, funded by any account that holds the rent. A simulation does not verify
 signatures, so scratch needs no keypair. Nothing lands, so no one pays the rent.
 
-**Builder library.** A builder author writes one handler against `sdp-intents-anchor`:
+**Builder library.** A builder author writes one handler against `sdp-intents-builder`:
 
 ```rust
-pub fn build_transfer_v1(
-    ctx: &mut Context<BuildTransferV1>,
-    amount: u64,
-    memo: Option<String>,
-) -> Result<BuildReturn> {
-    let mut build = Build::new(ctx)?;
-    let hook_accounts = build.require_accounts(&transfer_hook_accounts(&ctx.accounts.mint)?)?;
-    build.instruction(create_ata_idempotent(Payer::Rent, &ctx.accounts.destination, /* … */))?;
-    build.instruction(transfer_checked(
-        &ctx.accounts.source,
-        &ctx.accounts.destination,
-        hook_accounts,
-        /* … */
-    ))?;
-    build.finish()
+pub fn build_transfer_v1(ctx: &mut Context<BuildTransferV1>, amount: u64, memo: Option<String>) -> Result<()> {
+    let remaining = ctx.remaining_accounts();
+    let mut build = Build::new(ctx.program_id, <BuildTransferV1 as TryAccounts>::HEADER_SIZE, &remaining)?;
+
+    let Some(hook_accounts) = build.require_accounts(&hook_addresses(&ctx.accounts.mint)?)? else {
+        return Ok(build.finish()?);
+    };
+
+    let destination = build.create_associated_token_account_idempotent(to, mint, &TOKEN_2022)?;
+    build.transfer_checked(&TransferChecked { destination: &destination, extra_accounts: &hook_metas, /* … */ })?;
+    Ok(build.finish()?)
 }
 ```
 
-1. `Build::new` reads the stack height with `sol_get_stack_height`, and in staged mode takes the
-   last account as scratch. The accounts struct holds only the accounts that the record names.
-2. `require_accounts` returns the accounts when they are present. Otherwise it ends the round with
-   `MoreAccounts`, in staged mode only. In hashed mode a missing account is an error.
-3. `Payer::Rent` writes the placeholder. `build.refuse(code, message)` returns
-   `Refused` in either mode.
+1. `Build::new` reads the stack height, and in staged mode takes the last account as scratch. The
+   accounts struct holds only the accounts that the record names. The extra accounts of earlier
+   rounds and scratch are the remaining accounts.
+2. `require_accounts` returns the accounts when the caller passed them. Otherwise it returns `None`,
+   and the handler returns `finish()`, which writes `MoreAccounts`. In hashed mode a missing account
+   is an error.
+3. `Meta::rent_payer()` writes the placeholder. `build.refuse(code, message)` writes `Refused` in
+   staged mode and fails in hashed mode.
 4. `finish` writes the staged result and the pointer, or hashes the instruction section and writes
-   `HashedReadyV1`. `BuildReturn` sets the return data.
+   `HashedReadyV1`.
+5. The `token` helpers derive associated token accounts and add `createIdempotent`,
+   `transferChecked`, and memos.
 
 **Result layout.** Every type is alignment-1 pod, so a reader casts it in place. `PodU16`, `PodU32`,
 `PodU64`, and `PodBool` are little-endian byte arrays with alignment 1, in the layout of the Anchor
@@ -1413,8 +1413,12 @@ intents/
   planner/              sdp-intents-planner: prepare with no IO. Asks for fetches and simulations,
                         runs the builder rounds, and returns the plan.
   client/               sdp-intents-client: the planner over RPC. No service, cache, or LiteSVM.
-  spec-anchor/          sdp-intents-anchor: the spec for Anchor programs
-  programs/             Anchor v2 workspace: Anchor.toml, Cargo.toml, Cargo.lock
+  programs/             Anchor v2 workspace: Cargo.toml, Cargo.lock
+    builder/            sdp-intents-builder: the builder library, over pinocchio, for Anchor v2
+                        and other programs. Staged and hashed modes, require_accounts, the rent
+                        payer, and token helpers.
+    testing/            the planner against LiteSVM, for the programs' tests
+    test-builder/       a builder with one MoreAccounts round, for the library's tests
     registry/           organizations, interfaces, implementations, approvals, versions, and
                         verify_intent
     token-2022-builder/ token.transfer for Token-2022 mints
@@ -1702,7 +1706,7 @@ Production is a separate project with its own design document. Minimum gates:
 | Milestone | Content | Days |
 | :-- | :-- | :-- |
 | M0 | This document, reviewed | 1 |
-| M1 | Workspaces and toolchains. The copies from relay. `sdp-intents-spec` and `sdp-intents-anchor`. The binary form, the views, the JSON compiler, the limits, and the round-trip check. SBF build check of each client crate. | 4 |
+| M1 | Workspaces and toolchains. The copies from relay. `sdp-intents-spec` and `sdp-intents-builder`. The binary form, the views, the JSON compiler, the limits, and the round-trip check. SBF build check of each client crate. | 4 |
 | M2 | The registry program on surfpool. The CLI: `lint`, `plan`, `apply`, and `--squads`. Service `prepare` that reads the registry, with LiteSVM and rounds. Static recipes for SOL and SPL Token transfers. `implementationsFor` with approvals. `token-2022-builder` without extensions. Rendering. Transfer parity. First corpus items. | 8 |
 | M3 | All extensions in `token-2022-builder`. `jupiter-lend-builder`. `kamino-builder` deposit. Surfpool parity. | 6 |
 | M4 | `verify`, Lighthouse assertions, `verify_intent`, the remote recipe, the Jupiter swap wrapper, and the `kamino-builder` withdrawal. Property and mutation tests. | 8 |

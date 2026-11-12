@@ -1,0 +1,22 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "implementation",
+  "id": "solana.org/test-builder-transfer",
+  "version": "1.0.0",
+  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "implements": "solana.org/token.transfer@^1",
+  "applies": [{ "value": "{inputs.mint}", "equals": "11111111111111111111111111111111" }],
+  "message": "transfer {inputs.amount} SOL from {inputs.from} to {inputs.to}",
+  "recipe": {
+    "kind": "program",
+    "program": "4nYmBfPS3y66obVLJzRpXZvnj7TjsrLykNj5CWGu4MyS",
+    "accounts": [
+      { "name": "from", "address": "{inputs.from}" },
+      { "name": "to", "address": "{inputs.to}" }
+    ],
+    "data": [
+      { "value": "bd1c9adb8ca2623c", "encoding": "hex" },
+      { "value": "{inputs.amount}", "encoding": "u64le" }
+    ]
+  }
+}

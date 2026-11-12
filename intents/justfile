@@ -22,3 +22,10 @@ test:
 
 unit-test:
     cargo test --workspace --lib
+
+# The onchain programs are a separate workspace, with its own Cargo.lock.
+build-programs:
+    cd programs && for manifest in */Cargo.toml; do if grep -q cdylib "$manifest"; then cargo build-sbf --manifest-path "$manifest"; fi; done
+
+test-programs: build-programs
+    cd programs && cargo test --workspace

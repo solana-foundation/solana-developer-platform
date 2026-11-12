@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 publish = false
-rust-version = "1.99"
+rust-version = "1.95"
 
 [workspace.dependencies]
 base64 = "=0.23.1"
@@ -21,7 +21,10 @@ sdp-intents-planner = { path = "planner" }
 sdp-intents-spec = { path = "spec" }
 serde_json = { version = "=1.0.154", features = ["preserve_order"] }
 sha2 = "=0.11.1"
-solana-address = { version = "=2.9.0", default-features = false }
+# A range, not an exact pin: the engine is built by this workspace and by `programs/`, and their
+# trees need different minors. LiteSVM pins `~2.7`, and `solana-message` 6 needs 2.8 or later. Each
+# workspace's Cargo.lock pins the exact version.
+solana-address = { version = ">=2.7.0, <2.10.0", default-features = false }
 
 [workspace.lints.rust]
 unused_imports = "deny"

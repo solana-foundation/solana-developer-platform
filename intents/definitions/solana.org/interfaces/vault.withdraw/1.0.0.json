@@ -1,0 +1,25 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "interface",
+  "id": "solana.org/vault.withdraw",
+  "version": "1.0.0",
+  "inputs": [
+    { "name": "owner", "type": "address", "signer": true },
+    { "name": "vault", "type": "address" },
+    { "name": "asset", "type": "mint" },
+    { "name": "shares", "type": "u64", "display": { "amount": { "mint": "{outputs.shareMint}" } } },
+    { "name": "minAmount", "type": "u64", "display": { "amount": { "mint": "{inputs.asset}" } } }
+  ],
+  "outputs": [
+    { "name": "shareMint", "type": "mint" }
+  ],
+  "display": "Withdraw {inputs.minAmount} {inputs.asset} or more from vault {inputs.vault}",
+  "postConditions": [
+    { "outflow": { "from": "{inputs.owner}", "mint": "{outputs.shareMint}", "max": "{inputs.shares}" },
+      "message": "{inputs.owner} sends at most {inputs.shares} of {outputs.shareMint}" },
+    { "inflow": { "to": "{inputs.owner}", "mint": "{inputs.asset}", "min": "{inputs.minAmount}" },
+      "message": "{inputs.owner} receives at least {inputs.minAmount} of {inputs.asset}" },
+    { "noOtherOutflows": { "from": "{inputs.owner}" },
+      "message": "nothing else leaves {inputs.owner}" }
+  ]
+}
