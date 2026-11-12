@@ -9,9 +9,11 @@ const fireblocksCsrSchema = z.object({
   expiresAt: z.string(),
 }) satisfies z.ZodType<FireblocksCsr>;
 
-const pendingFireblocksCsrSchema = z.object({ csr: fireblocksCsrSchema.nullable() });
+const pendingFireblocksCsrEnvelopeSchema = z.object({
+  data: z.object({ csr: fireblocksCsrSchema.nullable() }),
+});
 
-export type PendingFireblocksCsr = z.infer<typeof pendingFireblocksCsrSchema>;
+export type PendingFireblocksCsr = z.infer<typeof pendingFireblocksCsrEnvelopeSchema>["data"];
 
 export async function fetchPendingFireblocksCsr(): Promise<PendingFireblocksCsr> {
   const response = await dashboardRequest("/api/dashboard/fireblocks/csr", {
@@ -21,5 +23,5 @@ export async function fetchPendingFireblocksCsr(): Promise<PendingFireblocksCsr>
   if (!response.ok) {
     throw new Error(parseErrorMessage(await response.text()));
   }
-  return pendingFireblocksCsrSchema.parse(await response.json());
+  return pendingFireblocksCsrEnvelopeSchema.parse(await response.json()).data;
 }
