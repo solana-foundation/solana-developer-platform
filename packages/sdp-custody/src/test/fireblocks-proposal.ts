@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import {
   AccountRole,
   type AddressesByLookupTableAddress,
@@ -40,7 +41,7 @@ const proposalSchema = z
 
 /** Both the native Kit plans and the provider-neutral Earn wire plans. */
 interface ProposalPlan {
-  cluster: string;
+  cluster: SolanaCluster;
   instructions: readonly {
     programAddress: string;
     accounts?: readonly { address: string; role: number }[];
@@ -98,7 +99,7 @@ export async function assertFireblocksProposal(
 export async function assertFireblocksTransaction(
   transaction: Parameters<TransactionPartialSigner["signTransactions"]>[0][number],
   wallet: TransactionPartialSigner,
-  cluster: string
+  cluster: SolanaCluster
 ): Promise<void> {
   const publicKey = wallet.address;
   const assetId = cluster === "mainnet-beta" ? "SOL" : "SOL_TEST";
