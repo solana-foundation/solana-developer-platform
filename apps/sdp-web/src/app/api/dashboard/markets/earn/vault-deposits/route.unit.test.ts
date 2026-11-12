@@ -33,7 +33,7 @@ describe("POST /api/dashboard/markets/earn/vault-deposits", () => {
     expect(mocks.proxyToSdpApi).toHaveBeenCalledWith({
       request,
       traceSource: "route.dashboard.earn.vault_deposits.create",
-      path: "/v1/earn/vault-deposits",
+      path: "/v1/earn/deposits/execute",
     });
   });
 });

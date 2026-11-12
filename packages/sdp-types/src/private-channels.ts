@@ -572,7 +572,7 @@ export interface PrivateChannelEventListEnvelope {
   nextCursor: string | null;
 }
 
-/** Flat id→name dictionary returned by GET /v1/private-channels/events/references. */
+/** Flat id→name dictionary returned by GET /v1/private-channels/events/reference-labels. */
 export interface PrivateChannelEventReferencesEnvelope {
   references: Record<string, string>;
 }

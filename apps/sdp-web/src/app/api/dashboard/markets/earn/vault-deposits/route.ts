@@ -8,7 +8,7 @@ export async function POST(request: Request) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.vault_deposits.create",
-    path: "/v1/earn/vault-deposits",
+    path: "/v1/earn/deposits/execute",
   });
 }
 
@@ -24,6 +24,6 @@ export async function GET(request: Request) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.vault_deposits.list",
-    path: `/v1/earn/vault-deposits${validated.query}`,
+    path: `/v1/earn/deposits/provider-signed${validated.query}`,
   });
 }

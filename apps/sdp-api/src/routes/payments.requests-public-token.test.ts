@@ -128,7 +128,7 @@ describe("payment request public tokens", () => {
   });
 
   it("refuses the link to a key without payment_requests.manage, naming the action", async () => {
-    const res = await get(`/v1/payments/requests/${requestId}/link`, READ_KEY);
+    const res = await get(`/v1/payments/requests/${requestId}/link-token`, READ_KEY);
 
     expect(res.status).toBe(403);
     expect(await res.json()).toMatchObject({
@@ -137,7 +137,7 @@ describe("payment request public tokens", () => {
   });
 
   it("returns the link token with payment_requests.manage", async () => {
-    const res = await get(`/v1/payments/requests/${requestId}/link`, MANAGE_KEY);
+    const res = await get(`/v1/payments/requests/${requestId}/link-token`, MANAGE_KEY);
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({

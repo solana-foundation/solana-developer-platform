@@ -45,9 +45,9 @@ export const INTERFACE_SNIPPETS: readonly InterfaceSnippet[] = [
   {
     mode: "api",
     method: "POST",
-    path: "/v1/payments/transfers",
+    path: "/v1/payments/transfers/execute",
     request: [
-      [PROMPT, ` curl -X POST ${API}/v1/payments/transfers \\`],
+      [PROMPT, ` curl -X POST ${API}/v1/payments/transfers/execute \\`],
       [`    ${AUTH} \\`],
       [`    ${IDEMPOTENCY} \\`],
       [`    ${JSON_TYPE} \\`],
@@ -56,7 +56,7 @@ export const INTERFACE_SNIPPETS: readonly InterfaceSnippet[] = [
     ],
     narrowRequest: [
       [PROMPT, " curl -X POST \\"],
-      [`  ${API}/v1/payments/transfers \\`],
+      [`  ${API}/v1/payments/transfers/execute \\`],
       [`  ${AUTH} \\`],
       [`  ${IDEMPOTENCY} \\`],
       [`  ${JSON_TYPE} \\`],

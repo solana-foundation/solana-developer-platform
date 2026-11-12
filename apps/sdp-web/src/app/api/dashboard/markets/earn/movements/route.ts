@@ -11,6 +11,6 @@ export async function GET(request: Request) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.movements.list",
-    path: `/v1/earn/movements${validated.query}`,
+    path: `/v1/earn/treasury/movements${validated.query}`,
   });
 }

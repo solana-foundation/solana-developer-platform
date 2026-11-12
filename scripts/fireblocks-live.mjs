@@ -311,7 +311,7 @@ export async function runLive(rawConfig, mode, options = {}) {
     log(
       "Approve the payment in Fireblocks. Fireblocks builds, signs and broadcasts; the source vault pays fees."
     );
-    result = await api("/v1/payments/transfers", body, attempt.idempotencyKey);
+    result = await api("/v1/payments/transfers/execute", body, attempt.idempotencyKey);
   }
   if (!result?.transfer) {
     throw new Error(

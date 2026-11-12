@@ -63,7 +63,7 @@ describe("EmbeddedYieldClient", () => {
       new EmbeddedYieldClient(config).getMovement(movement.movementId)
     ).resolves.toEqual(movement);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "http://127.0.0.1:8787/v1/earn/external-wallet/movements/movement%2Fwith%20space"
+      "http://127.0.0.1:8787/v1/earn/movements/caller-signed/movement%2Fwith%20space"
     );
   });
 
@@ -198,10 +198,10 @@ describe("EmbeddedYieldClient", () => {
     );
 
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
-      "http://127.0.0.1:8787/v1/earn/external-wallet/withdrawal-request-transactions",
-      "http://127.0.0.1:8787/v1/earn/external-wallet/withdrawal-requests",
-      "http://127.0.0.1:8787/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
-      "http://127.0.0.1:8787/v1/earn/external-wallet/withdrawal-request-cancellations",
+      "http://127.0.0.1:8787/v1/earn/withdrawal-requests/build-unsigned-transaction",
+      "http://127.0.0.1:8787/v1/earn/withdrawal-requests/submit-signed-transaction",
+      "http://127.0.0.1:8787/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
+      "http://127.0.0.1:8787/v1/earn/withdrawal-requests/cancel/submit-signed-transaction",
     ]);
     const requestSubmit = fetchMock.mock.calls[1]?.[1] as
       | RequestInit

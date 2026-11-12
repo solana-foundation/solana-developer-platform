@@ -739,7 +739,7 @@ describe("Payments routes — on-chain transfers", () => {
       await seedSolOfframpDeposit(transferId);
       const app = createApp({ rampProviderMaturity: maturity });
       const res = await app.request(
-        "/v1/payments/transfers",
+        "/v1/payments/transfers/execute",
         {
           method: "POST",
           headers: {

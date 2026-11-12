@@ -307,7 +307,7 @@ describe("ApiPlaygroundShell", () => {
 
   it.each([
     ["refuses to resend on any other write", "/v1/counterparties", false],
-    ["resends on a transfer", "/v1/payments/transfers", true],
+    ["resends on a transfer", "/v1/payments/transfers/execute", true],
   ])("%s a lost POST's key past the key record's window", async (_case, path, resent) => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
@@ -388,7 +388,7 @@ describe("ApiPlaygroundShell", () => {
       ...endpoint,
       id: "post-transfer-in-flight",
       method: "POST",
-      path: "/v1/payments/transfers",
+      path: "/v1/payments/transfers/execute",
     };
     const view = render(
       <I18nProvider locale="en" messages={getMessages("en")}>
@@ -548,7 +548,7 @@ describe("ApiPlaygroundShell", () => {
       ...endpoint,
       id: "post-transfer",
       method: "POST",
-      path: "/v1/payments/transfers",
+      path: "/v1/payments/transfers/execute",
     };
     const view = render(
       <I18nProvider locale="en" messages={getMessages("en")}>

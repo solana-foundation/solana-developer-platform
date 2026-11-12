@@ -61,7 +61,7 @@ export function registerAssetProfilePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/asset-profiles",
+    path: "/v1/issuance/tokens/create-with-asset-profile",
     tags: ["Asset Profiles"],
     summary: "Create token with asset profile",
     operationId: "createTokenWithAssetProfile",

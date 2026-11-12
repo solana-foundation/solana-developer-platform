@@ -84,7 +84,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
     const createdKey = (await createKeyRes.json()) as CreateApiKeyResponse;
     const scopedRequest = requestWithApiKey(createdKey.data.apiKey.key);
     const transferFrom = (request: typeof scopedRequest, sourceCustodyWalletId: string) =>
-      request("/v1/payments/transfers", {
+      request("/v1/payments/transfers/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

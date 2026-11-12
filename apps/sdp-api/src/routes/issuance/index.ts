@@ -8,6 +8,7 @@ import { projectContextMiddleware } from "@/middleware/project-context";
 import { requestGate } from "@/middleware/request-gate";
 import { publicRoute, requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
+import { createTokenWithAssetProfile } from "@/routes/asset-profiles/create";
 import type { Env } from "@/types/env";
 import {
   addAllowlistEntry,
@@ -53,6 +54,7 @@ import {
   burnSchema,
   confirmDeploySchema,
   createTokenSchema,
+  createTokenWithAssetProfileSchema,
   deployTokenSchema,
   forceBurnSchema,
   freezeSchema,
@@ -91,6 +93,12 @@ issuance.get("/templates/:templateId", requireAction("issuance.read"), getTokenT
 
 // Token CRUD
 issuance.post(
+  "/tokens/create-with-asset-profile",
+  requireAction("issuance.manage"),
+  validateBody(createTokenWithAssetProfileSchema),
+  createTokenWithAssetProfile
+);
+issuance.post(
   "/tokens",
   requireAction("issuance.manage"),
   validateBody(createTokenSchema),
@@ -123,13 +131,13 @@ issuance.patch(
 
 // Deploy
 issuance.post(
-  "/tokens/:tokenId/deploy",
+  "/tokens/:tokenId/deploy/execute",
   requireAction("issuance.execute"),
   validateBody(deployTokenSchema),
   deployToken
 );
 issuance.post(
-  "/tokens/:tokenId/deploy/prepare",
+  "/tokens/:tokenId/deploy/build-unsigned-transaction",
   requireAction("issuance.execute"),
   validateBody(legacyDeployTokenSchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
@@ -140,7 +148,7 @@ issuance.post(
 // the signing wallet prepareDeploy persisted on the token, so they can't diverge
 // from the prepared tx. Required before prepare-metadata can run.
 issuance.post(
-  "/tokens/:tokenId/deploy/confirm",
+  "/tokens/:tokenId/deploy/confirm-submitted-transaction",
   requireAction("issuance.execute"),
   validateBody(confirmDeploySchema),
   confirmDeploy
@@ -148,7 +156,7 @@ issuance.post(
 // Follow-up tx for the non-custodial deploy flow: set the metadata uri when the
 // create tx had to be prepared with an empty uri to stay under the packet limit.
 issuance.post(
-  "/tokens/:tokenId/deploy/prepare-metadata",
+  "/tokens/:tokenId/deploy/metadata/build-unsigned-transaction",
   requireAction("issuance.execute"),
   validateBody(legacyDeployTokenSchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
@@ -157,14 +165,14 @@ issuance.post(
 
 // Mint
 issuance.post(
-  "/tokens/:tokenId/mint/prepare",
+  "/tokens/:tokenId/mint/build-unsigned-transaction",
   requireAction("issuance.execute"),
   validateBody(mintSchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareMint
 );
 issuance.post(
-  "/tokens/:tokenId/mint",
+  "/tokens/:tokenId/mint/execute",
   requireAction("issuance.execute"),
   validateBody(mintSchema),
   requestGate({
@@ -177,14 +185,14 @@ issuance.post(
 
 // Burn
 issuance.post(
-  "/tokens/:tokenId/burn/prepare",
+  "/tokens/:tokenId/burn/build-unsigned-transaction",
   requireAction("issuance.execute"),
   validateBody(burnSchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareBurn
 );
 issuance.post(
-  "/tokens/:tokenId/burn",
+  "/tokens/:tokenId/burn/execute",
   requireAction("issuance.execute"),
   validateBody(burnSchema),
   executeBurn
@@ -192,14 +200,14 @@ issuance.post(
 
 // Seize (Force Transfer)
 issuance.post(
-  "/tokens/:tokenId/seize/prepare",
+  "/tokens/:tokenId/seize/build-unsigned-transaction",
   requireAction("issuance.enforce"),
   validateBody(seizeSchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareSeize
 );
 issuance.post(
-  "/tokens/:tokenId/seize",
+  "/tokens/:tokenId/seize/execute",
   requireAction("issuance.enforce"),
   validateBody(seizeSchema),
   executeSeize
@@ -207,14 +215,14 @@ issuance.post(
 
 // Force Burn
 issuance.post(
-  "/tokens/:tokenId/force-burn/prepare",
+  "/tokens/:tokenId/force-burn/build-unsigned-transaction",
   requireAction("issuance.enforce"),
   validateBody(forceBurnSchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareForceBurn
 );
 issuance.post(
-  "/tokens/:tokenId/force-burn",
+  "/tokens/:tokenId/force-burn/execute",
   requireAction("issuance.enforce"),
   validateBody(forceBurnSchema),
   executeForceBurn
@@ -222,14 +230,14 @@ issuance.post(
 
 // Authority Updates
 issuance.post(
-  "/tokens/:tokenId/authority/prepare",
+  "/tokens/:tokenId/authority/update/build-unsigned-transaction",
   requireAction("issuance.authority"),
   validateBody(updateAuthoritySchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareUpdateAuthority
 );
 issuance.post(
-  "/tokens/:tokenId/authority",
+  "/tokens/:tokenId/authority/update/execute",
   requireAction("issuance.authority"),
   validateBody(updateAuthoritySchema),
   requestGate({
@@ -256,36 +264,40 @@ issuance.post(
 
 // Freeze/Unfreeze
 issuance.post(
-  "/tokens/:tokenId/freeze",
+  "/tokens/:tokenId/freeze-account",
   requireAction("issuance.enforce"),
   validateBody(freezeSchema),
   freezeAccount
 );
 issuance.post(
-  "/tokens/:tokenId/unfreeze",
+  "/tokens/:tokenId/unfreeze-account",
   requireAction("issuance.enforce"),
   validateBody(unfreezeSchema),
   unfreezeAccount
 );
-issuance.get("/tokens/:tokenId/frozen", requireAction("issuance.read"), listFrozenAccounts);
+issuance.get(
+  "/tokens/:tokenId/frozen-accounts",
+  requireAction("issuance.read"),
+  listFrozenAccounts
+);
 
-// Allowlist
-// `/allowlist/labels` (GET) is registered before the `/allowlist/:entryId`
+// Control list
+// `/control-list/labels` (GET) is registered before the `/control-list/:entryId`
 // (DELETE) route; distinct methods mean there is no path collision either way.
 issuance.get(
-  "/tokens/:tokenId/allowlist/labels",
+  "/tokens/:tokenId/control-list/labels",
   requireAction("issuance.read"),
   listAllowlistLabels
 );
-issuance.get("/tokens/:tokenId/allowlist", requireAction("issuance.read"), listAllowlist);
+issuance.get("/tokens/:tokenId/control-list", requireAction("issuance.read"), listAllowlist);
 issuance.post(
-  "/tokens/:tokenId/allowlist",
+  "/tokens/:tokenId/control-list",
   requireAction("issuance.enforce"),
   validateBody(addAllowlistSchema),
   addAllowlistEntry
 );
 issuance.delete(
-  "/tokens/:tokenId/allowlist/:entryId",
+  "/tokens/:tokenId/control-list/:entryId",
   requireAction("issuance.enforce"),
   removeAllowlistEntry
 );
@@ -300,13 +312,13 @@ async function requireAssetProfilesFeature(c: AppContext, next: Next) {
 
 // Holders (KYC-wallet enrollment for an asset)
 issuance.get(
-  "/tokens/:tokenId/holders",
+  "/tokens/:tokenId/holder-enrollments",
   requireAssetProfilesFeature,
   requireAction("issuance.read"),
   listHolders
 );
 issuance.post(
-  "/tokens/:tokenId/holders",
+  "/tokens/:tokenId/holder-enrollments",
   requireAssetProfilesFeature,
   requireAction("issuance.manage"),
   validateBody(enrollHolderSchema),
