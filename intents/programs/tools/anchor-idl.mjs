@@ -6,7 +6,7 @@
 import { createHash } from "node:crypto";
 import { deflateSync } from "node:zlib";
 
-import { base58, fromBase58 } from "../e2e/surfnet.mjs";
+import { base58, fromBase58 } from "../../e2e/surfnet.mjs";
 
 const P = 2n ** 255n - 19n;
 const D = (P - ((121665n * power(121666n, P - 2n)) % P)) % P;

@@ -40,7 +40,7 @@ build-verifier:
 
 # The mainnet programs that the tests run, checked against their pinned hashes.
 fetch-programs:
-    cd programs && node fetch-programs.mjs
+    node programs/tools/fetch-programs.mjs
 
 test-programs: build-programs fetch-programs idl
     cd programs && cargo test --workspace
@@ -53,13 +53,13 @@ surfnet:
 # verify, and send intents with every onchain check on.
 e2e rpc="http://127.0.0.1:8899": build-programs build-verifier
     cargo build -q -p sdp-intents-cli -p sdp-intents-service -p sdp-intents-test-provider
-    cd programs && node deploy-surfnet.mjs {{rpc}}
+    node programs/tools/deploy-surfnet.mjs {{rpc}}
     node e2e/run.mjs {{rpc}}
 
 # A surfnet for `apps/intents-playground`: place the programs, fund the playground wallets, publish
 # the definitions, then serve the API with those wallets. It runs in the foreground.
 playground rpc="http://127.0.0.1:8899": build-programs idl build-verifier
     cargo build -q -p sdp-intents-cli -p sdp-intents-service -p sdp-intents-test-provider
-    cd programs && node deploy-surfnet.mjs {{rpc}}
+    node programs/tools/deploy-surfnet.mjs {{rpc}}
     node e2e/playground.mjs {{rpc}}
     bash -c 'trap "kill 0" EXIT; node adapters/jupiter.mjs & ./target/debug/sdp-intents-test-provider {{rpc}} & ./target/debug/sdp-intents-service --rpc {{rpc}} --wallets target/playground/wallets'

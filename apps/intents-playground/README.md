@@ -22,7 +22,7 @@ Each step runs in its own terminal, from the repository root.
    cd intents
    just build-programs idl
    cargo build -p sdp-intents-cli -p sdp-intents-service -p sdp-intents-test-provider
-   (cd programs && node deploy-surfnet.mjs)
+   node programs/tools/deploy-surfnet.mjs
    node e2e/playground.mjs
    ```
 

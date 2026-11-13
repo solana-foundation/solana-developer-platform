@@ -48,12 +48,12 @@ pub mod definitions {
 }
 
 /// A mainnet program that a test runs, from `<crate_dir>/fixtures/<file>`. The binaries stay out of
-/// git: `node fetch-programs.mjs` in `intents/programs` fetches them and checks their pinned hashes.
+/// git: `just fetch-programs` in `intents` fetches them and checks their pinned hashes.
 pub fn fixture_program(crate_dir: &str, file: &str) -> Result<Vec<u8>, String> {
     let path = std::path::Path::new(crate_dir).join("fixtures").join(file);
 
     std::fs::read(&path).map_err(|error| {
-        format!("cannot read {}: {error}. Run `node fetch-programs.mjs` in intents/programs.", path.display())
+        format!("cannot read {}: {error}. Run `just fetch-programs` in intents.", path.display())
     })
 }
 

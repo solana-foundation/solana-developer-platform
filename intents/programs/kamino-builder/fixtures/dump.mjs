@@ -7,8 +7,8 @@
 // read in one `getMultipleAccounts` call, so the accounts and the clock are of one slot.
 //
 // `kvault.so` and `klend.so` are the Kamino mainnet programs, under Kamino's licenses. They stay out
-// of git, and `node fetch-programs.mjs` in `intents/programs` fetches them. After a new dump, pin
-// their new hashes in `intents/programs/fixture-programs.json`.
+// of git, and `just fetch-programs` in `intents` fetches them. After a new dump, pin
+// their new hashes in `intents/programs/tools/fixture-programs.json`.
 
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";

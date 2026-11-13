@@ -1,8 +1,8 @@
 // Fetches the mainnet programs that the tests run in LiteSVM, and checks each against its pinned
 // SHA-256 in `fixture-programs.json`. The binaries stay out of git, because they are the protocols'
-// licensed programs. Run it from this directory:
+// licensed programs. Each `file` in the JSON is relative to `programs`. From `intents`:
 //
-//   node fetch-programs.mjs [rpc]
+//   node programs/tools/fetch-programs.mjs [rpc]
 //
 // A file whose hash already matches is kept. A program that changed on mainnet fails the check,
 // because the account fixtures were dumped against the pinned version. Dump the account fixtures
@@ -55,7 +55,7 @@ const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 let failed = false;
 
 for (const { program, file, sha256: pinned } of PROGRAMS) {
-  const path = new URL(`./${file}`, import.meta.url);
+  const path = new URL(`../${file}`, import.meta.url);
 
   if (existsSync(path) && sha256(readFileSync(path)) === pinned) {
     continue;
