@@ -1490,9 +1490,10 @@ prototype copies what it needs and owns the copies. `spec/` starts from `relay-s
 from `chain-source`: the account cache, the subscriptions, and in-process LiteSVM simulation. Relay
 is Apache-2.0. Each copied file keeps its notice, and `intents/NOTICE` names the source.
 
-`kamino-builder` uses `kvault-interface` 0.1.0 and `klend-interface` 0.6.0. They are Apache-2.0,
-have no Anchor dependency, and hold Kamino's instruction builders, state types, and PDAs. The kvault
-program is BUSL-1.1, so the builder uses only these crates. They use `solana-pubkey` 2 and
+`kamino-builder` uses `kvault-interface` 0.1.0 and `klend-interface` 0.6.0. `kvault-interface`
+declares Apache-2.0. `klend-interface` is BUSL-1.1, whose Additional Use Grant allows use in
+unmodified form as a dependency, so the builder depends on it and copies none of its layouts. Both
+have no Anchor dependency, and hold Kamino's instruction builders, state types, and PDAs. They use `solana-pubkey` 2 and
 `solana-instruction` 2. Anchor v2 uses `solana-address` 2.6 and `solana-instruction` 3, so the
 builder converts through 32-byte arrays. M1 checks that each crate builds for SBF beside Anchor v2.
 If one does not, the builder copies the layouts that it reads. v1 has no lookup tables, so a Kamino

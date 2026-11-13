@@ -1,0 +1,38 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "implementation",
+  "id": "solana.org/kamino-withdraw",
+  "version": "1.0.0",
+  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "implements": "solana.org/vault.withdraw@^1",
+  "annotations": { "builder": "The address is a placeholder until kamino-builder is deployed." },
+  "applies": [
+    { "account": "{inputs.vault}", "owner": "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd", "discriminator": "e4c452a562d2eb98" }
+  ],
+  "message": "withdraw {inputs.shares} of {outputs.shareMint} from Kamino vault {inputs.vault} to {inputs.owner} for at least {inputs.minAmount} of {inputs.asset}",
+  "recipe": {
+    "kind": "program",
+    "program": "LNuhpDaM2bKkoaGPMDJ4aALq8CGKNz2Xq336bo6Tafy",
+    "accounts": [
+      { "name": "vault", "address": "{inputs.vault}" },
+      { "name": "owner", "address": "{inputs.owner}" },
+      { "name": "asset", "address": "{inputs.asset}" },
+      { "name": "tokenProgram", "address": { "hasOne": { "account": "{accounts.vault}", "owner": "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd", "offset": "152" } } },
+      { "name": "shareMint", "address": { "hasOne": { "account": "{accounts.vault}", "owner": "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd", "offset": "184" } } },
+      { "name": "ownerAssetAccount", "address": { "ata": { "owner": "{inputs.owner}", "mint": "{inputs.asset}", "tokenProgram": "{accounts.tokenProgram}" } } },
+      { "name": "ownerShareAccount", "address": { "ata": { "owner": "{inputs.owner}", "mint": "{accounts.shareMint}", "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" } } }
+    ],
+    "data": [
+      { "value": "86507a42ca1c0af6", "encoding": "hex" },
+      { "value": "{inputs.shares}", "encoding": "u64le" },
+      { "value": "{inputs.minAmount}", "encoding": "u64le" }
+    ]
+  },
+  "postConditions": [
+    { "invokesOnly": [
+        "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd",
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+      ],
+      "message": "only Kamino vault and ATA instructions run" }
+  ]
+}

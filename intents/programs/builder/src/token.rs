@@ -28,9 +28,10 @@ pub fn mint_decimals(mint: &AccountView) -> Result<u8, BuildError> {
 }
 
 /// The amount in a token account of either token program, or `None` when the account does not
-/// exist. Another owner is an error. The caller checks the mint and the token owner.
+/// exist: it holds no lamports. An account that exists and that no token program owns is an error.
+/// The caller checks the mint and the token owner.
 pub fn token_account_amount(account: &AccountView) -> Result<Option<u64>, BuildError> {
-    if account.lamports() == 0 && account.is_data_empty() {
+    if account.lamports() == 0 {
         return Ok(None);
     }
 
@@ -80,6 +81,24 @@ impl Build<'_> {
         ];
 
         self.instruction(&ASSOCIATED_TOKEN, &accounts, &[CREATE_IDEMPOTENT])
+    }
+
+    /// Creates `account`, the associated token account of `owner` for `mint`, only when it holds no
+    /// lamports. The planner refuses an instruction that names a payer and creates no account, so a
+    /// builder that reads the account adds the create only when it is needed. The ATA program checks
+    /// the address.
+    pub fn create_associated_token_account_if_missing(
+        &mut self,
+        account: &AccountView,
+        owner: &Address,
+        mint: &Address,
+        token_program: &Address,
+    ) -> Result<(), BuildError> {
+        if account.lamports() > 0 {
+            return Ok(());
+        }
+
+        self.create_associated_token_account_idempotent_at(account.address(), owner, mint, token_program)
     }
 
     /// `transferChecked`, with `extra_accounts` after the four that it names, such as the accounts
