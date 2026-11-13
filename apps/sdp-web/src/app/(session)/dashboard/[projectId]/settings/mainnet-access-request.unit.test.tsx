@@ -99,6 +99,8 @@ describe("MainnetAccessRequestHost", () => {
         access: {
           state: "pending",
           available: true,
+          sandboxOnly: false,
+          mainnetOnly: false,
           countryCode: "SG",
           request: null,
           contactEmail: null,

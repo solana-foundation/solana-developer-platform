@@ -45,7 +45,7 @@ import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-
 import type { EarnRepository } from "@/db/repositories/earn.repository";
 import { createEarnRepository } from "@/db/repositories/repository-factory";
 import { isEarnEnabled } from "@/lib/feature-flags";
-import { productionProjectsAllowed } from "@/lib/production-entitlement";
+import { productionProjectsAllowed, sandboxProjectsAllowed } from "@/lib/production-entitlement";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import type { KVStore } from "@/runtime/kv";
 import { createKVStoreSet } from "@/runtime/kv-redis";
@@ -158,6 +158,8 @@ async function syncProviderCatalogue(
     });
   }
 
+  // A deployment that serves mainnet only has no sandbox shelf to fetch, mirror or write.
+  if (!sandboxProjectsAllowed(env)) return;
   for (const environment of SYNCED_ENVIRONMENTS) {
     if (environment === "production") {
       continue;

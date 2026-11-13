@@ -25,6 +25,7 @@ import type { Env } from "@/types/env";
 import {
   type AdminAlertDetails,
   type AdminAlertKind,
+  ALERT_KINDS_SENT_WHEN_OFF,
   alertProjectSchema,
   type ConfigAlertKind,
   type MoneyMovementCounts,
@@ -405,8 +406,8 @@ async function moveCursor(
 }
 
 /**
- * Who one alert goes to: every admin, unless the organization turned alerts off (turning them off
- * is itself emailed, so it can never happen unnoticed), and the person it took admin access from,
+ * Who one alert goes to: every admin, unless the organization turned alerts off and the alert is
+ * not one of `ALERT_KINDS_SENT_WHEN_OFF`, and the person it took admin access from,
  * whatever the setting, unless they made the change themselves.
  */
 async function configAlertRecipients(
@@ -416,7 +417,7 @@ async function configAlertRecipients(
   context: { admins: readonly Recipient[]; alertEmailsOff: boolean }
 ): Promise<Recipient[]> {
   const admins =
-    context.alertEmailsOff && alert.kind !== "alert_emails_changed" ? [] : context.admins;
+    context.alertEmailsOff && !ALERT_KINDS_SENT_WHEN_OFF.has(alert.kind) ? [] : context.admins;
   if (!alert.affectedUserId || alert.affectedUserId === row.user_id) return [...admins];
   const affected = await affectedRecipient(tx, alert.affectedUserId);
   if (!affected) return [...admins];

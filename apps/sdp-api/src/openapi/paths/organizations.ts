@@ -92,7 +92,7 @@ export function registerOrganizationPaths(registry: OpenAPIRegistry) {
     summary: "Get mainnet access",
     operationId: "getMainnetAccess",
     description:
-      "Returns where the organization's mainnet access stands, with its declared jurisdiction and Terms and Conditions acceptance, and whether this deployment takes requests. A signed-in admin only, never an API key.",
+      "Returns where the organization's mainnet access stands, with its declared jurisdiction and Terms and Conditions acceptance, and whether this deployment takes requests. Any signed-in member, never an API key.",
     security: [{ clerkBearerAuth: [] }],
     request: { params: z.object({ orgId: orgIdParamSchema }) },
     responses: {

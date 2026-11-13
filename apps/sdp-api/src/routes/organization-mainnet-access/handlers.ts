@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { conflict, forbidden, serviceUnavailable } from "@/lib/errors";
-import { isProductionEntitled } from "@/lib/production-entitlement";
+import { isProductionEntitled, productionProjectsAllowed } from "@/lib/production-entitlement";
 import { success } from "@/lib/response";
 import { requireHumanActor } from "@/middleware/human-session";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -33,6 +33,11 @@ function requireOwnOrganization(c: AppContext): { orgId: string; userId: string 
  * The GET reports the same decision as `available`.
  */
 function requireRequestsAvailable(c: AppContext): void {
+  if (!productionProjectsAllowed(c.env)) {
+    throw forbidden(
+      "This deployment is a sandbox; request mainnet access on the production deployment"
+    );
+  }
   if (isProductionEntitled(c)) {
     throw conflict("Mainnet is already enabled for this organization");
   }

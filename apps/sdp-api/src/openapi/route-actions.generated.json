@@ -89,7 +89,7 @@
   "GET /v1/members/:_/api-keys": "members.manage",
   "GET /v1/members/me": "members.read",
   "GET /v1/organizations/:_": "organizations.read",
-  "GET /v1/organizations/:_/mainnet-access": "organizations.manage",
+  "GET /v1/organizations/:_/mainnet-access": "organizations.read",
   "GET /v1/organizations/:_/provider-access": "organizations.read",
   "GET /v1/payments/ramps/offramp/currency": "offramp.read",
   "GET /v1/payments/ramps/onramp/currency": "onramp.read",
