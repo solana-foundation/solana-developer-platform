@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use clap::Parser;
 
-use sdp_intents_chain::CachedRpc;
+use sdp_intents_chain::{CachedRpc, SimulateIn};
 use sdp_intents_service::{router, Metrics, Service, Wallets};
 
 #[derive(Parser)]
@@ -32,6 +32,10 @@ struct Args {
     /// How long the cache serves an account that no subscription covers.
     #[arg(long, default_value_t = 400)]
     max_age_ms: u64,
+
+    /// Simulates with `simulateTransaction` on the RPC, in place of LiteSVM in this process.
+    #[arg(long)]
+    simulate_on_rpc: bool,
 }
 
 #[tokio::main]
@@ -47,9 +51,10 @@ async fn main() -> ExitCode {
 
 async fn run(args: Args) -> Result<(), String> {
     let ws = args.ws.clone().map_or_else(|| websocket_url(&args.rpc), Ok)?;
+    let simulate_in = if args.simulate_on_rpc { SimulateIn::Rpc } else { SimulateIn::Process };
     let wallets = args.wallets.as_deref().map(Wallets::load).transpose()?.unwrap_or_default();
     let service = Service {
-        chain: CachedRpc::new(&args.rpc, &ws, Duration::from_millis(args.max_age_ms)),
+        chain: CachedRpc::new(&args.rpc, &ws, Duration::from_millis(args.max_age_ms), simulate_in),
         wallets,
         metrics: Metrics::default(),
     };
@@ -57,7 +62,10 @@ async fn run(args: Args) -> Result<(), String> {
     let listener = tokio::net::TcpListener::bind(args.listen)
         .await
         .map_err(|error| format!("cannot listen on {}: {error}", args.listen))?;
-    eprintln!("sdp-intents-service on http://{} over {} and {ws}", args.listen, args.rpc);
+    eprintln!(
+        "sdp-intents-service on http://{} over {} and {ws}, simulating in {simulate_in:?}",
+        args.listen, args.rpc
+    );
 
     axum::serve(listener, router(Arc::new(service)))
         .with_graceful_shutdown(async {

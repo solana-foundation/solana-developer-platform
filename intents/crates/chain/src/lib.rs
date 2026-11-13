@@ -6,11 +6,11 @@
 //! stores nothing (`AGENTS.md`, "RPC is a budget"). Each subscription holds its own websocket, which
 //! is enough for the registry's indexes.
 //!
-//! Simulations run on the RPC. LiteSVM 0.18 runs v1 transactions, but it depends on the Agave 4.3
-//! crates, and the RPC client of this workspace uses Agave 4.5. One build holds only one of them.
+//! Simulations run in process, in LiteSVM over the cache (`simulator.rs`), or on the RPC.
 
 mod cache;
 mod calls;
+mod simulator;
 mod subscriptions;
 
 use std::sync::Arc;
@@ -49,6 +49,16 @@ pub(crate) struct Inner {
     max_age: Duration,
     state: std::sync::Mutex<State>,
     calls: Calls,
+    simulator: Option<simulator::Simulator>,
+}
+
+/// Where a simulation runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SimulateIn {
+    /// LiteSVM in this process, over the cache.
+    Process,
+    /// `simulateTransaction` on the RPC.
+    Rpc,
 }
 
 /// An account that a listing returned.
@@ -68,17 +78,21 @@ pub enum ChainError {
 
 impl CachedRpc {
     /// Reads at `processed`. `ws_url` serves the subscriptions.
-    pub fn new(rpc_url: &str, ws_url: &str, max_age: Duration) -> Self {
-        Self::with_client(
-            RpcClient::new_with_commitment(rpc_url.to_owned(), CommitmentConfig::processed()),
-            ws_url,
-            max_age,
-        )
+    pub fn new(rpc_url: &str, ws_url: &str, max_age: Duration, simulate_in: SimulateIn) -> Self {
+        let rpc = RpcClient::new_with_commitment(rpc_url.to_owned(), CommitmentConfig::processed());
+
+        Self::with_client(rpc, ws_url, max_age, simulate_in)
     }
 
-    pub fn with_client(rpc: RpcClient, ws_url: &str, max_age: Duration) -> Self {
-        let inner =
-            Inner { rpc, ws_url: ws_url.to_owned(), max_age, state: Default::default(), calls: Calls::default() };
+    pub fn with_client(rpc: RpcClient, ws_url: &str, max_age: Duration, simulate_in: SimulateIn) -> Self {
+        let inner = Inner {
+            rpc,
+            ws_url: ws_url.to_owned(),
+            max_age,
+            state: Default::default(),
+            calls: Calls::default(),
+            simulator: (simulate_in == SimulateIn::Process).then(simulator::Simulator::new),
+        };
 
         Self { inner: Arc::new(inner) }
     }
@@ -87,8 +101,8 @@ impl CachedRpc {
         self.inner.calls.snapshot()
     }
 
-    /// Simulates with signatures unchecked and the blockhash replaced, as the client does.
-    pub async fn simulate(&self, simulation: &Simulation) -> Result<SimulationResult, ChainError> {
+    /// Simulates on the RPC with signatures unchecked and the blockhash replaced, as the client does.
+    async fn simulate_on_rpc(&self, simulation: &Simulation) -> Result<SimulationResult, ChainError> {
         let transaction = rpc::simulation_transaction(simulation)?;
         self.inner.calls.count(Counter::SimulateTransaction);
         let response =

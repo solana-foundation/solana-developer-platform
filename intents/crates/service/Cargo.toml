@@ -27,10 +27,10 @@ sdp-intents-planner.workspace = true
 sdp-intents-registry-client.workspace = true
 sdp-intents-spec.workspace = true
 serde_json.workspace = true
-solana-keypair = "=4.0.1"
-solana-message = "=6.0.0"
-solana-signer = "=4.0.0"
-solana-transaction = "=6.0.0"
+solana-keypair = "=3.1.2"
+solana-message = "=4.6.0"
+solana-signer = "=3.0.1"
+solana-transaction = "=4.3.0"
 tokio = { version = "=1.54.1", features = ["macros", "net", "rt-multi-thread", "signal"] }
 
 [lints]

@@ -7,26 +7,31 @@ license.workspace = true
 publish.workspace = true
 rust-version.workspace = true
 
-# `solana-pubsub-client` holds the subscriptions, and `futures-util` shares one fetch between the
-# requests that wait for it. Both are in the tree of `solana-rpc-client` already. The other Solana
+# `litesvm` simulates in process. `solana-pubsub-client` holds the subscriptions, and `futures-util`
+# shares one fetch between the requests that wait for it. The last two are in the tree of
+# `solana-rpc-client` already. The other Solana
 # crates are the types that the RPC clients take and return, at the versions that they use.
 [dependencies]
 futures-util = "=0.3.34"
+litesvm = "=0.18.2"
 sdp-intents-client.workspace = true
 sdp-intents-planner.workspace = true
 sdp-intents-spec.workspace = true
-solana-account-decoder-client-types = "=4.5.0-beta.0"
+solana-account-decoder-client-types = "=4.3.2"
+solana-account = "=4.7.0"
 solana-address.workspace = true
 solana-commitment-config = "=3.1.1"
-solana-hash = "=4.7.0"
-solana-pubsub-client = "=4.5.0-beta.0"
-solana-rpc-client = "=4.5.0-beta.0"
-solana-rpc-client-api = "=4.5.0-beta.0"
-solana-signature = "=3.6.0"
-solana-transaction = "=6.0.0"
+solana-hash = "=4.6.0"
+solana-pubsub-client = "=4.3.2"
+solana-rpc-client = "=4.3.2"
+solana-rpc-client-api = "=4.3.2"
+solana-sdk-ids = "=3.1.0"
+solana-signature = "=3.5.2"
+solana-transaction = "=4.3.0"
 tokio = { version = "=1.54.1", features = ["rt", "sync", "time"] }
 
 [dev-dependencies]
+base64.workspace = true
 serde_json.workspace = true
 tokio = { version = "=1.54.1", features = ["macros", "rt-multi-thread"] }
 

@@ -720,10 +720,14 @@ protection. A pin would also stop `prepare` after each upgrade until a new recor
 The planner (4.14) runs `prepare` with no IO. It asks for accounts to fetch and for transactions to
 simulate, and its caller answers. The client answers with RPC: `getMultipleAccounts`, and
 `simulateTransaction` with `sigVerify` off, `replaceRecentBlockhash` on, and scratch in `accounts`.
-The service answers from an account cache in `intents/crates/chain`, and simulates on the RPC.
-LiteSVM 0.18 runs v1 transactions, but it depends on the Agave 4.3 crates, and the RPC client of
-the service workspace uses Agave 4.5. One build holds only one of them, so in-process simulation
-waits for the workspace and LiteSVM to share one Agave version.
+The service answers from an account cache in `intents/crates/chain`, and simulates the v1 message
+in LiteSVM 0.18 over that cache. The service workspace uses the Agave 4.3 crates, as LiteSVM does.
+A simulation writes every account that its transaction names, then the clock from the cluster.
+LiteSVM keeps each program and loads it again only when its bytes change. Each program and program
+data account stays under a subscription. `--simulate-on-rpc` uses `simulateTransaction` instead.
+
+LiteSVM runs every feature, so a feature that the cluster has not activated can change a result.
+One LiteSVM serves the service, so simulations run one at a time.
 
 1. Reads use `processed`. The blockhash uses `confirmed`.
 2. A cached account is served only while a live subscription covers it. Other accounts are fetched
@@ -759,7 +763,7 @@ account share one fetch, and the cache never stores a failure (`AGENTS.md`, "RPC
 | Registry | Two `VersionIndexV1` accounts, under a subscription, and two version accounts, which never change | One `getMultipleAccounts` |
 | `implementationsFor` | The interface index, then the listed implementation indexes and their `applies` accounts | Two `getMultipleAccounts`. The interface index is usually cached. |
 | Account resolution | The accounts of one `hasOne` or `read` level, and the mints that rendering needs | One `getMultipleAccounts` for each level |
-| Simulation round | The accounts that the transaction or the builder names and the cache does not hold | One `getMultipleAccounts` |
+| Simulation round | The accounts that the transaction names and the cache does not hold, then the program data of a program that is new to the cache | One `getMultipleAccounts`, or two for a new program. No `simulateTransaction`. |
 | `verify` | The accounts of the final simulation, already loaded | None |
 
 With a warm cache, an SPL Token or Token-2022 transfer takes one `getMultipleAccounts` call, and a

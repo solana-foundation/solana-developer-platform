@@ -15,18 +15,18 @@ bs58.workspace = true
 sdp-intents-planner.workspace = true
 sdp-intents-spec.workspace = true
 serde_json.workspace = true
-solana-account-decoder-client-types = "=4.5.0-beta.0"
+solana-account-decoder-client-types = "=4.3.2"
 solana-address.workspace = true
 solana-commitment-config = "=3.1.1"
-solana-hash = "=4.7.0"
-solana-instruction = "=4.0.0"
-solana-keypair = "=4.0.1"
-solana-message = "=6.0.0"
-solana-rpc-client = "=4.5.0-beta.0"
-solana-rpc-client-api = "=4.5.0-beta.0"
-solana-signature = "=3.6.0"
-solana-signer = "=4.0.0"
-solana-transaction = "=6.0.0"
+solana-hash = "=4.6.0"
+solana-instruction = "=3.5.1"
+solana-keypair = "=3.1.2"
+solana-message = "=4.6.0"
+solana-rpc-client = "=4.3.2"
+solana-rpc-client-api = "=4.3.2"
+solana-signature = "=3.5.2"
+solana-signer = "=3.0.1"
+solana-transaction = "=4.3.0"
 
 [dev-dependencies]
 sdp-intents-compiler.workspace = true

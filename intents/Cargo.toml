@@ -37,9 +37,8 @@ sdp-intents-registry-client = { path = "crates/registry-client" }
 sdp-intents-spec = { path = "crates/spec" }
 serde_json = { version = "=1.0.154", features = ["preserve_order"] }
 sha2 = "=0.11.1"
-# A range, not an exact pin: the engine is built by this workspace and by `programs/`, and their
-# trees need different minors. LiteSVM pins `~2.7`, and `solana-message` 6 needs 2.8 or later. Each
-# workspace's Cargo.lock pins the exact version.
+# A range, not an exact pin: the engine is built by this workspace and by `programs/`. LiteSVM
+# pins `~2.7`, so both lockfiles hold 2.7 today, and each pins the exact version.
 solana-address = { version = ">=2.7.0, <2.10.0", default-features = false }
 
 [workspace.lints.rust]

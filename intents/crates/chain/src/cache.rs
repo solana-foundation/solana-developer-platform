@@ -234,7 +234,12 @@ mod tests {
         let answer = json!({ "context": { "slot": 5 }, "value": [account] });
         let mocks: MocksMap = (0..answers).map(|_| (RpcRequest::GetMultipleAccounts, answer.clone())).collect();
 
-        CachedRpc::with_client(RpcClient::new_mock_with_mocks_map("fails", mocks), "ws://unused", max_age)
+        CachedRpc::with_client(
+            RpcClient::new_mock_with_mocks_map("fails", mocks),
+            "ws://unused",
+            max_age,
+            crate::SimulateIn::Rpc,
+        )
     }
 
     /// The mock answers at once, so the test starts the second request before it awaits the first.
