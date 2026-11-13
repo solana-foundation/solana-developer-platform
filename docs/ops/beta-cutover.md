@@ -10,12 +10,12 @@ Nothing changes until the switches below are set, so the code ships ahead of the
 
 ## Switches
 
-| Switch | Where | Set to at the window | What it does |
-| --- | --- | --- | --- |
-| `SDP_ALLOW_SANDBOX_PROJECTS` | Production API env (sdp-infra prod tfvars) | `"false"` | Hides and refuses sandbox projects, creates no sandbox project for a new organization, registers no sandbox cron work, and locks organizations without mainnet access to the mainnet request page. |
-| `SDP_ALLOW_PRODUCTION_PROJECTS` | Beta API env | `"false"` (already) | Beta serves the sandbox only and refuses mainnet requests. |
-| `sandbox-on-beta` | Production `sdp-web` Vercel project | on | "Try the sandbox" links to beta on the homepage, the sign-in page, the workspace switcher and the mainnet request page. |
-| `beta-label` | Beta `sdp-web` Vercel project | on | A Beta badge beside the product name on the homepage and the sign-in, sign-up, terms and mainnet request pages. |
+| Switch                          | Where                                      | Set to at the window | What it does                                                                                                                                                                                       |
+| ------------------------------- | ------------------------------------------ | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SDP_ALLOW_SANDBOX_PROJECTS`    | Production API env (sdp-infra prod tfvars) | `"false"`            | Hides and refuses sandbox projects, creates no sandbox project for a new organization, registers no sandbox cron work, and locks organizations without mainnet access to the mainnet request page. |
+| `SDP_ALLOW_PRODUCTION_PROJECTS` | Beta API env                               | `"false"` (already)  | Beta serves the sandbox only and refuses mainnet requests.                                                                                                                                         |
+| `sandbox-on-beta`               | Production `sdp-web` Vercel project        | on                   | "Try the sandbox" links to beta on the homepage, the sign-in page, the workspace switcher and the mainnet request page.                                                                            |
+| `beta-label`                    | Beta `sdp-web` Vercel project              | on                   | A Beta badge beside the product name on the homepage and the sign-in, sign-up, terms and mainnet request pages.                                                                                    |
 
 Unset means allowed for both API switches. Any value other than `true` or `false` fails at boot,
 and so does setting both to `false`.
