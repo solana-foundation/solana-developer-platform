@@ -28,12 +28,16 @@ pub(crate) struct VerifyIntent<'v> {
     pub(crate) extra_accounts: &'v [Address],
     /// The builder's role of each account of its instructions, in order. A static recipe has none.
     pub(crate) builder_roles: Vec<u8>,
+    /// The most that the rent payer spends on new accounts in the segment.
+    pub(crate) rent_cap: u64,
+    /// The accounts that the span can change, which the assertions guard.
+    pub(crate) guarded: &'v [Address],
 }
 
 impl VerifyIntent<'_> {
     /// The accounts are the instructions sysvar, the fee payer, the rent payer, the two indexes, the
-    /// two version accounts, the record's account table, and the extra accounts. Each one is
-    /// readonly.
+    /// two version accounts, the record's account table, the extra accounts, and the guarded
+    /// accounts. Each one is readonly.
     pub(crate) fn instruction(&self, recipe: &Recipe<'_>) -> Result<Instruction, PlanError> {
         let interface = recipe.interface().id();
         let implementation = recipe.implementation().id();
@@ -57,13 +61,15 @@ impl VerifyIntent<'_> {
             .into_iter()
             .chain(record)
             .chain(self.extra_accounts.iter().copied())
+            .chain(self.guarded.iter().copied())
             .map(|address| AccountMeta { address, role: AccountRole::Readonly })
             .collect();
 
         Ok(Instruction { program: REGISTRY_PROGRAM, accounts, data: self.data()? })
     }
 
-    /// The Anchor discriminator, then each argument in borsh: a `u32` length and the bytes.
+    /// The Anchor discriminator, then each argument in borsh: the intent and the builder roles as a
+    /// `u32` length and the bytes, the rent cap, and the count of guarded accounts.
     fn data(&self) -> Result<Vec<u8>, PlanError> {
         let length = |bytes: &[u8]| {
             u32::try_from(bytes.len()).map_err(|_| PlanError::DoesNotFit {
@@ -73,6 +79,11 @@ impl VerifyIntent<'_> {
             })
         };
         let discriminator = Sha256::digest(b"global:verify_intent");
+        let guarded = u8::try_from(self.guarded.len()).map_err(|_| PlanError::DoesNotFit {
+            limit: Limit::Accounts,
+            used: self.guarded.len(),
+            max: usize::from(u8::MAX),
+        })?;
 
         Ok([
             discriminator.get(..8).unwrap_or_default(),
@@ -80,6 +91,8 @@ impl VerifyIntent<'_> {
             self.intent,
             &length(&self.builder_roles)?.to_le_bytes(),
             &self.builder_roles,
+            &self.rent_cap.to_le_bytes(),
+            &[guarded],
         ]
         .concat())
     }

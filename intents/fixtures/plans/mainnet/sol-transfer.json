@@ -12,7 +12,7 @@
         "mint": "11111111111111111111111111111111",
         "amount": "250000000"
       },
-      "options": { "assertions": false, "verifyIntent": false }
+      "options": { "verifyIntent": false }
     }
   ]
 }

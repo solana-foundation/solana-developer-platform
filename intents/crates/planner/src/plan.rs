@@ -116,7 +116,8 @@ impl<C: Chain> Values<'_, '_, C> {
 
     /// The intent's part of the plan message: `<record message> | guarantees: <each>; <each> |
     /// interface: <id> | implementation: <id>`, the builder for a program recipe, then the onchain
-    /// checks. An id is the name, the version, and the first 8 bytes of the digest.
+    /// checks. An id is the name, the version, and the first 8 bytes of the digest. The segment
+    /// adds the rent cap after its first simulation.
     pub(crate) fn message(
         &self,
         guarantees: &[String],
@@ -134,7 +135,13 @@ impl<C: Chain> Values<'_, '_, C> {
         };
 
         let builder = builder.map(|builder| format!(" | builder: {}", base58(builder))).unwrap_or_default();
-        let checks = if self.recipe.intent().options()?.verify_intent { "verify_intent" } else { "none" };
+        let options = self.recipe.intent().options()?;
+        let checks = match (options.verify_intent, options.assertions) {
+            (true, true) => "verify_intent, assertions",
+            (true, false) => "verify_intent",
+            (false, true) => "assertions",
+            (false, false) => "none",
+        };
 
         Ok(format!(
             "{record} | guarantees: {} | interface: {} | implementation: {}{builder} | onchain checks: {checks}",

@@ -4,6 +4,7 @@
 mod client;
 mod fixture;
 mod flows;
+mod guarded;
 mod intents;
 mod plans;
 mod svm;

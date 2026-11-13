@@ -1,0 +1,27 @@
+[package]
+name = "sdp-intents-lighthouse"
+description = "The Lighthouse assertions that guard an SDP intent's postconditions onchain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sdp-intents-engine.workspace = true
+sdp-intents-spec.workspace = true
+
+# A program derives addresses through the syscalls. Elsewhere `curve25519` derives them in Rust.
+[target.'cfg(target_os = "solana")'.dependencies]
+solana-address = { workspace = true, features = ["syscalls"] }
+
+[target.'cfg(not(target_os = "solana"))'.dependencies]
+solana-address = { workspace = true, features = ["curve25519"] }
+
+[dev-dependencies]
+bs58.workspace = true
+sdp-intents-compiler.workspace = true
+solana-address = { workspace = true, features = ["curve25519", "decode"] }
+
+[lints]
+workspace = true

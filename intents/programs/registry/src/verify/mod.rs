@@ -1,15 +1,17 @@
-//! `verify_intent`: proves in the transaction that its instructions are what the record builds for
-//! the intent, so a signer needs only the transaction bytes. The data is the intent in binary form.
+//! `verify_intent`: proves in the transaction that its segment is what the record builds for the
+//! intent, guarded by the assertions of its postconditions, so a signer needs only the transaction
+//! bytes. [`position`] gives where the segment is.
 //!
 //! The accounts are the instructions sysvar, the fee payer, the rent payer, the two indexes, the
-//! two version accounts, then every account of the record's account table in order, then for a
-//! program recipe the accounts of the builder's last `MoreAccounts` round. [`position`] gives where the checked instructions are.
-//! A remote recipe's span is empty, so `verify_intent` proves only the record and its accounts.
+//! two version accounts, every account of the record's account table in order, for a program
+//! recipe the accounts of the builder's last `MoreAccounts` round, then the guarded accounts.
 //!
-//! For a program recipe, the data also holds the builder's role of each account of its
-//! instructions, one byte each, in order. A static recipe holds none, because `verify_intent`
-//! builds those instructions itself.
+//! The data is the intent in binary form, the builder's role of each account of its instructions
+//! for a program recipe, the rent cap, and the count of guarded accounts. A static recipe holds no
+//! roles, because `verify_intent` builds its instructions itself. A remote recipe's span is empty,
+//! so `verify_intent` proves only the record and its accounts.
 
+mod assertions;
 mod chain;
 mod position;
 mod program_recipe;
@@ -17,14 +19,19 @@ mod registry;
 mod roles;
 mod static_recipe;
 
+use alloc::vec::Vec;
+use core::ops::Range;
+
 use anchor_lang::prelude::*;
 use sdp_intents_engine::{EngineError, Payers, Recipe, Resolution};
 use sdp_intents_spec::wire::DocumentKind;
-use sdp_intents_spec::{Intent, RecipeKind};
+use sdp_intents_spec::{AccountRole, Intent, IntentOptions, RecipeKind};
 
 use crate::error::RegistryError;
 use crate::state::{spec_address, version};
+use assertions::SegmentAssertions;
 use chain::PassedAccounts;
+use position::Segment;
 
 #[derive(Accounts)]
 pub struct VerifyIntent {
@@ -37,14 +44,20 @@ pub struct VerifyIntent {
     pub implementation_version: UncheckedAccount,
 }
 
-pub fn verify_intent(
-    accounts: &VerifyIntent,
-    record_accounts: &[AccountView],
-    intent: &[u8],
-    builder_roles: &[u8],
-) -> Result<()> {
-    position::check_top_level(&accounts.instructions)?;
-    check_options(intent)?;
+/// The instruction's arguments.
+pub struct VerifyArgs<'a> {
+    pub intent: &'a [u8],
+    pub builder_roles: &'a [u8],
+    /// The most that the rent payer spends on new accounts in the segment.
+    pub rent_cap: u64,
+    /// The count of guarded accounts, which end the accounts of the instruction.
+    pub guarded_accounts: u8,
+}
+
+pub fn verify_intent(accounts: &VerifyIntent, passed: &[AccountView], args: VerifyArgs<'_>) -> Result<()> {
+    let sysvar = &accounts.instructions;
+    position::check_top_level(sysvar)?;
+    let options = check_options(args.intent)?;
 
     let interface_data = version::load(accounts.interface_version.account(), DocumentKind::Interface)?;
     let implementation_data = version::load(accounts.implementation_version.account(), DocumentKind::Implementation)?;
@@ -55,20 +68,82 @@ pub fn verify_intent(
     let rent_payer = spec_address(accounts.rent_payer.address());
     let payers = Payers { fee: &fee_payer, rent: &rent_payer };
 
-    let mut recipe = Recipe::parse(interface, implementation, intent, payers).map_err(refused)?;
+    let mut recipe = Recipe::parse(interface, implementation, args.intent, payers).map_err(refused)?;
     registry::check_indexes(accounts, &recipe)?;
 
-    let chain = PassedAccounts::borrow(record_accounts)?;
+    let record_len = passed.len().checked_sub(usize::from(args.guarded_accounts));
+    let (record, guarded) = passed.split_at(record_len.ok_or(RegistryError::WrongGuardedAccounts)?);
+    let chain = PassedAccounts::borrow(record)?;
     resolve(&mut recipe, &chain)?;
+
+    let first = position::first_after(sysvar)?;
+    let snapshot_count = if options.assertions { position::lighthouse_run(sysvar, first) } else { 0 };
+    let snapshots = first..first.checked_add(snapshot_count).ok_or(ProgramError::ArithmeticOverflow)?;
+    let ends = SegmentEnds { options, recipe: &recipe, guarded, rent_cap: args.rent_cap, snapshots };
 
     match recipe.implementation().recipe().map_err(|error| refused(error.into()))? {
         RecipeKind::Static => {
-            require!(builder_roles.is_empty(), RegistryError::WrongBuilderRoles);
-            static_recipe::verify(&recipe, &chain, &accounts.instructions)
+            require!(args.builder_roles.is_empty(), RegistryError::WrongBuilderRoles);
+
+            let built = position::span(sysvar, ends.snapshots.end, static_recipe::count(&recipe)?)?;
+            let named = static_recipe::named(&recipe, &chain)?;
+            let end = ends.end(sysvar, named, &static_recipe::outputs(&recipe)?, &built)?;
+
+            static_recipe::verify(&recipe, &chain, sysvar, &Segment { built, whole: first..end })
         }
-        RecipeKind::Program => program_recipe::verify(&recipe, &chain, &accounts.instructions, builder_roles),
+        RecipeKind::Program => {
+            let hashed = program_recipe::call(&recipe, &chain)?;
+            let built = position::span(sysvar, ends.snapshots.end, hashed.num_instructions)?;
+            let named = position::named(sysvar, &built, builder_roles(args.builder_roles)?.into_iter())?;
+            let end = ends.end(sysvar, named, &hashed.outputs, &built)?;
+
+            program_recipe::verify(&hashed, sysvar, payers, args.builder_roles, &Segment { built, whole: first..end })
+        }
         RecipeKind::Remote => Ok(()),
     }
+}
+
+/// What the end of a segment depends on besides its built instructions.
+struct SegmentEnds<'v, 'a> {
+    options: IntentOptions,
+    recipe: &'v Recipe<'a>,
+    guarded: &'v [AccountView],
+    rent_cap: u64,
+    snapshots: Range<usize>,
+}
+
+impl SegmentEnds<'_, '_> {
+    /// The position after the segment: after the assertions, or after the built instructions when
+    /// the intent turns assertions off.
+    fn end(
+        &self,
+        sysvar: &SysvarInstructions,
+        named: Vec<sdp_intents_lighthouse::Meta>,
+        outputs: &[u8],
+        built: &Range<usize>,
+    ) -> Result<usize> {
+        if !self.options.assertions {
+            require!(self.guarded.is_empty(), RegistryError::WrongGuardedAccounts);
+            return Ok(built.end);
+        }
+
+        let assertions = SegmentAssertions {
+            sysvar,
+            recipe: self.recipe,
+            outputs,
+            named,
+            guarded: self.guarded,
+            rent_cap: self.rent_cap,
+            snapshots: self.snapshots.clone(),
+            built,
+        };
+
+        assertions.verify()
+    }
+}
+
+fn builder_roles(roles: &[u8]) -> Result<Vec<AccountRole>> {
+    roles.iter().map(|role| AccountRole::try_from(*role).map_err(|_| RegistryError::WrongBuilderRoles.into())).collect()
 }
 
 /// The role check lets the fee payer be a writable signer. Only a writable signer can be the fee
@@ -80,15 +155,11 @@ fn fee_payer(accounts: &VerifyIntent) -> Result<sdp_intents_spec::Address> {
     Ok(spec_address(fee_payer.address()))
 }
 
-/// `verify_intent` cannot check Lighthouse assertions yet, so it refuses an intent that asks for
-/// them. A signer then never reads a guarantee that the transaction does not hold.
-fn check_options(intent: &[u8]) -> Result<()> {
+fn check_options(intent: &[u8]) -> Result<IntentOptions> {
     let options = Intent::parse(intent).and_then(|intent| intent.options()).map_err(|error| refused(error.into()))?;
-
     require!(options.verify_intent, RegistryError::VerificationOff);
-    require!(!options.assertions, RegistryError::AssertionsUnavailable);
 
-    Ok(())
+    Ok(options)
 }
 
 /// One `resolve` completes, because every account is in the instruction. Each resolved address

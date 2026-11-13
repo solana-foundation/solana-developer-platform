@@ -33,7 +33,7 @@ pub(crate) fn is_signed(base: BaseType) -> bool {
     matches!(base, BaseType::I8 | BaseType::I16 | BaseType::I32 | BaseType::I64 | BaseType::I128)
 }
 
-fn value_len(value_type: ValueType, bytes: &[u8]) -> Option<usize> {
+pub(crate) fn value_len(value_type: ValueType, bytes: &[u8]) -> Option<usize> {
     if !value_type.array {
         return base_len(value_type.base, bytes);
     }

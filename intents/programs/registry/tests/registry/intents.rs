@@ -69,15 +69,17 @@ impl Published {
         })
     }
 
-    /// `verify_intent` for `documents`: the payers, the registry's accounts, the record's account table, then
-    /// `extra_accounts`, the accounts of a builder's last round. `builder_roles` holds the builder's
-    /// role of each account of its instructions, and is empty for a static recipe.
+    /// `verify_intent` for `documents` with no guarded accounts: the payers, the registry's accounts,
+    /// the record's account table, then `extra_accounts`, the accounts of a builder's last round.
+    /// `builder_roles` holds the builder's role of each account of its instructions, and is empty for
+    /// a static recipe.
     pub fn verify_instruction(
         &self,
         svm: &LiteSVM,
         documents: &Documents,
         extra_accounts: &[Address],
         builder_roles: &[u8],
+        rent_cap: u64,
     ) -> Result<Instruction, Failure> {
         let accounts = &self.accounts;
         let fee_payer = Address::new_from_array(documents.fee_payer.0);
@@ -95,6 +97,8 @@ impl Published {
         let data = anchor_lang::InstructionData::data(&registry::instruction::VerifyIntent {
             intent: &documents.intent,
             builder_roles,
+            rent_cap,
+            guarded_accounts: 0,
         });
 
         Ok(Instruction {

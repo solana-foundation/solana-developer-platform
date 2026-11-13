@@ -15,7 +15,7 @@
         "amount": "100000000",
         "memo": null
       },
-      "options": { "assertions": false, "verifyIntent": false }
+      "options": { "verifyIntent": false }
     },
     {
       "interface": "solana.org/token.transfer@^1",
@@ -26,7 +26,7 @@
         "mint": "11111111111111111111111111111111",
         "amount": "250000000"
       },
-      "options": { "assertions": false, "verifyIntent": false }
+      "options": { "verifyIntent": false }
     }
   ]
 }

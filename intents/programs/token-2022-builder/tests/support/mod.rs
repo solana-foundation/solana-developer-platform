@@ -3,7 +3,7 @@
 use anchor_v2_testing::litesvm::LiteSVM;
 use anchor_v2_testing::{Keypair, Message, Signer, VersionedMessage, VersionedTransaction};
 use sdp_intents_planner::{Plan, PlanError};
-use sdp_intents_program_testing::{definitions, prepare, send, svm, Documents};
+use sdp_intents_program_testing::{built, definitions, prepare, send, svm, Documents};
 use solana_account::Account;
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
@@ -58,7 +58,7 @@ pub struct Sent {
 
 impl Chain {
     pub fn new() -> Result<Self, String> {
-        let mut svm = svm();
+        let mut svm = svm()?;
         svm.add_program(token_2022_builder::id(), BUILDER_PROGRAM).map_err(|error| format!("{error:?}"))?;
         svm.add_program(HOOK_PROGRAM_ID, HOOK_PROGRAM).map_err(|error| format!("{error:?}"))?;
 
@@ -187,7 +187,7 @@ impl Chain {
   "interface": "solana.org/token.transfer@^1",
   "implementation": "solana.org/token-2022-transfer@^1",
   "inputs": {{ "from": "{}", "to": "{}", "mint": "{mint}", "amount": "{amount}"{memo} }},
-  "options": {{ "assertions": false, "verifyIntent": false }}
+  "options": {{ "verifyIntent": false }}
 }}"#,
             self.wallets.from.pubkey(),
             self.wallets.to.pubkey(),
@@ -202,12 +202,7 @@ impl Chain {
         send(&mut self.svm, &plan, &[&self.wallets.fee_payer, &self.wallets.from])
             .map_err(|error| format!("{error:?}"))?;
 
-        let programs = plan
-            .transaction
-            .instructions
-            .iter()
-            .map(|instruction| Address::new_from_array(instruction.program.0))
-            .collect();
+        let programs = built(&plan).iter().map(|instruction| Address::new_from_array(instruction.program.0)).collect();
 
         Ok(Sent { plan, programs })
     }

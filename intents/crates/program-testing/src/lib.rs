@@ -5,7 +5,7 @@
 //! use sdp_intents_program_testing::{definitions, prepare, send, svm, Documents};
 //!
 //! # fn run(intent: &str, fee_payer: &solana_address::Address, signers: &[&anchor_v2_testing::Keypair]) -> Result<(), Box<dyn std::error::Error>> {
-//! let mut svm = svm();
+//! let mut svm = svm()?;
 //! let documents =
 //!     Documents::compile(&[definitions::TOKEN_TRANSFER], &[definitions::SYSTEM_TRANSFER], intent, fee_payer)?;
 //! let plan = prepare(&svm, &documents)?;
@@ -27,8 +27,8 @@ use solana_signature::Signature;
 
 use sdp_intents_compiler::Catalog;
 use sdp_intents_planner::{
-    Account, AccountMap, IntentDocuments, Payers, Plan, PlanError, PlanRequest, Planner, ReturnData, Simulation,
-    SimulationResult, Step,
+    Account, AccountMap, Instruction, IntentDocuments, Payers, Plan, PlanError, PlanRequest, Planner, ReturnData,
+    Simulation, SimulationResult, Step,
 };
 use sdp_intents_spec::Address;
 
@@ -59,9 +59,15 @@ pub fn fixture_program(crate_dir: &str, file: &str) -> Result<Vec<u8>, String> {
 /// A scratch address for the planner. LiteSVM holds no account there.
 const SCRATCH: Address = Address([0x5c; 32]);
 
-/// A LiteSVM that checks no signatures, as a simulation over RPC with `sigVerify` off.
-pub fn svm() -> LiteSVM {
-    LiteSVM::new().with_sigverify(false)
+/// A LiteSVM that checks no signatures, as a simulation over RPC with `sigVerify` off, with
+/// Lighthouse at its mainnet address for the assertions.
+pub fn svm() -> Result<LiteSVM, String> {
+    let mut svm = LiteSVM::new().with_sigverify(false);
+    let lighthouse = fixture_program(env!("CARGO_MANIFEST_DIR"), "lighthouse.so")?;
+    let address = solana_address(&sdp_intents_lighthouse::LIGHTHOUSE_PROGRAM);
+    svm.add_program(address, &lighthouse).map_err(|error| format!("{error:?}"))?;
+
+    Ok(svm)
 }
 
 /// The three documents of one intent, compiled, and the account that pays for its plan.
@@ -113,6 +119,12 @@ impl Documents {
     pub fn as_intent(&self) -> IntentDocuments<'_> {
         IntentDocuments { interface: &self.interface, implementation: &self.implementation, intent: &self.intent }
     }
+}
+
+/// The instructions that the record built for the plan's first intent, without `verify_intent` and
+/// the Lighthouse instructions around them.
+pub fn built(plan: &Plan) -> &[Instruction] {
+    plan.intents.first().and_then(|intent| plan.transaction.instructions.get(intent.span.clone())).unwrap_or_default()
 }
 
 /// Runs the planner for one intent, answering each fetch and each simulation from `svm`.

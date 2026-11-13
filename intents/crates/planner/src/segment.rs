@@ -1,6 +1,10 @@
-//! Plans one intent's segment of the transaction: `verify_intent` when the intent keeps it, then
-//! the built instructions. Each simulation runs the earlier segments first, so a builder, the
-//! rendered values, and the checks read the state after them.
+//! Plans one intent's segment of the transaction. Each simulation runs the earlier segments first,
+//! so a builder, the rendered values, and the checks read the state after them.
+//!
+//! A segment takes two simulations. The first runs the built instructions alone: the planner checks
+//! the postconditions and the payer rules against it, and reads the rent cap from it. The second
+//! runs the whole segment, with `verify_intent` and the Lighthouse instructions (`onchain.rs`). An
+//! intent that turns both checks off needs only the first.
 
 use sha2::{Digest as _, Sha256};
 
@@ -8,11 +12,11 @@ use sdp_intents_engine::{Chain, Payers, Recipe, Resolution};
 use sdp_intents_spec::builder::StagedResult;
 use sdp_intents_spec::{Address, RecipeKind};
 
+use crate::onchain::{OnchainChecks, OnchainInputs};
 use crate::plan::{Built, PlannedIntent};
-use crate::registry::VerifyIntent;
 use crate::render::Column;
 use crate::values::Values;
-use crate::verify::{Snapshot, Verification};
+use crate::verify::{rent_cap, Snapshot, Verification};
 use crate::{
     Account, Digests, Instruction, IntentDocuments, PlanError, RequiredSignature, Simulation, SimulationResult,
     Transaction,
@@ -40,7 +44,7 @@ pub(crate) struct Segment {
     pub(crate) intent: PlannedIntent,
     /// The intent's part of the plan message.
     pub(crate) message: String,
-    pub(crate) verify: Option<Instruction>,
+    pub(crate) onchain: OnchainChecks,
     pub(crate) built: Vec<Instruction>,
     pub(crate) signatures: Vec<RequiredSignature>,
     /// The accounts that the segment can change, and their state after it, in the same order.
@@ -56,6 +60,7 @@ pub(crate) struct SegmentPlanner<'a> {
     intent: &'a [u8],
     digests: Digests,
     priority_fee_lamports: u64,
+    memory_id: u8,
     /// The account that pays a builder simulation's fee and scratch rent.
     pub(crate) funder: Address,
     scratch: Address,
@@ -72,16 +77,19 @@ enum State {
         builder: Address,
     },
     Built(Built),
-    AwaitingVerification(Box<Verifying>),
+    AwaitingChecks(Box<Checking>),
+    /// The simulation of the whole segment, which `next` returns.
+    Onchain(Box<Onchain>),
+    AwaitingOnchain(Box<Onchain>),
     Planned(Box<Segment>),
     Finished,
 }
 
-/// The segment, simulated after the earlier ones, with what the plan needs once the simulation
-/// passes.
-struct Verifying {
+/// The built instructions, simulated after the earlier segments, with what the plan needs once the
+/// simulation passes.
+struct Checking {
     built: Built,
-    verify: Option<Instruction>,
+    earlier: Vec<Instruction>,
     earlier_fee: u64,
     /// The fee of the transaction up to this segment, for a simulation that reports none.
     estimated_fee: u64,
@@ -93,19 +101,23 @@ struct Verifying {
     signatures: Vec<RequiredSignature>,
 }
 
+/// The whole segment, after the built instructions passed their checks.
+struct Onchain {
+    checking: Checking,
+    onchain: OnchainChecks,
+    message: String,
+    simulation: Option<Simulation>,
+}
+
 impl<'a> SegmentPlanner<'a> {
     pub(crate) fn new(
         documents: IntentDocuments<'a>,
         payers: Payers<'a>,
         priority_fee_lamports: u64,
+        memory_id: u8,
         scratch: Address,
     ) -> Result<Self, PlanError> {
         let recipe = Recipe::parse(documents.interface, documents.implementation, documents.intent, payers)?;
-
-        if recipe.intent().options()?.assertions {
-            return Err(PlanError::Unavailable("assertions"));
-        }
-
         let digests = Digests {
             interface: Sha256::digest(documents.interface).into(),
             implementation: Sha256::digest(documents.implementation).into(),
@@ -117,6 +129,7 @@ impl<'a> SegmentPlanner<'a> {
             intent: documents.intent,
             digests,
             priority_fee_lamports,
+            memory_id,
             funder,
             scratch,
             extra_accounts: Vec::new(),
@@ -129,9 +142,15 @@ impl<'a> SegmentPlanner<'a> {
         match core::mem::replace(&mut self.state, State::Finished) {
             State::Resolving => self.resolve(earlier),
             State::Building => self.simulate_builder(earlier),
-            State::Built(built) => self.simulate_segment(built, earlier),
+            State::Built(built) => self.simulate_built(built, earlier),
+            State::Onchain(mut onchain) => {
+                let simulation = onchain.simulation.take().ok_or(PlanError::OutOfOrder)?;
+                self.state = State::AwaitingOnchain(onchain);
+
+                Ok(SegmentStep::Simulate(simulation))
+            }
             State::Planned(segment) => Ok(SegmentStep::Planned(segment)),
-            awaiting @ (State::AwaitingBuilder { .. } | State::AwaitingVerification(_)) => {
+            awaiting @ (State::AwaitingBuilder { .. } | State::AwaitingChecks(_) | State::AwaitingOnchain(_)) => {
                 self.state = awaiting;
                 Err(PlanError::OutOfOrder)
             }
@@ -142,7 +161,8 @@ impl<'a> SegmentPlanner<'a> {
     pub(crate) fn simulated(&mut self, result: SimulationResult) -> Result<(), PlanError> {
         match core::mem::replace(&mut self.state, State::Finished) {
             State::AwaitingBuilder { builder } => self.builder_result(builder, result),
-            State::AwaitingVerification(verifying) => self.verified(*verifying, result),
+            State::AwaitingChecks(checking) => self.checked(*checking, result),
+            State::AwaitingOnchain(onchain) => self.verified_onchain(*onchain, result),
             other => {
                 self.state = other;
                 Err(PlanError::OutOfOrder)
@@ -159,7 +179,7 @@ impl<'a> SegmentPlanner<'a> {
         }
 
         match self.recipe.implementation().recipe()? {
-            RecipeKind::Static => self.simulate_segment(Built::from_static(&self.recipe, earlier.chain)?, earlier),
+            RecipeKind::Static => self.simulate_built(Built::from_static(&self.recipe, earlier.chain)?, earlier),
             RecipeKind::Program => self.simulate_builder(earlier),
             RecipeKind::Remote => Err(PlanError::RemoteRecipe),
         }
@@ -205,10 +225,10 @@ impl<'a> SegmentPlanner<'a> {
         Ok(())
     }
 
-    /// Renders what needs account data, then simulates the transaction up to the end of this
-    /// segment. The fee payer and the segment's writable accounts are snapshot first, because only
+    /// Renders what needs account data, then simulates the built instructions after the earlier
+    /// segments. The fee payer and the segment's writable accounts are snapshot first, because only
     /// they can change.
-    fn simulate_segment<C: Chain>(&mut self, built: Built, earlier: &Earlier<'_, C>) -> Result<SegmentStep, PlanError> {
+    fn simulate_built<C: Chain>(&mut self, built: Built, earlier: &Earlier<'_, C>) -> Result<SegmentStep, PlanError> {
         if built.instructions.is_empty() {
             return Err(PlanError::NoInstructions);
         }
@@ -237,104 +257,122 @@ impl<'a> SegmentPlanner<'a> {
         let display = values.render(self.recipe.interface().display()?, Column::Display)?;
         let signatures = values.signatures(&segment, &built)?;
         let before = observe.iter().map(|address| snapshot_of(earlier.chain, address)).collect();
-        let verify = self.verify_instruction(&built)?;
 
-        let instructions = earlier.instructions.iter().chain(&verify).chain(&built.instructions).cloned().collect();
-        let transaction = Transaction {
-            priority_fee_lamports: self.priority_fee_lamports,
-            ..Transaction::unbudgeted(fee_payer, instructions)
-        };
+        let transaction = self.transaction(earlier.instructions.iter().chain(&built.instructions));
         transaction.check_fit()?;
 
-        let estimated_fee = transaction.fee();
-        let simulation = Simulation { transaction, observe: observe.clone() };
-        let verifying = Verifying {
-            built,
-            verify,
+        let checking = Checking {
+            estimated_fee: transaction.fee(),
+            earlier: earlier.instructions.to_vec(),
             earlier_fee: earlier.fee,
-            estimated_fee,
-            observe,
+            built,
+            observe: observe.clone(),
             before,
             guarantees,
             message,
             display,
             signatures,
         };
-        self.state = State::AwaitingVerification(Box::new(verifying));
+        self.state = State::AwaitingChecks(Box::new(checking));
 
-        Ok(SegmentStep::Simulate(simulation))
+        Ok(SegmentStep::Simulate(Simulation { transaction, observe }))
     }
 
-    /// `verify_intent` for the intent, unless the intent turns it off. A builder's roles come from
-    /// its instructions, and a static recipe has none.
-    fn verify_instruction(&self, built: &Built) -> Result<Option<Instruction>, PlanError> {
-        if !self.recipe.intent().options()?.verify_intent {
-            return Ok(None);
-        }
-
-        let builder_roles = match self.recipe.implementation().recipe()? {
-            RecipeKind::Program => built.roles(),
-            RecipeKind::Static | RecipeKind::Remote => Vec::new(),
-        };
-        let verify = VerifyIntent { intent: self.intent, extra_accounts: &self.extra_accounts, builder_roles };
-
-        verify.instruction(&self.recipe).map(Some)
-    }
-
-    fn verified(&mut self, verifying: Verifying, result: SimulationResult) -> Result<(), PlanError> {
-        if let Some(error) = result.error {
-            return Err(PlanError::Simulation { error, logs: result.logs });
-        }
-
-        if result.accounts.len() != verifying.observe.len() {
-            return Err(PlanError::NoAccounts);
-        }
-
-        let snapshots: Vec<Snapshot> = verifying
-            .observe
-            .iter()
-            .zip(verifying.before)
-            .zip(&result.accounts)
-            .map(|((address, before), after)| Snapshot {
-                address: *address,
-                before,
-                after: after.clone().unwrap_or_else(empty),
-            })
-            .collect();
-        let fee = result.fee.unwrap_or(verifying.estimated_fee);
+    /// Checks the postconditions and the payer rules, then builds the onchain checks with the rent
+    /// cap that the simulation gives.
+    fn checked(&mut self, checking: Checking, result: SimulationResult) -> Result<(), PlanError> {
+        let snapshots = snapshots(&checking, &result)?;
+        let fee = result.fee.unwrap_or(checking.estimated_fee);
 
         Verification::new(
             &self.recipe,
-            &verifying.built.outputs,
+            &checking.built.outputs,
             &snapshots,
-            &verifying.built.instructions,
-            fee.saturating_sub(verifying.earlier_fee),
+            &checking.built.instructions,
+            fee.saturating_sub(checking.earlier_fee),
         )
-        .check(&verifying.guarantees)?;
+        .check(&checking.guarantees)?;
 
-        let segment = Segment {
-            message: verifying.message,
+        let rent_cap = rent_cap(&snapshots);
+        let message = format!("{} | rent cap {rent_cap} lamports", checking.message);
+        let options = self.recipe.intent().options()?;
+
+        if !options.verify_intent && !options.assertions {
+            self.state = State::Planned(Box::new(self.segment(checking, OnchainChecks::default(), message, result)?));
+            return Ok(());
+        }
+
+        let inputs = OnchainInputs {
+            recipe: &self.recipe,
+            intent: self.intent,
+            built: &checking.built,
+            extra_accounts: &self.extra_accounts,
+            snapshots: &snapshots,
+            rent_cap,
+            memory_id: self.memory_id,
+        };
+        let onchain = inputs.checks()?;
+
+        let instructions = checking
+            .earlier
+            .iter()
+            .chain(&onchain.verify)
+            .chain(&onchain.snapshots)
+            .chain(&checking.built.instructions)
+            .chain(&onchain.checks);
+        let transaction = self.transaction(instructions);
+        transaction.check_fit()?;
+
+        let simulation = Simulation { transaction, observe: checking.observe.clone() };
+        self.state = State::Onchain(Box::new(Onchain { checking, onchain, message, simulation: Some(simulation) }));
+
+        Ok(())
+    }
+
+    /// The postconditions held in the first simulation, so this one only has to pass.
+    fn verified_onchain(&mut self, onchain: Onchain, result: SimulationResult) -> Result<(), PlanError> {
+        snapshots(&onchain.checking, &result)?;
+
+        let segment = self.segment(onchain.checking, onchain.onchain, onchain.message, result)?;
+        self.state = State::Planned(Box::new(segment));
+
+        Ok(())
+    }
+
+    fn segment(
+        &self,
+        checking: Checking,
+        onchain: OnchainChecks,
+        message: String,
+        result: SimulationResult,
+    ) -> Result<Segment, PlanError> {
+        Ok(Segment {
+            message,
             intent: PlannedIntent {
-                display: verifying.display,
+                display: checking.display,
                 digests: self.digests,
                 builder: self.builder(),
-                outputs: verifying.built.outputs,
+                outputs: checking.built.outputs,
                 builder_simulations: self.builder_simulations,
                 verify: None,
                 span: 0..0,
             },
-            verify: verifying.verify,
-            built: verifying.built.instructions,
-            signatures: verifying.signatures,
-            observed: verifying.observe,
+            onchain,
+            built: checking.built.instructions,
+            signatures: checking.signatures,
+            observed: checking.observe,
             after: result.accounts,
-            fee,
+            fee: result.fee.unwrap_or(checking.estimated_fee),
             units_consumed: result.units_consumed.ok_or(PlanError::NoUnits)?,
             loaded_accounts_data_size: result.loaded_accounts_data_size,
-        };
-        self.state = State::Planned(Box::new(segment));
+        })
+    }
 
-        Ok(())
+    fn transaction<'i>(&self, instructions: impl Iterator<Item = &'i Instruction>) -> Transaction {
+        Transaction {
+            priority_fee_lamports: self.priority_fee_lamports,
+            ..Transaction::unbudgeted(*self.recipe.payers().fee, instructions.cloned().collect())
+        }
     }
 
     /// The builder program of a program recipe.
@@ -354,6 +392,29 @@ fn snapshot_of<C: Chain>(chain: &C, address: &Address) -> Account {
         lamports: account.lamports,
         data: account.data.to_vec(),
     })
+}
+
+/// Each observed account before the simulation and after it.
+fn snapshots(checking: &Checking, result: &SimulationResult) -> Result<Vec<Snapshot>, PlanError> {
+    if let Some(error) = &result.error {
+        return Err(PlanError::Simulation { error: error.clone(), logs: result.logs.clone() });
+    }
+
+    if result.accounts.len() != checking.observe.len() {
+        return Err(PlanError::NoAccounts);
+    }
+
+    Ok(checking
+        .observe
+        .iter()
+        .zip(&checking.before)
+        .zip(&result.accounts)
+        .map(|((address, before), after)| Snapshot {
+            address: *address,
+            before: before.clone(),
+            after: after.clone().unwrap_or_else(empty),
+        })
+        .collect())
 }
 
 fn empty() -> Account {

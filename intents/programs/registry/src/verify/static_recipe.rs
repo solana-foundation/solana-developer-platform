@@ -2,24 +2,55 @@
 //! instruction at its place in the span: the program, each account, and the data, byte for byte.
 //! Each account's role must be its role in the transaction, as [`super::roles`] gives it.
 
+use alloc::vec::Vec;
 use core::ops::Range;
 
 use anchor_lang::prelude::*;
 use pinocchio::sysvars::instructions::IntrospectedInstruction;
 use sdp_intents_engine::{BuiltInstruction, Chain, Recipe};
+use sdp_intents_lighthouse::Meta;
 use sdp_intents_spec::AccountRole;
 
 use crate::error::RegistryError;
+use crate::verify::position::Segment;
+use crate::verify::refused;
 use crate::verify::roles::TransactionRoles;
-use crate::verify::{position, refused};
 
-pub fn verify<C: Chain>(recipe: &Recipe<'_>, chain: &C, sysvar: &SysvarInstructions) -> Result<()> {
-    let count = recipe.implementation().instructions().map_err(|error| refused(error.into()))?.len();
-    let span = position::span(sysvar, count)?;
+/// The number of instructions that the recipe builds.
+pub fn count(recipe: &Recipe<'_>) -> Result<usize> {
+    Ok(recipe.implementation().instructions().map_err(|error| refused(error.into()))?.len())
+}
+
+/// Each account of the built instructions with its role, in order.
+pub fn named<C: Chain>(recipe: &Recipe<'_>, chain: &C) -> Result<Vec<Meta>> {
+    let mut named = Vec::new();
+
+    for expected in recipe.instructions(chain).map_err(refused)? {
+        for account in expected.map_err(refused)?.accounts() {
+            let account = account.map_err(refused)?;
+            named.push(Meta { address: *account.address, role: account.role });
+        }
+    }
+
+    Ok(named)
+}
+
+/// The output addresses that the record binds, in borsh.
+pub fn outputs(recipe: &Recipe<'_>) -> Result<Vec<u8>> {
+    let count = recipe.interface().outputs().map_err(|error| refused(error.into()))?.len();
+
+    (0u8..)
+        .take(count)
+        .map(|output| recipe.output_address(output).map(|address| address.0).map_err(refused))
+        .collect::<Result<Vec<_>>>()
+        .map(|addresses| addresses.concat())
+}
+
+pub fn verify<C: Chain>(recipe: &Recipe<'_>, chain: &C, sysvar: &SysvarInstructions, segment: &Segment) -> Result<()> {
     let roles = transaction_roles(recipe, chain)?;
-    let checked = Checked { sysvar, span: &span, roles: &roles };
+    let checked = Checked { sysvar, span: &segment.whole, roles: &roles };
 
-    recipe.instructions(chain).map_err(refused)?.zip(span.clone()).try_for_each(|(expected, position)| {
+    recipe.instructions(chain).map_err(refused)?.zip(segment.built.clone()).try_for_each(|(expected, position)| {
         let expected = expected.map_err(refused)?;
 
         checked.compare(&expected, &sysvar.load_instruction_at(position)?)

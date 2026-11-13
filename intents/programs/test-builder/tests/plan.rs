@@ -4,7 +4,7 @@
 use anchor_v2_testing::litesvm::LiteSVM;
 use anchor_v2_testing::{Keypair, Signer};
 use sdp_intents_planner::PlanError;
-use sdp_intents_program_testing::{definitions, prepare, send, svm, Documents};
+use sdp_intents_program_testing::{built, definitions, prepare, send, svm, Documents};
 
 const RECORD: &str = include_str!("../fixtures/test-builder-transfer.json");
 const PROGRAM: &[u8] = include_bytes!("../../target/deploy/test_builder.so");
@@ -22,7 +22,7 @@ struct Setup {
 }
 
 fn setup() -> Result<Setup, String> {
-    let mut svm = svm();
+    let mut svm = svm()?;
     svm.add_program(test_builder::id(), PROGRAM).map_err(|error| format!("{error:?}"))?;
 
     let wallets = Wallets { fee_payer: Keypair::new(), from: Keypair::new(), to: Keypair::new() };
@@ -40,7 +40,7 @@ fn intent(wallets: &Wallets, amount: u64) -> String {
   "interface": "solana.org/token.transfer@^1",
   "implementation": "solana.org/test-builder-transfer@^1",
   "inputs": {{ "from": "{}", "to": "{}", "mint": "11111111111111111111111111111111", "amount": "{amount}" }},
-  "options": {{ "assertions": false, "verifyIntent": false }}
+  "options": {{ "verifyIntent": false }}
 }}"#,
         wallets.from.pubkey(),
         wallets.to.pubkey(),
@@ -61,9 +61,11 @@ fn plans_a_builder_transfer_in_two_rounds_and_sends_it() {
     let plan = prepare(&svm, &documents).unwrap();
 
     assert_eq!(plan.intents[0].builder_simulations, 2);
-    assert_eq!(plan.transaction.instructions.len(), 1);
+    assert_eq!(built(&plan).len(), 1);
     assert!(plan.message.contains(&format!(" || 1: transfer 2 SOL from {}", wallets.from.pubkey())));
-    assert!(plan.message.ends_with(&format!("| builder: {} | onchain checks: none", test_builder::id())));
+    assert!(plan
+        .message
+        .contains(&format!("| builder: {} | onchain checks: assertions | rent cap ", test_builder::id())));
 
     send(&mut svm, &plan, &[&wallets.fee_payer, &wallets.from]).unwrap();
 

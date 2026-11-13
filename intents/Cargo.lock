@@ -2027,6 +2027,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sdp-intents-lighthouse"
+version = "0.1.0"
+dependencies = [
+ "bs58",
+ "sdp-intents-compiler",
+ "sdp-intents-engine",
+ "sdp-intents-spec",
+ "solana-address 2.9.0",
+]
+
+[[package]]
 name = "sdp-intents-planner"
 version = "0.1.0"
 dependencies = [
@@ -2034,6 +2045,7 @@ dependencies = [
  "bytemuck",
  "sdp-intents-compiler",
  "sdp-intents-engine",
+ "sdp-intents-lighthouse",
  "sdp-intents-spec",
  "sha2 0.11.1",
  "solana-address 2.9.0",

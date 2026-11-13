@@ -205,7 +205,7 @@ mod tests {
 
         let prepared = Client::new(url).prepare(&request).unwrap();
 
-        assert_eq!(prepared.plan.transaction.instructions.len(), 2);
+        assert_eq!(prepared.plan.intents[0].span.len(), 2);
         assert_eq!(prepared.message.first(), Some(&0x81));
     }
 }

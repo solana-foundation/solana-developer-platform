@@ -1,6 +1,14 @@
 [workspace]
 resolver = "2"
-members = ["crates/spec", "crates/compiler", "crates/engine", "crates/planner", "crates/client", "crates/cli"]
+members = [
+    "crates/spec",
+    "crates/compiler",
+    "crates/engine",
+    "crates/lighthouse",
+    "crates/planner",
+    "crates/client",
+    "crates/cli",
+]
 # `crates/builder` and `crates/program-testing` belong to the programs workspace, because they
 # depend on pinocchio and LiteSVM.
 exclude = ["crates/builder", "crates/program-testing", "programs"]
@@ -20,6 +28,7 @@ bytemuck = { version = "=1.25.2", features = ["derive", "min_const_generics"] }
 sdp-intents-compiler = { path = "crates/compiler" }
 sdp-intents-client = { path = "crates/client" }
 sdp-intents-engine = { path = "crates/engine" }
+sdp-intents-lighthouse = { path = "crates/lighthouse" }
 sdp-intents-planner = { path = "crates/planner" }
 sdp-intents-spec = { path = "crates/spec" }
 serde_json = { version = "=1.0.154", features = ["preserve_order"] }

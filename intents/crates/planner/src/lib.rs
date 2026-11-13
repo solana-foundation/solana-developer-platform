@@ -32,6 +32,7 @@
 mod accounts;
 mod error;
 mod instruction;
+mod onchain;
 mod plan;
 mod planner;
 mod registry;

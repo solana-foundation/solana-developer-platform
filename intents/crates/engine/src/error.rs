@@ -61,6 +61,9 @@ pub enum EngineError {
     },
     /// The value has no form in the encoding, such as an optional input outside `borsh`.
     BadEncoding,
+    /// A postcondition names a value of another type, an absent input, or an output that the
+    /// builder did not write.
+    BadCondition,
 }
 
 impl From<SpecError> for EngineError {
@@ -89,6 +92,7 @@ impl fmt::Display for EngineError {
             Self::Unresolved { account } => write!(f, "account {account} is not resolved"),
             Self::UnboundOutput { output } => write!(f, "output {output} has no account"),
             Self::BadEncoding => f.write_str("the value has no form in this encoding"),
+            Self::BadCondition => f.write_str("a postcondition names a value that it cannot read"),
         }
     }
 }

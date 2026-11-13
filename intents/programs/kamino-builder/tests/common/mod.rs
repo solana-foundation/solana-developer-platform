@@ -51,7 +51,7 @@ pub struct Holdings {
 }
 
 pub fn setup(holdings: Holdings) -> Result<Setup, String> {
-    let mut svm = sdp_intents_program_testing::svm();
+    let mut svm = sdp_intents_program_testing::svm()?;
     svm.add_program(kamino_builder::id(), BUILDER_PROGRAM).map_err(debug)?;
     svm.add_program(KVAULT, &fixture_program(env!("CARGO_MANIFEST_DIR"), "kvault.so")?).map_err(debug)?;
     svm.add_program(KLEND, &fixture_program(env!("CARGO_MANIFEST_DIR"), "klend.so")?).map_err(debug)?;
@@ -134,7 +134,7 @@ fn intent(interface: &str, implementation: &str, wallets: &Wallets, amounts: &st
   "interface": "solana.org/{interface}@^1",
   "implementation": "solana.org/{implementation}@^1",
   "inputs": {{ "owner": "{}", "vault": "{VAULT}", "asset": "{USDC}", {amounts} }},
-  "options": {{ "assertions": false, "verifyIntent": false }}
+  "options": {{ "verifyIntent": false }}
 }}"#,
         wallets.owner.pubkey(),
     )

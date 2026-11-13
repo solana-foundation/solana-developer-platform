@@ -6,7 +6,7 @@ mod support;
 use anchor_v2_testing::Signer;
 use jupiter_lend_builder::LENDING_PROGRAM;
 use sdp_intents_planner::{Instruction, PlanError};
-use sdp_intents_program_testing::send;
+use sdp_intents_program_testing::{built, send};
 use solana_address::Address;
 use support::{
     ata, balance, deposit_plan, fund, market_accounts, report, setup, signers, withdraw_plan, Amounts, Failure,
@@ -48,7 +48,7 @@ fn named(accounts: &[(&str, u8)]) -> Vec<(String, u8)> {
 fn lending_instruction(measured: &Measured) -> Option<&Instruction> {
     let lending = LENDING_PROGRAM.to_bytes();
 
-    measured.plan.transaction.instructions.iter().find(|instruction| instruction.program.0 == lending)
+    built(&measured.plan).iter().find(|instruction| instruction.program.0 == lending)
 }
 
 #[test]
@@ -70,7 +70,7 @@ fn deposits_usdt_into_a_new_share_account() {
 
     let plan = &measured.plan;
     assert_eq!(plan.intents[0].builder_simulations, 1);
-    assert_eq!(plan.transaction.instructions.len(), 2);
+    assert_eq!(built(plan).len(), 2);
     assert_eq!(plan.intents[0].outputs, JLUSDT.to_bytes());
     assert!(plan.message.contains(&format!(" || 1: deposit 100 of {USDT} from {owner}")));
 
@@ -119,7 +119,7 @@ fn the_deposit_is_the_instruction_of_the_sdk() {
     assert_eq!(metas(deposit), expected);
     assert_eq!(deposit.data, data.concat());
 
-    let create = measured.plan.transaction.instructions.first().unwrap();
+    let create = built(&measured.plan).first().unwrap();
     let rent_payer = setup.wallets.fee_payer.pubkey().to_string();
     let expected_create = named(&[
         (&rent_payer, WRITABLE_SIGNER),
@@ -187,7 +187,7 @@ fn withdraws_shares_into_a_new_asset_account() {
 
     let plan = &measured.plan;
     assert_eq!(plan.intents[0].builder_simulations, 1);
-    assert_eq!(plan.transaction.instructions.len(), 2);
+    assert_eq!(built(plan).len(), 2);
     assert_eq!(plan.intents[0].outputs, JLUSDT.to_bytes());
 
     send(&mut setup.svm, plan, &signers(&setup.wallets)).unwrap();
@@ -210,7 +210,7 @@ fn withdraws_the_shares_of_a_deposit() {
     report("withdrawal", &measured);
 
     assert_eq!(measured.plan.intents[0].builder_simulations, 1);
-    assert_eq!(measured.plan.transaction.instructions.len(), 1);
+    assert_eq!(built(&measured.plan).len(), 1);
 
     send(&mut setup.svm, &measured.plan, &signers(&setup.wallets)).unwrap();
 
@@ -228,7 +228,7 @@ fn a_deposit_into_an_existing_share_account_is_one_instruction() {
     let measured = deposit_plan(&setup, &VAULT, &USDT, Amounts { amount: 100 * UNIT, floor: 94 * UNIT }).unwrap();
     report("deposit", &measured);
 
-    assert_eq!(measured.plan.transaction.instructions.len(), 1);
+    assert_eq!(built(&measured.plan).len(), 1);
     send(&mut setup.svm, &measured.plan, &signers(&setup.wallets)).unwrap();
 }
 

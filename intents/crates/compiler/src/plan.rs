@@ -133,10 +133,9 @@ mod tests {
             PLAN,
             r#""amount": "250000000"
       },
-      "options": { "assertions": false, "verifyIntent": false }"#,
+      "options": { "verifyIntent": false }"#,
             r#""amount": "250000000"
-      },
-      "options": { "assertions": false }"#,
+      }"#,
         );
         let catalog = full_catalog();
         let plan = compile_plan(&text, &catalog).unwrap();

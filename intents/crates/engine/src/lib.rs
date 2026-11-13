@@ -46,6 +46,7 @@
 
 mod borsh;
 mod chain;
+mod conditions;
 mod documents;
 mod error;
 mod hints;
@@ -60,8 +61,18 @@ mod value;
 mod test_support;
 
 pub use chain::{AccountData, Chain};
+pub use conditions::Condition;
 pub use error::EngineError;
 pub use instructions::{BuiltAccount, BuiltInstruction, Instructions};
 pub use payers::Payers;
 pub use recipe::{Missing, Recipe, Resolution};
 pub use value::Bytes;
+
+/// The associated token account of `owner` for `mint`, under `token_program`.
+pub fn associated_token_account(
+    owner: &sdp_intents_spec::Address,
+    mint: &sdp_intents_spec::Address,
+    token_program: &sdp_intents_spec::Address,
+) -> Option<sdp_intents_spec::Address> {
+    pda::associated_token_account(owner, mint, token_program)
+}

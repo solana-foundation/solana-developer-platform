@@ -56,13 +56,14 @@ impl<'a> Planner<'a> {
     /// `scratch` is any address that holds no account, where a builder simulation writes its result.
     /// A fresh random address keeps others from creating an account there first.
     ///
-    /// Every intent turns off `assertions`. Prepare cannot build the Lighthouse instructions yet,
-    /// and it refuses to drop a check that an intent asks for.
     pub fn new(request: &PlanRequest<'a>, scratch: Address) -> Result<Self, PlanError> {
         let segments = request
             .intents
             .iter()
-            .map(|documents| SegmentPlanner::new(*documents, request.payers, request.priority_fee_lamports, scratch))
+            .zip(0u8..)
+            .map(|(documents, memory_id)| {
+                SegmentPlanner::new(*documents, request.payers, request.priority_fee_lamports, memory_id, scratch)
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
         if segments.is_empty() {
@@ -114,12 +115,16 @@ impl<'a> Planner<'a> {
 
     /// Appends the segment's instructions, and keeps the state after it for the next segment.
     fn add(&mut self, segment: Segment) {
-        let verify = segment.verify.map(|verify| {
+        let onchain = segment.onchain;
+        let verify = onchain.verify.map(|verify| {
             self.instructions.push(verify);
             self.instructions.len().saturating_sub(1)
         });
+        self.instructions.extend(onchain.snapshots);
         let start = self.instructions.len();
         self.instructions.extend(segment.built);
+        let end = self.instructions.len();
+        self.instructions.extend(onchain.checks);
 
         let new_signatures: Vec<_> = segment
             .signatures
@@ -135,7 +140,7 @@ impl<'a> Planner<'a> {
             loaded_accounts_data_size: segment.loaded_accounts_data_size,
         });
         self.messages.push(segment.message);
-        self.intents.push(PlannedIntent { verify, span: start..self.instructions.len(), ..segment.intent });
+        self.intents.push(PlannedIntent { verify, span: start..end, ..segment.intent });
     }
 
     /// The last simulation ran the whole transaction, so it measures the budget.
@@ -160,6 +165,7 @@ impl<'a> Planner<'a> {
 
 #[cfg(test)]
 mod tests {
+    use sdp_intents_lighthouse::LIGHTHOUSE_PROGRAM;
     use sdp_intents_spec::AccountRole;
 
     use super::*;
@@ -171,6 +177,7 @@ mod tests {
     const TO: &str = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
     const USDC: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
     const TOKEN_PROGRAM: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+    const ASSOCIATED_TOKEN: &str = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
     const TOKEN_2022_PROGRAM: &str = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
     const ATA_RENT: u64 = 2_039_280;
     const SOL: u64 = 1_000_000_000;
@@ -248,7 +255,7 @@ mod tests {
         let Ok(Step::Done(plan)) = planner.next(&accounts) else { panic!("the plan is done") };
 
         assert!(plan.message.starts_with(&format!("sdp-intents/1: fee payer {FEE_PAYER} | rent payer {FEE_PAYER} | priority fee 5000 lamports || 1: transfer 100 of {USDC} from {FROM} to {TO} | guarantees: {FROM} sends at most 100 of {USDC}; nothing else leaves {FROM} | interface: token.transfer@1.0.0 ")));
-        assert!(plan.message.ends_with(" | onchain checks: none"));
+        assert!(plan.message.ends_with(" | onchain checks: none | rent cap 2039280 lamports"));
         assert_eq!(plan.intents[0].display, format!("Send 100 {USDC} to 9WzD…AWWM"));
         assert_eq!(plan.transaction.budget.compute_unit_limit, 33_000);
         assert_eq!(plan.transaction.priority_fee_lamports, 5_000);
@@ -306,16 +313,39 @@ mod tests {
         );
     }
 
+    /// The sender's token account is the only guarded value, so the segment snapshots its amount
+    /// and asserts the outflow around the two built instructions.
     #[test]
-    fn an_intent_that_keeps_the_onchain_checks_is_refused() {
+    fn assertions_guard_the_segment_in_a_second_simulation() {
         let documents = Compiled::compile(
             include_str!("../../../definitions/solana.org/implementations/spl-token-transfer/1.0.0.json"),
             &include_str!("../../../fixtures/intents/spl-token-transfer.json").replace(r#""assertions": false, "#, ""),
         );
+        let mut planner = Planner::new(&request(&[&documents], 5_000), SCRATCH).unwrap();
+        let mut accounts = AccountMap::default();
+        spl_final_simulation(&mut planner, &mut accounts);
 
-        let refused = Planner::new(&request(&[&documents], 5_000), SCRATCH);
+        planner.simulated(spl_result(400_000_000, SOL - 15_000 - ATA_RENT)).unwrap();
+        let guarded = simulation(planner.next(&accounts).unwrap());
+        let programs: Vec<_> = guarded.transaction.instructions.iter().map(|instruction| instruction.program).collect();
 
-        assert!(refused.is_err_and(|error| error == PlanError::Unavailable("assertions")));
+        assert_eq!(
+            programs,
+            [
+                LIGHTHOUSE_PROGRAM,
+                account(ASSOCIATED_TOKEN),
+                account(TOKEN_PROGRAM),
+                LIGHTHOUSE_PROGRAM,
+                LIGHTHOUSE_PROGRAM
+            ]
+        );
+        assert_eq!(guarded.observe.len(), 3);
+
+        planner.simulated(spl_result(400_000_000, SOL - 15_000 - ATA_RENT)).unwrap();
+        let Ok(Step::Done(plan)) = planner.next(&accounts) else { panic!("the plan is done") };
+
+        assert_eq!(plan.intents[0].span, 1..3);
+        assert!(plan.message.contains(" | onchain checks: assertions | "));
     }
 
     fn builder_planner(documents: &Compiled) -> (Planner<'_>, AccountMap) {

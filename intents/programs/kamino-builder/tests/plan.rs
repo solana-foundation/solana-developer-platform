@@ -7,7 +7,7 @@ mod common;
 
 use anchor_v2_testing::Signer;
 use sdp_intents_planner::{Plan, PlanError};
-use sdp_intents_program_testing::{send, Documents, SendError};
+use sdp_intents_program_testing::{built, send, Documents, SendError};
 use solana_address::Address;
 
 use common::*;
@@ -44,7 +44,7 @@ fn withdraw_documents(wallets: &Wallets, shares: u64, min_amount: u64) -> Result
 fn programs(plan: &Plan) -> Vec<String> {
     let program = |instruction: &sdp_intents_planner::Instruction| Address::new_from_array(instruction.program.0);
 
-    plan.transaction.instructions.iter().map(|instruction| program(instruction).to_string()).collect()
+    built(plan).iter().map(|instruction| program(instruction).to_string()).collect()
 }
 
 fn report(name: &str, measured: &Measured) {
@@ -88,7 +88,8 @@ fn deposits_in_two_rounds_and_creates_the_share_account() {
 fn the_kvault_program_holds_the_minimum_shares_of_a_deposit() {
     let Setup { mut svm, wallets } = setup(Holdings { usdc: 1_000 * USDC_UNIT, shares: 0 }).unwrap();
     let mut plan = prepare(&svm, &deposit_documents(&wallets, 100 * USDC_UNIT, 90 * SHARE_UNIT).unwrap()).unwrap().plan;
-    let deposit = plan.transaction.instructions.last_mut().unwrap();
+    let deposit_position = plan.intents[0].span.end - 1;
+    let deposit = &mut plan.transaction.instructions[deposit_position];
     deposit.data.splice(16.., u64::MAX.to_le_bytes());
 
     let Err(SendError::Failed(failed)) = send(&mut svm, &plan, &[&wallets.fee_payer, &wallets.owner]) else {

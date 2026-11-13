@@ -1,5 +1,6 @@
-//! A program recipe: the builder runs again by CPI in hashed mode. Its result gives the span's
-//! length, and its hash must equal the SHA-256 of the span in the layout of the instruction section.
+//! A program recipe: the builder runs again by CPI in hashed mode. Its result gives the length of
+//! the built span and the outputs, and its hash must equal the SHA-256 of the built span in the
+//! layout of the instruction section.
 //!
 //! The section names the rent payer with the placeholder, as the builder does. Only the rent payer
 //! maps back, and the fee payer never appears, so the mapping is exact. A builder that names the
@@ -25,8 +26,9 @@ use sdp_intents_spec::AccountRole;
 use crate::error::RegistryError;
 use crate::state::spec_address;
 use crate::verify::chain::PassedAccounts;
+use crate::verify::position::Segment;
+use crate::verify::refused;
 use crate::verify::roles::TransactionRoles;
-use crate::verify::{position, refused};
 
 /// The call of the builder, in the form that a CPI takes.
 struct BuilderCall<'a> {
@@ -35,13 +37,18 @@ struct BuilderCall<'a> {
     accounts: Vec<&'a AccountView>,
 }
 
-/// `chain` holds the record's accounts, then the accounts of the builder's last round.
-pub fn verify(
-    recipe: &Recipe<'_>,
-    chain: &PassedAccounts<'_>,
-    sysvar: &SysvarInstructions,
-    builder_roles: &[u8],
-) -> Result<()> {
+/// What the builder returned in hashed mode.
+pub struct Hashed {
+    pub num_instructions: usize,
+    instructions_hash: [u8; 32],
+    signers: Vec<sdp_intents_spec::Address>,
+    /// The interface's outputs, in borsh.
+    pub outputs: Vec<u8>,
+}
+
+/// Calls the builder. `chain` holds the record's accounts, then the accounts of the builder's last
+/// round.
+pub fn call(recipe: &Recipe<'_>, chain: &PassedAccounts<'_>) -> Result<Hashed> {
     let call = builder_call(recipe, chain)?;
     call.invoke()?;
 
@@ -49,13 +56,27 @@ pub fn verify(
     require!(*return_data.program_id() == call.program, RegistryError::BadBuilderResult);
 
     let hashed = HashedReady::parse(return_data.as_slice()).map_err(|_| RegistryError::BadBuilderResult)?;
-    let built = position::span(sysvar, usize::from(hashed.fixed.num_instructions))?;
-    let section = instruction_section(sysvar, built.clone(), recipe.payers(), builder_roles)?;
-    require!(
-        anchor_lang::sha256(&section.bytes) == hashed.fixed.instructions_hash,
-        RegistryError::WrongInstructionsHash
-    );
-    check_roles(sysvar, &built, &section.roles)?;
+
+    Ok(Hashed {
+        num_instructions: usize::from(hashed.fixed.num_instructions),
+        instructions_hash: hashed.fixed.instructions_hash,
+        signers: hashed.signers.to_vec(),
+        outputs: hashed.outputs.to_vec(),
+    })
+}
+
+/// The built span must hash to the builder's hash, with the builder's roles.
+pub fn verify(
+    hashed: &Hashed,
+    sysvar: &SysvarInstructions,
+    payers: Payers<'_>,
+    builder_roles: &[u8],
+    segment: &Segment,
+) -> Result<()> {
+    let built = &segment.built;
+    let section = instruction_section(sysvar, built.clone(), payers, builder_roles)?;
+    require!(anchor_lang::sha256(&section.bytes) == hashed.instructions_hash, RegistryError::WrongInstructionsHash);
+    check_roles(sysvar, segment, &section.roles)?;
 
     let signs = |signer: &sdp_intents_spec::Address| {
         built.clone().any(|position| {
@@ -149,13 +170,13 @@ fn instruction_section(
     Ok(section)
 }
 
-fn check_roles(sysvar: &SysvarInstructions, built: &Range<usize>, roles: &TransactionRoles) -> Result<()> {
-    for position in built.clone() {
+fn check_roles(sysvar: &SysvarInstructions, segment: &Segment, roles: &TransactionRoles) -> Result<()> {
+    for position in segment.built.clone() {
         let instruction = sysvar.load_instruction_at(position)?;
 
         for account in 0..instruction.num_account_metas() {
             let meta = instruction.get_instruction_account_at(account)?;
-            roles.check(sysvar, built, &meta.key, AccountRole::new(meta.is_writable(), meta.is_signer()))?;
+            roles.check(sysvar, &segment.whole, &meta.key, AccountRole::new(meta.is_writable(), meta.is_signer()))?;
         }
     }
 

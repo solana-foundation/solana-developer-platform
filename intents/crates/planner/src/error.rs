@@ -65,6 +65,10 @@ pub enum PlanError {
     },
     /// No bump puts a registry address off the curve.
     NoRegistryAddress,
+    /// No bump puts the Lighthouse memory address off the curve.
+    NoMemoryAddress,
+    /// The postconditions cannot be asserted with Lighthouse.
+    Guard(sdp_intents_lighthouse::GuardError),
 }
 
 impl Limit {
@@ -121,6 +125,8 @@ impl fmt::Display for PlanError {
                 limit.as_text()
             ),
             Self::NoRegistryAddress => f.write_str("no bump puts a registry address off the curve"),
+            Self::NoMemoryAddress => f.write_str("no bump puts the Lighthouse memory address off the curve"),
+            Self::Guard(error) => write!(f, "the assertions cannot guard the intent: {error}"),
         }
     }
 }

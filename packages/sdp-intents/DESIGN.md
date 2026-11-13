@@ -279,7 +279,7 @@ mint. This record handles Token-2022 mints:
   "spec": "sdp-intents@1.0",
   "kind": "plan",
   "request": { "kind": "plan", "intents": ["…"] },
-  "message": "sdp-intents/1: fee payer KoRa… | rent payer KoRa… | priority fee 5000 lamports || 1: transfer 100 of 2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo from 7xKX… to 9aBc… | guarantees: 7xKX… sends at most 100 of 2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo; nothing else leaves 7xKX…; only Token-2022, ATA, and Memo instructions run | interface: token.transfer@1.0.0 3f9a… | implementation: token-2022-transfer@1.0.0 c21e… | builder: T22Bld… | onchain checks: verify_intent",
+  "message": "sdp-intents/1: fee payer KoRa… | rent payer KoRa… | priority fee 5000 lamports || 1: transfer 100 of 2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo from 7xKX… to 9aBc… | guarantees: 7xKX… sends at most 100 of 2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo; nothing else leaves 7xKX…; only Token-2022, ATA, and Memo instructions run | interface: token.transfer@1.0.0 3f9a… | implementation: token-2022-transfer@1.0.0 c21e… | builder: T22Bld… | onchain checks: verify_intent, assertions | rent cap 2039280 lamports",
   "intents": [
     {
       "display": "Send 100 PYUSD to 9aBc…",
@@ -287,7 +287,7 @@ mint. This record handles Token-2022 mints:
       "builder": { "program": "T22Bld…", "deploySlot": "312004417" },
       "outputs": "",
       "verify": 0,
-      "span": { "start": 1, "end": 3 }
+      "span": { "start": 2, "end": 4 }
     }
   ],
   "transactions": [
@@ -335,8 +335,8 @@ mint. This record handles Token-2022 mints:
 
 1. `message` is what a signer signs once for the whole transaction, such as on a Ledger. It
    names the payers and the priority fee, then each intent after `|| <n>:`: the record's template,
-   `guarantees` from both sets of postconditions, the ids with digests, the builder, and the onchain
-   checks. `display` comes from the interface. `deploySlot` is for the audit log only.
+   `guarantees` from both sets of postconditions, the ids with digests, the builder, the onchain
+   checks, and the rent cap (4.5). `display` comes from the interface. `deploySlot` is for the audit log only.
 2. `verify` is the position of the intent's `verify_intent`, and `span` the positions of its built
    instructions (4.6). `verify` is `null` when the intent turns `verifyIntent` off.
 3. Instructions use the `EarnVaultInstruction` shape: base58 addresses, numeric `AccountRole`
@@ -345,8 +345,9 @@ mint. This record handles Token-2022 mints:
 5. Transactions are v1 (SIMD-0385): up to 4,096 bytes and 64 accounts, with the compute budget in
    `config` and no lookup tables. The service sets the compute unit limit and the loaded data size
    from the simulation, because both default to zero.
-6. The example shortens `verify_intent`, and leaves out the Lighthouse instructions (4.5) and the
-   permanent delegate warning (4.11).
+6. The example shortens `verify_intent`, and leaves out the Lighthouse instructions around the
+   span (4.5) and the permanent delegate warning (4.11). The positions count the Lighthouse
+   instructions.
 7. The PYUSD transfer hook names no program, so the transfer has no hook accounts.
 
 **Relations.**
@@ -731,7 +732,10 @@ The service answers from an account cache, and simulates in LiteSVM over it. The
 5. A builder that runs out of compute or rounds fails `prepare`, with no retry.
 
 **Plans.** The planner plans the intents in order, one segment each. Each builder round and each
-segment's simulation runs the earlier segments first. So a builder, account resolution, and the
+segment's simulation runs the earlier segments first. A segment takes two simulations: the built
+instructions alone, which the checks of 4.5 and the rent cap read, then the whole segment with
+`verify_intent` and the assertions, which must pass. An intent that turns both onchain checks off
+takes only the first. So a builder, account resolution, and the
 rendered values read the state after them, as `verify_intent` does onchain. Each segment's checks
 compare the state before and after that segment. The last simulation runs the whole transaction
 and sets the budget.
@@ -792,12 +796,33 @@ when every top-level instruction invokes a listed program, Lighthouse, or the re
 cannot assert it, so `verify` and the onchain wallet check it. A sponsor can add its own program
 policy.
 
-**Assertions.** Lighthouse (`github.com/Jac0xb/lighthouse`):
+**Assertions.** Lighthouse (`github.com/Jac0xb/lighthouse`, immutable on mainnet at
+`L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95`) checks the postconditions onchain. The
+`sdp-intents-lighthouse` crate builds the instructions, so the planner and `verify_intent` build
+the same bytes.
 
-1. First, `MemoryWrite` copies the mint, owner, and amount of each token account of a signer input.
-2. Last, `AssertAccountDelta` checks outflows and inflows against the copy, and
-   `AssertTokenAccount` checks delegate, close authority, and owner.
-3. The final instruction closes the memory account.
+1. The guarded accounts are the accounts that a built instruction names writable, and the fee
+   payer when a built instruction names it. Only they can change.
+2. Before the built instructions, `MemoryWrite` copies each guarded value into memory: the lamports
+   of an address that a SOL postcondition bounds, and the amount of a token account whose owner a
+   postcondition bounds. With `noAuthorityChange`, it copies bytes 32 to 165, which hold the owner,
+   the delegate, and the close authority too. The fee payer pays for memory.
+3. After them, `AssertAccountDelta` fails unless each value changed by at least its bound: minus
+   the `max` of an outflow, the `min` of an inflow, or zero under `noOtherOutflows`. The rent payer
+   may also spend the rent cap. With `noAuthorityChange`, the three authority fields must not
+   change. An inflow to an associated token account that the segment creates is
+   `AssertTokenAccount` on its amount, with no copy.
+4. `MemoryClose` ends the segment and returns the rent of memory to the fee payer.
+
+The bounds come from the postconditions and the rent cap only, so a program can build them. The
+rent cap is the rent-exempt minimum of each account that the first simulation shows as new, at
+6,960 lamports a byte with the 128 bytes that the runtime adds, or its lamports when they are
+fewer. The rest of a new account's lamports are a transfer, and the outflow counts them. The cap
+is in `verify_intent`'s data and in the message.
+
+Limits, which `prepare` and `verify_intent` both refuse: a token outflow or inflow is bounded on
+one account of its owner, because Lighthouse cannot sum the changes of several. A token inflow to
+an owner with no account of the mint must reach the owner's associated token account.
 
 **Rendering.** `message` uses the `message` column. `display` uses the `display` column.
 
@@ -824,8 +849,7 @@ what the records build for its intents, so a signer needs only the transaction b
 transaction holds one segment for each intent, in order:
 
 ```
-[verify_intent] [Lighthouse snapshot × S] [built × N] [Lighthouse assertions × M]
-                └──────────────────────── span ────────────────────────────┘
+[verify_intent] [MemoryWrite × S] [built × N] [assertion × M] [MemoryClose]
 ```
 
 `verify_intent` is an instruction of the registry program. Its data is two Anchor `&[u8]`
@@ -835,13 +859,16 @@ one program holds both.
 
 Its accounts, all readonly: the instructions sysvar, the fee payer, the rent payer, the interface
 index, the implementation index, the interface version account, the implementation version
-account, every account of the record's account table in order, then for a program recipe the
-accounts of the last `MoreAccounts` round. The builder program is in the table. The fee payer must
-be a writable signer, because only a writable signer can be the fee payer.
+account, every account of the record's account table in order, for a program recipe the accounts
+of the last `MoreAccounts` round, then the guarded accounts (4.5). The builder program is in the
+table. The fee payer must be a writable signer, because only a writable signer can be the fee
+payer. After the two `&[u8]` arguments, the data holds the rent cap as a `u64` and the count of
+guarded accounts as a `u8`.
 
-**Spans.** The span of `verify_intent` is the S + N + M instructions after it. Each count comes
-from the record or the builder, never from the transaction. The postconditions give S and M, which
-are 0 until Lighthouse exists. N is:
+**Spans.** The segment of `verify_intent` is the instructions after it: S snapshots, N built
+instructions, then the assertions and the close. S is the run of Lighthouse instructions right
+after `verify_intent`, and `verify_intent` checks it against the snapshots that it builds. The
+postconditions give the assertions. Neither count comes from the service. N is:
 
 | Recipe | N |
 | :-- | :-- |
@@ -878,9 +905,7 @@ none`.
    `allowUnapproved`, and the checks of `applies`. A version account that the registry owns holds
    the document of its id, because `publish` creates it only at that id's address. So no address
    is derived.
-2. It refuses an intent that turns `verifyIntent` off, and, until it checks Lighthouse, an intent
-   that asks for `assertions`. A signer then never reads a guarantee that the transaction does not
-   hold.
+2. It refuses an intent that turns `verifyIntent` off.
 3. It resolves the record's accounts with the engine over its own accounts, so one resolve
    completes or fails. Each resolved address must be the account at its place in the table.
 4. It refuses a span that runs past the transaction, and a span that holds a registry instruction.
@@ -893,8 +918,13 @@ none`.
    account's role from the builder's roles, compares the SHA-256 with `instructions_hash`, and
    checks that a built instruction names each builder signer as a signer. The hash proves the
    builder's roles.
-7. Each role in the sysvar must be the account's role in the transaction, below. Any difference
-   fails the transaction.
+7. With `assertions`, the guarded accounts at the end of its accounts must be the accounts that
+   the built span can change. It builds the snapshots and the assertions from the postconditions,
+   those accounts as they are now, and the rent cap. Each must equal the Lighthouse instruction at
+   its place: the program, each account's address, and the data. Memory's address, id, and bump
+   come from the first snapshot, and Lighthouse checks them against the fee payer.
+8. Each role in the sysvar must be the account's role in the transaction, below. The Lighthouse
+   instructions do not count as outside the segment. Any difference fails the transaction.
 
 **Roles.** The sysvar holds each account's role in the whole transaction, not in one instruction.
 An account is writable or a signer everywhere when one instruction, or the fee payer slot, makes it
@@ -1490,7 +1520,7 @@ from implementation id to the approved versions:
 | Command | Effect |
 | :-- | :-- |
 | `sdp-intents lint [paths]` | Checks every definition, and exits with an error on a finding. `--format github` writes GitHub annotations. |
-| `sdp-intents prepare <request> --rpc <url>` | Plans the plan request over RPC and prints the plan. It reads the documents from the definitions, and refuses an intent that keeps `assertions`, because Lighthouse is not built yet. An intent that keeps `verifyIntent` needs the registry on the cluster. |
+| `sdp-intents prepare <request> --rpc <url>` | Plans the plan request over RPC and prints the plan. It reads the documents from the definitions. An intent that keeps `verifyIntent` needs the registry on the cluster. |
 | `sdp-intents plan --cluster <url>` | Reads the registry and prints the instructions that make it match the definitions |
 | `sdp-intents apply --cluster <url> --keypair <path>` | Sends the plan, signed by the key |
 | `sdp-intents apply --cluster <url> --squads <multisig>` | Proposes the plan to a Squads v4 multisig instead of sending it |
@@ -1538,6 +1568,8 @@ intents/
     spec/               sdp-intents-spec: binary documents, views, limits, and the zero-copy
                         builder ABI and result layout. no_std, bytemuck only.
     compiler/           sdp-intents-compiler: JSON to binary and back, and the lint checks
+    lighthouse/         sdp-intents-lighthouse: the Lighthouse snapshots and assertions of a
+                        segment, for the planner and verify_intent. no_std with alloc.
     engine/             sdp-intents-engine: binds an intent to its records, resolves accounts, and
                         builds instructions. no_std, no heap. The planner and verify_intent use it.
     planner/            sdp-intents-planner: prepare with no IO. Asks for fetches and simulations,
@@ -1754,7 +1786,7 @@ flowchart TB
 | RPC simulation | `verify` fails closed. | A false simulation can only build a transaction that fails onchain, unless the intent opts out of the onchain checks. | Nothing is signed. |
 | Intent service | No plans. | A false plan fails `verify_intent` or the assertions. | No plans. |
 | Jupiter API | Swap errors. | A bad route fails postconditions. A bad price above the minimum passes. | No swaps. |
-| Lighthouse | The transaction fails. Nothing moves. | A bug can pass a bad transaction. An upgrade can change an assertion. | Assertions fail. Only `verify` applies. |
+| Lighthouse | The transaction fails. Nothing moves. | A bug can pass a bad transaction. The program has no upgrade authority, so no upgrade can change an assertion. | It cannot disappear while immutable. If the cluster removed it, every guarded transaction would fail. |
 | surfpool, local | Local tests fail. | Not applicable. | Not applicable. |
 
 **Worst case.** Prototype: a wrong transaction on a local fork. Production: a wrong builder emits
@@ -1815,7 +1847,7 @@ builder upgrades, refusal rates, simulation rounds, and simulation latency.
 | Toolchain (§3.2.3, §3.2.4) | `intents/` adds `rust-toolchain.toml`, a `justfile` with the standard recipes, and a committed `Cargo.lock`. |
 | Rust (§3.2.8) | `rustfmt.toml`, Clippy with `-D warnings`, workspace lints. No `unwrap`, `expect`, or `panic!` in the service or builders. |
 | Programs (§3.2.1) | Builders use Anchor v2 and checked arithmetic, and validate owner, PDA, and discriminator for every account that they read. |
-| New dependencies (§3.2.2) | Rust: the Squads v4 client, Anchor v2 (`anchor-lang` from `otter-sec/anchor`, pinned by git revision), `wincode`, `bytemuck`, `spl-token-2022`, `spl-tlv-account-resolution`, `spl-associated-token-account`, `kvault-interface`, `klend-interface`, `litesvm`, the Lighthouse Rust client, and an HTTP server crate. TypeScript: `vite`, `@vitejs/plugin-react`, and `react-dom`. All pinned exactly, with a reason in the PR. |
+| New dependencies (§3.2.2) | Rust: the Squads v4 client, Anchor v2 (`anchor-lang` from `otter-sec/anchor`, pinned by git revision), `wincode`, `bytemuck`, `spl-token-2022`, `spl-tlv-account-resolution`, `spl-associated-token-account`, `kvault-interface`, `klend-interface`, `litesvm`, and an HTTP server crate. The Lighthouse instructions are built by hand from its 2.0.0 layout, with no client crate. TypeScript: `vite`, `@vitejs/plugin-react`, and `react-dom`. All pinned exactly, with a reason in the PR. |
 | Review (§3.4) | Low tier, one reviewer. |
 | Deployment (§3.5) | None. The registry and the builders deploy to local surfpool only. |
 

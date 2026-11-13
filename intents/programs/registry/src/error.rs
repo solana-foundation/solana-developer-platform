@@ -42,8 +42,8 @@ pub enum RegistryError {
     SpanPastEnd,
     #[msg("The intent turns off verifyIntent")]
     VerificationOff,
-    #[msg("The intent asks for assertions, which verify_intent cannot check yet")]
-    AssertionsUnavailable,
+    #[msg("A Lighthouse instruction differs from what the postconditions assert")]
+    WrongAssertions,
     #[msg("The record refuses the intent")]
     RecipeRefused,
     #[msg("An account differs from the one that the record derives at its place")]
@@ -66,4 +66,8 @@ pub enum RegistryError {
     VersionRemoved,
     #[msg("The fee payer of verify_intent is not a writable signer")]
     FeePayerNotSigner,
+    #[msg("The guarded accounts are not the accounts that the span can change")]
+    WrongGuardedAccounts,
+    #[msg("Lighthouse cannot assert the postconditions of the intent")]
+    AssertionsRefused,
 }

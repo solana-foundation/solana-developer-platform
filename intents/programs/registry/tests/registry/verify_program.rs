@@ -70,7 +70,7 @@ fn plan_and_verify_with_roles(setup: &Setup, amount: u64, extra: bool, roles: Op
 
     let extra_accounts = if extra { vec![test_builder::EXTRA_ACCOUNT] } else { Vec::new() };
     let roles = roles.map_or_else(|| builder_roles(&plan), <[u8]>::to_vec);
-    let verify = setup.published.verify_instruction(&setup.svm, &verified, &extra_accounts, &roles)?;
+    let verify = setup.published.verify_instruction(&setup.svm, &verified, &extra_accounts, &roles, 0)?;
 
     Ok(with_verify(&plan, verify))
 }

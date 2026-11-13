@@ -25,11 +25,31 @@ const ASSOCIATED_TOKEN_PROGRAM: Address = Address([
     123, 216, 219, 233, 248, 89,
 ]);
 const TOKEN_ACCOUNT_LEN: usize = 165;
+/// The rent-exempt minimum is 6,960 lamports for each byte of data and for the 128 bytes that the
+/// runtime adds: 3,480 lamports a byte-year, for two years.
+const RENT_LAMPORTS_PER_BYTE: u64 = 6_960;
+const ACCOUNT_STORAGE_OVERHEAD: u64 = 128;
 
 /// An ATA `Create` or `CreateIdempotent`. The ATA program uses the funder only to pay for the
 /// account that it creates, so an idempotent create of an account that exists takes nothing.
 fn funds_only(instruction: &Instruction) -> bool {
     instruction.program == ASSOCIATED_TOKEN_PROGRAM && matches!(instruction.data.as_slice(), [] | [0] | [1])
+}
+
+/// What the rent payer can spend on the accounts that the snapshots show as new: the rent-exempt
+/// minimum of each one's data, or its lamports when they are fewer. Lamports above that minimum are
+/// a transfer, not rent.
+pub(crate) fn rent_cap(snapshots: &[Snapshot]) -> u64 {
+    snapshots
+        .iter()
+        .filter(|snapshot| snapshot.before.lamports == 0 && snapshot.after.lamports > 0)
+        .map(|snapshot| {
+            let len = u64::try_from(snapshot.after.data.len()).unwrap_or(u64::MAX);
+            let minimum = len.saturating_add(ACCOUNT_STORAGE_OVERHEAD).saturating_mul(RENT_LAMPORTS_PER_BYTE);
+
+            snapshot.after.lamports.min(minimum)
+        })
+        .fold(0u64, u64::saturating_add)
 }
 
 /// An account of the transaction before and after it. An account that does not exist has no
@@ -269,10 +289,7 @@ impl<'v, 'a> Verification<'v, 'a> {
     }
 
     fn created_rent(&self) -> u64 {
-        self.snapshots
-            .iter()
-            .filter(|snapshot| self.created(&snapshot.address))
-            .fold(0u64, |rent, snapshot| rent.saturating_add(snapshot.after.lamports))
+        rent_cap(self.snapshots)
     }
 
     fn created(&self, address: &Address) -> bool {

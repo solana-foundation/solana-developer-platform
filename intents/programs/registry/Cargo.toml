@@ -22,6 +22,7 @@ anchor-lang.workspace = true
 bytemuck.workspace = true
 pinocchio.workspace = true
 sdp-intents-engine = { path = "../../crates/engine" }
+sdp-intents-lighthouse = { path = "../../crates/lighthouse" }
 sdp-intents-spec.workspace = true
 solana-instruction.workspace = true
 

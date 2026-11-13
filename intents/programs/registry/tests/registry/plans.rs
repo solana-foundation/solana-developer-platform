@@ -10,6 +10,9 @@ use crate::intents::{builder_roles, publish_transfer, Published};
 use crate::svm::{failure, funded, send_plan, svm, Failure, SOL};
 use crate::token::{associated_token_account, set_mint, set_token_account, token_amount};
 
+/// The rent-exempt minimum of an account with no data, which a transfer to a new wallet funds.
+const NEW_WALLET_RENT: u64 = 890_880;
+
 const TEST_BUILDER_TRANSFER: &str = include_str!("../../../test-builder/fixtures/test-builder-transfer.json");
 
 struct Wallets {
@@ -54,7 +57,7 @@ fn the_planner_builds_the_verify_intent_of_a_client() {
     let documents = published.compile(&intent("system-transfer", &wallets, SOL), &wallets.fee_payer.pubkey()).unwrap();
 
     let plan = prepare(&svm, &documents).unwrap();
-    let by_hand = published.verify_instruction(&svm, &documents, &[], &[]).unwrap();
+    let by_hand = published.verify_instruction(&svm, &documents, &[], &[], NEW_WALLET_RENT).unwrap();
 
     assert_eq!(verify_at(&plan, 0).unwrap(), &by_hand);
     assert_eq!(plan.intents[0].span, 1..2);
@@ -97,8 +100,9 @@ fn verifies_a_builder_that_the_planner_planned() {
         },
         ..plan.clone()
     };
-    let by_hand =
-        published.verify_instruction(&svm, &documents, &[test_builder::EXTRA_ACCOUNT], &builder_roles(&built)).unwrap();
+    let by_hand = published
+        .verify_instruction(&svm, &documents, &[test_builder::EXTRA_ACCOUNT], &builder_roles(&built), NEW_WALLET_RENT)
+        .unwrap();
     assert_eq!(verify_at(&plan, 0).unwrap(), &by_hand);
 
     send_plan(&mut svm, &plan, &[&wallets.fee_payer, &wallets.from]).unwrap();

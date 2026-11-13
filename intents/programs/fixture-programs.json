@@ -18,5 +18,10 @@
     "program": "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD",
     "file": "kamino-builder/fixtures/klend.so",
     "sha256": "2bc227a7354f1182165ce2f0976fc7ebd20ac535a2dd946fa450054f35075a46"
+  },
+  {
+    "program": "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95",
+    "file": "../crates/program-testing/fixtures/lighthouse.so",
+    "sha256": "a89179ae024ac36aa5fc308251caa84cd0a3390ae66d8523514004a86d5148bb"
   }
 ]

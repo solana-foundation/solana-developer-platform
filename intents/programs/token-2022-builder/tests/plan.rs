@@ -4,6 +4,7 @@
 mod support;
 
 use anchor_v2_testing::Signer;
+use sdp_intents_program_testing::built;
 use spl_token_2022_interface::extension::transfer_fee::TransferFeeAmount;
 use spl_token_2022_interface::extension::{BaseStateWithExtensions, StateWithExtensions};
 use spl_token_2022_interface::state::Account as TokenAccountState;
@@ -85,7 +86,7 @@ fn a_memo_comes_right_before_the_transfer_to_a_destination_that_requires_one() {
     let sent = chain.transfer(&mint, AMOUNT, Some("invoice 42")).unwrap();
 
     assert_eq!(sent.programs, [MEMO, TOKEN_2022]);
-    assert_eq!(sent.plan.transaction.instructions[0].data, b"invoice 42");
+    assert_eq!(built(&sent.plan)[0].data, b"invoice 42");
     assert_eq!(chain.token_amount(&destination), Ok(AMOUNT));
 }
 
@@ -110,7 +111,7 @@ fn a_transfer_hook_resolves_its_accounts_in_rounds() {
 
     let sent = chain.transfer(&mint, AMOUNT, None).unwrap();
 
-    let transfer = sent.plan.transaction.instructions.last().unwrap();
+    let transfer = built(&sent.plan).last().unwrap();
     let appended: Vec<[u8; 32]> = transfer.accounts[4..].iter().map(|meta| meta.address.0).collect();
     let counter = chain.svm.get_account(&hook_accounts.counter).unwrap().data;
 

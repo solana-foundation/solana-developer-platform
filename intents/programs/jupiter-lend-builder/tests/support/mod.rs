@@ -77,7 +77,7 @@ pub struct Measured {
 }
 
 pub fn setup() -> Result<Setup, String> {
-    let mut svm = svm();
+    let mut svm = svm()?;
     svm.add_program(jupiter_lend_builder::id(), BUILDER).map_err(|error| format!("{error:?}"))?;
     let lending = fixture_program(env!("CARGO_MANIFEST_DIR"), "jupiter_lend_lending.so")?;
     let liquidity = fixture_program(env!("CARGO_MANIFEST_DIR"), "jupiter_lend_liquidity.so")?;
@@ -163,7 +163,7 @@ pub fn deposit_plan(setup: &Setup, vault: &Address, asset: &Address, amounts: Am
   "interface": "solana.org/vault.deposit@^1",
   "implementation": "solana.org/jupiter-lend-deposit@^1",
   "inputs": {{ "owner": "{}", "vault": "{vault}", "asset": "{asset}", "amount": "{}", "minShares": "{}" }},
-  "options": {{ "assertions": false, "verifyIntent": false }}
+  "options": {{ "verifyIntent": false }}
 }}"#,
         setup.wallets.owner.pubkey(),
         amounts.amount,
@@ -184,7 +184,7 @@ pub fn withdraw_plan(setup: &Setup, amounts: Amounts) -> Result<Measured, Failur
   "interface": "solana.org/vault.withdraw@^1",
   "implementation": "solana.org/jupiter-lend-withdraw@^1",
   "inputs": {{ "owner": "{}", "vault": "{VAULT}", "asset": "{USDT}", "shares": "{}", "minAmount": "{}" }},
-  "options": {{ "assertions": false, "verifyIntent": false }}
+  "options": {{ "verifyIntent": false }}
 }}"#,
         setup.wallets.owner.pubkey(),
         amounts.amount,

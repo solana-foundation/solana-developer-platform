@@ -45,7 +45,7 @@ impl Failure {
 }
 
 pub fn svm() -> Result<LiteSVM, Failure> {
-    let mut svm = sdp_intents_program_testing::svm();
+    let mut svm = sdp_intents_program_testing::svm().map_err(failure)?;
     svm.add_program(registry::ID, REGISTRY).map_err(|error| failure(format!("{error:?}")))?;
     svm.add_program(test_builder::ID, TEST_BUILDER).map_err(|error| failure(format!("{error:?}")))?;
 
