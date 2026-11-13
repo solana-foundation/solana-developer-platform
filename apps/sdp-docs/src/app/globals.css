@@ -2336,6 +2336,11 @@ a.rounded-lg.border.p-4 > p.truncate {
   display: none;
 }
 
+/* A callout's padding closes it: its last paragraph adds no space below. */
+.launch-docs-callout .launch-mdx-paragraph:last-child {
+  margin-bottom: 0;
+}
+
 .launch-docs-callout[data-type="info"] > svg {
   fill: none;
   color: var(--ink-tertiary);
