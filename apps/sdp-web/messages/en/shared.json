@@ -130,8 +130,10 @@
     "title": "{organization} isn't on mainnet yet",
     "bodyRequest": "You can request mainnet access below or try the sandbox.",
     "bodyRequestNoSandbox": "You can request mainnet access below.",
-    "bodyPending": "You've requested mainnet access. You can try the sandbox while you wait.",
-    "bodyPendingNoSandbox": "You've requested mainnet access.",
+    "bodyAskAdmin": "Ask an Admin of {organization} to request mainnet access, or try the sandbox.",
+    "bodyAskAdminNoSandbox": "Ask an Admin of {organization} to request mainnet access.",
+    "bodyPending": "{organization} has requested mainnet access. You can try the sandbox while you wait.",
+    "bodyPendingNoSandbox": "{organization} has requested mainnet access.",
     "bodyUnavailable": "Mainnet requests aren't open yet. You can try the sandbox.",
     "bodyUnavailableNoSandbox": "Mainnet requests aren't open yet.",
     "trySandbox": "Try the sandbox"

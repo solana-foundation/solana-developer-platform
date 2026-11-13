@@ -1,3 +1,4 @@
+import type { MainnetAccessState } from "@sdp/types/mainnet-access";
 import type { Project } from "@sdp/types/projects";
 import type { OrganizationRole } from "@sdp/types/roles";
 import type { ReactNode } from "react";
@@ -13,13 +14,13 @@ import {
 } from "@/test/request-project";
 
 /** What the organization-scoped API answers, by path: its onboarding status and mainnet access. */
-const orgApi = vi.hoisted(() => ({
-  mainnetAccess: { state: "not_requested", mainnetOnly: false } as {
-    state: string;
-    mainnetOnly: boolean;
-  },
-  fetch: vi.fn(),
-}));
+const orgApi = vi.hoisted(() => {
+  const mainnetAccess: { state: MainnetAccessState; mainnetOnly: boolean } = {
+    state: "not_requested",
+    mainnetOnly: false,
+  };
+  return { mainnetAccess, fetch: vi.fn() };
+});
 
 const sdpApi = vi.hoisted(() => ({
   listSdpProjects: vi.fn<() => Promise<Project[]>>(),

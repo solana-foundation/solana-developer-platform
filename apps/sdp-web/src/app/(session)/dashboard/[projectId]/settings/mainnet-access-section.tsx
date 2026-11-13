@@ -25,7 +25,12 @@ function countryLabel(code: CountryCode): string {
  * The organization's mainnet access (HOO-2427): a one-time request while it has none, and what
  * it declared and accepted once it asked. Changes go through the SDP alias, never this section.
  */
-export async function MainnetAccessSection() {
+export async function MainnetAccessSection({
+  canRequestAccess = true,
+}: {
+  /** The viewer may send or resend the request (an admin); the settings card is admin-only. */
+  canRequestAccess?: boolean;
+} = {}) {
   const [t, locale, timeZone, loaded] = await Promise.all([
     getTranslations(),
     getRequestLocale(),
@@ -44,7 +49,9 @@ export async function MainnetAccessSection() {
   }
   return (
     <MainnetAccessRequestHost
-      canRequest={loaded.access.state === "not_requested" && loaded.access.available}
+      canRequest={
+        canRequestAccess && loaded.access.state === "not_requested" && loaded.access.available
+      }
       organizationId={loaded.organizationId}
       organizationName={loaded.organizationName}
       record={
@@ -52,6 +59,7 @@ export async function MainnetAccessSection() {
           organizationId={loaded.organizationId}
           organizationName={loaded.organizationName}
           access={loaded.access}
+          canResend={canRequestAccess}
           locale={locale}
           timeZone={timeZone}
           t={t}
@@ -67,6 +75,7 @@ function MainnetAccessRecord({
   organizationId,
   organizationName,
   access,
+  canResend,
   locale,
   timeZone,
   t,
@@ -74,6 +83,7 @@ function MainnetAccessRecord({
   organizationId: string;
   organizationName: string;
   access: MainnetAccess;
+  canResend: boolean;
   locale: string;
   timeZone: string;
   t: Translate;
@@ -88,6 +98,7 @@ function MainnetAccessRecord({
         organizationId={organizationId}
         organizationName={organizationName}
         access={access}
+        canResend={canResend}
         t={t}
       />
       <RecordList>
@@ -137,11 +148,13 @@ function MainnetAccessBand({
   organizationId,
   organizationName,
   access,
+  canResend,
   t,
 }: {
   organizationId: string;
   organizationName: string;
   access: MainnetAccess;
+  canResend: boolean;
   t: Translate;
 }) {
   if (access.sandboxOnly) {
@@ -169,7 +182,7 @@ function MainnetAccessBand({
         tone="attention"
         why={t("Shared.mainnetAccess.unsentBody")}
         action={
-          access.available ? (
+          access.available && canResend ? (
             <MainnetAccessResendButton organizationId={organizationId} />
           ) : undefined
         }

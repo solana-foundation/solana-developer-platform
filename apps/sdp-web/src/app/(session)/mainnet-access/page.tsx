@@ -9,23 +9,29 @@ import { externalLinkProps } from "@/components/homepage/homepage-links";
 import { betaLabel, sandboxOnBeta } from "@/flags";
 import type { MessageKey } from "@/i18n/messages";
 import { getTranslations } from "@/i18n/server";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { requestMemberRole } from "@/lib/sdp-api";
 import { MainnetAccessAccountActions } from "./mainnet-access-account-actions";
 
 /**
  * Where an organization waits on a deployment that serves mainnet only until SDP turns mainnet
- * on: it can do nothing else here, so the page holds the request, the way to the hosted sandbox,
- * and the way out. Any other organization goes back to the dashboard.
+ * on: it can do nothing else here, so the page holds the request (an admin's to send), the way
+ * to the hosted sandbox, and the way out. Any other organization goes back to the dashboard.
  */
 export default async function MainnetAccessPage() {
-  const [t, loaded, linkSandbox, beta] = await Promise.all([
+  const [t, loaded, linkSandbox, beta, role] = await Promise.all([
     getTranslations(),
     loadMainnetAccess(),
     sandboxOnBeta(),
     betaLabel(),
+    requestMemberRole(),
   ]);
+  const canRequest = resolveDashboardAccess(role).capabilities.canManageOrgSettings;
   if (loaded.ok && (!loaded.access.mainnetOnly || loaded.access.state === "approved")) {
     redirect("/dashboard");
   }
+  // Awaited here, not placed as an async element, so the page renders as one resolved tree.
+  const section = await MainnetAccessSection({ canRequestAccess: canRequest });
 
   return (
     <main className="flex min-h-dvh flex-col bg-surface px-4 pb-10 sm:px-6">
@@ -43,7 +49,11 @@ export default async function MainnetAccessPage() {
               ? t("Shared.mainnetAccessLock.title", { organization: loaded.organizationName })
               : t("Shared.mainnetAccess.title")}
           </h1>
-          <p className="text-body text-secondary">{t(lockBodyKey(loaded, linkSandbox))}</p>
+          <p className="text-body text-secondary">
+            {t(lockBodyKey(lockStateOf(loaded, canRequest), linkSandbox), {
+              organization: loaded.ok ? loaded.organizationName : "",
+            })}
+          </p>
           {linkSandbox ? (
             <div>
               <Button asChild variant="outline" size="sm">
@@ -55,38 +65,49 @@ export default async function MainnetAccessPage() {
             </div>
           ) : null}
         </div>
-        <MainnetAccessSection />
+        {section}
       </div>
     </main>
   );
 }
 
-/** What the organization can do next: request mainnet, wait on its request, or neither yet. */
-function lockBodyKey(
+type LockState = "request" | "askAdmin" | "pending" | "unavailable";
+
+/**
+ * What the organization can do next: an admin requests mainnet, anyone else asks an admin, the
+ * request waits on SDP, or the deployment takes no request yet.
+ */
+function lockStateOf(
   loaded: Awaited<ReturnType<typeof loadMainnetAccess>>,
-  linkSandbox: boolean
-): MessageKey {
-  const state = !loaded.ok
-    ? "unavailable"
-    : loaded.access.state === "pending"
-      ? "pending"
-      : loaded.access.available
-        ? "notRequested"
-        : "unavailable";
-  return linkSandbox ? LOCK_BODY_KEYS[state].withSandbox : LOCK_BODY_KEYS[state].alone;
+  canRequest: boolean
+): LockState {
+  if (!loaded.ok || !loaded.access.available) return "unavailable";
+  if (loaded.access.state === "pending") return "pending";
+  return canRequest ? "request" : "askAdmin";
 }
 
-const LOCK_BODY_KEYS = {
-  notRequested: {
-    withSandbox: "Shared.mainnetAccessLock.bodyRequest",
-    alone: "Shared.mainnetAccessLock.bodyRequestNoSandbox",
-  },
-  pending: {
-    withSandbox: "Shared.mainnetAccessLock.bodyPending",
-    alone: "Shared.mainnetAccessLock.bodyPendingNoSandbox",
-  },
-  unavailable: {
-    withSandbox: "Shared.mainnetAccessLock.bodyUnavailable",
-    alone: "Shared.mainnetAccessLock.bodyUnavailableNoSandbox",
-  },
-} as const satisfies Record<string, { withSandbox: MessageKey; alone: MessageKey }>;
+/** The line under the title, naming the sandbox only where the page links it. */
+function lockBodyKey(state: LockState, linkSandbox: boolean): MessageKey {
+  switch (state) {
+    case "request":
+      return linkSandbox
+        ? "Shared.mainnetAccessLock.bodyRequest"
+        : "Shared.mainnetAccessLock.bodyRequestNoSandbox";
+    case "askAdmin":
+      return linkSandbox
+        ? "Shared.mainnetAccessLock.bodyAskAdmin"
+        : "Shared.mainnetAccessLock.bodyAskAdminNoSandbox";
+    case "pending":
+      return linkSandbox
+        ? "Shared.mainnetAccessLock.bodyPending"
+        : "Shared.mainnetAccessLock.bodyPendingNoSandbox";
+    case "unavailable":
+      return linkSandbox
+        ? "Shared.mainnetAccessLock.bodyUnavailable"
+        : "Shared.mainnetAccessLock.bodyUnavailableNoSandbox";
+    default: {
+      const exhaustive: never = state;
+      throw new Error(`Unhandled mainnet lock state: ${String(exhaustive)}`);
+    }
+  }
+}
