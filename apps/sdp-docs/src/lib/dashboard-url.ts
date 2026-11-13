@@ -60,12 +60,18 @@ function normalizeDashboardUrl(candidate: string, setting: string): string {
   return `${parsed.origin}/`;
 }
 
-/** The dashboard deployment paired with this docs build. */
+/**
+ * The dashboard deployment paired with this docs build. A preview pairs with sdp-web's preview
+ * through Vercel's related projects, or links nowhere. A production build takes
+ * `NEXT_PUBLIC_SDP_WEB_URL` when it is set, so a second docs project built from this repo (beta)
+ * links to its own dashboard, not sdp-web's production alias.
+ */
 export function resolveDashboardUrl(env: NodeJS.ProcessEnv = process.env): string | null {
   const environment = vercelEnvironmentSchema.parse(env.VERCEL_ENV);
   const configured = env.NEXT_PUBLIC_SDP_WEB_URL?.trim();
   let configuredUrl: string | null = null;
   if (configured) configuredUrl = normalizeDashboardUrl(configured, "NEXT_PUBLIC_SDP_WEB_URL");
+  if (environment === "production" && configuredUrl) return configuredUrl;
   const related = relatedDashboardUrl(env, environment);
   if (related) return normalizeDashboardUrl(related, "VERCEL_RELATED_PROJECTS");
   if (environment === "preview") return null;
