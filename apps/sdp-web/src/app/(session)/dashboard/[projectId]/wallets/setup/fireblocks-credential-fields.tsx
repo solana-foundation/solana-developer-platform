@@ -42,7 +42,9 @@ function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) 
     // it used is claimed by then, so a cached answer would offer a registration that cannot connect.
     dedupingInterval: 0,
   });
-  const csr = data === undefined ? null : data.csr;
+  // A failed read leaves the previous answer in the cache, and a rejected attempt may have
+  // claimed that registration: only a read that succeeded names the one to use.
+  const csr = data === undefined || readError !== undefined ? null : data.csr;
   const [generating, setGenerating] = useState(false);
   const [vaultsPending, setVaultsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
