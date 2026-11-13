@@ -1,0 +1,22 @@
+[
+  {
+    "program": "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9",
+    "file": "jupiter-lend-builder/fixtures/jupiter_lend_lending.so",
+    "sha256": "043ec5c874ddfbe0a9338620a788de96523c0c0b16df619710c53f66f0d4b473"
+  },
+  {
+    "program": "jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC",
+    "file": "jupiter-lend-builder/fixtures/jupiter_lend_liquidity.so",
+    "sha256": "afc2ffb48042500766b47dada39603d2aeb36caab3751ad37b4ffafcd437883b"
+  },
+  {
+    "program": "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd",
+    "file": "kamino-builder/fixtures/kvault.so",
+    "sha256": "69fa9d01aa8f133460d32a5f1c0570ac40caa0ffe11d819224e97048f2cc246c"
+  },
+  {
+    "program": "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD",
+    "file": "kamino-builder/fixtures/klend.so",
+    "sha256": "2bc227a7354f1182165ce2f0976fc7ebd20ac535a2dd946fa450054f35075a46"
+  }
+]

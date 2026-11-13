@@ -12,7 +12,7 @@ use jupiter_lend_builder::{LENDING_PROGRAM, LIQUIDITY_PROGRAM};
 use sdp_intents_builder::programs::TOKEN;
 use sdp_intents_builder::token::associated_token_address;
 use sdp_intents_planner::{AccountMap, Plan, PlanError, Planner, Step};
-use sdp_intents_program_testing::{fetch, simulate, svm, Documents};
+use sdp_intents_program_testing::{fetch, fixture_program, simulate, svm, Documents};
 use solana_account::Account;
 use solana_address::Address;
 use solana_clock::Clock;
@@ -25,8 +25,6 @@ const WITHDRAW_RECORD: &str =
     include_str!("../../../../definitions/solana.org/implementations/jupiter-lend-withdraw/1.0.0.json");
 
 const BUILDER: &[u8] = include_bytes!("../../../target/deploy/jupiter_lend_builder.so");
-const LENDING: &[u8] = include_bytes!("../../fixtures/jupiter_lend_lending.so");
-const LIQUIDITY: &[u8] = include_bytes!("../../fixtures/jupiter_lend_liquidity.so");
 pub const MARKET: &[u8] = include_bytes!("../../fixtures/usdt-market.bin");
 
 pub const USDT: Address = Address::from_str_const("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB");
@@ -81,8 +79,10 @@ pub struct Measured {
 pub fn setup() -> Result<Setup, String> {
     let mut svm = svm();
     svm.add_program(jupiter_lend_builder::id(), BUILDER).map_err(|error| format!("{error:?}"))?;
-    svm.add_program(LENDING_PROGRAM, LENDING).map_err(|error| format!("{error:?}"))?;
-    svm.add_program(LIQUIDITY_PROGRAM, LIQUIDITY).map_err(|error| format!("{error:?}"))?;
+    let lending = fixture_program(env!("CARGO_MANIFEST_DIR"), "jupiter_lend_lending.so")?;
+    let liquidity = fixture_program(env!("CARGO_MANIFEST_DIR"), "jupiter_lend_liquidity.so")?;
+    svm.add_program(LENDING_PROGRAM, &lending).map_err(|error| format!("{error:?}"))?;
+    svm.add_program(LIQUIDITY_PROGRAM, &liquidity).map_err(|error| format!("{error:?}"))?;
 
     for fixture in market_accounts(MARKET)? {
         svm.set_account(fixture.address, fixture.account).map_err(|error| format!("{error:?}"))?;

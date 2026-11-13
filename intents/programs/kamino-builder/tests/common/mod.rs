@@ -8,7 +8,7 @@ use solana_account::Account;
 use solana_address::Address;
 
 use sdp_intents_planner::{AccountMap, Plan, PlanError, Planner, Step};
-use sdp_intents_program_testing::{fetch, simulate, Documents};
+use sdp_intents_program_testing::{fetch, fixture_program, simulate, Documents};
 
 pub const VAULT: Address = Address::from_str_const("HDsayqAsDWy3QvANGqh2yNraqcD8Fnjgh73Mhb3WRS5E");
 pub const USDC: Address = Address::from_str_const("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
@@ -18,8 +18,6 @@ const KVAULT: Address = Address::from_str_const("KvauGMspG5k6rtzrqqn7WNn3oZdyKqL
 const KLEND: Address = Address::from_str_const("KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
 
 const BUILDER_PROGRAM: &[u8] = include_bytes!("../../../target/deploy/kamino_builder.so");
-const KVAULT_PROGRAM: &[u8] = include_bytes!("../../fixtures/kvault.so");
-const KLEND_PROGRAM: &[u8] = include_bytes!("../../fixtures/klend.so");
 const FIXTURE_ACCOUNTS: &str = include_str!("../../fixtures/accounts.json");
 
 pub const DEPOSIT_INTERFACE: &str =
@@ -55,8 +53,8 @@ pub struct Holdings {
 pub fn setup(holdings: Holdings) -> Result<Setup, String> {
     let mut svm = sdp_intents_program_testing::svm();
     svm.add_program(kamino_builder::id(), BUILDER_PROGRAM).map_err(debug)?;
-    svm.add_program(KVAULT, KVAULT_PROGRAM).map_err(debug)?;
-    svm.add_program(KLEND, KLEND_PROGRAM).map_err(debug)?;
+    svm.add_program(KVAULT, &fixture_program(env!("CARGO_MANIFEST_DIR"), "kvault.so")?).map_err(debug)?;
+    svm.add_program(KLEND, &fixture_program(env!("CARGO_MANIFEST_DIR"), "klend.so")?).map_err(debug)?;
     load_fixture_accounts(&mut svm)?;
 
     let wallets = Wallets { fee_payer: Keypair::new(), owner: Keypair::new() };

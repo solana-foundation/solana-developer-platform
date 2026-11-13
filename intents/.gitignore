@@ -1,2 +1,4 @@
 /target
 /programs/target
+# The mainnet programs that the tests run. `node programs/fetch-programs.mjs` fetches them.
+/programs/*/fixtures/*.so

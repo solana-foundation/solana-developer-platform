@@ -6,8 +6,9 @@
 // The tests read `accounts.json`, `kvault.so`, and `klend.so`. Every account except the programs is
 // read in one `getMultipleAccounts` call, so the accounts and the clock are of one slot.
 //
-// `kvault.so` and `klend.so` are the Kamino mainnet programs, under Kamino's licenses. The kvault
-// program is BUSL-1.1. The tests only run them in LiteSVM.
+// `kvault.so` and `klend.so` are the Kamino mainnet programs, under Kamino's licenses. They stay out
+// of git, and `node fetch-programs.mjs` in `intents/programs` fetches them. After a new dump, pin
+// their new hashes in `intents/programs/fixture-programs.json`.
 
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";

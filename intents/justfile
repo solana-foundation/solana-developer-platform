@@ -27,5 +27,9 @@ unit-test:
 build-programs:
     cd programs && for manifest in */Cargo.toml; do if grep -q cdylib "$manifest"; then cargo build-sbf --manifest-path "$manifest"; fi; done
 
-test-programs: build-programs
+# The mainnet programs that the tests run, checked against their pinned hashes.
+fetch-programs:
+    cd programs && node fetch-programs.mjs
+
+test-programs: build-programs fetch-programs
     cd programs && cargo test --workspace
