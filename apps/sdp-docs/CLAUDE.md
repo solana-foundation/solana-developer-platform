@@ -387,6 +387,18 @@ many customer wallets, what it costs, and what a wallet's policy must allow.
 State only what the code or the API response shows; fees and eligibility
 wording there is a product commitment, so change it with product sign-off.
 
+Each quickstart has a folder of its code to clone and run, which its Next steps
+link: `examples/embedded-yield-quickstart` and `examples/treasury-quickstart`.
+The TypeScript file (and `sign.mjs`) is the page's blocks verbatim and
+`deposit.sh` runs its cURL commands; the one difference is the API host, which
+an example reads from `SDP_API_URL` and defaults to the hosted sandbox.
+`scripts/earn-quickstart-example.test.ts` fails when a page and its folder
+differ, so change them together. The root `biome.json` leaves the mirrored
+files unformatted. CI runs that test only when sdp-docs or a package it depends
+on changes: the examples sit outside the workspace, so neither the test filter
+nor turbo's cache sees them. After editing only an example, run
+`pnpm --filter sdp-docs test`.
+
 The provider-integration guide remains under `content/unpublished/earn`
 because it describes internal operations. Programs, provider actions and
 onboarding stay outside the pinned public API contract. A change to that
