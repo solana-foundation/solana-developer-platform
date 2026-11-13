@@ -21,6 +21,8 @@ interface Props {
   record: ListedImplementation | null;
   planState: PlanState;
   tamper: boolean;
+  malicious: boolean;
+  onMalicious: (malicious: boolean) => void;
   ready: boolean;
   onTab: (tab: Tab) => void;
   onTamper: (tamper: boolean) => void;
@@ -72,8 +74,36 @@ function IntentTab(props: Props) {
 }
 
 function PrepareControls(props: Props) {
+  const remote = props.record?.document?.recipe === "remote";
+  const frozen = props.record?.document?.recipe === "remote transaction";
+
   return (
     <div className="side-actions">
+      {frozen && (
+        <div className="callout callout-amber">
+          The provider signs this transaction, so nothing onchain checks it. Turn both onchain
+          checks off to accept it. A new simulation checks every guarantee.
+        </div>
+      )}
+      {remote && (
+        <label className="switch-row">
+          <span>
+            <span className="switch-label">Malicious endpoint</span>
+            <span className="section-sub">
+              The Jupiter wrapper also approves an attacker. The assertions refuse it.
+            </span>
+          </span>
+          <span className="toggle">
+            <input
+              type="checkbox"
+              checked={props.malicious}
+              onChange={(event) => props.onMalicious(event.target.checked)}
+            />
+            <span className="toggle-track" />
+            <span className="toggle-thumb" />
+          </span>
+        </label>
+      )}
       <label className="switch-row">
         <span>
           <span className="switch-label">Tamper with the plan</span>
@@ -134,6 +164,23 @@ function PlanTab(props: Props) {
           label="Builder simulations"
           value={plan.intents.map((intent) => intent.builderSimulations).join(", ")}
         />
+        <Row
+          label="Tier"
+          value={
+            plan.message
+              .match(/\| tier (\d)/g)
+              ?.map((tier) => tier.slice(-1))
+              .join(", ") ?? "1"
+          }
+        />
+        {(transaction?.presigned.length ?? 0) > 0 && (
+          <Row
+            label="Signed by the provider"
+            value={(transaction?.presigned ?? [])
+              .map((signed) => shortAddress(signed.address))
+              .join(", ")}
+          />
+        )}
         {Object.entries(plan.rpcCalls).map(([method, count]) => (
           <Row key={method} label={`Service ${method}`} value={String(count)} />
         ))}
@@ -233,6 +280,16 @@ function Instructions({ plan }: { plan: Plan }) {
 function VerifiedResult({ verified }: { verified: Verified }) {
   const proves = verified.matches === true && verified.unverified.length === 0;
 
+  if (verified.checkedBy === "simulation") {
+    return (
+      <div className={`callout ${verified.matches ? "callout-amber" : "callout-red"}`}>
+        {verified.matches
+          ? "A new simulation of the provider's transaction checks every guarantee, and the message matches. Nothing onchain checks them."
+          : "The provider's transaction does not plan to the plan's message."}
+      </div>
+    );
+  }
+
   return (
     <div className={`callout ${proves ? "callout-green" : "callout-amber"}`}>
       {proves
@@ -270,7 +327,7 @@ function RecordTab({ record }: { record: ListedImplementation | null }) {
           <Row
             key={entry.version}
             label={`Version ${entry.version}`}
-            value={entry.removed ? "removed" : entry.approved ? "approved" : "not approved"}
+            value={`tier ${entry.tier}, ${entry.removed ? "removed" : entry.approved ? "approved" : "not approved"}`}
           />
         ))}
       </div>

@@ -45,6 +45,7 @@ export function App() {
   const [candidatesError, setCandidatesError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("intent");
   const [tamper, setTamper] = useState(false);
+  const [malicious, setMalicious] = useState(false);
   const [planState, setPlanState] = useState(NO_PLAN);
 
   useEffect(() => {
@@ -130,7 +131,6 @@ export function App() {
     setTab("record");
   };
 
-  const compiled = planState.plan?.transactions[0]?.compiled ?? "";
   const prepare = () => {
     setPlanState({ ...NO_PLAN, busy: "prepare" });
     setTab("plan");
@@ -145,16 +145,19 @@ export function App() {
 
     setPlanState({ ...planState, busy: "verify", error: null });
     api
-      .verify(compiled, plan.message)
+      .verify(plan)
       .then((verified) => setPlanState({ ...planState, verified, busy: null, error: null }))
       .catch((error: unknown) =>
         setPlanState({ ...planState, busy: null, error: describe(error) })
       );
   };
   const send = () => {
+    const plan = planState.plan;
+    if (plan === null) return;
+
     setPlanState({ ...planState, busy: "send", error: null });
     api
-      .send(compiled)
+      .send(plan)
       .then(({ signature }) => setPlanState({ ...planState, signature, busy: null, error: null }))
       .catch((error: unknown) =>
         setPlanState({ ...planState, busy: null, error: describe(error) })
@@ -204,6 +207,18 @@ export function App() {
             record={record}
             planState={planState}
             tamper={tamper}
+            malicious={malicious}
+            onMalicious={(on) => {
+              api
+                .adapterMode(on)
+                .then((ok) => ok && setMalicious(on))
+                .catch(() =>
+                  setPlanState({
+                    ...NO_PLAN,
+                    error: "The Jupiter wrapper does not answer on :8791.",
+                  })
+                );
+            }}
             ready={selected !== null && feePayer !== ""}
             onTab={setTab}
             onTamper={setTamper}

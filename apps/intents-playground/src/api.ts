@@ -1,7 +1,7 @@
 // The service's routes, as `intents/crates/service/src/lib.rs` lists them. The dev server forwards
 // `/api` to the service.
 
-export type Recipe = "static" | "program" | "remote";
+export type Recipe = "static" | "program" | "remote" | "remote transaction";
 
 export interface Input {
   name: string;
@@ -12,6 +12,7 @@ export interface Input {
 }
 
 export interface InterfaceDocument {
+  settlement: "atomic" | "async";
   display: string;
   inputs: Input[];
   outputs: { name: string; type: string }[];
@@ -30,6 +31,7 @@ export interface VersionEntry {
   publishSlot: string;
   approved: boolean;
   removed: boolean;
+  tier: number;
 }
 
 interface ListedIndex {
@@ -91,11 +93,13 @@ export interface Plan {
     span: { start: number; end: number };
     builderSimulations: number;
   }[];
+  request: unknown;
   transactions: {
     instructions: PlannedInstruction[];
     config: Record<string, string>;
     compiled: string;
     signatures: { address: string; role: string; status: string }[];
+    presigned: { address: string; signature: string }[];
   }[];
   simulation: { unitsConsumed: string };
   rpcCalls: Record<string, number>;
@@ -110,6 +114,8 @@ export interface Verified {
     segment: { start: number; end: number };
   }[];
   unverified: number[];
+  /// `simulation` for a provider's transaction, which no `verify_intent` proves.
+  checkedBy?: string;
 }
 
 export class ServiceError extends Error {
@@ -154,7 +160,24 @@ export const api = {
     ),
   prepare: (request: unknown, tamper: boolean) =>
     post<Plan>("/v1/prepare", request, tamper ? { "x-sdp-tamper": "1" } : {}),
-  verify: (message: string, expected: string) =>
-    post<Verified>("/v1/verify", { message, expected }),
-  send: (message: string) => post<{ signature: string }>("/v1/send", { message }),
+  verify: (plan: Plan) => {
+    const transaction = plan.transactions[0];
+
+    return post<Verified>("/v1/verify", {
+      message: transaction?.compiled,
+      expected: plan.message,
+      presigned: transaction?.presigned ?? [],
+      request: plan.request,
+    });
+  },
+  send: (plan: Plan) =>
+    post<{ signature: string }>("/v1/send", {
+      message: plan.transactions[0]?.compiled,
+      presigned: plan.transactions[0]?.presigned ?? [],
+    }),
+  /// The Jupiter wrapper's switch that adds an approval to an attacker.
+  adapterMode: (malicious: boolean) =>
+    fetch("/adapter/mode", { method: "POST", body: JSON.stringify({ malicious }) }).then(
+      (response) => response.ok
+    ),
 };

@@ -256,3 +256,7 @@
 .interface-body > * {
   flex-shrink: 0;
 }
+
+.header-badge {
+  margin-left: 8px;
+}

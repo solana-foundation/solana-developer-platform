@@ -12,6 +12,8 @@ export const MINTS: KnownMint[] = [
   { symbol: "USDC", address: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", decimals: 6 },
   // biome-ignore lint/security/noSecrets: a public mainnet address.
   { symbol: "USDT", address: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", decimals: 6 },
+  // biome-ignore lint/security/noSecrets: a public mainnet address.
+  { symbol: "wYLDS", address: "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih", decimals: 6 },
 ];
 
 /// The first vault takes USDC, the form's default mint.
@@ -20,6 +22,14 @@ export const VAULTS = [
   { name: "Kamino USDC", address: "HDsayqAsDWy3QvANGqh2yNraqcD8Fnjgh73Mhb3WRS5E" },
   // biome-ignore lint/security/noSecrets: a public mainnet address.
   { name: "Jupiter Lend USDT", address: "F7tLdeF2YZZex9MR8HgGggyFiz7UU2UgUube2tmfwNPE" },
+  // biome-ignore lint/security/noSecrets: a public mainnet address.
+  { name: "Ondo USDY", address: "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6" },
+  // biome-ignore lint/security/noSecrets: a public mainnet address.
+  { name: "Hastra PRIME", address: "3b8X44fLF9ooXaUm3hhSgjpmVs6rZZ3pPoGnGahc3Uu7" },
+  // biome-ignore lint/security/noSecrets: a public mainnet address.
+  { name: "Hastra wYLDS", address: "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih" },
+  // biome-ignore lint/security/noSecrets: a public mainnet address.
+  { name: "Test provider nOPAL", address: "GArhnnDj3GYhmQeApKVXaRv4TQFwhPcs3SNF6FXsTeXq" },
 ];
 
 export const PROGRAMS: Record<string, string> = {

@@ -27,6 +27,9 @@ for (const { address } of wallets.slice(0, 2)) {
   await rpc("surfnet_setTokenAccount", [address, USDT, { amount: 1_000_000_000 }, TOKEN_PROGRAM]);
 }
 
+// The receiving wallet of the stand-in provider, which `test-provider-deposit` pins.
+await rpc("surfnet_setTokenAccount", ["ProviderWa11et11111111111111111111111111111", USDC, { amount: 0 }, TOKEN_PROGRAM]);
+
 const registry = ["--rpc", RPC, "--keypair", authority.path];
 
 if (!cli("plan", ...registry).includes("holds every definition")) {
@@ -35,4 +38,7 @@ if (!cli("plan", ...registry).includes("holds every definition")) {
 
 console.log("the registry holds every definition");
 wallets.forEach(({ name, address }) => console.log(`  ${name.padEnd(9)} ${address}`));
-console.log(`\nnow run: cargo run -p sdp-intents-service -- --rpc ${RPC} --wallets ${WALLETS}`);
+console.log("\nnow run the Jupiter wrapper, the stand-in provider, and the service:");
+console.log("  node adapters/jupiter.mjs");
+console.log(`  cargo run -p sdp-intents-test-provider -- ${RPC}`);
+console.log(`  cargo run -p sdp-intents-service -- --rpc ${RPC} --wallets ${WALLETS}`);

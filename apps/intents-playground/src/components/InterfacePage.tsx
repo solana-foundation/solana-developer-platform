@@ -30,6 +30,9 @@ export function InterfacePage(props: Props) {
           <div>
             <div className="section-sub">
               {listed.id} · {listed.shown}
+              {document.settlement === "async" && (
+                <span className="badge badge-amber header-badge">settles later</span>
+              )}
             </div>
             <h1 className="page-title">{renderTemplate(document.display, values, wallets)}</h1>
           </div>

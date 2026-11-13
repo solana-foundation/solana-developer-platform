@@ -48,7 +48,7 @@ e2e rpc="http://127.0.0.1:8899": build-programs
 # A surfnet for `apps/intents-playground`: place the programs, fund the playground wallets, publish
 # the definitions, then serve the API with those wallets. It runs in the foreground.
 playground rpc="http://127.0.0.1:8899": build-programs
-    cargo build -q -p sdp-intents-cli -p sdp-intents-service
+    cargo build -q -p sdp-intents-cli -p sdp-intents-service -p sdp-intents-test-provider
     cd programs && node deploy-surfnet.mjs {{rpc}}
     node e2e/playground.mjs {{rpc}}
-    ./target/debug/sdp-intents-service --rpc {{rpc}} --wallets target/playground/wallets
+    bash -c 'trap "kill 0" EXIT; node adapters/jupiter.mjs & ./target/debug/sdp-intents-test-provider {{rpc}} & ./target/debug/sdp-intents-service --rpc {{rpc}} --wallets target/playground/wallets'
