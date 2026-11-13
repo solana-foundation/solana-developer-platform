@@ -9,10 +9,18 @@ import { nextNavigationMock, resetDashboardNavigation } from "@/test/dashboard-n
 import { EnglishI18n } from "@/test/i18n";
 import MainnetAccessPage from "./page";
 
-const state = vi.hoisted(() => ({ sandboxOnBeta: false, betaLabel: false }));
+const state = vi.hoisted(() => ({
+  sandboxOnBeta: false,
+  betaLabel: false,
+  orgId: "org_clerk_test" as string | null,
+}));
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
+// The session is an ambient input: only its active organization matters here.
+vi.mock("@/lib/sdp-auth", () => ({
+  getSdpAuth: async () => ({ orgId: state.orgId, userId: "user_test" }),
+}));
 vi.mock("@/flags", () => ({
   sandboxOnBeta: async () => state.sandboxOnBeta,
   betaLabel: async () => state.betaLabel,
@@ -49,6 +57,7 @@ async function renderPage() {
 
 beforeEach(() => {
   resetDashboardNavigation();
+  state.orgId = "org_clerk_test";
   state.sandboxOnBeta = false;
   state.betaLabel = false;
 });
@@ -67,6 +76,15 @@ describe("mainnet request page", () => {
 
     await expect(MainnetAccessPage()).rejects.toThrow("NEXT_REDIRECT");
     expect(nextNavigationMock.redirect.mock.calls).toEqual([["/dashboard"]]);
+  });
+
+  it("sends a session without an active organization to the dashboard", async () => {
+    state.orgId = null;
+    const role = vi.spyOn(sdpApi, "requestMemberRole");
+
+    await expect(MainnetAccessPage()).rejects.toThrow("NEXT_REDIRECT");
+    expect(nextNavigationMock.redirect.mock.calls).toEqual([["/dashboard"]]);
+    expect(role).not.toHaveBeenCalled();
   });
 
   it("offers an admin the request and the hosted sandbox when the flag is on", async () => {

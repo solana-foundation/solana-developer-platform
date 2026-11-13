@@ -11,6 +11,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { getTranslations } from "@/i18n/server";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { requestMemberRole } from "@/lib/sdp-api";
+import { getSdpAuth } from "@/lib/sdp-auth";
 import { MainnetAccessAccountActions } from "./mainnet-access-account-actions";
 
 /**
@@ -19,6 +20,10 @@ import { MainnetAccessAccountActions } from "./mainnet-access-account-actions";
  * to the hosted sandbox, and the way out. Any other organization goes back to the dashboard.
  */
 export default async function MainnetAccessPage() {
+  // Outside the dashboard layout, so no organization picker: a session without an active
+  // organization goes to the dashboard, which offers one.
+  const { orgId } = await getSdpAuth();
+  if (!orgId) redirect("/dashboard");
   const [t, loaded, linkSandbox, beta, role] = await Promise.all([
     getTranslations(),
     loadMainnetAccess(),
