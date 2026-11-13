@@ -1,0 +1,242 @@
+---
+module: earn
+title: Treasury quickstart
+description: Deposit your organization's own funds from a custody wallet with two API requests and no signature.
+---
+
+A Treasury deposit is two requests: pick a strategy, deposit. SDP signs through
+your wallet's custody provider, so there is nothing for you to sign. This runs
+on devnet with test tokens.
+
+To deposit from a customer's wallet instead, use the
+[Embedded Yield quickstart](/docs/earn/quickstart).
+
+## Before you start
+
+| You need | How to get it |
+| --- | --- |
+| A custody wallet | [Create an account](https://platform.solana.com/sign-up), then [create a wallet](/docs/guides/setup-wallets) in your sandbox project. Copy its address. |
+| An API key | [Create a key](/docs/developing-with-sdp/manage-api-keys#create-a-key) with Earn **Execute** and Wallets **Read**, and give it access to that wallet. |
+| Devnet USDC | Send it to the wallet's address from the [Circle faucet](https://faucet.circle.com) on Solana Devnet. The deposit is 10 USDC. |
+| Node.js 20.18 or later | It runs the TypeScript and makes the idempotency key. The cURL examples also use jq. |
+
+```bash title="Terminal"
+export SDP_API_KEY="sf_..."
+export WALLET="..." # your custody wallet's address
+```
+
+## Find your wallet's ID
+
+Earn names a custody wallet by its ID, not its address. Look the ID up once
+with [`GET /v1/wallets`](/docs/reference/api/wallets/list-wallets). In
+TypeScript, each step adds to `deposit.mts`.
+
+<Tabs items={["TypeScript", "cURL"]} groupId="earn-code-language">
+<Tab value="TypeScript">
+
+```typescript title="deposit.mts"
+import { randomUUID } from "node:crypto";
+
+const api = "https://api.solana.com/v1";
+const headers = {
+  Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+  "Content-Type": "application/json",
+};
+
+/** Returns the response's `data`, or throws the API's error. */
+async function data(response: Response) {
+  const body = await response.json();
+  if (!response.ok) throw new Error(`${body.error.code}: ${body.error.message}`);
+  return body.data;
+}
+
+// Find your custody wallet's ID by its address.
+const { wallets }: { wallets: { id: string; publicKey: string }[] } = await fetch(
+  `${api}/wallets`,
+  { headers },
+).then(data);
+const wallet = wallets.find((w) => w.publicKey === process.env.WALLET);
+if (!wallet) throw new Error("This API key cannot see that wallet");
+```
+
+</Tab>
+<Tab value="cURL">
+
+```bash title="Terminal"
+# Find your custody wallet's ID by its address.
+export WALLET_ID="$(curl -sS https://api.solana.com/v1/wallets \
+  -H "Authorization: Bearer $SDP_API_KEY" |
+  jq -r --arg address "$WALLET" '.data.wallets[] | select(.publicKey == $address) | .id')"
+echo "$WALLET_ID" # empty means the key cannot see that wallet
+```
+
+</Tab>
+</Tabs>
+
+## 1. Pick a strategy
+
+[`GET /v1/earn/strategies`](/docs/reference/api/earn/list-earn-strategies)
+lists the strategies your project can see.
+
+<Tabs items={["TypeScript", "cURL"]} groupId="earn-code-language">
+<Tab value="TypeScript">
+
+```typescript title="deposit.mts (continued)"
+type Strategy = {
+  id: string;
+  status: string;
+  fundable: boolean;
+  depositMints: string[];
+  depositSlippage: object | null;
+};
+
+// Fetch the strategies your project can see.
+const { strategies }: { strategies: Strategy[] } = await fetch(
+  `${api}/earn/strategies?pageSize=100`,
+  { headers },
+).then(data);
+
+// Take one that is open for deposits, takes devnet USDC, and needs no slippage floor.
+const USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+const strategy = strategies.find(
+  (s) => s.fundable && s.status === "active" && s.depositSlippage === null
+    && s.depositMints[0] === USDC,
+);
+if (!strategy) throw new Error("No devnet USDC strategy is open for deposits");
+```
+
+</Tab>
+<Tab value="cURL">
+
+```bash title="Terminal"
+# Fetch the strategies, and take one that is open for deposits, takes devnet USDC,
+# and needs no slippage floor.
+export STRATEGY_ID="$(curl -sS "https://api.solana.com/v1/earn/strategies?pageSize=100" \
+  -H "Authorization: Bearer $SDP_API_KEY" | jq -r '
+    [.data.strategies[] | select(.fundable and .status == "active" and .depositSlippage == null
+      and .depositMints[0] == "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU")][0].id')"
+echo "$STRATEGY_ID" # "null" means no strategy matched
+```
+
+</Tab>
+</Tabs>
+
+## 2. Deposit
+
+[`POST /v1/earn/vault-deposits`](/docs/reference/api/earn/create-earn-vault-deposit)
+builds, signs, and broadcasts the deposit. The `Idempotency-Key` header is
+required.
+
+<Tabs items={["TypeScript", "cURL"]} groupId="earn-code-language">
+<Tab value="TypeScript">
+
+```typescript title="deposit.mts (continued)"
+// Deposit 10 USDC. Each new deposit takes a new idempotency key.
+const deposit = await fetch(`${api}/earn/vault-deposits`, {
+  method: "POST",
+  headers: { ...headers, "Idempotency-Key": randomUUID() },
+  body: JSON.stringify({ strategyId: strategy.id, custodyWalletId: wallet.id, amount: "10" }),
+}).then(data);
+```
+
+</Tab>
+<Tab value="cURL">
+
+```bash title="Terminal"
+# Deposit 10 USDC. Each new deposit takes a new idempotency key.
+curl -sS https://api.solana.com/v1/earn/vault-deposits \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: $(node -e 'console.log(crypto.randomUUID())')" \
+  -d @- <<EOF | tee deposit.json | jq .
+{ "strategyId": "$STRATEGY_ID", "custodyWalletId": "$WALLET_ID", "amount": "10" }
+EOF
+```
+
+</Tab>
+</Tabs>
+
+```json title="Response (trimmed)"
+{
+  "data": {
+    "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
+    "movementId": "earn_movement_a6aed3f5-4f89-4dc6-9d4b-0864021bd80d",
+    "status": "submitted",
+    "signature": "3dhkSPLiQZQPXL96fWzMdWJtdbtAffkBKXw2xhsYbV3VNSnYrVAcdx1czsnLsE1ou4SvLecGdSYe4QpAuZdfjJAf",
+    "replayed": false
+  }
+}
+```
+
+SDP pays the network fee while the strategy's `feeSponsored` is `true`.
+Otherwise the wallet needs devnet SOL.
+
+<Callout type="info">
+A `403` with `details.reason` set to `provider_not_entitled` means SDP has not
+activated this strategy's provider for your organization yet. Ask your SDP
+contact, then deposit again. `wallet_out_of_scope` means the key has no access
+to the wallet.
+</Callout>
+
+## 3. Watch it land
+
+The deposit reaches `confirmed` within about 30 seconds. Then the wallet holds
+a position.
+
+<Tabs items={["TypeScript", "cURL"]} groupId="earn-code-language">
+<Tab value="TypeScript">
+
+```typescript title="deposit.mts (continued)"
+// Poll until the network confirms the deposit.
+let record;
+do {
+  await new Promise((resolve) => setTimeout(resolve, 2_000));
+  ({ deposit: record } = await fetch(`${api}/earn/vault-deposits/${deposit.movementId}`, {
+    headers,
+  }).then(data));
+} while (record.status !== "confirmed" && record.status !== "failed");
+
+// Read your project's custody positions.
+const { positions } = await fetch(`${api}/earn/vault-positions`, { headers }).then(data);
+console.log(record.status, positions);
+```
+
+</Tab>
+<Tab value="cURL">
+
+```bash title="Terminal"
+# Run again until this prints "confirmed".
+curl -sS "https://api.solana.com/v1/earn/vault-deposits/$(jq -r .data.movementId deposit.json)" \
+  -H "Authorization: Bearer $SDP_API_KEY" | jq .data.deposit.status
+
+# Read your project's custody positions.
+curl -sS https://api.solana.com/v1/earn/vault-positions \
+  -H "Authorization: Bearer $SDP_API_KEY" | jq .data.positions
+```
+
+</Tab>
+</Tabs>
+
+In TypeScript, run the file with `npx tsx deposit.mts`.
+
+```json title="Positions (trimmed)"
+[
+  {
+    "id": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
+    "label": "Kamino Vault USDC",
+    "custodyWalletId": "cwlt_5d0c2c0e-8f3a-4c59-9b1e-2a7f4e6d8c31",
+    "shares": "10",
+    "withdrawableShares": "10",
+    "tokenValue": "10"
+  }
+]
+```
+
+`tokenValue` is the position's live value in the deposit token.
+
+## Next steps
+
+- [Track and recover a deposit](/docs/earn/treasury#track-a-deposit) after a lost response
+- [Withdraw](/docs/earn/treasury#withdraw) to the same wallet
+- [Send a slippage floor](/docs/earn/integration-details#slippage-floors) when a strategy needs one
+- [Limit a key to one wallet](/docs/developing-with-sdp/manage-api-keys#wallet-access)

@@ -1,10 +1,12 @@
 ---
 module: earn
 title: How Earn works
-description: Who signs, who holds funds, how one integration serves many customers, what it costs, and how movements settle.
+description: Who signs, where funds go, what it costs, and how movements settle, for Embedded Yield and Treasury.
 ---
 
-Earn builds transactions, and your customer's wallet signs them.
+Earn builds every transaction. Who signs it is the difference between
+[Embedded Yield and Treasury](/docs/earn#two-ways-to-use-earn); strategies,
+shares, and settlement work the same way in both.
 
 ## Key terms
 
@@ -15,22 +17,27 @@ Earn builds transactions, and your customer's wallet signs them.
 | Movement | SDP's record of one deposit or withdrawal, from submit to finality. |
 | Withdrawal request | SDP's record of a withdrawal that pays out later. |
 | External wallet | A wallet SDP holds no key for, such as your customer's. `ownerAddress` names it. |
+| Custody wallet | A wallet in your SDP project whose key a custody provider holds. `custodyWalletId` names it. |
 
 ## Who signs
 
-1. Your backend asks SDP to **build** an unsigned transaction.
-2. Your customer's wallet **signs** it, without changing or broadcasting it.
-3. Your backend **submits** the signed transaction.
-4. SDP verifies it, records a movement, broadcasts it, and tracks it.
+| Step | Embedded Yield | Treasury |
+| --- | --- | --- |
+| Build | Your backend asks SDP for an unsigned transaction. | Your backend asks SDP to deposit or withdraw. |
+| Sign | Your customer's wallet signs it, without changing or broadcasting it. | SDP signs through the wallet's custody provider, when the API key's [wallet scope](/docs/developing-with-sdp/manage-api-keys#wallet-access) includes the wallet. |
+| Submit | Your backend submits the signed transaction. | Nothing to submit. |
+| Settle | SDP verifies it, records a movement, broadcasts it, and tracks it. | SDP records a movement, broadcasts it, and tracks it. |
 
-The only signers are the customer's wallet and, when you name one, your
-[fee payer](/docs/earn/integration-details#fees-and-sponsorship). SDP never
-signs.
+With Embedded Yield, the only signers are the customer's wallet and, when you
+name one, your [fee payer](/docs/earn/integration-details#fees-and-sponsorship):
+SDP never signs. With Treasury, the signers are the custody wallet and, when
+SDP pays the fee, SDP's fee sponsor.
 
 ## Where funds go
 
-SDP never holds your customer's keys or funds. Every step is onchain, so you
-can check it:
+The wallet that deposits holds the position. SDP never holds a customer's
+keys or funds, and a custody wallet's key stays with its custody provider.
+Every step is onchain, so you can check it:
 
 | Step | What happens | How to check |
 | --- | --- | --- |
@@ -57,8 +64,8 @@ builds.
 
 ## One integration, many customers
 
-One API key serves every customer. SDP records positions and movements for
-each wallet, inside your project.
+With Embedded Yield, one API key serves every customer. SDP records positions
+and movements for each wallet, inside your project.
 
 | Question | Answer |
 | --- | --- |
@@ -76,21 +83,23 @@ wallet.
 
 | Cost | Paid to | Who pays |
 | --- | --- | --- |
-| Network fee and account rent | The Solana network | The customer's wallet, or your [`feePayer`](/docs/earn/integration-details#fees-and-sponsorship). |
+| Network fee and account rent | The Solana network | Embedded Yield: the customer's wallet, or your [`feePayer`](/docs/earn/integration-details#fees-and-sponsorship). Treasury: SDP pays network fees while the strategy's `feeSponsored` is `true`, though never for a swap-funded deposit; otherwise the custody wallet pays. |
 | Strategy fees | The strategy's provider | The provider sets and collects them. `riskMetadata` lists the rates it reports, such as `managementFeeBps` and `performanceFeeBps`. |
 | SDP fee | Nobody | No transaction SDP builds contains an instruction that pays SDP. |
 
 ## What the wallet must support
 
 Earn issues no token of its own: the position is the strategy's share or
-yield-bearing token. Any wallet that signs a Solana transaction unchanged
-works, whether browser, embedded, MPC, or custody.
+yield-bearing token. For Embedded Yield, any wallet that signs a Solana
+transaction unchanged works, whether browser, embedded, MPC, or custody. For
+Treasury, the custody provider's policy must allow the same programs and
+tokens.
 
 | The wallet or its policy must | Why |
 | --- | --- |
 | Sign a transaction it did not build, unchanged | SDP refuses a changed transaction. |
 | Leave broadcasting to SDP | SDP records the movement first, then broadcasts. |
-| Allow the programs a build calls | The strategy's program, the Associated Token Account program, and the Memo program, which tags the build ID. Decode a build to list them: IDs can differ between devnet and mainnet. |
+| Allow the programs a transaction calls | The strategy's program, the Associated Token Account program, and the Memo program, which carries SDP's tag for the transaction. Decode one to list them: IDs can differ between devnet and mainnet. |
 | Hold the strategy's token | An SPL Token or Token-2022 mint, which can carry a transfer hook or an issuer freeze authority. SDP simulates each build, so it already includes the accounts a hook needs. |
 | Create accounts on a first deposit | The share account, and for some strategies a record for the wallet. See [rent](/docs/earn/integration-details#fees-and-sponsorship). |
 

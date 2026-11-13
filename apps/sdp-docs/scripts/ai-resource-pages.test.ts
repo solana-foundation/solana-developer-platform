@@ -71,7 +71,7 @@ describe("AI discovery page selection", () => {
     assert.equal(sections.flatMap(({ pages }) => pages).length, pages.size);
   });
 
-  it("skips channel-excluded Earn pages and discovers the four guides when admitted", () => {
+  it("skips channel-excluded Earn pages and discovers the six guides when admitted", () => {
     const unpublished = pagesOf("introduction");
     assert.deepEqual(selectKeyPages(unpublished, ["introduction"], EARN_KEY_PAGE_SLUGS), [
       unpublished.get("introduction"),
@@ -81,14 +81,24 @@ describe("AI discovery page selection", () => {
       "introduction",
       "earn/index",
       "earn/quickstart",
+      "earn/treasury-quickstart",
       "earn/concepts",
-      "guides/embedded-yield"
+      "guides/embedded-yield",
+      "earn/treasury"
     );
     assert.deepEqual(
       selectKeyPages(published, ["introduction", "earn/index"], EARN_KEY_PAGE_SLUGS).map(
         ({ slug }) => slug
       ),
-      ["introduction", "earn/index", "earn/quickstart", "earn/concepts", "guides/embedded-yield"]
+      [
+        "introduction",
+        "earn/index",
+        "earn/quickstart",
+        "earn/treasury-quickstart",
+        "earn/concepts",
+        "guides/embedded-yield",
+        "earn/treasury",
+      ]
     );
     assert.throws(
       () => selectKeyPages(unpublished, ["missing-required-page"], EARN_KEY_PAGE_SLUGS),
@@ -135,13 +145,10 @@ describe("AI discovery page selection", () => {
     const source = "<ModuleTable />\n\n<ModuleCapabilities />\n";
 
     const hidden = expandDocsBlocks(source, "overview.mdx", { surface: held });
-    assert.doesNotMatch(
-      hidden,
-      /\*\*Earn\*\*|DeFi and RWA strategies, customer-signed transactions/
-    );
+    assert.doesNotMatch(hidden, /\*\*Earn\*\*|DeFi and RWA strategies, from customer wallets/);
 
     const visible = expandDocsBlocks(source, "overview.mdx", { surface: published });
     assert.match(visible, /\*\*Earn\*\*/);
-    assert.match(visible, /DeFi and RWA strategies, customer-signed transactions, and positions/);
+    assert.match(visible, /DeFi and RWA strategies, from customer wallets or custody wallets/);
   });
 });
