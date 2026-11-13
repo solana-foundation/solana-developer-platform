@@ -1216,6 +1216,7 @@ pub struct VersionEntryV1 {
     pub version: SemverV1,
     pub publish_slot: PodU64,
     pub approved: PodBool,
+    pub removed: PodBool,
 }
 
 #[repr(C)]
@@ -1248,10 +1249,12 @@ pub struct VersionIndexV1 {
 5. The approved list holds the index addresses of an interface's approved implementations. An
    implementation index has none, leaves `approve_authority` and `approve_new_versions` at zero,
    and sets `interface` to the interface's index address, which never changes.
-6. `publish` grows the account by 15 bytes and inserts the entry in order. `remove` takes the entry
-   out and shrinks the account. `approve` grows the account by 32 bytes and appends an address, and
-   `unapprove` moves the last address into the gap and shrinks the account. Each shrink returns the
-   rent. Growing the versions list moves the approved list, which costs one memory move.
+6. `publish` grows the account by 16 bytes and inserts the entry in order. `remove` keeps the
+   entry, marked `removed` and no longer approved, so the index refuses to publish, approve, or
+   release that version again, and an id never names other bytes. `approve` grows the account by
+   32 bytes and appends an address, and `unapprove` moves the last address into the gap and shrinks
+   the account, which returns the rent. Growing the versions list moves the approved list, which
+   costs one memory move.
 7. A version of an implementation is approved when the interface's list holds the implementation
    and the version entry's `approved` is set. Only the interface's approve authority changes
    either one. The list makes approved implementations discoverable with no `getProgramAccounts`.
@@ -1271,7 +1274,7 @@ pub struct VersionIndexV1 {
 | `close_buffer` | Buffer writer | Closes a buffer that is not published, and returns the rent |
 | `publish` | Update authority | Checks that the buffer's SHA-256 equals the hash in the instruction, runs `parse` and the limits on the buffer, creates the version account, copies the document, adds the entry to the index, and closes the buffer. The head does not move. |
 | `set_head` | Update authority | Points the head at a published version |
-| `remove` | Update authority | Closes a version account, removes its entry, and returns the rent to a recipient |
+| `remove` | Update authority | Closes a version account and returns its rent to a recipient. The entry stays, marked removed, so the version is never published again. |
 | `approve_implementation`, `unapprove_implementation` | Approve authority of the interface | Adds an implementation to the interface's list, or removes it |
 | `approve_version`, `unapprove_version` | Approve authority of the interface | Sets or clears `approved` on one version of an implementation |
 | `set_approval_policy` | Approve authority | Sets `approve_new_versions` on an interface index |
@@ -1291,7 +1294,7 @@ interface index lists the lowest version in that range.
    version, which lets a publisher test a release before `set_head`.
 3. Removing a version is how a publisher revokes it. `prepare` refuses an intent that names a
    removed version, and a wallet that stored it can no longer execute it. `remove` refuses the
-   head version, so the update authority moves the head first.
+   head version, so the update authority moves the head first. A fix ships as a new version.
 4. The interface's approve authority can unapprove an implementation or a version at any time. A
    change of policy does not change versions that are already published.
 5. `prepare` refuses an unapproved version with `notApproved`, unless the intent sets

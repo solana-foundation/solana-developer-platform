@@ -1,6 +1,9 @@
 //! `VersionIndexV1`: the authorities, the head, and the versions of one interface or
 //! implementation. Two lists follow the fixed part: the versions, sorted so that the last entry is
 //! the newest, then the index addresses of the implementations that an interface approves.
+//!
+//! An entry stays when its version is removed, marked `removed`, so the index refuses to publish that
+//! version again. Otherwise a removed version could come back with other bytes under the same id.
 
 use anchor_lang::prelude::*;
 use bytemuck::{bytes_of, Pod, Zeroable};
@@ -34,6 +37,7 @@ pub struct VersionEntryV1 {
     pub version: SemverV1,
     pub publish_slot: PodU64,
     pub approved: PodBool,
+    pub removed: PodBool,
 }
 
 /// The discriminator and the fixed part.
@@ -85,8 +89,17 @@ impl<'a> Index<'a> {
         self.versions.binary_search_by(|entry| compare_versions(&entry.version, version))
     }
 
+    /// The entry of `version`, removed or not.
     pub fn entry(&self, version: &SemverV1) -> Option<&'a VersionEntryV1> {
         self.find(version).ok().and_then(|position| self.versions.get(position))
+    }
+
+    /// The entry of `version` when the version is published and not removed.
+    pub fn live_entry(&self, version: &SemverV1) -> Result<&'a VersionEntryV1> {
+        let entry = self.entry(version).ok_or(RegistryError::VersionNotPublished)?;
+        require!(!entry.removed.get(), RegistryError::VersionRemoved);
+
+        Ok(entry)
     }
 
     pub fn approves(&self, implementation_index: &Address) -> bool {
@@ -105,7 +118,7 @@ pub fn header_mut(view: &mut AccountView) -> Result<RefMut<'_, VersionIndexV1>> 
     header_during_change(view)
 }
 
-/// Adds `entry` in version order. `payer` funds the 15 bytes that the account grows by.
+/// Adds `entry` in version order. `payer` funds the 16 bytes that the account grows by.
 pub fn insert_version(view: &mut AccountView, payer: &AccountView, entry: VersionEntryV1) -> Result<()> {
     let placement = {
         let data = load(view)?;
@@ -134,43 +147,38 @@ pub fn insert_version(view: &mut AccountView, payer: &AccountView, entry: Versio
     Ok(())
 }
 
-/// Takes out the entry at `position`. The rent of its 15 bytes goes to `recipient`.
-pub fn remove_version(view: &mut AccountView, recipient: &AccountView, position: usize) -> Result<()> {
-    let len = {
-        let data = load(view)?;
-        Index::parse(&data)?.versions.get(position).ok_or(RegistryError::VersionNotPublished)?;
+/// Marks the entry at `position` removed and no longer approved. The entry keeps its place.
+pub fn mark_removed(view: &mut AccountView, position: usize) -> Result<()> {
+    let mut entry = entry_mut(view, position)?;
+    entry.removed = PodBool::new(true);
+    entry.approved = PodBool::new(false);
 
-        data.len()
-    };
-
-    let start = entry_offset(position)?;
-    let mut data = view.try_borrow_mut()?;
-    data.get_mut(start..len).ok_or(RegistryError::WrongAccount)?.rotate_left(ENTRY_LEN);
-    drop(data);
-
-    let mut header = header_during_change(view)?;
-    header.version_count = sub(header.version_count, 1)?;
-    drop(header);
-
-    let shrunk = len.checked_sub(ENTRY_LEN).ok_or(ProgramError::ArithmeticOverflow)?;
-
-    anchor_lang::realloc_account(view, shrunk, recipient, false)
+    Ok(())
 }
 
+/// A removed version cannot be approved, because it has no document.
 pub fn set_version_approved(view: &mut AccountView, version: &SemverV1, approved: bool) -> Result<()> {
     let position = {
         let data = load(view)?;
+        let index = Index::parse(&data)?;
+        index.live_entry(version)?;
 
-        Index::parse(&data)?.find(version).map_err(|_| RegistryError::VersionNotPublished)?
+        index.find(version).map_err(|_| RegistryError::VersionNotPublished)?
     };
 
-    let mut data = view.try_borrow_mut()?;
-    let entry = data.get_mut(entry_offset(position)?..).and_then(|rest| rest.get_mut(..ENTRY_LEN));
-    let entry: &mut VersionEntryV1 = bytemuck::try_from_bytes_mut(entry.ok_or(RegistryError::WrongAccount)?)
-        .map_err(|_| RegistryError::WrongAccount)?;
-    entry.approved = PodBool::new(approved);
+    entry_mut(view, position)?.approved = PodBool::new(approved);
 
     Ok(())
+}
+
+fn entry_mut(view: &mut AccountView, position: usize) -> Result<RefMut<'_, VersionEntryV1>> {
+    let start = entry_offset(position)?;
+    let end = start.checked_add(ENTRY_LEN).ok_or(ProgramError::ArithmeticOverflow)?;
+
+    RefMut::try_map(view.try_borrow_mut()?, |data| {
+        data.get_mut(start..end).and_then(|bytes| bytemuck::try_from_bytes_mut(bytes).ok()).ok_or(())
+    })
+    .map_err(|_| RegistryError::WrongAccount.into())
 }
 
 /// Appends an implementation index to an interface's approved list. `payer` funds 32 bytes.
@@ -286,7 +294,7 @@ mod tests {
     #[test]
     fn layouts_are_pinned() {
         assert_eq!(core::mem::size_of::<VersionIndexV1>(), 177);
-        assert_eq!(ENTRY_LEN, 15);
+        assert_eq!(ENTRY_LEN, 16);
         assert_eq!(FIXED_LEN, 185);
     }
 
@@ -295,6 +303,7 @@ mod tests {
             version: crate::state::semver(1, minor, 0),
             publish_slot: PodU64::new(9),
             approved: PodBool::new(approved),
+            removed: PodBool::new(false),
         }
     }
 

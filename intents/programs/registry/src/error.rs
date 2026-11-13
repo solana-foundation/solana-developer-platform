@@ -62,4 +62,6 @@ pub enum RegistryError {
     WrongBuilderRoles,
     #[msg("An account's role is not the union of its roles in the built instructions and the fee payer slot")]
     WrongRole,
+    #[msg("The version was removed. A removed version cannot be published, approved, or made the head again.")]
+    VersionRemoved,
 }

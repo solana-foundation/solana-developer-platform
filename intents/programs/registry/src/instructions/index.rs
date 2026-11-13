@@ -128,7 +128,7 @@ impl ChangeIndex {
         let version = semver(major, minor, patch);
         let mut view = *self.index.account();
 
-        Index::parse(&index::load(&view)?)?.entry(&version).ok_or(RegistryError::VersionNotPublished)?;
+        Index::parse(&index::load(&view)?)?.live_entry(&version)?;
 
         let mut header = index::header_mut(&mut view)?;
         self.require_organization(&header)?;

@@ -53,8 +53,9 @@ impl Publish {
         require!(anchor_lang::sha256(document) == document_hash, RegistryError::WrongDocumentHash);
 
         let published = self.check_document(&target, document)?;
-        let unpublished = Index::parse(&index::load(self.index.account())?)?.entry(&published.version).is_none();
-        require!(unpublished, RegistryError::AlreadyPublished);
+        let existing = Index::parse(&index::load(self.index.account())?)?.entry(&published.version).copied();
+        require!(!existing.is_some_and(|entry| entry.removed.get()), RegistryError::VersionRemoved);
+        require!(existing.is_none(), RegistryError::AlreadyPublished);
 
         let publish_slot = Clock::get()?.slot;
         self.create_version(&target, &published.version, publish_slot, document)?;
@@ -64,6 +65,7 @@ impl Publish {
             version: published.version,
             publish_slot: PodU64::new(publish_slot),
             approved: PodBool::new(published.approved),
+            removed: PodBool::new(false),
         };
 
         let mut index_view = *self.index.account();
@@ -140,7 +142,9 @@ impl Publish {
             RegistryError::WrongDocumentId
         );
 
-        interface.entry(&implements.version).ok_or(RegistryError::InterfaceVersionNotPublished)?;
+        let interface_version =
+            interface.entry(&implements.version).ok_or(RegistryError::InterfaceVersionNotPublished)?;
+        require!(!interface_version.removed.get(), RegistryError::VersionRemoved);
 
         Ok(interface.header.approve_new_versions.get() && interface.approves(self.index.address()))
     }

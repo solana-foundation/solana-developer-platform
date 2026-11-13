@@ -5,8 +5,9 @@ use crate::state::index::{self, Index};
 use crate::state::organization::OrganizationV1;
 use crate::state::{close, semver, spec_address, version};
 
-/// Revokes a version: closes its account and takes its entry out of the index. Both rents go to
-/// `recipient`. The head version stays until the head moves.
+/// Revokes a version: closes its account, which returns its rent to `recipient`, and marks its entry
+/// in the index removed. The entry stays, so the version cannot be published again. The head
+/// version stays until the head moves.
 #[derive(Accounts)]
 pub struct Remove {
     pub authority: Signer,
@@ -30,6 +31,7 @@ impl Remove {
             require!(header.organization == *self.organization.address(), RegistryError::WrongAccount);
             self.organization.require_authority(&header.update_authority, &self.authority)?;
             require!(!(header.has_head.get() && header.head == version), RegistryError::RemovesHead);
+            index.live_entry(&version)?;
 
             let kind = index.kind()?;
             let version_data = version::load(self.version.account(), kind)?;
@@ -48,7 +50,7 @@ impl Remove {
         let mut index_view = *self.index.account();
         let mut version_view = *self.version.account();
         let mut recipient = *self.recipient.account();
-        index::remove_version(&mut index_view, &recipient, position)?;
+        index::mark_removed(&mut index_view, position)?;
 
         close(&mut version_view, &mut recipient)
     }

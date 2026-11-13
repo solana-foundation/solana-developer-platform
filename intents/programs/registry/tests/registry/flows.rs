@@ -158,7 +158,7 @@ fn publish_refuses_a_wrong_hash_a_wrong_signer_and_another_name() {
 }
 
 #[test]
-fn remove_returns_the_rent_and_refuses_the_head() {
+fn remove_returns_the_version_rent_keeps_the_entry_and_refuses_the_head() {
     let mut svm = svm().unwrap();
     let organization = Organization::create(&mut svm, "solana.org").unwrap();
     let index = organization.create_interface(&mut svm, INTERFACE).unwrap();
@@ -196,10 +196,41 @@ fn remove_returns_the_rent_and_refuses_the_head() {
     send(&mut svm, &[client::remove(&removal(first), &version(1, 0, 0))], &[&organization.authority]).unwrap();
 
     let data = index_data(&svm, &index).unwrap();
-    assert_eq!(Index::parse(&data).unwrap().versions.len(), 1);
+    let removed = Index::parse(&data).unwrap().versions.first().copied().unwrap();
+    assert_eq!(Index::parse(&data).unwrap().versions.len(), 2);
+    assert!(removed.removed.get() && !removed.approved.get());
     assert!(svm.get_account(&first).is_none_or(|account| account.lamports == 0));
-    assert_eq!(lamports(&svm, &recipient), version_rent + index_rent - lamports(&svm, &index));
-    assert!(index_rent > lamports(&svm, &index));
+    assert_eq!(lamports(&svm, &recipient), version_rent);
+    assert_eq!(lamports(&svm, &index), index_rent);
+
+    let again =
+        send(&mut svm, &[client::remove(&removal(first), &version(1, 0, 0))], &[&organization.authority]).unwrap_err();
+    assert!(again.is(RegistryError::VersionRemoved), "{again}");
+
+    let head = send(&mut svm, &[change.set_head(&version(1, 0, 0))], &[&organization.authority]).unwrap_err();
+    assert!(head.is(RegistryError::VersionRemoved), "{head}");
+}
+
+/// A removed version keeps its entry, so its id never names other bytes.
+#[test]
+fn a_removed_version_cannot_be_published_again() {
+    let mut svm = svm().unwrap();
+    let organization = Organization::create(&mut svm, "solana.org").unwrap();
+    let index = organization.create_interface(&mut svm, INTERFACE).unwrap();
+    let document = interface_document(&organization, "1.0.0").unwrap();
+    let first = organization.publish(&mut svm, INTERFACE, &document, None).unwrap();
+    let removal = Removal {
+        authority: organization.authority.pubkey(),
+        organization: organization.address,
+        index,
+        version: first,
+        recipient: Keypair::new().pubkey(),
+    };
+    send(&mut svm, &[client::remove(&removal, &version(1, 0, 0))], &[&organization.authority]).unwrap();
+
+    let republished = organization.publish(&mut svm, INTERFACE, &document, None).unwrap_err();
+
+    assert!(republished.is(RegistryError::VersionRemoved), "{republished}");
 }
 
 #[test]
