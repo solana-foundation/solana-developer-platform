@@ -30,15 +30,18 @@ environment fallback needs one.
 1. The API and dashboard changes are deployed to production with `SDP_ALLOW_SANDBOX_PROJECTS`
    unset. Production behaves as before.
 2. The beta deployment is live and its sign-up works end to end.
-3. Bot sign-up protection is on for the production Clerk instance, since production sign-up stays
-   open.
-4. Owners of existing production sandbox projects are told the projects move out of view. They are
-   hidden and refused, not deleted.
+3. Vercel bot protection is on for both dashboards, since sign-up is open on both. Clerk's CAPTCHA
+   is not required.
+4. The production canary's organization has mainnet access. The canary reads that organization's
+   wallets, transfers and keys, which a locked organization answers with 403, and three failed
+   canary runs hold production. Its Production project already exists, so granting access is the
+   whole change. Stage's synthetic traffic uses the same organization.
 5. `sandbox-on-beta` exists on the production `sdp-web` project and `beta-label` on the beta one,
    both off.
 6. Rehearse on stage: set `SDP_ALLOW_SANDBOX_PROJECTS` to `false` there and run the checks below.
-   Stage's synthetic traffic runs on a sandbox project, so give its organization mainnet access or
-   point the traffic at production projects first.
+
+Existing production sandbox projects are hidden and refused, not deleted. Their organizations land
+on the mainnet request page, which offers the sandbox on beta, so no separate notice is needed.
 
 ## The window, in order
 
