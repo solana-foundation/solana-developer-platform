@@ -1,5 +1,6 @@
 import { rehypeCodeDefaultOptions } from "fumadocs-core/mdx-plugins";
 import { defineConfig, defineDocs, frontmatterSchema } from "fumadocs-mdx/config";
+import { remarkDashboardLinks } from "./src/lib/dashboard-links";
 import { remarkDocsBlocks } from "./src/lib/docs-blocks";
 import { publishedRampProviderIds, ROTATE_PROVIDERS_TOKEN } from "./src/lib/docs-catalog";
 import { publicSurface } from "./src/lib/release-channel";
@@ -135,7 +136,8 @@ export default defineConfig({
   mdxOptions: {
     // Generated blocks first, so headings and search text see what the build
     // publishes (src/lib/docs-blocks.ts).
-    remarkPlugins: (defaults) => [remarkDocsBlocks, ...defaults],
+    // Dashboard links run after the blocks, so links a block writes are paired too.
+    remarkPlugins: (defaults) => [remarkDocsBlocks, remarkDashboardLinks, ...defaults],
     rehypeCodeOptions: {
       ...rehypeCodeDefaultOptions,
       transformers: [...defaultTransformers, rampProviderRotator, codeLanguage],

@@ -323,7 +323,12 @@ keep Swagger UI for their own release channel.
   `VERCEL_RELATED_PROJECTS` and `VERCEL_ENV` to link to the same branch's web
   preview. A preview without pairing hides the action. Production falls back to
   the canonical platform origin, and local development uses `localhost:3000`.
-  Malformed configured URLs fail the build.
+  Malformed configured URLs fail the build. `remarkDashboardLinks`
+  (`src/lib/dashboard-links.ts`) points a page's account links (`https://platform.solana.com`,
+  `/sign-up`, `/sign-in`) at the same paired dashboard, so the beta docs send new readers to beta;
+  a link text naming the production host names the paired one. Dashboard pages (`/dashboard`, Go to
+  mainnet's link) and `/docs` stay canonical: mainnet is requested on production. Pages keep writing
+  the canonical URL; the `.md` route and the llms files keep it too.
 - `generate-api-docs.mjs` parses it and, with `scripts/lib/api-reference-page.ts`, writes a folder per family (`reference/api/<family>/`): `index.mdx`, the family's table of operations (Method, Endpoint, Summary, each row one link to its operation), and a page per operation named by its `endpointId` (`create-wallet.mdx`), which the folder's `meta.json` lists in document order. An operation page is titled by its summary, described by the description's first sentence, and holds its parameters, request body, responses, cURL, TypeScript and Python samples, success examples and one route-specific error example when available. The shared Idempotency-Key contract is summarized with a link to its guide; OpenAPI retains the full contract. Under Responses, each JSON body's fields nest under its status; a status whose fields an earlier status already lists says "Same fields as `400`." The generator fails if a table misses an operation or a page misses a sample.
 - A family whose routes name groups (`x-sdp-group`, the model's `group`; two or more) keeps each group's pages in a `(group)` folder with its own `meta.json`: Fumadocs shows it as a collapsible sidebar folder and leaves it out of URLs, so an operation stays at `<family>/<endpointId>`. Its table gets a heading per group. `operationGroups` lays out both; a family with fewer than two groups stays flat. Scripts that read files take slugs from `docsPageSlugOf` (`src/lib/site.ts`), which drops `(group)` folders as Fumadocs does, and the `.md` route reads the page's own file (`page.path`).
 - Reference content is Markdown, so `.md`, `llms-full.txt` and search carry
