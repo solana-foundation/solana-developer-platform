@@ -2,7 +2,8 @@
 //! and writes each input in borsh, in interface order.
 //!
 //! `cluster` is checked and not stored, because the binary form of a record has no cluster either.
-//! The registry that holds the record is on one cluster.
+//! The registry that holds the record is on one cluster. A plan (`plan.rs`) compiles each of its
+//! intents with the same parts.
 
 use sdp_intents_spec::wire::{DocumentKind, IntentDocV1, PodU64, PoolRefV1};
 use sdp_intents_spec::{Address, BaseType, Intent, IntentOptions, ValueType};
@@ -41,21 +42,44 @@ pub(crate) fn compile_intent<'c>(text: &str, catalog: &'c Catalog) -> Result<Com
     }
 }
 
-struct Payers {
+/// What every intent of a plan shares.
+#[derive(Clone, Copy)]
+pub(crate) struct Terms {
+    pub(crate) payers: Payers,
+    pub(crate) priority_fee_lamports: u64,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct Payers {
     fee: Address,
     rent: Address,
 }
 
-#[derive(Default)]
-struct Options {
-    priority_fee_lamports: u64,
-    flags: IntentOptions,
+/// The part of an intent that is its own in a plan: the documents and the inputs.
+pub(crate) struct Entry<'c> {
+    interface: &'c CompiledInterface,
+    implementation: &'c CompiledImplementation,
+    inputs: Vec<Vec<u8>>,
 }
 
 fn compile<'c>(value: &Value, catalog: &'c Catalog, sink: &mut Sink) -> Option<CompiledIntent<'c>> {
     let mut object = root(value, sink)?;
     read_kind(&mut object, "intent", sink);
 
+    let entry = read_entry(&mut object, catalog, sink);
+    let payers = object.required("payers", sink).and_then(|node| read_payers(&node, sink));
+    let options = object.field("options").map_or(Some(Options::default()), |node| read_options(&node, sink));
+    read_cluster(&mut object, sink);
+    object.finish(sink);
+
+    let options = options?;
+    let terms = Terms { payers: payers?, priority_fee_lamports: options.priority_fee_lamports };
+
+    write_intent(entry?, terms, options.flags, sink)
+}
+
+/// Reads `interface`, `implementation`, and `inputs`.
+pub(crate) fn read_entry<'c>(object: &mut Object<'_>, catalog: &'c Catalog, sink: &mut Sink) -> Option<Entry<'c>> {
     let interface = object.required("interface", sink).and_then(|node| read_interface(&node, catalog, sink));
     let implementation_node = object.required("implementation", sink);
     let implementation = implementation_node.as_ref().and_then(|node| read_implementation(node, catalog, sink));
@@ -67,30 +91,36 @@ fn compile<'c>(value: &Value, catalog: &'c Catalog, sink: &mut Sink) -> Option<C
     let inputs = object.required("inputs", sink);
     let inputs =
         interface.as_ref().zip(inputs).and_then(|(found, node)| read_inputs(&node, &found.interface.schema, sink));
-    let payers = object.required("payers", sink).and_then(|node| read_payers(&node, sink));
-    let options = object.field("options").map_or(Some(Options::default()), |node| read_options(&node, sink));
 
+    Some(Entry { interface: interface?.interface, implementation: implementation?, inputs: inputs? })
+}
+
+/// `cluster` is checked and not stored.
+pub(crate) fn read_cluster(object: &mut Object<'_>, sink: &mut Sink) {
     if let Some(cluster) = object.field("cluster") {
         cluster.str(sink).and_then(|text| reported(address(text), &cluster, sink));
     }
+}
 
-    object.finish(sink);
-
-    let interface = interface?.interface;
-    let implementation = implementation?;
+pub(crate) fn write_intent<'c>(
+    entry: Entry<'c>,
+    terms: Terms,
+    flags: IntentOptions,
+    sink: &mut Sink,
+) -> Option<CompiledIntent<'c>> {
     let fixed = IntentDocV1 {
-        interface: interface.document_id,
-        implementation: implementation.document_id,
-        fee_payer: payers.as_ref()?.fee,
-        rent_payer: payers?.rent,
-        priority_fee_lamports: PodU64::new(options.as_ref()?.priority_fee_lamports),
-        flags: options?.flags.to_flags(),
+        interface: entry.interface.document_id,
+        implementation: entry.implementation.document_id,
+        fee_payer: terms.payers.fee,
+        rent_payer: terms.payers.rent,
+        priority_fee_lamports: PodU64::new(terms.priority_fee_lamports),
+        flags: flags.to_flags(),
         ..IntentDocV1::default()
     };
 
-    let bytes = sink.is_empty().then(|| write(fixed, &inputs?, sink)).flatten()?;
+    let bytes = sink.is_empty().then(|| write(fixed, &entry.inputs, sink)).flatten()?;
 
-    Some(CompiledIntent { bytes, interface, implementation })
+    Some(CompiledIntent { bytes, interface: entry.interface, implementation: entry.implementation })
 }
 
 /// The implementation must implement this interface, at a version that the interface still covers.
@@ -142,7 +172,7 @@ fn read_input(object: &mut Object<'_>, field: &Field, pointer: &str, sink: &mut 
 }
 
 /// `rent` defaults to `fee`.
-fn read_payers(node: &Node<'_>, sink: &mut Sink) -> Option<Payers> {
+pub(crate) fn read_payers(node: &Node<'_>, sink: &mut Sink) -> Option<Payers> {
     let mut object = node.object(sink)?;
     let read = |node: Node<'_>, sink: &mut Sink| node.str(sink).and_then(|text| reported(address(text), &node, sink));
 
@@ -155,26 +185,35 @@ fn read_payers(node: &Node<'_>, sink: &mut Sink) -> Option<Payers> {
     Some(Payers { fee, rent: rent.unwrap_or(Some(fee))? })
 }
 
+#[derive(Default)]
+struct Options {
+    priority_fee_lamports: u64,
+    flags: IntentOptions,
+}
+
 fn read_options(node: &Node<'_>, sink: &mut Sink) -> Option<Options> {
     let mut object = node.object(sink)?;
+    let priority_fee = read_priority_fee(&mut object, sink);
+    let flags = read_flags(&mut object, sink);
+    object.finish(sink);
+
+    Some(Options { priority_fee_lamports: priority_fee?, flags: flags? })
+}
+
+pub(crate) fn read_priority_fee(object: &mut Object<'_>, sink: &mut Sink) -> Option<u64> {
+    object.field("priorityFeeLamports").map_or(Some(0), |node| read_lamports(&node, sink))
+}
+
+pub(crate) fn read_flags(object: &mut Object<'_>, sink: &mut Sink) -> Option<IntentOptions> {
     let defaults = IntentOptions::default();
     let flag =
         |node: Option<Node<'_>>, default: bool, sink: &mut Sink| node.map_or(Some(default), |node| node.bool(sink));
 
-    let priority_fee = object.field("priorityFeeLamports").map_or(Some(0), |node| read_lamports(&node, sink));
     let allow_unapproved = flag(object.field("allowUnapproved"), defaults.allow_unapproved, sink);
     let assertions = flag(object.field("assertions"), defaults.assertions, sink);
     let verify_intent = flag(object.field("verifyIntent"), defaults.verify_intent, sink);
-    object.finish(sink);
 
-    Some(Options {
-        priority_fee_lamports: priority_fee?,
-        flags: IntentOptions {
-            allow_unapproved: allow_unapproved?,
-            assertions: assertions?,
-            verify_intent: verify_intent?,
-        },
-    })
+    Some(IntentOptions { allow_unapproved: allow_unapproved?, assertions: assertions?, verify_intent: verify_intent? })
 }
 
 fn read_lamports(node: &Node<'_>, sink: &mut Sink) -> Option<u64> {

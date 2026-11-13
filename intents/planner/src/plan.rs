@@ -1,3 +1,5 @@
+use core::ops::Range;
+
 use sdp_intents_engine::{Chain, Recipe};
 use sdp_intents_spec::builder::Ready;
 use sdp_intents_spec::{Address, ValueRef, ValueSource};
@@ -6,9 +8,19 @@ use crate::render::{base58, Column};
 use crate::values::{Table, Values};
 use crate::{Instruction, PlanError, RequiredSignature, SignerRole, Transaction};
 
-/// The plan of one intent: what the signers read, and the transaction they sign.
+/// The plan of one or more intents: what the signers read, and the transaction they sign.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Plan {
+    /// Each intent, in the order of its segment in the transaction.
+    pub intents: Vec<PlannedIntent>,
+    pub transaction: Transaction,
+    pub signatures: Vec<RequiredSignature>,
+    pub units_consumed: u64,
+}
+
+/// One intent of a plan, and where its segment is in the transaction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlannedIntent {
     /// What a signer reads and signs: the record's message, the guarantees, and the documents.
     pub message: String,
     /// The interface's display, for people.
@@ -16,12 +28,13 @@ pub struct Plan {
     /// The SHA-256 of the interface and the implementation documents.
     pub digests: Digests,
     pub builder: Option<Address>,
-    pub transaction: Transaction,
-    pub signatures: Vec<RequiredSignature>,
     /// The interface's outputs, in order, in borsh.
     pub outputs: Vec<u8>,
     pub builder_simulations: usize,
-    pub units_consumed: u64,
+    /// The position of the intent's `verify_intent`, when the intent keeps it.
+    pub verify: Option<usize>,
+    /// The positions of the instructions that the recipe built.
+    pub span: Range<usize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,6 +73,14 @@ impl Built {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Self { instructions, signers: ready.signers()?.to_vec(), outputs: ready.outputs()?.to_vec() })
+    }
+
+    /// The role of each account of the instructions, in order, as a builder writes them.
+    pub(crate) fn roles(&self) -> Vec<u8> {
+        self.instructions
+            .iter()
+            .flat_map(|instruction| instruction.accounts.iter().map(|meta| u8::from(meta.role)))
+            .collect()
     }
 }
 

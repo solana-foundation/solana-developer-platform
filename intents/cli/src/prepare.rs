@@ -1,5 +1,5 @@
-//! `sdp-intents prepare`: plans an intent over RPC against the definitions in this repository, and
-//! prints the plan as JSON, in the shape of `DESIGN.md`, section 4.1.
+//! `sdp-intents prepare`: plans a plan request over RPC against the definitions in this repository,
+//! and prints the plan as JSON, in the shape of `DESIGN.md`, section 4.1.
 //!
 //! Until the registry exists, the documents come from the definitions tree, not from the chain.
 
@@ -9,7 +9,7 @@ use base64::Engine as _;
 use serde_json::{json, Value};
 
 use sdp_intents_client::{Client, ClientError, Prepared};
-use sdp_intents_planner::{Instruction, PlanError};
+use sdp_intents_planner::{Instruction, IntentDocuments, PlanError, PlannedIntent};
 use sdp_intents_spec::Address;
 
 use crate::lint::{compile_tree, Outcome};
@@ -18,8 +18,8 @@ use crate::tree::Tree;
 
 #[derive(clap::Args)]
 pub struct PrepareArgs {
-    /// The intent, as JSON.
-    intent: PathBuf,
+    /// The plan request, as JSON: the payers, then each intent.
+    request: PathBuf,
 
     /// The RPC that the fetches and the simulations use.
     #[arg(long)]
@@ -39,21 +39,28 @@ pub fn run(args: &PrepareArgs) -> Result<Outcome, String> {
         return Err("the definitions have findings, so no intent can name them".to_owned());
     }
 
-    let text = std::fs::read_to_string(&args.intent)
-        .map_err(|error| format!("cannot read `{}`: {error}", args.intent.display()))?;
-    let intent = match compiled.catalog.compile_intent(&text) {
-        Ok(intent) => intent,
+    let text = std::fs::read_to_string(&args.request)
+        .map_err(|error| format!("cannot read `{}`: {error}", args.request.display()))?;
+    let request = match compiled.catalog.compile_plan(&text) {
+        Ok(request) => request,
         Err(report) => {
-            eprint!("{}", report.render(&args.intent.display().to_string(), &text));
+            eprint!("{}", report.render(&args.request.display().to_string(), &text));
             return Ok(Outcome::Findings);
         }
     };
 
-    let prepared = Client::new(&args.rpc)
-        .prepare(&intent.interface.bytes, &intent.implementation.bytes, &intent.bytes)
-        .map_err(describe)?;
-    let intent_json: Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
-    let plan = serde_json::to_string_pretty(&plan_json(&prepared, intent_json)).map_err(|error| error.to_string())?;
+    let documents: Vec<IntentDocuments<'_>> = request
+        .intents
+        .iter()
+        .map(|intent| IntentDocuments {
+            interface: &intent.interface.bytes,
+            implementation: &intent.implementation.bytes,
+            intent: &intent.bytes,
+        })
+        .collect();
+    let prepared = Client::new(&args.rpc).prepare(&documents).map_err(describe)?;
+    let request_json: Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+    let plan = serde_json::to_string_pretty(&plan_json(&prepared, request_json)).map_err(|error| error.to_string())?;
 
     println!("{plan}");
 
@@ -70,7 +77,7 @@ fn describe(error: ClientError) -> String {
     }
 }
 
-fn plan_json(prepared: &Prepared, intent: Value) -> Value {
+fn plan_json(prepared: &Prepared, request: Value) -> Value {
     let plan = &prepared.plan;
     let budget = plan.transaction.budget;
     let signatures: Vec<Value> = plan
@@ -82,12 +89,8 @@ fn plan_json(prepared: &Prepared, intent: Value) -> Value {
     json!({
         "spec": "sdp-intents@1.0",
         "kind": "plan",
-        "intent": intent,
-        "digests": { "interface": digest(&plan.digests.interface), "implementation": digest(&plan.digests.implementation) },
-        "builder": plan.builder.map(|program| json!({ "program": base58(&program) })),
-        "outputs": base64(&plan.outputs),
-        "message": plan.message,
-        "display": plan.display,
+        "request": request,
+        "intents": plan.intents.iter().map(intent_json).collect::<Vec<_>>(),
         "transactions": [{
             "instructions": plan.transaction.instructions.iter().map(instruction_json).collect::<Vec<_>>(),
             "version": 1,
@@ -100,7 +103,21 @@ fn plan_json(prepared: &Prepared, intent: Value) -> Value {
             "compiled": base64(&prepared.message),
             "signatures": signatures,
         }],
-        "simulation": { "unitsConsumed": plan.units_consumed.to_string(), "builderSimulations": plan.builder_simulations },
+        "simulation": { "unitsConsumed": plan.units_consumed.to_string() },
+    })
+}
+
+/// `verify` and `span` are positions in the transaction's instructions.
+fn intent_json(intent: &PlannedIntent) -> Value {
+    json!({
+        "message": intent.message,
+        "display": intent.display,
+        "digests": { "interface": digest(&intent.digests.interface), "implementation": digest(&intent.digests.implementation) },
+        "builder": intent.builder.map(|program| json!({ "program": base58(&program) })),
+        "outputs": base64(&intent.outputs),
+        "verify": intent.verify,
+        "span": { "start": intent.span.start, "end": intent.span.end },
+        "builderSimulations": intent.builder_simulations,
     })
 }
 

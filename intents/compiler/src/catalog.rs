@@ -7,6 +7,7 @@ use crate::diagnostic::Report;
 use crate::implementation::{compile_implementation, CompiledImplementation};
 use crate::intent::{compile_intent, CompiledIntent};
 use crate::interface::{compile_interface, CompiledInterface};
+use crate::plan::{compile_plan, CompiledPlan};
 
 /// The documents that a file can name from outside itself: the address of each organization, the
 /// interfaces, and the implementations. Compile the interfaces first, then the implementations that
@@ -48,6 +49,11 @@ impl Catalog {
 
     pub fn compile_intent(&self, text: &str) -> Result<CompiledIntent<'_>, Report> {
         compile_intent(text, self)
+    }
+
+    /// A plan request: one or more intents that share the payers and the priority fee.
+    pub fn compile_plan(&self, text: &str) -> Result<CompiledPlan<'_>, Report> {
+        compile_plan(text, self)
     }
 
     #[cfg(test)]

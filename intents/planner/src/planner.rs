@@ -1,17 +1,15 @@
-use sha2::{Digest as _, Sha256};
+//! The plan of one or more intents. Each intent is one segment of the transaction, planned in
+//! order, so each segment's simulations run the earlier segments first. The last simulation is the
+//! whole transaction, and its compute units set the budget.
 
-use sdp_intents_engine::{Chain, Recipe, Resolution};
-use sdp_intents_spec::builder::StagedResult;
-use sdp_intents_spec::{Address, RecipeKind};
+use sdp_intents_engine::Chain;
+use sdp_intents_spec::Address;
 
-use crate::plan::Built;
-use crate::render::Column;
-use crate::values::Values;
-use crate::verify::{Snapshot, Verification};
-use crate::{Account, Budget, Digests, Plan, PlanError, RequiredSignature, Simulation, SimulationResult, Transaction};
-
-/// A builder asks for accounts in at most 4 rounds.
-const MAX_BUILDER_SIMULATIONS: usize = 4;
+use crate::accounts::Overlay;
+use crate::plan::PlannedIntent;
+use crate::segment::{Earlier, Segment, SegmentPlanner, SegmentStep};
+use crate::{AccountMap, Budget, Instruction, IntentDocuments, Plan, PlanError, RequiredSignature, Simulation};
+use crate::{SimulationResult, Transaction};
 
 /// What the caller does next for the planner.
 #[derive(Debug)]
@@ -23,276 +21,131 @@ pub enum Step {
     Done(Box<Plan>),
 }
 
-/// `prepare` for one intent, with no IO. Each `next` returns the fetch or the simulation that the
-/// plan needs, and the caller answers it.
+/// `prepare` with no IO. Each `next` returns the fetch or the simulation that the plan needs, and
+/// the caller answers it.
 pub struct Planner<'a> {
-    recipe: Recipe<'a>,
-    digests: Digests,
-    funder: Address,
-    scratch: Address,
-    extra_accounts: Vec<Address>,
-    builder_simulations: usize,
-    state: State,
-}
+    segments: Vec<SegmentPlanner<'a>>,
+    fee_payer: Address,
+    priority_fee_lamports: u64,
 
-enum State {
-    Resolving,
-    Building,
-    /// A simulation of a call to `builder` has no answer yet.
-    AwaitingBuilder {
-        builder: Address,
-    },
-    Built(Built),
-    AwaitingVerification(Box<Verifying>),
-    Planned(Box<Plan>),
-    Finished,
-}
-
-/// The final transaction, simulated, with what the plan needs once the simulation passes.
-struct Verifying {
-    built: Built,
-    transaction: Transaction,
-    observe: Vec<Address>,
-    before: Vec<Account>,
-    guarantees: Vec<String>,
-    message: String,
-    display: String,
+    intents: Vec<PlannedIntent>,
+    instructions: Vec<Instruction>,
     signatures: Vec<RequiredSignature>,
+    after: AccountMap,
+    last: Option<Measured>,
+}
+
+/// The simulation of the transaction up to the end of the last planned segment.
+#[derive(Clone, Copy)]
+struct Measured {
+    fee: u64,
+    units_consumed: u64,
+    loaded_accounts_data_size: Option<u32>,
 }
 
 impl<'a> Planner<'a> {
     /// `scratch` is any address that holds no account, where a builder simulation writes its result.
     /// A fresh random address keeps others from creating an account there first.
     ///
-    /// The intent must turn off `assertions` and `verifyIntent`. Prepare builds neither the
-    /// Lighthouse instructions nor `verify_intent` yet, and it refuses to drop a check that the
-    /// intent asks for. Without them, the postconditions hold only in the simulation.
-    pub fn new(
-        interface: &'a [u8],
-        implementation: &'a [u8],
-        intent: &'a [u8],
-        scratch: Address,
-    ) -> Result<Self, PlanError> {
-        let recipe = Recipe::parse(interface, implementation, intent)?;
-        let options = recipe.intent().options()?;
-
-        if options.assertions {
-            return Err(PlanError::Unavailable("assertions"));
-        }
-
-        if options.verify_intent {
-            return Err(PlanError::Unavailable("verifyIntent"));
-        }
-
-        let digests = Digests {
-            interface: Sha256::digest(interface).into(),
-            implementation: Sha256::digest(implementation).into(),
+    /// Every intent names the same payers and priority fee, and turns off `assertions`. Prepare
+    /// cannot build the Lighthouse instructions yet, and it refuses to drop a check that an intent
+    /// asks for.
+    pub fn new(intents: &[IntentDocuments<'a>], scratch: Address) -> Result<Self, PlanError> {
+        let segments =
+            intents.iter().map(|documents| SegmentPlanner::new(*documents, scratch)).collect::<Result<Vec<_>, _>>()?;
+        let first = segments.first().ok_or(PlanError::NoIntents)?.recipe().intent();
+        let terms = |intent: &sdp_intents_spec::Intent<'_>| {
+            (*intent.fee_payer(), *intent.rent_payer(), intent.priority_fee_lamports())
         };
-        let funder = *recipe.intent().fee_payer();
+
+        if segments.iter().any(|segment| terms(segment.recipe().intent()) != terms(first)) {
+            return Err(PlanError::PayersDiffer);
+        }
 
         Ok(Self {
-            recipe,
-            digests,
-            funder,
-            scratch,
-            extra_accounts: Vec::new(),
-            builder_simulations: 0,
-            state: State::Resolving,
+            fee_payer: *first.fee_payer(),
+            priority_fee_lamports: first.priority_fee_lamports(),
+            segments,
+            intents: Vec::new(),
+            instructions: Vec::new(),
+            signatures: Vec::new(),
+            after: AccountMap::default(),
+            last: None,
         })
     }
 
     /// The account that pays a builder simulation's fee and scratch rent. It defaults to the fee
     /// payer.
     pub fn with_funder(mut self, funder: Address) -> Self {
-        self.funder = funder;
+        self.segments.iter_mut().for_each(|segment| segment.funder = funder);
         self
     }
 
     pub fn next<C: Chain>(&mut self, chain: &C) -> Result<Step, PlanError> {
-        match core::mem::replace(&mut self.state, State::Finished) {
-            State::Resolving => self.resolve(chain),
-            State::Building => self.simulate_builder(chain),
-            State::Built(built) => self.simulate_final(built, chain),
-            State::Planned(plan) => Ok(Step::Done(plan)),
-            awaiting @ (State::AwaitingBuilder { .. } | State::AwaitingVerification(_)) => {
-                self.state = awaiting;
-                Err(PlanError::OutOfOrder)
+        loop {
+            let Some(segment) = self.segments.get_mut(self.intents.len()) else {
+                return self.finish().map(|plan| Step::Done(Box::new(plan)));
+            };
+
+            let overlay = Overlay { after: &self.after, base: chain };
+            let fee = self.last.map_or(0, |last| last.fee);
+            let earlier = Earlier { instructions: &self.instructions, fee, chain: &overlay };
+
+            match segment.next(&earlier)? {
+                SegmentStep::Fetch(addresses) => return Ok(Step::Fetch(addresses)),
+                SegmentStep::Simulate(simulation) => return Ok(Step::Simulate(simulation)),
+                SegmentStep::Planned(segment) => self.add(*segment),
             }
-            State::Finished => Err(PlanError::OutOfOrder),
         }
     }
 
     /// Reads the result of the simulation that `next` asked for.
     pub fn simulated(&mut self, result: SimulationResult) -> Result<(), PlanError> {
-        match core::mem::replace(&mut self.state, State::Finished) {
-            State::AwaitingBuilder { builder } => self.builder_result(builder, result),
-            State::AwaitingVerification(verifying) => self.verified(*verifying, result),
-            other => {
-                self.state = other;
-                Err(PlanError::OutOfOrder)
-            }
-        }
+        self.segments.get_mut(self.intents.len()).ok_or(PlanError::OutOfOrder)?.simulated(result)
     }
 
-    fn resolve<C: Chain>(&mut self, chain: &C) -> Result<Step, PlanError> {
-        if let Resolution::Missing(missing) = self.recipe.resolve(chain)? {
-            let addresses = missing.addresses().copied().collect();
-            self.state = State::Resolving;
-
-            return Ok(Step::Fetch(addresses));
-        }
-
-        match self.recipe.implementation().recipe()? {
-            RecipeKind::Static => self.simulate_final(Built::from_static(&self.recipe, chain)?, chain),
-            RecipeKind::Program => self.simulate_builder(chain),
-            RecipeKind::Remote => Err(PlanError::RemoteRecipe),
-        }
-    }
-
-    fn simulate_builder<C: Chain>(&mut self, chain: &C) -> Result<Step, PlanError> {
-        if self.builder_simulations == MAX_BUILDER_SIMULATIONS {
-            return Err(PlanError::TooManyRounds);
-        }
-
-        let call = self.recipe.builder_call(chain, &self.extra_accounts)?;
-        let builder = *call.program;
-        let simulation = Simulation::staged(&call, self.funder, self.scratch)?;
-
-        self.builder_simulations = self.builder_simulations.saturating_add(1);
-        self.state = State::AwaitingBuilder { builder };
-
-        Ok(Step::Simulate(simulation))
-    }
-
-    fn builder_result(&mut self, builder: Address, result: SimulationResult) -> Result<(), PlanError> {
-        if let Some(error) = result.error {
-            return Err(PlanError::Simulation { error, logs: result.logs });
-        }
-
-        let return_data =
-            result.return_data.filter(|data| data.program == builder).ok_or(PlanError::NoBuilderResult)?;
-        let scratch = result.accounts.into_iter().next().flatten().ok_or(PlanError::NoScratch)?;
-
-        match StagedResult::parse(&return_data.data, &scratch.data)? {
-            StagedResult::Ready(ready) => self.state = State::Built(Built::from_ready(&self.recipe, &ready)?),
-            StagedResult::MoreAccounts(addresses) => {
-                self.extra_accounts.extend_from_slice(addresses);
-                self.state = State::Building;
-            }
-            StagedResult::Refused(refused) => {
-                let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
-
-                return Err(PlanError::Refused { code: text(refused.code), message: text(refused.message) });
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Renders what needs account data, then simulates the final transaction. The fee payer and
-    /// the writable accounts are snapshot first, because only they can change.
-    fn simulate_final<C: Chain>(&mut self, built: Built, chain: &C) -> Result<Step, PlanError> {
-        let intent = self.recipe.intent();
-        let transaction = Transaction {
-            fee_payer: *intent.fee_payer(),
-            instructions: built.instructions.clone(),
-            budget: Budget::MAXIMUM,
-            priority_fee_lamports: intent.priority_fee_lamports(),
-        };
-        let observe = transaction.writable_accounts();
-        let values = Values { recipe: &self.recipe, chain, outputs: &built.outputs };
-
-        let missing = observe.iter().chain(&values.amount_mints()?).fold(Vec::new(), |mut missing, address| {
-            if chain.account(address).is_none() && !missing.contains(address) {
-                missing.push(*address);
-            }
-
-            missing
+    /// Appends the segment's instructions, and keeps the state after it for the next segment.
+    fn add(&mut self, segment: Segment) {
+        let verify = segment.verify.map(|verify| {
+            self.instructions.push(verify);
+            self.instructions.len().saturating_sub(1)
         });
+        let start = self.instructions.len();
+        self.instructions.extend(segment.built);
 
-        if !missing.is_empty() {
-            self.state = State::Built(built);
-            return Ok(Step::Fetch(missing));
-        }
-
-        let guarantees = values.guarantees()?;
-        let builder = self.builder();
-        let message = values.message(&guarantees, &self.digests, builder.as_ref())?;
-        let display = values.render(self.recipe.interface().display()?, Column::Display)?;
-        let signatures = values.signatures(&transaction, &built)?;
-        let before = observe.iter().map(|address| snapshot_of(chain, address)).collect();
-
-        let simulation = Simulation { transaction: transaction.clone(), observe: observe.clone() };
-        let verifying = Verifying { built, transaction, observe, before, guarantees, message, display, signatures };
-        self.state = State::AwaitingVerification(Box::new(verifying));
-
-        Ok(Step::Simulate(simulation))
-    }
-
-    fn verified(&mut self, verifying: Verifying, result: SimulationResult) -> Result<(), PlanError> {
-        if let Some(error) = result.error {
-            return Err(PlanError::Simulation { error, logs: result.logs });
-        }
-
-        if result.accounts.len() != verifying.observe.len() {
-            return Err(PlanError::NoAccounts);
-        }
-
-        let snapshots: Vec<Snapshot> = verifying
-            .observe
-            .iter()
-            .zip(verifying.before)
-            .zip(result.accounts)
-            .map(|((address, before), after)| Snapshot {
-                address: *address,
-                before,
-                after: after.unwrap_or_else(empty),
-            })
+        let new_signatures: Vec<_> = segment
+            .signatures
+            .into_iter()
+            .filter(|signature| !self.signatures.iter().any(|known| known.address == signature.address))
             .collect();
-        let fee = result.fee.unwrap_or_else(|| verifying.transaction.fee());
+        self.signatures.extend(new_signatures);
 
-        Verification::new(&self.recipe, &verifying.built.outputs, &snapshots, &verifying.transaction.instructions, fee)
-            .check(&verifying.guarantees)?;
+        self.after.insert_fetched(&segment.observed, segment.after);
+        self.last = Some(Measured {
+            fee: segment.fee,
+            units_consumed: segment.units_consumed,
+            loaded_accounts_data_size: segment.loaded_accounts_data_size,
+        });
+        self.intents.push(PlannedIntent { verify, span: start..self.instructions.len(), ..segment.intent });
+    }
 
-        let units_consumed = result.units_consumed.ok_or(PlanError::NoUnits)?;
-        let budget = Budget::measured(units_consumed, result.loaded_accounts_data_size);
-        let plan = Plan {
-            message: verifying.message,
-            display: verifying.display,
-            digests: self.digests,
-            builder: self.builder(),
-            transaction: Transaction { budget, ..verifying.transaction },
-            signatures: verifying.signatures,
-            outputs: verifying.built.outputs,
-            builder_simulations: self.builder_simulations,
-            units_consumed,
+    /// The last simulation ran the whole transaction, so it measures the budget.
+    fn finish(&mut self) -> Result<Plan, PlanError> {
+        let last = self.last.take().ok_or(PlanError::OutOfOrder)?;
+        let transaction = Transaction {
+            fee_payer: self.fee_payer,
+            instructions: core::mem::take(&mut self.instructions),
+            budget: Budget::measured(last.units_consumed, last.loaded_accounts_data_size),
+            priority_fee_lamports: self.priority_fee_lamports,
         };
-        self.state = State::Planned(Box::new(plan));
 
-        Ok(())
+        Ok(Plan {
+            intents: core::mem::take(&mut self.intents),
+            transaction,
+            signatures: core::mem::take(&mut self.signatures),
+            units_consumed: last.units_consumed,
+        })
     }
-
-    /// The builder program of a program recipe.
-    fn builder(&self) -> Option<Address> {
-        let implementation = self.recipe.implementation();
-        let call = implementation.instructions().ok()?.first()?;
-
-        (implementation.recipe().ok()? == RecipeKind::Program)
-            .then(|| self.recipe.address(call.program).copied())
-            .flatten()
-    }
-}
-
-fn snapshot_of<C: Chain>(chain: &C, address: &Address) -> Account {
-    chain.account(address).map_or_else(empty, |account| Account {
-        owner: *account.owner,
-        lamports: account.lamports,
-        data: account.data.to_vec(),
-    })
-}
-
-fn empty() -> Account {
-    Account { owner: Address::default(), lamports: 0, data: Vec::new() }
 }
 
 #[cfg(test)]
@@ -301,7 +154,7 @@ mod tests {
 
     use super::*;
     use crate::test_support::*;
-    use crate::{AccountMap, AccountMeta, SignerRole};
+    use crate::{Account, AccountMap, AccountMeta, SignerRole};
 
     const FEE_PAYER: &str = "5ZWj7a1f8tWkjBESHKgrLmXshuXxqeY9SYcfbshpAqPG";
     const FROM: &str = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
@@ -375,8 +228,7 @@ mod tests {
     #[test]
     fn plans_a_static_transfer() {
         let documents = Compiled::spl_transfer();
-        let mut planner =
-            Planner::new(&documents.interface, &documents.implementation, &documents.intent, SCRATCH).unwrap();
+        let mut planner = Planner::new(&[documents.documents()], SCRATCH).unwrap();
         let mut accounts = AccountMap::default();
 
         let final_run = spl_final_simulation(&mut planner, &mut accounts);
@@ -385,8 +237,8 @@ mod tests {
         planner.simulated(spl_result(400_000_000, SOL - 15_000 - ATA_RENT)).unwrap();
         let Ok(Step::Done(plan)) = planner.next(&accounts) else { panic!("the plan is done") };
 
-        assert!(plan.message.starts_with(&format!("sdp-intents/1: transfer 100 of {USDC} from {FROM} to {TO} | guarantees: {FROM} sends at most 100 of {USDC}; nothing else leaves {FROM} | interface: token.transfer@1.0.0 ")));
-        assert_eq!(plan.display, format!("Send 100 {USDC} to 9WzD…AWWM"));
+        assert!(plan.intents[0].message.starts_with(&format!("sdp-intents/1: transfer 100 of {USDC} from {FROM} to {TO} | guarantees: {FROM} sends at most 100 of {USDC}; nothing else leaves {FROM} | interface: token.transfer@1.0.0 ")));
+        assert_eq!(plan.intents[0].display, format!("Send 100 {USDC} to 9WzD…AWWM"));
         assert_eq!(plan.transaction.budget.compute_unit_limit, 33_000);
         assert_eq!(plan.transaction.priority_fee_lamports, 5_000);
         assert_eq!(
@@ -398,8 +250,7 @@ mod tests {
     #[test]
     fn a_broken_guarantee_fails_the_plan() {
         let documents = Compiled::spl_transfer();
-        let mut planner =
-            Planner::new(&documents.interface, &documents.implementation, &documents.intent, SCRATCH).unwrap();
+        let mut planner = Planner::new(&[documents.documents()], SCRATCH).unwrap();
         spl_final_simulation(&mut planner, &mut AccountMap::default());
 
         let failed = planner.simulated(spl_result(300_000_000, SOL - 15_000 - ATA_RENT));
@@ -410,8 +261,7 @@ mod tests {
     #[test]
     fn a_fee_payer_that_loses_more_than_the_fee_and_the_rent_fails_the_plan() {
         let documents = Compiled::spl_transfer();
-        let mut planner =
-            Planner::new(&documents.interface, &documents.implementation, &documents.intent, SCRATCH).unwrap();
+        let mut planner = Planner::new(&[documents.documents()], SCRATCH).unwrap();
         spl_final_simulation(&mut planner, &mut AccountMap::default());
 
         let failed = planner.simulated(spl_result(400_000_000, SOL / 2));
@@ -428,14 +278,13 @@ mod tests {
             &include_str!("../../fixtures/intents/spl-token-transfer.json").replace(r#""assertions": false, "#, ""),
         );
 
-        let refused = Planner::new(&documents.interface, &documents.implementation, &documents.intent, SCRATCH);
+        let refused = Planner::new(&[documents.documents()], SCRATCH);
 
         assert!(refused.is_err_and(|error| error == PlanError::Unavailable("assertions")));
     }
 
     fn builder_planner(documents: &Compiled) -> (Planner<'_>, AccountMap) {
-        let mut planner =
-            Planner::new(&documents.interface, &documents.implementation, &documents.intent, SCRATCH).unwrap();
+        let mut planner = Planner::new(&[documents.documents()], SCRATCH).unwrap();
         let mut accounts = AccountMap::default();
         let step = fetch(&mut planner, &mut accounts, |_| Some(mint(TOKEN_2022_PROGRAM)));
         assert!(matches!(step, Step::Simulate(_)));
@@ -446,8 +295,7 @@ mod tests {
     #[test]
     fn a_builder_simulation_creates_scratch_first() {
         let documents = Compiled::token_2022_transfer();
-        let mut planner =
-            Planner::new(&documents.interface, &documents.implementation, &documents.intent, SCRATCH).unwrap();
+        let mut planner = Planner::new(&[documents.documents()], SCRATCH).unwrap();
         let simulation =
             simulation(fetch(&mut planner, &mut AccountMap::default(), |_| Some(mint(TOKEN_2022_PROGRAM))));
         let [create, call] = simulation.transaction.instructions.as_slice() else { panic!("two instructions") };
@@ -514,13 +362,93 @@ mod tests {
     #[test]
     fn steps_run_in_order() {
         let documents = Compiled::token_2022_transfer();
-        let mut planner =
-            Planner::new(&documents.interface, &documents.implementation, &documents.intent, SCRATCH).unwrap();
+        let mut planner = Planner::new(&[documents.documents()], SCRATCH).unwrap();
 
         assert_eq!(planner.simulated(SimulationResult::default()), Err(PlanError::OutOfOrder));
 
         let (mut planner, accounts) = builder_planner(&documents);
 
         assert!(planner.next(&accounts).is_err_and(|error| error == PlanError::OutOfOrder));
+    }
+
+    /// Answers each fetch with `answer` until the planner asks for something else.
+    fn answer_fetches(
+        planner: &mut Planner<'_>,
+        accounts: &mut AccountMap,
+        answer: impl Fn(&Address) -> Option<Account>,
+    ) -> Step {
+        loop {
+            match planner.next(accounts).unwrap() {
+                Step::Fetch(addresses) => accounts.insert_fetched(&addresses, addresses.iter().map(&answer).collect()),
+                step => return step,
+            }
+        }
+    }
+
+    /// The fee payer, the sender, and the receiver after a System transfer, in the order that the
+    /// simulation observes them.
+    fn transfer_result(fee_payer: u64, from: u64, to: u64) -> SimulationResult {
+        SimulationResult {
+            accounts: vec![Some(wallet(fee_payer)), Some(wallet(from)), Some(wallet(to))],
+            units_consumed: Some(300),
+            ..SimulationResult::default()
+        }
+    }
+
+    const QUARTER: u64 = SOL / 4;
+    const TRANSFER_FEE: u64 = 10_000;
+
+    /// Two transfers of a quarter SOL each, planned up to the simulation of the second segment.
+    fn second_segment(planner: &mut Planner<'_>, accounts: &mut AccountMap) -> Simulation {
+        let first = simulation(answer_fetches(planner, accounts, |_| Some(wallet(10 * SOL))));
+        assert_eq!(first.transaction.instructions.len(), 1);
+        assert_eq!(first.observe, [account(FEE_PAYER), account(FROM), account(TO)]);
+
+        planner.simulated(transfer_result(10 * SOL - TRANSFER_FEE, 10 * SOL - QUARTER, 10 * SOL + QUARTER)).unwrap();
+        let second = simulation(planner.next(accounts).unwrap());
+        assert_eq!(second.transaction.instructions.first(), first.transaction.instructions.first());
+
+        second
+    }
+
+    #[test]
+    fn a_later_intent_runs_after_the_earlier_ones() {
+        let documents = Compiled::system_transfer(SYSTEM_TRANSFER);
+        let mut planner = Planner::new(&[documents.documents(), documents.documents()], SCRATCH).unwrap();
+        let mut accounts = AccountMap::default();
+
+        assert_eq!(second_segment(&mut planner, &mut accounts).transaction.instructions.len(), 2);
+
+        let after = transfer_result(10 * SOL - TRANSFER_FEE, 10 * SOL - 2 * QUARTER, 10 * SOL + 2 * QUARTER);
+        planner.simulated(after).unwrap();
+        let Ok(Step::Done(plan)) = planner.next(&accounts) else { panic!("the plan is done") };
+
+        assert_eq!(plan.intents.iter().map(|intent| intent.span.clone()).collect::<Vec<_>>(), [0..1, 1..2]);
+        assert_eq!(plan.transaction.instructions.len(), 2);
+        assert_eq!(plan.signatures.len(), 2);
+    }
+
+    /// The second segment's checks start from the state after the first, so each segment answers
+    /// only for what it moves.
+    #[test]
+    fn each_segment_answers_for_its_own_changes() {
+        let documents = Compiled::system_transfer(SYSTEM_TRANSFER);
+        let mut planner = Planner::new(&[documents.documents(), documents.documents()], SCRATCH).unwrap();
+        second_segment(&mut planner, &mut AccountMap::default());
+
+        let after = transfer_result(10 * SOL - TRANSFER_FEE, 10 * SOL - 3 * QUARTER, 10 * SOL + 3 * QUARTER);
+
+        assert!(planner.simulated(after).is_err_and(|error| matches!(error, PlanError::CheckFailed(_))));
+    }
+
+    #[test]
+    fn intents_share_their_payers() {
+        let first = Compiled::system_transfer(SYSTEM_TRANSFER);
+        let second = Compiled::system_transfer(&SYSTEM_TRANSFER.replace(FEE_PAYER, FROM));
+
+        let refused = Planner::new(&[first.documents(), second.documents()], SCRATCH);
+
+        assert!(refused.is_err_and(|error| error == PlanError::PayersDiffer));
+        assert!(Planner::new(&[], SCRATCH).is_err_and(|error| error == PlanError::NoIntents));
     }
 }

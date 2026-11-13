@@ -56,10 +56,12 @@ fn plans_a_builder_transfer_in_two_rounds_and_sends_it() {
 
     let plan = prepare(&svm, &documents).unwrap();
 
-    assert_eq!(plan.builder_simulations, 2);
+    assert_eq!(plan.intents[0].builder_simulations, 2);
     assert_eq!(plan.transaction.instructions.len(), 1);
-    assert!(plan.message.starts_with(&format!("sdp-intents/1: transfer 2 SOL from {}", wallets.from.pubkey())));
-    assert!(plan.message.ends_with(&format!("| builder: {}", test_builder::id())));
+    assert!(plan.intents[0]
+        .message
+        .starts_with(&format!("sdp-intents/1: transfer 2 SOL from {}", wallets.from.pubkey())));
+    assert!(plan.intents[0].message.ends_with(&format!("| builder: {}", test_builder::id())));
 
     send(&mut svm, &plan, &[&wallets.fee_payer, &wallets.from]).unwrap();
 

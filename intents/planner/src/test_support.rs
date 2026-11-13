@@ -8,7 +8,7 @@ use sdp_intents_spec::builder::{
 use sdp_intents_spec::wire::{PodU16, PodU32};
 use sdp_intents_spec::{AccountRole, Address};
 
-use crate::{Account, ReturnData, SimulationResult};
+use crate::{Account, IntentDocuments, ReturnData, SimulationResult};
 
 pub(crate) const BUILDER: Address = Address([0x42; 32]);
 pub(crate) const SCRATCH: Address = Address([0x5c; 32]);
@@ -20,6 +20,10 @@ pub(crate) struct Compiled {
 }
 
 impl Compiled {
+    pub(crate) fn documents(&self) -> IntentDocuments<'_> {
+        IntentDocuments { interface: &self.interface, implementation: &self.implementation, intent: &self.intent }
+    }
+
     pub(crate) fn compile(implementation: &str, intent: &str) -> Self {
         let mut catalog = Catalog::default().with_publisher("solana.org", Address([7; 32]));
         let interface = catalog
@@ -28,6 +32,10 @@ impl Compiled {
         let implementation = catalog.compile_implementation(implementation).unwrap().bytes.clone();
 
         Self { interface, implementation, intent: catalog.compile_intent(intent).unwrap().bytes }
+    }
+
+    pub(crate) fn system_transfer(intent: &str) -> Self {
+        Self::compile(include_str!("../../definitions/solana.org/implementations/system-transfer/1.0.0.json"), intent)
     }
 
     pub(crate) fn spl_transfer() -> Self {
@@ -48,6 +56,8 @@ impl Compiled {
         )
     }
 }
+
+pub(crate) const SYSTEM_TRANSFER: &str = include_str!("../../fixtures/intents/system-transfer.json");
 
 pub(crate) fn account(address: &str) -> Address {
     Address(bs58::decode(address).into_vec().unwrap().try_into().unwrap())

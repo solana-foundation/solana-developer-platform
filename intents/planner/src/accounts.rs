@@ -38,3 +38,15 @@ impl Chain for AccountMap {
         })
     }
 }
+
+/// The chain after the earlier segments: the accounts that they changed, over `base`.
+pub(crate) struct Overlay<'o, C> {
+    pub(crate) after: &'o AccountMap,
+    pub(crate) base: &'o C,
+}
+
+impl<C: Chain> Chain for Overlay<'_, C> {
+    fn account(&self, address: &Address) -> Option<AccountData<'_>> {
+        self.after.account(address).or_else(|| self.base.account(address))
+    }
+}

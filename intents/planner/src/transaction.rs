@@ -1,11 +1,14 @@
 use sdp_intents_spec::Address;
 
-use crate::Instruction;
+use crate::{Instruction, Limit, PlanError};
 
 /// The runtime charges 5,000 lamports for each signature.
 const SIGNATURE_FEE: u64 = 5_000;
 const MAX_COMPUTE_UNITS: u32 = 1_400_000;
 const MIN_HEAP_SIZE: u32 = 32 * 1024;
+/// The runtime locks at most 64 accounts, and runs at most 64 top-level instructions.
+const MAX_ACCOUNTS: usize = 64;
+const MAX_INSTRUCTIONS: usize = 64;
 
 /// A v1 transaction before its blockhash and its signatures. The caller compiles it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,6 +50,26 @@ impl Budget {
 }
 
 impl Transaction {
+    /// A transaction for a simulation: the highest budget, and no priority fee.
+    pub(crate) fn unbudgeted(fee_payer: Address, instructions: Vec<Instruction>) -> Self {
+        Self { fee_payer, instructions, budget: Budget::MAXIMUM, priority_fee_lamports: 0 }
+    }
+
+    /// Fails when the runtime would refuse the transaction for its accounts or its instructions.
+    /// The caller checks the size after it compiles the message.
+    pub(crate) fn check_fit(&self) -> Result<(), PlanError> {
+        let fits = |limit: Limit, used: usize, max: usize| {
+            if used > max {
+                return Err(PlanError::DoesNotFit { limit, used, max });
+            }
+
+            Ok(())
+        };
+
+        fits(Limit::Accounts, self.accounts().len(), MAX_ACCOUNTS)?;
+        fits(Limit::Instructions, self.instructions.len(), MAX_INSTRUCTIONS)
+    }
+
     /// Every account that the transaction names, the fee payer first, each once.
     pub fn accounts(&self) -> Vec<Address> {
         let named = self.instructions.iter().flat_map(|instruction| {

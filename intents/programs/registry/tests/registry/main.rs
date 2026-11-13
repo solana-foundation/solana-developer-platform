@@ -5,6 +5,7 @@ mod client;
 mod fixture;
 mod flows;
 mod intents;
+mod plans;
 mod svm;
 mod token;
 mod verify_program;

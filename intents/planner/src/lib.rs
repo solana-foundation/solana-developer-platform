@@ -3,7 +3,7 @@
 //! from its cache and its own simulator. Both run the same planner.
 //!
 //! ```
-//! use sdp_intents_planner::{Account, AccountMap, Plan, PlanError, Planner, Simulation, SimulationResult, Step};
+//! use sdp_intents_planner::{Account, AccountMap, IntentDocuments, Plan, PlanError, Planner, Simulation, SimulationResult, Step};
 //! use sdp_intents_spec::Address;
 //!
 //! trait Rpc {
@@ -11,8 +11,8 @@
 //!     fn simulate(&self, simulation: &Simulation) -> SimulationResult;
 //! }
 //!
-//! fn plan(rpc: &impl Rpc, interface: &[u8], implementation: &[u8], intent: &[u8], scratch: Address) -> Result<Plan, PlanError> {
-//!     let mut planner = Planner::new(interface, implementation, intent, scratch)?;
+//! fn plan(rpc: &impl Rpc, intents: &[IntentDocuments<'_>], scratch: Address) -> Result<Plan, PlanError> {
+//!     let mut planner = Planner::new(intents, scratch)?;
 //!     let mut accounts = AccountMap::default();
 //!
 //!     loop {
@@ -34,7 +34,9 @@ mod error;
 mod instruction;
 mod plan;
 mod planner;
+mod registry;
 mod render;
+mod segment;
 mod simulation;
 mod transaction;
 mod values;
@@ -44,9 +46,18 @@ mod verify;
 mod test_support;
 
 pub use accounts::{Account, AccountMap};
-pub use error::PlanError;
+pub use error::{Limit, PlanError};
 pub use instruction::{AccountMeta, Instruction};
-pub use plan::{Digests, Plan};
+pub use plan::{Digests, Plan, PlannedIntent};
 pub use planner::{Planner, Step};
+pub use registry::REGISTRY_PROGRAM;
 pub use simulation::{ReturnData, Simulation, SimulationResult};
 pub use transaction::{Budget, RequiredSignature, SignerRole, Transaction};
+
+/// The compiled documents of one intent.
+#[derive(Clone, Copy, Debug)]
+pub struct IntentDocuments<'a> {
+    pub interface: &'a [u8],
+    pub implementation: &'a [u8],
+    pub intent: &'a [u8],
+}

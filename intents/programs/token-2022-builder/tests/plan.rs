@@ -30,7 +30,7 @@ fn a_plain_mint_creates_the_destination_then_transfers() {
 
     let sent = chain.transfer(&mint, AMOUNT, None).unwrap();
 
-    assert_eq!(sent.plan.builder_simulations, 1);
+    assert_eq!(sent.plan.intents[0].builder_simulations, 1);
     assert_eq!(sent.programs, [ASSOCIATED_TOKEN, TOKEN_2022]);
     assert_eq!(chain.token_amount(&ata(&chain.wallets.from.pubkey(), &mint)), Ok(FUNDED - AMOUNT));
     assert_eq!(chain.token_amount(&ata(&chain.wallets.to.pubkey(), &mint)), Ok(AMOUNT));
@@ -68,7 +68,7 @@ fn a_transfer_fee_is_withheld_from_what_the_recipient_receives() {
     let state = StateWithExtensions::<TokenAccountState>::unpack(&data).unwrap();
     let withheld = u64::from(state.get_extension::<TransferFeeAmount>().unwrap().withheld_amount);
 
-    assert_eq!(sent.plan.builder_simulations, 1);
+    assert_eq!(sent.plan.intents[0].builder_simulations, 1);
     assert_eq!(chain.token_amount(&ata(&chain.wallets.from.pubkey(), &mint)), Ok(FUNDED - AMOUNT));
     assert_eq!(state.base.amount, AMOUNT - 2_500);
     assert_eq!(withheld, 2_500);
@@ -114,7 +114,7 @@ fn a_transfer_hook_resolves_its_accounts_in_rounds() {
     let appended: Vec<[u8; 32]> = transfer.accounts[4..].iter().map(|meta| meta.address.0).collect();
     let counter = chain.svm.get_account(&hook_accounts.counter).unwrap().data;
 
-    assert_eq!(sent.plan.builder_simulations, 3);
+    assert_eq!(sent.plan.intents[0].builder_simulations, 3);
     assert_eq!(appended.len(), 5);
     assert_eq!(appended[1], hook_accounts.counter.to_bytes());
     assert!(transfer.accounts[5].role.writable());

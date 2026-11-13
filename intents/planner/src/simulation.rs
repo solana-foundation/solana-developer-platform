@@ -3,7 +3,7 @@
 use sdp_intents_engine::{BuiltInstruction, Chain, EngineError};
 use sdp_intents_spec::{AccountRole, Address};
 
-use crate::{Account, AccountMeta, Budget, Instruction, Transaction};
+use crate::{Account, AccountMeta, Instruction, Transaction};
 
 /// The rent-exempt minimum for scratch: (10,240 + 128) bytes at 6,960 lamports a byte. A simulation
 /// lands nothing, so this amount only has to be in the funder's balance.
@@ -40,10 +40,12 @@ pub struct ReturnData {
 }
 
 impl Simulation {
-    /// A staged builder call. The transaction first creates scratch, owned by the builder, then calls
-    /// the builder with scratch as its last account. `funder` pays the fee and the scratch rent.
+    /// A staged builder call. The transaction runs `earlier`, then creates scratch, owned by the
+    /// builder, then calls the builder with scratch as its last account. `funder` pays the fee and
+    /// the scratch rent.
     pub(crate) fn staged<C: Chain>(
         call: &BuiltInstruction<'_, C>,
+        earlier: &[Instruction],
         funder: Address,
         scratch: Address,
     ) -> Result<Self, EngineError> {
@@ -66,12 +68,8 @@ impl Simulation {
         let mut call = Instruction::built(call)?;
         call.accounts.push(AccountMeta { address: scratch, role: AccountRole::Writable });
 
-        let transaction = Transaction {
-            fee_payer: funder,
-            instructions: vec![create_scratch, call],
-            budget: Budget::MAXIMUM,
-            priority_fee_lamports: 0,
-        };
+        let instructions = earlier.iter().cloned().chain([create_scratch, call]).collect();
+        let transaction = Transaction::unbudgeted(funder, instructions);
 
         Ok(Self { transaction, observe: vec![scratch] })
     }

@@ -62,9 +62,9 @@ fn deposits_in_two_rounds_and_creates_the_share_account() {
     let measured = prepare(&svm, &documents).unwrap();
     report("deposit", &measured);
 
-    assert_eq!(measured.plan.builder_simulations, 2);
+    assert_eq!(measured.plan.intents[0].builder_simulations, 2);
     assert_eq!(programs(&measured.plan), [ASSOCIATED_TOKEN, KVAULT]);
-    assert_eq!(measured.plan.outputs, SHARE_MINT.to_bytes());
+    assert_eq!(measured.plan.intents[0].outputs, SHARE_MINT.to_bytes());
     assert!(measured.plan.transaction.accounts().len() <= MAX_TRANSACTION_ACCOUNTS);
 
     send(&mut svm, &measured.plan, &[&wallets.fee_payer, &wallets.owner]).unwrap();
@@ -96,7 +96,7 @@ fn withdraws_from_the_available_tokens_in_one_leg() {
     let measured = prepare(&svm, &documents).unwrap();
     report("withdraw, one leg", &measured);
 
-    assert_eq!(measured.plan.builder_simulations, 2);
+    assert_eq!(measured.plan.intents[0].builder_simulations, 2);
     assert_eq!(programs(&measured.plan), [ASSOCIATED_TOKEN, KVAULT]);
 
     send(&mut svm, &measured.plan, &[&wallets.fee_payer, &wallets.owner]).unwrap();

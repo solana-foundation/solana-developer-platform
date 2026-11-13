@@ -69,10 +69,10 @@ fn deposits_usdt_into_a_new_share_account() {
     report("deposit with a share account create", &measured);
 
     let plan = &measured.plan;
-    assert_eq!(plan.builder_simulations, 1);
+    assert_eq!(plan.intents[0].builder_simulations, 1);
     assert_eq!(plan.transaction.instructions.len(), 2);
-    assert_eq!(plan.outputs, JLUSDT.to_bytes());
-    assert!(plan.message.starts_with(&format!("sdp-intents/1: deposit 100 of {USDT} from {owner}")));
+    assert_eq!(plan.intents[0].outputs, JLUSDT.to_bytes());
+    assert!(plan.intents[0].message.starts_with(&format!("sdp-intents/1: deposit 100 of {USDT} from {owner}")));
 
     send(&mut setup.svm, plan, &signers(&setup.wallets)).unwrap();
 
@@ -186,9 +186,9 @@ fn withdraws_shares_into_a_new_asset_account() {
     report("withdrawal with an asset account create", &measured);
 
     let plan = &measured.plan;
-    assert_eq!(plan.builder_simulations, 1);
+    assert_eq!(plan.intents[0].builder_simulations, 1);
     assert_eq!(plan.transaction.instructions.len(), 2);
-    assert_eq!(plan.outputs, JLUSDT.to_bytes());
+    assert_eq!(plan.intents[0].outputs, JLUSDT.to_bytes());
 
     send(&mut setup.svm, plan, &signers(&setup.wallets)).unwrap();
 
@@ -209,7 +209,7 @@ fn withdraws_the_shares_of_a_deposit() {
     let measured = withdraw_plan(&setup, Amounts { amount: shares, floor: 99 * UNIT }).unwrap();
     report("withdrawal", &measured);
 
-    assert_eq!(measured.plan.builder_simulations, 1);
+    assert_eq!(measured.plan.intents[0].builder_simulations, 1);
     assert_eq!(measured.plan.transaction.instructions.len(), 1);
 
     send(&mut setup.svm, &measured.plan, &signers(&setup.wallets)).unwrap();

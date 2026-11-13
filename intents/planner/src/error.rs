@@ -3,6 +3,14 @@ use core::fmt;
 use sdp_intents_engine::EngineError;
 use sdp_intents_spec::SpecError;
 
+/// A runtime limit that a transaction can break.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Limit {
+    Accounts,
+    Instructions,
+    Bytes,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PlanError {
     Engine(EngineError),
@@ -45,6 +53,30 @@ pub enum PlanError {
     Unresolved,
     /// The account that an `amount` display names is not a mint.
     NotAMint(sdp_intents_spec::Address),
+    /// The plan holds no intent.
+    NoIntents,
+    /// The intents name different payers or priority fees. A plan has one of each.
+    PayersDiffer,
+    /// The recipe built no instructions, so no instruction can follow `verify_intent`.
+    NoInstructions,
+    /// The transaction breaks a runtime limit.
+    DoesNotFit {
+        limit: Limit,
+        used: usize,
+        max: usize,
+    },
+    /// No bump puts a registry address off the curve.
+    NoRegistryAddress,
+}
+
+impl Limit {
+    pub fn as_text(self) -> &'static str {
+        match self {
+            Self::Accounts => "accounts",
+            Self::Instructions => "instructions",
+            Self::Bytes => "bytes",
+        }
+    }
 }
 
 impl From<EngineError> for PlanError {
@@ -83,6 +115,15 @@ impl fmt::Display for PlanError {
             Self::UnsafeText => f.write_str("the message holds text that is not printable ASCII"),
             Self::Unresolved => f.write_str("a value names an account that is not loaded"),
             Self::NotAMint(address) => write!(f, "{} is not a mint", bs58::encode(address.0).into_string()),
+            Self::NoIntents => f.write_str("the plan holds no intent"),
+            Self::PayersDiffer => f.write_str("the intents name different payers or priority fees"),
+            Self::NoInstructions => f.write_str("the recipe built no instructions"),
+            Self::DoesNotFit { limit, used, max } => write!(
+                f,
+                "the transaction needs {used} {}, and the limit is {max}. Turn off `assertions` or `verifyIntent` in an intent, or plan fewer intents.",
+                limit.as_text()
+            ),
+            Self::NoRegistryAddress => f.write_str("no bump puts a registry address off the curve"),
         }
     }
 }

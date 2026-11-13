@@ -157,7 +157,7 @@ pub struct Measured {
 /// `sdp_intents_program_testing::prepare`, which also measures each builder simulation. The final
 /// simulation is the last one, and the plan holds its units.
 pub fn prepare(svm: &LiteSVM, documents: &Documents) -> Result<Measured, PlanError> {
-    let mut planner = Planner::new(&documents.interface, &documents.implementation, &documents.intent, SCRATCH)?;
+    let mut planner = Planner::new(&[documents.as_intent()], SCRATCH)?;
     let mut accounts = AccountMap::default();
     let mut rounds = Vec::new();
 

@@ -1,10 +1,10 @@
-//! Plans an intent over RPC, with no service. It answers the planner's fetches with
+//! Plans intents over RPC, with no service. It answers the planner's fetches with
 //! `getMultipleAccounts`, and its simulations with `simulateTransaction`.
 //!
 //! ```no_run
-//! # fn run(interface: &[u8], implementation: &[u8], intent: &[u8]) -> Result<(), sdp_intents_client::ClientError> {
+//! # fn run(intents: &[sdp_intents_planner::IntentDocuments<'_>]) -> Result<(), sdp_intents_client::ClientError> {
 //! let client = sdp_intents_client::Client::new("https://api.mainnet-beta.solana.com");
-//! let prepared = client.prepare(interface, implementation, intent)?;
+//! let prepared = client.prepare(intents)?;
 //! # Ok(())
 //! # }
 //! ```
@@ -19,7 +19,11 @@ use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_rpc_client_api::config::{RpcSimulateTransactionAccountsConfig, RpcSimulateTransactionConfig};
 
-use sdp_intents_planner::{Account, AccountMap, Plan, PlanError, Planner, Simulation, SimulationResult, Step};
+use solana_message::v1::{MAX_TRANSACTION_SIZE, SIGNATURE_SIZE};
+
+use sdp_intents_planner::{
+    Account, AccountMap, IntentDocuments, Limit, Plan, PlanError, Planner, Simulation, SimulationResult, Step,
+};
 use sdp_intents_spec::Address;
 
 /// `getMultipleAccounts` takes at most 100 addresses.
@@ -43,8 +47,8 @@ impl Client {
         Self { rpc: RpcClient::new_with_commitment(url.to_string(), CommitmentConfig::processed()) }
     }
 
-    pub fn prepare(&self, interface: &[u8], implementation: &[u8], intent: &[u8]) -> Result<Prepared, ClientError> {
-        let mut planner = Planner::new(interface, implementation, intent, fresh_address())?;
+    pub fn prepare(&self, intents: &[IntentDocuments<'_>]) -> Result<Prepared, ClientError> {
+        let mut planner = Planner::new(intents, fresh_address())?;
         let mut accounts = AccountMap::default();
 
         let plan = loop {
@@ -56,7 +60,14 @@ impl Client {
         };
 
         let (blockhash, _) = self.rpc.get_latest_blockhash_with_commitment(CommitmentConfig::confirmed())?;
-        let message = rpc::message(&plan.transaction, blockhash)?.serialize();
+        let message = rpc::message(&plan.transaction, blockhash)?;
+        let signatures = usize::from(message.header.num_required_signatures);
+        let message = message.serialize();
+        let size = message.len().saturating_add(signatures.saturating_mul(SIGNATURE_SIZE));
+
+        if size > MAX_TRANSACTION_SIZE {
+            return Err(PlanError::DoesNotFit { limit: Limit::Bytes, used: size, max: MAX_TRANSACTION_SIZE }.into());
+        }
 
         Ok(Prepared { plan: *plan, message })
     }
@@ -168,22 +179,26 @@ mod tests {
     fn plans_an_spl_transfer_over_rpc() {
         let url = std::env::var("SDP_INTENTS_RPC_URL").unwrap();
         let mut catalog = Catalog::default().with_publisher("solana.org", Address([7; 32]));
-        let interface = catalog
+        catalog
             .compile_interface(include_str!("../../definitions/solana.org/interfaces/token.transfer/1.0.0.json"))
-            .unwrap()
-            .bytes
-            .clone();
-        let implementation = catalog
+            .unwrap();
+        catalog
             .compile_implementation(include_str!(
                 "../../definitions/solana.org/implementations/spl-token-transfer/1.0.0.json"
             ))
-            .unwrap()
-            .bytes
-            .clone();
-        let intent =
-            catalog.compile_intent(include_str!("../../fixtures/intents/mainnet/usdc-transfer.json")).unwrap().bytes;
+            .unwrap();
+        let plan = catalog.compile_plan(include_str!("../../fixtures/plans/mainnet/usdc-transfer.json")).unwrap();
+        let documents: Vec<_> = plan
+            .intents
+            .iter()
+            .map(|intent| IntentDocuments {
+                interface: &intent.interface.bytes,
+                implementation: &intent.implementation.bytes,
+                intent: &intent.bytes,
+            })
+            .collect();
 
-        let prepared = Client::new(url).prepare(&interface, &implementation, &intent).unwrap();
+        let prepared = Client::new(url).prepare(&documents).unwrap();
 
         assert_eq!(prepared.plan.transaction.instructions.len(), 2);
         assert_eq!(prepared.message.first(), Some(&0x81));

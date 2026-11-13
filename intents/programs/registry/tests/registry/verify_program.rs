@@ -61,8 +61,10 @@ fn plan_and_verify_with_roles(setup: &Setup, amount: u64, extra: bool, roles: Op
     let verified = setup.published.compile(&intent(setup, amount, r#"{ "assertions": false }"#))?;
     let plan = prepare(&setup.svm, &planned).map_err(|error| failure(format!("{error}")))?;
 
-    if plan.builder_simulations != 2 {
-        return Err(failure(format!("the plan took {} builder simulations", plan.builder_simulations)));
+    let builder_simulations: usize = plan.intents.iter().map(|intent| intent.builder_simulations).sum();
+
+    if builder_simulations != 2 {
+        return Err(failure(format!("the plan took {builder_simulations} builder simulations")));
     }
 
     let extra_accounts = if extra { vec![test_builder::EXTRA_ACCOUNT] } else { Vec::new() };

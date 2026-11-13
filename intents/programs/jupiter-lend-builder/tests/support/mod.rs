@@ -202,7 +202,7 @@ pub fn withdraw_plan(setup: &Setup, amounts: Amounts) -> Result<Measured, Failur
 /// `sdp_intents_program_testing::prepare`, which also counts the fetches and reads the builder's
 /// compute units from the logs of each builder simulation.
 fn prepare_measured(svm: &LiteSVM, documents: &Documents) -> Result<Measured, PlanError> {
-    let mut planner = Planner::new(&documents.interface, &documents.implementation, &documents.intent, SCRATCH)?;
+    let mut planner = Planner::new(&[documents.as_intent()], SCRATCH)?;
     let mut accounts = AccountMap::default();
     let mut fetches = 0usize;
     let mut builder_units = Vec::new();
@@ -247,7 +247,7 @@ pub fn report(name: &str, measured: &Measured) {
         "{name}: {} CU, builder {:?} CU in {} simulations, {} fetches, {} instructions, {} accounts",
         plan.units_consumed,
         measured.builder_units,
-        plan.builder_simulations,
+        plan.intents.iter().map(|intent| intent.builder_simulations).sum::<usize>(),
         measured.fetches,
         plan.transaction.instructions.len(),
         account_count(plan),

@@ -1,5 +1,5 @@
-//! `token.transfer` and one implementation of it in the registry, and the `verify_intent`
-//! instruction that the planner does not build yet.
+//! `token.transfer` and one implementation of it in the registry, and `verify_intent` as a client
+//! builds it by hand. The tests change that instruction, and compare the planner's with it.
 
 use anchor_lang::Address;
 use anchor_v2_testing::litesvm::LiteSVM;
@@ -111,8 +111,8 @@ pub fn builder_roles(plan: &Plan) -> Vec<u8> {
         .collect()
 }
 
-/// `plan` with `verify` first, and the highest budget, because the planner measured the budget
-/// without `verify_intent`.
+/// `plan` with `verify` first, and the highest budget, because the plan's budget does not include
+/// `verify`.
 pub fn with_verify(plan: &Plan, verify: Instruction) -> Plan {
     let instructions = std::iter::once(verify).chain(plan.transaction.instructions.iter().cloned()).collect();
     let budget = sdp_intents_planner::Budget {

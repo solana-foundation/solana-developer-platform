@@ -2361,6 +2361,7 @@ dependencies = [
  "sdp-intents-engine",
  "sdp-intents-spec",
  "sha2 0.11.1",
+ "solana-address 2.7.0",
 ]
 
 [[package]]

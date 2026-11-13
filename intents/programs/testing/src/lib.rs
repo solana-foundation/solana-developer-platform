@@ -26,7 +26,7 @@ use solana_signature::Signature;
 
 use sdp_intents_compiler::Catalog;
 use sdp_intents_planner::{
-    Account, AccountMap, Plan, PlanError, Planner, ReturnData, Simulation, SimulationResult, Step,
+    Account, AccountMap, IntentDocuments, Plan, PlanError, Planner, ReturnData, Simulation, SimulationResult, Step,
 };
 use sdp_intents_spec::Address;
 
@@ -91,11 +91,20 @@ impl Documents {
             intent: compiled.bytes,
         })
     }
+
+    pub fn as_intent(&self) -> IntentDocuments<'_> {
+        IntentDocuments { interface: &self.interface, implementation: &self.implementation, intent: &self.intent }
+    }
 }
 
-/// Runs the planner, answering each fetch and each simulation from `svm`.
+/// Runs the planner for one intent, answering each fetch and each simulation from `svm`.
 pub fn prepare(svm: &LiteSVM, documents: &Documents) -> Result<Plan, PlanError> {
-    let mut planner = Planner::new(&documents.interface, &documents.implementation, &documents.intent, SCRATCH)?;
+    prepare_intents(svm, &[documents.as_intent()])
+}
+
+/// [`prepare`] for a plan of one or more intents, in order.
+pub fn prepare_intents(svm: &LiteSVM, intents: &[IntentDocuments<'_>]) -> Result<Plan, PlanError> {
+    let mut planner = Planner::new(intents, SCRATCH)?;
     let mut accounts = AccountMap::default();
 
     loop {
