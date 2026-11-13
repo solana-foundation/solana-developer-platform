@@ -7,6 +7,7 @@ mod flows;
 mod guarded;
 mod intents;
 mod plans;
+mod registry_client;
 mod svm;
 mod token;
 mod verifier;

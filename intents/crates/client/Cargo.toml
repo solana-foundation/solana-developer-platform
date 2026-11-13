@@ -19,10 +19,12 @@ solana-address.workspace = true
 solana-commitment-config = "=3.1.1"
 solana-hash = "=4.7.0"
 solana-instruction = "=4.0.0"
+solana-keypair = "=4.0.1"
 solana-message = "=6.0.0"
 solana-rpc-client = "=4.5.0-beta.0"
 solana-rpc-client-api = "=4.5.0-beta.0"
 solana-signature = "=3.6.0"
+solana-signer = "=4.0.0"
 solana-transaction = "=6.0.0"
 
 [dev-dependencies]

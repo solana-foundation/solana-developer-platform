@@ -33,3 +33,14 @@ fetch-programs:
 
 test-programs: build-programs fetch-programs
     cd programs && cargo test --workspace
+
+# A local surfnet that forks mainnet, for `e2e`. It runs in the foreground.
+surfnet:
+    surfpool start --network mainnet --no-tui --no-studio --no-deploy --airdrop-amount 0
+
+# The whole flow against a running surfnet: place the programs, publish the definitions, then plan,
+# verify, and send intents with every onchain check on.
+e2e rpc="http://127.0.0.1:8899": build-programs
+    cargo build -q -p sdp-intents-cli
+    cd programs && node deploy-surfnet.mjs {{rpc}}
+    node e2e/run.mjs {{rpc}}

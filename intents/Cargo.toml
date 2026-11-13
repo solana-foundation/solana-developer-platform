@@ -6,6 +6,7 @@ members = [
     "crates/engine",
     "crates/lighthouse",
     "crates/planner",
+    "crates/registry-client",
     "crates/client",
     "crates/cli",
 ]
@@ -30,6 +31,7 @@ sdp-intents-client = { path = "crates/client" }
 sdp-intents-engine = { path = "crates/engine" }
 sdp-intents-lighthouse = { path = "crates/lighthouse" }
 sdp-intents-planner = { path = "crates/planner" }
+sdp-intents-registry-client = { path = "crates/registry-client" }
 sdp-intents-spec = { path = "crates/spec" }
 serde_json = { version = "=1.0.154", features = ["preserve_order"] }
 sha2 = "=0.11.1"

@@ -13,8 +13,7 @@ use crate::plan::{compile_plan, CompiledPlan};
 /// interfaces, and the implementations. Compile the interfaces first, then the implementations that
 /// name them, then the intents that name both. The catalog keeps each document that compiles.
 ///
-/// The registry derives an organization's address from its name. Until the registry exists, the
-/// caller supplies the addresses.
+/// The registry derives an organization's address from its name, and the caller supplies it.
 #[derive(Debug, Default)]
 pub struct Catalog {
     publishers: HashMap<String, Address>,
@@ -45,6 +44,16 @@ impl Catalog {
         let implementation = compile_implementation(text, self)?;
 
         Ok(self.implementations.entry(implementation.id.to_string()).insert_entry(implementation).into_mut())
+    }
+
+    /// Every interface that compiled, in no order.
+    pub fn interfaces(&self) -> impl Iterator<Item = &CompiledInterface> {
+        self.interfaces.values()
+    }
+
+    /// Every implementation that compiled, in no order.
+    pub fn implementations(&self) -> impl Iterator<Item = &CompiledImplementation> {
+        self.implementations.values()
     }
 
     pub fn compile_intent(&self, text: &str) -> Result<CompiledIntent<'_>, Report> {

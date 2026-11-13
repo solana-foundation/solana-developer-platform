@@ -53,7 +53,7 @@ mod writer;
 mod test_support;
 
 pub use catalog::Catalog;
-pub use id::Id;
+pub use id::{parse_version, Id};
 pub use implementation::CompiledImplementation;
 pub use intent::CompiledIntent;
 pub use interface::CompiledInterface;

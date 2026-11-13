@@ -28,6 +28,7 @@ pub struct LintArgs {
     format: Format,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outcome {
     Clean,
     Findings,
@@ -65,11 +66,16 @@ pub struct CompiledTree<'t> {
     pub reports: Vec<FileReport<'t>>,
 }
 
+/// The organization's registry account, which publishes its documents. A name that has no address
+/// gets the default one, and the registry refuses it.
+pub fn publisher(organization: &str) -> Address {
+    sdp_intents_registry_client::organization_address(organization).unwrap_or_default()
+}
+
 pub fn compile_tree(tree: &Tree) -> CompiledTree<'_> {
-    let mut catalog = tree
-        .organizations()
-        .into_iter()
-        .fold(Catalog::default(), |catalog, organization| catalog.with_publisher(organization, Address::default()));
+    let mut catalog = tree.organizations().into_iter().fold(Catalog::default(), |catalog, organization| {
+        catalog.with_publisher(organization, publisher(organization))
+    });
 
     let mut reports = Vec::new();
 
@@ -169,7 +175,7 @@ mod tests {
     }
 
     fn tree(definitions: Vec<Definition>) -> Tree {
-        Tree { definitions, strays: Vec::new() }
+        Tree { definitions, indexes: Vec::new(), strays: Vec::new() }
     }
 
     #[test]

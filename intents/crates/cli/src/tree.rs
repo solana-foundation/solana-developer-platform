@@ -66,28 +66,47 @@ pub struct Definition {
     pub text: String,
 }
 
+/// The `index.json` of an interface, which states what the registry index must hold.
+pub struct IndexFile {
+    pub path: PathBuf,
+    pub organization: String,
+    pub interface: String,
+    pub text: String,
+}
+
 /// Every JSON file under the root. A stray is a JSON file at no definition's place, which lint
 /// reports so that a misplaced file never goes unchecked.
 pub struct Tree {
     pub definitions: Vec<Definition>,
+    pub indexes: Vec<IndexFile>,
     pub strays: Vec<PathBuf>,
 }
 
 impl Tree {
     pub fn read(root: &Path) -> Result<Self, String> {
         let mut definitions = Vec::new();
+        let mut indexes = Vec::new();
         let mut strays = Vec::new();
 
         for path in json_files(root)? {
-            let position = path.strip_prefix(root).ok().and_then(Position::parse);
+            let relative = path.strip_prefix(root).ok();
+            let position = relative.and_then(Position::parse);
 
-            match position {
-                Some(position) => definitions.push(Definition { text: read(&path)?, path, position }),
-                None => strays.push(path),
+            match (relative.and_then(IndexPlace::parse), position) {
+                (Some(place), _) => {
+                    indexes.push(IndexFile {
+                        text: read(&path)?,
+                        path,
+                        organization: place.organization,
+                        interface: place.interface,
+                    });
+                }
+                (None, Some(position)) => definitions.push(Definition { text: read(&path)?, path, position }),
+                (None, None) => strays.push(path),
             }
         }
 
-        Ok(Self { definitions, strays })
+        Ok(Self { definitions, indexes, strays })
     }
 
     pub fn of_kind(&self, kind: Kind) -> impl Iterator<Item = &Definition> {
@@ -100,6 +119,24 @@ impl Tree {
         organizations.dedup();
 
         organizations
+    }
+}
+
+/// Where an interface's `index.json` sits: `<organization>/interfaces/<name>/index.json`.
+struct IndexPlace {
+    organization: String,
+    interface: String,
+}
+
+impl IndexPlace {
+    fn parse(relative: &Path) -> Option<Self> {
+        let parts: Vec<&str> =
+            relative.components().map(|component| component.as_os_str().to_str()).collect::<Option<_>>()?;
+        let [organization, "interfaces", name, "index.json"] = parts.as_slice() else {
+            return None;
+        };
+
+        Some(Self { organization: (*organization).to_owned(), interface: (*name).to_owned() })
     }
 }
 

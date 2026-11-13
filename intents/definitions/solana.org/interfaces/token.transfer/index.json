@@ -1,0 +1,8 @@
+{
+  "approveNewVersions": false,
+  "approvals": {
+    "solana.org/system-transfer": ["1.0.0"],
+    "solana.org/spl-token-transfer": ["1.0.0"],
+    "solana.org/token-2022-transfer": ["1.0.0"]
+  }
+}

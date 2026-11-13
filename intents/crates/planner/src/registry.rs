@@ -9,11 +9,7 @@ use sdp_intents_spec::{AccountRole, Address};
 
 use crate::{AccountMeta, Instruction, Limit, PlanError};
 
-/// `9sgttDZ2vnzb85HWuQbx8vy6Boga32zpP5QRZ7UtbWpp`.
-pub const REGISTRY_PROGRAM: Address = Address([
-    131, 217, 165, 14, 242, 154, 37, 232, 205, 185, 77, 119, 196, 52, 155, 177, 116, 173, 206, 209, 58, 232, 41, 103,
-    187, 187, 37, 64, 150, 138, 246, 201,
-]);
+pub use sdp_intents_registry_client::REGISTRY_PROGRAM;
 /// `Sysvar1nstructions1111111111111111111111111`.
 const INSTRUCTIONS_SYSVAR: Address = Address([
     6, 167, 213, 23, 24, 123, 209, 102, 53, 218, 212, 4, 85, 253, 194, 192, 193, 36, 198, 143, 33, 86, 117, 165, 219,
@@ -123,22 +119,13 @@ pub(crate) fn verify_intent_discriminator() -> [u8; 8] {
 }
 
 fn index_address(kind: DocumentKind, id: &DocumentIdV1) -> Result<Address, PlanError> {
-    find(&[b"index", &[kind.into()], &id.publisher.0, &id.name_hash])
+    sdp_intents_registry_client::index_address(kind, &id.publisher, &id.name_hash)
+        .map_err(|_| PlanError::NoRegistryAddress)
 }
 
 pub(crate) fn version_address(kind: DocumentKind, id: &DocumentIdV1) -> Result<Address, PlanError> {
-    let seed: &[u8] = if kind == DocumentKind::Interface { b"interface" } else { b"implementation" };
-    let version = &id.version;
-
-    find(&[seed, &id.publisher.0, &id.name_hash, &version.major.0, &version.minor.0, &version.patch.0])
-}
-
-fn find(seeds: &[&[u8]]) -> Result<Address, PlanError> {
-    let program = solana_address::Address::new_from_array(REGISTRY_PROGRAM.0);
-    let (address, _bump) =
-        solana_address::Address::try_find_program_address(seeds, &program).ok_or(PlanError::NoRegistryAddress)?;
-
-    Ok(Address(address.to_bytes()))
+    sdp_intents_registry_client::version_address(kind, &id.publisher, &id.name_hash, &id.version)
+        .map_err(|_| PlanError::NoRegistryAddress)
 }
 
 #[cfg(test)]
@@ -146,10 +133,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_constants_are_the_registry_and_the_sysvar() {
+    fn the_constant_is_the_sysvar() {
         let base58 = |address: &Address| bs58::encode(address.0).into_string();
 
-        assert_eq!(base58(&REGISTRY_PROGRAM), "9sgttDZ2vnzb85HWuQbx8vy6Boga32zpP5QRZ7UtbWpp");
         assert_eq!(base58(&INSTRUCTIONS_SYSVAR), "Sysvar1nstructions1111111111111111111111111");
     }
 }

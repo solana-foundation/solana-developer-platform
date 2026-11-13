@@ -1,0 +1,20 @@
+[package]
+name = "sdp-intents-registry-client"
+description = "The SDP registry's instructions, addresses, and accounts, with no Anchor and no IO"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bytemuck.workspace = true
+sdp-intents-spec.workspace = true
+sha2.workspace = true
+solana-address = { workspace = true, features = ["curve25519"] }
+
+[dev-dependencies]
+bs58.workspace = true
+
+[lints]
+workspace = true

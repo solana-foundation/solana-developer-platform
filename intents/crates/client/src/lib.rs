@@ -12,6 +12,7 @@
 //! ```
 
 mod rpc;
+mod send;
 mod verify;
 
 use core::fmt;
@@ -28,6 +29,9 @@ use sdp_intents_planner::{
     Account, AccountMap, Limit, Plan, PlanError, PlanRequest, Planner, Simulation, SimulationResult, Step,
 };
 use sdp_intents_spec::Address;
+
+pub use solana_keypair::{read_keypair_file, Keypair};
+pub use solana_signer::Signer;
 
 /// `getMultipleAccounts` takes at most 100 addresses.
 const MAX_ACCOUNTS_PER_FETCH: usize = 100;
@@ -73,6 +77,11 @@ impl Client {
         }
 
         Ok(Prepared { plan: *plan, message })
+    }
+
+    /// Each account at `addresses`, in order, with `getMultipleAccounts` split at 100.
+    pub fn accounts(&self, addresses: &[Address]) -> Result<Vec<Option<Account>>, ClientError> {
+        self.fetch(addresses)
     }
 
     fn fetch(&self, addresses: &[Address]) -> Result<Vec<Option<Account>>, ClientError> {
@@ -133,6 +142,8 @@ pub enum ClientError {
     Decode(String),
     /// The transaction does not verify.
     Verify(sdp_intents_planner::VerifyError),
+    /// The message needs the signature of this address, and no signer holds its key.
+    MissingSigner(String),
 }
 
 impl From<PlanError> for ClientError {
@@ -167,6 +178,7 @@ impl fmt::Display for ClientError {
             Self::Compile(error) => write!(f, "the simulation does not compile: {error}"),
             Self::Decode(error) => write!(f, "the answer does not decode: {error}"),
             Self::Verify(error) => write!(f, "the transaction does not verify: {error}"),
+            Self::MissingSigner(address) => write!(f, "no signer holds the key of {address}"),
         }
     }
 }

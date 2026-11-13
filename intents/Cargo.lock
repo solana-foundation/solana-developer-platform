@@ -1979,8 +1979,10 @@ dependencies = [
  "sdp-intents-client",
  "sdp-intents-compiler",
  "sdp-intents-planner",
+ "sdp-intents-registry-client",
  "sdp-intents-spec",
  "serde_json",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -1998,10 +2000,12 @@ dependencies = [
  "solana-commitment-config",
  "solana-hash",
  "solana-instruction 4.0.0",
+ "solana-keypair",
  "solana-message",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-signature",
+ "solana-signer",
  "solana-transaction",
 ]
 
@@ -2046,6 +2050,17 @@ dependencies = [
  "sdp-intents-compiler",
  "sdp-intents-engine",
  "sdp-intents-lighthouse",
+ "sdp-intents-registry-client",
+ "sdp-intents-spec",
+ "sha2 0.11.1",
+]
+
+[[package]]
+name = "sdp-intents-registry-client"
+version = "0.1.0"
+dependencies = [
+ "bs58",
+ "bytemuck",
  "sdp-intents-spec",
  "sha2 0.11.1",
  "solana-address 2.9.0",

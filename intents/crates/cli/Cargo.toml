@@ -18,8 +18,10 @@ clap.workspace = true
 sdp-intents-client.workspace = true
 sdp-intents-compiler.workspace = true
 sdp-intents-planner.workspace = true
+sdp-intents-registry-client.workspace = true
 sdp-intents-spec.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 
 [lints]
 workspace = true

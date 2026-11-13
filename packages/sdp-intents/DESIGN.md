@@ -1527,10 +1527,17 @@ from implementation id to the approved versions:
 | Command | Effect |
 | :-- | :-- |
 | `sdp-intents lint [paths]` | Checks every definition, and exits with an error on a finding. `--format github` writes GitHub annotations. |
-| `sdp-intents prepare <request> --rpc <url>` | Plans the plan request over RPC and prints the plan. It reads the documents from the definitions. An intent that keeps `verifyIntent` needs the registry on the cluster. |
-| `sdp-intents plan --cluster <url>` | Reads the registry and prints the instructions that make it match the definitions |
-| `sdp-intents apply --cluster <url> --keypair <path>` | Sends the plan, signed by the key |
-| `sdp-intents apply --cluster <url> --squads <multisig>` | Proposes the plan to a Squads v4 multisig instead of sending it |
+| `sdp-intents plan --rpc <url> --keypair <path>` | Reads the registry and prints the steps that make it hold the definitions |
+| `sdp-intents apply --rpc <url> --keypair <path>` | Sends those steps, signed and paid by the key |
+| `sdp-intents apply --rpc <url> --squads <multisig>` | Proposes the steps to a Squads v4 multisig instead of sending them. Not built yet. |
+| `sdp-intents prepare <request> --rpc <url>` | Plans the plan request over RPC and prints the plan. It compiles the documents from the definitions with each organization's registry address, so `verify_intent` finds them once `apply` has run. |
+| `sdp-intents verify <plan> --rpc <url>` | Renders the message from the plan's compiled transaction and the registry, as its signer does (4.6), and lists each instruction that no segment holds |
+| `sdp-intents send <plan> --rpc <url> --keypair <path>…` | Verifies the plan, then signs its compiled transaction with each key and sends it. It refuses a plan that does not verify, unless `--allow-unverified` is set. |
+
+The prototype reads the `approveNewVersions` and `approvals` of each interface's `index.json`.
+The key that runs `apply` is the authority of each organization that it creates, and both
+authorities of each index follow the organization's. It reads no `organization.json`, no
+implementation `index.json`, and no authorities or heads yet.
 
 `lint` checks:
 
@@ -1545,8 +1552,10 @@ from implementation id to the approved versions:
    the part of the version that 4.8 requires.
 7. Approvals and heads name versions that exist.
 
-`plan` and `apply` cover every registry instruction: organizations, indexes, authorities,
-`write_buffer`, `publish`, `set_head`, `remove`, approvals, and the approval policy. `plan` never
+`plan` and `apply` will cover every registry instruction: organizations, indexes, authorities,
+`write_buffer`, `publish`, `set_head`, `remove`, approvals, and the approval policy. The prototype
+covers the organizations, the indexes, the documents, the approvals, and the approval policy.
+`plan` refuses a published version whose bytes differ from the definition's. `plan` never
 removes a version on its own. A removal needs `--remove`.
 
 **Multisig.** Any authority can be a Squads vault. With `--squads`, `apply` uploads each document
@@ -1556,8 +1565,15 @@ SHA-256 of the document, so the members approve the exact bytes, and the upload 
 
 **GitHub.** Later, a workflow runs `lint` and `plan` on each pull request, and posts the plan as a
 comment. On merge to `main`, it runs `apply --squads`, so the registry changes only through a
-multisig vote on a reviewed plan. The prototype runs the same commands from the `justfile` against
-local surfpool, with a Squads v4 program cloned from a mainnet fork.
+multisig vote on a reviewed plan.
+
+**Local run.** `just surfnet` starts surfpool, which forks mainnet, so Lighthouse, Jupiter Lend,
+and Kamino run with live state. `just e2e` then builds the programs and places each one at the
+address that its `declare_id!` names, with the `surfnet_setAccount` cheatcode
+(`programs/deploy-surfnet.mjs`). It runs `apply` with a new key, funds new wallets with
+cheatcodes, and for each plan runs `prepare`, `verify`, and `send` with every onchain check on: a
+USDC transfer and a SOL transfer in one transaction, a Jupiter Lend deposit, and a Kamino vault
+deposit. It checks each balance after (`e2e/run.mjs`).
 
 ### 4.14 Prototype
 
@@ -1582,9 +1598,11 @@ intents/
     planner/            sdp-intents-planner: prepare with no IO. Asks for fetches and simulations,
                         plans each intent as a segment, and builds verify_intent. Also verifies a
                         transaction for its signer.
-    client/             sdp-intents-client: the planner and the verifier over RPC. No service,
-                        cache, or LiteSVM.
-    cli/                sdp-intents: lint and prepare, later plan and apply with Squads (4.13)
+    client/             sdp-intents-client: the planner and the verifier over RPC, and sending.
+                        No service, cache, or LiteSVM.
+    registry-client/    sdp-intents-registry-client: the registry's instructions, addresses, and
+                        account views, with no Anchor. The registry's tests pin it to Anchor's.
+    cli/                sdp-intents: lint, plan, apply, prepare, verify, and send (4.13)
     builder/            sdp-intents-builder: the builder library, over pinocchio, for Anchor v2
                         and other programs. Staged and hashed modes, require_accounts, the rent
                         payer, and token helpers. In the programs workspace.
@@ -1601,7 +1619,8 @@ intents/
     kamino-builder/     vault.deposit and vault.withdraw
     test-builder/       a builder with one MoreAccounts round, for the library's tests
     test-transfer-hook/ a transfer hook, for the Token-2022 builder's tests
-  definitions/          organizations, interfaces, and implementations in JSON (4.13)
+  definitions/          organizations, interfaces, implementations, and approvals in JSON (4.13)
+  e2e/                  the whole flow against a local surfnet (4.13)
   fixtures/
     intents/
     plans/

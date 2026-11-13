@@ -2279,6 +2279,7 @@ dependencies = [
  "sdp-intents-lighthouse",
  "sdp-intents-planner",
  "sdp-intents-program-testing",
+ "sdp-intents-registry-client",
  "sdp-intents-spec",
  "solana-account",
  "solana-instruction 4.0.0",
@@ -2370,9 +2371,9 @@ dependencies = [
  "bs58",
  "sdp-intents-engine",
  "sdp-intents-lighthouse",
+ "sdp-intents-registry-client",
  "sdp-intents-spec",
  "sha2 0.11.1",
- "solana-address 2.7.0",
 ]
 
 [[package]]
@@ -2388,6 +2389,16 @@ dependencies = [
  "solana-address 2.7.0",
  "solana-instruction 3.5.1",
  "solana-signature",
+]
+
+[[package]]
+name = "sdp-intents-registry-client"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "sdp-intents-spec",
+ "sha2 0.11.1",
+ "solana-address 2.7.0",
 ]
 
 [[package]]
