@@ -1,4 +1,5 @@
 {
+  "head": "1.0.0",
   "approveNewVersions": false,
   "approvals": {
     "solana.org/jupiter-lend-withdraw": ["1.0.0"],

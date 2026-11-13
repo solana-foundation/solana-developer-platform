@@ -28,24 +28,45 @@ pub fn create_organization(
     ))
 }
 
-/// Creates the index of an interface. Its update authority and approve authority are
-/// `Address::default()`, so they follow the organization authority.
-pub fn create_interface(
-    payer: &Address,
-    authority: &Address,
+/// Moves the organization's authority to `new_authority`. Its current authority signs.
+pub fn set_organization_authority(
     organization: &Address,
-    index: &Address,
+    authority: &Address,
+    new_authority: &Address,
+) -> RegistryInstruction {
+    instruction("set_organization_authority", &[&new_authority.0], vec![writable(organization), signer(authority)])
+}
+
+/// The authorities of a new index. `Address::default()` follows the organization authority.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct IndexAuthorities {
+    pub update: Address,
+    pub approve: Address,
+}
+
+/// The accounts that the index of an interface is created with.
+pub struct NewInterface<'n> {
+    pub payer: &'n Address,
+    pub authority: &'n Address,
+    pub organization: &'n Address,
+    pub index: &'n Address,
+}
+
+/// Creates the index of an interface.
+pub fn create_interface(
+    new: &NewInterface<'_>,
     name_hash: &[u8; 32],
+    authorities: IndexAuthorities,
 ) -> RegistryInstruction {
     let accounts = vec![
-        writable_signer(payer),
-        readonly(organization),
-        signer(authority),
-        writable(index),
+        writable_signer(new.payer),
+        readonly(new.organization),
+        signer(new.authority),
+        writable(new.index),
         readonly(&SYSTEM_PROGRAM),
     ];
 
-    instruction("create_interface", &[name_hash, &[0; 32], &[0; 32]], accounts)
+    instruction("create_interface", &[name_hash, &authorities.update.0, &authorities.approve.0], accounts)
 }
 
 /// The accounts that the index of an implementation is created with.
@@ -57,9 +78,13 @@ pub struct NewImplementation<'n> {
     pub index: &'n Address,
 }
 
-/// Creates the index of an implementation of the interface at `interface_index`. Its update
-/// authority follows the organization authority.
-pub fn create_implementation(new: &NewImplementation<'_>, name_hash: &[u8; 32]) -> RegistryInstruction {
+/// Creates the index of an implementation of the interface at `interface_index`, with
+/// `update_authority`. `Address::default()` follows the organization authority.
+pub fn create_implementation(
+    new: &NewImplementation<'_>,
+    name_hash: &[u8; 32],
+    update_authority: &Address,
+) -> RegistryInstruction {
     let accounts = vec![
         writable_signer(new.payer),
         readonly(new.organization),
@@ -69,7 +94,7 @@ pub fn create_implementation(new: &NewImplementation<'_>, name_hash: &[u8; 32]) 
         readonly(&SYSTEM_PROGRAM),
     ];
 
-    instruction("create_implementation", &[name_hash, &[0; 32]], accounts)
+    instruction("create_implementation", &[name_hash, &update_authority.0], accounts)
 }
 
 /// Writes `bytes` at `offset` of the buffer `buffer_id` of `writer`, which holds a document of
@@ -107,9 +132,23 @@ pub struct IndexChange {
 
 impl IndexChange {
     pub fn set_approval_policy(&self, approve_new_versions: bool) -> RegistryInstruction {
-        let accounts = vec![signer(&self.authority), readonly(&self.organization), writable(&self.index)];
+        instruction("set_approval_policy", &[&[u8::from(approve_new_versions)]], self.accounts())
+    }
 
-        instruction("set_approval_policy", &[&[u8::from(approve_new_versions)]], accounts)
+    pub fn set_update_authority(&self, new_authority: &Address) -> RegistryInstruction {
+        instruction("set_update_authority", &[&new_authority.0], self.accounts())
+    }
+
+    pub fn set_approve_authority(&self, new_authority: &Address) -> RegistryInstruction {
+        instruction("set_approve_authority", &[&new_authority.0], self.accounts())
+    }
+
+    pub fn set_head(&self, version: &SemverV1) -> RegistryInstruction {
+        instruction("set_head", &[&version.major.0, &version.minor.0, &version.patch.0], self.accounts())
+    }
+
+    fn accounts(&self) -> Vec<Meta> {
+        vec![signer(&self.authority), readonly(&self.organization), writable(&self.index)]
     }
 }
 

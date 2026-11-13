@@ -1,10 +1,15 @@
 //! The steps that make the registry hold the definitions: create each organization and index,
-//! publish each version, and set each interface's approvals. A step is planned only when the
-//! registry does not hold its result, so `apply` can run again after a failure.
+//! publish each version, set each interface's approvals, set each head, then move each authority. A
+//! step is planned only when the registry does not hold its result, so `apply` can run again after a
+//! failure.
 //!
-//! The steps run in an order that the registry accepts: an interface version before the
-//! implementations of it, and an implementation's approval before its versions, so that an
-//! interface with `approveNewVersions` approves them at publish.
+//! The steps run in an order that the registry accepts. An interface version comes before the
+//! implementations of it. An implementation's approval comes before its versions, so that an
+//! interface with `approveNewVersions` approves them at publish. Each organization and index is
+//! created with the signer's authority, and the authorities move last, because each earlier step
+//! needs the signer to be the authority.
+//!
+//! The catalog holds one version of each id, so a step publishes at most one version of a document.
 
 use std::collections::HashMap;
 
@@ -13,14 +18,15 @@ use sha2::{Digest as _, Sha256};
 use sdp_intents_compiler::{Catalog, CompiledImplementation, CompiledInterface, Id};
 use sdp_intents_planner::Account;
 use sdp_intents_registry_client::{
-    self as registry, Approval, IndexChange, IndexView, NewImplementation, OrganizationView, Publication,
-    RegistryInstruction, VERSION_DOCUMENT_OFFSET,
+    self as registry, Approval, IndexAuthorities, IndexChange, IndexView, NewImplementation, NewInterface,
+    OrganizationView, Publication, RegistryInstruction, VERSION_DOCUMENT_OFFSET,
 };
 use sdp_intents_spec::wire::{DocumentKind, SemverV1};
 use sdp_intents_spec::Address;
 
 use crate::lint::publisher;
-use crate::tree::IndexFile;
+use crate::settings::{version_text, IndexSettings, OrganizationSettings};
+use crate::tree::Kind;
 
 /// A buffer write holds at most 800 bytes of the document, so the transaction stays under its size
 /// limit.
@@ -32,24 +38,13 @@ pub struct Step {
     pub transactions: Vec<Vec<RegistryInstruction>>,
 }
 
-/// What an interface's `index.json` states.
-pub struct InterfaceApprovals {
-    pub interface: Id,
-    pub approve_new_versions: bool,
-    pub implementations: Vec<ApprovedImplementation>,
-}
-
-pub struct ApprovedImplementation {
-    pub id: Id,
-    pub versions: Vec<SemverV1>,
-}
-
 /// The definitions, the accounts that the registry holds for them, and the key that signs.
 pub struct Sync<'s> {
     pub catalog: &'s Catalog,
-    pub approvals: &'s [InterfaceApprovals],
+    pub organizations: &'s [OrganizationSettings],
+    pub indexes: &'s [IndexSettings],
     pub accounts: &'s HashMap<Address, Account>,
-    pub authority: Address,
+    pub signer: Address,
 }
 
 /// A document's place in the registry.
@@ -59,118 +54,143 @@ struct Place {
     version: Address,
 }
 
+/// What a document publishes, and where.
+struct Document<'d> {
+    id: &'d Id,
+    version: &'d SemverV1,
+    bytes: &'d [u8],
+    at: Place,
+    interface_index: Option<Address>,
+}
+
 impl Sync<'_> {
     /// Every account that the steps read: each organization, index, and version account.
     pub fn addresses(catalog: &Catalog) -> Result<Vec<Address>, String> {
-        let interfaces = sorted_interfaces(catalog).into_iter().map(|interface| {
-            place(DocumentKind::Interface, &interface.id, &interface.version)
-                .map(|place| [place.organization, place.index, place.version])
-        });
-        let implementations = sorted_implementations(catalog).into_iter().map(|implementation| {
-            place(DocumentKind::Implementation, &implementation.id, &implementation.version)
-                .map(|place| [place.organization, place.index, place.version])
-        });
+        let interfaces = sorted_interfaces(catalog)
+            .into_iter()
+            .map(|interface| place(DocumentKind::Interface, &interface.id, &interface.version));
+        let implementations = sorted_implementations(catalog)
+            .into_iter()
+            .map(|implementation| place(DocumentKind::Implementation, &implementation.id, &implementation.version));
+        let places = interfaces.chain(implementations).collect::<Result<Vec<_>, _>>()?;
 
-        let addresses = interfaces.chain(implementations).collect::<Result<Vec<_>, _>>()?;
+        Ok(places.iter().flat_map(|at| [at.organization, at.index, at.version]).fold(
+            Vec::new(),
+            |mut unique, address| {
+                if !unique.contains(&address) {
+                    unique.push(address);
+                }
 
-        Ok(addresses.into_iter().flatten().fold(Vec::new(), |mut unique, address| {
-            if !unique.contains(&address) {
-                unique.push(address);
-            }
-
-            unique
-        }))
+                unique
+            },
+        ))
     }
 
     pub fn steps(&self) -> Result<Vec<Step>, String> {
         let interfaces = sorted_interfaces(self.catalog);
         let implementations = sorted_implementations(self.catalog);
+        let names = organization_names(&interfaces, &implementations);
 
-        let organizations = self.organization_steps(&interfaces, &implementations)?;
-        let interface_steps =
-            interfaces.iter().map(|interface| self.interface_steps(interface)).collect::<Result<Vec<_>, _>>()?;
-        let policies =
-            self.approvals.iter().map(|approvals| self.policy_step(approvals)).collect::<Result<Vec<_>, _>>()?;
-        let implementation_indexes = implementations
+        let created = names.iter().filter_map(|name| self.create_organization(name)).collect::<Result<Vec<_>, _>>()?;
+        let interface_steps = all(interfaces.iter().map(|interface| self.interface_steps(interface)))?;
+        let policies = all(interfaces.iter().map(|interface| self.policy_step(&interface.id)))?;
+        let indexes = all(implementations.iter().map(|implementation| self.implementation_index_step(implementation)))?;
+        let approvals = all(interfaces.iter().map(|interface| self.approval_steps(&interface.id)))?;
+        let versions =
+            all(implementations.iter().map(|implementation| self.implementation_version_step(implementation)))?;
+        let version_approvals = all(interfaces.iter().map(|interface| self.version_approval_steps(&interface.id)))?;
+        let interface_tails = all(interfaces.iter().map(|interface| self.index_tail(Kind::Interface, &interface.id)))?;
+        let implementation_tails = all(implementations
             .iter()
-            .map(|implementation| self.implementation_index_step(implementation))
-            .collect::<Result<Vec<_>, _>>()?;
-        let approvals =
-            self.approvals.iter().map(|approvals| self.approval_steps(approvals)).collect::<Result<Vec<_>, _>>()?;
-        let versions = implementations
-            .iter()
-            .map(|implementation| self.implementation_version_step(implementation))
-            .collect::<Result<Vec<_>, _>>()?;
-        let version_approvals = self
-            .approvals
-            .iter()
-            .map(|approvals| self.version_approval_steps(approvals))
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|implementation| self.index_tail(Kind::Implementation, &implementation.id)))?;
+        let moved =
+            names.iter().filter_map(|name| self.move_organization_authority(name)).collect::<Result<Vec<_>, _>>()?;
 
-        Ok(organizations
-            .into_iter()
-            .chain(interface_steps.into_iter().flatten())
-            .chain(policies.into_iter().flatten())
-            .chain(implementation_indexes.into_iter().flatten())
-            .chain(approvals.into_iter().flatten())
-            .chain(versions.into_iter().flatten())
-            .chain(version_approvals.into_iter().flatten())
-            .collect())
-    }
+        let groups = [
+            created,
+            interface_steps,
+            policies,
+            indexes,
+            approvals,
+            versions,
+            version_approvals,
+            interface_tails,
+            implementation_tails,
+            moved,
+        ];
 
-    /// Each organization must exist with the signer as its authority.
-    fn organization_steps(
-        &self,
-        interfaces: &[&CompiledInterface],
-        implementations: &[&CompiledImplementation],
-    ) -> Result<Vec<Step>, String> {
-        let mut names: Vec<&str> = interfaces
-            .iter()
-            .map(|interface| interface.id.organization.as_str())
-            .chain(implementations.iter().map(|implementation| implementation.id.organization.as_str()))
-            .collect();
-        names.sort_unstable();
-        names.dedup();
+        let steps: Vec<Step> = groups.into_iter().flatten().collect();
 
-        names
-            .into_iter()
-            .filter_map(|name| match self.accounts.get(&publisher(name)) {
-                None => Some(
-                    registry::create_organization(&self.authority, name, &self.authority)
-                        .map(|instruction| step(format!("create the organization {name}"), vec![vec![instruction]]))
-                        .map_err(|error| error.to_string()),
-                ),
-                Some(account) => self.check_authority(name, account).err().map(Err),
-            })
-            .collect()
-    }
-
-    fn check_authority(&self, name: &str, account: &Account) -> Result<(), String> {
-        let organization = OrganizationView::parse(&account.data).map_err(|error| format!("{name}: {error}"))?;
-
-        if *organization.authority() != self.authority {
-            return Err(format!("the authority of {name} is another key than the signer"));
+        if !steps.is_empty() {
+            names.iter().try_for_each(|name| self.check_signer(name))?;
         }
 
-        Ok(())
+        Ok(steps)
+    }
+
+    /// Each step signs as the organization authority, so an organization that the registry holds
+    /// must have the signer as its authority.
+    fn check_signer(&self, name: &str) -> Result<(), String> {
+        let Some(account) = self.accounts.get(&publisher(name)) else { return Ok(()) };
+        let organization = OrganizationView::parse(&account.data).map_err(|error| format!("{name}: {error}"))?;
+
+        match *organization.authority() == self.signer {
+            true => Ok(()),
+            false => Err(format!("the authority of {name} is {}, not the signer", base58(organization.authority()))),
+        }
+    }
+
+    /// An organization that the registry does not hold is created with the signer's authority.
+    fn create_organization(&self, name: &str) -> Option<Result<Step, String>> {
+        let Some(account) = self.accounts.get(&publisher(name)) else {
+            let created = registry::create_organization(&self.signer, name, &self.signer)
+                .map(|instruction| step(format!("create the organization {name}"), vec![instruction]));
+
+            return Some(created.map_err(|error| error.to_string()));
+        };
+
+        OrganizationView::parse(&account.data).err().map(|error| Err(format!("{name}: {error}")))
+    }
+
+    fn move_organization_authority(&self, name: &str) -> Option<Result<Step, String>> {
+        let wanted = self.organizations.iter().find(|settings| settings.organization == name)?.authority?;
+        let current = match self.accounts.get(&publisher(name)) {
+            None => self.signer,
+            Some(account) => match OrganizationView::parse(&account.data) {
+                Ok(view) => *view.authority(),
+                Err(error) => return Some(Err(format!("{name}: {error}"))),
+            },
+        };
+
+        (current != wanted).then(|| {
+            let instruction = registry::set_organization_authority(&publisher(name), &current, &wanted);
+
+            Ok(step(format!("move the authority of {name} to {}", base58(&wanted)), vec![instruction]))
+        })
     }
 
     fn interface_steps(&self, interface: &CompiledInterface) -> Result<Vec<Step>, String> {
         let at = place(DocumentKind::Interface, &interface.id, &interface.version)?;
         let index = (!self.exists(&at.index)).then(|| {
-            let instruction = registry::create_interface(
-                &self.authority,
-                &self.authority,
-                &at.organization,
-                &at.index,
-                &interface.id.name_hash(),
-            );
+            let new = NewInterface {
+                payer: &self.signer,
+                authority: &self.signer,
+                organization: &at.organization,
+                index: &at.index,
+            };
+            let instruction = registry::create_interface(&new, &interface.id.name_hash(), IndexAuthorities::default());
 
-            step(format!("create the interface index {}", interface.id), vec![vec![instruction]])
+            step(format!("create the interface index {}", interface.id), vec![instruction])
         });
-        let publish = self.publish_step(&interface.id, &interface.version, &interface.bytes, &at, None)?;
+        let document = Document {
+            id: &interface.id,
+            version: &interface.version,
+            bytes: &interface.bytes,
+            at,
+            interface_index: None,
+        };
 
-        Ok(index.into_iter().chain(publish).collect())
+        Ok(index.into_iter().chain(self.publish_step(&document)?).collect())
     }
 
     fn implementation_index_step(&self, implementation: &CompiledImplementation) -> Result<Option<Step>, String> {
@@ -182,156 +202,175 @@ impl Sync<'_> {
 
         let interface_index = implemented_index(implementation)?;
         let new = NewImplementation {
-            payer: &self.authority,
-            authority: &self.authority,
+            payer: &self.signer,
+            authority: &self.signer,
             organization: &at.organization,
             interface_index: &interface_index,
             index: &at.index,
         };
-        let instruction = registry::create_implementation(&new, &implementation.id.name_hash());
+        let instruction = registry::create_implementation(&new, &implementation.id.name_hash(), &Address::default());
 
-        Ok(Some(step(format!("create the implementation index {}", implementation.id), vec![vec![instruction]])))
+        Ok(Some(step(format!("create the implementation index {}", implementation.id), vec![instruction])))
     }
 
     fn implementation_version_step(&self, implementation: &CompiledImplementation) -> Result<Option<Step>, String> {
-        let at = place(DocumentKind::Implementation, &implementation.id, &implementation.version)?;
-        let interface_index = implemented_index(implementation)?;
+        let document = Document {
+            id: &implementation.id,
+            version: &implementation.version,
+            bytes: &implementation.bytes,
+            at: place(DocumentKind::Implementation, &implementation.id, &implementation.version)?,
+            interface_index: Some(implemented_index(implementation)?),
+        };
 
-        self.publish_step(
-            &implementation.id,
-            &implementation.version,
-            &implementation.bytes,
-            &at,
-            Some(interface_index),
-        )
+        self.publish_step(&document)
     }
 
     /// Writes the document to a buffer in parts, then publishes it. A version that the registry
     /// holds must hold the same document, because a version never changes.
-    fn publish_step(
-        &self,
-        id: &Id,
-        version: &SemverV1,
-        document: &[u8],
-        at: &Place,
-        interface_index: Option<Address>,
-    ) -> Result<Option<Step>, String> {
-        let label = format!("{id}@{}", version_text(version));
+    fn publish_step(&self, document: &Document<'_>) -> Result<Option<Step>, String> {
+        let label = format!("{}@{}", document.id, version_text(document.version));
+        let at = &document.at;
 
         if let Some(account) = self.accounts.get(&at.version) {
-            return match account.data.get(VERSION_DOCUMENT_OFFSET..) == Some(document) {
+            return match account.data.get(VERSION_DOCUMENT_OFFSET..) == Some(document.bytes) {
                 true => Ok(None),
                 false => Err(format!("the registry holds another document at {label}. Publish a new version.")),
             };
         }
 
-        let document_hash: [u8; 32] = Sha256::digest(document).into();
-        let buffer_id = document_hash.first_chunk::<4>().map_or(0, |bytes| u32::from_le_bytes(*bytes));
-        let buffer = registry::buffer_address(&self.authority, buffer_id).map_err(|error| error.to_string())?;
-        let writes = document
+        let bytes = document.bytes;
+        let document_hash: [u8; 32] = Sha256::digest(bytes).into();
+        let buffer_id = document_hash.first_chunk::<4>().map_or(0, |prefix| u32::from_le_bytes(*prefix));
+        let buffer = registry::buffer_address(&self.signer, buffer_id).map_err(|error| error.to_string())?;
+        let writes = bytes
             .chunks(BUFFER_PART)
             .zip((0..).step_by(BUFFER_PART))
             .map(|(part, offset)| {
-                registry::write_buffer(&self.authority, &buffer, buffer_id, document.len(), offset, part)
+                registry::write_buffer(&self.signer, &buffer, buffer_id, bytes.len(), offset, part)
                     .map(|instruction| vec![instruction])
                     .map_err(|error| error.to_string())
             })
             .collect::<Result<Vec<_>, _>>()?;
         let publication = Publication {
-            payer: self.authority,
-            authority: self.authority,
+            payer: self.signer,
+            authority: self.signer,
             organization: at.organization,
             index: at.index,
             buffer,
-            buffer_writer: self.authority,
+            buffer_writer: self.signer,
             version: at.version,
-            interface_index,
+            interface_index: document.interface_index,
         };
 
         let transactions = writes.into_iter().chain([vec![publication.instruction(&document_hash)]]).collect();
 
-        Ok(Some(step(format!("publish {label}"), transactions)))
+        Ok(Some(Step { description: format!("publish {label}"), transactions }))
     }
 
-    fn policy_step(&self, approvals: &InterfaceApprovals) -> Result<Option<Step>, String> {
-        let index = index_of(DocumentKind::Interface, &approvals.interface)?;
+    fn policy_step(&self, interface: &Id) -> Result<Option<Step>, String> {
+        let wanted =
+            self.index_settings(Kind::Interface, interface).is_some_and(|settings| settings.approve_new_versions);
+        let index = index_of(DocumentKind::Interface, interface)?;
         let current = self.index(&index)?.is_some_and(|view| view.approve_new_versions());
 
-        if current == approvals.approve_new_versions {
+        if current == wanted {
             return Ok(None);
         }
 
-        let change = IndexChange {
-            authority: self.authority,
-            organization: publisher(&approvals.interface.organization),
-            index,
-        };
-        let instruction = change.set_approval_policy(approvals.approve_new_versions);
+        let instruction = self.change(interface, index).set_approval_policy(wanted);
 
-        Ok(Some(step(
-            format!("set approveNewVersions of {} to {}", approvals.interface, approvals.approve_new_versions),
-            vec![vec![instruction]],
-        )))
+        Ok(Some(step(format!("set approveNewVersions of {interface} to {wanted}"), vec![instruction])))
     }
 
-    fn approval_steps(&self, approvals: &InterfaceApprovals) -> Result<Vec<Step>, String> {
-        let interface_index = index_of(DocumentKind::Interface, &approvals.interface)?;
+    fn approval_steps(&self, interface: &Id) -> Result<Vec<Step>, String> {
+        let Some(settings) = self.index_settings(Kind::Interface, interface) else { return Ok(Vec::new()) };
+        let interface_index = index_of(DocumentKind::Interface, interface)?;
 
-        approvals
-            .implementations
+        settings
+            .approvals
             .iter()
             .map(|implementation| {
-                let approval = self.approval(approvals, &interface_index, &implementation.id)?;
+                let approval = self.approval(interface, &interface_index, &implementation.id)?;
                 let approved =
                     self.index(&interface_index)?.is_some_and(|view| view.approves(&approval.implementation_index));
+                let description = format!("approve {} for {interface}", implementation.id);
 
-                Ok((!approved).then(|| {
-                    step(
-                        format!("approve {} for {}", implementation.id, approvals.interface),
-                        vec![vec![approval.approve_implementation(&self.authority)]],
-                    )
-                }))
+                Ok((!approved).then(|| step(description, vec![approval.approve_implementation(&self.signer)])))
             })
             .filter_map(Result::transpose)
             .collect()
     }
 
     /// A version that is new and that the interface approves at publish needs no approval.
-    fn version_approval_steps(&self, approvals: &InterfaceApprovals) -> Result<Vec<Step>, String> {
-        let interface_index = index_of(DocumentKind::Interface, &approvals.interface)?;
+    fn version_approval_steps(&self, interface: &Id) -> Result<Vec<Step>, String> {
+        let Some(settings) = self.index_settings(Kind::Interface, interface) else { return Ok(Vec::new()) };
+        let interface_index = index_of(DocumentKind::Interface, interface)?;
         let mut steps = Vec::new();
 
-        for implementation in &approvals.implementations {
-            let approval = self.approval(approvals, &interface_index, &implementation.id)?;
+        for implementation in &settings.approvals {
+            let approval = self.approval(interface, &interface_index, &implementation.id)?;
 
             for version in &implementation.versions {
                 let entry = self.index(&approval.implementation_index)?.and_then(|view| view.entry(version));
-                let approved_at_publish = entry.is_none() && approvals.approve_new_versions;
+                let approved_at_publish = entry.is_none() && settings.approve_new_versions;
 
                 if entry.is_some_and(|entry| entry.approved) || approved_at_publish {
                     continue;
                 }
 
                 let description = format!("approve {}@{}", implementation.id, version_text(version));
-                steps.push(step(description, vec![vec![approval.approve_version(version)]]));
+                steps.push(step(description, vec![approval.approve_version(version)]));
             }
         }
 
         Ok(steps)
     }
 
-    fn approval(
-        &self,
-        approvals: &InterfaceApprovals,
-        interface_index: &Address,
-        implementation: &Id,
-    ) -> Result<Approval, String> {
+    /// The head, then the authorities, that the index file states.
+    fn index_tail(&self, kind: Kind, id: &Id) -> Result<Vec<Step>, String> {
+        let Some(settings) = self.index_settings(kind, id) else { return Ok(Vec::new()) };
+        let index = index_of(document_kind(kind), id)?;
+        let view = self.index(&index)?;
+        let change = self.change(id, index);
+
+        let current_head = view.as_ref().and_then(IndexView::head);
+        let head = settings
+            .head
+            .filter(|head| current_head != Some(*head))
+            .map(|head| step(format!("set the head of {id} to {}", version_text(&head)), vec![change.set_head(&head)]));
+
+        let update = view.as_ref().map_or(Address::default(), |view| *view.update_authority());
+        let update_step = (update != settings.update_authority).then(|| {
+            let description = format!("move the update authority of {id} to {}", base58(&settings.update_authority));
+
+            step(description, vec![change.set_update_authority(&settings.update_authority)])
+        });
+
+        let approve = view.as_ref().map_or(Address::default(), |view| *view.approve_authority());
+        let approve_step = (kind == Kind::Interface && approve != settings.approve_authority).then(|| {
+            let description = format!("move the approve authority of {id} to {}", base58(&settings.approve_authority));
+
+            step(description, vec![change.set_approve_authority(&settings.approve_authority)])
+        });
+
+        Ok(head.into_iter().chain(update_step).chain(approve_step).collect())
+    }
+
+    fn approval(&self, interface: &Id, interface_index: &Address, implementation: &Id) -> Result<Approval, String> {
         Ok(Approval {
-            authority: self.authority,
-            organization: publisher(&approvals.interface.organization),
+            authority: self.signer,
+            organization: publisher(&interface.organization),
             interface_index: *interface_index,
             implementation_index: index_of(DocumentKind::Implementation, implementation)?,
         })
+    }
+
+    fn change(&self, id: &Id, index: Address) -> IndexChange {
+        IndexChange { authority: self.signer, organization: publisher(&id.organization), index }
+    }
+
+    fn index_settings(&self, kind: Kind, id: &Id) -> Option<&IndexSettings> {
+        self.indexes.iter().find(|settings| settings.kind == kind && settings.id == *id)
     }
 
     /// The index at `address`, or `None` when the registry holds no index there.
@@ -347,8 +386,33 @@ impl Sync<'_> {
     }
 }
 
-fn step(description: String, transactions: Vec<Vec<RegistryInstruction>>) -> Step {
-    Step { description, transactions }
+/// The steps of each item, in order, or the first failure.
+fn all<S: IntoIterator<Item = Step>>(results: impl Iterator<Item = Result<S, String>>) -> Result<Vec<Step>, String> {
+    results.collect::<Result<Vec<_>, _>>().map(|steps| steps.into_iter().flatten().collect())
+}
+
+/// A step of one transaction.
+fn step(description: String, instructions: Vec<RegistryInstruction>) -> Step {
+    Step { description, transactions: vec![instructions] }
+}
+
+fn organization_names(interfaces: &[&CompiledInterface], implementations: &[&CompiledImplementation]) -> Vec<String> {
+    let mut names: Vec<String> = interfaces
+        .iter()
+        .map(|interface| interface.id.organization.clone())
+        .chain(implementations.iter().map(|implementation| implementation.id.organization.clone()))
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+
+    names
+}
+
+fn document_kind(kind: Kind) -> DocumentKind {
+    match kind {
+        Kind::Interface => DocumentKind::Interface,
+        Kind::Implementation => DocumentKind::Implementation,
+    }
 }
 
 fn place(kind: DocumentKind, id: &Id, version: &SemverV1) -> Result<Place, String> {
@@ -377,67 +441,20 @@ fn implemented_index(implementation: &CompiledImplementation) -> Result<Address,
 
 fn sorted_interfaces(catalog: &Catalog) -> Vec<&CompiledInterface> {
     let mut interfaces: Vec<_> = catalog.interfaces().collect();
-    interfaces.sort_by_key(|interface| (interface.id.to_string(), version_key(&interface.version)));
+    interfaces.sort_by_key(|interface| interface.id.to_string());
 
     interfaces
 }
 
 fn sorted_implementations(catalog: &Catalog) -> Vec<&CompiledImplementation> {
     let mut implementations: Vec<_> = catalog.implementations().collect();
-    implementations.sort_by_key(|implementation| (implementation.id.to_string(), version_key(&implementation.version)));
+    implementations.sort_by_key(|implementation| implementation.id.to_string());
 
     implementations
 }
 
-fn version_key(version: &SemverV1) -> [u16; 3] {
-    [version.major.get(), version.minor.get(), version.patch.get()]
-}
-
-fn version_text(version: &SemverV1) -> String {
-    format!("{}.{}.{}", version.major.get(), version.minor.get(), version.patch.get())
-}
-
-/// Reads an interface's `index.json`: `approveNewVersions`, which defaults to false, and
-/// `approvals`, a map from implementation id to its approved versions.
-pub fn read_approvals(file: &IndexFile) -> Result<InterfaceApprovals, String> {
-    let at = |reason: String| format!("{}: {reason}", file.path.display());
-    let value: serde_json::Value = serde_json::from_str(&file.text).map_err(|error| at(error.to_string()))?;
-    let object = value.as_object().ok_or_else(|| at("the index is not an object".into()))?;
-
-    if let Some(key) = object.keys().find(|key| !["approveNewVersions", "approvals"].contains(&key.as_str())) {
-        return Err(at(format!("unknown key `{key}`")));
-    }
-
-    let approve_new_versions = match object.get("approveNewVersions") {
-        None => false,
-        Some(value) => value.as_bool().ok_or_else(|| at("`approveNewVersions` is not a boolean".into()))?,
-    };
-    let approvals = object.get("approvals").and_then(|value| value.as_object());
-    let implementations = approvals
-        .into_iter()
-        .flatten()
-        .map(|(id, versions)| {
-            let id = Id::parse(id).map_err(at)?;
-            let versions = versions
-                .as_array()
-                .ok_or_else(|| at(format!("the versions of {id} are not a list")))?
-                .iter()
-                .map(|version| {
-                    let text = version.as_str().ok_or_else(|| at(format!("a version of {id} is not a string")))?;
-
-                    sdp_intents_compiler::parse_version(text).map_err(at)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            Ok(ApprovedImplementation { id, versions })
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-
-    Ok(InterfaceApprovals {
-        interface: Id { organization: file.organization.clone(), name: file.interface.clone() },
-        approve_new_versions,
-        implementations,
-    })
+fn base58(address: &Address) -> String {
+    bs58::encode(address.0).into_string()
 }
 
 #[cfg(test)]
@@ -446,10 +463,28 @@ mod tests {
 
     use super::*;
     use crate::lint::compile_tree;
+    use crate::settings::{read_settings, TreeSettings};
     use crate::tree::Tree;
+
+    const SIGNER: Address = Address([1; 32]);
+    const VAULT: Address = Address([2; 32]);
 
     fn definitions() -> Tree {
         Tree::read(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../definitions")).unwrap()
+    }
+
+    fn descriptions(tree: &Tree, settings: &TreeSettings) -> Vec<String> {
+        let compiled = compile_tree(tree);
+        let accounts = HashMap::new();
+        let sync = Sync {
+            catalog: &compiled.catalog,
+            organizations: &settings.organizations,
+            indexes: &settings.indexes,
+            accounts: &accounts,
+            signer: SIGNER,
+        };
+
+        sync.steps().unwrap().into_iter().map(|step| step.description).collect()
     }
 
     /// An empty registry needs the organization first, then each interface, then each
@@ -457,17 +492,7 @@ mod tests {
     #[test]
     fn plans_an_empty_registry_in_the_order_that_it_accepts() {
         let tree = definitions();
-        let compiled = compile_tree(&tree);
-        let approvals = tree.indexes.iter().map(read_approvals).collect::<Result<Vec<_>, _>>().unwrap();
-        let accounts = HashMap::new();
-        let sync = Sync {
-            catalog: &compiled.catalog,
-            approvals: &approvals,
-            accounts: &accounts,
-            authority: Address([1; 32]),
-        };
-
-        let steps: Vec<String> = sync.steps().unwrap().into_iter().map(|step| step.description).collect();
+        let steps = descriptions(&tree, &read_settings(&tree).unwrap());
         let position = |text: &str| steps.iter().position(|step| step == text).unwrap();
 
         assert_eq!(steps.first().map(String::as_str), Some("create the organization solana.org"));
@@ -479,19 +504,25 @@ mod tests {
             position("approve solana.org/system-transfer for solana.org/token.transfer")
                 < position("publish solana.org/system-transfer@1.0.0")
         );
-        assert_eq!(steps.last().map(String::as_str), Some("approve solana.org/kamino-withdraw@1.0.0"));
-        assert_eq!(steps.len(), 35);
+        assert_eq!(steps.last().map(String::as_str), Some("set the head of solana.org/token-2022-transfer to 1.0.0"));
+        assert_eq!(steps.len(), 45);
     }
 
+    /// Every step before the moves needs the signer to be the authority.
     #[test]
-    fn refuses_an_unknown_key_in_an_index() {
-        let file = IndexFile {
-            path: PathBuf::from("index.json"),
-            organization: "solana.org".into(),
-            interface: "token.transfer".into(),
-            text: r#"{ "approvals": {}, "head": "1.0.0" }"#.into(),
-        };
+    fn moves_each_authority_last() {
+        let tree = definitions();
+        let mut settings = read_settings(&tree).unwrap();
+        settings.organizations.push(OrganizationSettings { organization: "solana.org".into(), authority: Some(VAULT) });
+        settings.indexes.iter_mut().for_each(|index| index.head = None);
 
-        assert!(read_approvals(&file).is_err_and(|error| error.contains("unknown key `head`")));
+        let token_transfer = settings.indexes.iter_mut().find(|index| index.id.name == "token.transfer").unwrap();
+        token_transfer.approve_authority = VAULT;
+        let steps = descriptions(&tree, &settings);
+        let vault = bs58::encode(VAULT.0).into_string();
+
+        assert_eq!(steps.len(), 37);
+        assert_eq!(steps[35], format!("move the approve authority of solana.org/token.transfer to {vault}"));
+        assert_eq!(steps[36], format!("move the authority of solana.org to {vault}"));
     }
 }

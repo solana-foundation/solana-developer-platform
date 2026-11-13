@@ -44,14 +44,14 @@ fn builds_the_instructions_that_anchor_builds() {
         registry_client::create_organization(&spec(&payer), "solana.org", &spec(&authority)).unwrap(),
         client::create_organization(&payer, "solana.org", &authority),
     );
+    let new_interface = registry_client::NewInterface {
+        payer: &spec(&payer),
+        authority: &spec(&authority),
+        organization: &spec(&organization),
+        index: &spec(&interface_index),
+    };
     assert_same(
-        registry_client::create_interface(
-            &spec(&payer),
-            &spec(&authority),
-            &spec(&organization),
-            &spec(&interface_index),
-            &name_hash,
-        ),
+        registry_client::create_interface(&new_interface, &name_hash, registry_client::IndexAuthorities::default()),
         client::create_interface(&payer, &authority, &organization, "token.transfer"),
     );
 
@@ -63,7 +63,7 @@ fn builds_the_instructions_that_anchor_builds() {
         index: &spec(&implementation_index),
     };
     assert_same(
-        registry_client::create_implementation(&new, &client::name_hash("spl-token-transfer")),
+        registry_client::create_implementation(&new, &client::name_hash("spl-token-transfer"), &Default::default()),
         client::create_implementation(&payer, &authority, &organization, &interface_index, "spl-token-transfer"),
     );
 
@@ -128,6 +128,13 @@ fn builds_the_instructions_that_anchor_builds() {
     };
     let anchor_change = client::IndexChange { authority, organization, index: interface_index };
     assert_same(change.set_approval_policy(true), anchor_change.set_approval_policy(true));
+    assert_same(change.set_update_authority(&spec(&payer)), anchor_change.set_update_authority(&payer));
+    assert_same(change.set_approve_authority(&spec(&payer)), anchor_change.set_approve_authority(&payer));
+    assert_same(change.set_head(&version), anchor_change.set_head(&version));
+    assert_same(
+        registry_client::set_organization_authority(&spec(&organization), &spec(&authority), &spec(&payer)),
+        client::set_organization_authority(&organization, &authority, &payer),
+    );
 }
 
 #[test]

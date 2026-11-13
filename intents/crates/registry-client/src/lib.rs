@@ -10,8 +10,8 @@ use sdp_intents_spec::{AccountRole, Address};
 
 pub use addresses::{buffer_address, index_address, name_hash, organization_address, version_address};
 pub use instructions::{
-    create_implementation, create_interface, create_organization, write_buffer, Approval, IndexChange,
-    NewImplementation, Publication,
+    create_implementation, create_interface, create_organization, set_organization_authority, write_buffer, Approval,
+    IndexAuthorities, IndexChange, NewImplementation, NewInterface, Publication,
 };
 pub use state::{IndexView, OrganizationView, VersionEntry, VERSION_DOCUMENT_OFFSET};
 

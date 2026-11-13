@@ -1,4 +1,5 @@
 {
+  "head": "1.0.0",
   "approveNewVersions": false,
   "approvals": {
     "solana.org/jupiter-lend-deposit": ["1.0.0"],

@@ -12,7 +12,8 @@ use sdp_intents_spec::Address;
 
 use crate::lint::{compile_tree, Outcome};
 use crate::output::{self, Format};
-use crate::sync::{read_approvals, Step, Sync};
+use crate::settings::read_settings;
+use crate::sync::{Step, Sync};
 use crate::tree::Tree;
 
 /// The budget of each registry transaction. The largest, `publish`, hashes a document of at most
@@ -90,7 +91,7 @@ fn planned(args: &SyncArgs) -> Result<Planned, String> {
         return Err("the definitions have findings, so they cannot be published".to_owned());
     }
 
-    let approvals = tree.indexes.iter().map(read_approvals).collect::<Result<Vec<_>, _>>()?;
+    let settings = read_settings(&tree)?;
     let addresses = Sync::addresses(&compiled.catalog)?;
     let fetched = Client::new(&args.rpc).accounts(&addresses).map_err(|error| error.to_string())?;
     let accounts: HashMap<_, _> = addresses
@@ -101,9 +102,10 @@ fn planned(args: &SyncArgs) -> Result<Planned, String> {
 
     let sync = Sync {
         catalog: &compiled.catalog,
-        approvals: &approvals,
+        organizations: &settings.organizations,
+        indexes: &settings.indexes,
         accounts: &accounts,
-        authority: Address(keypair.pubkey().to_bytes()),
+        signer: Address(keypair.pubkey().to_bytes()),
     };
     let steps = sync.steps()?;
 

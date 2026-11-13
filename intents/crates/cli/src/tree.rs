@@ -66,11 +66,20 @@ pub struct Definition {
     pub text: String,
 }
 
-/// The `index.json` of an interface, which states what the registry index must hold.
+/// The `index.json` of an interface or an implementation, which states what its registry index
+/// must hold.
 pub struct IndexFile {
     pub path: PathBuf,
     pub organization: String,
-    pub interface: String,
+    pub kind: Kind,
+    pub name: String,
+    pub text: String,
+}
+
+/// The `organization.json` of an organization, which states its authority.
+pub struct OrganizationFile {
+    pub path: PathBuf,
+    pub organization: String,
     pub text: String,
 }
 
@@ -79,34 +88,31 @@ pub struct IndexFile {
 pub struct Tree {
     pub definitions: Vec<Definition>,
     pub indexes: Vec<IndexFile>,
+    pub organizations: Vec<OrganizationFile>,
     pub strays: Vec<PathBuf>,
 }
 
 impl Tree {
     pub fn read(root: &Path) -> Result<Self, String> {
-        let mut definitions = Vec::new();
-        let mut indexes = Vec::new();
-        let mut strays = Vec::new();
+        let mut tree =
+            Self { definitions: Vec::new(), indexes: Vec::new(), organizations: Vec::new(), strays: Vec::new() };
 
         for path in json_files(root)? {
-            let relative = path.strip_prefix(root).ok();
-            let position = relative.and_then(Position::parse);
+            let place = path.strip_prefix(root).ok().map(Place::parse).unwrap_or(Place::Stray);
 
-            match (relative.and_then(IndexPlace::parse), position) {
-                (Some(place), _) => {
-                    indexes.push(IndexFile {
-                        text: read(&path)?,
-                        path,
-                        organization: place.organization,
-                        interface: place.interface,
-                    });
+            match place {
+                Place::Index { organization, kind, name } => {
+                    tree.indexes.push(IndexFile { text: read(&path)?, path, organization, kind, name });
                 }
-                (None, Some(position)) => definitions.push(Definition { text: read(&path)?, path, position }),
-                (None, None) => strays.push(path),
+                Place::Organization { organization } => {
+                    tree.organizations.push(OrganizationFile { text: read(&path)?, path, organization });
+                }
+                Place::Definition(position) => tree.definitions.push(Definition { text: read(&path)?, path, position }),
+                Place::Stray => tree.strays.push(path),
             }
         }
 
-        Ok(Self { definitions, indexes, strays })
+        Ok(tree)
     }
 
     pub fn of_kind(&self, kind: Kind) -> impl Iterator<Item = &Definition> {
@@ -122,21 +128,29 @@ impl Tree {
     }
 }
 
-/// Where an interface's `index.json` sits: `<organization>/interfaces/<name>/index.json`.
-struct IndexPlace {
-    organization: String,
-    interface: String,
+/// What a file is, from where it sits: `<organization>/organization.json`,
+/// `<organization>/<kind>/<name>/index.json`, or a definition.
+enum Place {
+    Organization { organization: String },
+    Index { organization: String, kind: Kind, name: String },
+    Definition(Position),
+    Stray,
 }
 
-impl IndexPlace {
-    fn parse(relative: &Path) -> Option<Self> {
-        let parts: Vec<&str> =
-            relative.components().map(|component| component.as_os_str().to_str()).collect::<Option<_>>()?;
-        let [organization, "interfaces", name, "index.json"] = parts.as_slice() else {
-            return None;
-        };
+impl Place {
+    fn parse(relative: &Path) -> Self {
+        let parts: Option<Vec<&str>> = relative.components().map(|component| component.as_os_str().to_str()).collect();
 
-        Some(Self { organization: (*organization).to_owned(), interface: (*name).to_owned() })
+        match parts.as_deref() {
+            Some([organization, "organization.json"]) => {
+                Self::Organization { organization: (*organization).to_owned() }
+            }
+            Some([organization, kind, name, "index.json"]) => match Kind::from_folder(kind) {
+                Some(kind) => Self::Index { organization: (*organization).to_owned(), kind, name: (*name).to_owned() },
+                None => Self::Stray,
+            },
+            _ => Position::parse(relative).map_or(Self::Stray, Self::Definition),
+        }
     }
 }
 

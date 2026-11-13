@@ -6,6 +6,7 @@ mod lint;
 mod output;
 mod prepare;
 mod registry;
+mod settings;
 mod sign;
 mod sync;
 mod tree;

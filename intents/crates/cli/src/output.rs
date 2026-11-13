@@ -25,9 +25,7 @@ pub fn render(format: Format, reports: &[FileReport<'_>], strays: &[&Path]) -> S
 }
 
 fn human(reports: &[FileReport<'_>], strays: &[&Path]) -> String {
-    let findings = reports
-        .iter()
-        .map(|file| file.report.render(&file.definition.path.display().to_string(), &file.definition.text));
+    let findings = reports.iter().map(|file| file.report.render(&file.path.display().to_string(), file.text));
     let strays = strays.iter().map(|path| {
         format!(
             "error[{STRAY}]: `{}` is not at the place of a definition, so lint cannot check it\n   = help: {STRAY_HELP}\n\n",
@@ -42,14 +40,14 @@ fn github(reports: &[FileReport<'_>], strays: &[&Path]) -> String {
     let mut out = String::new();
 
     for file in reports {
-        let path = file.definition.path.display().to_string();
+        let path = file.path.display().to_string();
 
         if let Some(syntax) = &file.report.syntax {
             let location = Location { line: syntax.line, column: syntax.column };
             annotate(&mut out, &path, Some(location), "invalidJson", &syntax.message);
         }
 
-        for located in file.report.located(&file.definition.text) {
+        for located in file.report.located(file.text) {
             annotate(&mut out, &path, located.location, located.diagnostic.code.as_str(), &message(located.diagnostic));
         }
     }
@@ -109,7 +107,11 @@ mod tests {
             syntax: None,
         };
 
-        let out = render(Format::Github, &[FileReport { definition: &definition, report }], &[Path::new("a,b.json")]);
+        let out = render(
+            Format::Github,
+            &[FileReport { path: &definition.path, text: &definition.text, report }],
+            &[Path::new("a,b.json")],
+        );
 
         assert_eq!(
             out,

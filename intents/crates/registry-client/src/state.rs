@@ -101,6 +101,18 @@ impl<'a> IndexView<'a> {
         Ok(index)
     }
 
+    pub fn update_authority(&self) -> &'a Address {
+        &self.fixed.update_authority
+    }
+
+    pub fn approve_authority(&self) -> &'a Address {
+        &self.fixed.approve_authority
+    }
+
+    pub fn head(&self) -> Option<SemverV1> {
+        self.fixed.has_head.get().then_some(self.fixed.head)
+    }
+
     pub fn approve_new_versions(&self) -> bool {
         self.fixed.approve_new_versions.get()
     }

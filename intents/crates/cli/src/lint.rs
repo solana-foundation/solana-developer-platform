@@ -12,6 +12,7 @@ use sdp_intents_compiler::Catalog;
 use sdp_intents_spec::Address;
 
 use crate::output::{self, Format};
+use crate::settings::{check_references, read_index, read_organization};
 use crate::tree::{Definition, Kind, Tree};
 
 #[derive(clap::Args)]
@@ -34,9 +35,10 @@ pub enum Outcome {
     Findings,
 }
 
-/// The findings for one definition. A definition with no findings has no `FileReport`.
+/// The findings for one file. A file with no findings has no `FileReport`.
 pub struct FileReport<'t> {
-    pub definition: &'t Definition,
+    pub path: &'t Path,
+    pub text: &'t str,
     pub report: Report,
 }
 
@@ -44,19 +46,24 @@ pub fn run(args: &LintArgs) -> Result<Outcome, String> {
     let tree = Tree::read(&args.root)?;
     let scope = Scope::new(&args.root, &args.paths)?;
 
-    let reports: Vec<FileReport<'_>> =
-        lint(&tree).into_iter().filter(|report| scope.contains(&report.definition.path)).collect();
+    let reports: Vec<FileReport<'_>> = lint(&tree).into_iter().filter(|report| scope.contains(report.path)).collect();
     let strays: Vec<&Path> = tree.strays.iter().map(PathBuf::as_path).filter(|path| scope.contains(path)).collect();
     let checked = tree.definitions.iter().filter(|definition| scope.contains(&definition.path)).count();
+    let is_definition = |path: &Path| tree.definitions.iter().any(|definition| definition.path == path);
+    let failed = reports.iter().filter(|report| is_definition(report.path)).count();
 
     print!("{}", output::render(args.format, &reports, &strays));
-    eprintln!("{} of {checked} definitions compiled", checked.saturating_sub(reports.len()));
+    eprintln!("{} of {checked} definitions compiled", checked.saturating_sub(failed));
 
     Ok(if reports.is_empty() && strays.is_empty() { Outcome::Clean } else { Outcome::Findings })
 }
 
+/// The findings of every definition, organization file, and index file of the tree.
 pub fn lint(tree: &Tree) -> Vec<FileReport<'_>> {
-    compile_tree(tree).reports
+    let compiled = compile_tree(tree);
+    let settings = settings_reports(tree, &compiled.catalog);
+
+    compiled.reports.into_iter().chain(settings).collect()
 }
 
 /// Every definition of a tree, compiled into one catalog, with the findings of the files that did
@@ -95,7 +102,25 @@ pub fn compile_tree(tree: &Tree) -> CompiledTree<'_> {
 fn with_position_findings(definition: &Definition, mut report: Report) -> FileReport<'_> {
     report.diagnostics.extend(position_findings(definition));
 
-    FileReport { definition, report }
+    FileReport { path: &definition.path, text: &definition.text, report }
+}
+
+/// The findings of each organization and index file: its own, and for an index, the versions and
+/// the implementations that it names.
+fn settings_reports<'t>(tree: &'t Tree, catalog: &Catalog) -> Vec<FileReport<'t>> {
+    let organizations = tree.organizations.iter().filter_map(|file| {
+        read_organization(file).err().map(|report| FileReport { path: &file.path, text: &file.text, report })
+    });
+    let indexes = tree.indexes.iter().filter_map(|file| {
+        let report = match read_index(file) {
+            Ok(settings) => Report { diagnostics: check_references(&settings, catalog), syntax: None },
+            Err(report) => report,
+        };
+
+        (!report.is_empty()).then_some(FileReport { path: &file.path, text: &file.text, report })
+    });
+
+    organizations.chain(indexes).collect()
 }
 
 /// The registry names a document by its place in the tree, so the `id` and `version` in the file
@@ -175,7 +200,7 @@ mod tests {
     }
 
     fn tree(definitions: Vec<Definition>) -> Tree {
-        Tree { definitions, indexes: Vec::new(), strays: Vec::new() }
+        Tree { definitions, indexes: Vec::new(), organizations: Vec::new(), strays: Vec::new() }
     }
 
     #[test]
