@@ -185,7 +185,7 @@ mod tests {
 
         assert_eq!(resolved.fetches, 1);
 
-        assert_eq!(call.program, &address("4pty1GwTYzz4q2cfpjWUDiKY15ydMLyVmLaGX4tmK3LT"));
+        assert_eq!(call.program, &address("2gMFoKF3p5eB2m72ccjncZH8e5agVYbHBH8A29zDMdBm"));
         assert!(accounts_of(&call).iter().all(|account| account.role == Readonly));
         assert_eq!(accounts_of(&call).get(3).unwrap().address, &find_ata(FROM, mint, TOKEN_2022_PROGRAM));
         assert_eq!(

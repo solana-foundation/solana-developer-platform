@@ -1,0 +1,39 @@
+[package]
+name = "token-2022-builder"
+description = "The builder of solana.org/token-2022-transfer: a Token-2022 transfer, with what the mint's extensions need"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = ["no-log-ix-name"]
+no-entrypoint = []
+cpi = ["no-entrypoint"]
+idl-build = []
+no-log-ix-name = []
+
+[dependencies]
+anchor-lang.workspace = true
+bytemuck.workspace = true
+pinocchio.workspace = true
+sdp-intents-builder = { path = "../builder" }
+
+# The tests create mints with the instructions of the interface crate, and check the layouts that
+# the builder reads against its types. The Solana crates are the versions that LiteSVM 0.18 uses.
+[dev-dependencies]
+anchor-v2-testing.workspace = true
+sdp-intents-planner = { path = "../../planner" }
+sdp-intents-program-testing = { path = "../testing" }
+solana-account = "=4.7.0"
+solana-address = { version = "=2.7.0", features = ["curve25519", "decode"] }
+solana-instruction = "=3.5.1"
+solana-sha256-hasher.workspace = true
+spl-token-2022-interface = "=4.0.0"
+
+[lints]
+workspace = true
