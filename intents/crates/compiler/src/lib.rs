@@ -29,6 +29,7 @@
 
 mod borsh;
 mod catalog;
+mod decompile;
 pub mod diagnostic;
 mod encoding;
 mod envelope;
@@ -54,6 +55,7 @@ mod writer;
 mod test_support;
 
 pub use catalog::Catalog;
+pub use decompile::{decompile_implementation, decompile_interface, DecompileError, Organizations};
 pub use id::{format_version, parse_version, Id, IdRange};
 pub use implementation::CompiledImplementation;
 pub use intent::CompiledIntent;
