@@ -61,9 +61,10 @@ impl<'a> Recipe<'a> {
         interface: Interface<'a>,
         implementation: Implementation<'a>,
         intent: Intent<'a>,
+        payers: Payers<'a>,
     ) -> Result<Self, EngineError> {
         Ok(Self {
-            documents: Documents::bind(interface, implementation, intent)?,
+            documents: Documents::bind(interface, implementation, intent, payers)?,
             addresses: Addresses::default(),
             missing_hints: HintAccounts::default(),
             complete: false,
@@ -71,8 +72,13 @@ impl<'a> Recipe<'a> {
     }
 
     /// Parses the three documents, then binds them.
-    pub fn parse(interface: &'a [u8], implementation: &'a [u8], intent: &'a [u8]) -> Result<Self, EngineError> {
-        Self::bind(Interface::parse(interface)?, Implementation::parse(implementation)?, Intent::parse(intent)?)
+    pub fn parse(
+        interface: &'a [u8],
+        implementation: &'a [u8],
+        intent: &'a [u8],
+        payers: Payers<'a>,
+    ) -> Result<Self, EngineError> {
+        Self::bind(Interface::parse(interface)?, Implementation::parse(implementation)?, Intent::parse(intent)?, payers)
     }
 
     /// Derives every address that the chain's data allows, and checks the owner hints. `Missing`
@@ -132,7 +138,7 @@ impl<'a> Recipe<'a> {
     }
 
     pub fn payers(&self) -> Payers<'a> {
-        Payers { fee: self.documents.intent.fee_payer(), rent: self.documents.intent.rent_payer() }
+        self.documents.payers
     }
 
     /// The instructions of a static recipe.

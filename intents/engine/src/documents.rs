@@ -4,7 +4,7 @@ use sdp_intents_spec::{
 };
 
 use crate::borsh::is_value;
-use crate::EngineError;
+use crate::{EngineError, Payers};
 
 /// The documents of one intent, after the checks that need no account data.
 #[derive(Clone, Copy)]
@@ -12,6 +12,7 @@ pub(crate) struct Documents<'a> {
     pub(crate) interface: Interface<'a>,
     pub(crate) implementation: Implementation<'a>,
     pub(crate) intent: Intent<'a>,
+    pub(crate) payers: Payers<'a>,
 }
 
 impl<'a> Documents<'a> {
@@ -20,8 +21,9 @@ impl<'a> Documents<'a> {
         interface: Interface<'a>,
         implementation: Implementation<'a>,
         intent: Intent<'a>,
+        payers: Payers<'a>,
     ) -> Result<Self, EngineError> {
-        let documents = Self { interface, implementation, intent };
+        let documents = Self { interface, implementation, intent, payers };
 
         if intent.interface() != interface.id() || intent.implementation() != implementation.id() {
             return Err(EngineError::WrongDocument);
@@ -172,7 +174,7 @@ impl InputSet {
 
 #[cfg(test)]
 mod tests {
-    use sdp_intents_spec::{Implementation, Intent, Interface};
+    use sdp_intents_spec::{Address, Implementation, Intent, Interface};
 
     use super::*;
     use crate::test_support::*;
@@ -226,6 +228,7 @@ mod tests {
             Interface::parse(&spl.interface).unwrap(),
             Implementation::parse(&system.implementation).unwrap(),
             Intent::parse(&spl.intent).unwrap(),
+            Payers { fee: &Address([1; 32]), rent: &Address([1; 32]) },
         );
 
         assert_eq!(bound.err(), Some(EngineError::WrongDocument));

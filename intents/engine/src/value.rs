@@ -69,8 +69,8 @@ impl<'r, C: Chain> Context<'r, C> {
 
                 bytemuck::try_from_bytes(bytes).map_err(|_| EngineError::BadInput { input: index })
             }
-            ValueSource::Payer if index == 0 => Ok(self.documents.intent.fee_payer()),
-            ValueSource::Payer if index == 1 => Ok(self.documents.intent.rent_payer()),
+            ValueSource::Payer if index == 0 => Ok(self.documents.payers.fee),
+            ValueSource::Payer if index == 1 => Ok(self.documents.payers.rent),
             ValueSource::Account => self.addresses.get(index).ok_or(EngineError::Unresolved { account: index }),
             ValueSource::Address => self.static_address(index),
             ValueSource::Output => self.output_address(index),

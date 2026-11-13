@@ -8,15 +8,21 @@ use sdp_intents_spec::builder::{
 use sdp_intents_spec::wire::{PodU16, PodU32};
 use sdp_intents_spec::{AccountRole, Address};
 
-use crate::{Account, IntentDocuments, ReturnData, SimulationResult};
+use crate::{Account, IntentDocuments, Payers, PlanRequest, ReturnData, SimulationResult};
 
 pub(crate) const BUILDER: Address = Address([0x42; 32]);
 pub(crate) const SCRATCH: Address = Address([0x5c; 32]);
+
+/// `5ZWj7a1f8tWkjBESHKgrLmXshuXxqeY9SYcfbshpAqPG` pays the fee of every test plan, and the rent
+/// unless the documents name another rent payer.
+pub(crate) const PAYER: &str = "5ZWj7a1f8tWkjBESHKgrLmXshuXxqeY9SYcfbshpAqPG";
 
 pub(crate) struct Compiled {
     pub(crate) interface: Vec<u8>,
     pub(crate) implementation: Vec<u8>,
     pub(crate) intent: Vec<u8>,
+    payer: Address,
+    rent_payer: Address,
 }
 
 impl Compiled {
@@ -31,7 +37,9 @@ impl Compiled {
         let interface = interface.unwrap().bytes.clone();
         let implementation = catalog.compile_implementation(implementation).unwrap().bytes.clone();
 
-        Self { interface, implementation, intent: catalog.compile_intent(intent).unwrap().bytes }
+        let intent = catalog.compile_intent(intent).unwrap().bytes;
+
+        Self { interface, implementation, intent, payer: account(PAYER), rent_payer: account(PAYER) }
     }
 
     pub(crate) fn system_transfer(intent: &str) -> Self {
@@ -45,15 +53,27 @@ impl Compiled {
         )
     }
 
-    /// The Token-2022 record, with its builder at `BUILDER`.
+    /// The Token-2022 record, with its builder at `BUILDER`. The sender pays the rent.
     pub(crate) fn token_2022_transfer() -> Self {
         let record = include_str!("../../definitions/solana.org/implementations/token-2022-transfer/1.0.0.json");
         let builder = bs58::encode(BUILDER.0).into_string();
-
-        Self::compile(
+        let compiled = Self::compile(
             &record.replace("2gMFoKF3p5eB2m72ccjncZH8e5agVYbHBH8A29zDMdBm", &builder),
             include_str!("../../fixtures/intents/token-2022-transfer.json"),
-        )
+        );
+
+        Self { rent_payer: account("7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"), ..compiled }
+    }
+}
+
+/// A plan of `intents`, paid by the first one's payers.
+pub(crate) fn request<'a>(intents: &[&'a Compiled], priority_fee_lamports: u64) -> PlanRequest<'a> {
+    let first = intents.first().unwrap();
+
+    PlanRequest {
+        intents: intents.iter().map(|compiled| compiled.documents()).collect(),
+        payers: Payers { fee: &first.payer, rent: &first.rent_payer },
+        priority_fee_lamports,
     }
 }
 

@@ -1,7 +1,7 @@
 use sdp_intents_spec::builder::PAYER_RENT_PLACEHOLDER;
 use sdp_intents_spec::Address;
 
-/// The fee payer and the rent payer of an intent. A builder never sees them. It names the rent payer
+/// The fee payer and the rent payer of the plan that holds the intent. A builder never sees them. It names the rent payer
 /// with a placeholder, and never names the fee payer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Payers<'a> {

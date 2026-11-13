@@ -1,21 +1,32 @@
-//! Compiles a plan request: the payers, the cluster, and the priority fee once, then each intent's
-//! documents, inputs, and options. Each intent compiles to the same binary form as an intent
-//! document, with the plan's payers and priority fee.
+//! Compiles a plan request: the payers, the cluster, and the priority fee once, then each intent.
+//! Each intent compiles to the binary form of an intent document. `cluster` is checked and not
+//! stored, because the registry that holds the records is on one cluster.
 
+use sdp_intents_spec::{Address, BaseType, ValueType};
 use serde_json::Value;
 
+use crate::borsh::encode;
 use crate::catalog::Catalog;
 use crate::diagnostic::{Code, Diagnostic, Report};
-use crate::envelope::{parse_json, read_kind, root};
-use crate::intent::{
-    read_cluster, read_entry, read_flags, read_payers, read_priority_fee, write_intent, CompiledIntent, Terms,
-};
-use crate::reader::{Node, Sink};
+use crate::encoding::address;
+use crate::envelope::{parse_json, read_kind, reported, root};
+use crate::intent::{read_intent, CompiledIntent};
+use crate::reader::{Node, Object, Sink};
 
-/// The intents of a plan, in the order of their segments in the transaction.
+/// A plan request in binary form: its intents, in the order of their segments in the transaction,
+/// and what they share.
 #[derive(Clone, Debug)]
 pub struct CompiledPlan<'c> {
     pub intents: Vec<CompiledIntent<'c>>,
+    pub payers: PlanPayers,
+    pub priority_fee_lamports: u64,
+}
+
+/// `rent` defaults to `fee`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlanPayers {
+    pub fee: Address,
+    pub rent: Address,
 }
 
 pub(crate) fn compile_plan<'c>(text: &str, catalog: &'c Catalog) -> Result<CompiledPlan<'c>, Report> {
@@ -34,55 +45,66 @@ fn compile<'c>(value: &Value, catalog: &'c Catalog, sink: &mut Sink) -> Option<C
     read_kind(&mut object, "plan", sink);
 
     let payers = object.required("payers", sink).and_then(|node| read_payers(&node, sink));
-    let priority_fee = object.field("options").map_or(Some(0), |node| {
-        let mut options = node.object(sink)?;
-        let priority_fee = read_priority_fee(&mut options, sink);
-        options.finish(sink);
-
-        priority_fee
-    });
+    let priority_fee = object.field("options").map_or(Some(0), |node| read_options(&node, sink));
     read_cluster(&mut object, sink);
     let entries = object.required("intents", sink).and_then(|node| node.array(sink));
-    let pointer = object.pointer().to_owned();
+    let pointer = format!("{}/intents", object.pointer());
     object.finish(sink);
 
     let entries = entries?;
 
     if entries.is_empty() {
-        sink.push(Diagnostic::new(
-            Code::InvalidValue,
-            &format!("{pointer}/intents"),
-            "a plan holds at least one intent",
-        ));
+        sink.push(Diagnostic::new(Code::InvalidValue, &pointer, "a plan holds at least one intent"));
     }
 
-    let terms = Terms { payers: payers?, priority_fee_lamports: priority_fee? };
-    let intents: Vec<Option<CompiledIntent<'c>>> =
-        entries.iter().map(|node| compile_entry(node, catalog, terms, sink)).collect();
+    let intents: Vec<Option<CompiledIntent<'c>>> = entries
+        .iter()
+        .map(|node| {
+            let mut entry = node.object(sink)?;
+            let intent = read_intent(&mut entry, catalog, sink);
+            entry.finish(sink);
 
-    Some(CompiledPlan { intents: intents.into_iter().collect::<Option<Vec<_>>>()? })
+            intent
+        })
+        .collect();
+
+    Some(CompiledPlan {
+        intents: intents.into_iter().collect::<Option<Vec<_>>>()?,
+        payers: payers?,
+        priority_fee_lamports: priority_fee?,
+    })
 }
 
-/// One intent of the plan: `interface`, `implementation`, `inputs`, and the `options` that turn a
-/// check off.
-fn compile_entry<'c>(
-    node: &Node<'_>,
-    catalog: &'c Catalog,
-    terms: Terms,
-    sink: &mut Sink,
-) -> Option<CompiledIntent<'c>> {
+fn read_payers(node: &Node<'_>, sink: &mut Sink) -> Option<PlanPayers> {
     let mut object = node.object(sink)?;
-    let entry = read_entry(&mut object, catalog, sink);
-    let flags = object.field("options").map_or(Some(Default::default()), |node| {
-        let mut options = node.object(sink)?;
-        let flags = read_flags(&mut options, sink);
-        options.finish(sink);
+    let read = |node: Node<'_>, sink: &mut Sink| node.str(sink).and_then(|text| reported(address(text), &node, sink));
 
-        flags
+    let fee = object.required("fee", sink).and_then(|node| read(node, sink)).map(Address);
+    let rent = object.field("rent").map(|node| read(node, sink).map(Address));
+    object.finish(sink);
+
+    let fee = fee?;
+
+    Some(PlanPayers { fee, rent: rent.unwrap_or(Some(fee))? })
+}
+
+/// The plan's options hold only the total priority fee.
+fn read_options(node: &Node<'_>, sink: &mut Sink) -> Option<u64> {
+    let mut object = node.object(sink)?;
+    let priority_fee = object.field("priorityFeeLamports").map_or(Some(0), |node| {
+        let bytes = encode(&node, ValueType { base: BaseType::U64, array: false }, sink)?;
+
+        bytes.try_into().ok().map(u64::from_le_bytes)
     });
     object.finish(sink);
 
-    write_intent(entry?, terms, flags?, sink)
+    priority_fee
+}
+
+fn read_cluster(object: &mut Object<'_>, sink: &mut Sink) {
+    if let Some(cluster) = object.field("cluster") {
+        cluster.str(sink).and_then(|text| reported(address(text), &cluster, sink));
+    }
 }
 
 #[cfg(test)]
@@ -95,14 +117,13 @@ mod tests {
     const PLAN: &str = include_str!("../../fixtures/plans/mainnet/usdc-and-sol-transfers.json");
 
     #[test]
-    fn each_intent_takes_the_plan_payers_and_priority_fee() {
+    fn the_plan_holds_the_payers_and_the_priority_fee() {
         let catalog = full_catalog();
         let plan = compile_plan(PLAN, &catalog).unwrap();
-        let intents: Vec<_> = plan.intents.iter().map(|intent| Intent::parse(&intent.bytes).unwrap()).collect();
 
         assert_eq!(plan.intents.len(), 2);
-        assert!(intents.iter().all(|intent| intent.fee_payer() == intents[0].fee_payer()));
-        assert!(intents.iter().all(|intent| intent.priority_fee_lamports() == 5_000));
+        assert_eq!(plan.payers.fee, plan.payers.rent);
+        assert_eq!(plan.priority_fee_lamports, 5_000);
         assert_eq!(plan.intents[1].implementation.id.name, "system-transfer");
     }
 

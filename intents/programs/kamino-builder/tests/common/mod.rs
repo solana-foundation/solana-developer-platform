@@ -134,11 +134,9 @@ fn intent(interface: &str, implementation: &str, wallets: &Wallets, amounts: &st
   "interface": "solana.org/{interface}@^1",
   "implementation": "solana.org/{implementation}@^1",
   "inputs": {{ "owner": "{}", "vault": "{VAULT}", "asset": "{USDC}", {amounts} }},
-  "payers": {{ "fee": "{}" }},
   "options": {{ "assertions": false, "verifyIntent": false }}
 }}"#,
         wallets.owner.pubkey(),
-        wallets.fee_payer.pubkey(),
     )
 }
 
@@ -157,7 +155,7 @@ pub struct Measured {
 /// `sdp_intents_program_testing::prepare`, which also measures each builder simulation. The final
 /// simulation is the last one, and the plan holds its units.
 pub fn prepare(svm: &LiteSVM, documents: &Documents) -> Result<Measured, PlanError> {
-    let mut planner = Planner::new(&[documents.as_intent()], SCRATCH)?;
+    let mut planner = Planner::new(&documents.request(), SCRATCH)?;
     let mut accounts = AccountMap::default();
     let mut rounds = Vec::new();
 

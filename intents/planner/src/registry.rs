@@ -31,13 +31,17 @@ pub(crate) struct VerifyIntent<'v> {
 }
 
 impl VerifyIntent<'_> {
-    /// The accounts are the instructions sysvar, the two indexes, the two version accounts, the
-    /// record's account table, and the extra accounts. Each one is readonly.
+    /// The accounts are the instructions sysvar, the fee payer, the rent payer, the two indexes, the
+    /// two version accounts, the record's account table, and the extra accounts. Each one is
+    /// readonly.
     pub(crate) fn instruction(&self, recipe: &Recipe<'_>) -> Result<Instruction, PlanError> {
         let interface = recipe.interface().id();
         let implementation = recipe.implementation().id();
+        let payers = recipe.payers();
         let registry = [
             INSTRUCTIONS_SYSVAR,
+            *payers.fee,
+            *payers.rent,
             index_address(DocumentKind::Interface, interface)?,
             index_address(DocumentKind::Implementation, implementation)?,
             version_address(DocumentKind::Interface, interface)?,

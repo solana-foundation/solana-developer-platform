@@ -22,8 +22,8 @@ recipes:
    route.
 
 A plan request holds one or more intents. The service adds the postconditions as assertions,
-verifies the result, and returns a plan: one transaction, and a message and a display for each
-intent.
+verifies the result, and returns a plan: one transaction, one message that covers every intent,
+and a display for each intent.
 
 Interfaces and implementations live in a registry program. An organization owns each one, and each
 interface's approve authority approves the implementations that UIs show.
@@ -57,7 +57,7 @@ Constraints:
 | :-- | :-- | :-- |
 | R1 | An interface declares inputs, outputs, a display, and postconditions. It names no program or account. | 4.1 |
 | R2 | An implementation record has `applies` checks, a message template, added postconditions, a cluster, and one recipe: static, program, or remote. | 4.1, 4.2 |
-| R3 | An intent names an interface, an implementation, inputs, payers, and options. A UI selects the implementation with the `applies` hints. `prepare` refuses an unapproved version unless the intent allows it. | 4.2, 4.10 |
+| R3 | An intent names an interface, an implementation, inputs, and options. A plan request names the payers and the priority fee. A UI selects the implementation with the `applies` hints. `prepare` refuses an unapproved version unless the intent allows it. | 4.2, 4.10 |
 | R4 | A static recipe has no conditions or loops. Instruction data is literal bytes and encoded values, with no discriminator rule. | 4.2 |
 | R5 | A builder returns instructions and outputs, or a refusal, in a zero-copy layout. Onchain it returns a hash of its instructions, so it writes no account. Its accounts are readonly and include no payer. A library hides both modes from builder authors. | 4.2 |
 | R6 | A remote endpoint returns the same result as a builder. | 4.2 |
@@ -95,18 +95,16 @@ digests, and bytes.
     "amount": "100000000",
     "memo": null
   },
-  "payers": { "fee": "KoRa…", "rent": "KoRa…" },
-  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
-  "options": { "priorityFeeLamports": "5000" }
+  "options": { "assertions": true, "verifyIntent": true }
 }
 ```
 
 1. The caller selects the implementation, usually through a UI that reads the `applies` hints
    (4.2).
-2. `cluster` is the genesis hash.
-3. `options` change execution, not the operation: the total priority fee, `allowUnapproved`
-   (4.10), and the onchain checks `assertions` and `verifyIntent` (4.6). `allowUnapproved` defaults
-   to false, and both checks default to true.
+2. An intent is the operation only. The plan request names who pays and the priority fee.
+3. `options` hold `allowUnapproved` (4.10) and the onchain checks `assertions` and `verifyIntent`
+   (4.6). `allowUnapproved` defaults to false, and both checks default to true. An intent can turn
+   off a check so that the plan fits.
 4. Amounts are base units.
 
 **Plan request.** What `prepare` takes: one or more intents in one transaction.
@@ -129,10 +127,9 @@ digests, and bytes.
 }
 ```
 
-1. The request names the payers, the cluster, and the priority fee once. Each intent compiles to
-   the binary intent with them, so every intent of a plan has the same payers.
-2. An intent's `options` hold only `allowUnapproved`, `assertions`, and `verifyIntent`. An intent
-   can turn off a check so that the plan fits.
+1. Each entry of `intents` is an intent without `spec` and `kind`.
+2. `payers`, `cluster`, and the total priority fee belong to the transaction, so only the request
+   holds them. `rent` defaults to `fee`. `cluster` is the genesis hash.
 
 **Interface.**
 
@@ -284,9 +281,9 @@ mint. This record handles Token-2022 mints:
   "spec": "sdp-intents@1.0",
   "kind": "plan",
   "request": { "kind": "plan", "intents": ["…"] },
+  "message": "sdp-intents/1: fee payer KoRa… | rent payer KoRa… | priority fee 5000 lamports || 1: transfer 100 of 2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo from 7xKX… to 9aBc… | guarantees: 7xKX… sends at most 100 of 2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo; nothing else leaves 7xKX…; only Token-2022, ATA, and Memo instructions run | interface: token.transfer@1.0.0 3f9a… | implementation: token-2022-transfer@1.0.0 c21e… | builder: T22Bld… | onchain checks: verify_intent",
   "intents": [
     {
-      "message": "sdp-intents/1: transfer 100 of 2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo from 7xKX… to 9aBc… | guarantees: 7xKX… sends at most 100 of 2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo; nothing else leaves 7xKX…; only Token-2022, ATA, and Memo instructions run | interface: solana.org/token.transfer@1.0.0 3f9a… | builder: T22Bld…",
       "display": "Send 100 PYUSD to 9aBc…",
       "digests": { "interface": "sha256:3f9a…", "implementation": "sha256:c21e…" },
       "builder": { "program": "T22Bld…", "deploySlot": "312004417" },
@@ -338,9 +335,10 @@ mint. This record handles Token-2022 mints:
 }
 ```
 
-1. `message` is the record's template, then `guarantees` from both sets of postconditions, then
-   the ids, digests, and builder. `display` comes from the interface. `deploySlot` is for the audit
-   log only.
+1. `message` is what a signer signs once for the whole transaction, such as on a Ledger. It
+   names the payers and the priority fee, then each intent after `|| <n>:`: the record's template,
+   `guarantees` from both sets of postconditions, the ids with digests, the builder, and the onchain
+   checks. `display` comes from the interface. `deploySlot` is for the audit log only.
 2. `verify` is the position of the intent's `verify_intent`, and `span` the positions of its built
    instructions (4.6). `verify` is `null` when the intent turns `verifyIntent` off.
 3. Instructions use the `EarnVaultInstruction` shape: base58 addresses, numeric `AccountRole`
@@ -368,7 +366,7 @@ erDiagram
   RECIPE }o--o| REMOTE_ENDPOINT : "remote kind"
   INTENT }o--|| INTERFACE : names
   INTENT }o--|| IMPLEMENTATION : names
-  INTENT ||--|| PAYERS : names
+  PLAN ||--|| PAYERS : names
   PLAN ||--|{ SEGMENT : "one for each intent"
   SEGMENT ||--|| INTENT : "pins versions of"
   PLAN ||--|{ TRANSACTION : contains
@@ -418,8 +416,7 @@ erDiagram
   }
   INTENT {
     string spec
-    string cluster "genesis hash"
-    string options
+    string options "allowUnapproved, assertions, verifyIntent"
   }
   PAYERS {
     address fee
@@ -427,10 +424,12 @@ erDiagram
   }
   PLAN {
     string request
+    string cluster "genesis hash"
+    u64 priority_fee
+    string message "payers, priority fee, then each segment's part"
   }
   SEGMENT {
     string digests
-    string message "from the implementation and the postconditions"
     string display "from the interface"
     int verify "position of verify_intent"
     string span "positions of the built instructions"
@@ -765,7 +764,7 @@ Kamino deposit takes two. The report counts the calls for each flow (section 10)
 | Kind | Declared in | Checked by |
 | :-- | :-- | :-- |
 | Signer input, `input:<name>` | Interface input with `"signer": true` | Postconditions |
-| Payer, `payer:fee` or `payer:rent` | Intent `payers`. `rent` defaults to `fee`. | Rules 4 and 5 |
+| Payer, `payer:fee` or `payer:rent` | Plan request `payers`. `rent` defaults to `fee`. | Rules 4 and 5 |
 | Builder signer, `builder` | The `Ready` result. A fresh keypair that the service signs for. | The account must not exist before the transaction. |
 
 `verify` simulates the final transaction with account snapshots and checks:
@@ -777,7 +776,9 @@ Kamino deposit takes two. The report counts the calls for each flow (section 10)
 4. The fee payer loses at most the fee plus capped rent. Each segment answers for the signature
    fees that it adds.
 5. No instruction names a payer or a signer input, except as the fee payer, as the funder of a new
-   account, or where the interface requires that signer.
+   account, as the funder of an ATA `Create` or `CreateIdempotent`, or where the interface requires
+   that signer. The ATA program uses the funder only to pay for the account, so an idempotent
+   create of an account that exists takes nothing.
 
 Rule 5 runs on the final instruction list, after placeholder replacement.
 Signer status belongs to the whole transaction, so any instruction that names the fee payer can
@@ -813,7 +814,10 @@ policy.
 | String | Restricted ASCII only | UTF-8 |
 | Absent option | `none` | Empty |
 
-`message` names tokens by mint address, because anyone can name a token "USDC".
+`message` names tokens by mint address, because anyone can name a token "USDC". The message is
+restricted ASCII on one line. The off-chain message format limits a message that a Ledger signs
+to about 1,212 bytes. Two transfers take about 1,080, so a plan of three or more intents can be
+too long for a Ledger.
 
 ### 4.6 Verification in the transaction
 
@@ -822,7 +826,8 @@ what the records build for its intents, so a signer needs only the transaction b
 transaction holds one segment for each intent, in order:
 
 ```
-[verify_intent] [Lighthouse snapshot] [built × N] [Lighthouse assertions × M]
+[verify_intent] [Lighthouse snapshot × S] [built × N] [Lighthouse assertions × M]
+                └──────────────────────── span ────────────────────────────┘
 ```
 
 `verify_intent` is an instruction of the registry program. Its data is two Anchor `&[u8]`
@@ -830,13 +835,15 @@ arguments: the intent in binary form, then for a program recipe the builder's ro
 of its instructions, one byte each, in order. The recipe logic and the registry change together, so
 one program holds both.
 
-Its accounts, all readonly: the instructions sysvar, the interface index, the implementation
-index, the interface version account, the implementation version account, every account of the
-record's account table in order, then for a program recipe the accounts of the last `MoreAccounts`
-round. The builder program is in the table.
+Its accounts, all readonly: the instructions sysvar, the fee payer, the rent payer, the interface
+index, the implementation index, the interface version account, the implementation version
+account, every account of the record's account table in order, then for a program recipe the
+accounts of the last `MoreAccounts` round. The builder program is in the table. The fee payer must
+be a writable signer, because only a writable signer can be the fee payer.
 
-**Spans.** The span of `verify_intent` is the N instructions after it. N comes from the record,
-never from the transaction:
+**Spans.** The span of `verify_intent` is the S + N + M instructions after it. Each count comes
+from the record or the builder, never from the transaction. The postconditions give S and M, which
+are 0 until Lighthouse exists. N is:
 
 | Recipe | N |
 | :-- | :-- |
@@ -845,9 +852,7 @@ never from the transaction:
 | Remote | 0 |
 
 Instructions outside every span are unverified. They can come before, between, or after the
-segments, such as ComputeBudget instructions or a sponsor's fee transfer. Lighthouse is not built
-yet. Its snapshot will come before the span, and the postconditions will give the count of its
-assertions.
+segments, such as ComputeBudget instructions or a sponsor's fee transfer.
 
 **Placement.** `verify_intent` is a top-level instruction, and runs before its span. So a builder
 that it calls reads the state that the simulation read: the state after the instructions before
@@ -855,15 +860,18 @@ that it calls reads the state that the simulation read: the state after the inst
 
 **Signer rule.** A signer:
 
-1. Decodes the intent of each `verify_intent`, renders its message from the intent and the record,
-   and approves each one.
+1. Renders the plan message from the transaction: the payers from the `verify_intent` accounts,
+   the priority fee from the v1 config, then each intent's part from its `verify_intent` and its
+   record. It signs or approves that message once.
 2. Puts each instruction in one class: ComputeBudget, `verify_intent`, in a span, or unverified.
 3. Shows each unverified instruction as it is: the program, the accounts with their roles, and the
    data.
 4. Checks the fee payer and its own signature.
 
 It needs no simulation and no trust in the service. A `verify_intent` that someone moves or drops
-changes no span. Its instructions then show as unverified.
+changes no span. Its instructions then show as unverified. An intent that turns `verifyIntent` off
+has no onchain form. Its part of the message comes from the service, and says `onchain checks:
+none`.
 
 **Checks.**
 
@@ -1141,7 +1149,7 @@ An interface and an intent use the same parts:
 | Document | Fixed part |
 | :-- | :-- |
 | `InterfaceDocV1` | Header, id, name, display, and a `TableRefV1` for inputs (`InputV1`: name, value type, flags, amount mint `ValueRefV1`), outputs (`OutputV1`: name, value type), post conditions, addresses, and literals |
-| `IntentDocV1` | Header, interface id, implementation id, fee payer, rent payer, priority fee, flags (`allowUnapproved`, `noAssertions`, `noVerifyIntent`), and a `TableRefV1` of one `PoolRefV1` for each input, in interface order. Each input is in `borsh`. The ids hold exact versions, which `prepare` pins. `cluster` is not stored, because a registry is on one cluster. |
+| `IntentDocV1` | Header, interface id, implementation id, flags (`allowUnapproved`, `noAssertions`, `noVerifyIntent`), and a `TableRefV1` of one `PoolRefV1` for each input, in interface order. Each input is in `borsh`. The ids hold exact versions, which `prepare` pins. The payers and the priority fee belong to the plan, and `verify_intent` takes the payers as accounts. `cluster` is not stored, because a registry is on one cluster. |
 
 | Payload | Source | Payload |
 | :-- | :-- | :-- |

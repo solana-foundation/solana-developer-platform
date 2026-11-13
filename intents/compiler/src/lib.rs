@@ -57,4 +57,4 @@ pub use id::Id;
 pub use implementation::CompiledImplementation;
 pub use intent::CompiledIntent;
 pub use interface::CompiledInterface;
-pub use plan::CompiledPlan;
+pub use plan::{CompiledPlan, PlanPayers};

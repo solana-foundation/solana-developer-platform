@@ -8,6 +8,7 @@ use sdp_intents_program_testing::{definitions, prepare, prepare_intents, Documen
 
 use crate::intents::{builder_roles, publish_transfer, Published};
 use crate::svm::{failure, funded, send_plan, svm, Failure, SOL};
+use crate::token::{associated_token_account, set_mint, set_token_account, token_amount};
 
 const TEST_BUILDER_TRANSFER: &str = include_str!("../../../test-builder/fixtures/test-builder-transfer.json");
 
@@ -30,12 +31,10 @@ fn intent(implementation: &str, wallets: &Wallets, amount: u64) -> String {
   "interface": "solana.org/token.transfer@^1",
   "implementation": "solana.org/{implementation}@^1",
   "inputs": {{ "from": "{}", "to": "{}", "mint": "11111111111111111111111111111111", "amount": "{amount}" }},
-  "payers": {{ "fee": "{}" }},
   "options": {{ "assertions": false }}
 }}"#,
         wallets.from.pubkey(),
         wallets.to.pubkey(),
-        wallets.fee_payer.pubkey(),
     )
 }
 
@@ -52,7 +51,7 @@ fn the_planner_builds_the_verify_intent_of_a_client() {
     let mut svm = svm().unwrap();
     let published = publish_transfer(&mut svm, definitions::SYSTEM_TRANSFER, true).unwrap();
     let wallets = wallets(&mut svm).unwrap();
-    let documents = published.compile(&intent("system-transfer", &wallets, SOL)).unwrap();
+    let documents = published.compile(&intent("system-transfer", &wallets, SOL), &wallets.fee_payer.pubkey()).unwrap();
 
     let plan = prepare(&svm, &documents).unwrap();
     let by_hand = published.verify_instruction(&svm, &documents, &[], &[]).unwrap();
@@ -68,10 +67,10 @@ fn verifies_a_plan_of_two_intents() {
     let mut svm = svm().unwrap();
     let published = publish_transfer(&mut svm, definitions::SYSTEM_TRANSFER, true).unwrap();
     let wallets = wallets(&mut svm).unwrap();
-    let first = published.compile(&intent("system-transfer", &wallets, SOL)).unwrap();
-    let second = published.compile(&intent("system-transfer", &wallets, 2 * SOL)).unwrap();
+    let first = published.compile(&intent("system-transfer", &wallets, SOL), &wallets.fee_payer.pubkey()).unwrap();
+    let second = published.compile(&intent("system-transfer", &wallets, 2 * SOL), &wallets.fee_payer.pubkey()).unwrap();
 
-    let plan = prepare_intents(&svm, &[first.as_intent(), second.as_intent()]).unwrap();
+    let plan = prepare_intents(&svm, &[&first, &second]).unwrap();
     let spans: Vec<_> = plan.intents.iter().map(|intent| (intent.verify, intent.span.clone())).collect();
     assert_eq!(spans, [(Some(0), 1..2), (Some(2), 3..4)]);
 
@@ -86,7 +85,8 @@ fn verifies_a_builder_that_the_planner_planned() {
     let mut svm = svm().unwrap();
     let published: Published = publish_transfer(&mut svm, TEST_BUILDER_TRANSFER, true).unwrap();
     let wallets = wallets(&mut svm).unwrap();
-    let documents: Documents = published.compile(&intent("test-builder-transfer", &wallets, 2 * SOL)).unwrap();
+    let documents: Documents =
+        published.compile(&intent("test-builder-transfer", &wallets, 2 * SOL), &wallets.fee_payer.pubkey()).unwrap();
 
     let plan = prepare(&svm, &documents).unwrap();
     let span = plan.intents[0].span.clone();
@@ -104,4 +104,29 @@ fn verifies_a_builder_that_the_planner_planned() {
     send_plan(&mut svm, &plan, &[&wallets.fee_payer, &wallets.from]).unwrap();
 
     assert_eq!(svm.get_account(&wallets.to.pubkey()).map(|account| account.lamports), Some(2 * SOL));
+}
+
+/// The receiver's token account exists, so the idempotent create creates nothing. The planner and
+/// `verify_intent` both accept it.
+#[test]
+fn verifies_an_spl_transfer_to_an_existing_token_account() {
+    let mut svm = svm().unwrap();
+    let published = publish_transfer(&mut svm, definitions::SPL_TOKEN_TRANSFER, true).unwrap();
+    let wallets = wallets(&mut svm).unwrap();
+    let mint = Keypair::new().pubkey();
+    let source = associated_token_account(&wallets.from.pubkey(), &mint);
+    let destination = associated_token_account(&wallets.to.pubkey(), &mint);
+    set_mint(&mut svm, &mint, 6).unwrap();
+    set_token_account(&mut svm, &source, &mint, &wallets.from.pubkey(), 500_000_000).unwrap();
+    set_token_account(&mut svm, &destination, &mint, &wallets.to.pubkey(), 0).unwrap();
+
+    let intent = intent("spl-token-transfer", &wallets, 100_000_000)
+        .replace("11111111111111111111111111111111", &mint.to_string())
+        .replace(r#""amount": "100000000" }"#, r#""amount": "100000000", "memo": null }"#);
+    let documents = published.compile(&intent, &wallets.fee_payer.pubkey()).unwrap();
+    let plan = prepare(&svm, &documents).unwrap();
+
+    send_plan(&mut svm, &plan, &[&wallets.fee_payer, &wallets.from]).unwrap();
+
+    assert_eq!(token_amount(&svm, &destination), Some(100_000_000));
 }

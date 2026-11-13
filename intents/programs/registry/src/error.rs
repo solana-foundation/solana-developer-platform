@@ -64,4 +64,6 @@ pub enum RegistryError {
     WrongRole,
     #[msg("The version was removed. A removed version cannot be published, approved, or made the head again.")]
     VersionRemoved,
+    #[msg("The fee payer of verify_intent is not a writable signer")]
+    FeePayerNotSigner,
 }

@@ -2,7 +2,7 @@
 
 use bytemuck::{Pod, Zeroable};
 
-use crate::{Address, DocumentHeaderV1, DocumentIdV1, PodU64, PoolRefV1, SpecError, TableRefV1};
+use crate::{DocumentHeaderV1, DocumentIdV1, PoolRefV1, SpecError, TableRefV1};
 
 const ALLOW_UNAPPROVED: u8 = 1;
 const NO_ASSERTIONS: u8 = 2;
@@ -15,9 +15,6 @@ pub struct IntentDocV1 {
     /// Exact versions. The service pins the ranges of the JSON intent at `prepare`.
     pub interface: DocumentIdV1,
     pub implementation: DocumentIdV1,
-    pub fee_payer: Address,
-    pub rent_payer: Address,
-    pub priority_fee_lamports: PodU64,
     pub flags: u8,
     /// One `PoolRefV1` for each input of the interface, in interface order. Each range holds the
     /// input in borsh, so an optional input starts with its tag.
@@ -68,7 +65,7 @@ mod tests {
 
     #[test]
     fn layout_is_pinned() {
-        assert_eq!(core::mem::size_of::<IntentDocV1>(), 231);
+        assert_eq!(core::mem::size_of::<IntentDocV1>(), 159);
     }
 
     #[test]

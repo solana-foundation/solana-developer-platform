@@ -173,6 +173,7 @@ impl Chain {
             &[definitions::TOKEN_TRANSFER],
             &[definitions::TOKEN_2022_TRANSFER],
             &self.intent(mint, amount, memo),
+            &self.wallets.fee_payer.pubkey(),
         )
     }
 
@@ -186,12 +187,10 @@ impl Chain {
   "interface": "solana.org/token.transfer@^1",
   "implementation": "solana.org/token-2022-transfer@^1",
   "inputs": {{ "from": "{}", "to": "{}", "mint": "{mint}", "amount": "{amount}"{memo} }},
-  "payers": {{ "fee": "{}" }},
   "options": {{ "assertions": false, "verifyIntent": false }}
 }}"#,
             self.wallets.from.pubkey(),
             self.wallets.to.pubkey(),
-            self.wallets.fee_payer.pubkey(),
         )
     }
 

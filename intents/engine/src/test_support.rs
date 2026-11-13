@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use sdp_intents_compiler::Catalog;
 use sdp_intents_spec::Address;
 
-use crate::{AccountData, Chain, Recipe, Resolution};
+use crate::{AccountData, Chain, Payers, Recipe, Resolution};
 
 pub(crate) const TOKEN_TRANSFER: &str =
     include_str!("../../definitions/solana.org/interfaces/token.transfer/1.0.0.json");
@@ -39,6 +39,7 @@ pub(crate) struct Compiled {
     pub(crate) interface: Vec<u8>,
     pub(crate) implementation: Vec<u8>,
     pub(crate) intent: Vec<u8>,
+    payer: Address,
 }
 
 impl Compiled {
@@ -47,11 +48,19 @@ impl Compiled {
         let interface = catalog.compile_interface(TOKEN_TRANSFER).unwrap().bytes.clone();
         let implementation = catalog.compile_implementation(implementation).unwrap().bytes.clone();
 
-        Self { interface, implementation, intent: catalog.compile_intent(intent).unwrap().bytes }
+        let intent = catalog.compile_intent(intent).unwrap().bytes;
+
+        Self { interface, implementation, intent, payer: address(FEE_PAYER) }
     }
 
+    /// `FEE_PAYER` pays both the fee and the rent.
     pub(crate) fn recipe(&self) -> Result<Recipe<'_>, crate::EngineError> {
-        Recipe::parse(&self.interface, &self.implementation, &self.intent)
+        Recipe::parse(
+            &self.interface,
+            &self.implementation,
+            &self.intent,
+            Payers { fee: &self.payer, rent: &self.payer },
+        )
     }
 }
 

@@ -23,11 +23,21 @@ const ASSOCIATED_TOKEN: &str = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 const SHARES_OUT_BELOW_MINIMUM: u32 = 7064;
 
 fn deposit_documents(wallets: &Wallets, amount: u64, min_shares: u64) -> Result<Documents, String> {
-    Documents::compile(&[DEPOSIT_INTERFACE], &[DEPOSIT_RECORD], &deposit_intent(wallets, amount, min_shares))
+    Documents::compile(
+        &[DEPOSIT_INTERFACE],
+        &[DEPOSIT_RECORD],
+        &deposit_intent(wallets, amount, min_shares),
+        &wallets.fee_payer.pubkey(),
+    )
 }
 
 fn withdraw_documents(wallets: &Wallets, shares: u64, min_amount: u64) -> Result<Documents, String> {
-    Documents::compile(&[WITHDRAW_INTERFACE], &[WITHDRAW_RECORD], &withdraw_intent(wallets, shares, min_amount))
+    Documents::compile(
+        &[WITHDRAW_INTERFACE],
+        &[WITHDRAW_RECORD],
+        &withdraw_intent(wallets, shares, min_amount),
+        &wallets.fee_payer.pubkey(),
+    )
 }
 
 /// The program of each instruction, in base58.

@@ -10,7 +10,5 @@
     "amount": "100000000",
     "memo": null
   },
-  "payers": { "fee": "5ZWj7a1f8tWkjBESHKgrLmXshuXxqeY9SYcfbshpAqPG" },
-  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
-  "options": { "priorityFeeLamports": "5000", "assertions": false, "verifyIntent": false }
+  "options": { "assertions": false, "verifyIntent": false }
 }

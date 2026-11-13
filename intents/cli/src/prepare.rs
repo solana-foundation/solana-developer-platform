@@ -9,7 +9,7 @@ use base64::Engine as _;
 use serde_json::{json, Value};
 
 use sdp_intents_client::{Client, ClientError, Prepared};
-use sdp_intents_planner::{Instruction, IntentDocuments, PlanError, PlannedIntent};
+use sdp_intents_planner::{Instruction, IntentDocuments, Payers, PlanError, PlanRequest, PlannedIntent};
 use sdp_intents_spec::Address;
 
 use crate::lint::{compile_tree, Outcome};
@@ -49,16 +49,20 @@ pub fn run(args: &PrepareArgs) -> Result<Outcome, String> {
         }
     };
 
-    let documents: Vec<IntentDocuments<'_>> = request
-        .intents
-        .iter()
-        .map(|intent| IntentDocuments {
-            interface: &intent.interface.bytes,
-            implementation: &intent.implementation.bytes,
-            intent: &intent.bytes,
-        })
-        .collect();
-    let prepared = Client::new(&args.rpc).prepare(&documents).map_err(describe)?;
+    let plan_request = PlanRequest {
+        intents: request
+            .intents
+            .iter()
+            .map(|intent| IntentDocuments {
+                interface: &intent.interface.bytes,
+                implementation: &intent.implementation.bytes,
+                intent: &intent.bytes,
+            })
+            .collect(),
+        payers: Payers { fee: &request.payers.fee, rent: &request.payers.rent },
+        priority_fee_lamports: request.priority_fee_lamports,
+    };
+    let prepared = Client::new(&args.rpc).prepare(&plan_request).map_err(describe)?;
     let request_json: Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
     let plan = serde_json::to_string_pretty(&plan_json(&prepared, request_json)).map_err(|error| error.to_string())?;
 
@@ -90,6 +94,7 @@ fn plan_json(prepared: &Prepared, request: Value) -> Value {
         "spec": "sdp-intents@1.0",
         "kind": "plan",
         "request": request,
+        "message": plan.message,
         "intents": plan.intents.iter().map(intent_json).collect::<Vec<_>>(),
         "transactions": [{
             "instructions": plan.transaction.instructions.iter().map(instruction_json).collect::<Vec<_>>(),
@@ -110,7 +115,6 @@ fn plan_json(prepared: &Prepared, request: Value) -> Value {
 /// `verify` and `span` are positions in the transaction's instructions.
 fn intent_json(intent: &PlannedIntent) -> Value {
     json!({
-        "message": intent.message,
         "display": intent.display,
         "digests": { "interface": digest(&intent.digests.interface), "implementation": digest(&intent.digests.implementation) },
         "builder": intent.builder.map(|program| json!({ "program": base58(&program) })),

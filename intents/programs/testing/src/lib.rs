@@ -4,9 +4,10 @@
 //! ```no_run
 //! use sdp_intents_program_testing::{definitions, prepare, send, svm, Documents};
 //!
-//! # fn run(intent: &str, signers: &[&anchor_v2_testing::Keypair]) -> Result<(), Box<dyn std::error::Error>> {
+//! # fn run(intent: &str, fee_payer: &solana_address::Address, signers: &[&anchor_v2_testing::Keypair]) -> Result<(), Box<dyn std::error::Error>> {
 //! let mut svm = svm();
-//! let documents = Documents::compile(&[definitions::TOKEN_TRANSFER], &[definitions::SYSTEM_TRANSFER], intent)?;
+//! let documents =
+//!     Documents::compile(&[definitions::TOKEN_TRANSFER], &[definitions::SYSTEM_TRANSFER], intent, fee_payer)?;
 //! let plan = prepare(&svm, &documents)?;
 //! send(&mut svm, &plan, signers).map_err(|error| format!("{error:?}"))?;
 //! # Ok(())
@@ -26,7 +27,8 @@ use solana_signature::Signature;
 
 use sdp_intents_compiler::Catalog;
 use sdp_intents_planner::{
-    Account, AccountMap, IntentDocuments, Plan, PlanError, Planner, ReturnData, Simulation, SimulationResult, Step,
+    Account, AccountMap, IntentDocuments, Payers, Plan, PlanError, PlanRequest, Planner, ReturnData, Simulation,
+    SimulationResult, Step,
 };
 use sdp_intents_spec::Address;
 
@@ -62,17 +64,23 @@ pub fn svm() -> LiteSVM {
     LiteSVM::new().with_sigverify(false)
 }
 
-/// The three documents of one intent, compiled.
+/// The three documents of one intent, compiled, and the account that pays for its plan.
 pub struct Documents {
     pub interface: Vec<u8>,
     pub implementation: Vec<u8>,
     pub intent: Vec<u8>,
+    pub fee_payer: Address,
 }
 
 impl Documents {
     /// Compiles the interfaces, then the implementations, then the intent, as `sdp-intents prepare`
     /// does. The error is the rendered findings.
-    pub fn compile(interfaces: &[&str], implementations: &[&str], intent: &str) -> Result<Self, String> {
+    pub fn compile(
+        interfaces: &[&str],
+        implementations: &[&str],
+        intent: &str,
+        fee_payer: &solana_address::Address,
+    ) -> Result<Self, String> {
         let mut catalog = Catalog::default().with_publisher("solana.org", Address([7; 32]));
 
         for text in interfaces {
@@ -89,7 +97,17 @@ impl Documents {
             interface: compiled.interface.bytes.clone(),
             implementation: compiled.implementation.bytes.clone(),
             intent: compiled.bytes,
+            fee_payer: Address(fee_payer.to_bytes()),
         })
+    }
+
+    /// A plan of this intent alone. The fee payer pays the fee and the rent, with no priority fee.
+    pub fn request(&self) -> PlanRequest<'_> {
+        PlanRequest {
+            intents: vec![self.as_intent()],
+            payers: Payers { fee: &self.fee_payer, rent: &self.fee_payer },
+            priority_fee_lamports: 0,
+        }
     }
 
     pub fn as_intent(&self) -> IntentDocuments<'_> {
@@ -99,12 +117,16 @@ impl Documents {
 
 /// Runs the planner for one intent, answering each fetch and each simulation from `svm`.
 pub fn prepare(svm: &LiteSVM, documents: &Documents) -> Result<Plan, PlanError> {
-    prepare_intents(svm, &[documents.as_intent()])
+    prepare_intents(svm, &[documents])
 }
 
-/// [`prepare`] for a plan of one or more intents, in order.
-pub fn prepare_intents(svm: &LiteSVM, intents: &[IntentDocuments<'_>]) -> Result<Plan, PlanError> {
-    let mut planner = Planner::new(intents, SCRATCH)?;
+/// [`prepare`] for a plan of one or more intents, in order. The first intent's fee payer pays the
+/// fee and the rent, with no priority fee.
+pub fn prepare_intents(svm: &LiteSVM, intents: &[&Documents]) -> Result<Plan, PlanError> {
+    let first = intents.first().ok_or(PlanError::NoIntents)?;
+    let request =
+        PlanRequest { intents: intents.iter().map(|documents| documents.as_intent()).collect(), ..first.request() };
+    let mut planner = Planner::new(&request, SCRATCH)?;
     let mut accounts = AccountMap::default();
 
     loop {

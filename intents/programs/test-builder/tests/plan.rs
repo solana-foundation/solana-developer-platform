@@ -40,28 +40,30 @@ fn intent(wallets: &Wallets, amount: u64) -> String {
   "interface": "solana.org/token.transfer@^1",
   "implementation": "solana.org/test-builder-transfer@^1",
   "inputs": {{ "from": "{}", "to": "{}", "mint": "11111111111111111111111111111111", "amount": "{amount}" }},
-  "payers": {{ "fee": "{}" }},
   "options": {{ "assertions": false, "verifyIntent": false }}
 }}"#,
         wallets.from.pubkey(),
         wallets.to.pubkey(),
-        wallets.fee_payer.pubkey(),
     )
 }
 
 #[test]
 fn plans_a_builder_transfer_in_two_rounds_and_sends_it() {
     let Setup { mut svm, wallets } = setup().unwrap();
-    let documents = Documents::compile(&[definitions::TOKEN_TRANSFER], &[RECORD], &intent(&wallets, 2 * SOL)).unwrap();
+    let documents = Documents::compile(
+        &[definitions::TOKEN_TRANSFER],
+        &[RECORD],
+        &intent(&wallets, 2 * SOL),
+        &wallets.fee_payer.pubkey(),
+    )
+    .unwrap();
 
     let plan = prepare(&svm, &documents).unwrap();
 
     assert_eq!(plan.intents[0].builder_simulations, 2);
     assert_eq!(plan.transaction.instructions.len(), 1);
-    assert!(plan.intents[0]
-        .message
-        .starts_with(&format!("sdp-intents/1: transfer 2 SOL from {}", wallets.from.pubkey())));
-    assert!(plan.intents[0].message.ends_with(&format!("| builder: {}", test_builder::id())));
+    assert!(plan.message.contains(&format!(" || 1: transfer 2 SOL from {}", wallets.from.pubkey())));
+    assert!(plan.message.ends_with(&format!("| builder: {} | onchain checks: none", test_builder::id())));
 
     send(&mut svm, &plan, &[&wallets.fee_payer, &wallets.from]).unwrap();
 
@@ -71,7 +73,13 @@ fn plans_a_builder_transfer_in_two_rounds_and_sends_it() {
 #[test]
 fn a_refusal_ends_the_plan() {
     let Setup { svm, wallets } = setup().unwrap();
-    let documents = Documents::compile(&[definitions::TOKEN_TRANSFER], &[RECORD], &intent(&wallets, 0)).unwrap();
+    let documents = Documents::compile(
+        &[definitions::TOKEN_TRANSFER],
+        &[RECORD],
+        &intent(&wallets, 0),
+        &wallets.fee_payer.pubkey(),
+    )
+    .unwrap();
 
     let refused = prepare(&svm, &documents);
 
@@ -84,7 +92,13 @@ fn a_refusal_ends_the_plan() {
 #[test]
 fn a_transfer_of_more_than_the_sender_holds_fails_the_simulation() {
     let Setup { svm, wallets } = setup().unwrap();
-    let documents = Documents::compile(&[definitions::TOKEN_TRANSFER], &[RECORD], &intent(&wallets, 20 * SOL)).unwrap();
+    let documents = Documents::compile(
+        &[definitions::TOKEN_TRANSFER],
+        &[RECORD],
+        &intent(&wallets, 20 * SOL),
+        &wallets.fee_payer.pubkey(),
+    )
+    .unwrap();
 
     let failed = prepare(&svm, &documents);
 

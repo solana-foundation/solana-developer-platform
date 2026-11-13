@@ -1,6 +1,6 @@
 use core::ops::Range;
 
-use sdp_intents_engine::{Chain, Recipe};
+use sdp_intents_engine::{Chain, Payers, Recipe};
 use sdp_intents_spec::builder::Ready;
 use sdp_intents_spec::{Address, ValueRef, ValueSource};
 
@@ -11,6 +11,9 @@ use crate::{Instruction, PlanError, RequiredSignature, SignerRole, Transaction};
 /// The plan of one or more intents: what the signers read, and the transaction they sign.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Plan {
+    /// What a signer reads and signs once for the whole transaction: the payers, the priority fee,
+    /// then each intent's record message, guarantees, documents, and onchain checks.
+    pub message: String,
     /// Each intent, in the order of its segment in the transaction.
     pub intents: Vec<PlannedIntent>,
     pub transaction: Transaction,
@@ -21,8 +24,6 @@ pub struct Plan {
 /// One intent of a plan, and where its segment is in the transaction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlannedIntent {
-    /// What a signer reads and signs: the record's message, the guarantees, and the documents.
-    pub message: String,
     /// The interface's display, for people.
     pub display: String,
     /// The SHA-256 of the interface and the implementation documents.
@@ -41,6 +42,19 @@ pub struct PlannedIntent {
 pub struct Digests {
     pub interface: [u8; 32],
     pub implementation: [u8; 32],
+}
+
+/// `sdp-intents/1: fee payer <address> | rent payer <address> | priority fee <lamports> lamports`,
+/// then `|| <n>: <part>` for each intent's part, in order. A signer renders the same text from the
+/// transaction, so the plan needs one off-chain signature.
+pub(crate) fn plan_message(payers: Payers<'_>, priority_fee_lamports: u64, parts: &[String]) -> String {
+    let intents: String = (1usize..).zip(parts).map(|(number, part)| format!(" || {number}: {part}")).collect();
+
+    format!(
+        "sdp-intents/1: fee payer {} | rent payer {} | priority fee {priority_fee_lamports} lamports{intents}",
+        base58(payers.fee),
+        base58(payers.rent),
+    )
 }
 
 /// What the recipe built: the instructions, the new accounts a builder signs for, and the outputs.
@@ -100,9 +114,9 @@ impl<C: Chain> Values<'_, '_, C> {
             .collect()
     }
 
-    /// `sdp-intents/1: <record message> | guarantees: <each>; <each> | interface: <id> | implementation:
-    /// <id>`, and the builder for a program recipe. An id is the name, the version, and the first 8
-    /// bytes of the digest.
+    /// The intent's part of the plan message: `<record message> | guarantees: <each>; <each> |
+    /// interface: <id> | implementation: <id>`, the builder for a program recipe, then the onchain
+    /// checks. An id is the name, the version, and the first 8 bytes of the digest.
     pub(crate) fn message(
         &self,
         guarantees: &[String],
@@ -120,9 +134,10 @@ impl<C: Chain> Values<'_, '_, C> {
         };
 
         let builder = builder.map(|builder| format!(" | builder: {}", base58(builder))).unwrap_or_default();
+        let checks = if self.recipe.intent().options()?.verify_intent { "verify_intent" } else { "none" };
 
         Ok(format!(
-            "sdp-intents/1: {record} | guarantees: {} | interface: {} | implementation: {}{builder}",
+            "{record} | guarantees: {} | interface: {} | implementation: {}{builder} | onchain checks: {checks}",
             guarantees.join("; "),
             id(interface.name()?, interface.id().version, &digests.interface),
             id(implementation.name()?, implementation.id().version, &digests.implementation),
@@ -136,7 +151,7 @@ impl<C: Chain> Values<'_, '_, C> {
         transaction: &Transaction,
         built: &Built,
     ) -> Result<Vec<RequiredSignature>, PlanError> {
-        let intent = self.recipe.intent();
+        let payers = self.recipe.payers();
         let inputs = self.recipe.interface().inputs()?;
 
         transaction
@@ -150,8 +165,8 @@ impl<C: Chain> Values<'_, '_, C> {
                 });
 
                 let role = match input {
-                    _ if address == *intent.fee_payer() => SignerRole::FeePayer,
-                    _ if address == *intent.rent_payer() => SignerRole::RentPayer,
+                    _ if address == *payers.fee => SignerRole::FeePayer,
+                    _ if address == *payers.rent => SignerRole::RentPayer,
                     Some((_, input)) => SignerRole::Input(
                         String::from_utf8_lossy(self.recipe.interface().text(input.name)?).into_owned(),
                     ),

@@ -4,7 +4,7 @@
 use anchor_lang::Address;
 use anchor_v2_testing::litesvm::LiteSVM;
 use sdp_intents_compiler::Catalog;
-use sdp_intents_engine::{Recipe, Resolution};
+use sdp_intents_engine::{Payers, Recipe, Resolution};
 use sdp_intents_planner::{AccountMap, AccountMeta, Instruction, Plan, Transaction};
 use sdp_intents_program_testing::{definitions, fetch, Documents};
 use sdp_intents_spec::AccountRole;
@@ -54,8 +54,8 @@ pub fn publish_transfer(svm: &mut LiteSVM, implementation: &'static str, approve
 
 impl Published {
     /// The interface, the implementation, and `intent`, with the organization's address as the
-    /// publisher.
-    pub fn compile(&self, intent: &str) -> Result<Documents, Failure> {
+    /// publisher. `fee_payer` pays the fee and the rent of the plan.
+    pub fn compile(&self, intent: &str, fee_payer: &Address) -> Result<Documents, Failure> {
         let mut catalog = catalog(&self.organization);
         catalog.compile_interface(definitions::TOKEN_TRANSFER).map_err(report)?;
         catalog.compile_implementation(self.implementation).map_err(report)?;
@@ -65,10 +65,11 @@ impl Published {
             interface: compiled.interface.bytes.clone(),
             implementation: compiled.implementation.bytes.clone(),
             intent: compiled.bytes,
+            fee_payer: spec_address(fee_payer),
         })
     }
 
-    /// `verify_intent` for `documents`: the registry's accounts, the record's account table, then
+    /// `verify_intent` for `documents`: the payers, the registry's accounts, the record's account table, then
     /// `extra_accounts`, the accounts of a builder's last round. `builder_roles` holds the builder's
     /// role of each account of its instructions, and is empty for a static recipe.
     pub fn verify_instruction(
@@ -79,8 +80,11 @@ impl Published {
         builder_roles: &[u8],
     ) -> Result<Instruction, Failure> {
         let accounts = &self.accounts;
+        let fee_payer = Address::new_from_array(documents.fee_payer.0);
         let fixed = [
             pinocchio::sysvars::instructions::INSTRUCTIONS_ID,
+            fee_payer,
+            fee_payer,
             accounts.interface_index,
             accounts.implementation_index,
             accounts.interface_version,
@@ -147,7 +151,8 @@ pub fn around(plan: &Plan, before: Instruction, after: Instruction) -> Plan {
 
 /// The address of each account of the record's table, as the engine resolves it against `svm`.
 fn record_accounts(svm: &LiteSVM, documents: &Documents) -> Result<Vec<Address>, Failure> {
-    let mut recipe = Recipe::parse(&documents.interface, &documents.implementation, &documents.intent)
+    let payers = Payers { fee: &documents.fee_payer, rent: &documents.fee_payer };
+    let mut recipe = Recipe::parse(&documents.interface, &documents.implementation, &documents.intent, payers)
         .map_err(|error| failure(error.to_string()))?;
     let mut chain = AccountMap::default();
 

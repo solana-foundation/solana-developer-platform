@@ -209,8 +209,6 @@ impl IntentFixture {
         let mut writer = Writer::new(core::mem::size_of::<IntentDocV1>());
 
         let fixed = IntentDocV1 {
-            fee_payer: Address([9; 32]),
-            rent_payer: Address([9; 32]),
             flags: self.flags,
             inputs: writer.table(&self.inputs),
             pool: writer.pool(&self.pool),

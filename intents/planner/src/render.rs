@@ -59,8 +59,8 @@ impl<C: Chain> Values<'_, '_, C> {
         let typed = match letter {
             b'i' => self.input(index)?,
             b'o' => self.output(index)?,
-            b'p' if index == 0 => address(*self.recipe.intent().fee_payer()),
-            b'p' => address(*self.recipe.intent().rent_payer()),
+            b'p' if index == 0 => address(*self.recipe.payers().fee),
+            b'p' => address(*self.recipe.payers().rent),
             b'a' => address(*self.recipe.address(index).ok_or(PlanError::Unresolved)?),
             _ => return Err(PlanError::BadTemplate),
         };

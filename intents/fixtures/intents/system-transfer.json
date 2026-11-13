@@ -9,6 +9,5 @@
     "mint": "11111111111111111111111111111111",
     "amount": "250000000"
   },
-  "payers": { "fee": "5ZWj7a1f8tWkjBESHKgrLmXshuXxqeY9SYcfbshpAqPG" },
   "options": { "assertions": false, "verifyIntent": false }
 }

@@ -4,7 +4,7 @@
 
 use sha2::{Digest as _, Sha256};
 
-use sdp_intents_engine::{Chain, Recipe, Resolution};
+use sdp_intents_engine::{Chain, Payers, Recipe, Resolution};
 use sdp_intents_spec::builder::StagedResult;
 use sdp_intents_spec::{Address, RecipeKind};
 
@@ -38,6 +38,8 @@ pub(crate) enum SegmentStep {
 /// A planned segment, and the simulation of the transaction up to its end.
 pub(crate) struct Segment {
     pub(crate) intent: PlannedIntent,
+    /// The intent's part of the plan message.
+    pub(crate) message: String,
     pub(crate) verify: Option<Instruction>,
     pub(crate) built: Vec<Instruction>,
     pub(crate) signatures: Vec<RequiredSignature>,
@@ -53,6 +55,7 @@ pub(crate) struct SegmentPlanner<'a> {
     recipe: Recipe<'a>,
     intent: &'a [u8],
     digests: Digests,
+    priority_fee_lamports: u64,
     /// The account that pays a builder simulation's fee and scratch rent.
     pub(crate) funder: Address,
     scratch: Address,
@@ -91,8 +94,13 @@ struct Verifying {
 }
 
 impl<'a> SegmentPlanner<'a> {
-    pub(crate) fn new(documents: IntentDocuments<'a>, scratch: Address) -> Result<Self, PlanError> {
-        let recipe = Recipe::parse(documents.interface, documents.implementation, documents.intent)?;
+    pub(crate) fn new(
+        documents: IntentDocuments<'a>,
+        payers: Payers<'a>,
+        priority_fee_lamports: u64,
+        scratch: Address,
+    ) -> Result<Self, PlanError> {
+        let recipe = Recipe::parse(documents.interface, documents.implementation, documents.intent, payers)?;
 
         if recipe.intent().options()?.assertions {
             return Err(PlanError::Unavailable("assertions"));
@@ -102,22 +110,19 @@ impl<'a> SegmentPlanner<'a> {
             interface: Sha256::digest(documents.interface).into(),
             implementation: Sha256::digest(documents.implementation).into(),
         };
-        let funder = *recipe.intent().fee_payer();
+        let funder = *payers.fee;
 
         Ok(Self {
             recipe,
             intent: documents.intent,
             digests,
+            priority_fee_lamports,
             funder,
             scratch,
             extra_accounts: Vec::new(),
             builder_simulations: 0,
             state: State::Resolving,
         })
-    }
-
-    pub(crate) fn recipe(&self) -> &Recipe<'a> {
-        &self.recipe
     }
 
     pub(crate) fn next<C: Chain>(&mut self, earlier: &Earlier<'_, C>) -> Result<SegmentStep, PlanError> {
@@ -208,7 +213,7 @@ impl<'a> SegmentPlanner<'a> {
             return Err(PlanError::NoInstructions);
         }
 
-        let fee_payer = *self.recipe.intent().fee_payer();
+        let fee_payer = *self.recipe.payers().fee;
         let segment = Transaction::unbudgeted(fee_payer, built.instructions.clone());
         let observe = segment.writable_accounts();
         let values = Values { recipe: &self.recipe, chain: earlier.chain, outputs: &built.outputs };
@@ -236,7 +241,7 @@ impl<'a> SegmentPlanner<'a> {
 
         let instructions = earlier.instructions.iter().chain(&verify).chain(&built.instructions).cloned().collect();
         let transaction = Transaction {
-            priority_fee_lamports: self.recipe.intent().priority_fee_lamports(),
+            priority_fee_lamports: self.priority_fee_lamports,
             ..Transaction::unbudgeted(fee_payer, instructions)
         };
         transaction.check_fit()?;
@@ -308,8 +313,8 @@ impl<'a> SegmentPlanner<'a> {
         .check(&verifying.guarantees)?;
 
         let segment = Segment {
+            message: verifying.message,
             intent: PlannedIntent {
-                message: verifying.message,
                 display: verifying.display,
                 digests: self.digests,
                 builder: self.builder(),

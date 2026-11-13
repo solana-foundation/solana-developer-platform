@@ -79,8 +79,8 @@ impl<'r, C: Chain> Values<'r, '_, C> {
         let typed = match value.source {
             ValueSource::Input => self.input_value(index)?,
             ValueSource::Output => self.output(index)?.value,
-            ValueSource::Payer if index == 0 => Value::Address(*self.recipe.intent().fee_payer()),
-            ValueSource::Payer => Value::Address(*self.recipe.intent().rent_payer()),
+            ValueSource::Payer if index == 0 => Value::Address(*self.recipe.payers().fee),
+            ValueSource::Payer => Value::Address(*self.recipe.payers().rent),
             ValueSource::Account => Value::Address(*self.recipe.address(index).ok_or(PlanError::Unresolved)?),
             ValueSource::Address => Value::Address(self.static_address(index, table)?),
             ValueSource::None | ValueSource::Literal => Value::Absent,

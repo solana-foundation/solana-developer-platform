@@ -19,7 +19,18 @@ const TOKEN_2022_PROGRAM: Address = Address([
     6, 221, 246, 225, 238, 117, 143, 222, 24, 66, 93, 188, 228, 108, 205, 218, 182, 26, 252, 77, 131, 185, 13, 39, 254,
     189, 249, 40, 216, 161, 139, 252,
 ]);
+/// `ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL`.
+const ASSOCIATED_TOKEN_PROGRAM: Address = Address([
+    140, 151, 37, 143, 78, 36, 137, 241, 187, 61, 16, 41, 20, 142, 13, 131, 11, 90, 19, 153, 218, 255, 16, 132, 4, 142,
+    123, 216, 219, 233, 248, 89,
+]);
 const TOKEN_ACCOUNT_LEN: usize = 165;
+
+/// An ATA `Create` or `CreateIdempotent`. The ATA program uses the funder only to pay for the
+/// account that it creates, so an idempotent create of an account that exists takes nothing.
+fn funds_only(instruction: &Instruction) -> bool {
+    instruction.program == ASSOCIATED_TOKEN_PROGRAM && matches!(instruction.data.as_slice(), [] | [0] | [1])
+}
 
 /// An account of the transaction before and after it. An account that does not exist has no
 /// lamports and no data.
@@ -115,9 +126,9 @@ impl<'v, 'a> Verification<'v, 'a> {
     /// The fee payer loses at most the fee and the rent of the accounts that the transaction
     /// creates, and an instruction names a payer only where it creates an account.
     fn check_payers(&self) -> Result<(), PlanError> {
-        let intent = self.values.recipe.intent();
-        let fee_payer = *intent.fee_payer();
-        let rent_payer = *intent.rent_payer();
+        let payers = self.values.recipe.payers();
+        let fee_payer = *payers.fee;
+        let rent_payer = *payers.rent;
 
         if self.lamport_loss(&fee_payer) > self.payer_allowance(&fee_payer) {
             return Err(PlanError::CheckFailed(
@@ -132,7 +143,9 @@ impl<'v, 'a> Verification<'v, 'a> {
         let names_payer = |instruction: &Instruction| {
             instruction.accounts.iter().any(|meta| meta.address == fee_payer || meta.address == rent_payer)
         };
-        let creates = |instruction: &Instruction| instruction.accounts.iter().any(|meta| self.created(&meta.address));
+        let creates = |instruction: &Instruction| {
+            funds_only(instruction) || instruction.accounts.iter().any(|meta| self.created(&meta.address))
+        };
 
         if self.instructions.iter().any(|instruction| names_payer(instruction) && !creates(instruction)) {
             return Err(PlanError::CheckFailed("an instruction names a payer and creates no account".into()));
@@ -248,9 +261,9 @@ impl<'v, 'a> Verification<'v, 'a> {
     }
 
     fn payer_allowance(&self, address: &Address) -> u64 {
-        let intent = self.values.recipe.intent();
-        let fee = if address == intent.fee_payer() { self.fee } else { 0 };
-        let rent = if address == intent.rent_payer() { self.created_rent() } else { 0 };
+        let payers = self.values.recipe.payers();
+        let fee = if address == payers.fee { self.fee } else { 0 };
+        let rent = if address == payers.rent { self.created_rent() } else { 0 };
 
         fee.saturating_add(rent)
     }

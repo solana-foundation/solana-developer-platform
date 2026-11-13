@@ -1,9 +1,9 @@
 //! `verify_intent`: proves in the transaction that its instructions are what the record builds for
 //! the intent, so a signer needs only the transaction bytes. The data is the intent in binary form.
 //!
-//! The accounts are the instructions sysvar, the two indexes, the two version accounts, then every
-//! account of the record's account table in order, then for a program recipe the accounts of the
-//! builder's last `MoreAccounts` round. [`position`] gives where the checked instructions are.
+//! The accounts are the instructions sysvar, the fee payer, the rent payer, the two indexes, the
+//! two version accounts, then every account of the record's account table in order, then for a
+//! program recipe the accounts of the builder's last `MoreAccounts` round. [`position`] gives where the checked instructions are.
 //! A remote recipe's span is empty, so `verify_intent` proves only the record and its accounts.
 //!
 //! For a program recipe, the data also holds the builder's role of each account of its
@@ -18,17 +18,19 @@ mod roles;
 mod static_recipe;
 
 use anchor_lang::prelude::*;
-use sdp_intents_engine::{EngineError, Recipe, Resolution};
+use sdp_intents_engine::{EngineError, Payers, Recipe, Resolution};
 use sdp_intents_spec::wire::DocumentKind;
 use sdp_intents_spec::{Intent, RecipeKind};
 
 use crate::error::RegistryError;
-use crate::state::version;
+use crate::state::{spec_address, version};
 use chain::PassedAccounts;
 
 #[derive(Accounts)]
 pub struct VerifyIntent {
     pub instructions: Sysvar<SysvarInstructions>,
+    pub fee_payer: UncheckedAccount,
+    pub rent_payer: UncheckedAccount,
     pub interface_index: UncheckedAccount,
     pub implementation_index: UncheckedAccount,
     pub interface_version: UncheckedAccount,
@@ -49,7 +51,11 @@ pub fn verify_intent(
     let interface = version::document(&interface_data)?;
     let implementation = version::document(&implementation_data)?;
 
-    let mut recipe = Recipe::parse(interface, implementation, intent).map_err(refused)?;
+    let fee_payer = fee_payer(accounts)?;
+    let rent_payer = spec_address(accounts.rent_payer.address());
+    let payers = Payers { fee: &fee_payer, rent: &rent_payer };
+
+    let mut recipe = Recipe::parse(interface, implementation, intent, payers).map_err(refused)?;
     registry::check_indexes(accounts, &recipe)?;
 
     let chain = PassedAccounts::borrow(record_accounts)?;
@@ -63,6 +69,15 @@ pub fn verify_intent(
         RecipeKind::Program => program_recipe::verify(&recipe, &chain, &accounts.instructions, builder_roles),
         RecipeKind::Remote => Ok(()),
     }
+}
+
+/// The role check lets the fee payer be a writable signer. Only a writable signer can be the fee
+/// payer, so any other account fails.
+fn fee_payer(accounts: &VerifyIntent) -> Result<sdp_intents_spec::Address> {
+    let fee_payer = accounts.fee_payer.account();
+    require!(fee_payer.is_signer() && fee_payer.is_writable(), RegistryError::FeePayerNotSigner);
+
+    Ok(spec_address(fee_payer.address()))
 }
 
 /// `verify_intent` cannot check Lighthouse assertions yet, so it refuses an intent that asks for

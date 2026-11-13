@@ -13,7 +13,7 @@
 //!    rounds. The data borrows from the documents and the chain.
 //!
 //! ```
-//! use sdp_intents_engine::{Chain, EngineError, Recipe, Resolution};
+//! use sdp_intents_engine::{Chain, EngineError, Payers, Recipe, Resolution};
 //! use sdp_intents_spec::Address;
 //!
 //! /// The service's account cache. `fetch` loads accounts with one `getMultipleAccounts`.
@@ -21,8 +21,9 @@
 //!     fn fetch<'a>(&mut self, addresses: impl Iterator<Item = &'a Address>);
 //! }
 //!
-//! fn build(interface: &[u8], implementation: &[u8], intent: &[u8], cache: &mut impl Cache) -> Result<(), EngineError> {
-//!     let mut recipe = Recipe::parse(interface, implementation, intent)?;
+//! fn build(documents: [&[u8]; 3], payers: Payers<'_>, cache: &mut impl Cache) -> Result<(), EngineError> {
+//!     let [interface, implementation, intent] = documents;
+//!     let mut recipe = Recipe::parse(interface, implementation, intent, payers)?;
 //!
 //!     while let Resolution::Missing(missing) = recipe.resolve(&*cache)? {
 //!         cache.fetch(missing.addresses());

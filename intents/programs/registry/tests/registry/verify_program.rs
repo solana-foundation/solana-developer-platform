@@ -31,12 +31,10 @@ fn intent(setup: &Setup, amount: u64, options: &str) -> String {
   "interface": "solana.org/token.transfer@^1",
   "implementation": "solana.org/test-builder-transfer@^1",
   "inputs": {{ "from": "{}", "to": "{}", "mint": "11111111111111111111111111111111", "amount": "{amount}" }},
-  "payers": {{ "fee": "{}" }},
   "options": {options}
 }}"#,
         setup.from.pubkey(),
         setup.to.pubkey(),
-        setup.fee_payer.pubkey(),
     )
 }
 
@@ -56,9 +54,12 @@ fn plan_and_verify(setup: &Setup, amount: u64, extra: bool) -> Result<Plan, Fail
 
 /// `plan_and_verify`, with `roles` in place of the builder's roles in `verify_intent` when set.
 fn plan_and_verify_with_roles(setup: &Setup, amount: u64, extra: bool, roles: Option<&[u8]>) -> Result<Plan, Failure> {
-    let planned =
-        setup.published.compile(&intent(setup, amount, r#"{ "assertions": false, "verifyIntent": false }"#))?;
-    let verified = setup.published.compile(&intent(setup, amount, r#"{ "assertions": false }"#))?;
+    let planned = setup.published.compile(
+        &intent(setup, amount, r#"{ "assertions": false, "verifyIntent": false }"#),
+        &setup.fee_payer.pubkey(),
+    )?;
+    let verified =
+        setup.published.compile(&intent(setup, amount, r#"{ "assertions": false }"#), &setup.fee_payer.pubkey())?;
     let plan = prepare(&setup.svm, &planned).map_err(|error| failure(format!("{error}")))?;
 
     let builder_simulations: usize = plan.intents.iter().map(|intent| intent.builder_simulations).sum();

@@ -1,6 +1,6 @@
 use super::wire::{IntentDocV1, IntentOptions};
 use crate::region::Region;
-use crate::{Address, DocumentHeaderV1, DocumentIdV1, DocumentKind, PoolRefV1, SpecError};
+use crate::{DocumentHeaderV1, DocumentIdV1, DocumentKind, PoolRefV1, SpecError};
 
 /// An intent document that `parse` validated, borrowed from its bytes. `parse` checks only the
 /// layout. The input values are checked against the interface by the code that binds the two.
@@ -32,18 +32,6 @@ impl<'a> Intent<'a> {
 
     pub fn implementation(&self) -> &'a DocumentIdV1 {
         &self.fixed.implementation
-    }
-
-    pub fn fee_payer(&self) -> &'a Address {
-        &self.fixed.fee_payer
-    }
-
-    pub fn rent_payer(&self) -> &'a Address {
-        &self.fixed.rent_payer
-    }
-
-    pub fn priority_fee_lamports(&self) -> u64 {
-        self.fixed.priority_fee_lamports.get()
     }
 
     pub fn options(&self) -> Result<IntentOptions, SpecError> {
@@ -79,7 +67,6 @@ mod tests {
         assert_eq!(intent.inputs().unwrap().len(), 5);
         assert_eq!(intent.input(3).unwrap(), 100_000_000u64.to_le_bytes());
         assert_eq!(intent.input(4).unwrap(), [0]);
-        assert_eq!(intent.fee_payer(), &Address([9; 32]));
         assert_eq!(intent.options(), Ok(IntentOptions::default()));
     }
 

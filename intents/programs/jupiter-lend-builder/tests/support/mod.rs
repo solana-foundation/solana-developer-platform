@@ -163,16 +163,15 @@ pub fn deposit_plan(setup: &Setup, vault: &Address, asset: &Address, amounts: Am
   "interface": "solana.org/vault.deposit@^1",
   "implementation": "solana.org/jupiter-lend-deposit@^1",
   "inputs": {{ "owner": "{}", "vault": "{vault}", "asset": "{asset}", "amount": "{}", "minShares": "{}" }},
-  "payers": {{ "fee": "{}" }},
   "options": {{ "assertions": false, "verifyIntent": false }}
 }}"#,
         setup.wallets.owner.pubkey(),
         amounts.amount,
         amounts.floor,
-        setup.wallets.fee_payer.pubkey(),
     );
 
-    let documents = Documents::compile(&[VAULT_DEPOSIT], &[DEPOSIT_RECORD], &intent).map_err(Failure::Compile)?;
+    let documents = Documents::compile(&[VAULT_DEPOSIT], &[DEPOSIT_RECORD], &intent, &setup.wallets.fee_payer.pubkey())
+        .map_err(Failure::Compile)?;
 
     prepare_measured(&setup.svm, &documents).map_err(Failure::Plan)
 }
@@ -185,16 +184,16 @@ pub fn withdraw_plan(setup: &Setup, amounts: Amounts) -> Result<Measured, Failur
   "interface": "solana.org/vault.withdraw@^1",
   "implementation": "solana.org/jupiter-lend-withdraw@^1",
   "inputs": {{ "owner": "{}", "vault": "{VAULT}", "asset": "{USDT}", "shares": "{}", "minAmount": "{}" }},
-  "payers": {{ "fee": "{}" }},
   "options": {{ "assertions": false, "verifyIntent": false }}
 }}"#,
         setup.wallets.owner.pubkey(),
         amounts.amount,
         amounts.floor,
-        setup.wallets.fee_payer.pubkey(),
     );
 
-    let documents = Documents::compile(&[VAULT_WITHDRAW], &[WITHDRAW_RECORD], &intent).map_err(Failure::Compile)?;
+    let documents =
+        Documents::compile(&[VAULT_WITHDRAW], &[WITHDRAW_RECORD], &intent, &setup.wallets.fee_payer.pubkey())
+            .map_err(Failure::Compile)?;
 
     prepare_measured(&setup.svm, &documents).map_err(Failure::Plan)
 }
@@ -202,7 +201,7 @@ pub fn withdraw_plan(setup: &Setup, amounts: Amounts) -> Result<Measured, Failur
 /// `sdp_intents_program_testing::prepare`, which also counts the fetches and reads the builder's
 /// compute units from the logs of each builder simulation.
 fn prepare_measured(svm: &LiteSVM, documents: &Documents) -> Result<Measured, PlanError> {
-    let mut planner = Planner::new(&[documents.as_intent()], SCRATCH)?;
+    let mut planner = Planner::new(&documents.request(), SCRATCH)?;
     let mut accounts = AccountMap::default();
     let mut fetches = 0usize;
     let mut builder_units = Vec::new();

@@ -72,7 +72,7 @@ fn deposits_usdt_into_a_new_share_account() {
     assert_eq!(plan.intents[0].builder_simulations, 1);
     assert_eq!(plan.transaction.instructions.len(), 2);
     assert_eq!(plan.intents[0].outputs, JLUSDT.to_bytes());
-    assert!(plan.intents[0].message.starts_with(&format!("sdp-intents/1: deposit 100 of {USDT} from {owner}")));
+    assert!(plan.message.contains(&format!(" || 1: deposit 100 of {USDT} from {owner}")));
 
     send(&mut setup.svm, plan, &signers(&setup.wallets)).unwrap();
 

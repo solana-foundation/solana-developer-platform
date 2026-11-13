@@ -2,9 +2,9 @@
 //! `getMultipleAccounts`, and its simulations with `simulateTransaction`.
 //!
 //! ```no_run
-//! # fn run(intents: &[sdp_intents_planner::IntentDocuments<'_>]) -> Result<(), sdp_intents_client::ClientError> {
+//! # fn run(request: &sdp_intents_planner::PlanRequest<'_>) -> Result<(), sdp_intents_client::ClientError> {
 //! let client = sdp_intents_client::Client::new("https://api.mainnet-beta.solana.com");
-//! let prepared = client.prepare(intents)?;
+//! let prepared = client.prepare(request)?;
 //! # Ok(())
 //! # }
 //! ```
@@ -22,7 +22,7 @@ use solana_rpc_client_api::config::{RpcSimulateTransactionAccountsConfig, RpcSim
 use solana_message::v1::{MAX_TRANSACTION_SIZE, SIGNATURE_SIZE};
 
 use sdp_intents_planner::{
-    Account, AccountMap, IntentDocuments, Limit, Plan, PlanError, Planner, Simulation, SimulationResult, Step,
+    Account, AccountMap, Limit, Plan, PlanError, PlanRequest, Planner, Simulation, SimulationResult, Step,
 };
 use sdp_intents_spec::Address;
 
@@ -47,8 +47,8 @@ impl Client {
         Self { rpc: RpcClient::new_with_commitment(url.to_string(), CommitmentConfig::processed()) }
     }
 
-    pub fn prepare(&self, intents: &[IntentDocuments<'_>]) -> Result<Prepared, ClientError> {
-        let mut planner = Planner::new(intents, fresh_address())?;
+    pub fn prepare(&self, request: &PlanRequest<'_>) -> Result<Prepared, ClientError> {
+        let mut planner = Planner::new(request, fresh_address())?;
         let mut accounts = AccountMap::default();
 
         let plan = loop {
@@ -164,6 +164,7 @@ impl std::error::Error for ClientError {}
 #[cfg(test)]
 mod tests {
     use sdp_intents_compiler::Catalog;
+    use sdp_intents_planner::{IntentDocuments, Payers};
 
     use super::*;
 
@@ -188,17 +189,21 @@ mod tests {
             ))
             .unwrap();
         let plan = catalog.compile_plan(include_str!("../../fixtures/plans/mainnet/usdc-transfer.json")).unwrap();
-        let documents: Vec<_> = plan
-            .intents
-            .iter()
-            .map(|intent| IntentDocuments {
-                interface: &intent.interface.bytes,
-                implementation: &intent.implementation.bytes,
-                intent: &intent.bytes,
-            })
-            .collect();
+        let request = PlanRequest {
+            intents: plan
+                .intents
+                .iter()
+                .map(|intent| IntentDocuments {
+                    interface: &intent.interface.bytes,
+                    implementation: &intent.implementation.bytes,
+                    intent: &intent.bytes,
+                })
+                .collect(),
+            payers: Payers { fee: &plan.payers.fee, rent: &plan.payers.rent },
+            priority_fee_lamports: plan.priority_fee_lamports,
+        };
 
-        let prepared = Client::new(url).prepare(&documents).unwrap();
+        let prepared = Client::new(url).prepare(&request).unwrap();
 
         assert_eq!(prepared.plan.transaction.instructions.len(), 2);
         assert_eq!(prepared.message.first(), Some(&0x81));

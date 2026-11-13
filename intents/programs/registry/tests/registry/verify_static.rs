@@ -44,12 +44,10 @@ fn intent(implementation: &str, wallets: &Wallets, mint: &Address, amount: u64, 
   "interface": "solana.org/token.transfer@^1",
   "implementation": "solana.org/{implementation}@^1",
   "inputs": {{ "from": "{}", "to": "{}", "mint": "{mint}", "amount": "{amount}" }},
-  "payers": {{ "fee": "{}" }},
   "options": {options}
 }}"#,
         wallets.from.pubkey(),
         wallets.to.pubkey(),
-        wallets.fee_payer.pubkey(),
     )
 }
 
@@ -60,8 +58,12 @@ struct Verified {
 }
 
 fn plan_and_verify(setup: &Setup, implementation: &str, mint: &Address, amount: u64) -> Result<Verified, Failure> {
-    let planned = setup.published.compile(&intent(implementation, &setup.wallets, mint, amount, PLANNED))?;
-    let verified = setup.published.compile(&intent(implementation, &setup.wallets, mint, amount, VERIFIED))?;
+    let planned = setup
+        .published
+        .compile(&intent(implementation, &setup.wallets, mint, amount, PLANNED), &setup.wallets.fee_payer.pubkey())?;
+    let verified = setup
+        .published
+        .compile(&intent(implementation, &setup.wallets, mint, amount, VERIFIED), &setup.wallets.fee_payer.pubkey())?;
     let plan = prepare(&setup.svm, &planned).map_err(|error| crate::svm::failure(format!("{error}")))?;
     let verify = setup.published.verify_instruction(&setup.svm, &verified, &[], &[])?;
 
@@ -161,10 +163,13 @@ fn refuses_an_unapproved_implementation_unless_the_intent_allows_it() {
 
     let allowing = |options: &str| options.replace("{ ", r#"{ "allowUnapproved": true, "#);
     let to = intent("system-transfer", &setup.wallets, &system_program(), SOL, &allowing(PLANNED));
-    let planned = setup.published.compile(&to).unwrap();
+    let planned = setup.published.compile(&to, &setup.wallets.fee_payer.pubkey()).unwrap();
     let verified = setup
         .published
-        .compile(&intent("system-transfer", &setup.wallets, &system_program(), SOL, &allowing(VERIFIED)))
+        .compile(
+            &intent("system-transfer", &setup.wallets, &system_program(), SOL, &allowing(VERIFIED)),
+            &setup.wallets.fee_payer.pubkey(),
+        )
         .unwrap();
     let plan = prepare(&setup.svm, &planned).unwrap();
     let verify = setup.published.verify_instruction(&setup.svm, &verified, &[], &[]).unwrap();
@@ -175,8 +180,13 @@ fn refuses_an_unapproved_implementation_unless_the_intent_allows_it() {
 #[test]
 fn refuses_an_intent_that_turns_verification_off() {
     let mut setup = setup(definitions::SYSTEM_TRANSFER, true).unwrap();
-    let planned =
-        setup.published.compile(&intent("system-transfer", &setup.wallets, &system_program(), SOL, PLANNED)).unwrap();
+    let planned = setup
+        .published
+        .compile(
+            &intent("system-transfer", &setup.wallets, &system_program(), SOL, PLANNED),
+            &setup.wallets.fee_payer.pubkey(),
+        )
+        .unwrap();
     let plan = prepare(&setup.svm, &planned).unwrap();
     let verify = setup.published.verify_instruction(&setup.svm, &planned, &[], &[]).unwrap();
     let signers = [&setup.wallets.fee_payer, &setup.wallets.from];
@@ -187,23 +197,28 @@ fn refuses_an_intent_that_turns_verification_off() {
 }
 
 #[test]
-fn refuses_registry_and_record_accounts_that_do_not_fit_the_intent() {
+fn refuses_payer_registry_and_record_accounts_that_do_not_fit_the_intent() {
     let mut setup = setup(definitions::SYSTEM_TRANSFER, true).unwrap();
     let verified = plan_and_verify(&setup, "system-transfer", &system_program(), SOL).unwrap();
     let signers = [&setup.wallets.fee_payer, &setup.wallets.from];
 
+    let mut unsigned_fee_payer = verified.verify.clone();
+    unsigned_fee_payer.accounts[1].address = sdp_intents_spec::Address(setup.wallets.to.pubkey().to_bytes());
+    let failed = send_plan(&mut setup.svm, &with_verify(&verified.plan, unsigned_fee_payer), &signers).unwrap_err();
+    assert!(failed.is(RegistryError::FeePayerNotSigner), "{failed}");
+
     let mut other_recipient = verified.verify.clone();
-    other_recipient.accounts[6].address = sdp_intents_spec::Address([9; 32]);
+    other_recipient.accounts[8].address = sdp_intents_spec::Address([9; 32]);
     let failed = send_plan(&mut setup.svm, &with_verify(&verified.plan, other_recipient), &signers).unwrap_err();
     assert!(failed.is(RegistryError::WrongRecipeAccount), "{failed}");
 
     let mut swapped_indexes = verified.verify.clone();
-    swapped_indexes.accounts.swap(1, 2);
+    swapped_indexes.accounts.swap(3, 4);
     let failed = send_plan(&mut setup.svm, &with_verify(&verified.plan, swapped_indexes), &signers).unwrap_err();
     assert!(failed.is(RegistryError::WrongIndexKind), "{failed}");
 
     let mut swapped_versions = verified.verify;
-    swapped_versions.accounts.swap(3, 4);
+    swapped_versions.accounts.swap(5, 6);
     let failed = send_plan(&mut setup.svm, &with_verify(&verified.plan, swapped_versions), &signers).unwrap_err();
     assert!(failed.is(RegistryError::WrongAccount), "{failed}");
 }
