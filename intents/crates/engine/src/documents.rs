@@ -41,6 +41,19 @@ impl<'a> Documents<'a> {
         Ok(documents)
     }
 
+    /// The accounts of the record that are program addresses, PDAs and ATAs, in record order.
+    pub(crate) fn program_addresses(&self) -> Result<crate::resolve::AccountSet, EngineError> {
+        let accounts = self.implementation.accounts()?;
+
+        accounts.iter().zip(0u8..).try_fold(crate::resolve::AccountSet::default(), |mut set, (account, index)| {
+            if matches!(account.address()?, AddressSource::Pda { .. } | AddressSource::Ata { .. }) {
+                set.insert(index);
+            }
+
+            Ok(set)
+        })
+    }
+
     fn check_implements(&self) -> Result<(), EngineError> {
         let implements = self.implementation.implements();
         let interface = self.interface.id();

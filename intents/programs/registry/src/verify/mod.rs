@@ -7,7 +7,8 @@
 //! recipe the accounts of the builder's last `MoreAccounts` round, then the guarded accounts.
 //!
 //! The data is the intent in binary form, the builder's role of each account of its instructions
-//! for a program recipe, the interface's outputs, and the [`SegmentLayout`]. A static recipe holds
+//! for a program recipe, the interface's outputs, the bump of each program address of the record,
+//! the bumps of a builder's program addresses, and the [`SegmentLayout`]. A static recipe holds
 //! no roles, because `verify_intent` builds its instructions itself. A remote recipe holds the roles
 //! that its endpoint stated, and [`remote_recipe`] checks what holds for any instructions.
 //!
@@ -54,6 +55,12 @@ pub struct VerifyArgs<'a> {
     pub builder_roles: &'a [u8],
     /// The interface's outputs, in borsh.
     pub outputs: &'a [u8],
+    /// The canonical bump of each program address of the record, in record order, so that each
+    /// derives with one hash. The signer's verifier checks offchain that each bump is canonical.
+    pub bumps: &'a [u8],
+    /// The canonical bumps of a builder's program addresses, which `verify_intent` passes to the
+    /// builder as `{builder.bumps}`. The builder refuses any bump that is not canonical.
+    pub builder_bumps: &'a [u8],
     pub layout: SegmentLayout,
 }
 
@@ -84,7 +91,9 @@ pub fn verify_intent(accounts: &VerifyIntent, passed: &[AccountView], args: Veri
     let rent_payer = spec_address(accounts.rent_payer.address());
     let payers = Payers { fee: &fee_payer, rent: &rent_payer };
 
-    let mut recipe = Recipe::parse(interface, implementation, args.intent, payers).map_err(refused)?;
+    let mut recipe = Recipe::parse_published(interface, implementation, args.intent, payers).map_err(refused)?;
+    recipe.state_bumps(args.bumps).map_err(refused)?;
+    recipe.state_builder_bumps(args.builder_bumps).map_err(refused)?;
     registry::check_indexes(accounts, &recipe)?;
 
     let layout = args.layout;
@@ -104,10 +113,10 @@ pub fn verify_intent(accounts: &VerifyIntent, passed: &[AccountView], args: Veri
             require!(static_recipe::outputs(&recipe)? == args.outputs, RegistryError::WrongOutputs);
 
             let built = ends.built(sysvar, static_recipe::count(&recipe)?)?;
-            let named = static_recipe::named(&recipe, &chain)?;
-            let end = ends.end(sysvar, named, args.outputs, &built)?;
+            let compared = static_recipe::compare(&recipe, &chain, sysvar, &built)?;
+            let end = ends.end(sysvar, compared.named.clone(), args.outputs, &built)?;
 
-            static_recipe::verify(&recipe, &chain, sysvar, &Segment { built, whole: first..end })
+            static_recipe::check_roles(&compared, sysvar, &Segment { built, whole: first..end })
         }
         RecipeKind::Program => {
             let hashed = program_recipe::call(&recipe, &chain)?;

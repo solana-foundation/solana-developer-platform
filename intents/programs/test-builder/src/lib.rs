@@ -17,9 +17,9 @@ const SYSTEM_TRANSFER: u32 = 2;
 pub mod test_builder {
     use super::*;
 
-    pub fn build_transfer_v1(ctx: &mut Context<BuildTransferV1>, amount: u64) -> Result<()> {
+    pub fn build_transfer_v1(ctx: &mut Context<BuildTransferV1>, amount: u64, bumps: &[u8]) -> Result<()> {
         let remaining = ctx.remaining_accounts();
-        let mut build = Build::new(ctx.program_id, <BuildTransferV1 as TryAccounts>::HEADER_SIZE, &remaining)?;
+        let mut build = Build::new(ctx.program_id, <BuildTransferV1 as TryAccounts>::HEADER_SIZE, &remaining, bumps)?;
 
         if amount == 0 {
             return Ok(build.refuse("zeroAmount", "the amount is zero")?);

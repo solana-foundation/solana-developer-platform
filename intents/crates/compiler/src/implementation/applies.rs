@@ -102,7 +102,7 @@ impl Build<'_, '_> {
             }
         };
 
-        let names = Names::new(self.schema, &[], Allowed { payers: false, accounts: false });
+        let names = Names::new(self.schema, &[], Allowed { payers: false, accounts: false, builder: false });
 
         names.resolve(reference, &node.pointer, self.sink).map(|resolved| resolved.value)
     }

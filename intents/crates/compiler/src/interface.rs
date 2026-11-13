@@ -74,7 +74,10 @@ impl Build {
         let schema = Schema { inputs: drafts.iter().map(|draft| draft.field.clone()).collect(), outputs };
         let failed: Vec<String> =
             drafts.iter().filter(|draft| draft.failed).map(|draft| draft.field.name.clone()).collect();
-        let names = Names { failed: &failed, ..Names::new(&schema, &[], Allowed { payers: false, accounts: false }) };
+        let names = Names {
+            failed: &failed,
+            ..Names::new(&schema, &[], Allowed { payers: false, accounts: false, builder: false })
+        };
 
         let display = object
             .required("display", &mut self.sink)

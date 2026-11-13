@@ -190,8 +190,14 @@ mod tests {
         assert_eq!(accounts_of(&call).get(3).unwrap().address, &find_ata(FROM, mint, TOKEN_2022_PROGRAM));
         assert_eq!(
             data_of(&call),
-            [&[0xbd, 0x1c, 0x9a, 0xdb, 0x8c, 0xa2, 0x62, 0x3c][..], &100_000_000u64.to_le_bytes(), &[0]].concat()
+            [&[0xbd, 0x1c, 0x9a, 0xdb, 0x8c, 0xa2, 0x62, 0x3c][..], &100_000_000u64.to_le_bytes(), &[0], &[0; 4]].concat()
         );
+
+        let mut stated = resolved.recipe;
+        stated.state_builder_bumps(&[254, 255]).unwrap();
+        let call = stated.builder_call(&chain, &[]).unwrap();
+
+        assert!(data_of(&call).ends_with(&[2, 0, 0, 0, 254, 255]));
     }
 
     fn resolved_token_2022<'d>(chain: &mut MapChain, documents: &'d Compiled) -> Resolved<'d> {

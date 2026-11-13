@@ -615,6 +615,14 @@ pub fn build_transfer_v1(ctx: &mut Context<BuildTransferV1>, amount: u64, memo: 
    `HashedReadyV1`.
 5. The `token` helpers derive associated token accounts and add `createIdempotent`,
    `transferChecked`, and memos.
+6. `build.program_address(seeds, program)` and `build.associated_token_address(owner, mint,
+   program)` derive addresses. In staged mode each searches for the canonical bump, and `Ready`
+   returns the bumps in order. The record passes them back as `{builder.bumps}`, a borsh
+   `Vec<u8>` argument, and in hashed mode each derivation takes the next one. A search costs 1,500
+   compute units for each bump that it tries, and a stated bump costs one SHA-256 and one curve
+   check, plus one pair for each bump above it. A bump that is missing, not canonical, or left
+   over fails the builder, so `verify_intent` fails. A derivation by search is in the library's
+   `offchain` module, which does not compile for Solana.
 
 **Result layout.** Every type is alignment-1 pod, so a reader casts it in place. `PodU16`, `PodU32`,
 `PodU64`, and `PodBool` are little-endian byte arrays with alignment 1, in the layout of the Anchor
@@ -641,6 +649,7 @@ pub struct ReadyHeaderV1 {
     pub num_instructions: u8,
     pub num_signers: u8,
     pub outputs_len: PodU16,
+    pub num_bumps: u8,
 }
 
 #[repr(C)]
@@ -668,7 +677,7 @@ pub struct HashedReadyV1 {
 
 | Result | Bytes at the pointer | The service then |
 | :-- | :-- | :-- |
-| `Ready` | `ReadyHeaderV1`, the outputs, and 32 bytes for each signer. Then, for each instruction, an `InstructionHeaderV1`, an `AccountMetaV1` for each account, and the data. | Verifies |
+| `Ready` | `ReadyHeaderV1`, the outputs, 32 bytes for each signer, and one byte for each bump. Then, for each instruction, an `InstructionHeaderV1`, an `AccountMetaV1` for each account, and the data. | Verifies |
 | `MoreAccounts` | `num_accounts: u8`, then 32 bytes for each address | Simulates again with the accounts appended, for at most 4 rounds and 64 accounts. Each round can depend on the round before. |
 | `Refused` | `code_len: u8`, `message_len: PodU16`, the code, and the message | Returns the refusal |
 
@@ -676,7 +685,7 @@ pub struct HashedReadyV1 {
 2. `role` is the `AccountRole` value: `0` readonly, `1` writable, `2` readonly signer, and `3`
    writable signer.
 3. A signer is a new account that the service signs for, such as a fresh keypair.
-4. The instruction section is the part of `Ready` after the signers: each `InstructionHeaderV1`,
+4. The instruction section is the part of `Ready` after the bumps: each `InstructionHeaderV1`,
    its `AccountMetaV1` entries, and its data, with the rent placeholder in place. `HashedReadyV1`
    is followed by 32 bytes for each signer and by the outputs. Return data holds at most 1,024
    bytes, so the signers and the outputs fit in 987 bytes.
@@ -897,11 +906,25 @@ of the last `MoreAccounts` round, then the guarded accounts (4.5). The builder p
 table. The fee payer must be a writable signer, because only a writable signer can be the fee
 payer.
 
-Its data is the intent, the builder's roles, and the interface's outputs, each a borsh `Vec<u8>`,
-then the layout: the rent cap as a `u64`, and as one `u8` each the count of guarded accounts, of
-snapshots, of built instructions, and of assertions with the close. A signer reads the outputs and
-the counts, so `verify_intent` refuses any that differ from what it derives (`WrongOutputs`,
+Its data is the intent, the builder's roles, the interface's outputs, the bumps of the record's
+program addresses, and the builder's bumps, each a borsh `Vec<u8>`, then the layout: the rent cap
+as a `u64`, and as one `u8` each the count of guarded accounts, of snapshots, of built
+instructions, and of assertions with the close. A signer reads the outputs and the counts, so
+`verify_intent` refuses any that differ from what it derives (`WrongOutputs`,
 `WrongSegmentLayout`). A transaction that lands therefore holds what its data states.
+
+**Bumps.** Only the canonical bump is supported. Each PDA and ATA of the record derives from its
+stated bump with one SHA-256, and `verify_intent` checks that the hash is off the curve and that
+the hash of each higher bump is on it. Any other bump derives no address, so the plan fails, and
+the signer's verifier refuses it offchain (`NonCanonicalBump`). Each bump is off the curve about
+half the time, so the check costs about one extra pair on average, where a search costs 1,500
+compute units for each bump that it tries. The builder's bumps go to the builder (4.2).
+
+**Cost.** `verify_intent` reads the documents without the checks of `parse`, because `publish`
+wrote them only after they passed, and a version account never changes. It builds the record's
+instructions once, and builds each expected Lighthouse instruction on the stack. For an SPL Token
+transfer with assertions it costs about 27,000 compute units, down from 34,000 to 44,000 with a
+search for each bump.
 
 **Spans.** The segment of `verify_intent` is the instructions after it: the snapshots, N built
 instructions, then the assertions and the close, as the layout counts them. The postconditions

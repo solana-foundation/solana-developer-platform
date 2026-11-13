@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use pinocchio::address::Address;
 use sdp_intents_builder::programs::TOKEN_2022;
-use sdp_intents_builder::token::{associated_token_address, TransferChecked};
+use sdp_intents_builder::token::TransferChecked;
 use sdp_intents_builder::{Build, BuildError};
 
 use crate::hook::hook_accounts;
@@ -24,7 +24,8 @@ pub fn build_transfer<'a: 'v, 'v>(
     let mint = accounts.mint.address();
     let to = accounts.to.address();
 
-    check_address(accounts.source.address(), associated_token_address(accounts.from.address(), mint, &TOKEN_2022))?;
+    let source = build.associated_token_address(accounts.from.address(), mint, &TOKEN_2022)?;
+    check_address(accounts.source.address(), Some(source))?;
 
     let preconditions = preconditions::check(accounts, amount, memo.is_some())?;
 
@@ -38,7 +39,7 @@ pub fn build_transfer<'a: 'v, 'v>(
 
     let destination = match preconditions.destination {
         Destination::Create => Some(build.create_associated_token_account_idempotent(to, mint, &TOKEN_2022)?),
-        Destination::Exists => associated_token_address(to, mint, &TOKEN_2022),
+        Destination::Exists => Some(build.associated_token_address(to, mint, &TOKEN_2022)?),
     };
 
     check_address(accounts.destination.address(), destination)?;

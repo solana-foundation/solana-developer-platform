@@ -136,7 +136,7 @@ pub(crate) fn more_accounts(addresses: &[Address]) -> SimulationResult {
 
 /// A `Ready` result with one transfer that the rent payer funds through the placeholder.
 pub(crate) fn ready_with_rent_payer() -> SimulationResult {
-    let header = ReadyHeaderV1 { num_instructions: 1, num_signers: 0, outputs_len: PodU16::new(0) };
+    let header = ReadyHeaderV1 { num_instructions: 1, num_signers: 0, outputs_len: PodU16::new(0), num_bumps: 0 };
     let instruction = InstructionHeaderV1 { program: Address::default(), num_accounts: 2, data_len: PodU16::new(1) };
     let payer = AccountMetaV1 { address: PAYER_RENT_PLACEHOLDER, role: AccountRole::WritableSigner.into() };
     let other = AccountMetaV1 { address: Address([3; 32]), role: AccountRole::Writable.into() };

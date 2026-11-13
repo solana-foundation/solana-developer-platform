@@ -9,6 +9,15 @@ pub struct AccountData<'a> {
     pub lamports: u64,
 }
 
+/// A chain that holds no account, for reads that need only addresses.
+pub(crate) struct NoAccounts;
+
+impl Chain for NoAccounts {
+    fn account(&self, _address: &Address) -> Option<AccountData<'_>> {
+        None
+    }
+}
+
 /// The accounts that the caller holds. The service backs it with its account cache, and a program
 /// with the accounts of its instruction.
 pub trait Chain {

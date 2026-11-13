@@ -49,6 +49,8 @@ pub enum EngineError {
     BadSeeds {
         account: u8,
     },
+    /// The caller stated another count of bumps than the record has program addresses.
+    WrongBumps,
     /// `instructions` runs only after `resolve` returns `Complete`.
     NotResolved,
     /// The address of the account is not resolved yet.
@@ -88,6 +90,7 @@ impl fmt::Display for EngineError {
             Self::ShortData { account } => write!(f, "the data of account {account} is too short"),
             Self::MissingData { account } => write!(f, "the data of account {account} is not loaded"),
             Self::BadSeeds { account } => write!(f, "the seeds of account {account} give no address"),
+            Self::WrongBumps => f.write_str("the bumps are not one for each program address of the record"),
             Self::NotResolved => f.write_str("the recipe is not resolved"),
             Self::Unresolved { account } => write!(f, "account {account} is not resolved"),
             Self::UnboundOutput { output } => write!(f, "output {output} has no account"),

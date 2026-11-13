@@ -8,7 +8,7 @@
 
 use alloc::vec::Vec;
 
-use sdp_intents_engine::{associated_token_account, Condition, Payers};
+use sdp_intents_engine::{associated_token_account, Condition, NamedAta, Payers};
 use sdp_intents_spec::Address;
 
 use crate::GuardError;
@@ -83,6 +83,8 @@ struct Holding {
 pub(crate) struct GuardInputs<'g> {
     pub(crate) conditions: &'g [Condition],
     pub(crate) accounts: &'g [GuardedAccount<'g>],
+    /// The associated token accounts that the record names, which need no derivation.
+    pub(crate) named_atas: &'g [NamedAta],
     pub(crate) payers: Payers<'g>,
     pub(crate) rent_cap: u64,
 }
@@ -193,14 +195,21 @@ impl GuardInputs<'_> {
             .collect()
     }
 
+    /// The record's own ATA of `owner` for `mint` when it names one. Otherwise the ATA of each token
+    /// program, which costs two derivations in a program.
     fn new_account(&self, owner: &Address, mint: &Address, min: u128) -> Result<NewAccountGuard, GuardError> {
         let min = u64::try_from(min).map_err(|_| GuardError::Overflow)?;
-        let created = |token_program: &Address| {
-            let address = associated_token_account(owner, mint, token_program)?;
-
-            self.accounts.iter().find(|account| account.address == address && account.data.is_empty())
+        let created = |address: Option<Address>| {
+            self.accounts.iter().find(|account| Some(account.address) == address && account.data.is_empty())
         };
-        let mut candidates = [created(&TOKEN_PROGRAM), created(&TOKEN_2022_PROGRAM)].into_iter().flatten();
+        let named = self.named_atas.iter().find(|ata| ata.owner == *owner && ata.mint == *mint);
+
+        if let Some(account) = named.and_then(|ata| created(Some(ata.address))) {
+            return Ok(NewAccountGuard { address: account.address, min });
+        }
+
+        let derived = |token_program: &Address| created(associated_token_account(owner, mint, token_program));
+        let mut candidates = [derived(&TOKEN_PROGRAM), derived(&TOKEN_2022_PROGRAM)].into_iter().flatten();
 
         match (candidates.next(), candidates.next()) {
             (Some(account), None) => Ok(NewAccountGuard { address: account.address, min }),

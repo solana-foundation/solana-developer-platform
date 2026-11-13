@@ -22,6 +22,15 @@ pub struct Build<'a> {
     requested: Vec<Address>,
     section: Section,
     outputs: Vec<u8>,
+    bumps: Bumps<'a>,
+}
+
+/// The bumps of the builder's program addresses. A simulation finds each canonical bump and
+/// returns it in the result. `verify_intent` states the bumps back, so each address derives with
+/// one hash, and a bump that is missing, not canonical, or not used fails the builder.
+enum Bumps<'a> {
+    Found(Vec<u8>),
+    Stated { bumps: &'a [u8], used: usize },
 }
 
 enum Mode {
@@ -36,8 +45,15 @@ enum Mode {
 impl<'a> Build<'a> {
     /// Reads the mode from the stack height. `record_accounts` is the number of accounts that the
     /// record names, which in Anchor v2 is `<T as TryAccounts>::HEADER_SIZE`. `accounts` are the ones
-    /// after them: the extra accounts, then scratch in staged mode.
-    pub fn new(program_id: &Address, record_accounts: usize, accounts: &'a [AccountView]) -> Result<Self, BuildError> {
+    /// after them: the extra accounts, then scratch in staged mode. `bumps` is the argument that the
+    /// record passes as `{builder.bumps}`: empty in a simulation, and the bumps that the simulation
+    /// found under `verify_intent`.
+    pub fn new(
+        program_id: &Address,
+        record_accounts: usize,
+        accounts: &'a [AccountView],
+        bumps: &'a [u8],
+    ) -> Result<Self, BuildError> {
         let (mode, extra_accounts) = if get_stack_height() == TRANSACTION_LEVEL_STACK_HEIGHT {
             let (scratch, extra_accounts) = accounts.split_last().ok_or(BuildError::NoScratch)?;
 
@@ -53,6 +69,12 @@ impl<'a> Build<'a> {
             (Mode::Hashed, accounts)
         };
 
+        let bumps = match mode {
+            Mode::Staged { .. } if !bumps.is_empty() => return Err(BuildError::WrongBumps),
+            Mode::Staged { .. } => Bumps::Found(Vec::new()),
+            Mode::Hashed => Bumps::Stated { bumps, used: 0 },
+        };
+
         Ok(Self {
             mode,
             extra_accounts,
@@ -60,7 +82,32 @@ impl<'a> Build<'a> {
             requested: Vec::new(),
             section: Section::default(),
             outputs: Vec::new(),
+            bumps,
         })
+    }
+
+    /// The program address of `seeds` under `program`. A simulation searches for the canonical
+    /// bump. Under `verify_intent` the next stated bump derives it with one hash, and fails unless
+    /// it is canonical.
+    pub fn program_address(&mut self, seeds: &[&[u8]], program: &Address) -> Result<Address, BuildError> {
+        match &mut self.bumps {
+            Bumps::Found(found) => {
+                let (address, bump) =
+                    Address::try_find_program_address(seeds, program).ok_or(BuildError::WrongAccounts)?;
+                found.push(bump);
+
+                Ok(address)
+            }
+            Bumps::Stated { bumps, used } => {
+                let bump = *bumps.get(*used).ok_or(BuildError::WrongBumps)?;
+                let program = sdp_intents_spec::Address(program.to_bytes());
+                let address =
+                    sdp_intents_engine::program_address(seeds, bump, &program).ok_or(BuildError::WrongBumps)?;
+                *used = used.saturating_add(1);
+
+                Ok(Address::new_from_array(address.0))
+            }
+        }
     }
 
     /// The accounts at `addresses`, in order, when the caller passed them after the ones that earlier
@@ -108,9 +155,17 @@ impl<'a> Build<'a> {
 
     /// Writes `MoreAccounts` when the builder asked for accounts, and the instructions otherwise.
     pub fn finish(self) -> Result<(), BuildError> {
+        let found = match &self.bumps {
+            Bumps::Found(found) => found.as_slice(),
+            Bumps::Stated { bumps, used } if *used == bumps.len() => &[],
+            Bumps::Stated { .. } => return Err(BuildError::WrongBumps),
+        };
+
         match self.mode {
             Mode::Staged { scratch, scratch_index } if self.requested.is_empty() => {
-                write_staged(scratch, scratch_index, ResultKind::Ready, &layout::ready(&self.section, &self.outputs)?)
+                let ready = layout::ready(&self.section, &self.outputs, found)?;
+
+                write_staged(scratch, scratch_index, ResultKind::Ready, &ready)
             }
             Mode::Staged { scratch, scratch_index } => {
                 write_staged(scratch, scratch_index, ResultKind::MoreAccounts, &layout::more_accounts(&self.requested)?)

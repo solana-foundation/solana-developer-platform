@@ -13,11 +13,9 @@ const TRANSFER_CHECKED: u8 = 12;
 const MINT_DECIMALS_OFFSET: usize = 44;
 const TOKEN_ACCOUNT_AMOUNT_OFFSET: usize = 64;
 
-/// `None` in the statistically improbable case that no bump gives an address off the curve.
-pub fn associated_token_address(owner: &Address, mint: &Address, token_program: &Address) -> Option<Address> {
-    let seeds: [&[u8]; 3] = [owner.as_ref(), token_program.as_ref(), mint.as_ref()];
-
-    Address::try_find_program_address(&seeds, &ASSOCIATED_TOKEN).map(|(address, _)| address)
+/// The seeds of the associated token account of `owner` for `mint`.
+pub(crate) fn ata_seeds<'s>(owner: &'s Address, mint: &'s Address, token_program: &'s Address) -> [&'s [u8]; 3] {
+    [owner.as_ref(), token_program.as_ref(), mint.as_ref()]
 }
 
 /// The decimals of a mint of either token program.
@@ -46,6 +44,17 @@ pub fn token_account_amount(account: &AccountView) -> Result<Option<u64>, BuildE
 }
 
 impl Build<'_> {
+    /// The associated token account of `owner` for `mint`, derived with the next bump, as
+    /// [`Build::program_address`] derives it.
+    pub fn associated_token_address(
+        &mut self,
+        owner: &Address,
+        mint: &Address,
+        token_program: &Address,
+    ) -> Result<Address, BuildError> {
+        self.program_address(&ata_seeds(owner, mint, token_program), &ASSOCIATED_TOKEN)
+    }
+
     /// Creates the associated token account of `owner` for `mint` when it does not exist, with the
     /// rent payer funding it. Returns its address.
     pub fn create_associated_token_account_idempotent(
@@ -54,7 +63,7 @@ impl Build<'_> {
         mint: &Address,
         token_program: &Address,
     ) -> Result<Address, BuildError> {
-        let account = associated_token_address(owner, mint, token_program).ok_or(BuildError::WrongAccounts)?;
+        let account = self.associated_token_address(owner, mint, token_program)?;
 
         self.create_associated_token_account_idempotent_at(&account, owner, mint, token_program)?;
 
@@ -149,10 +158,9 @@ mod tests {
         let owner = address("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
         let usdc = address("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
 
-        assert_eq!(
-            associated_token_address(&owner, &usdc, &TOKEN),
-            Some(address("FGETo8T8wMcN2wCjav8VK6eh3dLk63evNDPxzLSJra8B"))
-        );
+        let found = Address::try_find_program_address(&ata_seeds(&owner, &usdc, &TOKEN), &ASSOCIATED_TOKEN);
+
+        assert_eq!(found.map(|(address, _)| address), Some(address("FGETo8T8wMcN2wCjav8VK6eh3dLk63evNDPxzLSJra8B")));
     }
 
     #[test]

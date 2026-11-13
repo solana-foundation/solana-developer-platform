@@ -93,7 +93,8 @@ fn load_fixture_accounts(svm: &mut LiteSVM) -> Result<(), String> {
 }
 
 pub fn token_address(owner: &Address, mint: &Address) -> Result<Address, String> {
-    sdp_intents_builder::token::associated_token_address(owner, mint, &TOKEN_PROGRAM).ok_or("no token address".into())
+    sdp_intents_builder::offchain::find_associated_token_address(owner, mint, &TOKEN_PROGRAM)
+        .ok_or("no token address".into())
 }
 
 /// An initialized SPL Token account.

@@ -1,9 +1,6 @@
 //! The Lighthouse instructions that the assertions use, in the borsh layout of Lighthouse 2.0.0,
 //! which is immutable on mainnet.
 
-use alloc::vec;
-use alloc::vec::Vec;
-
 use sdp_intents_spec::{AccountRole, Address};
 
 /// `L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95`.
@@ -41,11 +38,62 @@ const SOME: u8 = 1;
 /// The token amount is at byte 64 of an SPL Token or Token-2022 account.
 pub(crate) const TOKEN_AMOUNT_OFFSET: u16 = 64;
 
-/// A Lighthouse instruction. Its program is [`LIGHTHOUSE_PROGRAM`].
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// The most accounts of an instruction here: a memory write.
+const MAX_ACCOUNTS: usize = 5;
+/// The most data of an instruction here is 37 bytes: a delegate check that names the delegate.
+const MAX_DATA: usize = 48;
+
+/// A Lighthouse instruction. Its program is [`LIGHTHOUSE_PROGRAM`]. It lives on the stack, so a
+/// program builds one with no allocation. A write past `MAX_DATA` leaves it with no data, so it
+/// matches no instruction of a transaction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LighthouseInstruction {
-    pub accounts: Vec<Meta>,
-    pub data: Vec<u8>,
+    accounts: [Meta; MAX_ACCOUNTS],
+    accounts_len: usize,
+    data: [u8; MAX_DATA],
+    /// `None` after a write past `MAX_DATA`.
+    data_len: Option<usize>,
+}
+
+impl LighthouseInstruction {
+    fn new(accounts: &[Meta]) -> Self {
+        let mut stored = [readonly(&SYSTEM_PROGRAM); MAX_ACCOUNTS];
+        let accounts_len = stored.iter_mut().zip(accounts).map(|(slot, meta)| *slot = *meta).count();
+
+        Self { accounts: stored, accounts_len, data: [0; MAX_DATA], data_len: Some(0) }
+    }
+
+    pub fn accounts(&self) -> &[Meta] {
+        self.accounts.get(..self.accounts_len).unwrap_or_default()
+    }
+
+    pub fn data(&self) -> &[u8] {
+        self.data_len.and_then(|len| self.data.get(..len)).unwrap_or_default()
+    }
+
+    fn bytes(&mut self, bytes: &[u8]) -> &mut Self {
+        let start = self.data_len;
+        let end = start.and_then(|start| start.checked_add(bytes.len()));
+        let slot = start.zip(end).and_then(|(start, end)| self.data.get_mut(start..end));
+
+        self.data_len = slot.map(|slot| slot.copy_from_slice(bytes)).and(end);
+
+        self
+    }
+
+    /// The unsigned LEB128 of `value`: 7 bits a byte, low bits first, with the top bit set on
+    /// every byte but the last.
+    fn leb128(&mut self, value: u64) -> &mut Self {
+        let groups = u64::BITS.saturating_sub(value.leading_zeros()).div_ceil(7).max(1);
+        let mut bytes = [0u8; 10];
+
+        for (slot, group) in bytes.iter_mut().zip(0..groups) {
+            let low = value.checked_shr(group.saturating_mul(7)).unwrap_or(0) as u8 & 0x7f;
+            *slot = if group.saturating_add(1) < groups { low | 0x80 } else { low };
+        }
+
+        self.bytes(bytes.get(..groups as usize).unwrap_or_default())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,66 +136,66 @@ impl Memory {
         offset: u64,
         source: Source,
     ) -> LighthouseInstruction {
-        let source = match source {
+        let accounts = [
+            readonly(&LIGHTHOUSE_PROGRAM),
+            readonly(&SYSTEM_PROGRAM),
+            Meta { address: *payer, role: AccountRole::WritableSigner },
+            Meta { address: self.address, role: AccountRole::Writable },
+            readonly(account),
+        ];
+        let mut instruction = LighthouseInstruction::new(&accounts);
+        instruction.bytes(&[MEMORY_WRITE, self.id, self.bump]).leb128(offset);
+
+        match source {
             Source::AccountData { offset, len } => {
-                [&[WRITE_ACCOUNT_DATA][..], &offset.to_le_bytes(), &len.to_le_bytes()].concat()
+                instruction.bytes(&[WRITE_ACCOUNT_DATA]).bytes(&offset.to_le_bytes()).bytes(&len.to_le_bytes())
             }
-            Source::Lamports => vec![WRITE_ACCOUNT_INFO_FIELD, FIELD_LAMPORTS],
+            Source::Lamports => instruction.bytes(&[WRITE_ACCOUNT_INFO_FIELD, FIELD_LAMPORTS]),
         };
 
-        LighthouseInstruction {
-            accounts: vec![
-                readonly(&LIGHTHOUSE_PROGRAM),
-                readonly(&SYSTEM_PROGRAM),
-                Meta { address: *payer, role: AccountRole::WritableSigner },
-                Meta { address: self.address, role: AccountRole::Writable },
-                readonly(account),
-            ],
-            data: [&[MEMORY_WRITE, self.id, self.bump][..], &leb128(offset), &source].concat(),
-        }
+        instruction
     }
 
     /// Closes memory and returns its rent to `payer`.
     pub(crate) fn close(&self, payer: &Address) -> LighthouseInstruction {
-        LighthouseInstruction {
-            accounts: vec![
-                readonly(&LIGHTHOUSE_PROGRAM),
-                Meta { address: *payer, role: AccountRole::WritableSigner },
-                Meta { address: self.address, role: AccountRole::Writable },
-            ],
-            data: vec![MEMORY_CLOSE, self.id, self.bump],
-        }
+        let accounts = [
+            readonly(&LIGHTHOUSE_PROGRAM),
+            Meta { address: *payer, role: AccountRole::WritableSigner },
+            Meta { address: self.address, role: AccountRole::Writable },
+        ];
+        let mut instruction = LighthouseInstruction::new(&accounts);
+        instruction.bytes(&[MEMORY_CLOSE, self.id, self.bump]);
+
+        instruction
     }
 
     /// Fails unless the lamports of `account` changed by at least `min_change` since the snapshot at
     /// `offset`.
     pub(crate) fn lamports_change(&self, account: &Address, offset: u64, min_change: i128) -> LighthouseInstruction {
-        let assertion = [
-            &[DELTA_ACCOUNT_INFO][..],
-            &leb128(offset),
-            &[DELTA_LAMPORTS],
-            &min_change.to_le_bytes(),
-            &[GREATER_THAN_OR_EQUAL],
-        ]
-        .concat();
+        let mut instruction = self.delta(account);
+        instruction
+            .bytes(&[DELTA_ACCOUNT_INFO])
+            .leb128(offset)
+            .bytes(&[DELTA_LAMPORTS])
+            .bytes(&min_change.to_le_bytes())
+            .bytes(&[GREATER_THAN_OR_EQUAL]);
 
-        self.delta(account, &assertion)
+        instruction
     }
 
     /// Fails unless the token amount of `account` changed by at least `min_change` since the
     /// snapshot at `offset`.
     pub(crate) fn amount_change(&self, account: &Address, offset: u64, min_change: i128) -> LighthouseInstruction {
-        let assertion = [
-            &[DELTA_DATA][..],
-            &leb128(offset),
-            &leb128(u64::from(TOKEN_AMOUNT_OFFSET)),
-            &[DELTA_U64],
-            &min_change.to_le_bytes(),
-            &[GREATER_THAN_OR_EQUAL],
-        ]
-        .concat();
+        let mut instruction = self.delta(account);
+        instruction
+            .bytes(&[DELTA_DATA])
+            .leb128(offset)
+            .leb128(u64::from(TOKEN_AMOUNT_OFFSET))
+            .bytes(&[DELTA_U64])
+            .bytes(&min_change.to_le_bytes())
+            .bytes(&[GREATER_THAN_OR_EQUAL]);
 
-        self.delta(account, &assertion)
+        instruction
     }
 
     /// Fails unless `len` bytes of `account` at `data_offset` equal the snapshot at `offset`.
@@ -158,83 +206,65 @@ impl Memory {
         data_offset: u16,
         len: u16,
     ) -> LighthouseInstruction {
-        let assertion = [
-            &[DELTA_DATA][..],
-            &leb128(offset),
-            &leb128(u64::from(data_offset)),
-            &[DELTA_BYTES],
-            &len.to_le_bytes(),
-            &[EQUAL],
-        ]
-        .concat();
+        let mut instruction = self.delta(account);
+        instruction
+            .bytes(&[DELTA_DATA])
+            .leb128(offset)
+            .leb128(u64::from(data_offset))
+            .bytes(&[DELTA_BYTES])
+            .bytes(&len.to_le_bytes())
+            .bytes(&[EQUAL]);
 
-        self.delta(account, &assertion)
+        instruction
     }
 
-    fn delta(&self, account: &Address, assertion: &[u8]) -> LighthouseInstruction {
-        LighthouseInstruction {
-            accounts: vec![readonly(&self.address), readonly(account)],
-            data: [&[ASSERT_ACCOUNT_DELTA, LOG_SILENT][..], assertion].concat(),
-        }
+    fn delta(&self, account: &Address) -> LighthouseInstruction {
+        let mut instruction = LighthouseInstruction::new(&[readonly(&self.address), readonly(account)]);
+        instruction.bytes(&[ASSERT_ACCOUNT_DELTA, LOG_SILENT]);
+
+        instruction
     }
 }
 
 /// Fails unless the token account holds at least `min`. It needs no snapshot.
 pub(crate) fn amount_at_least(account: &Address, min: u64) -> LighthouseInstruction {
-    LighthouseInstruction {
-        accounts: vec![readonly(account)],
-        data: [&[ASSERT_TOKEN_ACCOUNT, LOG_SILENT, TOKEN_AMOUNT][..], &min.to_le_bytes(), &[GREATER_THAN_OR_EQUAL]]
-            .concat(),
-    }
+    let mut instruction = LighthouseInstruction::new(&[readonly(account)]);
+    instruction
+        .bytes(&[ASSERT_TOKEN_ACCOUNT, LOG_SILENT, TOKEN_AMOUNT])
+        .bytes(&min.to_le_bytes())
+        .bytes(&[GREATER_THAN_OR_EQUAL]);
+
+    instruction
 }
 
 /// Fails unless the token account's delegate is `delegate`, or it has none when `delegate` is
 /// `None`.
 pub(crate) fn delegate_is(account: &Address, delegate: Option<&Address>) -> LighthouseInstruction {
-    let value: Vec<u8> = match delegate {
-        Some(delegate) => [&[SOME][..], &delegate.0].concat(),
-        None => vec![NONE],
-    };
+    let mut instruction = LighthouseInstruction::new(&[readonly(account)]);
+    instruction.bytes(&[ASSERT_TOKEN_ACCOUNT, LOG_SILENT, TOKEN_DELEGATE]);
 
-    LighthouseInstruction {
-        accounts: vec![readonly(account)],
-        data: [&[ASSERT_TOKEN_ACCOUNT, LOG_SILENT, TOKEN_DELEGATE][..], &value, &[EQUAL]].concat(),
+    match delegate {
+        Some(delegate) => instruction.bytes(&[SOME]).bytes(&delegate.0),
+        None => instruction.bytes(&[NONE]),
     }
+    .bytes(&[EQUAL]);
+
+    instruction
 }
 
 /// Fails unless the token account's delegate may take at most `max`.
 pub(crate) fn delegated_at_most(account: &Address, max: u64) -> LighthouseInstruction {
-    LighthouseInstruction {
-        accounts: vec![readonly(account)],
-        data: [
-            &[ASSERT_TOKEN_ACCOUNT, LOG_SILENT, TOKEN_DELEGATED_AMOUNT][..],
-            &max.to_le_bytes(),
-            &[LESS_THAN_OR_EQUAL],
-        ]
-        .concat(),
-    }
+    let mut instruction = LighthouseInstruction::new(&[readonly(account)]);
+    instruction
+        .bytes(&[ASSERT_TOKEN_ACCOUNT, LOG_SILENT, TOKEN_DELEGATED_AMOUNT])
+        .bytes(&max.to_le_bytes())
+        .bytes(&[LESS_THAN_OR_EQUAL]);
+
+    instruction
 }
 
 fn readonly(address: &Address) -> Meta {
     Meta { address: *address, role: AccountRole::Readonly }
-}
-
-/// The unsigned LEB128 of `value`: 7 bits a byte, low bits first, with the top bit set on every
-/// byte but the last.
-fn leb128(mut value: u64) -> Vec<u8> {
-    let mut bytes = Vec::new();
-
-    loop {
-        let low = (value & 0x7f) as u8;
-        value >>= 7;
-
-        if value == 0 {
-            bytes.push(low);
-            return bytes;
-        }
-
-        bytes.push(low | 0x80);
-    }
 }
 
 #[cfg(test)]
@@ -243,9 +273,31 @@ mod tests {
 
     #[test]
     fn writes_leb128() {
-        assert_eq!(leb128(0), [0]);
-        assert_eq!(leb128(64), [64]);
-        assert_eq!(leb128(300), [0xac, 0x02]);
+        let leb128 = |value| {
+            let mut instruction = LighthouseInstruction::new(&[]);
+            instruction.leb128(value);
+
+            instruction
+        };
+
+        assert_eq!(leb128(0).data(), [0]);
+        assert_eq!(leb128(64).data(), [64]);
+        assert_eq!(leb128(300).data(), [0xac, 0x02]);
+    }
+
+    /// The longest instruction fits, and a write past the buffer leaves no data.
+    #[test]
+    fn the_longest_instruction_fits() {
+        let memory = Memory { address: Address([1; 32]), id: 0, bump: 255 };
+        let amount = memory.amount_change(&Address([2; 32]), u64::MAX, i128::MIN);
+        let delegate = delegate_is(&Address([2; 32]), Some(&Address([3; 32])));
+
+        assert_eq!(amount.data().len(), 32);
+        assert_eq!(delegate.data().len(), 37);
+        let mut overflowed = LighthouseInstruction::new(&[]);
+        overflowed.bytes(&[0; MAX_DATA]).bytes(&[0]);
+
+        assert!(overflowed.data().is_empty());
     }
 
     #[test]

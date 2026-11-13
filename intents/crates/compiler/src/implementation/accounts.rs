@@ -116,7 +116,7 @@ impl Build<'_, '_> {
         object.finish(self.sink);
 
         let first = self.seeds.len();
-        let seeds: Vec<_> = seeds?.iter().filter_map(|seed| self.read_segment(seed, visible)).collect();
+        let seeds: Vec<_> = seeds?.iter().filter_map(|seed| self.read_segment(seed, visible, false)).collect();
         self.seeds.extend(seeds);
 
         let range = RangeV1 {
@@ -183,7 +183,7 @@ impl Build<'_, '_> {
         let names = Names::new(
             self.schema,
             self.account_names.get(..visible).unwrap_or_default(),
-            Allowed { payers: true, accounts: true },
+            Allowed { payers: true, accounts: true, builder: false },
         );
         let resolved = names.resolve(reference, &node.pointer, self.sink)?;
 
@@ -219,7 +219,7 @@ impl Build<'_, '_> {
         let names = Names::new(
             self.schema,
             self.account_names.get(..visible).unwrap_or_default(),
-            Allowed { payers: false, accounts: true },
+            Allowed { payers: false, accounts: true, builder: false },
         );
 
         names.resolve(reference, &node.pointer, self.sink).map(|resolved| resolved.value.index)

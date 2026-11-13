@@ -11,6 +11,7 @@ rust-version.workspace = true
 [dependencies]
 bytemuck.workspace = true
 pinocchio.workspace = true
+sdp-intents-engine = { path = "../engine" }
 sdp-intents-spec.workspace = true
 solana-instruction.workspace = true
 solana-sha256-hasher.workspace = true

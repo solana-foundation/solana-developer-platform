@@ -69,11 +69,14 @@ impl OnchainInputs<'_, '_> {
             RecipeKind::Program | RecipeKind::Remote => self.built.roles(),
             RecipeKind::Static | RecipeKind::RemoteTransaction => Vec::new(),
         };
+        let bumps = self.recipe.bumps()?;
         let verify = VerifyIntent {
             intent: self.intent,
             extra_accounts: self.extra_accounts,
             builder_roles,
             outputs: &self.built.outputs,
+            bumps: bumps.as_slice(),
+            builder_bumps: &self.built.builder_bumps,
             rent_cap: self.rent_cap,
             guarded,
             counts,
@@ -118,10 +121,10 @@ fn lighthouse_instruction(instruction: &LighthouseInstruction) -> Instruction {
     Instruction {
         program: LIGHTHOUSE_PROGRAM,
         accounts: instruction
-            .accounts
+            .accounts()
             .iter()
             .map(|meta| AccountMeta { address: meta.address, role: meta.role })
             .collect(),
-        data: instruction.data.clone(),
+        data: instruction.data().to_vec(),
     }
 }

@@ -21,20 +21,6 @@ pub fn count(recipe: &Recipe<'_>) -> Result<usize> {
     Ok(recipe.implementation().instructions().map_err(|error| refused(error.into()))?.len())
 }
 
-/// Each account of the built instructions with its role, in order.
-pub fn named<C: Chain>(recipe: &Recipe<'_>, chain: &C) -> Result<Vec<Meta>> {
-    let mut named = Vec::new();
-
-    for expected in recipe.instructions(chain).map_err(refused)? {
-        for account in expected.map_err(refused)?.accounts() {
-            let account = account.map_err(refused)?;
-            named.push(Meta { address: *account.address, role: account.role });
-        }
-    }
-
-    Ok(named)
-}
-
 /// The output addresses that the record binds, in borsh.
 pub fn outputs(recipe: &Recipe<'_>) -> Result<Vec<u8>> {
     let count = recipe.interface().outputs().map_err(|error| refused(error.into()))?.len();
@@ -46,40 +32,48 @@ pub fn outputs(recipe: &Recipe<'_>) -> Result<Vec<u8>> {
         .map(|addresses| addresses.concat())
 }
 
-pub fn verify<C: Chain>(recipe: &Recipe<'_>, chain: &C, sysvar: &SysvarInstructions, segment: &Segment) -> Result<()> {
-    let roles = transaction_roles(recipe, chain)?;
-    let checked = Checked { sysvar, span: &segment.whole, roles: &roles };
+/// What the comparison of the built span found: each account of the built instructions with its
+/// role, in order, and the union of each account's roles, which [`check_roles`] needs.
+pub struct Compared {
+    pub named: Vec<Meta>,
+    roles: TransactionRoles,
+}
 
-    recipe.instructions(chain).map_err(refused)?.zip(segment.built.clone()).try_for_each(|(expected, position)| {
-        let expected = expected.map_err(refused)?;
+/// Builds the record's instructions once, and compares each with the sysvar's instruction at its
+/// place in `built`: the program, each account's address, and the data, byte for byte.
+pub fn compare<C: Chain>(
+    recipe: &Recipe<'_>,
+    chain: &C,
+    sysvar: &SysvarInstructions,
+    built: &Range<usize>,
+) -> Result<Compared> {
+    let mut compared = Compared { named: Vec::new(), roles: TransactionRoles::new(recipe.payers().fee) };
 
-        checked.compare(&expected, &sysvar.load_instruction_at(position)?)
+    recipe.instructions(chain).map_err(refused)?.zip(built.clone()).try_for_each(|(expected, position)| {
+        compared.add(&expected.map_err(refused)?, &sysvar.load_instruction_at(position)?)
+    })?;
+
+    Ok(compared)
+}
+
+/// Each account's role in the sysvar must be the union of its roles in the span, or a role that an
+/// instruction outside the segment explains.
+pub fn check_roles(compared: &Compared, sysvar: &SysvarInstructions, segment: &Segment) -> Result<()> {
+    segment.built.clone().try_for_each(|position| {
+        let actual = sysvar.load_instruction_at(position)?;
+
+        (0..actual.num_account_metas()).try_for_each(|index| {
+            let meta = actual.get_instruction_account_at(index)?;
+            let role = AccountRole::new(meta.is_writable(), meta.is_signer());
+
+            compared.roles.check(sysvar, &segment.whole, &meta.key, role)
+        })
     })
 }
 
-/// What each instruction of the span is compared against.
-struct Checked<'a> {
-    sysvar: &'a SysvarInstructions,
-    span: &'a Range<usize>,
-    roles: &'a TransactionRoles,
-}
-
-fn transaction_roles<C: Chain>(recipe: &Recipe<'_>, chain: &C) -> Result<TransactionRoles> {
-    let mut roles = TransactionRoles::new(recipe.payers().fee);
-
-    for expected in recipe.instructions(chain).map_err(refused)? {
-        for account in expected.map_err(refused)?.accounts() {
-            let account = account.map_err(refused)?;
-            roles.add(account.address, account.role);
-        }
-    }
-
-    Ok(roles)
-}
-
-impl Checked<'_> {
-    fn compare<C: Chain>(
-        &self,
+impl Compared {
+    fn add<C: Chain>(
+        &mut self,
         expected: &BuiltInstruction<'_, C>,
         actual: &IntrospectedInstruction<'_>,
     ) -> Result<()> {
@@ -89,11 +83,12 @@ impl Checked<'_> {
         expected.accounts().enumerate().try_for_each(|(position, account)| {
             let account = account.map_err(refused)?;
             let meta = actual.get_instruction_account_at(position)?;
-            let role = AccountRole::new(meta.is_writable(), meta.is_signer());
-
             require!(meta.key.as_ref() == account.address.0, RegistryError::WrongInstruction);
 
-            self.roles.check(self.sysvar, self.span, &meta.key, role)
+            self.named.push(Meta { address: *account.address, role: account.role });
+            self.roles.add(account.address, account.role);
+
+            Ok::<(), anchor_lang::Error>(())
         })?;
 
         let data = actual.get_instruction_data();

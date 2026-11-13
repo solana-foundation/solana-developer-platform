@@ -40,11 +40,16 @@ impl Section {
     }
 }
 
-/// `ReadyHeaderV1`, the outputs, no signers, then the instruction section.
-pub(crate) fn ready(section: &Section, outputs: &[u8]) -> Result<Vec<u8>, BuildError> {
-    let header = ReadyHeaderV1 { num_instructions: section.count, num_signers: 0, outputs_len: length(outputs.len())? };
+/// `ReadyHeaderV1`, the outputs, no signers, the bumps, then the instruction section.
+pub(crate) fn ready(section: &Section, outputs: &[u8], bumps: &[u8]) -> Result<Vec<u8>, BuildError> {
+    let header = ReadyHeaderV1 {
+        num_instructions: section.count,
+        num_signers: 0,
+        outputs_len: length(outputs.len())?,
+        num_bumps: u8::try_from(bumps.len()).map_err(|_| BuildError::TooLarge)?,
+    };
 
-    Ok([bytes_of(&header), outputs, &section.bytes].concat())
+    Ok([bytes_of(&header), outputs, bumps, &section.bytes].concat())
 }
 
 pub(crate) fn more_accounts(addresses: &[Address]) -> Result<Vec<u8>, BuildError> {
@@ -119,11 +124,12 @@ mod tests {
 
     #[test]
     fn a_ready_result_parses_with_the_spec_view() {
-        let bytes = ready(&transfer_section(), &[7; 32]).unwrap();
+        let bytes = ready(&transfer_section(), &[7; 32], &[255, 253]).unwrap();
         let ready = Ready::parse(&bytes).unwrap();
         let instruction = ready.instructions().unwrap().next().unwrap().unwrap();
 
         assert_eq!(ready.outputs().unwrap(), [7; 32]);
+        assert_eq!(ready.bumps().unwrap(), [255, 253]);
         assert_eq!(instruction.program.0, [1; 32]);
         assert_eq!(instruction.accounts.get(1).unwrap().address.0, RENT_PAYER.to_bytes());
         assert_eq!(instruction.accounts.get(1).unwrap().role(), Ok(AccountRole::WritableSigner));
@@ -154,7 +160,7 @@ mod tests {
     fn a_hashed_result_hashes_the_section_that_ready_holds() {
         let section = transfer_section();
         let hashed_bytes = hashed(&section, &[]).unwrap();
-        let ready_bytes = ready(&section, &[]).unwrap();
+        let ready_bytes = ready(&section, &[], &[]).unwrap();
 
         let hashed = HashedReady::parse(&hashed_bytes).unwrap();
         let ready = Ready::parse(&ready_bytes).unwrap();

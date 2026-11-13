@@ -5,23 +5,40 @@ use sdp_intents_spec::wire::{AccountV1, RangeV1};
 use sdp_intents_spec::{Address, AddressSource, Segment, SpecError};
 
 use crate::documents::Documents;
-use crate::pda::{self, MAX_SEEDS};
+use crate::pda::{self, ASSOCIATED_TOKEN_PROGRAM, MAX_SEEDS};
 use crate::value::{Bytes, Context};
 use crate::{Chain, EngineError};
 
 /// A record has at most 32 accounts.
 const MAX_ACCOUNTS: usize = 32;
 
-/// The address of each account of a recipe, in record order. It is about 1 KB, so a program can
-/// hold it in one stack frame.
+/// The address of each account of a recipe, in record order, and the bump of each program address.
+/// It is about 1 KB, so a program can hold it in one stack frame.
 pub(crate) struct Addresses {
     slots: [Address; MAX_ACCOUNTS],
     resolved: AccountSet,
+    bumps: [u8; MAX_ACCOUNTS],
+    /// The program addresses whose bump the caller stated, which derive with one hash.
+    stated: AccountSet,
+    /// The bumps of a builder's program addresses in borsh, a `u32` length then each bump, which a
+    /// builder call names as `{builder.bumps}`.
+    builder_bumps: [u8; BUILDER_BUMPS_LEN],
+    builder_bumps_len: usize,
 }
+
+/// A borsh `Vec<u8>` of at most 32 bumps.
+const BUILDER_BUMPS_LEN: usize = 4 + MAX_ACCOUNTS;
 
 impl Default for Addresses {
     fn default() -> Self {
-        Self { slots: [Address::default(); MAX_ACCOUNTS], resolved: AccountSet::default() }
+        Self {
+            slots: [Address::default(); MAX_ACCOUNTS],
+            resolved: AccountSet::default(),
+            bumps: [0; MAX_ACCOUNTS],
+            stated: AccountSet::default(),
+            builder_bumps: [0; BUILDER_BUMPS_LEN],
+            builder_bumps_len: 4,
+        }
     }
 }
 
@@ -30,11 +47,57 @@ impl Addresses {
         self.resolved.contains(account).then(|| self.slots.get(usize::from(account))).flatten()
     }
 
-    fn set(&mut self, account: u8, address: Address) {
-        if let Some(slot) = self.slots.get_mut(usize::from(account)) {
-            *slot = address;
+    fn set(&mut self, account: u8, derived: Derived) {
+        if let (Some(slot), Some(bump)) =
+            (self.slots.get_mut(usize::from(account)), self.bumps.get_mut(usize::from(account)))
+        {
+            *slot = derived.address;
+            *bump = derived.bump.unwrap_or(0);
             self.resolved.insert(account);
         }
+    }
+
+    pub(crate) fn bump(&self, account: u8) -> Option<u8> {
+        self.bumps.get(usize::from(account)).copied()
+    }
+
+    pub(crate) fn stated_bump(&self, account: u8) -> Option<u8> {
+        self.stated.contains(account).then(|| self.bump(account)).flatten()
+    }
+
+    /// `None` when there are more bumps than the buffer holds.
+    pub(crate) fn state_builder_bumps(&mut self, bumps: &[u8]) -> Option<()> {
+        let len = u32::try_from(bumps.len()).ok()?;
+        let end = bumps.len().checked_add(4)?;
+        self.builder_bumps.get_mut(..4)?.copy_from_slice(&len.to_le_bytes());
+        self.builder_bumps.get_mut(4..end)?.copy_from_slice(bumps);
+        self.builder_bumps_len = end;
+
+        Some(())
+    }
+
+    pub(crate) fn builder_bumps(&self) -> &[u8] {
+        self.builder_bumps.get(..self.builder_bumps_len).unwrap_or_default()
+    }
+
+    pub(crate) fn state_bump(&mut self, account: u8, bump: u8) {
+        if let Some(slot) = self.bumps.get_mut(usize::from(account)) {
+            *slot = bump;
+            self.stated.insert(account);
+        }
+    }
+}
+
+/// An account's address, and its bump when it is a program address.
+#[derive(Clone, Copy)]
+pub(crate) struct Derived {
+    address: Address,
+    bump: Option<u8>,
+}
+
+impl Derived {
+    fn plain(address: Address) -> Self {
+        Self { address, bump: None }
     }
 }
 
@@ -55,7 +118,11 @@ impl AccountSet {
         (0u8..32).filter(move |account| self.contains(*account))
     }
 
-    fn insert(&mut self, account: u8) {
+    pub(crate) fn len(self) -> usize {
+        self.iter().count()
+    }
+
+    pub(crate) fn insert(&mut self, account: u8) {
         self.0 |= bit(account);
     }
 
@@ -100,7 +167,7 @@ impl Documents<'_> {
             let derived = Context { documents: *self, addresses, chain }.derive(account, index);
 
             match derived {
-                Ok(address) => addresses.set(index, address),
+                Ok(derived) => addresses.set(index, derived),
                 Err(EngineError::MissingData { account }) => missing.insert_address(account, addresses),
                 Err(EngineError::Unresolved { .. }) => {}
                 Err(error) => return Err(error),
@@ -143,29 +210,28 @@ impl Documents<'_> {
 }
 
 impl<C: Chain> Context<'_, C> {
-    fn derive(&self, account: &AccountV1, index: u8) -> Result<Address, EngineError> {
-        let bad_seeds = EngineError::BadSeeds { account: index };
-
+    fn derive(&self, account: &AccountV1, index: u8) -> Result<Derived, EngineError> {
         match account.address()? {
-            AddressSource::Value(value) => self.address(value).copied(),
-            AddressSource::Static { address } => self.static_address(address).copied(),
+            AddressSource::Value(value) => self.address(value).copied().map(Derived::plain),
+            AddressSource::Static { address } => self.static_address(address).copied().map(Derived::plain),
             AddressSource::Pda { program, seeds } => self.pda(self.address(program)?, seeds, index),
             AddressSource::Ata { owner, mint, token_program } => {
                 let [owner, mint, token_program] =
                     [owner, mint, token_program].map(|value| self.address(value)).map(|address| address.copied());
+                let (owner, mint, token_program) = (owner?, mint?, token_program?);
 
-                pda::associated_token_account(&owner?, &mint?, &token_program?).ok_or(bad_seeds)
+                self.program_address(&pda::ata_seeds(&owner, &mint, &token_program), &ASSOCIATED_TOKEN_PROGRAM, index)
             }
             AddressSource::HasOne { account, owner, offset } => {
                 let data = self.account_data(account, owner)?;
                 let bytes = data.get(usize::from(offset)..).and_then(<[u8]>::first_chunk::<32>);
 
-                bytes.map(|bytes| Address(*bytes)).ok_or(EngineError::ShortData { account })
+                bytes.map(|bytes| Derived::plain(Address(*bytes))).ok_or(EngineError::ShortData { account })
             }
         }
     }
 
-    fn pda(&self, program: &Address, seeds: RangeV1, account: u8) -> Result<Address, EngineError> {
+    fn pda(&self, program: &Address, seeds: RangeV1, account: u8) -> Result<Derived, EngineError> {
         let bad_seeds = EngineError::BadSeeds { account };
         let seeds = self.documents.implementation.seeds(seeds)?;
         let mut parts = [Bytes::EMPTY; MAX_SEEDS];
@@ -175,7 +241,18 @@ impl<C: Chain> Context<'_, C> {
             *part = self.segment(seed)?;
         }
 
-        pda::find(parts, program).ok_or(bad_seeds)
+        self.program_address(parts, program, account)
+    }
+
+    /// One hash with the bump that the caller stated, or else a search for the canonical bump.
+    fn program_address(&self, seeds: &[Bytes<'_>], program: &Address, account: u8) -> Result<Derived, EngineError> {
+        let bad_seeds = EngineError::BadSeeds { account };
+
+        match self.addresses.stated_bump(account) {
+            Some(bump) => pda::with_bump(seeds, bump, program).map(|address| Derived { address, bump: Some(bump) }),
+            None => pda::find(seeds, program).map(|found| Derived { address: found.address, bump: Some(found.bump) }),
+        }
+        .ok_or(bad_seeds)
     }
 }
 
@@ -288,6 +365,6 @@ mod tests {
 
     #[test]
     fn the_address_table_fits_a_stack_frame() {
-        assert!(core::mem::size_of::<Addresses>() <= 1_040);
+        assert!(core::mem::size_of::<Addresses>() <= 1_130);
     }
 }

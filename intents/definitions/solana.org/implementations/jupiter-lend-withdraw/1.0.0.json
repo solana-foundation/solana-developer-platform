@@ -57,7 +57,8 @@
     "data": [
       { "value": "86507a42ca1c0af6", "encoding": "hex" },
       { "value": "{inputs.shares}", "encoding": "u64le" },
-      { "value": "{inputs.minAmount}", "encoding": "u64le" }
+      { "value": "{inputs.minAmount}", "encoding": "u64le" },
+      { "value": "{builder.bumps}", "encoding": "borsh" }
     ]
   },
   "postConditions": [

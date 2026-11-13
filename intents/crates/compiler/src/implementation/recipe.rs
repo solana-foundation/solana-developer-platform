@@ -103,7 +103,7 @@ impl Build<'_, '_> {
         let account_count = self.accounts.len();
         let data = object.required("data", self.sink).and_then(|data| data.array(self.sink));
         let segments: Vec<SegmentV1> =
-            data?.iter().filter_map(|segment| self.read_segment(segment, account_count)).collect();
+            data?.iter().filter_map(|segment| self.read_segment(segment, account_count, true)).collect();
 
         let first_account = self.instruction_accounts.len();
         let indexes: Vec<u8> = (0..account_count).filter_map(|index| u8::try_from(index).ok()).collect();
@@ -137,8 +137,11 @@ impl Build<'_, '_> {
         let indexes: Vec<Option<u8>> =
             accounts.unwrap_or_default().iter().map(|account| self.account_by_name(account)).collect();
         let all_accounts = self.accounts.len();
-        let segments: Vec<SegmentV1> =
-            data.unwrap_or_default().iter().filter_map(|segment| self.read_segment(segment, all_accounts)).collect();
+        let segments: Vec<SegmentV1> = data
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|segment| self.read_segment(segment, all_accounts, false))
+            .collect();
 
         let (Some(program), Some(indexes)) = (program, indexes.into_iter().collect::<Option<Vec<u8>>>()) else {
             return;

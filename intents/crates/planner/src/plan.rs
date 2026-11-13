@@ -82,6 +82,8 @@ pub(crate) struct Built {
     pub(crate) instructions: Vec<Instruction>,
     pub(crate) signers: Vec<Address>,
     pub(crate) outputs: Vec<u8>,
+    /// The canonical bumps of a builder's program addresses, which `verify_intent` passes back.
+    pub(crate) builder_bumps: Vec<u8>,
     /// The provider's transaction of a remote recipe that returns one.
     pub(crate) frozen: Option<FrozenTransaction>,
 }
@@ -98,7 +100,13 @@ impl Built {
             .map(|output| recipe.output_address(output).map(|address| address.0))
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(Self { instructions, signers: Vec::new(), outputs: outputs.concat(), frozen: None })
+        Ok(Self {
+            instructions,
+            signers: Vec::new(),
+            outputs: outputs.concat(),
+            builder_bumps: Vec::new(),
+            frozen: None,
+        })
     }
 
     /// `verify_intent` maps each account at the rent payer's address back to the placeholder, so a
@@ -122,7 +130,13 @@ impl Built {
             .map(|instruction| instruction.and_then(|instruction| Instruction::ready(&instruction, payers)))
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(Self { instructions, signers: ready.signers()?.to_vec(), outputs: ready.outputs()?.to_vec(), frozen: None })
+        Ok(Self {
+            instructions,
+            signers: ready.signers()?.to_vec(),
+            outputs: ready.outputs()?.to_vec(),
+            builder_bumps: ready.bumps()?.to_vec(),
+            frozen: None,
+        })
     }
 
     /// The role of each account of the instructions, in order, as a builder writes them.

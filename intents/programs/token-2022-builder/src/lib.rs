@@ -34,9 +34,14 @@ declare_id!("2gMFoKF3p5eB2m72ccjncZH8e5agVYbHBH8A29zDMdBm");
 pub mod token_2022_builder {
     use super::*;
 
-    pub fn build_transfer_v1(ctx: &mut Context<BuildTransferV1>, amount: u64, memo: Option<String>) -> Result<()> {
+    pub fn build_transfer_v1(
+        ctx: &mut Context<BuildTransferV1>,
+        amount: u64,
+        memo: Option<String>,
+        bumps: &[u8],
+    ) -> Result<()> {
         let remaining = ctx.remaining_accounts();
-        let mut build = Build::new(ctx.program_id, <BuildTransferV1 as TryAccounts>::HEADER_SIZE, &remaining)?;
+        let mut build = Build::new(ctx.program_id, <BuildTransferV1 as TryAccounts>::HEADER_SIZE, &remaining, bumps)?;
         let accounts = TransferAccounts {
             mint: ctx.accounts.mint.account(),
             from: ctx.accounts.from.account(),

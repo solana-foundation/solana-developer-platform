@@ -32,14 +32,16 @@ pub struct ResultPointerV1 {
     pub len: PodU32,
 }
 
-/// The start of a `Ready` result. The outputs follow, then 32 bytes for each signer, then the
-/// instruction section.
+/// The start of a `Ready` result. The outputs follow, then 32 bytes for each signer, then one byte
+/// for each bump, then the instruction section. The bumps are the canonical bump of each program
+/// address that the builder derived, in order. `verify_intent` passes them back to the builder.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Pod, Zeroable)]
 pub struct ReadyHeaderV1 {
     pub num_instructions: u8,
     pub num_signers: u8,
     pub outputs_len: PodU16,
+    pub num_bumps: u8,
 }
 
 /// The start of one instruction in the instruction section. `num_accounts` entries of
@@ -80,7 +82,7 @@ mod tests {
     #[test]
     fn layouts_are_pinned() {
         assert_eq!(size_of::<ResultPointerV1>(), 10);
-        assert_eq!(size_of::<ReadyHeaderV1>(), 4);
+        assert_eq!(size_of::<ReadyHeaderV1>(), 5);
         assert_eq!(size_of::<InstructionHeaderV1>(), 35);
         assert_eq!(size_of::<AccountMetaV1>(), 33);
         assert_eq!(size_of::<HashedReadyV1>(), 37);

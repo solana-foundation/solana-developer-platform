@@ -95,11 +95,15 @@ impl Published {
             accounts.implementation_version,
         ];
         let record = record_accounts(svm, documents)?;
+        let bumps = record.bumps;
+        let record = record.addresses;
         let readonly = |address: &Address| AccountMeta { address: spec_address(address), role: AccountRole::Readonly };
         let data = anchor_lang::InstructionData::data(&registry::instruction::VerifyIntent {
             intent: &documents.intent,
             builder_roles,
             outputs: &[],
+            bumps: &bumps,
+            builder_bumps: &[],
             layout,
         });
 
@@ -166,8 +170,15 @@ pub fn around(plan: &Plan, before: Instruction, after: Instruction) -> Plan {
     Plan { transaction: Transaction { instructions, ..plan.transaction.clone() }, ..plan.clone() }
 }
 
-/// The address of each account of the record's table, as the engine resolves it against `svm`.
-fn record_accounts(svm: &LiteSVM, documents: &Documents) -> Result<Vec<Address>, Failure> {
+/// The record's accounts as the engine resolves them against `svm`.
+struct RecordAccounts {
+    /// The address of each account of the record's table.
+    addresses: Vec<Address>,
+    /// The canonical bump of each program address of the table.
+    bumps: Vec<u8>,
+}
+
+fn record_accounts(svm: &LiteSVM, documents: &Documents) -> Result<RecordAccounts, Failure> {
     let payers = Payers { fee: &documents.fee_payer, rent: &documents.fee_payer };
     let mut recipe = Recipe::parse(&documents.interface, &documents.implementation, &documents.intent, payers)
         .map_err(|error| failure(error.to_string()))?;
@@ -184,11 +195,14 @@ fn record_accounts(svm: &LiteSVM, documents: &Documents) -> Result<Vec<Address>,
 
     let count = recipe.implementation().accounts().map_err(|error| failure(error.to_string()))?.len();
 
-    (0u8..)
+    let addresses = (0u8..)
         .take(count)
         .map(|account| recipe.address(account).map(|address| Address::new_from_array(address.0)))
         .collect::<Option<Vec<_>>>()
-        .ok_or_else(|| failure("an account is not resolved".into()))
+        .ok_or_else(|| failure("an account is not resolved".into()))?;
+    let bumps = recipe.bumps().map_err(|error| failure(error.to_string()))?.as_slice().to_vec();
+
+    Ok(RecordAccounts { addresses, bumps })
 }
 
 pub fn spec_address(address: &Address) -> sdp_intents_spec::Address {

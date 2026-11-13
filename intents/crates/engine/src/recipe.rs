@@ -11,10 +11,38 @@ use crate::resolve::{AccountSet, Addresses};
 use crate::value::Context;
 use crate::{BuiltInstruction, Chain, EngineError, Instructions, Payers};
 
+/// An associated token account of a record: its owner, its mint, and its address.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NamedAta {
+    pub owner: Address,
+    pub mint: Address,
+    pub address: Address,
+}
+
+/// The bump of each program address of a record, in record order.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Bumps {
+    values: [u8; 32],
+    len: usize,
+}
+
+impl Bumps {
+    pub fn as_slice(&self) -> &[u8] {
+        self.values.get(..self.len).unwrap_or_default()
+    }
+
+    fn push(&mut self, bump: u8) {
+        if let Some(slot) = self.values.get_mut(self.len) {
+            *slot = bump;
+            self.len = self.len.saturating_add(1);
+        }
+    }
+}
+
 /// A builder call holds at most 64 accounts, the account limit of a v1 transaction.
 const MAX_BUILDER_ACCOUNTS: usize = 64;
 
-/// The recipe of one intent, with the accounts that `resolve` has derived. It holds about 1.2 KB, so
+/// The recipe of one intent, with the accounts that `resolve` has derived. It holds about 1.3 KB, so
 /// a program can keep it in one stack frame.
 pub struct Recipe<'a> {
     documents: Documents<'a>,
@@ -71,6 +99,22 @@ impl<'a> Recipe<'a> {
         })
     }
 
+    /// Parses the intent, and reads the two documents that the registry published without its
+    /// checks, then binds them. A program reads the documents from the registry's version accounts.
+    pub fn parse_published(
+        interface: &'a [u8],
+        implementation: &'a [u8],
+        intent: &'a [u8],
+        payers: Payers<'a>,
+    ) -> Result<Self, EngineError> {
+        Self::bind(
+            Interface::parse_published(interface)?,
+            Implementation::parse_published(implementation)?,
+            Intent::parse(intent)?,
+            payers,
+        )
+    }
+
     /// Parses the three documents, then binds them.
     pub fn parse(
         interface: &'a [u8],
@@ -107,6 +151,59 @@ impl<'a> Recipe<'a> {
         self.complete = true;
 
         Ok(Resolution::Complete)
+    }
+
+    /// States the bump of each program address of the record, in record order, so that each
+    /// derives with one hash. A program states the bumps that the plan holds. Only the canonical
+    /// bump is supported, and the signer's verifier checks offchain that each bump is canonical.
+    pub fn state_bumps(&mut self, bumps: &[u8]) -> Result<(), EngineError> {
+        let accounts = self.documents.program_addresses()?;
+
+        if accounts.len() != bumps.len() {
+            return Err(EngineError::WrongBumps);
+        }
+
+        accounts.iter().zip(bumps).for_each(|(account, bump)| self.addresses.state_bump(account, *bump));
+
+        Ok(())
+    }
+
+    /// States the canonical bumps of the builder's program addresses, which the builder call names
+    /// as `{builder.bumps}`. A program states the bumps that the builder returned in the
+    /// simulation. The builder refuses any bump that is not canonical.
+    pub fn state_builder_bumps(&mut self, bumps: &[u8]) -> Result<(), EngineError> {
+        self.addresses.state_builder_bumps(bumps).ok_or(EngineError::WrongBumps)
+    }
+
+    /// The bump of each program address of the record, in record order, once `resolve` completes.
+    pub fn bumps(&self) -> Result<Bumps, EngineError> {
+        let accounts = self.documents.program_addresses()?;
+        let mut bumps = Bumps::default();
+
+        for account in accounts.iter() {
+            bumps.push(self.addresses.bump(account).ok_or(EngineError::Unresolved { account })?);
+        }
+
+        Ok(bumps)
+    }
+
+    /// Each associated token account that the record names and resolved, with its owner and mint.
+    pub fn associated_token_accounts(&self) -> impl Iterator<Item = NamedAta> + '_ {
+        let context =
+            Context { documents: self.documents, addresses: &self.addresses, chain: &crate::chain::NoAccounts };
+        let accounts = self.documents.implementation.accounts().unwrap_or_default();
+
+        accounts.iter().zip(0u8..).filter_map(move |(account, index)| {
+            let sdp_intents_spec::AddressSource::Ata { owner, mint, .. } = account.address().ok()? else {
+                return None;
+            };
+
+            Some(NamedAta {
+                owner: *context.address(owner).ok()?,
+                mint: *context.address(mint).ok()?,
+                address: *self.addresses.get(index)?,
+            })
+        })
     }
 
     /// The address of account `account` of the record. A program compares it with the account that
@@ -197,6 +294,6 @@ mod tests {
 
     #[test]
     fn a_recipe_fits_a_stack_frame() {
-        assert!(core::mem::size_of::<Recipe>() <= 1_300);
+        assert!(core::mem::size_of::<Recipe>() <= 1_344);
     }
 }

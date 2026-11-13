@@ -91,7 +91,7 @@ enum State {
     },
     /// The remote endpoint has no answer yet.
     AwaitingRemote,
-    Built(Built),
+    Built(Box<Built>),
     AwaitingChecks(Box<Checking>),
     Planned(Box<Segment>),
     Finished,
@@ -145,7 +145,7 @@ impl<'a> SegmentPlanner<'a> {
         match core::mem::replace(&mut self.state, State::Finished) {
             State::Resolving => self.resolve(earlier),
             State::Building => self.simulate_builder(earlier),
-            State::Built(built) => self.simulate_segment(built, earlier),
+            State::Built(built) => self.simulate_segment(*built, earlier),
             State::Planned(segment) => Ok(SegmentStep::Planned(segment)),
             awaiting @ (State::AwaitingBuilder { .. } | State::AwaitingChecks(_) | State::AwaitingRemote) => {
                 self.state = awaiting;
@@ -175,7 +175,7 @@ impl<'a> SegmentPlanner<'a> {
                     }
                     _ => Built::from_remote(&self.recipe, answer)?,
                 };
-                self.state = State::Built(built);
+                self.state = State::Built(Box::new(built));
                 Ok(())
             }
             other => {
@@ -251,7 +251,7 @@ impl<'a> SegmentPlanner<'a> {
         let scratch = result.accounts.into_iter().next().flatten().ok_or(PlanError::NoScratch)?;
 
         match StagedResult::parse(&return_data.data, &scratch.data)? {
-            StagedResult::Ready(ready) => self.state = State::Built(Built::from_ready(&self.recipe, &ready)?),
+            StagedResult::Ready(ready) => self.state = State::Built(Box::new(Built::from_ready(&self.recipe, &ready)?)),
             StagedResult::MoreAccounts(addresses) => {
                 self.extra_accounts.extend_from_slice(addresses);
                 self.state = State::Building;
@@ -288,7 +288,7 @@ impl<'a> SegmentPlanner<'a> {
         });
 
         if !missing.is_empty() {
-            self.state = State::Built(built);
+            self.state = State::Built(Box::new(built));
             return Ok(SegmentStep::Fetch(missing));
         }
 

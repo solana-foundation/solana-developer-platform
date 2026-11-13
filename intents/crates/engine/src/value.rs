@@ -36,7 +36,7 @@ impl<'r> Bytes<'r> {
         Self::borrowed(&address.0)
     }
 
-    fn borrowed(bytes: &'r [u8]) -> Self {
+    pub(crate) fn borrowed(bytes: &'r [u8]) -> Self {
         Self(Repr::Borrowed(bytes))
     }
 }
@@ -128,7 +128,8 @@ impl<'r, C: Chain> Context<'r, C> {
 
                 self.address(value).map(|address| Bytes::borrowed(&address.0))
             }
-            ValueSource::None | ValueSource::Literal => Err(EngineError::BadEncoding),
+            ValueSource::Bumps if encoding == Encoding::Borsh => Ok(Bytes::borrowed(self.addresses.builder_bumps())),
+            ValueSource::None | ValueSource::Literal | ValueSource::Bumps => Err(EngineError::BadEncoding),
         }
     }
 

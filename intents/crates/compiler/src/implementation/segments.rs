@@ -15,8 +15,8 @@ use crate::suggest::closest;
 
 impl Build<'_, '_> {
     /// `visible` is how many accounts the segment can name: the accounts before a PDA, or every
-    /// account for instruction data.
-    pub(super) fn read_segment(&mut self, node: &Node<'_>, visible: usize) -> Option<SegmentV1> {
+    /// account for instruction data. Only a builder call can name `{builder.bumps}`.
+    pub(super) fn read_segment(&mut self, node: &Node<'_>, visible: usize, builder_call: bool) -> Option<SegmentV1> {
         let mut object = node.object(self.sink)?;
 
         if let Some(read) = object.field("read") {
@@ -42,7 +42,7 @@ impl Build<'_, '_> {
                 let names = Names::new(
                     self.schema,
                     self.account_names.get(..visible).unwrap_or_default(),
-                    Allowed { payers: true, accounts: true },
+                    Allowed { payers: true, accounts: true, builder: builder_call },
                 );
                 let resolved = names.resolve(reference, &value.pointer, self.sink)?;
                 let wire = self.check_fit(&encoding, resolved.shape, text)?;

@@ -26,6 +26,11 @@ pub(crate) struct VerifyIntent<'v> {
     pub(crate) builder_roles: Vec<u8>,
     /// The interface's outputs, in borsh, which `verify_intent` checks against the record.
     pub(crate) outputs: &'v [u8],
+    /// The canonical bump of each program address of the record, in record order.
+    pub(crate) bumps: &'v [u8],
+    /// The canonical bumps of a builder's program addresses, which the builder call names as
+    /// `{builder.bumps}`.
+    pub(crate) builder_bumps: &'v [u8],
     /// The most that the rent payer spends on new accounts in the segment.
     pub(crate) rent_cap: u64,
     /// The accounts that the span can change, which the assertions guard.
@@ -102,6 +107,10 @@ impl VerifyIntent<'_> {
             &self.builder_roles,
             &length(self.outputs)?.to_le_bytes(),
             self.outputs,
+            &length(self.bumps)?.to_le_bytes(),
+            self.bumps,
+            &length(self.builder_bumps)?.to_le_bytes(),
+            self.builder_bumps,
             &self.rent_cap.to_le_bytes(),
             &[guarded, self.counts.snapshots, self.counts.built, self.counts.checks],
         ]

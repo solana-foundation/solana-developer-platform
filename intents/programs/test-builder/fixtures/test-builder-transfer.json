@@ -16,7 +16,8 @@
     ],
     "data": [
       { "value": "bd1c9adb8ca2623c", "encoding": "hex" },
-      { "value": "{inputs.amount}", "encoding": "u64le" }
+      { "value": "{inputs.amount}", "encoding": "u64le" },
+      { "value": "{builder.bumps}", "encoding": "borsh" }
     ]
   }
 }

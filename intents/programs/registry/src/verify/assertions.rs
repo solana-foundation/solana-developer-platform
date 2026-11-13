@@ -111,9 +111,9 @@ impl SegmentAssertions<'_, '_> {
 
 fn matches(expected: &LighthouseInstruction, actual: &IntrospectedInstruction<'_>) -> bool {
     actual.get_program_id().as_ref() == sdp_intents_lighthouse::LIGHTHOUSE_PROGRAM.0
-        && actual.num_account_metas() == expected.accounts.len()
-        && actual.get_instruction_data() == expected.data.as_slice()
-        && expected.accounts.iter().enumerate().all(|(index, meta)| {
+        && actual.num_account_metas() == expected.accounts().len()
+        && actual.get_instruction_data() == expected.data()
+        && expected.accounts().iter().enumerate().all(|(index, meta)| {
             actual.get_instruction_account_at(index).is_ok_and(|account| account.key.as_ref() == meta.address.0)
         })
 }

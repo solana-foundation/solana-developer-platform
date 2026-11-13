@@ -8,15 +8,24 @@
 //! use sdp_intents_builder::{Build, BuildError, Meta};
 //!
 //! /// `accounts` are the accounts after the record's: in Anchor v2, `ctx.remaining_accounts()`.
-//! fn build_transfer(program_id: &Address, accounts: &[AccountView], token_program: &Address) -> Result<(), BuildError> {
-//!     let mut build = Build::new(program_id, 5, accounts)?;
+//! /// `bumps` is the argument that the record passes as `{builder.bumps}`.
+//! fn build_transfer(
+//!     program_id: &Address,
+//!     accounts: &[AccountView],
+//!     bumps: &[u8],
+//!     owner: &Address,
+//!     mint: &Address,
+//!     token_program: &Address,
+//! ) -> Result<(), BuildError> {
+//!     let mut build = Build::new(program_id, 5, accounts, bumps)?;
+//!     let owner_account = build.associated_token_address(owner, mint, token_program)?;
 //!
 //!     let hook_addresses: [Address; 1] = [Address::new_from_array([7; 32])];
 //!     let Some(hook_accounts) = build.require_accounts(&hook_addresses)? else {
 //!         return build.finish();
 //!     };
 //!
-//!     let metas = [Meta::writable(hook_accounts[0].address()), Meta::rent_payer()];
+//!     let metas = [Meta::writable(&owner_account), Meta::writable(hook_accounts[0].address()), Meta::rent_payer()];
 //!     build.instruction(token_program, &metas, &[12])?;
 //!     build.finish()
 //! }
@@ -31,6 +40,11 @@
 //!   again with it. In hashed mode it is an error, because `verify_intent` passes the last round's.
 //! - A builder names the rent payer with [`Meta::rent_payer`]. It never sees a payer, and never
 //!   names the fee payer.
+//! - [`Build::program_address`] and [`Build::associated_token_address`] derive addresses. In staged
+//!   mode each searches for the canonical bump, and the result returns the bumps in order. In
+//!   hashed mode each takes the next bump that `verify_intent` passes as `{builder.bumps}`, and
+//!   derives with one hash instead of a search. A bump that is missing, not canonical, or left over
+//!   fails the builder.
 
 #![no_std]
 
@@ -40,6 +54,8 @@ mod build;
 mod error;
 mod layout;
 mod meta;
+#[cfg(not(target_os = "solana"))]
+pub mod offchain;
 pub mod programs;
 pub mod token;
 

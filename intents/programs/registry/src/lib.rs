@@ -121,10 +121,12 @@ pub mod registry {
         intent: &[u8],
         builder_roles: &[u8],
         outputs: &[u8],
+        bumps: &[u8],
+        builder_bumps: &[u8],
         layout: SegmentLayout,
     ) -> Result<()> {
         let passed = ctx.remaining_accounts();
-        let args = verify::VerifyArgs { intent, builder_roles, outputs, layout };
+        let args = verify::VerifyArgs { intent, builder_roles, outputs, bumps, builder_bumps, layout };
 
         verify::verify_intent(&ctx.accounts, &passed, args)
     }

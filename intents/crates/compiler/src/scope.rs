@@ -11,6 +11,9 @@ use crate::reference::{Reference, Scope};
 use crate::suggest::closest;
 
 const PAYERS: [&str; 2] = ["fee", "rent"];
+/// `{builder.bumps}`: the canonical bumps of the builder's program addresses, in borsh.
+const BUILDER: [&str; 1] = ["bumps"];
+const BYTES: Shape = Shape { value_type: ValueType { base: BaseType::Bytes, array: false }, optional: false };
 const ADDRESS: Shape = Shape { value_type: ValueType { base: BaseType::Address, array: false }, optional: false };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,11 +29,13 @@ pub struct Schema {
     pub outputs: Vec<Field>,
 }
 
-/// Which scopes a reference at one place may name.
+/// Which scopes a reference at one place may name. Only a program recipe's builder call can name
+/// `builder`.
 #[derive(Clone, Copy, Debug)]
 pub struct Allowed {
     pub payers: bool,
     pub accounts: bool,
+    pub builder: bool,
 }
 
 /// The names that a reference at one place can see. `accounts` holds only the accounts that the
@@ -61,6 +66,7 @@ impl<'s> Names<'s> {
             Scope::Inputs | Scope::Outputs => true,
             Scope::Payers => self.allowed.payers,
             Scope::Accounts => self.allowed.accounts,
+            Scope::Builder => self.allowed.builder,
         };
 
         if self.failed.iter().any(|name| name == reference.name) {
@@ -92,6 +98,7 @@ impl<'s> Names<'s> {
             Scope::Accounts => {
                 position(self.accounts.iter().map(String::as_str), reference.name, ValueSource::Account, ADDRESS)
             }
+            Scope::Builder => position(BUILDER.iter().copied(), reference.name, ValueSource::Bumps, BYTES),
         };
 
         if found.is_none() {
@@ -107,6 +114,7 @@ impl<'s> Names<'s> {
             Scope::Outputs => self.schema.outputs.iter().map(|field| field.name.as_str()).collect(),
             Scope::Payers => PAYERS.to_vec(),
             Scope::Accounts => self.accounts.iter().map(String::as_str).collect(),
+            Scope::Builder => BUILDER.to_vec(),
         };
         let scope = reference.scope.as_str();
         let diagnostic = Diagnostic::new(
@@ -161,7 +169,7 @@ mod tests {
     #[test]
     fn resolves_inputs_and_payers() {
         let schema = schema();
-        let names = Names::new(&schema, &[], Allowed { payers: true, accounts: false });
+        let names = Names::new(&schema, &[], Allowed { payers: true, accounts: false, builder: false });
         let mut sink = Sink::default();
 
         let amount = names.resolve(Reference { scope: Scope::Inputs, name: "amount" }, "/x", &mut sink).unwrap();
@@ -175,7 +183,7 @@ mod tests {
     #[test]
     fn a_recipe_cannot_name_the_fee_payer() {
         let schema = schema();
-        let names = Names::new(&schema, &[], Allowed { payers: true, accounts: false });
+        let names = Names::new(&schema, &[], Allowed { payers: true, accounts: false, builder: false });
         let mut sink = Sink::default();
 
         assert!(names.resolve(Reference { scope: Scope::Payers, name: "fee" }, "/x", &mut sink).is_none());
@@ -185,7 +193,7 @@ mod tests {
     #[test]
     fn suggests_the_name_that_was_meant() {
         let schema = schema();
-        let names = Names::new(&schema, &[], Allowed { payers: false, accounts: false });
+        let names = Names::new(&schema, &[], Allowed { payers: false, accounts: false, builder: false });
         let mut sink = Sink::default();
 
         assert!(names.resolve(Reference { scope: Scope::Inputs, name: "amout" }, "/x", &mut sink).is_none());

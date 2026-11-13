@@ -12,11 +12,14 @@ bytemuck.workspace = true
 sdp-intents-spec.workspace = true
 
 # A program derives addresses through the syscalls. Elsewhere `curve25519` derives them in Rust.
+# `solana-sha256-hasher` hashes with the syscall in a program, and with `sha2` elsewhere.
 [target.'cfg(target_os = "solana")'.dependencies]
 solana-address = { workspace = true, features = ["syscalls"] }
+solana-sha256-hasher = "=3.1.0"
 
 [target.'cfg(not(target_os = "solana"))'.dependencies]
 solana-address = { workspace = true, features = ["curve25519"] }
+solana-sha256-hasher = { version = "=3.1.0", features = ["sha2"] }
 
 [dev-dependencies]
 sdp-intents-compiler.workspace = true

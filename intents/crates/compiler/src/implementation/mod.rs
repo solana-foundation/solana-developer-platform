@@ -81,7 +81,7 @@ fn compile(value: &Value, catalog: &Catalog, sink: &mut Sink) -> Option<Compiled
     }
 
     let message = object.required("message", build.sink).and_then(|message| {
-        let names = Names::new(build.schema, &[], Allowed { payers: false, accounts: false });
+        let names = Names::new(build.schema, &[], Allowed { payers: false, accounts: false, builder: false });
 
         compile_template(&message, &names, build.sink)
     });
@@ -149,7 +149,7 @@ impl<'c, 's> Build<'c, 's> {
         // A record's postcondition can name its accounts, such as a provider's receiving wallet
         // that the record pins (`DESIGN.md`, 4.15).
         let account_names = self.account_names.clone();
-        let names = Names::new(self.schema, &account_names, Allowed { payers: false, accounts: true });
+        let names = Names::new(self.schema, &account_names, Allowed { payers: false, accounts: true, builder: false });
 
         let conditions: Vec<PostConditionV1> = nodes
             .iter()
@@ -180,7 +180,7 @@ impl<'c, 's> Build<'c, 's> {
 
 #[cfg(test)]
 mod tests {
-    use sdp_intents_spec::{AddressSource, Implementation, RecipeKind, Segment};
+    use sdp_intents_spec::{AddressSource, Encoding, Implementation, RecipeKind, Segment, ValueRef, ValueSource};
 
     use super::compile_implementation;
     use crate::diagnostic::Code;
@@ -263,8 +263,28 @@ mod tests {
 
         assert_eq!(record.recipe(), Ok(RecipeKind::Program));
         assert_eq!(record.instruction_accounts(call).unwrap(), &[0, 1, 2, 3, 4]);
-        assert_eq!(record.instruction_segments(call).unwrap().len(), 3);
+        assert_eq!(record.instruction_segments(call).unwrap().len(), 4);
         assert_eq!(record.post_conditions().unwrap().len(), 1);
+    }
+
+    /// A builder call can pass the builder's bumps, in borsh. No other place can name them.
+    #[test]
+    fn only_a_builder_call_names_the_bumps() {
+        let compiled = compile_implementation(TOKEN_2022_TRANSFER, &catalog()).unwrap();
+        let record = Implementation::parse(&compiled.bytes).unwrap();
+        let call = record.instructions().unwrap().first().unwrap();
+        let last = record.instruction_segments(call).unwrap().last().unwrap().decode().unwrap();
+        let static_bumps = edit(
+            SYSTEM_TRANSFER,
+            r#"{ "value": "{inputs.amount}", "encoding": "u64le" }"#,
+            r#"{ "value": "{inputs.amount}", "encoding": "u64le" }, { "value": "{builder.bumps}", "encoding": "borsh" }"#,
+        );
+
+        assert_eq!(
+            last,
+            Segment::Reference { value: ValueRef { source: ValueSource::Bumps, index: 0 }, encoding: Encoding::Borsh }
+        );
+        assert_eq!(compile_implementation(&static_bumps, &catalog()).unwrap_err().codes(), [Code::ReferenceNotAllowed]);
     }
 
     #[test]

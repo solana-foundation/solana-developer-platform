@@ -21,6 +21,9 @@ pub enum BuildError {
     Refused,
     /// Scratch is borrowed elsewhere.
     ScratchBorrowed,
+    /// In hashed mode, a stated bump is missing, is not canonical, or was not used. In staged mode,
+    /// the caller stated bumps.
+    WrongBumps,
 }
 
 impl BuildError {
@@ -33,6 +36,7 @@ impl BuildError {
             Self::AfterRequest => 4,
             Self::Refused => 5,
             Self::ScratchBorrowed => 6,
+            Self::WrongBumps => 7,
         }
     }
 }
@@ -53,6 +57,7 @@ impl fmt::Display for BuildError {
             Self::AfterRequest => "the builder added an instruction after it asked for accounts",
             Self::Refused => "the builder refused",
             Self::ScratchBorrowed => "scratch is borrowed",
+            Self::WrongBumps => "the stated bumps are not the canonical bumps of the builder's program addresses",
         };
 
         f.write_str(text)

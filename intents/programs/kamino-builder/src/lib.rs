@@ -34,17 +34,22 @@ declare_id!("LNuhpDaM2bKkoaGPMDJ4aALq8CGKNz2Xq336bo6Tafy");
 pub mod kamino_builder {
     use super::*;
 
-    pub fn build_deposit_v1(ctx: &mut Context<BuildVaultV1>, amount: u64, min_shares: u64) -> Result<()> {
+    pub fn build_deposit_v1(ctx: &mut Context<BuildVaultV1>, amount: u64, min_shares: u64, bumps: &[u8]) -> Result<()> {
         let remaining = ctx.remaining_accounts();
-        let mut build = Build::new(ctx.program_id, <BuildVaultV1 as TryAccounts>::HEADER_SIZE, &remaining)?;
+        let mut build = Build::new(ctx.program_id, <BuildVaultV1 as TryAccounts>::HEADER_SIZE, &remaining, bumps)?;
         let outcome = deposit::build(&mut build, &ctx.accounts.views(), amount, min_shares)?;
 
         Ok(outcome.finish(build)?)
     }
 
-    pub fn build_withdraw_v1(ctx: &mut Context<BuildVaultV1>, shares: u64, min_amount: u64) -> Result<()> {
+    pub fn build_withdraw_v1(
+        ctx: &mut Context<BuildVaultV1>,
+        shares: u64,
+        min_amount: u64,
+        bumps: &[u8],
+    ) -> Result<()> {
         let remaining = ctx.remaining_accounts();
-        let mut build = Build::new(ctx.program_id, <BuildVaultV1 as TryAccounts>::HEADER_SIZE, &remaining)?;
+        let mut build = Build::new(ctx.program_id, <BuildVaultV1 as TryAccounts>::HEADER_SIZE, &remaining, bumps)?;
         let outcome = withdraw::build(&mut build, &ctx.accounts.views(), shares, min_amount)?;
 
         Ok(outcome.finish(build)?)

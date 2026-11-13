@@ -14,6 +14,17 @@ pub struct Interface<'a> {
 
 impl<'a> Interface<'a> {
     pub fn parse(bytes: &'a [u8]) -> Result<Self, SpecError> {
+        let interface = Self::parse_published(bytes)?;
+        interface.validate()?;
+
+        Ok(interface)
+    }
+
+    /// Reads the header and the fixed part, and skips the checks of [`Self::parse`]. Only for a
+    /// document that the registry published: `publish` writes a version account once, after
+    /// `parse` passes, and the account never changes. An accessor still fails on an index out
+    /// of bounds.
+    pub fn parse_published(bytes: &'a [u8]) -> Result<Self, SpecError> {
         let header: &DocumentHeaderV1 = Region::new(bytes).fixed(0)?;
         header.check(DocumentKind::Interface, bytes.len())?;
 
@@ -21,10 +32,7 @@ impl<'a> Interface<'a> {
             DocumentHeaderV1::LEN.checked_add(usize::from(header.body_len.get())).ok_or(SpecError::LengthMismatch)?;
         let body = bytes.get(..body_end).ok_or(SpecError::Truncated)?;
 
-        let interface = Self { body, fixed: Region::new(body).fixed(0)? };
-        interface.validate()?;
-
-        Ok(interface)
+        Ok(Self { body, fixed: Region::new(body).fixed(0)? })
     }
 
     pub fn id(&self) -> &'a DocumentIdV1 {

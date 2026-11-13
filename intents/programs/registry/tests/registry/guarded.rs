@@ -6,7 +6,7 @@ use anchor_v2_testing::litesvm::LiteSVM;
 use anchor_v2_testing::{Keypair, Signer};
 use registry::RegistryError;
 use sdp_intents_lighthouse::LIGHTHOUSE_PROGRAM;
-use sdp_intents_planner::Plan;
+use sdp_intents_planner::{Plan, VerifyError};
 use sdp_intents_program_testing::{definitions, prepare, prepare_intents, verify};
 
 use crate::intents::{publish_transfer, spec_address, Published};
@@ -111,6 +111,35 @@ fn verifies_a_token_transfer_that_its_sender_pays_for() {
     assert_eq!(token_amount(&setup.svm, &destination), Some(100_000_000));
 }
 
+/// The plan states the canonical bump of each ATA. Any other bump derives no address onchain, so
+/// `verify_intent` refuses the plan, and the signer's verifier refuses it too.
+#[test]
+fn refuses_a_bump_that_is_not_canonical() {
+    let mut setup = setup(definitions::SPL_TOKEN_TRANSFER).unwrap();
+    let mint = Keypair::new().pubkey();
+    let source = associated_token_account(&setup.from.pubkey(), &mint);
+    set_mint(&mut setup.svm, &mint, 6).unwrap();
+    set_token_account(&mut setup.svm, &source, &mint, &setup.from.pubkey(), 500_000_000).unwrap();
+    let plan = plan(&setup, "spl-token-transfer", &mint, 100_000_000, &setup.from.pubkey()).unwrap();
+    let verify_position = plan.intents[0].verify.unwrap();
+    // The layout is 12 bytes. Before it are the empty builder bumps, 4 bytes, then the two bumps.
+    let first_bump = plan.transaction.instructions[verify_position].data.len() - 12 - 4 - 2;
+
+    for offset in [0, 1] {
+        for change in [1u8, 255] {
+            let mut wrong = plan.clone();
+            let bump = &mut wrong.transaction.instructions[verify_position].data[first_bump + offset];
+            *bump = bump.wrapping_add(change);
+
+            assert!(matches!(verify(&setup.svm, &wrong.transaction), Err(VerifyError::NonCanonicalBump(_))));
+            let failed = send_plan(&mut setup.svm, &wrong, &[&setup.from]).unwrap_err();
+            assert!(failed.is(RegistryError::RecipeRefused), "{failed}");
+        }
+    }
+
+    send_plan(&mut setup.svm, &plan, &[&setup.from]).unwrap();
+}
+
 #[test]
 fn verifies_a_builder_transfer_with_the_default_checks() {
     let mut setup = setup(TEST_BUILDER_TRANSFER).unwrap();
@@ -120,6 +149,29 @@ fn verifies_a_builder_transfer_with_the_default_checks() {
     send_plan(&mut setup.svm, &plan, &[&setup.fee_payer, &setup.from]).unwrap();
 
     assert_eq!(lamports(&setup.svm, &setup.to.pubkey()), Some(2 * SOL));
+}
+
+/// The builder consumes the bumps that `verify_intent` passes, in order. The test builder derives no
+/// address, so a stated bump is left over, and the builder fails the transaction.
+#[test]
+fn a_builder_refuses_a_bump_that_it_does_not_use() {
+    const WRONG_BUMPS: u32 = 0x5d1b_0007;
+    let mut setup = setup(TEST_BUILDER_TRANSFER).unwrap();
+    let plan = plan(&setup, "test-builder-transfer", &Address::default(), 2 * SOL, &setup.fee_payer.pubkey()).unwrap();
+    let verify_position = plan.intents[0].verify.unwrap();
+
+    let mut extra = plan.clone();
+    let data = &mut extra.transaction.instructions[verify_position].data;
+    // The empty builder bumps, a 4-byte length, end 12 bytes before the end.
+    let builder_bumps = data.len() - 12 - 4;
+    let layout = data.split_off(builder_bumps + 4);
+    data.truncate(builder_bumps);
+    data.extend([&1u32.to_le_bytes()[..], &[255], &layout].concat());
+
+    let failed = send_plan(&mut setup.svm, &extra, &[&setup.fee_payer, &setup.from]).unwrap_err();
+    assert_eq!(failed.custom_code(), Some(WRONG_BUMPS), "{failed}");
+
+    send_plan(&mut setup.svm, &plan, &[&setup.fee_payer, &setup.from]).unwrap();
 }
 
 /// Each segment snapshots and asserts its own transfer, with its own memory.
@@ -164,10 +216,12 @@ fn refuses_assertions_that_differ_from_the_postconditions() {
     let failed = send_plan(&mut setup.svm, &unchecked, &signers).unwrap_err();
     assert!(failed.is(RegistryError::SpanPastEnd), "{failed}");
 
+    // The built instructions move one place, so `verify_intent` finds a snapshot where it compares
+    // the first built instruction.
     let mut unsnapshot = plan.clone();
     unsnapshot.transaction.instructions.remove(span.start - 1);
     let failed = send_plan(&mut setup.svm, &unsnapshot, &signers).unwrap_err();
-    assert!(failed.is(RegistryError::WrongAssertions), "{failed}");
+    assert!(failed.is(RegistryError::WrongInstruction), "{failed}");
 
     assert!(setup.svm.get_account(&setup.to.pubkey()).is_none());
 }

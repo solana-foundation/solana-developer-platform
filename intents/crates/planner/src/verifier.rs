@@ -68,6 +68,9 @@ pub enum VerifyError {
     /// The segment of the `verify_intent` at this position ends past the transaction, or holds
     /// another `verify_intent`.
     BadSegment(usize),
+    /// The `verify_intent` at this position states a bump that is not the canonical bump of a
+    /// program address of its record.
+    NonCanonicalBump(usize),
     /// A `verify_intent` names another fee payer than the transaction's.
     WrongFeePayer(usize),
     /// The `verify_intent` instructions name different rent payers.
@@ -90,6 +93,9 @@ impl core::fmt::Display for VerifyError {
             Self::Plan(error) => write!(f, "{error}"),
             Self::BadVerifyIntent(position) => write!(f, "the verify_intent at {position} does not decode"),
             Self::BadSegment(position) => write!(f, "the segment of the verify_intent at {position} is not whole"),
+            Self::NonCanonicalBump(position) => {
+                write!(f, "the verify_intent at {position} states a bump that is not canonical")
+            }
             Self::WrongFeePayer(position) => write!(f, "the verify_intent at {position} names another fee payer"),
             Self::PayersDiffer => f.write_str("the verify_intent instructions name different rent payers"),
             Self::NotAVersion(address) => write!(f, "{} is not the version account of its document", base58(address)),
@@ -105,6 +111,8 @@ struct DecodedVerify<'t> {
     instruction: &'t Instruction,
     intent: &'t [u8],
     outputs: &'t [u8],
+    /// The bumps that `verify_intent` derives the record's program addresses with.
+    bumps: &'t [u8],
     rent_cap: u64,
     segment: Range<usize>,
     built: Range<usize>,
@@ -196,6 +204,8 @@ fn decode<'t>(
     let intent = data.bytes().ok_or_else(bad)?;
     data.bytes().ok_or_else(bad)?;
     let outputs = data.bytes().ok_or_else(bad)?;
+    let bumps = data.bytes().ok_or_else(bad)?;
+    data.bytes().ok_or_else(bad)?;
     let Some((rent_cap, &[_guarded, snapshots, built, checks])) = data.0.split_first_chunk::<8>() else {
         return Err(bad());
     };
@@ -219,6 +229,7 @@ fn decode<'t>(
         instruction,
         intent,
         outputs,
+        bumps,
         rent_cap,
         segment: position..end,
         built: built_start..built_end,
@@ -244,6 +255,10 @@ fn part<C: Chain>(verify: &DecodedVerify<'_>, payers: Payers<'_>, chain: &C) -> 
 
     if let Resolution::Missing(missing) = recipe.resolve(chain).map_err(PlanError::from)? {
         return Ok(Part::Missing(missing.addresses().copied().collect()));
+    }
+
+    if recipe.bumps().map_err(PlanError::from)?.as_slice() != verify.bumps {
+        return Err(VerifyError::NonCanonicalBump(verify.position));
     }
 
     let values = Values { recipe: &recipe, chain, outputs: verify.outputs };

@@ -63,9 +63,11 @@ struct Slot {
 impl Guard<'_, '_> {
     pub fn assertions(&self) -> Result<Assertions, GuardError> {
         let conditions = self.recipe.conditions(self.outputs)?.collect::<Result<Vec<_>, _>>()?;
+        let named_atas: Vec<_> = self.recipe.associated_token_accounts().collect();
         let inputs = GuardInputs {
             conditions: &conditions,
             accounts: self.accounts,
+            named_atas: &named_atas,
             payers: self.recipe.payers(),
             rent_cap: self.rent_cap,
         };
@@ -224,14 +226,14 @@ mod tests {
         // and the payer's lamports.
         assert_eq!(built.checks.len(), 5);
         // One snapshot reads the owner through the close authority, bytes 32 to 165.
-        assert_eq!(built.snapshots[0].data, [0, 0, 255, 0, 0, 32, 0, 133, 0]);
+        assert_eq!(built.snapshots[0].data(), [0, 0, 255, 0, 0, 32, 0, 133, 0]);
         assert_eq!(
-            built.checks[0].data,
+            built.checks[0].data(),
             [&[4u8, 0, 1, 32, 64, 6][..], &(-100_000_000i128).to_le_bytes(), &[4]].concat()
         );
-        assert!(built.checks.iter().any(|check| check.data == [1, 0, 255]));
-        assert!(built.checks.iter().all(|check| !check.accounts.is_empty()));
-        assert_eq!(LIGHTHOUSE_PROGRAM, built.snapshots[0].accounts[0].address);
+        assert!(built.checks.iter().any(|check| check.data() == [1, 0, 255]));
+        assert!(built.checks.iter().all(|check| !check.accounts().is_empty()));
+        assert_eq!(LIGHTHOUSE_PROGRAM, built.snapshots[0].accounts()[0].address);
     }
 
     /// The sender pays the rent, so its lamports may fall by the rent cap and no more.
@@ -246,7 +248,7 @@ mod tests {
         let built = assertions(&accounts, &Address(FROM)).unwrap();
 
         assert_eq!(built.snapshots.len(), 2);
-        assert_eq!(built.checks[0].data, [&[4u8, 0, 0, 0, 0][..], &(-2_039_280i128).to_le_bytes(), &[4]].concat());
+        assert_eq!(built.checks[0].data(), [&[4u8, 0, 0, 0, 0][..], &(-2_039_280i128).to_le_bytes(), &[4]].concat());
     }
 
     #[test]

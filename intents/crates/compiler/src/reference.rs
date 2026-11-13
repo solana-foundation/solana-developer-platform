@@ -8,6 +8,7 @@ pub enum Scope {
     Outputs,
     Payers,
     Accounts,
+    Builder,
 }
 
 impl Scope {
@@ -17,6 +18,7 @@ impl Scope {
             "outputs" => Some(Self::Outputs),
             "payers" => Some(Self::Payers),
             "accounts" => Some(Self::Accounts),
+            "builder" => Some(Self::Builder),
             _ => None,
         }
     }
@@ -27,6 +29,7 @@ impl Scope {
             Self::Outputs => "outputs",
             Self::Payers => "payers",
             Self::Accounts => "accounts",
+            Self::Builder => "builder",
         }
     }
 }
@@ -105,7 +108,7 @@ fn parse_reference(inner: &str) -> Result<Reference<'_>, String> {
         format!("`{{{inner}}}` is not a reference. A reference is `{{scope.name}}`, such as `{{inputs.amount}}`.")
     })?;
     let scope = Scope::parse(scope).ok_or_else(|| {
-        format!("`{scope}` is not a scope. The scopes are `inputs`, `outputs`, `payers`, and `accounts`.")
+        format!("`{scope}` is not a scope. The scopes are `inputs`, `outputs`, `payers`, `accounts`, and `builder`.")
     })?;
 
     if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {

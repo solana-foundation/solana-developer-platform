@@ -17,6 +17,17 @@ impl<'a> Implementation<'a> {
     /// Tables and the pool must lie in the body. The extension area holds only fields of later
     /// minor versions.
     pub fn parse(bytes: &'a [u8]) -> Result<Self, SpecError> {
+        let implementation = Self::parse_published(bytes)?;
+        implementation.validate()?;
+
+        Ok(implementation)
+    }
+
+    /// Reads the header and the fixed part, and skips the checks of [`Self::parse`]. Only for a
+    /// document that the registry published: `publish` writes a version account once, after
+    /// `parse` passes, and the account never changes. An accessor still fails on an index out
+    /// of bounds.
+    pub fn parse_published(bytes: &'a [u8]) -> Result<Self, SpecError> {
         let header: &DocumentHeaderV1 = Region::new(bytes).fixed(0)?;
         header.check(DocumentKind::Implementation, bytes.len())?;
 
@@ -24,10 +35,7 @@ impl<'a> Implementation<'a> {
             DocumentHeaderV1::LEN.checked_add(usize::from(header.body_len.get())).ok_or(SpecError::LengthMismatch)?;
         let body = bytes.get(..body_end).ok_or(SpecError::Truncated)?;
 
-        let implementation = Self { body, fixed: Region::new(body).fixed(0)? };
-        implementation.validate()?;
-
-        Ok(implementation)
+        Ok(Self { body, fixed: Region::new(body).fixed(0)? })
     }
 
     pub fn id(&self) -> &'a DocumentIdV1 {

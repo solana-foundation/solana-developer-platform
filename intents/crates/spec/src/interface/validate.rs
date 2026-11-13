@@ -18,6 +18,7 @@ impl Interface<'_> {
             accounts: 0,
             addresses: self.addresses()?.len(),
             literals: self.literals()?.len(),
+            bumps: false,
         };
 
         inputs.iter().try_for_each(|input| self.check_input(counts, input))?;

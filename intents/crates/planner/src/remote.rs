@@ -131,7 +131,13 @@ impl Built {
             })
             .collect::<Result<Vec<_>, PlanError>>()?;
 
-        Ok(Self { instructions: answer.instructions, signers: Vec::new(), outputs: outputs.concat(), frozen: None })
+        Ok(Self {
+            instructions: answer.instructions,
+            signers: Vec::new(),
+            outputs: outputs.concat(),
+            builder_bumps: Vec::new(),
+            frozen: None,
+        })
     }
 
     /// A provider's transaction. It is the whole plan, so it has one intent and no onchain checks,
@@ -174,7 +180,13 @@ impl Built {
         let instructions =
             frozen.transaction.instructions.iter().filter(|instruction| !instruction.is_budget()).cloned();
 
-        Ok(Self { instructions: instructions.collect(), signers, outputs, frozen: Some(frozen) })
+        Ok(Self {
+            instructions: instructions.collect(),
+            signers,
+            outputs,
+            builder_bumps: Vec::new(),
+            frozen: Some(frozen),
+        })
     }
 }
 

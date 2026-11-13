@@ -12,6 +12,8 @@ pub(crate) struct Counts {
     pub(crate) accounts: usize,
     pub(crate) addresses: usize,
     pub(crate) literals: usize,
+    /// Whether the place can name the builder's bumps: only a program recipe's builder call can.
+    pub(crate) bumps: bool,
 }
 
 impl Counts {
@@ -27,6 +29,7 @@ impl Counts {
             ValueSource::Account => index < self.accounts,
             ValueSource::Address => index < self.addresses,
             ValueSource::Literal => index < self.literals,
+            ValueSource::Bumps => self.bumps && index == 0,
         };
 
         if !exists {
@@ -50,7 +53,7 @@ mod tests {
     use super::*;
 
     fn counts() -> Counts {
-        Counts { inputs: Some(2), outputs: None, accounts: 1, addresses: 0, literals: 0 }
+        Counts { inputs: Some(2), outputs: None, accounts: 1, addresses: 0, literals: 0, bumps: false }
     }
 
     #[test]

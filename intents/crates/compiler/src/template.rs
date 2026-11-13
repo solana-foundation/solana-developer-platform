@@ -62,7 +62,7 @@ mod tests {
             shape: Shape { value_type: ValueType { base: BaseType::Address, array: false }, optional: false },
         };
         let schema = Schema { inputs: vec![field("from"), field("to")], outputs: Vec::new() };
-        let names = Names::new(&schema, &[], Allowed { payers: false, accounts: false });
+        let names = Names::new(&schema, &[], Allowed { payers: false, accounts: false, builder: false });
         let mut sink = Sink::default();
 
         let value = json!("Send to {inputs.to} {{not a reference}}");

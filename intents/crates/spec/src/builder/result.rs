@@ -94,11 +94,21 @@ impl<'a> Ready<'a> {
         cursor.entries(usize::from(self.header.num_signers))
     }
 
+    /// The canonical bump of each program address that the builder derived, in order.
+    pub fn bumps(&self) -> Result<&'a [u8], SpecError> {
+        let mut cursor = Cursor::new(self.rest);
+        cursor.take(usize::from(self.header.outputs_len.get()))?;
+        cursor.entries::<Address>(usize::from(self.header.num_signers))?;
+
+        cursor.take(usize::from(self.header.num_bumps))
+    }
+
     /// The bytes that `HashedReadyV1::instructions_hash` covers.
     pub fn instruction_section(&self) -> Result<&'a [u8], SpecError> {
         let mut cursor = Cursor::new(self.rest);
         cursor.take(usize::from(self.header.outputs_len.get()))?;
         cursor.entries::<Address>(usize::from(self.header.num_signers))?;
+        cursor.take(usize::from(self.header.num_bumps))?;
 
         Ok(cursor.rest())
     }
@@ -217,9 +227,9 @@ mod tests {
     }
 
     fn ready(section: &[u8], num_instructions: u8) -> Vec<u8> {
-        let header = ReadyHeaderV1 { num_instructions, num_signers: 1, outputs_len: PodU16::new(2) };
+        let header = ReadyHeaderV1 { num_instructions, num_signers: 1, outputs_len: PodU16::new(2), num_bumps: 1 };
 
-        [bytes_of(&header), &[7, 7], &[5; 32], section].concat()
+        [bytes_of(&header), &[7, 7], &[5; 32], &[254], section].concat()
     }
 
     #[test]
@@ -230,6 +240,7 @@ mod tests {
 
         assert_eq!(ready.outputs().unwrap(), [7, 7]);
         assert_eq!(ready.signers().unwrap(), [Address([5; 32])]);
+        assert_eq!(ready.bumps().unwrap(), [254]);
         assert_eq!(ready.instruction_section().unwrap(), section.as_slice());
 
         let first = ready.instructions().unwrap().next().unwrap().unwrap();

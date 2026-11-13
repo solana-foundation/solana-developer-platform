@@ -60,7 +60,7 @@ pub fn hook_accounts<'a: 'v, 'v>(
     amount: u64,
 ) -> Result<Option<Vec<Meta>>, Stop> {
     let seeds: [&[u8]; 2] = [EXTRA_ACCOUNT_METAS_SEED, accounts.mint.address().as_ref()];
-    let (meta_list_address, _) = Address::try_find_program_address(&seeds, program).ok_or(Refusal::HookUnresolvable)?;
+    let meta_list_address = build.program_address(&seeds, program)?;
 
     let Some(given) = build.require_accounts(&[meta_list_address])? else {
         return Ok(None);
@@ -105,7 +105,7 @@ impl<'v> Resolver<'_, 'v> {
         let mut unresolved = metas.iter().peekable();
 
         while let Some(meta) = unresolved.peek() {
-            match self.resolve(meta)? {
+            match self.resolve(meta, build)? {
                 Resolution::Address(address) => {
                     self.push(meta, address);
                     unresolved.next();
@@ -129,10 +129,10 @@ impl<'v> Resolver<'_, 'v> {
         Ok(Progress::Resolved)
     }
 
-    fn resolve(&self, meta: &ExtraAccountMetaV1) -> Result<Resolution, Stop> {
+    fn resolve(&self, meta: &ExtraAccountMetaV1, build: &mut Build<'_>) -> Result<Resolution, Stop> {
         match meta.address_config()? {
             AddressConfig::Fixed(address) => Ok(Resolution::Address(address)),
-            AddressConfig::Pda { program, seeds } => self.pda(program, &seeds),
+            AddressConfig::Pda { program, seeds } => self.pda(program, &seeds, build),
             AddressConfig::InAccountData { account_index, data_index } => {
                 self.address_in_account_data(account_index, data_index)
             }
@@ -144,7 +144,9 @@ impl<'v> Resolver<'_, 'v> {
         }
     }
 
-    fn pda(&self, program: PdaProgram, seeds: &[Seed<'_>]) -> Result<Resolution, Stop> {
+    /// Derives the address only once the seeds' data is present, so each meta derives once, in
+    /// order, and takes the next bump.
+    fn pda(&self, program: PdaProgram, seeds: &[Seed<'_>], build: &mut Build<'_>) -> Result<Resolution, Stop> {
         let program = match program {
             PdaProgram::Hook => self.program,
             PdaProgram::AtAccount(index) => &self.account(index)?.address,
@@ -164,7 +166,7 @@ impl<'v> Resolver<'_, 'v> {
             .map(|(seed, data)| self.seed_bytes(seed, data.as_deref()))
             .collect::<Result<_, _>>()?;
 
-        let (address, _) = Address::try_find_program_address(&bytes, program).ok_or(Refusal::HookUnresolvable)?;
+        let address = build.program_address(&bytes, program)?;
 
         Ok(Resolution::Address(address))
     }

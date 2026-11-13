@@ -65,7 +65,8 @@ pub use conditions::Condition;
 pub use error::EngineError;
 pub use instructions::{BuiltAccount, BuiltInstruction, Instructions};
 pub use payers::Payers;
-pub use recipe::{Missing, Recipe, Resolution};
+pub use pda::program_address;
+pub use recipe::{Bumps, Missing, NamedAta, Recipe, Resolution};
 pub use value::Bytes;
 
 /// The associated token account of `owner` for `mint`, under `token_program`.

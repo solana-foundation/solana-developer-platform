@@ -129,10 +129,13 @@ fn verify_intent_refuses_a_layout_or_outputs_that_lie() {
 
     let mut other_outputs = plan.clone();
     let data = &mut other_outputs.transaction.instructions[verify_position].data;
-    let outputs = data.len() - 12 - 4;
-    let layout = data.split_off(outputs + 4);
+    // The SOL transfer's record has no program address and no builder, so both bump vectors are
+    // empty: 4 bytes each before the 12-byte layout.
+    let bumps = data.len() - 12 - 4 - 4;
+    let outputs = bumps - 4;
+    let rest = data.split_off(bumps);
     data.truncate(outputs);
-    data.extend([&32u32.to_le_bytes()[..], &[7; 32], &layout].concat());
+    data.extend([&32u32.to_le_bytes()[..], &[7; 32], &rest].concat());
     let failed = send_plan(&mut setup.svm, &other_outputs, &signers).unwrap_err();
     assert!(failed.is(RegistryError::WrongOutputs), "{failed}");
 

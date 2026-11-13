@@ -52,7 +52,8 @@
     "data": [
       { "value": "3b3ea155eec4ff43", "encoding": "hex" },
       { "value": "{inputs.amount}", "encoding": "u64le" },
-      { "value": "{inputs.minShares}", "encoding": "u64le" }
+      { "value": "{inputs.minShares}", "encoding": "u64le" },
+      { "value": "{builder.bumps}", "encoding": "borsh" }
     ]
   },
   "postConditions": [

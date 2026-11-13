@@ -20,13 +20,15 @@ impl Implementation<'_> {
             accounts: self.accounts()?.len(),
             addresses: self.addresses()?.len(),
             literals: self.literals()?.len(),
+            bumps: false,
         };
 
         self.accounts()?
             .iter()
             .enumerate()
             .try_for_each(|(position, account)| self.check_account(counts, position, account))?;
-        self.instructions()?.iter().try_for_each(|instruction| self.check_instruction(counts, instruction))?;
+        let call = Counts { bumps: self.recipe()? == RecipeKind::Program, ..counts };
+        self.instructions()?.iter().try_for_each(|instruction| self.check_instruction(call, instruction))?;
 
         self.applies()?.iter().try_for_each(|applies| check_applies(counts, applies))?;
         self.post_conditions()?.iter().try_for_each(|condition| self.check_post_condition(counts, condition))?;

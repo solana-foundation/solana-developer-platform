@@ -44,6 +44,9 @@ wire_code! {
         Account = 4,
         Address = 5,
         Literal = 6,
+        /// The canonical bumps that a builder derives its program addresses with, in borsh. Only
+        /// a program recipe's builder call names it, at index `0`.
+        Bumps = 7,
     }
 }
 

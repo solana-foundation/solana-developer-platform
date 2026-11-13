@@ -38,16 +38,26 @@ pub const LIQUIDITY_PROGRAM: Address = Address::from_str_const("jupeiUmn818Jg1ek
 pub mod jupiter_lend_builder {
     use super::*;
 
-    pub fn build_deposit_v1(ctx: &mut Context<BuildDepositV1>, amount: u64, min_shares: u64) -> Result<()> {
+    pub fn build_deposit_v1(
+        ctx: &mut Context<BuildDepositV1>,
+        amount: u64,
+        min_shares: u64,
+        bumps: &[u8],
+    ) -> Result<()> {
         let remaining = ctx.remaining_accounts();
-        let build = Build::new(ctx.program_id, <BuildDepositV1 as TryAccounts>::HEADER_SIZE, &remaining)?;
+        let build = Build::new(ctx.program_id, <BuildDepositV1 as TryAccounts>::HEADER_SIZE, &remaining, bumps)?;
 
         deposit::build(&ctx.accounts, build, &Deposit { amount, min_shares })
     }
 
-    pub fn build_withdraw_v1(ctx: &mut Context<BuildWithdrawV1>, shares: u64, min_amount: u64) -> Result<()> {
+    pub fn build_withdraw_v1(
+        ctx: &mut Context<BuildWithdrawV1>,
+        shares: u64,
+        min_amount: u64,
+        bumps: &[u8],
+    ) -> Result<()> {
         let remaining = ctx.remaining_accounts();
-        let build = Build::new(ctx.program_id, <BuildWithdrawV1 as TryAccounts>::HEADER_SIZE, &remaining)?;
+        let build = Build::new(ctx.program_id, <BuildWithdrawV1 as TryAccounts>::HEADER_SIZE, &remaining, bumps)?;
 
         withdraw::build(&ctx.accounts, build, &Withdrawal { shares, min_amount })
     }
