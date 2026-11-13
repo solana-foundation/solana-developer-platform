@@ -77,7 +77,8 @@ const RPC_PROVIDER_LABELS = {
   validationcloud: "Validation Cloud",
 } as const satisfies Record<RpcIntegration["provider"], string>;
 
-// Mark, name, category, state, chevron: one grid so every row's columns line up.
+// Mark, name, category, state, chevron: one grid so every row's columns line up. A row with no
+// chevron spans its state across the chevron's track, so the state ends at the row's edge.
 export const INTEGRATION_ROW_COLUMNS =
   "grid grid-cols-[2.75rem_minmax(0,1fr)_auto_1rem] items-center gap-x-3 md:grid-cols-[2.75rem_minmax(0,1fr)_11rem_10rem_1rem]";
 

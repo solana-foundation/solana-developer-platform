@@ -45,6 +45,22 @@ function familyRowCount(
   }
 }
 
+export function familyRowsHaveChevron(family: ProjectIntegrationFamily): boolean {
+  switch (family) {
+    case "custody":
+    case "private_channels":
+      return true;
+    case "rpc":
+    case "ramps":
+    case "compliance":
+      return false;
+    default: {
+      const unhandledFamily: never = family;
+      throw new Error(`Unhandled integration family: ${unhandledFamily}`);
+    }
+  }
+}
+
 export function integrationsSkeletonSections(
   flags: IntegrationsSkeletonFlags
 ): IntegrationsSkeletonSection[] {
