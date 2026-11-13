@@ -133,6 +133,7 @@ pub fn interface(view: &Interface<'_>, names: &Names) -> Result<Value, SpecError
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(json!({
+        "settlement": if view.settles_later() { "async" } else { "atomic" },
         "display": names.render(view.display()?),
         "inputs": inputs,
         "outputs": outputs,

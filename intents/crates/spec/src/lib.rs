@@ -66,7 +66,7 @@ pub mod wire {
         AccountV1, AppliesV1, ImplementationDocV1, InstructionV1, OutputBindingV1, SegmentV1,
     };
     pub use crate::intent::IntentDocV1;
-    pub use crate::interface::{InputV1, InterfaceDocV1, OutputV1};
+    pub use crate::interface::{InputV1, InterfaceDocV1, OutputV1, INTERFACE_SETTLES_LATER};
     pub use crate::literal::LiteralV1;
     pub use crate::pod::{PodBool, PodU16, PodU32, PodU64};
     pub use crate::post_condition::PostConditionV1;

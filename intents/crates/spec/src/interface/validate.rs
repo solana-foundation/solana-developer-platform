@@ -63,8 +63,11 @@ impl Interface<'_> {
     fn check_post_condition(&self, counts: Counts, condition: &PostConditionV1) -> Result<(), SpecError> {
         self.text(condition.message)?;
 
-        if CheckKind::try_from(condition.check)? == CheckKind::InvokesOnly || condition.programs.count != 0 {
-            return Err(SpecError::BadCode);
+        match CheckKind::try_from(condition.check)? {
+            CheckKind::InvokesOnly => return Err(SpecError::BadCode),
+            CheckKind::Delegates => counts.check_value(condition.delegate().try_into()?)?,
+            _ if condition.programs.count != 0 => return Err(SpecError::BadCode),
+            _ => {}
         }
 
         condition.args.iter().try_for_each(|arg| counts.check_value((*arg).try_into()?))

@@ -26,7 +26,7 @@ struct Check {
     args: &'static [(&'static str, Want)],
 }
 
-const CHECKS: [Check; 5] = [
+const CHECKS: [Check; 7] = [
     Check {
         key: "outflow",
         kind: CheckKind::Outflow,
@@ -40,6 +40,12 @@ const CHECKS: [Check; 5] = [
     Check { key: "noOtherOutflows", kind: CheckKind::NoOtherOutflows, args: &[("from", Want::Address)] },
     Check { key: "noAuthorityChange", kind: CheckKind::NoAuthorityChange, args: &[("account", Want::Address)] },
     Check { key: "invokesOnly", kind: CheckKind::InvokesOnly, args: &[] },
+    Check {
+        key: "delegates",
+        kind: CheckKind::Delegates,
+        args: &[("from", Want::Address), ("mint", Want::Mint), ("max", Want::Amount), ("to", Want::Address)],
+    },
+    Check { key: "noDelegate", kind: CheckKind::NoDelegate, args: &[("from", Want::Address), ("mint", Want::Mint)] },
 ];
 
 /// Where post conditions write their text and their program addresses.
@@ -78,7 +84,14 @@ pub fn read_post_condition(
     if check.kind == CheckKind::InvokesOnly {
         condition.programs = read_programs(&body, output.addresses, sink)?;
     } else {
-        condition.args = read_args(&body, check, names, sink)?;
+        let args = read_args(&body, check, names, sink)?;
+        let (first_three, fourth) = args.split_at(args.len().min(3));
+        condition.args.iter_mut().zip(first_three).for_each(|(slot, value)| *slot = *value);
+
+        // `delegates` holds its delegate in `programs` (`PostConditionV1::delegate`).
+        if let Some(delegate) = fourth.first() {
+            condition.programs = RangeV1 { first: delegate.source, count: delegate.index };
+        }
     }
 
     Some(condition)
@@ -98,7 +111,7 @@ fn find_check(object: &Object<'_>, sink: &mut Sink) -> Option<&'static Check> {
     found
 }
 
-fn read_args(body: &Node<'_>, check: &Check, names: &Names<'_>, sink: &mut Sink) -> Option<[ValueRefV1; 3]> {
+fn read_args(body: &Node<'_>, check: &Check, names: &Names<'_>, sink: &mut Sink) -> Option<Vec<ValueRefV1>> {
     let mut object = body.object(sink)?;
     let resolved: Vec<Option<ValueRefV1>> = check
         .args
@@ -107,10 +120,7 @@ fn read_args(body: &Node<'_>, check: &Check, names: &Names<'_>, sink: &mut Sink)
         .collect();
     object.finish(sink);
 
-    let mut args = [ValueRefV1::default(); 3];
-    args.iter_mut().zip(resolved).try_for_each(|(slot, value)| value.map(|value| *slot = value))?;
-
-    Some(args)
+    resolved.into_iter().collect()
 }
 
 fn read_arg(node: &Node<'_>, want: Want, names: &Names<'_>, sink: &mut Sink) -> Option<ValueRefV1> {

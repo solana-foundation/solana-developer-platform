@@ -2,6 +2,7 @@
 
 use sdp_intents_spec::wire::{
     DocumentIdV1, DocumentKind, InputV1, InterfaceDocV1, LiteralV1, OutputV1, PostConditionV1, SemverV1, ValueRefV1,
+    INTERFACE_SETTLES_LATER,
 };
 use sdp_intents_spec::{BaseType, Interface, ValueType};
 use serde_json::Value;
@@ -80,6 +81,7 @@ impl Build {
             .and_then(|display| compile_template(&display, &names, &mut self.sink));
         let inputs: Vec<InputV1> = drafts.iter().map(|draft| self.encode_input(draft, &names)).collect();
         let post_conditions = self.post_conditions(&mut object, &names);
+        let flags = self.settlement(&mut object);
 
         let pointer = object.pointer().to_owned();
         object.finish(&mut self.sink);
@@ -99,6 +101,7 @@ impl Build {
             inputs: &inputs,
             outputs: &schema.outputs,
             post_conditions: &post_conditions,
+            flags,
         };
         let bytes = self.write(&envelope, document)?;
 
@@ -142,6 +145,26 @@ impl Build {
             .collect()
     }
 
+    /// `"settlement": "async"` marks a request, which the provider settles after the transaction.
+    /// `"atomic"` and no key mean that the transaction settles it.
+    fn settlement(&mut self, object: &mut Object<'_>) -> u8 {
+        let Some(node) = object.field("settlement") else {
+            return 0;
+        };
+
+        match node.str(&mut self.sink) {
+            Some("async") => INTERFACE_SETTLES_LATER,
+            Some("atomic") | None => 0,
+            Some(other) => {
+                self.sink.push(
+                    Diagnostic::new(Code::InvalidValue, &node.pointer, format!("`{other}` is not a settlement"))
+                        .help("the settlements are `atomic` and `async`"),
+                );
+                0
+            }
+        }
+    }
+
     fn encode_input(&mut self, draft: &InputDraft<'_>, names: &Names<'_>) -> InputV1 {
         let amount_mint =
             draft.amount_mint.as_ref().and_then(|mint| resolve_amount_mint(draft, mint, names, &mut self.sink));
@@ -179,6 +202,7 @@ impl Build {
             addresses: writer.table(self.addresses.as_slice()),
             literals: writer.table::<LiteralV1>(&[]),
             pool: writer.pool(&self.pool),
+            flags: document.flags,
             ..InterfaceDocV1::default()
         };
         let header = writer.header(DocumentKind::Interface);
@@ -204,6 +228,7 @@ struct Document<'d> {
     inputs: &'d [InputV1],
     outputs: &'d [Field],
     post_conditions: &'d [PostConditionV1],
+    flags: u8,
 }
 
 fn read_input<'v>(node: &Node<'v>, sink: &mut Sink) -> Option<InputDraft<'v>> {

@@ -1804,9 +1804,11 @@ so an interface states what the transaction does, and states that the rest happe
 2. A request's postconditions bound what leaves the owner: `outflow` and `noOtherOutflows`. They
    never promise an inflow that settles later.
 3. `delegates` is a new postcondition: `{ "delegates": { "from": "{inputs.owner}", "mint": "…",
-   "to": "…", "max": "{inputs.shares}" } }`. It is the only authority change that it allows on the
-   owner's accounts of that mint. Hastra's `request_redeem` sets such a delegate. Lighthouse
-   asserts the delegate and the delegated amount of the token account.
+   "to": "…", "max": "{inputs.amount}" } }`. After the span, each of the owner's accounts of that mint
+   names `to` as its delegate, for at most `max`. It is the one authority change that rule 3 then
+   allows on those accounts. `noDelegate { from, mint }` states that the accounts have no delegate,
+   which a cancellation needs. Lighthouse asserts the delegate and the delegated amount. A
+   postcondition holds three values, so `delegates` keeps its delegate in the two bytes of `programs`.
 4. A record states where the money goes. WisdomTree's receiving wallet is one standing wallet for
    each trade type, fund, and currency. The record holds it as a literal and adds "{accounts.wallet}
    receives {inputs.amount}". A new wallet is a new version, which the approve authority approves.
@@ -1815,6 +1817,13 @@ so an interface states what the transaction does, and states that the rest happe
 5. The plan returns the request: the request account, or the signature when there is none. Earn's
    order tracking follows the settlement. The intent system does not.
 6. `vault.claim` waits for a provider whose user claims the settlement. None of these does.
+
+The prototype builds Hastra's flows as static recipes, at tier 1. `hastra-prime-deposit` mints wYLDS
+1:1 for USDC and stakes it for PRIME in one transaction, and its inflow assertion adds the share
+floor that Hastra's instruction lacks. A par redemption is one plan of two intents:
+`hastra-prime-unstake` is a `vault.withdraw` from PRIME to wYLDS, and `hastra-wylds-request` is a
+`vault.requestWithdrawal` of that wYLDS. `hastra-wylds-cancel` revokes the request. Hastra's program
+makes the owner pay the request account's rent, so those plans name the owner as the rent payer.
 
 ### 4.16 Remote recipes and trust tiers
 

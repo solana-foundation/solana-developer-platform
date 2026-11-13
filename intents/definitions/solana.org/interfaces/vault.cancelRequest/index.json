@@ -1,0 +1,9 @@
+{
+  "head": "1.0.0",
+  "approveNewVersions": false,
+  "approvals": {
+    "solana.org/hastra-wylds-cancel": [
+      "1.0.0"
+    ]
+  }
+}

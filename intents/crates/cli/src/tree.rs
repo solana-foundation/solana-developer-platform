@@ -216,12 +216,26 @@ mod tests {
         .for_each(|path| assert_eq!(Position::parse(Path::new(path)), None, "{path}"));
     }
 
+    /// The version files under `<root>/solana.org/<kind>`, such as `interfaces/token.transfer/1.0.0.json`.
+    fn version_files(root: &Path, kind: &str) -> usize {
+        let names = std::fs::read_dir(root.join("solana.org").join(kind)).unwrap();
+
+        names
+            .flat_map(|name| std::fs::read_dir(name.unwrap().path()).unwrap())
+            .filter(|file| {
+                file.as_ref().unwrap().file_name().to_string_lossy().starts_with(|c: char| c.is_ascii_digit())
+            })
+            .count()
+    }
+
     #[test]
     fn reads_the_definitions_in_this_repository() {
-        let tree = Tree::read(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../definitions")).unwrap();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../definitions");
+        let tree = Tree::read(&root).unwrap();
+        let interfaces = version_files(&root, "interfaces");
 
-        assert_eq!(tree.definitions.len(), 12);
-        assert_eq!(tree.of_kind(Kind::Interface).count(), 3);
+        assert_eq!(tree.definitions.len(), interfaces + version_files(&root, "implementations"));
+        assert_eq!(tree.of_kind(Kind::Interface).count(), interfaces);
         assert_eq!(tree.organizations(), ["solana.org"]);
         assert!(tree.strays.is_empty());
     }

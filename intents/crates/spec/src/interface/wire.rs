@@ -20,7 +20,13 @@ pub struct InterfaceDocV1 {
     pub addresses: TableRefV1,
     pub literals: TableRefV1,
     pub pool: PoolRefV1,
+    /// [`INTERFACE_SETTLES_LATER`], or zero.
+    pub flags: u8,
 }
+
+/// The interface is a request: the transaction moves the money in, and the provider settles the
+/// rest later, outside the transaction (`DESIGN.md`, 4.15).
+pub const INTERFACE_SETTLES_LATER: u8 = 1;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Pod, Zeroable)]

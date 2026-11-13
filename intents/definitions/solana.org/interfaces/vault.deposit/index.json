@@ -10,6 +10,9 @@
     ],
     "solana.org/ondo-usdy-deposit": [
       "1.0.0"
+    ],
+    "solana.org/hastra-prime-deposit": [
+      "1.0.0"
     ]
   }
 }

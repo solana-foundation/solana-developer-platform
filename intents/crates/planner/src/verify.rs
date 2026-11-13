@@ -68,6 +68,7 @@ struct TokenAccount {
     authority: Address,
     amount: u64,
     delegate: Option<Address>,
+    delegated_amount: u64,
     close_authority: Option<Address>,
 }
 
@@ -89,6 +90,7 @@ fn token_account(account: &Account) -> Option<TokenAccount> {
         authority: address(32)?,
         amount: u64::from_le_bytes(*account.data.get(64..)?.first_chunk::<8>()?),
         delegate: optional(72)?,
+        delegated_amount: u64::from_le_bytes(*account.data.get(121..)?.first_chunk::<8>()?),
         close_authority: optional(129)?,
     })
 }
@@ -194,9 +196,11 @@ impl<'v, 'a> Verification<'v, 'a> {
     /// Rule 3 holds for every signer input, whether or not a postcondition states it: no delegate,
     /// close authority, or owner of its token accounts changes.
     fn check_signer_authorities(&self) -> Result<(), PlanError> {
+        let conditions = self.conditions()?;
+
         for authority in self.values.recipe.signer_authorities()? {
             if let sdp_intents_engine::Condition::NoAuthorityChange { owner } = authority? {
-                if !self.no_authority_change(&owner) {
+                if !self.no_authority_change(&owner, &self.delegated_mints(&owner, &conditions)?) {
                     return Err(PlanError::CheckFailed(format!(
                         "an authority of an account of {} changes",
                         crate::render::base58(&owner)
@@ -234,8 +238,19 @@ impl<'v, 'a> Verification<'v, 'a> {
                 Ok(self.inflow(&address(first)?, &address(second)?) >= min)
             }
             CheckKind::NoOtherOutflows => self.no_other_outflows(&address(first)?, all),
-            CheckKind::NoAuthorityChange => Ok(self.no_authority_change(&address(first)?)),
+            CheckKind::NoAuthorityChange => {
+                let owner = address(first)?;
+
+                Ok(self.no_authority_change(&owner, &self.delegated_mints(&owner, all)?))
+            }
             CheckKind::InvokesOnly => self.invokes_only(condition.check.programs),
+            CheckKind::Delegates => {
+                let to = self.values.address(ValueRef::try_from(condition.check.delegate())?, condition.table)?;
+                let max = self.values.integer(third?)?;
+
+                Ok(self.delegates(&address(first)?, &address(second)?, Some(&to), max))
+            }
+            CheckKind::NoDelegate => Ok(self.delegates(&address(first)?, &address(second)?, None, 0)),
         }
     }
 
@@ -290,19 +305,56 @@ impl<'v, 'a> Verification<'v, 'a> {
         Ok(lamports_hold && tokens_hold)
     }
 
-    /// The owner, the delegate, and the close authority of each token account of `owner` stay.
-    fn no_authority_change(&self, owner: &Address) -> bool {
+    /// The owner, the delegate, and the close authority of each token account of `owner` stay. A
+    /// `delegates` postcondition judges the delegate of an account of a mint in `delegated`.
+    fn no_authority_change(&self, owner: &Address, delegated: &[Address]) -> bool {
         self.snapshots.iter().all(|snapshot| {
             let Some(before) = token_account(&snapshot.before).filter(|account| account.authority == *owner) else {
                 return true;
             };
+            let delegate_free = delegated.contains(&before.mint);
 
             token_account(&snapshot.after).is_some_and(|after| {
                 after.authority == before.authority
-                    && after.delegate == before.delegate
+                    && (delegate_free || after.delegate == before.delegate)
                     && after.close_authority == before.close_authority
             })
         })
+    }
+
+    /// Each token account of `from` of `mint` names `to` as its delegate, for at most `max`, after
+    /// the transaction, or has no delegate when `to` is `None`. At least one such account must exist.
+    fn delegates(&self, from: &Address, mint: &Address, to: Option<&Address>, max: u128) -> bool {
+        let accounts: Vec<TokenAccount> = self
+            .snapshots
+            .iter()
+            .filter_map(|snapshot| token_account(&snapshot.after))
+            .filter(|account| account.authority == *from && account.mint == *mint)
+            .collect();
+
+        !accounts.is_empty()
+            && accounts
+                .iter()
+                .all(|account| account.delegate.as_ref() == to && u128::from(account.delegated_amount) <= max)
+    }
+
+    /// The mints of `owner`'s accounts that a `delegates` postcondition covers.
+    fn delegated_mints(&self, owner: &Address, all: &[Condition<'_>]) -> Result<Vec<Address>, PlanError> {
+        all.iter()
+            .filter(|condition| {
+                [u8::from(CheckKind::Delegates), u8::from(CheckKind::NoDelegate)].contains(&condition.check.check)
+            })
+            .filter_map(|condition| {
+                let [from, mint, _] = condition.check.args.map(ValueRef::try_from);
+                let resolve = |value: Result<ValueRef, SpecError>| self.values.address(value?, condition.table);
+
+                match (resolve(from), resolve(mint)) {
+                    (Ok(from), Ok(mint)) if from == *owner => Some(Ok(mint)),
+                    (Ok(_), Ok(_)) => None,
+                    (Err(error), _) | (_, Err(error)) => Some(Err(error)),
+                }
+            })
+            .collect()
     }
 
     fn invokes_only(&self, programs: RangeV1) -> Result<bool, PlanError> {

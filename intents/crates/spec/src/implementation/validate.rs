@@ -100,8 +100,12 @@ impl Implementation<'_> {
         self.text(condition.message)?;
         condition.args.iter().try_for_each(|arg| counts.check_value(ValueRef::try_from(*arg)?))?;
 
-        if CheckKind::try_from(condition.check)? == CheckKind::InvokesOnly {
-            condition.programs.within(counts.addresses)?;
+        match CheckKind::try_from(condition.check)? {
+            CheckKind::InvokesOnly => {
+                condition.programs.within(counts.addresses)?;
+            }
+            CheckKind::Delegates => counts.check_value(ValueRef::try_from(condition.delegate())?)?,
+            _ => {}
         }
 
         Ok(())

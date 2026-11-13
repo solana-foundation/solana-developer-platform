@@ -31,6 +31,12 @@ const DELTA_LAMPORTS: u8 = 0;
 const DELTA_U64: u8 = 6;
 const DELTA_BYTES: u8 = 8;
 const TOKEN_AMOUNT: u8 = 2;
+const TOKEN_DELEGATE: u8 = 3;
+const TOKEN_DELEGATED_AMOUNT: u8 = 6;
+const LESS_THAN_OR_EQUAL: u8 = 5;
+/// The borsh tags of `None` and `Some`.
+const NONE: u8 = 0;
+const SOME: u8 = 1;
 
 /// The token amount is at byte 64 of an SPL Token or Token-2022 account.
 pub(crate) const TOKEN_AMOUNT_OFFSET: u16 = 64;
@@ -179,6 +185,33 @@ pub(crate) fn amount_at_least(account: &Address, min: u64) -> LighthouseInstruct
         accounts: vec![readonly(account)],
         data: [&[ASSERT_TOKEN_ACCOUNT, LOG_SILENT, TOKEN_AMOUNT][..], &min.to_le_bytes(), &[GREATER_THAN_OR_EQUAL]]
             .concat(),
+    }
+}
+
+/// Fails unless the token account's delegate is `delegate`, or it has none when `delegate` is
+/// `None`.
+pub(crate) fn delegate_is(account: &Address, delegate: Option<&Address>) -> LighthouseInstruction {
+    let value: Vec<u8> = match delegate {
+        Some(delegate) => [&[SOME][..], &delegate.0].concat(),
+        None => vec![NONE],
+    };
+
+    LighthouseInstruction {
+        accounts: vec![readonly(account)],
+        data: [&[ASSERT_TOKEN_ACCOUNT, LOG_SILENT, TOKEN_DELEGATE][..], &value, &[EQUAL]].concat(),
+    }
+}
+
+/// Fails unless the token account's delegate may take at most `max`.
+pub(crate) fn delegated_at_most(account: &Address, max: u64) -> LighthouseInstruction {
+    LighthouseInstruction {
+        accounts: vec![readonly(account)],
+        data: [
+            &[ASSERT_TOKEN_ACCOUNT, LOG_SILENT, TOKEN_DELEGATED_AMOUNT][..],
+            &max.to_le_bytes(),
+            &[LESS_THAN_OR_EQUAL],
+        ]
+        .concat(),
     }
 }
 

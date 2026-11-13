@@ -44,6 +44,11 @@ impl<'a> Interface<'a> {
         self.text(self.fixed.display)
     }
 
+    /// Whether the provider settles the operation after the transaction.
+    pub fn settles_later(&self) -> bool {
+        self.fixed.flags & super::wire::INTERFACE_SETTLES_LATER != 0
+    }
+
     pub fn inputs(&self) -> Result<&'a [InputV1], SpecError> {
         self.table(self.fixed.inputs)
     }

@@ -1,0 +1,130 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "implementation",
+  "id": "solana.org/hastra-wylds-cancel",
+  "version": "1.0.0",
+  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "implements": "solana.org/vault.cancelRequest@^1",
+  "annotations": {
+    "release": "Hastra v0.0.6, source commit 121e4cc600b976a97faa018359e00bda48113ec2."
+  },
+  "applies": [
+    {
+      "value": "{inputs.vault}",
+      "equals": "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih"
+    }
+  ],
+  "message": "cancel {inputs.owner}'s Hastra redemption request {outputs.request}, which returns its rent",
+  "recipe": {
+    "kind": "static",
+    "accounts": [
+      {
+        "name": "owner",
+        "address": "{inputs.owner}",
+        "writable": true,
+        "signer": true
+      },
+      {
+        "name": "wylds",
+        "address": "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih"
+      },
+      {
+        "name": "mintProgram",
+        "address": "9WUyNREiPDMgwMh5Gt81Fd3JpiCKxpjZ5Dpq9Bo1RhMV"
+      },
+      {
+        "name": "tokenProgram",
+        "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+      },
+      {
+        "name": "mintConfig",
+        "address": {
+          "pda": {
+            "program": "{accounts.mintProgram}",
+            "seeds": [
+              {
+                "value": "config",
+                "encoding": "utf8"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "redeemVaultAuthority",
+        "address": {
+          "pda": {
+            "program": "{accounts.mintProgram}",
+            "seeds": [
+              {
+                "value": "redeem_vault_authority",
+                "encoding": "utf8"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "request",
+        "writable": true,
+        "address": {
+          "pda": {
+            "program": "{accounts.mintProgram}",
+            "seeds": [
+              {
+                "value": "redemption_request",
+                "encoding": "utf8"
+              },
+              {
+                "value": "{inputs.owner}",
+                "encoding": "address"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "ownerWylds",
+        "writable": true,
+        "address": {
+          "ata": {
+            "owner": "{inputs.owner}",
+            "mint": "{accounts.wylds}",
+            "tokenProgram": "{accounts.tokenProgram}"
+          }
+        }
+      }
+    ],
+    "instructions": [
+      {
+        "program": "9WUyNREiPDMgwMh5Gt81Fd3JpiCKxpjZ5Dpq9Bo1RhMV",
+        "accounts": [
+          "owner",
+          "ownerWylds",
+          "request",
+          "redeemVaultAuthority",
+          "mintConfig",
+          "tokenProgram"
+        ],
+        "data": [
+          {
+            "value": "6f4ce83227af30f2",
+            "encoding": "hex"
+          }
+        ]
+      }
+    ],
+    "outputs": {
+      "escrowMint": "wylds",
+      "request": "request"
+    }
+  },
+  "postConditions": [
+    {
+      "invokesOnly": [
+        "9WUyNREiPDMgwMh5Gt81Fd3JpiCKxpjZ5Dpq9Bo1RhMV"
+      ],
+      "message": "only Hastra vault-mint instructions run"
+    }
+  ]
+}

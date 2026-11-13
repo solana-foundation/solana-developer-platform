@@ -11,7 +11,9 @@ use sdp_intents_engine::Recipe;
 use sdp_intents_spec::Address;
 
 use crate::guards::{GuardInputs, GuardedAccount, Guards, TokenGuard};
-use crate::wire::{amount_at_least, LighthouseInstruction, Memory, Source, TOKEN_AMOUNT_OFFSET};
+use crate::wire::{
+    amount_at_least, delegate_is, delegated_at_most, LighthouseInstruction, Memory, Source, TOKEN_AMOUNT_OFFSET,
+};
 use crate::GuardError;
 
 const LAMPORTS_LEN: u64 = 8;
@@ -96,14 +98,21 @@ impl Guard<'_, '_> {
         let amount_offset =
             if guard.authorities_fixed { slot_offset.saturating_add(AMOUNT_IN_AUTHORITIES_SLOT) } else { slot_offset };
         let amount = guard.min_change.map(|min| self.memory.amount_change(&guard.address, amount_offset, min));
-        let fields: &[Field] = if guard.authorities_fixed { &[OWNER, DELEGATE, CLOSE_AUTHORITY] } else { &[] };
+        let fields: &[Field] = match (guard.authorities_fixed, guard.delegation) {
+            (false, _) => &[],
+            (true, None) => &[OWNER, DELEGATE, CLOSE_AUTHORITY],
+            (true, Some(_)) => &[OWNER, CLOSE_AUTHORITY],
+        };
         let authorities = fields.iter().map(|field| {
             let offset = slot_offset.saturating_add(field.slot_offset);
 
             self.memory.bytes_unchanged(&guard.address, offset, field.data_offset, field.len)
         });
+        let delegation = guard.delegation.into_iter().flat_map(|delegation| {
+            [delegate_is(&guard.address, delegation.to.as_ref()), delegated_at_most(&guard.address, delegation.max)]
+        });
 
-        amount.into_iter().chain(authorities).collect()
+        amount.into_iter().chain(authorities).chain(delegation).collect()
     }
 }
 

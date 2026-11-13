@@ -1,0 +1,217 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "implementation",
+  "id": "solana.org/hastra-prime-unstake",
+  "version": "1.0.0",
+  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "implements": "solana.org/vault.withdraw@^1",
+  "annotations": {
+    "release": "Hastra v0.0.6, source commit 121e4cc600b976a97faa018359e00bda48113ec2.",
+    "legacyTicket": "vault-stake takes an optional legacy ticket. The program address in its place means none, as Anchor reads it."
+  },
+  "applies": [
+    {
+      "value": "{inputs.vault}",
+      "equals": "3b8X44fLF9ooXaUm3hhSgjpmVs6rZZ3pPoGnGahc3Uu7"
+    },
+    {
+      "value": "{inputs.asset}",
+      "equals": "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih"
+    }
+  ],
+  "message": "unstake {inputs.shares} of {outputs.shareMint} from Hastra to {inputs.owner} for at least {inputs.minAmount} of {inputs.asset}",
+  "recipe": {
+    "kind": "static",
+    "accounts": [
+      {
+        "name": "rentPayer",
+        "address": "{payers.rent}",
+        "writable": true,
+        "signer": true
+      },
+      {
+        "name": "owner",
+        "address": "{inputs.owner}",
+        "signer": true,
+        "writable": true
+      },
+      {
+        "name": "wylds",
+        "address": "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih",
+        "writable": true
+      },
+      {
+        "name": "prime",
+        "address": "{inputs.vault}",
+        "writable": true
+      },
+      {
+        "name": "stakeProgram",
+        "address": "97V7JsExNC6yFWu5KjK1FLfVkNVvtMpAFL5QkLWKEGxY"
+      },
+      {
+        "name": "systemProgram",
+        "address": "11111111111111111111111111111111"
+      },
+      {
+        "name": "tokenProgram",
+        "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+      },
+      {
+        "name": "stakeConfig",
+        "address": {
+          "pda": {
+            "program": "{accounts.stakeProgram}",
+            "seeds": [
+              {
+                "value": "stake_config",
+                "encoding": "utf8"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "stakeVaultConfig",
+        "address": {
+          "pda": {
+            "program": "{accounts.stakeProgram}",
+            "seeds": [
+              {
+                "value": "stake_vault_token_account_config",
+                "encoding": "utf8"
+              },
+              {
+                "value": "{accounts.stakeConfig}",
+                "encoding": "address"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "stakeVault",
+        "writable": true,
+        "address": {
+          "hasOne": {
+            "account": "{accounts.stakeVaultConfig}",
+            "owner": "97V7JsExNC6yFWu5KjK1FLfVkNVvtMpAFL5QkLWKEGxY",
+            "offset": "8"
+          }
+        }
+      },
+      {
+        "name": "stakeVaultAuthority",
+        "address": {
+          "pda": {
+            "program": "{accounts.stakeProgram}",
+            "seeds": [
+              {
+                "value": "vault_authority",
+                "encoding": "utf8"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "stakePriceConfig",
+        "address": {
+          "pda": {
+            "program": "{accounts.stakeProgram}",
+            "seeds": [
+              {
+                "value": "stake_price_config",
+                "encoding": "utf8"
+              },
+              {
+                "value": "{accounts.stakeConfig}",
+                "encoding": "address"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "ownerWylds",
+        "writable": true,
+        "address": {
+          "ata": {
+            "owner": "{inputs.owner}",
+            "mint": "{accounts.wylds}",
+            "tokenProgram": "{accounts.tokenProgram}"
+          }
+        }
+      },
+      {
+        "name": "ownerPrime",
+        "writable": true,
+        "address": {
+          "ata": {
+            "owner": "{inputs.owner}",
+            "mint": "{accounts.prime}",
+            "tokenProgram": "{accounts.tokenProgram}"
+          }
+        }
+      }
+    ],
+    "instructions": [
+      {
+        "program": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+        "accounts": [
+          "rentPayer",
+          "ownerWylds",
+          "owner",
+          "wylds",
+          "systemProgram",
+          "tokenProgram"
+        ],
+        "data": [
+          {
+            "value": "01",
+            "encoding": "hex"
+          }
+        ]
+      },
+      {
+        "program": "97V7JsExNC6yFWu5KjK1FLfVkNVvtMpAFL5QkLWKEGxY",
+        "accounts": [
+          "stakeConfig",
+          "stakeVaultConfig",
+          "stakeVault",
+          "stakeVaultAuthority",
+          "owner",
+          "stakeProgram",
+          "ownerWylds",
+          "ownerPrime",
+          "prime",
+          "wylds",
+          "stakePriceConfig",
+          "tokenProgram"
+        ],
+        "data": [
+          {
+            "value": "b80c569546c461e1",
+            "encoding": "hex"
+          },
+          {
+            "value": "{inputs.shares}",
+            "encoding": "u64le"
+          }
+        ]
+      }
+    ],
+    "outputs": {
+      "shareMint": "prime"
+    }
+  },
+  "postConditions": [
+    {
+      "invokesOnly": [
+        "97V7JsExNC6yFWu5KjK1FLfVkNVvtMpAFL5QkLWKEGxY",
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+      ],
+      "message": "only Hastra vault-stake and ATA instructions run"
+    }
+  ]
+}

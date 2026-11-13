@@ -1,0 +1,25 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "interface",
+  "id": "solana.org/vault.requestWithdrawal",
+  "version": "1.0.0",
+  "settlement": "async",
+  "inputs": [
+    { "name": "owner", "type": "address", "signer": true },
+    { "name": "vault", "type": "address" },
+    { "name": "asset", "type": "mint" },
+    { "name": "amount", "type": "u64", "display": { "amount": { "mint": "{outputs.escrowMint}" } } }
+  ],
+  "outputs": [
+    { "name": "escrowMint", "type": "mint" },
+    { "name": "escrowDelegate", "type": "address" },
+    { "name": "request", "type": "address" }
+  ],
+  "display": "Request a withdrawal of {inputs.amount} {outputs.escrowMint} from vault {inputs.vault}, paid later in {inputs.asset}",
+  "postConditions": [
+    { "delegates": { "from": "{inputs.owner}", "mint": "{outputs.escrowMint}", "to": "{outputs.escrowDelegate}", "max": "{inputs.amount}" },
+      "message": "{outputs.escrowDelegate} may take at most {inputs.amount} of {outputs.escrowMint} from {inputs.owner}" },
+    { "noOtherOutflows": { "from": "{inputs.owner}" },
+      "message": "nothing leaves {inputs.owner} now" }
+  ]
+}

@@ -51,11 +51,20 @@ pub(crate) struct LamportGuard {
 }
 
 /// A token account that existed before the span. `min_change` bounds its amount, and
-/// `authorities_fixed` keeps its owner, delegate, and close authority.
+/// `authorities_fixed` keeps its owner, delegate, and close authority. With `delegation`, the
+/// delegate is the one that it names instead.
 pub(crate) struct TokenGuard {
     pub(crate) address: Address,
     pub(crate) min_change: Option<i128>,
     pub(crate) authorities_fixed: bool,
+    pub(crate) delegation: Option<Delegation>,
+}
+
+/// The delegate that a token account must name after the span, for at most `max`, or none.
+#[derive(Clone, Copy)]
+pub(crate) struct Delegation {
+    pub(crate) to: Option<Address>,
+    pub(crate) max: u64,
 }
 
 /// An associated token account that the span creates and that an inflow must reach.
@@ -145,10 +154,25 @@ impl GuardInputs<'_> {
             .iter()
             .any(|condition| matches!(condition, Condition::NoAuthorityChange { owner: fixed } if fixed == owner));
 
-        Ok((min_change.is_some() || authorities_fixed).then_some(TokenGuard {
+        let delegation = self
+            .conditions
+            .iter()
+            .find_map(|condition| match *condition {
+                Condition::Delegates { from, mint, to, max } if from == *owner && mint == held.mint => Some(
+                    u64::try_from(max).map(|max| Delegation { to: Some(to), max }).map_err(|_| GuardError::Overflow),
+                ),
+                Condition::NoDelegate { from, mint } if from == *owner && mint == held.mint => {
+                    Some(Ok(Delegation { to: None, max: 0 }))
+                }
+                _ => None,
+            })
+            .transpose()?;
+
+        Ok((min_change.is_some() || authorities_fixed || delegation.is_some()).then_some(TokenGuard {
             address: *address,
             min_change,
             authorities_fixed,
+            delegation,
         }))
     }
 

@@ -29,6 +29,19 @@ pub enum Condition {
     },
     /// Every top-level instruction invokes a listed program. No account state shows it.
     InvokesOnly,
+    /// After the span, each of `from`'s token accounts of `mint` names `to` as its delegate, for at
+    /// most `max`. It is the one authority change that rule 3 then allows on those accounts.
+    Delegates {
+        from: Address,
+        mint: Address,
+        to: Address,
+        max: u128,
+    },
+    /// After the span, no token account of `from` of `mint` has a delegate.
+    NoDelegate {
+        from: Address,
+        mint: Address,
+    },
 }
 
 /// The document whose address table a value with source `Address` indexes.
@@ -88,6 +101,13 @@ impl ConditionValues<'_, '_> {
             CheckKind::NoOtherOutflows => Condition::NoOtherOutflows { from: address(first)? },
             CheckKind::NoAuthorityChange => Condition::NoAuthorityChange { owner: address(first)? },
             CheckKind::InvokesOnly => Condition::InvokesOnly,
+            CheckKind::Delegates => Condition::Delegates {
+                from: address(first)?,
+                mint: address(second)?,
+                to: self.address(ValueRef::try_from(check.delegate())?, table)?,
+                max: self.integer(third?)?,
+            },
+            CheckKind::NoDelegate => Condition::NoDelegate { from: address(first)?, mint: address(second)? },
         })
     }
 

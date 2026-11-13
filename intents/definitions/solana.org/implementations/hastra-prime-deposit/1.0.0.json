@@ -1,0 +1,101 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "implementation",
+  "id": "solana.org/hastra-prime-deposit",
+  "version": "1.0.0",
+  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "implements": "solana.org/vault.deposit@^1",
+  "annotations": {
+    "release": "Hastra v0.0.6, source commit 121e4cc600b976a97faa018359e00bda48113ec2. vault-mint mints wYLDS 1:1 for USDC, so vault-stake stakes the same amount."
+  },
+  "applies": [
+    { "value": "{inputs.vault}", "equals": "3b8X44fLF9ooXaUm3hhSgjpmVs6rZZ3pPoGnGahc3Uu7" },
+    { "value": "{inputs.asset}", "equals": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" }
+  ],
+  "message": "deposit {inputs.amount} of {inputs.asset} from {inputs.owner} into Hastra PRIME for at least {inputs.minShares} of {outputs.shareMint}",
+  "recipe": {
+    "kind": "static",
+    "accounts": [
+      { "name": "rentPayer", "address": "{payers.rent}", "writable": true, "signer": true },
+      { "name": "owner", "address": "{inputs.owner}", "signer": true },
+      { "name": "usdc", "address": "{inputs.asset}" },
+      { "name": "wylds", "address": "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih", "writable": true },
+      { "name": "prime", "address": "{inputs.vault}", "writable": true },
+      { "name": "mintProgram", "address": "9WUyNREiPDMgwMh5Gt81Fd3JpiCKxpjZ5Dpq9Bo1RhMV" },
+      { "name": "stakeProgram", "address": "97V7JsExNC6yFWu5KjK1FLfVkNVvtMpAFL5QkLWKEGxY" },
+      { "name": "systemProgram", "address": "11111111111111111111111111111111" },
+      { "name": "tokenProgram", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" },
+      { "name": "mintConfig", "address": { "pda": { "program": "{accounts.mintProgram}", "seeds": [
+        { "value": "config", "encoding": "utf8" }
+      ] } } },
+      { "name": "mintVaultConfig", "address": { "pda": { "program": "{accounts.mintProgram}", "seeds": [
+        { "value": "vault_token_account_config", "encoding": "utf8" },
+        { "value": "{accounts.mintConfig}", "encoding": "address" }
+      ] } } },
+      { "name": "mintVault", "writable": true, "address": { "hasOne": { "account": "{accounts.mintVaultConfig}", "owner": "9WUyNREiPDMgwMh5Gt81Fd3JpiCKxpjZ5Dpq9Bo1RhMV", "offset": "8" } } },
+      { "name": "mintAuthority", "address": { "pda": { "program": "{accounts.mintProgram}", "seeds": [
+        { "value": "mint_authority", "encoding": "utf8" }
+      ] } } },
+      { "name": "stakeConfig", "address": { "pda": { "program": "{accounts.stakeProgram}", "seeds": [
+        { "value": "stake_config", "encoding": "utf8" }
+      ] } } },
+      { "name": "stakeVaultConfig", "address": { "pda": { "program": "{accounts.stakeProgram}", "seeds": [
+        { "value": "stake_vault_token_account_config", "encoding": "utf8" },
+        { "value": "{accounts.stakeConfig}", "encoding": "address" }
+      ] } } },
+      { "name": "stakeVault", "writable": true, "address": { "hasOne": { "account": "{accounts.stakeVaultConfig}", "owner": "97V7JsExNC6yFWu5KjK1FLfVkNVvtMpAFL5QkLWKEGxY", "offset": "8" } } },
+      { "name": "stakeVaultAuthority", "address": { "pda": { "program": "{accounts.stakeProgram}", "seeds": [
+        { "value": "vault_authority", "encoding": "utf8" }
+      ] } } },
+      { "name": "stakeMintAuthority", "address": { "pda": { "program": "{accounts.stakeProgram}", "seeds": [
+        { "value": "mint_authority", "encoding": "utf8" }
+      ] } } },
+      { "name": "stakePriceConfig", "address": { "pda": { "program": "{accounts.stakeProgram}", "seeds": [
+        { "value": "stake_price_config", "encoding": "utf8" },
+        { "value": "{accounts.stakeConfig}", "encoding": "address" }
+      ] } } },
+      { "name": "ownerUsdc", "writable": true, "address": { "ata": { "owner": "{inputs.owner}", "mint": "{accounts.usdc}", "tokenProgram": "{accounts.tokenProgram}" } } },
+      { "name": "ownerWylds", "writable": true, "address": { "ata": { "owner": "{inputs.owner}", "mint": "{accounts.wylds}", "tokenProgram": "{accounts.tokenProgram}" } } },
+      { "name": "ownerPrime", "writable": true, "address": { "ata": { "owner": "{inputs.owner}", "mint": "{accounts.prime}", "tokenProgram": "{accounts.tokenProgram}" } } }
+    ],
+    "instructions": [
+      {
+        "program": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+        "accounts": ["rentPayer", "ownerWylds", "owner", "wylds", "systemProgram", "tokenProgram"],
+        "data": [{ "value": "01", "encoding": "hex" }]
+      },
+      {
+        "program": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+        "accounts": ["rentPayer", "ownerPrime", "owner", "prime", "systemProgram", "tokenProgram"],
+        "data": [{ "value": "01", "encoding": "hex" }]
+      },
+      {
+        "program": "9WUyNREiPDMgwMh5Gt81Fd3JpiCKxpjZ5Dpq9Bo1RhMV",
+        "accounts": ["mintConfig", "mintVaultConfig", "mintVault", "wylds", "mintAuthority", "owner", "ownerUsdc", "ownerWylds", "tokenProgram"],
+        "data": [
+          { "value": "f223c68952e1f2b6", "encoding": "hex" },
+          { "value": "{inputs.amount}", "encoding": "u64le" }
+        ]
+      },
+      {
+        "program": "97V7JsExNC6yFWu5KjK1FLfVkNVvtMpAFL5QkLWKEGxY",
+        "accounts": ["stakeConfig", "stakeVaultConfig", "stakeVault", "stakeVaultAuthority", "prime", "wylds", "stakeMintAuthority", "owner", "ownerWylds", "ownerPrime", "stakePriceConfig", "tokenProgram"],
+        "data": [
+          { "value": "f223c68952e1f2b6", "encoding": "hex" },
+          { "value": "{inputs.amount}", "encoding": "u64le" }
+        ]
+      }
+    ],
+    "outputs": { "shareMint": "prime" }
+  },
+  "postConditions": [
+    {
+      "invokesOnly": [
+        "9WUyNREiPDMgwMh5Gt81Fd3JpiCKxpjZ5Dpq9Bo1RhMV",
+        "97V7JsExNC6yFWu5KjK1FLfVkNVvtMpAFL5QkLWKEGxY",
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+      ],
+      "message": "only Hastra vault-mint, vault-stake, and ATA instructions run"
+    }
+  ]
+}

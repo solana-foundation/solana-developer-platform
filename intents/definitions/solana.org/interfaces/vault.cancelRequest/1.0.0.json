@@ -1,0 +1,21 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "interface",
+  "id": "solana.org/vault.cancelRequest",
+  "version": "1.0.0",
+  "inputs": [
+    { "name": "owner", "type": "address", "signer": true },
+    { "name": "vault", "type": "address" }
+  ],
+  "outputs": [
+    { "name": "escrowMint", "type": "mint" },
+    { "name": "request", "type": "address" }
+  ],
+  "display": "Cancel the withdrawal request {outputs.request} of vault {inputs.vault}",
+  "postConditions": [
+    { "noDelegate": { "from": "{inputs.owner}", "mint": "{outputs.escrowMint}" },
+      "message": "no one may take {outputs.escrowMint} from {inputs.owner}" },
+    { "noOtherOutflows": { "from": "{inputs.owner}" },
+      "message": "nothing leaves {inputs.owner}" }
+  ]
+}

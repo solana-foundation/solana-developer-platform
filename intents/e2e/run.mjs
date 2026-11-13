@@ -31,6 +31,8 @@ const RPC = process.argv[2] ?? "http://127.0.0.1:8899";
 const SERVICE_BINARY = new URL("../target/debug/sdp-intents-service", import.meta.url).pathname;
 const ADAPTER = new URL("../adapters/jupiter.mjs", import.meta.url).pathname;
 const USDY = "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6";
+const PRIME = "3b8X44fLF9ooXaUm3hhSgjpmVs6rZZ3pPoGnGahc3Uu7";
+const WYLDS = "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih";
 const SERVICE_LISTEN = "127.0.0.1:8788";
 const SERVICE = `http://${SERVICE_LISTEN}`;
 const OUT = new URL("../target/e2e/", import.meta.url).pathname;
@@ -150,7 +152,7 @@ const adapter = await startAdapter();
 try {
   console.log("the service reads the registry");
   const listing = await service("/v1/registry");
-  expect(listing.interfaces.length === 3 && listing.implementations.length === 9, "it lists 3 interfaces and 9 implementations");
+  expect(listing.interfaces.length === 5 && listing.implementations.length === 13, "it lists 5 interfaces and 13 implementations");
 
   const candidates = await service(
     "/v1/implementations",
@@ -240,6 +242,62 @@ try {
     ]),
   );
   expect((await tokenAmount(sender.address, USDC)) - usdcBefore2 >= 50_000_000n, "the withdrawal paid at least 50 USDC");
+
+  console.log("a Hastra PRIME deposit, then a par redemption request and its cancellation");
+  const primeBefore = await tokenAmount(sender.address, PRIME);
+  await run(
+    "hastra-deposit",
+    plan(payer, [
+      {
+        interface: "solana.org/vault.deposit@^1",
+        implementation: "solana.org/hastra-prime-deposit@^1",
+        inputs: { owner: sender.address, vault: PRIME, asset: USDC, amount: "100000000", minShares: "80000000" },
+      },
+    ]),
+    [payer, sender],
+  );
+  expect((await tokenAmount(sender.address, PRIME)) - primeBefore >= 80_000_000n, "the sender holds at least 80 more PRIME");
+
+  // request_redeem makes the owner pay the request account's rent, so the owner is the rent payer.
+  const asRentPayer = (request) => ({ ...request, payers: { fee: payer.address, rent: sender.address } });
+  const requested = await run(
+    "hastra-request",
+    asRentPayer(
+      plan(payer, [
+        {
+          interface: "solana.org/vault.withdraw@^1",
+          implementation: "solana.org/hastra-prime-unstake@^1",
+          inputs: { owner: sender.address, vault: PRIME, asset: WYLDS, shares: "50000000", minAmount: "50000000" },
+        },
+        {
+          interface: "solana.org/vault.requestWithdrawal@^1",
+          implementation: "solana.org/hastra-wylds-request@^1",
+          inputs: { owner: sender.address, vault: WYLDS, asset: USDC, amount: "50000000" },
+        },
+      ]),
+    ),
+    [payer, sender],
+  );
+  expect(requested.message.includes("| settles later, outside this transaction |"), "the message says the request settles later");
+  const wylds = await rpc("getTokenAccountsByOwner", [sender.address, { mint: WYLDS }, { encoding: "jsonParsed" }]);
+  const delegated = wylds.value[0].account.data.parsed.info;
+  expect(delegated.delegatedAmount?.amount === "50000000", `Hastra may take 50 wYLDS (${delegated.delegate})`);
+
+  await run(
+    "hastra-cancel",
+    asRentPayer(
+      plan(payer, [
+        {
+          interface: "solana.org/vault.cancelRequest@^1",
+          implementation: "solana.org/hastra-wylds-cancel@^1",
+          inputs: { owner: sender.address, vault: WYLDS },
+        },
+      ]),
+    ),
+    [payer, sender],
+  );
+  const cancelled = await rpc("getTokenAccountsByOwner", [sender.address, { mint: WYLDS }, { encoding: "jsonParsed" }]);
+  expect(cancelled.value[0].account.data.parsed.info.delegate === undefined, "the cancellation revokes the delegate");
 
   console.log("an endpoint that adds an approval to an attacker");
   await fetch("http://127.0.0.1:8791/mode", { method: "POST", body: JSON.stringify({ malicious: true }) });

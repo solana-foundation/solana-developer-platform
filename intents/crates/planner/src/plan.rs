@@ -177,8 +177,10 @@ impl<C: Chain> Values<'_, '_, C> {
             (false, false) => "none",
         };
 
+        let settlement = if interface.settles_later() { " | settles later, outside this transaction" } else { "" };
+
         Ok(format!(
-            "{record} | guarantees: {} | interface: {} | implementation: {}{builder}{tier} | onchain checks: {checks}",
+            "{record}{settlement} | guarantees: {} | interface: {} | implementation: {}{builder}{tier} | onchain checks: {checks}",
             guarantees.join("; "),
             id(interface.name()?, interface.id().version, &digests.interface),
             id(implementation.name()?, implementation.id().version, &digests.implementation),
