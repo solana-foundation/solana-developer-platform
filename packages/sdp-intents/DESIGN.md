@@ -783,25 +783,49 @@ The service is untrusted. By default, each transaction proves onchain that its i
 what the record builds for the intent, so a signer needs only the transaction bytes.
 
 ```
-[Lighthouse snapshot] [built instructions] [Lighthouse assertions] [verify_intent]
+[verify_intent] [built instructions]
 ```
 
-`verify_intent` is an instruction of the registry program. Its data is the intent in binary form.
-Its accounts are the interface and implementation version accounts, the builder program, and the
-accounts that the recipe names, including those of the last `MoreAccounts` round. The recipe logic
-and the registry change together, so one program holds both.
+`verify_intent` is an instruction of the registry program. Its data is the intent in binary form,
+as one Anchor `&[u8]` argument. The recipe logic and the registry change together, so one program
+holds both.
 
-1. It checks that the registry owns both version accounts, that they match the intent, that the
-   version is approved unless the intent sets `allowUnapproved`, and the checks of `applies`.
-2. Static recipe: it checks each account against its source, reads the `hasOne` and `read` bytes,
-   and builds the instructions.
-3. Program recipe: it calls the builder by CPI with the record's data, and every account readonly
-   and unsigned. The builder returns `HashedReadyV1` (4.2).
-4. It serializes the built instructions from the instructions sysvar into the instruction section,
-   with the rent payer's address mapped back to the placeholder. For a static recipe it compares the
-   bytes. For a program recipe it compares their SHA-256 with `instructions_hash`, and checks the
-   signers. It also compares the Lighthouse instructions with the ones that the postconditions give.
-5. Any difference fails the transaction.
+Its accounts, all readonly: the instructions sysvar, the interface index, the implementation
+index, the interface version account, the implementation version account, every account of the
+record's account table in order, then for a program recipe the accounts of the last `MoreAccounts`
+round. The builder program is in the table.
+
+**Placement.** `verify_intent` is a top-level instruction. Every instruction before it is a
+ComputeBudget instruction, and every instruction after it is a built instruction. So it checks the
+whole transaction, a signer finds the intent at one place, and a transaction holds one intent.
+`verify_intent` runs first, so a builder that it calls reads the state that the simulation read,
+not the state after the built instructions. The Lighthouse snapshot will follow `verify_intent`,
+and the assertions will end the transaction. Their counts come from the postconditions, so the
+boundaries of the built instructions stay exact.
+
+1. It checks that the registry owns both version accounts and both indexes, that they name the
+   documents of the intent, that the version is approved unless the intent sets
+   `allowUnapproved`, and the checks of `applies`. A version account that the registry owns holds
+   the document of its id, because `publish` creates it only at that id's address. So no address
+   is derived.
+2. It refuses an intent that turns `verifyIntent` off, and, until it checks Lighthouse, an intent
+   that asks for `assertions`. A signer then never reads a guarantee that the transaction does not
+   hold.
+3. It resolves the record's accounts with the engine over its own accounts, so one resolve
+   completes or fails. Each resolved address must be the account at its place in the table.
+4. Static recipe: it builds the instructions and compares each one, byte for byte, with the
+   sysvar's instruction at its place: program, accounts, roles, and data. Their count must be the
+   recipe's.
+5. Program recipe: it calls the builder by CPI with the record's data, and every account readonly
+   and unsigned. The builder returns `HashedReadyV1` (4.2). It serializes the instructions after
+   itself into the instruction section, with the rent payer's address mapped back to the
+   placeholder, compares the SHA-256 with `instructions_hash`, and checks that a built instruction
+   names each builder signer as a signer.
+6. Any difference fails the transaction.
+
+The sysvar holds each account's role in the transaction, not in one instruction. A record that
+declares an account readonly fails when another instruction makes it writable, such as a `from`
+that is also the fee payer.
 
 A signer decodes the intent from `verify_intent`, renders the message from the intent and the
 record, and checks the fee payer and its own signature. It needs no simulation and no trust in the
@@ -814,13 +838,16 @@ service.
    `prepare`, the instructions differ and the transaction fails.
 3. The builder never sees a payer, so the rent payer can reach a built instruction only as the
    placeholder. One placeholder maps to one address, so the reverse mapping is exact, also when one
-   address pays both the fee and the rent.
+   address pays both the fee and the rent. A builder that names the rent payer's address through an
+   input, such as a `from` that also pays the rent, fails the check.
 4. A remote recipe cannot run onchain. `verify_intent` checks the registry part and the assertions
    only, so the instructions trust the endpoint, within the postconditions.
-5. Outputs still trust the builder, at execution.
-6. The builder runs at CPI depth 2, with no writes. Its limits are its heap, up to 256 KB through
+5. A version that is removed and published again at the same version can hold another document.
+   `verify_intent` checks ids, not digests, so it accepts the new document.
+6. Outputs still trust the builder, at execution.
+7. The builder runs at CPI depth 2, with no writes. Its limits are its heap, up to 256 KB through
    the v1 heap config, and the 988 bytes for signers and outputs.
-7. The wallet in 4.7 uses the same logic inside `execute`.
+8. The wallet in 4.7 uses the same logic inside `execute`.
 
 ### 4.7 Onchain execution
 
@@ -1159,10 +1186,16 @@ carries its version in its name.
 
 | Account | Seeds | Contents |
 | :-- | :-- | :-- |
-| `OrganizationV1` | `"org"`, SHA-256 of the name | Authority and name |
+| `OrganizationV1` | `"org"`, SHA-256 of the name | Authority and name, at most 64 bytes |
 | `VersionIndexV1` | `"index"`, kind, organization, name hash | Authorities, head, and the list of versions |
 | `InterfaceV1` | `"interface"`, organization, name hash, major, minor, patch | Version, publish slot, and an `InterfaceDocV1` |
 | `ImplementationV1` | `"implementation"`, organization, name hash, major, minor, patch | Version, publish slot, and an `ImplementationDocV1` |
+| `BufferV1` | `"buffer"`, writer, a `u32` that the writer picks | Writer, document length, and the document so far |
+
+Each account starts with its 8-byte Anchor discriminator. The kind seed is one byte, and the major,
+minor, and patch seeds are each a little-endian `u16`. A version account is the 14-byte fixed part,
+then the document. The registry reads an index and a version account in place, and checks the
+owner, the discriminator, and the length of each list.
 
 ```rust
 #[repr(C)]
@@ -1228,12 +1261,19 @@ pub struct VersionIndexV1 {
 | `create_implementation` | Organization authority of the proposer | Creates the index for one interface, with an update authority |
 | `set_update_authority` | Update authority | Changes the update authority of an index |
 | `set_approve_authority` | Approve authority | Changes the approve authority of an interface |
-| `write_buffer` | Any key | Writes a document into a buffer account, in parts. The buffer records the key that wrote it. |
+| `write_buffer` | Any key | Writes a document into a buffer account, in parts. The first part creates the buffer at the document's length. The buffer records the key that wrote it. |
+| `close_buffer` | Buffer writer | Closes a buffer that is not published, and returns the rent |
 | `publish` | Update authority | Checks that the buffer's SHA-256 equals the hash in the instruction, runs `parse` and the limits on the buffer, creates the version account, copies the document, adds the entry to the index, and closes the buffer. The head does not move. |
 | `set_head` | Update authority | Points the head at a published version |
-| `remove` | Update authority | Closes a version account, removes its entry, and returns the rent |
-| `approve`, `unapprove` | Approve authority of the interface | Adds an implementation to the interface's list or removes it, or sets or clears `approved` on one of its versions |
+| `remove` | Update authority | Closes a version account, removes its entry, and returns the rent to a recipient |
+| `approve_implementation`, `unapprove_implementation` | Approve authority of the interface | Adds an implementation to the interface's list, or removes it |
+| `approve_version`, `unapprove_version` | Approve authority of the interface | Sets or clears `approved` on one version of an implementation |
 | `set_approval_policy` | Approve authority | Sets `approve_new_versions` on an interface index |
+| `verify_intent` | None | Checks the transaction against the intent (4.6) |
+
+Each instruction that checks an update authority or an approve authority takes the organization
+that resolves `Address::default()`. `publish` checks the document limits of 4.9 that the views
+expose. The 10,000-byte limit bounds the seed, segment, and pool tables.
 
 `publish` checks that the document's `DocumentIdV1` matches the index and the seeds. For an
 implementation, it also checks that `implements` names the index's interface, and that the
