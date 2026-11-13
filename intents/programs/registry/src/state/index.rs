@@ -38,6 +38,8 @@ pub struct VersionEntryV1 {
     pub publish_slot: PodU64,
     pub approved: PodBool,
     pub removed: PodBool,
+    /// The trust tier of an implementation's recipe (`RecipeKind::tier`), and zero for an interface.
+    pub tier: u8,
 }
 
 /// The discriminator and the fixed part.
@@ -118,7 +120,7 @@ pub fn header_mut(view: &mut AccountView) -> Result<RefMut<'_, VersionIndexV1>> 
     header_during_change(view)
 }
 
-/// Adds `entry` in version order. `payer` funds the 16 bytes that the account grows by.
+/// Adds `entry` in version order. `payer` funds the 17 bytes that the account grows by.
 pub fn insert_version(view: &mut AccountView, payer: &AccountView, entry: VersionEntryV1) -> Result<()> {
     let placement = {
         let data = load(view)?;
@@ -294,7 +296,7 @@ mod tests {
     #[test]
     fn layouts_are_pinned() {
         assert_eq!(core::mem::size_of::<VersionIndexV1>(), 177);
-        assert_eq!(ENTRY_LEN, 16);
+        assert_eq!(ENTRY_LEN, 17);
         assert_eq!(FIXED_LEN, 185);
     }
 
@@ -304,6 +306,7 @@ mod tests {
             publish_slot: PodU64::new(9),
             approved: PodBool::new(approved),
             removed: PodBool::new(false),
+            tier: 1,
         }
     }
 

@@ -16,6 +16,18 @@ wire_code! {
     }
 }
 
+impl RecipeKind {
+    /// The trust tier of `DESIGN.md`, 4.16: 1 when `verify_intent` rebuilds the instructions, 2 when
+    /// only the assertions bound them, and 3 when only a simulation checks them.
+    pub fn tier(self) -> u8 {
+        match self {
+            Self::Static | Self::Program => 1,
+            Self::Remote => 2,
+            Self::RemoteTransaction => 3,
+        }
+    }
+}
+
 wire_code! {
     pub enum AccountSourceKind {
         Value = 1,

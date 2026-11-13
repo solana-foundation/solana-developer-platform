@@ -158,6 +158,7 @@ fn version_json(entry: VersionEntry) -> Value {
         "publishSlot": entry.publish_slot.to_string(),
         "approved": entry.approved,
         "removed": entry.removed,
+        "tier": entry.tier,
     })
 }
 

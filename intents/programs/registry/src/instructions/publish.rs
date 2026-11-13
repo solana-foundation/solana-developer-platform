@@ -37,10 +37,11 @@ struct Target {
     interface: Address,
 }
 
-/// The version that `publish` adds, and whether the interface's policy approves it.
+/// The version that `publish` adds, whether the interface's policy approves it, and its tier.
 struct Published {
     version: SemverV1,
     approved: bool,
+    tier: u8,
 }
 
 impl Publish {
@@ -66,6 +67,7 @@ impl Publish {
             publish_slot: PodU64::new(publish_slot),
             approved: PodBool::new(published.approved),
             removed: PodBool::new(false),
+            tier: published.tier,
         };
 
         let mut index_view = *self.index.account();
@@ -94,25 +96,27 @@ impl Publish {
 
     /// Validates the document with its view and the limits, and checks that its id names the index.
     fn check_document(&self, target: &Target, document: &[u8]) -> Result<Published> {
-        let (id, approved) = match target.kind {
+        let (id, approved, tier) = match target.kind {
             DocumentKind::Interface => {
                 let interface = Interface::parse(document).map_err(|_| RegistryError::BadDocument)?;
                 crate::limits::check_interface(&interface)?;
 
-                (*interface.id(), false)
+                (*interface.id(), false, 0)
             }
             DocumentKind::Implementation => {
                 let implementation = Implementation::parse(document).map_err(|_| RegistryError::BadDocument)?;
                 crate::limits::check_implementation(&implementation)?;
+                let tier = implementation.recipe().map_err(|_| RegistryError::BadDocument)?.tier();
+                let policy_approves = self.check_implements(target, &implementation)?;
 
-                (*implementation.id(), self.check_implements(target, &implementation)?)
+                (*implementation.id(), policy_approves && self.keeps_tier(tier)?, tier)
             }
             DocumentKind::Intent => return Err(RegistryError::WrongIndexKind.into()),
         };
 
         self.check_id(target, &id)?;
 
-        Ok(Published { version: id.version, approved })
+        Ok(Published { version: id.version, approved, tier })
     }
 
     fn check_id(&self, target: &Target, id: &DocumentIdV1) -> Result<()> {
@@ -147,6 +151,17 @@ impl Publish {
         require!(!interface_version.removed.get(), RegistryError::VersionRemoved);
 
         Ok(interface.header.approve_new_versions.get() && interface.approves(self.index.address()))
+    }
+
+    /// The policy carries an approval to a new version only when its tier is no worse than the tier
+    /// of the highest approved version. With no approved version, a new version needs its own
+    /// approval.
+    fn keeps_tier(&self, tier: u8) -> Result<bool> {
+        let data = index::load(self.index.account())?;
+        let index = Index::parse(&data)?;
+        let highest_approved = index.versions.iter().rev().find(|entry| entry.approved.get() && !entry.removed.get());
+
+        Ok(highest_approved.is_some_and(|entry| tier <= entry.tier))
     }
 
     fn create_version(&self, target: &Target, version: &SemverV1, publish_slot: u64, document: &[u8]) -> Result<()> {

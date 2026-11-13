@@ -1341,6 +1341,7 @@ pub struct VersionEntryV1 {
     pub publish_slot: PodU64,
     pub approved: PodBool,
     pub removed: PodBool,
+    pub tier: u8,
 }
 
 #[repr(C)]
@@ -1373,7 +1374,7 @@ pub struct VersionIndexV1 {
 5. The approved list holds the index addresses of an interface's approved implementations. An
    implementation index has none, leaves `approve_authority` and `approve_new_versions` at zero,
    and sets `interface` to the interface's index address, which never changes.
-6. `publish` grows the account by 16 bytes and inserts the entry in order. `remove` keeps the
+6. `publish` grows the account by 17 bytes and inserts the entry in order. `remove` keeps the
    entry, marked `removed` and no longer approved, so the index refuses to publish, approve, or
    release that version again, and an id never names other bytes. `approve` grows the account by
    32 bytes and appends an address, and `unapprove` moves the last address into the gap and shrinks
@@ -1384,9 +1385,9 @@ pub struct VersionIndexV1 {
    either one. The list makes approved implementations discoverable with no `getProgramAccounts`.
 8. `approve_new_versions` is the interface's policy, and defaults to false. When it is true,
    `publish` marks a new version of an approved implementation as approved, unless the new version
-   has a worse trust tier (4.16) than the highest approved version. When it is false, each version
-   needs its own approval. Each `VersionEntryV1` records its tier, so `publish` compares them with no
-   other account.
+   has a worse trust tier (4.16) than the highest approved version, or no version is approved yet.
+   When it is false, each version needs its own approval. Each `VersionEntryV1` records its tier, so
+   `publish` compares them with no other account.
 
 | Instruction | Signer | Effect |
 | :-- | :-- | :-- |

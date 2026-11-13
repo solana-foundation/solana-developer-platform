@@ -54,6 +54,7 @@ struct VersionEntryV1 {
     publish_slot: PodU64,
     approved: PodBool,
     removed: PodBool,
+    tier: u8,
 }
 
 pub struct OrganizationView<'a> {
@@ -91,6 +92,7 @@ pub struct VersionEntry {
     pub publish_slot: u64,
     pub approved: bool,
     pub removed: bool,
+    pub tier: u8,
 }
 
 impl From<&VersionEntryV1> for VersionEntry {
@@ -100,6 +102,7 @@ impl From<&VersionEntryV1> for VersionEntry {
             publish_slot: entry.publish_slot.get(),
             approved: entry.approved.get(),
             removed: entry.removed.get(),
+            tier: entry.tier,
         }
     }
 }
@@ -199,6 +202,6 @@ mod tests {
     fn layouts_are_pinned() {
         assert_eq!(size_of::<OrganizationV1>(), 129);
         assert_eq!(size_of::<VersionIndexV1>(), 177);
-        assert_eq!(size_of::<VersionEntryV1>(), 16);
+        assert_eq!(size_of::<VersionEntryV1>(), 17);
     }
 }

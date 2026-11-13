@@ -379,6 +379,51 @@ fn the_approval_policy_approves_new_versions_of_an_approved_implementation() {
     assert_eq!(approved, [true, false, false, true]);
 }
 
+/// `system-transfer` as an endpoint's instructions, at tier 2.
+fn remote_document(organization: &Organization, version: &str) -> Result<Vec<u8>, Failure> {
+    let text = format!(
+        r#"{{
+  "spec": "sdp-intents@1.0", "kind": "implementation", "id": "solana.org/system-transfer", "version": "{version}",
+  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d", "implements": "solana.org/token.transfer@^1",
+  "message": "transfer {{inputs.amount}} of {{inputs.mint}} by an endpoint",
+  "recipe": {{ "kind": "remote", "url": "https://example.invalid", "returns": "instructions" }},
+  "postConditions": [{{ "invokesOnly": ["11111111111111111111111111111111"], "message": "only System instructions run" }}]
+}}"#
+    );
+    let mut catalog = catalog(organization);
+    catalog.compile_interface(definitions::TOKEN_TRANSFER).map_err(report)?;
+
+    Ok(catalog.compile_implementation(&text).map_err(report)?.bytes.clone())
+}
+
+/// The policy carries an approval only to a version whose tier is no worse than the highest
+/// approved version's, so a builder replaced by an endpoint needs its own approval.
+#[test]
+fn the_approval_policy_keeps_a_version_at_its_tier() {
+    let Implemented { mut svm, organization, interface_index, implementation_index } = implemented().unwrap();
+    let approval = organization.approval(&interface_index, &implementation_index);
+    let change = IndexChange {
+        authority: organization.authority.pubkey(),
+        organization: organization.address,
+        index: interface_index,
+    };
+    send(&mut svm, &[change.set_approval_policy(true)], &[&organization.authority]).unwrap();
+    organization.approve(&mut svm, &approval, &version(1, 0, 0)).unwrap();
+
+    let static_document = implementation_document(&organization, "1.0.1").unwrap();
+    organization.publish(&mut svm, IMPLEMENTATION, &static_document, Some(interface_index)).unwrap();
+    let remote = remote_document(&organization, "1.0.2").unwrap();
+    organization.publish(&mut svm, IMPLEMENTATION, &remote, Some(interface_index)).unwrap();
+
+    let data = index_data(&svm, &implementation_index).unwrap();
+    let entries = Index::parse(&data).unwrap().versions;
+    let approved: Vec<bool> = entries.iter().map(|entry| entry.approved.get()).collect();
+    let tiers: Vec<u8> = entries.iter().map(|entry| entry.tier).collect();
+
+    assert_eq!(approved, [true, true, false]);
+    assert_eq!(tiers, [1, 1, 2]);
+}
+
 #[test]
 fn an_implementation_must_name_a_published_interface_version() {
     let mut svm = svm().unwrap();

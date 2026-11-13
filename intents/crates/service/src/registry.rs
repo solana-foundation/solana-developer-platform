@@ -305,7 +305,7 @@ mod tests {
         SemverV1 { major: PodU16::new(major), minor: PodU16::new(minor), patch: PodU16::new(patch) }
     }
 
-    /// An index account, in the layout that the registry writes: the fixed part, then one 16-byte
+    /// An index account, in the layout that the registry writes: the fixed part, then one 17-byte
     /// entry for each version, oldest first. Each version is `(version, removed)`.
     fn index(head: Option<SemverV1>, versions: &[(SemverV1, bool)]) -> Vec<u8> {
         let semver_bytes = |version: SemverV1| [version.major.0, version.minor.0, version.patch.0].concat();
@@ -320,7 +320,7 @@ mod tests {
         ]
         .concat();
         let entries = versions.iter().flat_map(|(version, removed)| {
-            [semver_bytes(*version), 7u64.to_le_bytes().to_vec(), vec![1, u8::from(*removed)]].concat()
+            [semver_bytes(*version), 7u64.to_le_bytes().to_vec(), vec![1, u8::from(*removed), 1]].concat()
         });
 
         fixed.into_iter().chain(entries).collect()
