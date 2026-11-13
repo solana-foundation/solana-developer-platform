@@ -1,5 +1,5 @@
-import { expect, test } from "@playwright/test";
 import { projectHref } from "@/lib/dashboard-project-path";
+import { expect, test } from "@/playwright/support/test";
 import { provisionLinkedOrgProjects } from "../support/local-dashboard-bootstrap";
 
 // The dashboard gates on the `private-channels` Vercel flag, whose default falls

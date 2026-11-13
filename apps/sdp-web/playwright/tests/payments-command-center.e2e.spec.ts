@@ -1,5 +1,5 @@
-import { expect, test } from "@playwright/test";
 import { projectHref } from "@/lib/dashboard-project-path";
+import { expect, test } from "@/playwright/support/test";
 import { gotoProjectPage, provisionLinkedOrgProjects } from "../support/local-dashboard-bootstrap";
 
 test.describe("payments command center and transaction ledger", () => {

@@ -1,5 +1,5 @@
-import { expect, type Page, test } from "@playwright/test";
 import { projectHref } from "@/lib/dashboard-project-path";
+import { expect, type Page, test } from "@/playwright/support/test";
 import { clearIssuanceFixtures, type IssuanceFixtures } from "../support/issuance-fixtures";
 import { gotoProjectPage, provisionWithAdminSession } from "../support/local-dashboard-bootstrap";
 import { bootstrapLocalIssuanceFixtures } from "../support/local-issuance-bootstrap";
