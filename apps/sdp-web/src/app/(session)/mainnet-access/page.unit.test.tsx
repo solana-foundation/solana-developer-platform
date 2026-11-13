@@ -9,11 +9,14 @@ import { nextNavigationMock, resetDashboardNavigation } from "@/test/dashboard-n
 import { EnglishI18n } from "@/test/i18n";
 import MainnetAccessPage from "./page";
 
-const state = vi.hoisted(() => ({
-  sandboxOnBeta: false,
-  betaLabel: false,
-  orgId: "org_clerk_test" as string | null,
-}));
+const state = vi.hoisted(() => {
+  const fixture: { sandboxOnBeta: boolean; betaLabel: boolean; orgId: string | null } = {
+    sandboxOnBeta: false,
+    betaLabel: false,
+    orgId: "org_clerk_test",
+  };
+  return fixture;
+});
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
