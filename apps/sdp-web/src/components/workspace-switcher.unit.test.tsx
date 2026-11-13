@@ -11,6 +11,7 @@ import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { setDashboardUrl } from "@/test/dashboard-navigation";
 import { EnglishI18n } from "@/test/i18n";
 import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
+import { dashboardFlagsAt } from "@/test/release-channel-flags";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 
 const mocks = vi.hoisted(() => {
@@ -28,9 +29,11 @@ const mocks = vi.hoisted(() => {
     isProjectSwitching: false,
   };
   const member: { role: OrganizationRole } = { role: "admin" };
+  const flags = { sandboxOnBeta: false };
   return {
     workspace,
     member,
+    flags,
     organizationLoaded: true,
     selectProject: vi.fn(),
     setActive: vi.fn<(params: { organization: string }) => Promise<void>>(),
@@ -74,6 +77,7 @@ beforeEach(() => {
   mocks.workspace.sandboxProject = SANDBOX_PROJECT;
   mocks.workspace.productionProject = PRODUCTION_PROJECT;
   mocks.member.role = "admin";
+  mocks.flags.sandboxOnBeta = false;
   mocks.organizationLoaded = true;
   mocks.selectProject.mockReset();
   mocks.switching.mockReset();
@@ -84,6 +88,7 @@ beforeEach(() => {
   }).mockImplementation(() => ({
     ...mocks.workspace,
     dashboardAccess: resolveDashboardAccess(mocks.member.role),
+    flags: { ...dashboardFlagsAt("stable"), sandboxOnBeta: mocks.flags.sandboxOnBeta },
     selectProject: mocks.selectProject,
     // The provider's switch: it records the request, then asks Clerk.
     switchOrganization: (organization: string) => mocks.setActive({ organization }),
@@ -135,6 +140,26 @@ describe("WorkspaceSwitcher", () => {
     expect(production.getAttribute("href")).toBe(
       `/dashboard/${SANDBOX_PROJECT.id}/settings#mainnet-access`
     );
+  });
+
+  it("links to the hosted sandbox where the deployment serves mainnet only", async () => {
+    mocks.workspace.sandboxProject = null;
+    mocks.flags.sandboxOnBeta = true;
+    showProject(PRODUCTION_PROJECT);
+    await openSwitcher();
+
+    const sandbox = screen.getByRole("menuitem", { name: /^Sandbox/ });
+    expect(within(sandbox).getByText("Devnet · platform-beta.solana.com")).toBeDefined();
+    expect(sandbox.getAttribute("href")).toBe("https://platform-beta.solana.com");
+    expect(sandbox.getAttribute("target")).toBe("_blank");
+  });
+
+  it("offers no hosted sandbox while the flag is off", async () => {
+    mocks.workspace.sandboxProject = null;
+    showProject(PRODUCTION_PROJECT);
+    await openSwitcher();
+
+    expect(screen.queryByRole("menuitem", { name: /^Sandbox/ })).toBeNull();
   });
 
   it("disables a locked Production for a member and says only an admin can request access", async () => {

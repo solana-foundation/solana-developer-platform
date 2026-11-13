@@ -12,8 +12,18 @@ import {
   setPageRequest,
 } from "@/test/request-project";
 
+/** What the organization-scoped API answers, by path: its onboarding status and mainnet access. */
+const orgApi = vi.hoisted(() => ({
+  mainnetAccess: { state: "not_requested", mainnetOnly: false } as {
+    state: string;
+    mainnetOnly: boolean;
+  },
+  fetch: vi.fn(),
+}));
+
 const sdpApi = vi.hoisted(() => ({
   listSdpProjects: vi.fn<() => Promise<Project[]>>(),
+  createOrgSdpApiClient: vi.fn(async () => ({ fetch: orgApi.fetch })),
   requestMemberRole: vi.fn(async (): Promise<OrganizationRole> => "admin"),
 }));
 
@@ -43,6 +53,7 @@ const DASHBOARD_FLAGS = vi.hoisted(
       privateChannels: false,
       releaseChannel: "experimental",
       ramps: false,
+      sandboxOnBeta: false,
     }) as const satisfies DashboardFlags
 );
 
@@ -87,6 +98,13 @@ beforeEach(() => {
   sdpApi.listSdpProjects.mockReset();
   dashboardShell.DashboardWorkspaceProvider.mockClear();
   sdpApi.listSdpProjects.mockResolvedValue([SANDBOX_PROJECT, PRODUCTION_PROJECT]);
+  orgApi.mainnetAccess = { state: "not_requested", mainnetOnly: false };
+  orgApi.fetch.mockReset();
+  orgApi.fetch.mockImplementation(async (path: string) =>
+    path === "/v1/onboarding/status"
+      ? { linked: true, organization: { id: "org_sdp" } }
+      : orgApi.mainnetAccess
+  );
 });
 
 describe("bare dashboard landing", () => {
@@ -138,6 +156,32 @@ describe("bare dashboard landing", () => {
     await expectRedirect(
       renderLanding({ return_to: "/dashboard/payments?tab=x" }),
       `/workspace-loading?return_to=${encodeURIComponent("/dashboard/payments?tab=x")}`
+    );
+  });
+});
+
+describe("bare dashboard landing on a deployment that serves mainnet only", () => {
+  it("lands on the production project once SDP has turned mainnet on", async () => {
+    sdpApi.listSdpProjects.mockResolvedValue([PRODUCTION_PROJECT]);
+    orgApi.mainnetAccess = { state: "approved", mainnetOnly: true };
+
+    await expectRedirect(renderLanding({}), `/dashboard/${PRODUCTION_PROJECT.id}`);
+  });
+
+  it("sends an organization SDP has not turned mainnet on for to the mainnet request page", async () => {
+    sdpApi.listSdpProjects.mockResolvedValue([]);
+    orgApi.mainnetAccess = { state: "pending", mainnetOnly: true };
+
+    await expectRedirect(renderLanding({}), "/mainnet-access");
+  });
+
+  it("waits on the loading page when the organization is not linked yet", async () => {
+    sdpApi.listSdpProjects.mockResolvedValue([]);
+    orgApi.fetch.mockRejectedValue({ status: 404 });
+
+    await expectRedirect(
+      renderLanding({}),
+      `/workspace-loading?return_to=${encodeURIComponent("/dashboard")}`
     );
   });
 });

@@ -1,4 +1,9 @@
 export const DEFAULT_SDP_WEB_URL = "https://platform.solana.com";
+/**
+ * The hosted sandbox: SDP on devnet, open to everyone. A deployment that serves mainnet only links
+ * here when its `sandbox-on-beta` flag is on.
+ */
+export const DEFAULT_SDP_SANDBOX_WEB_URL = "https://platform-beta.solana.com";
 export const DEFAULT_SDP_DOCS_URL = `${DEFAULT_SDP_WEB_URL}/docs`;
 /** The SDP Terms of Use (`SDP_TERMS`), a public page of the dashboard app. */
 export const SDP_TERMS_PATH = "/terms";

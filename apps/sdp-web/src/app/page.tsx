@@ -15,7 +15,7 @@ import { NetworkSection } from "@/components/homepage/network-section";
 import { PaymentsSection } from "@/components/homepage/payments-section";
 import { StackSection } from "@/components/homepage/stack-section";
 import { StartSection } from "@/components/homepage/start-section";
-import { homepageOpenSignup } from "@/flags";
+import { homepageOpenSignup, sandboxOnBeta } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 
 /*
@@ -64,17 +64,20 @@ export async function generateMetadata(
 }
 
 export default async function Home() {
-  const [t, openSignup, { userId }] = await Promise.all([
+  const [t, openSignup, hostedSandbox, { userId }] = await Promise.all([
     getTranslations(),
     homepageOpenSignup(),
+    sandboxOnBeta(),
     auth(),
   ]);
   const links = resolveHomepageLinks({
     signedIn: Boolean(userId),
     openSignup,
+    hostedSandbox,
     createAccountLabel: t("Homepage.cta.createAccount"),
     joinWaitlistLabel: t("Homepage.cta.joinWaitlist"),
     dashboardLabel: t("Homepage.cta.dashboard"),
+    trySandboxLabel: t("Homepage.cta.trySandbox"),
   });
 
   return (

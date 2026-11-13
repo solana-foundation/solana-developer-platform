@@ -2,6 +2,7 @@
 
 import { useOrganization, useOrganizationList } from "@clerk/nextjs";
 import type { Project, ProjectEnvironment } from "@sdp/types/projects";
+import { DEFAULT_SDP_SANDBOX_WEB_URL } from "@sdp/types/site";
 import { cn } from "@sdp/ui/cn";
 import {
   DropdownMenu,
@@ -14,6 +15,7 @@ import {
 import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@sdp/ui/tooltip";
 import {
+  ArrowUpRightIcon,
   Building2Icon,
   CheckIcon,
   ChevronsUpDownIcon,
@@ -198,6 +200,28 @@ function LockedProductionItem({
   );
 }
 
+/** On a deployment that serves mainnet only, the sandbox lives on its own host. */
+function HostedSandboxItem({ disabled }: { disabled: boolean }) {
+  const t = useTranslations();
+  const { icon: Icon, labelKey } = ENVIRONMENT_PRESENTATIONS.sandbox;
+  return (
+    <DropdownMenuItem asChild disabled={disabled} className="gap-2.5">
+      <a href={DEFAULT_SDP_SANDBOX_WEB_URL} target="_blank" rel="noreferrer">
+        <Icon className="size-4 shrink-0 text-secondary" aria-hidden="true" />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate">{t(labelKey)}</span>
+          <span className="truncate text-xs font-normal text-tertiary">
+            {t("Shared.SharedComponents.environmentSandboxHostedDetail", {
+              host: new URL(DEFAULT_SDP_SANDBOX_WEB_URL).host,
+            })}
+          </span>
+        </span>
+        <ArrowUpRightIcon className="ml-auto size-4 shrink-0 text-tertiary" aria-hidden="true" />
+      </a>
+    </DropdownMenuItem>
+  );
+}
+
 export function WorkspaceSwitcher({
   collapsed = false,
   onOrganizationSwitchingChange,
@@ -220,6 +244,7 @@ export function WorkspaceSwitcher({
     switchOrganization,
     isProjectSwitching,
     dashboardAccess,
+    flags,
   } = useDashboardWorkspace();
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
 
@@ -311,6 +336,9 @@ export function WorkspaceSwitcher({
             <DropdownMenuLabel className="text-xs font-medium normal-case tracking-normal text-secondary">
               {t("Shared.SharedComponents.environmentsOf", { organization: activeOrg.name })}
             </DropdownMenuLabel>
+            {sandboxProject === null && flags.sandboxOnBeta ? (
+              <HostedSandboxItem disabled={isSwitching} />
+            ) : null}
             {environmentProjects.map((project) => (
               <EnvironmentItem
                 key={project.id}

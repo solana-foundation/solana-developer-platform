@@ -44,6 +44,7 @@ const flags = defineDashboardFlags({
 
 export const {
   homepageOpenSignup,
+  sandboxOnBeta,
   issuance,
   assetProfiles,
   privateChannels,

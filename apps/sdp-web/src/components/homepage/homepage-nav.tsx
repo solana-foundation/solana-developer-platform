@@ -7,9 +7,9 @@ import { NAV_GROUP_IDS, type NavGroup, type NavLink } from "./nav/nav-types";
 export async function HomepageNav({ links }: { links: HomepageLinks }) {
   const t = await getTranslations();
   const sandbox: NavLink = {
-    label: links.signup.external ? links.signup.label : t("Homepage.nav.platform.sandbox"),
-    href: links.signup.href,
-    external: links.signup.external,
+    label: links.sandbox.external ? links.sandbox.label : t("Homepage.nav.platform.sandbox"),
+    href: links.sandbox.href,
+    external: links.sandbox.external,
   };
 
   const groups: NavGroup[] = [

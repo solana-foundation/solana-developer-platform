@@ -112,4 +112,42 @@ describe("MainnetAccessSection", () => {
     ).toBeTruthy();
     expect(rowLabels()).toEqual(["Requested", "Based in", "Terms and Conditions", "Changes"]);
   });
+
+  it("names the request as the only way in on a deployment that serves mainnet only", async () => {
+    await renderSection({
+      state: "not_requested",
+      available: true,
+      sandboxOnly: false,
+      mainnetOnly: true,
+      countryCode: null,
+      request: null,
+      contactEmail: "mainnet@example.test",
+    });
+
+    expect(screen.getByRole("definition").textContent).toBe("Not on yet");
+    expect(
+      screen.getByRole("button", {
+        name: "SDP turns on mainnet for Acme once, when an Admin asks. Until then the organization can't use SDP here.",
+      })
+    ).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Request mainnet access…" })).toHaveLength(1);
+  });
+
+  it("points a sandbox-only deployment at mainnet's own host instead of a request", async () => {
+    await renderSection({
+      state: "not_requested",
+      available: false,
+      sandboxOnly: true,
+      mainnetOnly: false,
+      countryCode: null,
+      request: null,
+      contactEmail: "mainnet@example.test",
+    });
+
+    expect(screen.getByText("Mainnet is on platform.solana.com")).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "Go to platform.solana.com" }).getAttribute("href")
+    ).toBe("https://platform.solana.com");
+    expect(screen.queryByRole("button", { name: "Request mainnet access…" })).toBeNull();
+  });
 });

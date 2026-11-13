@@ -125,6 +125,11 @@
     "saveFailed": "Could not save the email alert setting: {error}",
     "loadFailed": "Could not load the email alert setting: {error}"
   },
+  "mainnetAccessLock": {
+    "title": "{organization} isn't on mainnet yet",
+    "body": "This deployment runs on mainnet only. An Admin requests mainnet access once and SDP reviews it by hand; the sandbox stays open to everyone in the meantime.",
+    "trySandbox": "Try the sandbox"
+  },
   "mainnetAccess": {
     "title": "Mainnet",
     "description": "The sandbox is open to everyone. SDP turns on mainnet for {organization} once, when an Admin asks, and every project then has a production.",
@@ -141,6 +146,11 @@
     "pendingBody": "SDP reviews every request by hand and emails the Admins once mainnet is on for {organization}.",
     "approvedBody": "Every project in {organization} has a production, on mainnet.",
     "unavailableBody": "Mainnet requests aren't open yet.",
+    "lockedDescription": "SDP turns on mainnet for {organization} once, when an Admin asks. Until then the organization can't use SDP here.",
+    "statusLocked": "Not on yet",
+    "sandboxOnlyTitle": "Mainnet is on {host}",
+    "sandboxOnlyBody": "This is the sandbox. To go to mainnet, sign up on {host} and request access there.",
+    "sandboxOnlyAction": "Go to {host}",
     "changesLabel": "Changes",
     "changesHelp": "SDP takes changes to the request by email.",
     "changesNoEmail": "Contact SDP",
@@ -374,6 +384,7 @@
     "environmentsOf": "Environments of {organization}",
     "environmentSandbox": "Sandbox",
     "environmentSandboxDetail": "Devnet · test tokens",
+    "environmentSandboxHostedDetail": "Devnet · {host}",
     "environmentProduction": "Production",
     "environmentProductionDetail": "Mainnet · real funds",
     "environmentProductionLockedDetail": "Mainnet · after review",

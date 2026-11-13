@@ -27,15 +27,25 @@ type AuthPageAction = {
 
 export async function AuthPageShell({
   action,
+  secondaryAction = null,
   children,
 }: {
   action: AuthPageAction | null;
+  /** A quieter link beside `action`, such as the hosted sandbox. */
+  secondaryAction?: AuthPageAction | null;
   children: ReactNode;
 }) {
   const t = await getTranslations();
   return (
     <main className="flex min-h-dvh flex-col bg-surface px-6 pb-10">
-      <div className="flex h-18 items-center justify-end">
+      <div className="flex h-18 items-center justify-end gap-2">
+        {secondaryAction === null ? null : (
+          <Button asChild variant="ghost" size="sm">
+            <Link href={secondaryAction.href} {...externalLinkProps(secondaryAction.external)}>
+              {secondaryAction.label}
+            </Link>
+          </Button>
+        )}
         {action === null ? null : (
           <Button asChild variant="outline" size="sm">
             <Link href={action.href} {...externalLinkProps(action.external)}>

@@ -7,6 +7,7 @@ import { DashboardLoadingScreen } from "@/components/dashboard-loading-screen";
 import { useTranslations } from "@/i18n/provider";
 import { signInHref } from "@/lib/clerk-config";
 import { parseDashboardPathname } from "@/lib/dashboard-project-path";
+import { MAINNET_ACCESS_PATH } from "@/lib/mainnet-only-landing";
 import { WORKSPACE_LOADING_RETRY_MS } from "@/lib/workspace-loading";
 
 export function WorkspaceLoadingRefresh({ returnTo }: { returnTo: string }) {
@@ -45,6 +46,11 @@ export function WorkspaceLoadingRefresh({ returnTo }: { returnTo: string }) {
         if (!response.ok) throw new Error("Workspace unavailable");
         const result = await response.json();
         if (controller.signal.aborted) return;
+        if (result.state === "locked") {
+          clearTimeout(deadline);
+          router.replace(MAINNET_ACCESS_PATH);
+          return;
+        }
         if (result.state === "ready") {
           clearTimeout(deadline);
           // Preserve the resolved Clerk session and keep this frame visible while

@@ -174,5 +174,17 @@
   {
     "candidate": "src/flags/index.ts:283:20:Enabled",
     "reason": "Vercel Flags Explorer metadata for operators (flag description and option labels); never rendered in the product UI"
+  },
+  {
+    "candidate": "src/flags/definitions.ts:111:5:Link to the hosted sandbox (platform-beta) from the homepage, sign-in, the workspace switcher and the mainnet request page. Turn on where the deployment serves mainnet only.",
+    "reason": "Vercel flag description and option labels, read by operators in the Vercel toolbar, never by dashboard users"
+  },
+  {
+    "candidate": "src/flags/definitions.ts:114:23:No sandbox link",
+    "reason": "Vercel flag description and option labels, read by operators in the Vercel toolbar, never by dashboard users"
+  },
+  {
+    "candidate": "src/flags/definitions.ts:115:22:Link to the sandbox",
+    "reason": "Vercel flag description and option labels, read by operators in the Vercel toolbar, never by dashboard users"
   }
 ]

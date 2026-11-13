@@ -1,6 +1,8 @@
 import { type CountryCode, countryByCode } from "@sdp/types/countries";
 import type { MainnetAccess } from "@sdp/types/mainnet-access";
 import { regionFlagEmoji } from "@sdp/types/payment-rails";
+import { DEFAULT_SDP_WEB_URL } from "@sdp/types/site";
+import { Button } from "@sdp/ui/button";
 import {
   RecordList,
   RecordRow,
@@ -94,7 +96,7 @@ function MainnetAccessRecord({
             label={t("Shared.mainnetAccess.statusLabel")}
             help={statusHelp(access, organizationName, t)}
           >
-            {t(STATUS_LABEL_KEYS[access.state])}
+            {t(statusLabelKey(access))}
           </RecordRow>
         )}
         {requestedOn === null ? null : (
@@ -124,7 +126,13 @@ function MainnetAccessRecord({
   );
 }
 
-/** Above the record: a request whose email did not go out, or one SDP is reviewing. */
+/** Mainnet's own deployment, as a sandbox-only one names and links it. */
+const MAINNET_HOST = new URL(DEFAULT_SDP_WEB_URL).host;
+
+/**
+ * Above the record: on a sandbox-only deployment, where mainnet is; else a request whose email did
+ * not go out, or one SDP is reviewing.
+ */
 function MainnetAccessBand({
   organizationId,
   organizationName,
@@ -136,6 +144,23 @@ function MainnetAccessBand({
   access: MainnetAccess;
   t: Translate;
 }) {
+  if (access.sandboxOnly) {
+    const host = { host: MAINNET_HOST };
+    return (
+      <RecordStateBand
+        state={t("Shared.mainnetAccess.sandboxOnlyTitle", host)}
+        tone="neutral"
+        why={t("Shared.mainnetAccess.sandboxOnlyBody", host)}
+        action={
+          <Button asChild variant="outline" size="sm">
+            <a href={DEFAULT_SDP_WEB_URL} target="_blank" rel="noreferrer">
+              {t("Shared.mainnetAccess.sandboxOnlyAction", host)}
+            </a>
+          </Button>
+        }
+      />
+    );
+  }
   if (access.state !== "pending") return null;
   if (access.request?.notified === false) {
     return (
@@ -186,6 +211,13 @@ const STATUS_LABEL_KEYS = {
   approved: "Shared.mainnetAccess.statusApproved",
 } as const satisfies Record<MainnetAccess["state"], MessageKey>;
 
+/** A deployment that serves mainnet only has no sandbox to fall back on, so "Sandbox only" would mislead. */
+function statusLabelKey(access: MainnetAccess): MessageKey {
+  return access.state === "not_requested" && access.mainnetOnly
+    ? "Shared.mainnetAccess.statusLocked"
+    : STATUS_LABEL_KEYS[access.state];
+}
+
 function statusHelp(access: MainnetAccess, organization: string, t: Translate): string {
   switch (access.state) {
     case "approved":
@@ -193,9 +225,12 @@ function statusHelp(access: MainnetAccess, organization: string, t: Translate): 
     case "pending":
       return t("Shared.mainnetAccess.pendingBody", { organization });
     case "not_requested":
-      return access.available
-        ? t("Shared.mainnetAccess.description", { organization })
-        : t("Shared.mainnetAccess.unavailableBody");
+      if (access.sandboxOnly)
+        return t("Shared.mainnetAccess.sandboxOnlyBody", { host: MAINNET_HOST });
+      if (!access.available) return t("Shared.mainnetAccess.unavailableBody");
+      return access.mainnetOnly
+        ? t("Shared.mainnetAccess.lockedDescription", { organization })
+        : t("Shared.mainnetAccess.description", { organization });
     default: {
       const exhaustive: never = access.state;
       throw new Error(`Unhandled mainnet access state: ${JSON.stringify(exhaustive)}`);
