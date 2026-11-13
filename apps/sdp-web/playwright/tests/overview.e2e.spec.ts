@@ -1,5 +1,6 @@
-import { expect, type Locator, test } from "@playwright/test";
+import { expect, type Locator } from "@playwright/test";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
+import { test } from "@/playwright/support/test";
 import {
   bootstrapLocalWalletFixtures,
   gotoProjectPage,
