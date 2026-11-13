@@ -72,6 +72,7 @@ pub(crate) fn hashed(section: &Section, outputs: &[u8]) -> Result<Vec<u8>, Build
     let fixed = HashedReadyV1 {
         kind: ResultKind::HashedReady.into(),
         instructions_hash: solana_sha256_hasher::hashv(&[&section.bytes]).to_bytes(),
+        num_instructions: section.count,
         num_signers: 0,
         outputs_len: length(outputs.len())?,
     };

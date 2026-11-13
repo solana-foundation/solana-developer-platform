@@ -9,8 +9,8 @@ use crate::{Address, PodU16, PodU32};
 /// charges the fee.
 pub const PAYER_RENT_PLACEHOLDER: Address = Address(*b"sdp-intents/payer/rent\0\0\0\0\0\0\0\0\0\0");
 
-/// Return data holds at most 1,024 bytes. `HashedReadyV1` takes 36 of them.
-pub const MAX_HASHED_TAIL: usize = 988;
+/// Return data holds at most 1,024 bytes. `HashedReadyV1` takes 37 of them.
+pub const MAX_HASHED_TAIL: usize = 987;
 
 wire_code! {
     pub enum ResultKind {
@@ -66,6 +66,8 @@ pub struct HashedReadyV1 {
     pub kind: u8,
     /// The SHA-256 of the instruction section, with the rent placeholder in place.
     pub instructions_hash: [u8; 32],
+    /// The number of instructions in the section. `verify_intent` takes the span's length from it.
+    pub num_instructions: u8,
     pub num_signers: u8,
     pub outputs_len: PodU16,
 }
@@ -81,6 +83,6 @@ mod tests {
         assert_eq!(size_of::<ReadyHeaderV1>(), 4);
         assert_eq!(size_of::<InstructionHeaderV1>(), 35);
         assert_eq!(size_of::<AccountMetaV1>(), 33);
-        assert_eq!(size_of::<HashedReadyV1>(), 36);
+        assert_eq!(size_of::<HashedReadyV1>(), 37);
     }
 }

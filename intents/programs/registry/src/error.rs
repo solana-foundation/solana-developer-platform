@@ -38,8 +38,8 @@ pub enum RegistryError {
     NotApproved,
     #[msg("verify_intent runs only as a top-level instruction")]
     NotTopLevel,
-    #[msg("An instruction before verify_intent is not a ComputeBudget instruction")]
-    UnverifiedInstruction,
+    #[msg("The span of verify_intent runs past the end of the transaction")]
+    SpanPastEnd,
     #[msg("The intent turns off verifyIntent")]
     VerificationOff,
     #[msg("The intent asks for assertions, which verify_intent cannot check yet")]
@@ -48,8 +48,8 @@ pub enum RegistryError {
     RecipeRefused,
     #[msg("An account differs from the one that the record derives at its place")]
     WrongRecipeAccount,
-    #[msg("The number of instructions differs from what the record builds")]
-    WrongInstructionCount,
+    #[msg("A registry instruction is in the span of verify_intent")]
+    RegistryInstructionInSpan,
     #[msg("An instruction differs from what the record builds")]
     WrongInstruction,
     #[msg("The builder returned no HashedReadyV1")]
@@ -60,7 +60,7 @@ pub enum RegistryError {
     UnsignedBuilderSigner,
     #[msg("The builder roles do not name one role for each account of the built instructions")]
     WrongBuilderRoles,
-    #[msg("An account's role is not the union of its roles in the built instructions and the fee payer slot")]
+    #[msg("An account's role is not the union of its roles in the span and the fee payer slot")]
     WrongRole,
     #[msg("The version was removed. A removed version cannot be published, approved, or made the head again.")]
     VersionRemoved,

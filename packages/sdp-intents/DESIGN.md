@@ -619,6 +619,7 @@ pub struct AccountMetaV1 {
 pub struct HashedReadyV1 {
     pub kind: u8,
     pub instructions_hash: [u8; 32],
+    pub num_instructions: u8,
     pub num_signers: u8,
     pub outputs_len: PodU16,
 }
@@ -637,7 +638,7 @@ pub struct HashedReadyV1 {
 4. The instruction section is the part of `Ready` after the signers: each `InstructionHeaderV1`,
    its `AccountMetaV1` entries, and its data, with the rent placeholder in place. `HashedReadyV1`
    is followed by 32 bytes for each signer and by the outputs. Return data holds at most 1,024
-   bytes, so the signers and the outputs fit in 988 bytes.
+   bytes, so the signers and the outputs fit in 987 bytes.
 
 **Remote endpoint.** The same ABI in JSON over HTTP. The request is
 `{ spec, kind, cluster, inputs, payers }`. The response is `Ready` or `Refused`, with
@@ -852,7 +853,7 @@ service.
    `verify_intent` checks ids, not digests, so it accepts the new document.
 6. Outputs still trust the builder, at execution.
 7. The builder runs at CPI depth 2, with no writes. Its limits are its heap, up to 256 KB through
-   the v1 heap config, and the 988 bytes for signers and outputs.
+   the v1 heap config, and the 987 bytes for signers and outputs.
 8. The wallet in 4.7 uses the same logic inside `execute`.
 
 ### 4.7 Onchain execution
@@ -1174,7 +1175,7 @@ this for every definition and corpus item.
 | Programs, accounts, seeds, instructions, segments | 16, 32, 32, 12, 48 |
 | `hasOne` depth | 4 levels |
 | Builder rounds | 4 simulations, and 64 accounts in total |
-| Builder result | 10,240 bytes in staged mode. In hashed mode, 988 bytes for signers and outputs. |
+| Builder result | 10,240 bytes in staged mode. In hashed mode, 987 bytes for signers and outputs. |
 | Builder heap | 32 KB, or up to 256 KB through the v1 heap config |
 
 ### 4.10 Registry

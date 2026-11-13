@@ -112,10 +112,10 @@ fn refuses_instructions_that_differ_from_the_builder() {
     let failed = send_plan(&mut setup.svm, &more, &signers).unwrap_err();
     assert!(failed.is(RegistryError::WrongInstructionsHash), "{failed}");
 
-    let mut added = plan.clone();
-    added.transaction.instructions.push(plan.transaction.instructions[1].clone());
-    let failed = send_plan(&mut setup.svm, &added, &signers).unwrap_err();
-    assert!(failed.is(RegistryError::WrongBuilderRoles), "{failed}");
+    let mut removed = plan.clone();
+    removed.transaction.instructions.pop();
+    let failed = send_plan(&mut setup.svm, &removed, &[&setup.fee_payer]).unwrap_err();
+    assert!(failed.is(RegistryError::SpanPastEnd), "{failed}");
 
     assert!(setup.svm.get_account(&setup.to.pubkey()).is_none());
 }

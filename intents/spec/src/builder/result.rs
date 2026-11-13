@@ -290,6 +290,7 @@ mod tests {
         let fixed = HashedReadyV1 {
             kind: ResultKind::HashedReady.into(),
             instructions_hash: [8; 32],
+            num_instructions: 2,
             num_signers: 0,
             outputs_len: PodU16::new(1),
         };
@@ -298,5 +299,6 @@ mod tests {
         let hashed = HashedReady::parse(&hashed_bytes).unwrap();
         assert_eq!(hashed.outputs, [4]);
         assert_eq!(hashed.fixed.instructions_hash, [8; 32]);
+        assert_eq!(hashed.fixed.num_instructions, 2);
     }
 }

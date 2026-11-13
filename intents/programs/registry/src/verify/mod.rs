@@ -4,6 +4,7 @@
 //! The accounts are the instructions sysvar, the two indexes, the two version accounts, then every
 //! account of the record's account table in order, then for a program recipe the accounts of the
 //! builder's last `MoreAccounts` round. [`position`] gives where the checked instructions are.
+//! A remote recipe's span is empty, so `verify_intent` proves only the record and its accounts.
 //!
 //! For a program recipe, the data also holds the builder's role of each account of its
 //! instructions, one byte each, in order. A static recipe holds none, because `verify_intent`
@@ -40,7 +41,7 @@ pub fn verify_intent(
     intent: &[u8],
     builder_roles: &[u8],
 ) -> Result<()> {
-    let built = position::built_instructions(&accounts.instructions)?;
+    position::check_top_level(&accounts.instructions)?;
     check_options(intent)?;
 
     let interface_data = version::load(accounts.interface_version.account(), DocumentKind::Interface)?;
@@ -57,9 +58,9 @@ pub fn verify_intent(
     match recipe.implementation().recipe().map_err(|error| refused(error.into()))? {
         RecipeKind::Static => {
             require!(builder_roles.is_empty(), RegistryError::WrongBuilderRoles);
-            static_recipe::verify(&recipe, &chain, &accounts.instructions, built)
+            static_recipe::verify(&recipe, &chain, &accounts.instructions)
         }
-        RecipeKind::Program => program_recipe::verify(&recipe, &chain, &accounts.instructions, built, builder_roles),
+        RecipeKind::Program => program_recipe::verify(&recipe, &chain, &accounts.instructions, builder_roles),
         RecipeKind::Remote => Ok(()),
     }
 }

@@ -123,6 +123,28 @@ pub fn with_verify(plan: &Plan, verify: Instruction) -> Plan {
     Plan { transaction: Transaction { instructions, budget, ..plan.transaction.clone() }, ..plan.clone() }
 }
 
+/// A transfer of the System program, as an instruction that no `verify_intent` covers.
+pub fn system_transfer(from: &Address, to: &Address, lamports: u64) -> Instruction {
+    const TRANSFER: u32 = 2;
+
+    Instruction {
+        program: spec_address(&crate::client::system_program()),
+        accounts: vec![
+            AccountMeta { address: spec_address(from), role: AccountRole::WritableSigner },
+            AccountMeta { address: spec_address(to), role: AccountRole::Writable },
+        ],
+        data: [TRANSFER.to_le_bytes().as_slice(), &lamports.to_le_bytes()].concat(),
+    }
+}
+
+/// `plan` with `before` first and `after` last.
+pub fn around(plan: &Plan, before: Instruction, after: Instruction) -> Plan {
+    let instructions =
+        std::iter::once(before).chain(plan.transaction.instructions.iter().cloned()).chain([after]).collect();
+
+    Plan { transaction: Transaction { instructions, ..plan.transaction.clone() }, ..plan.clone() }
+}
+
 /// The address of each account of the record's table, as the engine resolves it against `svm`.
 fn record_accounts(svm: &LiteSVM, documents: &Documents) -> Result<Vec<Address>, Failure> {
     let mut recipe = Recipe::parse(&documents.interface, &documents.implementation, &documents.intent)

@@ -1,5 +1,5 @@
-//! A program recipe: the builder runs again by CPI in hashed mode, and its hash must equal the
-//! SHA-256 of the sysvar's instructions in the layout of the instruction section.
+//! A program recipe: the builder runs again by CPI in hashed mode. Its result gives the span's
+//! length, and its hash must equal the SHA-256 of the span in the layout of the instruction section.
 //!
 //! The section names the rent payer with the placeholder, as the builder does. Only the rent payer
 //! maps back, and the fee payer never appears, so the mapping is exact. A builder that names the
@@ -25,8 +25,8 @@ use sdp_intents_spec::AccountRole;
 use crate::error::RegistryError;
 use crate::state::spec_address;
 use crate::verify::chain::PassedAccounts;
-use crate::verify::refused;
 use crate::verify::roles::TransactionRoles;
+use crate::verify::{position, refused};
 
 /// The call of the builder, in the form that a CPI takes.
 struct BuilderCall<'a> {
@@ -40,7 +40,6 @@ pub fn verify(
     recipe: &Recipe<'_>,
     chain: &PassedAccounts<'_>,
     sysvar: &SysvarInstructions,
-    built: Range<usize>,
     builder_roles: &[u8],
 ) -> Result<()> {
     let call = builder_call(recipe, chain)?;
@@ -50,12 +49,13 @@ pub fn verify(
     require!(*return_data.program_id() == call.program, RegistryError::BadBuilderResult);
 
     let hashed = HashedReady::parse(return_data.as_slice()).map_err(|_| RegistryError::BadBuilderResult)?;
+    let built = position::span(sysvar, usize::from(hashed.fixed.num_instructions))?;
     let section = instruction_section(sysvar, built.clone(), recipe.payers(), builder_roles)?;
     require!(
         anchor_lang::sha256(&section.bytes) == hashed.fixed.instructions_hash,
         RegistryError::WrongInstructionsHash
     );
-    check_roles(sysvar, built.clone(), &section.roles)?;
+    check_roles(sysvar, &built, &section.roles)?;
 
     let signs = |signer: &sdp_intents_spec::Address| {
         built.clone().any(|position| {
@@ -149,15 +149,13 @@ fn instruction_section(
     Ok(section)
 }
 
-fn check_roles(sysvar: &SysvarInstructions, built: Range<usize>, roles: &TransactionRoles) -> Result<()> {
-    for position in built {
+fn check_roles(sysvar: &SysvarInstructions, built: &Range<usize>, roles: &TransactionRoles) -> Result<()> {
+    for position in built.clone() {
         let instruction = sysvar.load_instruction_at(position)?;
 
         for account in 0..instruction.num_account_metas() {
             let meta = instruction.get_instruction_account_at(account)?;
-            let role = AccountRole::new(meta.is_writable(), meta.is_signer());
-
-            require!(role == roles.role(&spec_address(&meta.key)), RegistryError::WrongRole);
+            roles.check(sysvar, built, &meta.key, AccountRole::new(meta.is_writable(), meta.is_signer()))?;
         }
     }
 

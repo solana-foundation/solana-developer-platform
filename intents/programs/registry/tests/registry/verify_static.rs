@@ -8,7 +8,7 @@ use registry::RegistryError;
 use sdp_intents_planner::Plan;
 use sdp_intents_program_testing::{definitions, prepare};
 
-use crate::intents::{publish_transfer, with_verify, Published};
+use crate::intents::{around, publish_transfer, system_transfer, with_verify, Published};
 use crate::svm::{funded, send_plan, svm, units_consumed, Failure, SOL};
 use crate::token::{associated_token_account, set_mint, set_token_account, token_amount};
 
@@ -102,16 +102,29 @@ fn refuses_a_system_transfer_of_another_amount_or_to_another_wallet() {
     let failed = send_plan(&mut setup.svm, &with_verify(&elsewhere, verified.verify.clone()), &signers).unwrap_err();
     assert!(failed.is(RegistryError::WrongInstruction), "{failed}");
 
-    let mut added = verified.plan.clone();
-    added.transaction.instructions.push(verified.plan.transaction.instructions[0].clone());
-    let failed = send_plan(&mut setup.svm, &with_verify(&added, verified.verify), &signers).unwrap_err();
-    assert!(failed.is(RegistryError::WrongInstructionCount), "{failed}");
-
     assert!(setup.svm.get_account(&setup.wallets.to.pubkey()).is_none());
 }
 
+/// The span is the record's one instruction, so the instructions before and after it are
+/// unverified, and the transaction lands.
 #[test]
-fn verify_intent_must_come_before_the_built_instructions() {
+fn verifies_a_span_between_unverified_instructions() {
+    let mut setup = setup(definitions::SYSTEM_TRANSFER, true).unwrap();
+    let verified = plan_and_verify(&setup, "system-transfer", &system_program(), 2 * SOL).unwrap();
+    let fee_payer = setup.wallets.fee_payer.pubkey();
+    let from = setup.wallets.from.pubkey();
+    let signers = [&setup.wallets.fee_payer, &setup.wallets.from];
+
+    let plan = with_verify(&verified.plan, verified.verify);
+    let before = system_transfer(&from, &fee_payer, 1);
+    let after = system_transfer(&from, &setup.wallets.to.pubkey(), SOL);
+    send_plan(&mut setup.svm, &around(&plan, before, after), &signers).unwrap();
+
+    assert_eq!(setup.svm.get_account(&setup.wallets.to.pubkey()).map(|account| account.lamports), Some(3 * SOL));
+}
+
+#[test]
+fn refuses_a_span_that_runs_past_the_transaction() {
     let mut setup = setup(definitions::SYSTEM_TRANSFER, true).unwrap();
     let verified = plan_and_verify(&setup, "system-transfer", &system_program(), SOL).unwrap();
     let signers = [&setup.wallets.fee_payer, &setup.wallets.from];
@@ -121,7 +134,20 @@ fn verify_intent_must_come_before_the_built_instructions() {
     last.transaction.budget = sdp_intents_planner::Budget::MAXIMUM;
     let failed = send_plan(&mut setup.svm, &last, &signers).unwrap_err();
 
-    assert!(failed.is(RegistryError::UnverifiedInstruction), "{failed}");
+    assert!(failed.is(RegistryError::SpanPastEnd), "{failed}");
+}
+
+/// A second `verify_intent` right after the first is in the first one's span.
+#[test]
+fn refuses_a_registry_instruction_in_the_span() {
+    let mut setup = setup(definitions::SYSTEM_TRANSFER, true).unwrap();
+    let verified = plan_and_verify(&setup, "system-transfer", &system_program(), SOL).unwrap();
+    let signers = [&setup.wallets.fee_payer, &setup.wallets.from];
+
+    let once = with_verify(&verified.plan, verified.verify.clone());
+    let failed = send_plan(&mut setup.svm, &with_verify(&once, verified.verify), &signers).unwrap_err();
+
+    assert!(failed.is(RegistryError::RegistryInstructionInSpan), "{failed}");
 }
 
 #[test]
@@ -231,6 +257,24 @@ fn refuses_an_spl_token_transfer_with_other_decimals() {
     readonly_destination.transaction.instructions[0].accounts[1].role = sdp_intents_spec::AccountRole::Readonly;
     let failed = send_plan(&mut setup.svm, &with_verify(&readonly_destination, verified.verify), &signers).unwrap_err();
     assert!(failed.is(RegistryError::WrongRole), "{failed}");
+}
+
+/// The receiver signs a transfer before the span, so the unverified transfer explains its role.
+#[test]
+fn accepts_a_role_that_an_unverified_instruction_explains() {
+    let mut setup = setup(definitions::SPL_TOKEN_TRANSFER, true).unwrap();
+    let tokens = token_accounts(&mut setup).unwrap();
+    let verified = plan_and_verify(&setup, "spl-token-transfer", &tokens.mint, 100_000_000).unwrap();
+    let to = setup.wallets.to.pubkey();
+    let fee_payer = setup.wallets.fee_payer.pubkey();
+    setup.svm.airdrop(&to, SOL).unwrap();
+
+    let plan = with_verify(&verified.plan, verified.verify);
+    let signed_by_receiver = around(&plan, system_transfer(&to, &fee_payer, 1), system_transfer(&to, &fee_payer, 1));
+    let signers = [&setup.wallets.to, &setup.wallets.from, &setup.wallets.fee_payer];
+    send_plan(&mut setup.svm, &signed_by_receiver, &signers).unwrap();
+
+    assert_eq!(token_amount(&setup.svm, &tokens.destination), Some(100_000_000));
 }
 
 /// The transfer names the sender as a readonly signer, and the fee payer slot makes it a writable

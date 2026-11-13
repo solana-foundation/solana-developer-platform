@@ -2,14 +2,19 @@
 //! instruction. An account is writable or a signer in every instruction when one instruction, or
 //! the fee payer slot, makes it so.
 //!
-//! So each account must have, in the sysvar, the union of its roles in the built instructions, and
-//! the intent's fee payer is also a writable signer. `verify_intent` passes its own accounts
-//! readonly, and every other instruction after it is built, so the union is every reason that an
-//! account can be writable or a signer. A role that the union does not explain fails.
+//! So an account that only the span names must have, in the sysvar, the union of its roles in the
+//! span, and the intent's fee payer is also a writable signer. An account that an instruction
+//! outside the span also names can have more, because the signer reads that instruction.
 
 use alloc::vec::Vec;
+use core::ops::Range;
 
+use anchor_lang::prelude::*;
 use sdp_intents_spec::{AccountRole, Address};
+
+use crate::error::RegistryError;
+use crate::state::spec_address;
+use crate::verify::position;
 
 pub struct TransactionRoles {
     entries: Vec<RoleEntry>,
@@ -35,6 +40,26 @@ impl TransactionRoles {
     /// The role that the sysvar must show for `address`.
     pub fn role(&self, address: &Address) -> AccountRole {
         self.entries.iter().find(|entry| entry.address == *address).map_or(AccountRole::Readonly, |entry| entry.role)
+    }
+
+    /// Fails unless `actual`, the sysvar's role of `address`, is the role that this union explains.
+    pub fn check(
+        &self,
+        sysvar: &SysvarInstructions,
+        span: &Range<usize>,
+        address: &anchor_lang::Address,
+        actual: AccountRole,
+    ) -> Result<()> {
+        let expected = self.role(&spec_address(address));
+
+        if actual == expected {
+            return Ok(());
+        }
+
+        let explained_outside = union(actual, expected) == actual && position::named_outside(sysvar, span, address);
+        require!(explained_outside, RegistryError::WrongRole);
+
+        Ok(())
     }
 }
 
