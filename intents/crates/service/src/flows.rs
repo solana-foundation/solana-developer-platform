@@ -48,9 +48,9 @@ pub async fn prepare(chain: &CachedRpc, text: &str, tamper: bool) -> Result<Valu
         tamper_with(&mut plan);
     }
 
-    let blockhash = chain.latest_blockhash().await?;
+    let recent = chain.latest_blockhash().await?;
 
-    Ok(plan_json::plan(&prepared(plan, blockhash)?, request))
+    Ok(plan_json::plan(&prepared(plan, recent.blockhash, recent.last_valid_block_height)?, request))
 }
 
 /// A body of `{ "message": base64, "expected": text }`. `expected` is the plan's message, when the

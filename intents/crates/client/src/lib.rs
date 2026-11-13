@@ -53,6 +53,8 @@ pub struct Prepared {
     pub plan: Plan,
     /// The v1 message that the signers sign, with a recent `confirmed` blockhash.
     pub message: Vec<u8>,
+    /// The last block height at which the message can land.
+    pub last_valid_block_height: u64,
 }
 
 impl Client {
@@ -74,9 +76,10 @@ impl Client {
             }
         };
 
-        let (blockhash, _) = self.rpc.get_latest_blockhash_with_commitment(CommitmentConfig::confirmed())?;
+        let (blockhash, last_valid_block_height) =
+            self.rpc.get_latest_blockhash_with_commitment(CommitmentConfig::confirmed())?;
 
-        prepared(*plan, blockhash)
+        prepared(*plan, blockhash, last_valid_block_height)
     }
 
     /// Each account at `addresses`, in order, with `getMultipleAccounts` split at 100.
@@ -113,7 +116,7 @@ impl Client {
 
 /// The plan with its v1 message compiled at `blockhash`, or `DoesNotFit` when the signed
 /// transaction is over 4,096 bytes.
-pub fn prepared(plan: Plan, blockhash: Hash) -> Result<Prepared, ClientError> {
+pub fn prepared(plan: Plan, blockhash: Hash, last_valid_block_height: u64) -> Result<Prepared, ClientError> {
     let message = rpc::message(&plan.transaction, blockhash)?;
     let signatures = usize::from(message.header.num_required_signatures);
     let message = message.serialize();
@@ -123,7 +126,7 @@ pub fn prepared(plan: Plan, blockhash: Hash) -> Result<Prepared, ClientError> {
         return Err(PlanError::DoesNotFit { limit: Limit::Bytes, used: size, max: MAX_TRANSACTION_SIZE }.into());
     }
 
-    Ok(Prepared { plan, message })
+    Ok(Prepared { plan, message, last_valid_block_height })
 }
 
 /// A scratch address that others cannot predict, so that no one can create an account there

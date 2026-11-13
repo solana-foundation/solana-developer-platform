@@ -38,6 +38,22 @@ pub use crate::calls::RpcCalls;
 /// About one slot.
 pub const DEFAULT_MAX_AGE: Duration = Duration::from_millis(400);
 
+/// A blockhash serves plans for about 5 slots. It stays valid for about 150 blocks, so a plan
+/// keeps most of its time to be signed.
+pub const BLOCKHASH_MAX_AGE: Duration = Duration::from_secs(2);
+
+/// A `confirmed` blockhash, and the last block height at which a transaction can use it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecentBlockhash {
+    pub blockhash: Hash,
+    pub last_valid_block_height: u64,
+}
+
+struct CachedBlockhash {
+    fetched: std::time::Instant,
+    recent: RecentBlockhash,
+}
+
 #[derive(Clone)]
 pub struct CachedRpc {
     inner: Arc<Inner>,
@@ -50,6 +66,8 @@ pub(crate) struct Inner {
     state: std::sync::Mutex<State>,
     calls: Calls,
     simulator: Option<simulator::Simulator>,
+    /// Held while a fetch runs, so that requests at once share one call.
+    blockhash: tokio::sync::Mutex<Option<CachedBlockhash>>,
 }
 
 /// Where a simulation runs.
@@ -92,6 +110,7 @@ impl CachedRpc {
             state: Default::default(),
             calls: Calls::default(),
             simulator: (simulate_in == SimulateIn::Process).then(simulator::Simulator::new),
+            blockhash: tokio::sync::Mutex::new(None),
         };
 
         Self { inner: Arc::new(inner) }
@@ -111,12 +130,21 @@ impl CachedRpc {
         Ok(rpc::simulation_result(response.value)?)
     }
 
-    /// A `confirmed` blockhash, as a signer needs.
-    pub async fn latest_blockhash(&self) -> Result<Hash, ChainError> {
-        self.inner.calls.count(Counter::GetLatestBlockhash);
-        let (blockhash, _) = self.inner.rpc.get_latest_blockhash_with_commitment(CommitmentConfig::confirmed()).await?;
+    /// A `confirmed` blockhash, as a signer needs, at most [`BLOCKHASH_MAX_AGE`] old.
+    pub async fn latest_blockhash(&self) -> Result<RecentBlockhash, ChainError> {
+        let mut cached = self.inner.blockhash.lock().await;
 
-        Ok(blockhash)
+        if let Some(cached) = cached.as_ref().filter(|cached| cached.fetched.elapsed() < BLOCKHASH_MAX_AGE) {
+            return Ok(cached.recent);
+        }
+
+        self.inner.calls.count(Counter::GetLatestBlockhash);
+        let (blockhash, last_valid_block_height) =
+            self.inner.rpc.get_latest_blockhash_with_commitment(CommitmentConfig::confirmed()).await?;
+        let recent = RecentBlockhash { blockhash, last_valid_block_height };
+        *cached = Some(CachedBlockhash { fetched: std::time::Instant::now(), recent });
+
+        Ok(recent)
     }
 
     /// Every account of `program` whose data starts with `discriminator`. The cache does not hold
@@ -176,3 +204,32 @@ impl core::fmt::Display for ChainError {
 }
 
 impl std::error::Error for ChainError {}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+    use solana_rpc_client::mock_sender::MocksMap;
+    use solana_rpc_client_api::request::RpcRequest;
+
+    use super::*;
+
+    /// Two plans within the age share one `getLatestBlockhash`.
+    #[tokio::test]
+    async fn plans_share_a_recent_blockhash() {
+        let answer = json!({ "context": { "slot": 1 }, "value": { "blockhash": Hash::new_from_array([7; 32]).to_string(), "lastValidBlockHeight": 150 } });
+        let mocks: MocksMap = [(RpcRequest::GetLatestBlockhash, answer)].into_iter().collect();
+        let rpc = CachedRpc::with_client(
+            RpcClient::new_mock_with_mocks_map("fails", mocks),
+            "ws://unused",
+            DEFAULT_MAX_AGE,
+            SimulateIn::Rpc,
+        );
+
+        let first = rpc.latest_blockhash().await.unwrap();
+        let second = rpc.latest_blockhash().await.unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(first.last_valid_block_height, 150);
+        assert_eq!(rpc.calls().get_latest_blockhash, 1);
+    }
+}

@@ -35,6 +35,7 @@ pub fn plan(prepared: &Prepared, request: Value) -> Value {
                 "heapSize": budget.heap_size.to_string(),
             },
             "compiled": base64(&prepared.message),
+            "lastValidBlockHeight": prepared.last_valid_block_height.to_string(),
             "signatures": signatures,
         }],
         "simulation": { "unitsConsumed": plan.units_consumed.to_string() },
