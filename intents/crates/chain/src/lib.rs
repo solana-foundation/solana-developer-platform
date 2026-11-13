@@ -6,8 +6,8 @@
 //! stores nothing (`AGENTS.md`, "RPC is a budget"). Each subscription holds its own websocket, which
 //! is enough for the registry's indexes.
 //!
-//! Simulations run on the RPC. LiteSVM 0.18 has no v1 transactions, and it pins `solana-address`
-//! 2.7, which `solana-message` 6 in this workspace refuses.
+//! Simulations run on the RPC. LiteSVM 0.18 runs v1 transactions, but it depends on the Agave 4.3
+//! crates, and the RPC client of this workspace uses Agave 4.5. One build holds only one of them.
 
 mod cache;
 mod calls;

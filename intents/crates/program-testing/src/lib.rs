@@ -14,8 +14,8 @@
 //! # }
 //! ```
 //!
-//! LiteSVM 0.18 has no v1 transactions, so a simulation runs as a legacy transaction with the
-//! ComputeBudget instructions of its budget first. The planner checks only the plan's instructions,
+//! A simulation runs as a legacy transaction with the ComputeBudget instructions of its budget
+//! first, although LiteSVM 0.18 also runs v1 transactions. The planner checks only the plan's instructions,
 //! so those instructions do not change a check.
 
 mod convert;

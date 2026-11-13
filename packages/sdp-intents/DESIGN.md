@@ -721,8 +721,9 @@ The planner (4.14) runs `prepare` with no IO. It asks for accounts to fetch and 
 simulate, and its caller answers. The client answers with RPC: `getMultipleAccounts`, and
 `simulateTransaction` with `sigVerify` off, `replaceRecentBlockhash` on, and scratch in `accounts`.
 The service answers from an account cache in `intents/crates/chain`, and simulates on the RPC.
-In-process LiteSVM simulation waits for a LiteSVM with v1 transactions. LiteSVM 0.18 has none, and
-it pins `solana-address` 2.7, which `solana-message` 6 refuses in the same build.
+LiteSVM 0.18 runs v1 transactions, but it depends on the Agave 4.3 crates, and the RPC client of
+the service workspace uses Agave 4.5. One build holds only one of them, so in-process simulation
+waits for the workspace and LiteSVM to share one Agave version.
 
 1. Reads use `processed`. The blockhash uses `confirmed`.
 2. A cached account is served only while a live subscription covers it. Other accounts are fetched
