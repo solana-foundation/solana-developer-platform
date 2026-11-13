@@ -43,7 +43,7 @@ impl Compiled {
         let builder = bs58::encode(BUILDER.0).into_string();
 
         Self::compile(
-            &record.replace("4pty1GwTYzz4q2cfpjWUDiKY15ydMLyVmLaGX4tmK3LT", &builder),
+            &record.replace("2gMFoKF3p5eB2m72ccjncZH8e5agVYbHBH8A29zDMdBm", &builder),
             include_str!("../../fixtures/intents/token-2022-transfer.json"),
         )
     }

@@ -5,14 +5,14 @@
   "version": "1.0.0",
   "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
   "implements": "solana.org/token.transfer@^1",
-  "annotations": { "builder": "The address is a placeholder until token-2022-builder is deployed." },
+  "annotations": { "builder": "The address is the id of the token-2022-builder program. The program is not deployed yet." },
   "applies": [
     { "account": "{inputs.mint}", "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" }
   ],
   "message": "transfer {inputs.amount} of {inputs.mint} from {inputs.from} to {inputs.to}",
   "recipe": {
     "kind": "program",
-    "program": "4pty1GwTYzz4q2cfpjWUDiKY15ydMLyVmLaGX4tmK3LT",
+    "program": "2gMFoKF3p5eB2m72ccjncZH8e5agVYbHBH8A29zDMdBm",
     "accounts": [
       { "name": "mint", "address": "{inputs.mint}" },
       { "name": "from", "address": "{inputs.from}" },
