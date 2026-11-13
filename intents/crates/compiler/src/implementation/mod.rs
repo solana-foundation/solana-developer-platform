@@ -9,7 +9,7 @@ mod write;
 use sdp_intents_spec::wire::{
     AccountV1, AppliesV1, DocumentIdV1, InstructionV1, OutputBindingV1, PostConditionV1, SegmentV1, SemverV1,
 };
-use sdp_intents_spec::{CheckKind, RecipeKind};
+use sdp_intents_spec::{Address, CheckKind, RecipeKind};
 use serde_json::Value;
 
 use crate::catalog::Catalog;
@@ -19,7 +19,7 @@ use crate::envelope::{parse_json, read_envelope, reported, root};
 use crate::id::Id;
 use crate::limits;
 use crate::post_condition::{read_post_condition, Output};
-use crate::reader::{Object, Sink};
+use crate::reader::{Node, Object, Sink};
 use crate::resolve::read_implements;
 use crate::scope::{Allowed, Names, Schema};
 use crate::template::compile_template;
@@ -65,13 +65,21 @@ struct Build<'c, 's> {
     output_bindings: Vec<OutputBindingV1>,
 }
 
+/// A cluster's name, such as `mainnet`, or its genesis hash.
+pub(crate) fn read_cluster(node: &Node<'_>, sink: &mut Sink) -> Option<Address> {
+    let text = node.str(sink)?;
+
+    match sdp_intents_spec::cluster::genesis_hash(text) {
+        Some(hash) => Some(hash),
+        None => reported(address(text), node, sink).map(Address),
+    }
+}
+
 fn compile(value: &Value, catalog: &Catalog, sink: &mut Sink) -> Option<CompiledImplementation> {
     let mut object = root(value, sink)?;
     let envelope = read_envelope(&mut object, "implementation", catalog, sink);
 
-    if let Some(cluster) = object.required("cluster", sink) {
-        cluster.str(sink).and_then(|text| reported(address(text), &cluster, sink));
-    }
+    let cluster = object.required("cluster", sink).and_then(|cluster| read_cluster(&cluster, sink));
 
     let implements = object.required("implements", sink).and_then(|node| read_implements(&node, catalog, sink))?;
     let mut build = Build::new(&implements.interface.schema, sink);
@@ -107,12 +115,13 @@ fn compile(value: &Value, catalog: &Catalog, sink: &mut Sink) -> Option<Compiled
     let envelope = envelope?;
     let message = message?;
     let recipe = recipe?;
+    let cluster = cluster?;
 
     if !build.sink.is_empty() {
         return None;
     }
 
-    let bytes = build.write(&envelope, &implements, &message, recipe)?;
+    let bytes = build.write(&envelope, &implements, &message, recipe, cluster)?;
 
     Some(CompiledImplementation {
         id: envelope.id,

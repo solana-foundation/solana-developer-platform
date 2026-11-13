@@ -80,4 +80,6 @@ pub enum RegistryError {
     ProgramNotListed,
     #[msg("verify_intent cannot check a recipe that returns a whole transaction")]
     WrongRecipeKind,
+    #[msg("The record is for another cluster than the registry serves")]
+    WrongCluster,
 }

@@ -440,6 +440,26 @@ fn an_implementation_must_name_a_published_interface_version() {
     assert_eq!(DocumentTarget::of(&document).unwrap().kind, DocumentKind::Implementation);
 }
 
+/// A deployment serves one cluster, so it refuses a record for another.
+#[test]
+fn publish_refuses_a_record_of_another_cluster() {
+    let mut svm = svm().unwrap();
+    let organization = Organization::create(&mut svm, "solana.org").unwrap();
+    let interface_index = organization.create_interface(&mut svm, INTERFACE).unwrap();
+    organization.publish(&mut svm, INTERFACE, &interface_document(&organization, "1.0.0").unwrap(), None).unwrap();
+    organization.create_implementation(&mut svm, IMPLEMENTATION, &interface_index).unwrap();
+    let devnet = definitions::SYSTEM_TRANSFER.replace("5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d", "devnet");
+    let mut catalog = catalog(&organization);
+    catalog.compile_interface(definitions::TOKEN_TRANSFER).unwrap();
+    let document = catalog.compile_implementation(&devnet).unwrap().bytes.clone();
+
+    let refused = organization.publish(&mut svm, IMPLEMENTATION, &document, Some(interface_index)).unwrap_err();
+    assert!(refused.is(RegistryError::WrongCluster), "{refused}");
+
+    let mainnet = implementation_document(&organization, "1.0.0").unwrap();
+    organization.publish(&mut svm, IMPLEMENTATION, &mainnet, Some(interface_index)).unwrap();
+}
+
 #[test]
 fn a_buffer_takes_writes_in_range_and_returns_its_rent() {
     let mut svm = svm().unwrap();

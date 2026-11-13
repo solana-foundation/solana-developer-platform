@@ -441,6 +441,11 @@ impl<'a> SegmentPlanner<'a> {
             .collect())
     }
 
+    /// The genesis hash of the record's cluster.
+    pub(crate) fn cluster(&self) -> &Address {
+        self.recipe.implementation().cluster()
+    }
+
     /// The builder program of a program recipe.
     fn builder(&self) -> Option<Address> {
         builder_program(&self.recipe)

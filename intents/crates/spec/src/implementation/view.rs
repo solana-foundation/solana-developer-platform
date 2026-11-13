@@ -46,6 +46,11 @@ impl<'a> Implementation<'a> {
         &self.fixed.implements
     }
 
+    /// The genesis hash of the record's cluster.
+    pub fn cluster(&self) -> &'a crate::Address {
+        &self.fixed.cluster
+    }
+
     pub fn recipe(&self) -> Result<RecipeKind, SpecError> {
         RecipeKind::try_from(self.fixed.recipe_kind)
     }

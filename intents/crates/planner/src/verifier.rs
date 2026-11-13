@@ -121,7 +121,13 @@ struct DecodedVerify<'t> {
 /// The accounts that a segment's message still needs, or the message.
 enum Part {
     Missing(Vec<Address>),
-    Rendered(String),
+    Rendered(Rendered),
+}
+
+/// An intent's part of the message, and the cluster that its record is for.
+struct Rendered {
+    text: String,
+    cluster: Address,
 }
 
 /// Verifies `transaction` against `chain`, which holds the accounts that earlier steps asked for.
@@ -149,8 +155,17 @@ pub fn verify_transaction<C: Chain>(transaction: &Transaction, chain: &C) -> Res
         return Ok(VerifyStep::Fetch(missing));
     }
 
-    let rendered: Vec<String> =
-        parts.into_iter().filter_map(|part| if let Part::Rendered(text) = part { Some(text) } else { None }).collect();
+    let rendered: Vec<Rendered> = parts
+        .into_iter()
+        .filter_map(|part| if let Part::Rendered(rendered) = part { Some(rendered) } else { None })
+        .collect();
+    let cluster = rendered.first().map(|part| part.cluster);
+
+    if rendered.iter().any(|part| Some(part.cluster) != cluster) {
+        return Err(PlanError::ClustersDiffer.into());
+    }
+
+    let texts: Vec<String> = rendered.into_iter().map(|part| part.text).collect();
     let in_segment = |position: &usize| verifies.iter().any(|verify| verify.segment.contains(position));
     let unverified = (0..transaction.instructions.len())
         .filter(|position| !in_segment(position))
@@ -158,7 +173,7 @@ pub fn verify_transaction<C: Chain>(transaction: &Transaction, chain: &C) -> Res
         .collect();
 
     Ok(VerifyStep::Done(Box::new(VerifiedTransaction {
-        message: plan_message(payers, transaction.priority_fee_lamports, &rendered),
+        message: plan_message(cluster.as_ref(), payers, transaction.priority_fee_lamports, &texts),
         intents: verifies
             .iter()
             .map(|verify| VerifiedIntent {
@@ -271,7 +286,10 @@ fn part<C: Chain>(verify: &DecodedVerify<'_>, payers: Payers<'_>, chain: &C) -> 
 
     let message = values.message()?;
 
-    Ok(Part::Rendered(with_rent_cap(&message, verify.rent_cap)))
+    Ok(Part::Rendered(Rendered {
+        text: with_rent_cap(&message, verify.rent_cap),
+        cluster: *recipe.implementation().cluster(),
+    }))
 }
 
 /// The document in a version account that the registry owns at the address of `id`.

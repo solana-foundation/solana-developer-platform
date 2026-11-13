@@ -64,17 +64,27 @@ pub(crate) fn builder_program(recipe: &Recipe<'_>) -> Option<Address> {
         .flatten()
 }
 
-/// `sdp-intents/1`, then `|| <n>: <part>` for each intent's part, in order, then `|| fee payer
-/// <address> | rent payer <address> | priority fee <lamports> lamports`. One payer of both is
-/// `fee and rent payer <address>`. A signer renders the same text from the transaction.
-pub(crate) fn plan_message(payers: Payers<'_>, priority_fee_lamports: u64, parts: &[String]) -> String {
+/// `sdp-intents/1 on <cluster>`, then `|| <n>: <part>` for each intent's part, in order, then `||
+/// fee payer <address> | rent payer <address> | priority fee <lamports> lamports`. The cluster is
+/// its name, such as `mainnet`, or its genesis hash when it has none. A transaction that proves
+/// no intent names no cluster. One payer of both is `fee and rent payer <address>`. A signer
+/// renders the same text from the transaction.
+pub(crate) fn plan_message(
+    cluster: Option<&Address>,
+    payers: Payers<'_>,
+    priority_fee_lamports: u64,
+    parts: &[String],
+) -> String {
+    let cluster = cluster.map_or_else(String::new, |cluster| {
+        format!(" on {}", sdp_intents_spec::cluster::name(cluster).map_or_else(|| base58(cluster), str::to_owned))
+    });
     let intents: String = (1usize..).zip(parts).map(|(number, part)| format!(" || {number}: {part}")).collect();
     let payers = match payers.fee == payers.rent {
         true => format!("fee and rent payer {}", base58(payers.fee)),
         false => format!("fee payer {} | rent payer {}", base58(payers.fee), base58(payers.rent)),
     };
 
-    format!("sdp-intents/1{intents} || {payers} | priority fee {priority_fee_lamports} lamports")
+    format!("sdp-intents/1{cluster}{intents} || {payers} | priority fee {priority_fee_lamports} lamports")
 }
 
 /// What the recipe built: the instructions, the new accounts a builder signs for, and the outputs.

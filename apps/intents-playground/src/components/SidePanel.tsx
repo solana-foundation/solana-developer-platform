@@ -394,7 +394,8 @@ function RecordTab({
       <div>
         <div className="section-title">{record.id}</div>
         <div className="section-sub">
-          {record.shown} · {record.document?.recipe ?? "unknown"} recipe ·{" "}
+          {record.shown} · {record.document?.cluster ?? "unknown cluster"} ·{" "}
+          {record.document?.recipe ?? "unknown"} recipe ·{" "}
           {record.approved ? "approved" : "unapproved"}
         </div>
       </div>

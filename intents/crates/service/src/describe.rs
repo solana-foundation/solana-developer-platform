@@ -149,8 +149,11 @@ pub fn implementation(view: &Implementation<'_>, names: &Names) -> Result<Value,
         _ => None,
     };
 
+    let cluster = sdp_intents_spec::cluster::name(view.cluster()).map_or_else(|| base58(view.cluster()), str::to_owned);
+
     Ok(json!({
         "recipe": recipe_name(view.recipe()?),
+        "cluster": cluster,
         "message": names.render(view.message()?),
         "applies": applies,
         "url": url,

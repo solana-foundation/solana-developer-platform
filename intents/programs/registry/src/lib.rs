@@ -23,6 +23,14 @@ use verify::*;
 
 declare_id!("9sgttDZ2vnzb85HWuQbx8vy6Boga32zpP5QRZ7UtbWpp");
 
+/// The genesis hash of the cluster that this deployment serves, by the build's feature.
+#[cfg(feature = "devnet")]
+pub const CLUSTER: sdp_intents_spec::Address = sdp_intents_spec::cluster::DEVNET;
+#[cfg(feature = "testnet")]
+pub const CLUSTER: sdp_intents_spec::Address = sdp_intents_spec::cluster::TESTNET;
+#[cfg(not(any(feature = "devnet", feature = "testnet")))]
+pub const CLUSTER: sdp_intents_spec::Address = sdp_intents_spec::cluster::MAINNET;
+
 #[program]
 pub mod registry {
     use super::*;

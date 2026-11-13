@@ -30,6 +30,7 @@
 
 mod address;
 pub mod builder;
+pub mod cluster;
 mod code;
 mod counts;
 mod document;

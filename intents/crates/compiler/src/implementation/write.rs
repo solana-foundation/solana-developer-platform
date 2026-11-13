@@ -16,6 +16,7 @@ impl Build<'_, '_> {
         implements: &InterfaceMatch<'_>,
         message: &[u8],
         recipe: Recipe,
+        cluster: sdp_intents_spec::Address,
     ) -> Option<Vec<u8>> {
         let name = self.pool.add(envelope.id.name.as_bytes());
         let message = self.pool.add(message);
@@ -27,6 +28,7 @@ impl Build<'_, '_> {
         let fixed = ImplementationDocV1 {
             id: envelope.document_id,
             implements: DocumentIdV1 { version: implements.lowest, ..interface },
+            cluster,
             recipe_kind: recipe.kind.into(),
             name,
             message,

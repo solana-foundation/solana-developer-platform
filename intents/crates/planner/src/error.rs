@@ -53,6 +53,8 @@ pub enum PlanError {
     Unavailable(&'static str),
     /// A postcondition or a payer rule does not hold in the simulation of the final transaction.
     CheckFailed(String),
+    /// The records of a plan are for different clusters.
+    ClustersDiffer,
     /// A document's publisher is not an organization of the registry.
     NotAnOrganization(sdp_intents_spec::Address),
     /// The plan message is longer than a hardware wallet signs, with its length and the limit.
@@ -145,6 +147,7 @@ impl fmt::Display for PlanError {
             ),
             Self::CheckFailed(check) => write!(f, "the simulation breaks a guarantee: {check}"),
             Self::UnknownSigner(address) => write!(f, "{} signs, and no role names it", bs58::encode(address.0).into_string()),
+            Self::ClustersDiffer => f.write_str("the records of the plan are for different clusters"),
             Self::NotAnOrganization(address) => {
                 write!(f, "{} is not an organization of the registry", bs58::encode(address.0).into_string())
             }

@@ -3,7 +3,7 @@
 use bytemuck::{Pod, Zeroable};
 
 use crate::code::wire_code;
-use crate::{DocumentHeaderV1, DocumentIdV1, PoolRefV1, RangeV1, TableRefV1, ValueRefV1};
+use crate::{Address, DocumentHeaderV1, DocumentIdV1, PoolRefV1, RangeV1, TableRefV1, ValueRefV1};
 
 wire_code! {
     pub enum RecipeKind {
@@ -86,6 +86,8 @@ pub struct ImplementationDocV1 {
     pub id: DocumentIdV1,
     /// The interface and the lowest version of it that this record implements.
     pub implements: DocumentIdV1,
+    /// The genesis hash of the cluster whose programs the record names.
+    pub cluster: Address,
     pub recipe_kind: u8,
     pub name: PoolRefV1,
     pub message: PoolRefV1,

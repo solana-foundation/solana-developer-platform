@@ -21,6 +21,8 @@ export interface InterfaceDocument {
 
 export interface ImplementationDocument {
   recipe: Recipe;
+  /// The cluster's name, such as `mainnet`, or its genesis hash when it has none.
+  cluster: string;
   message: string;
   applies: string[];
   url: string | null;

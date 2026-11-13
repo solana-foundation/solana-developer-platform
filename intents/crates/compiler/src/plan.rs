@@ -1,6 +1,6 @@
 //! Compiles a plan request: the payers, the cluster, and the priority fee once, then each intent.
-//! Each intent compiles to the binary form of an intent document. `cluster` is checked and not
-//! stored, because the registry that holds the records is on one cluster.
+//! Each intent compiles to the binary form of an intent document. `cluster` is a name, such as
+//! `mainnet`, or a genesis hash. It is not stored, and each record must be for it.
 
 use sdp_intents_spec::{Address, BaseType, ValueType};
 use serde_json::Value;
@@ -10,8 +10,9 @@ use crate::catalog::Catalog;
 use crate::diagnostic::{Code, Diagnostic, Report};
 use crate::encoding::address;
 use crate::envelope::{parse_json, read_kind, reported, root};
+use crate::implementation::read_cluster;
 use crate::intent::{read_intent, CompiledIntent};
-use crate::reader::{Node, Object, Sink};
+use crate::reader::{Node, Sink};
 
 /// A plan request in binary form: its intents, in the order of their segments in the transaction,
 /// and what they share.
@@ -63,7 +64,7 @@ fn compile<'c>(value: &Value, catalog: &'c Catalog, sink: &mut Sink) -> Option<C
 
     let payers = object.required("payers", sink).and_then(|node| read_payers(&node, sink));
     let options = object.field("options").map_or(Some(PlanOptions::default()), |node| read_options(&node, sink));
-    read_cluster(&mut object, sink);
+    let cluster = object.field("cluster").map(|node| (read_cluster(&node, sink), node.pointer.clone()));
     let entries = object.required("intents", sink).and_then(|node| node.array(sink));
     let pointer = format!("{}/intents", object.pointer());
     object.finish(sink);
@@ -84,6 +85,10 @@ fn compile<'c>(value: &Value, catalog: &'c Catalog, sink: &mut Sink) -> Option<C
             intent
         })
         .collect();
+
+    if let Some((Some(cluster), pointer)) = cluster {
+        check_cluster(&cluster, &intents, &pointer, sink);
+    }
 
     Some(CompiledPlan {
         intents: intents.into_iter().collect::<Option<Vec<_>>>()?,
@@ -131,10 +136,26 @@ fn read_options(node: &Node<'_>, sink: &mut Sink) -> Option<PlanOptions> {
     Some(PlanOptions { priority_fee_lamports: priority_fee?, output: output? })
 }
 
-fn read_cluster(object: &mut Object<'_>, sink: &mut Sink) {
-    if let Some(cluster) = object.field("cluster") {
-        cluster.str(sink).and_then(|text| reported(address(text), &cluster, sink));
+/// Each record of the plan must be for the plan's cluster.
+fn check_cluster(cluster: &Address, intents: &[Option<CompiledIntent<'_>>], pointer: &str, sink: &mut Sink) {
+    let name = |hash: &Address| sdp_intents_spec::cluster::name(hash).map_or_else(|| bs58_text(hash), str::to_owned);
+    let other = intents.iter().flatten().find_map(|intent| {
+        let record = sdp_intents_spec::Implementation::parse(&intent.implementation.bytes).ok()?;
+
+        (record.cluster() != cluster).then(|| (intent.implementation.id.to_string(), *record.cluster()))
+    });
+
+    if let Some((id, record_cluster)) = other {
+        sink.push(Diagnostic::new(
+            Code::InvalidValue,
+            pointer,
+            format!("the plan is for {}, and `{id}` is for {}", name(cluster), name(&record_cluster)),
+        ));
     }
+}
+
+fn bs58_text(address: &Address) -> String {
+    bs58::encode(address.0).into_string()
 }
 
 #[cfg(test)]
@@ -156,6 +177,21 @@ mod tests {
         assert_eq!(plan.priority_fee_lamports, 5_000);
         assert_eq!(plan.output, PlanOutput::Transaction);
         assert_eq!(plan.intents[1].implementation.id.name, "system-transfer");
+    }
+
+    /// A cluster is a name or a genesis hash, and every record must be for it.
+    #[test]
+    fn every_record_is_for_the_plan_cluster() {
+        let catalog = full_catalog();
+        let named =
+            edit(PLAN, "\"cluster\": \"5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d\"", "\"cluster\": \"mainnet\"");
+        let devnet =
+            edit(PLAN, "\"cluster\": \"5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d\"", "\"cluster\": \"devnet\"");
+        let report = compile_plan(&devnet, &catalog).unwrap_err();
+
+        assert!(compile_plan(&named, &catalog).is_ok());
+        assert!(report.diagnostics.iter().any(|finding| finding.message.contains("is for devnet")), "{report:?}");
+        assert!(report.diagnostics.iter().any(|finding| finding.message.contains("is for mainnet")), "{report:?}");
     }
 
     #[test]

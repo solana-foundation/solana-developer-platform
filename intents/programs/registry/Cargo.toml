@@ -16,6 +16,9 @@ no-entrypoint = []
 cpi = ["no-entrypoint"]
 idl-build = []
 no-log-ix-name = []
+# The cluster that a deployment serves. A build with neither serves mainnet.
+devnet = []
+testnet = []
 
 [dependencies]
 anchor-lang.workspace = true

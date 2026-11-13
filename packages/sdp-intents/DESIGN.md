@@ -127,7 +127,8 @@ digests, and bytes.
 
 1. Each entry of `intents` is an intent without `spec` and `kind`.
 2. `payers`, `cluster`, and the total priority fee belong to the transaction, so only the request
-   holds them. `rent` defaults to `fee`. `cluster` is the genesis hash.
+   holds them. `rent` defaults to `fee`. `cluster` is a name, `mainnet`, `devnet`, or `testnet`,
+   or a genesis hash. Each record must be for it.
 3. `options.output` is `transaction`, the default, or `instructions`. With `instructions`, the plan
    holds no `transaction`, and `prepare` reads no blockhash. The caller compiles the instructions as
    a legacy, v0, or v1 transaction. It keeps each segment whole and in order, keeps the request's
@@ -285,7 +286,7 @@ mint. This record handles Token-2022 mints:
   "spec": "sdp-intents@1.0",
   "kind": "plan",
   "request": { "kind": "plan", "intents": ["…"] },
-  "message": "sdp-intents/1 || 1: transfer 100 of 2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo from 7xKX… to 9aBc… | interface: solana.org/token.transfer@1.0.0 | implementation: solana.org/token-2022-transfer@1.0.0 | tier 1 | onchain checks: verify_intent, assertions | rent cap 2039280 lamports || fee and rent payer KoRa… | priority fee 5000 lamports",
+  "message": "sdp-intents/1 on mainnet || 1: transfer 100 of 2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo from 7xKX… to 9aBc… | interface: solana.org/token.transfer@1.0.0 | implementation: solana.org/token-2022-transfer@1.0.0 | tier 1 | onchain checks: verify_intent, assertions | rent cap 2039280 lamports || fee and rent payer KoRa… | priority fee 5000 lamports",
   "intents": [
     {
       "display": "Send 100 PYUSD to 9aBc…",
@@ -340,8 +341,10 @@ mint. This record handles Token-2022 mints:
 }
 ```
 
-1. `message` is what a signer signs once for the whole transaction, such as on a Ledger. Each
-   intent comes after `|| <n>:`: the record's template, the ids, the tier, the onchain checks, and
+1. `message` is what a signer signs once for the whole transaction, such as on a Ledger. It
+   starts with the cluster of the records, by name, or by genesis hash when the cluster has no
+   name. `sdp-intents-spec` holds the one table of names and hashes, which programs and offchain
+   code share. Each intent comes after `|| <n>:`: the record's template, the ids, the tier, the onchain checks, and
    the rent cap (4.5). The payers and the priority fee come last. An id is the organization, the
    name, and the exact version. The registry never publishes a version twice, so the id names one
    document, and the message holds no digest. The guarantees are in the interface and the record,
@@ -1175,6 +1178,7 @@ pub struct ImplementationDocV1 {
     pub header: DocumentHeaderV1,
     pub id: DocumentIdV1,
     pub implements: DocumentIdV1,
+    pub cluster: [u8; 32],
     pub recipe_kind: u8,
     pub name: PoolRefV1,
     pub message: PoolRefV1,
@@ -1355,6 +1359,11 @@ this for every definition and corpus item.
 
 The registry is an Anchor v2 program with zero-copy accounts. The prototype runs it on local
 surfpool, and the service reads every interface and implementation from it.
+
+A deployment serves one cluster, which the build chooses: mainnet, or devnet or testnet by
+feature. A program cannot read the genesis hash, so the build holds it. `publish` refuses a record
+whose `cluster` is another (`WrongCluster`). A record writes its cluster as a name or a genesis
+hash, and stores the hash.
 
 An organization owns interfaces and implementations. Anyone can create an organization, and anyone
 can propose an implementation of any interface. Each interface has an approve authority, which

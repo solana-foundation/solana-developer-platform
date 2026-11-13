@@ -40,6 +40,8 @@ pub struct Planner<'a> {
     segments: Vec<SegmentPlanner<'a>>,
     payers: Payers<'a>,
     priority_fee_lamports: u64,
+    /// The genesis hash of the cluster that every record of the plan is for.
+    cluster: Address,
 
     intents: Vec<PlannedIntent>,
     messages: Vec<String>,
@@ -73,12 +75,15 @@ impl<'a> Planner<'a> {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        if segments.is_empty() {
-            return Err(PlanError::NoIntents);
+        let cluster = *segments.first().ok_or(PlanError::NoIntents)?.cluster();
+
+        if segments.iter().any(|segment| *segment.cluster() != cluster) {
+            return Err(PlanError::ClustersDiffer);
         }
 
         Ok(Self {
             payers: request.payers,
+            cluster,
             priority_fee_lamports: request.priority_fee_lamports,
             segments,
             intents: Vec::new(),
@@ -181,8 +186,8 @@ impl<'a> Planner<'a> {
             },
         };
 
-        let message =
-            plan_message(self.payers, transaction.priority_fee_lamports, &core::mem::take(&mut self.messages));
+        let messages = core::mem::take(&mut self.messages);
+        let message = plan_message(Some(&self.cluster), self.payers, transaction.priority_fee_lamports, &messages);
 
         if message.len() > MAX_MESSAGE_LEN {
             return Err(PlanError::MessageTooLong { used: message.len(), max: MAX_MESSAGE_LEN });
@@ -298,7 +303,7 @@ mod tests {
         assert_eq!(
             plan.message,
             format!(
-                "sdp-intents/1 || 1: transfer 100 of {USDC} from {FROM} to {TO} | interface: solana.org/token.transfer@1.0.0 | implementation: solana.org/spl-token-transfer@1.0.0 | tier 1 | onchain checks: none | rent cap 2039280 lamports || fee and rent payer {FEE_PAYER} | priority fee 5000 lamports"
+                "sdp-intents/1 on mainnet || 1: transfer 100 of {USDC} from {FROM} to {TO} | interface: solana.org/token.transfer@1.0.0 | implementation: solana.org/spl-token-transfer@1.0.0 | tier 1 | onchain checks: none | rent cap 2039280 lamports || fee and rent payer {FEE_PAYER} | priority fee 5000 lamports"
             )
         );
         assert_eq!(plan.intents[0].display, format!("Send 100 {USDC} to 9WzD…AWWM"));
@@ -460,6 +465,19 @@ mod tests {
         assert!(planner.next(&accounts).is_err_and(|error| error == PlanError::TooManyRounds));
     }
 
+    /// One message names one cluster, so a plan cannot hold records of two.
+    #[test]
+    fn refuses_records_of_two_clusters() {
+        let mainnet = Compiled::spl_transfer();
+        let devnet = Compiled::compile(
+            &include_str!("../../../definitions/solana.org/implementations/spl-token-transfer/1.0.0.json")
+                .replace("5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d", "devnet"),
+            include_str!("../../../fixtures/intents/spl-token-transfer.json"),
+        );
+
+        assert!(matches!(Planner::new(&request(&[&mainnet, &devnet], 0), SCRATCH), Err(PlanError::ClustersDiffer)));
+    }
+
     #[test]
     fn steps_run_in_order() {
         let documents = Compiled::token_2022_transfer();
@@ -554,7 +572,7 @@ mod tests {
         let Ok(Step::Done(plan)) = planner.next(&accounts) else { panic!("the plan is done") };
         let transfer = format!("transfer 0.25 SOL from {FROM} to {TO}");
 
-        assert!(plan.message.starts_with(&format!("sdp-intents/1 || 1: {transfer} | ")));
+        assert!(plan.message.starts_with(&format!("sdp-intents/1 on mainnet || 1: {transfer} | ")));
         assert!(plan.message.contains(&format!(" || 2: {transfer} | ")));
         assert!(plan.message.ends_with(&format!(" || fee and rent payer {FEE_PAYER} | priority fee 0 lamports")));
         assert_eq!(plan.message.matches(" || ").count(), 3);
