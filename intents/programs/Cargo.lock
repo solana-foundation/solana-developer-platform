@@ -2267,6 +2267,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "registry"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-v2-testing",
+ "bytemuck",
+ "pinocchio",
+ "sdp-intents-compiler",
+ "sdp-intents-engine",
+ "sdp-intents-planner",
+ "sdp-intents-program-testing",
+ "sdp-intents-spec",
+ "solana-account",
+ "solana-instruction 4.0.0",
+ "test-builder",
+]
+
+[[package]]
 name = "rfc6979"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
