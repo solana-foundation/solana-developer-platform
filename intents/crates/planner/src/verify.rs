@@ -131,6 +131,7 @@ impl<'v, 'a> Verification<'v, 'a> {
     /// error when one does not hold.
     pub(crate) fn check(&self, guarantees: &[String]) -> Result<(), PlanError> {
         self.check_payers()?;
+        self.check_signer_authorities()?;
 
         let conditions = self.conditions()?;
 
@@ -188,6 +189,23 @@ impl<'v, 'a> Verification<'v, 'a> {
             .filter(|(input, _)| input.signer())
             .map(|(_, index)| self.values.address(ValueRef { source: ValueSource::Input, index }, Table::Interface))
             .collect()
+    }
+
+    /// Rule 3 holds for every signer input, whether or not a postcondition states it: no delegate,
+    /// close authority, or owner of its token accounts changes.
+    fn check_signer_authorities(&self) -> Result<(), PlanError> {
+        for authority in self.values.recipe.signer_authorities()? {
+            if let sdp_intents_engine::Condition::NoAuthorityChange { owner } = authority? {
+                if !self.no_authority_change(&owner) {
+                    return Err(PlanError::CheckFailed(format!(
+                        "an authority of an account of {} changes",
+                        crate::render::base58(&owner)
+                    )));
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn conditions(&self) -> Result<Vec<Condition<'_>>, PlanError> {

@@ -98,7 +98,8 @@ fn verifies_a_token_transfer_that_its_sender_pays_for() {
     let plan = plan(&setup, "spl-token-transfer", &mint, 100_000_000, &setup.from.pubkey()).unwrap();
 
     let rent = setup.svm.minimum_balance_for_rent_exemption(165);
-    assert_eq!(lighthouse_count(&plan), 5);
+    // Rule 3 adds the sender's token account: its owner, delegate, and close authority.
+    assert_eq!(lighthouse_count(&plan), 8);
     assert!(plan.message.ends_with(&format!(" | rent cap {rent} lamports")), "{}", plan.message);
     assert_eq!(verify(&setup.svm, &plan.transaction).unwrap().message, plan.message);
 

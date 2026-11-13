@@ -220,7 +220,7 @@ mod tests {
     fn reads_the_definitions_in_this_repository() {
         let tree = Tree::read(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../definitions")).unwrap();
 
-        assert_eq!(tree.definitions.len(), 10);
+        assert_eq!(tree.definitions.len(), 12);
         assert_eq!(tree.of_kind(Kind::Interface).count(), 3);
         assert_eq!(tree.organizations(), ["solana.org"]);
         assert!(tree.strays.is_empty());

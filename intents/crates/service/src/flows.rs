@@ -105,16 +105,11 @@ async fn call_remote(call: &RemoteCall) -> Result<RemoteAnswer, ServiceError> {
         ServiceError::new(StatusCode::BAD_GATEWAY, "remote", format!("the remote endpoint failed: {error}"))
     };
     let http = reqwest::Client::builder().timeout(remote::CALL_TIMEOUT).build().map_err(failed)?;
-    let response = http
-        .post(&call.url)
-        .json(&remote::request_body(call))
-        .send()
-        .await
-        .and_then(reqwest::Response::error_for_status)
-        .map_err(failed)?;
+    let response = http.post(&call.url).json(&remote::request_body(call)).send().await.map_err(failed)?;
+    let status = response.status().as_u16();
     let answer: Value = response.json().await.map_err(failed)?;
 
-    Ok(remote::read_answer(&answer)?)
+    Ok(remote::answered(status, &answer)?)
 }
 
 async fn verified(chain: &CachedRpc, message: &[u8]) -> Result<VerifiedTransaction, ServiceError> {

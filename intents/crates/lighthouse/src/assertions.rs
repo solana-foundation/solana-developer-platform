@@ -211,13 +211,16 @@ mod tests {
         let built = assertions(&accounts, &Address(PAYER)).unwrap();
 
         assert_eq!(built.snapshots.len(), 1);
-        assert_eq!(built.checks.len(), 2);
-        assert_eq!(built.snapshots[0].data, [0, 0, 255, 0, 0, 64, 0, 8, 0]);
+        // The outflow, three checks of rule 3 on the owner, the delegate, and the close authority,
+        // and the payer's lamports.
+        assert_eq!(built.checks.len(), 5);
+        // One snapshot reads the owner through the close authority, bytes 32 to 165.
+        assert_eq!(built.snapshots[0].data, [0, 0, 255, 0, 0, 32, 0, 133, 0]);
         assert_eq!(
             built.checks[0].data,
-            [&[4u8, 0, 1, 0, 64, 6][..], &(-100_000_000i128).to_le_bytes(), &[4]].concat()
+            [&[4u8, 0, 1, 32, 64, 6][..], &(-100_000_000i128).to_le_bytes(), &[4]].concat()
         );
-        assert_eq!(built.checks[1].data, [1, 0, 255]);
+        assert!(built.checks.iter().any(|check| check.data == [1, 0, 255]));
         assert!(built.checks.iter().all(|check| !check.accounts.is_empty()));
         assert_eq!(LIGHTHOUSE_PROGRAM, built.snapshots[0].accounts[0].address);
     }

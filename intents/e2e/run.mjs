@@ -29,6 +29,8 @@ import {
 
 const RPC = process.argv[2] ?? "http://127.0.0.1:8899";
 const SERVICE_BINARY = new URL("../target/debug/sdp-intents-service", import.meta.url).pathname;
+const ADAPTER = new URL("../adapters/jupiter.mjs", import.meta.url).pathname;
+const USDY = "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6";
 const SERVICE_LISTEN = "127.0.0.1:8788";
 const SERVICE = `http://${SERVICE_LISTEN}`;
 const OUT = new URL("../target/e2e/", import.meta.url).pathname;
@@ -46,22 +48,27 @@ async function service(path, body) {
   return answer;
 }
 
-/// The service signs with the wallets in `WALLETS`, so it starts after they exist.
-async function startService() {
-  const child = spawn(SERVICE_BINARY, ["--rpc", RPC, "--listen", SERVICE_LISTEN, "--wallets", WALLETS], {
-    stdio: ["ignore", "ignore", "inherit"],
-  });
+/// Starts `command` and waits until `url` answers.
+async function start(command, args, url) {
+  const child = spawn(command, args, { stdio: ["ignore", "ignore", "inherit"] });
 
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    const healthy = await fetch(`${SERVICE}/health`).then((response) => response.ok, () => false);
-    if (healthy) return child;
+    const up = await fetch(url).then((response) => response.status < 500, () => false);
+    if (up) return child;
 
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
   child.kill();
-  throw new Error("the service did not start");
+  throw new Error(`${command} did not start`);
 }
+
+/// The service signs with the wallets in `WALLETS`, so it starts after they exist.
+const startService = () =>
+  start(SERVICE_BINARY, ["--rpc", RPC, "--listen", SERVICE_LISTEN, "--wallets", WALLETS], `${SERVICE}/health`);
+
+/// The Jupiter swap wrapper that the Ondo records name.
+const startAdapter = () => start(process.execPath, [ADAPTER], "http://127.0.0.1:8791/mode");
 
 async function tokenAmount(owner, mint) {
   const result = await rpc("getTokenAccountsByOwner", [owner, { mint }, { encoding: "jsonParsed" }]);
@@ -103,6 +110,8 @@ async function run(name, request, signers) {
     const sent = cli("send", planPath, "--rpc", RPC, ...signers.flatMap((signer) => ["--keypair", signer.path]));
     expect(sent.includes("sent "), `${name}: the CLI signed it, and it landed`);
   }
+
+  return plan;
 }
 
 const plan = (payer, intents) => ({ spec: "sdp-intents@1.0", kind: "plan", payers: { fee: payer.address }, intents });
@@ -136,11 +145,12 @@ const organizationAuthority = base58(Buffer.from(organization.value.data[0], "ba
 expect(organizationAuthority === vault, "the vault is the authority of solana.org");
 
 const child = await startService();
+const adapter = await startAdapter();
 
 try {
   console.log("the service reads the registry");
   const listing = await service("/v1/registry");
-  expect(listing.interfaces.length === 3 && listing.implementations.length === 7, "it lists 3 interfaces and 7 implementations");
+  expect(listing.interfaces.length === 3 && listing.implementations.length === 9, "it lists 3 interfaces and 9 implementations");
 
   const candidates = await service(
     "/v1/implementations",
@@ -201,7 +211,60 @@ try {
   );
   expect(usdcBefore - (await tokenAmount(sender.address, USDC)) === 100_000_000n, "the sender deposited 100 USDC");
 
+  console.log("an Ondo USDY deposit and withdrawal by a Jupiter route, from a remote recipe");
+  const usdyBefore = await tokenAmount(sender.address, USDY);
+  const deposit = await run(
+    "ondo-deposit",
+    plan(payer, [
+      {
+        interface: "solana.org/vault.deposit@^1",
+        implementation: "solana.org/ondo-usdy-deposit@^1",
+        inputs: { owner: sender.address, vault: USDY, asset: USDC, amount: "100000000", minShares: "80000000" },
+      },
+    ]),
+    [payer, sender],
+  );
+  expect(deposit.message.includes("| endpoint: http://127.0.0.1:8791/jupiter | tier 2 |"), "the message names the endpoint and tier 2");
+  const usdyGained = (await tokenAmount(sender.address, USDY)) - usdyBefore;
+  expect(usdyGained >= 80_000_000n, `the sender holds ${usdyGained} more USDY, at least 80 USDY`);
+
+  const usdcBefore2 = await tokenAmount(sender.address, USDC);
+  await run(
+    "ondo-withdraw",
+    plan(payer, [
+      {
+        interface: "solana.org/vault.withdraw@^1",
+        implementation: "solana.org/ondo-usdy-withdraw@^1",
+        inputs: { owner: sender.address, vault: USDY, asset: USDC, shares: "50000000", minAmount: "50000000" },
+      },
+    ]),
+  );
+  expect((await tokenAmount(sender.address, USDC)) - usdcBefore2 >= 50_000_000n, "the withdrawal paid at least 50 USDC");
+
+  console.log("an endpoint that adds an approval to an attacker");
+  await fetch("http://127.0.0.1:8791/mode", { method: "POST", body: JSON.stringify({ malicious: true }) });
+  const refused = await service(
+    "/v1/prepare",
+    JSON.stringify(
+      plan(payer, [
+        {
+          interface: "solana.org/vault.deposit@^1",
+          implementation: "solana.org/ondo-usdy-deposit@^1",
+          inputs: { owner: sender.address, vault: USDY, asset: USDC, amount: "10000000", minShares: "8000000" },
+        },
+      ]),
+    ),
+  ).then(
+    () => undefined,
+    (error) => error.message,
+  );
+  await fetch("http://127.0.0.1:8791/mode", { method: "POST", body: JSON.stringify({ malicious: false }) });
+  // The segment's Lighthouse assertions fail in the planner's simulation, as they would onchain.
+  const assertionFailed = refused?.includes("Program L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95 failed") === true;
+  expect(assertionFailed || refused?.includes("breaks a guarantee") === true, "the service refuses it: the assertions fail");
+
   console.log("every flow landed");
 } finally {
   child.kill();
+  adapter.kill();
 }

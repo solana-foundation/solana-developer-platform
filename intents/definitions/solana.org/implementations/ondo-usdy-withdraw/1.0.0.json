@@ -1,0 +1,30 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "implementation",
+  "id": "solana.org/ondo-usdy-withdraw",
+  "version": "1.0.0",
+  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "implements": "solana.org/vault.withdraw@^1",
+  "annotations": {
+    "endpoint": "The local Jupiter swap wrapper of the prototype, intents/adapters/jupiter.mjs. A published record names SDP's hosted wrapper."
+  },
+  "applies": [{ "value": "{inputs.vault}", "equals": "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6" }],
+  "message": "withdraw {inputs.shares} of {outputs.shareMint} from Ondo USDY to {inputs.owner} for at least {inputs.minAmount} of {inputs.asset}, by a Jupiter route",
+  "recipe": {
+    "kind": "remote",
+    "url": "http://127.0.0.1:8791/jupiter",
+    "returns": "instructions",
+    "accounts": [{ "name": "usdy", "address": "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6" }],
+    "outputs": { "shareMint": "usdy" }
+  },
+  "postConditions": [
+    {
+      "invokesOnly": [
+        "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+      ],
+      "message": "only Jupiter, token, and ATA instructions run"
+    }
+  ]
+}

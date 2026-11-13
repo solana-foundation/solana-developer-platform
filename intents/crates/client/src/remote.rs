@@ -14,8 +14,9 @@ use sdp_intents_spec::{AccountRole, Address};
 use crate::json::base58;
 use crate::{Client, ClientError};
 
-/// An endpoint answers within this time, or the call fails.
-pub const CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+/// An endpoint answers within this time, or the call fails. The Jupiter wrapper can wait about 30
+/// seconds for its rate limit.
+pub const CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 
 pub fn request_body(call: &RemoteCall) -> Value {
     let inputs: Map<String, Value> =
@@ -69,12 +70,23 @@ impl Client {
             .post(&call.url)
             .json(&request_body(call))
             .send()
-            .and_then(reqwest::blocking::Response::error_for_status)
             .map_err(|error| ClientError::Remote(error.to_string()))?;
+        let status = response.status();
         let answer: Value = response.json().map_err(|error| ClientError::Remote(error.to_string()))?;
 
-        read_answer(&answer)
+        answered(status.as_u16(), &answer)
     }
+}
+
+/// The answer, or the endpoint's `error` when its status is not a success.
+pub fn answered(status: u16, answer: &Value) -> Result<RemoteAnswer, ClientError> {
+    if !(200..300).contains(&status) {
+        let error = answer.get("error").and_then(Value::as_str).unwrap_or("no error message");
+
+        return Err(ClientError::Remote(format!("the endpoint answered {status}: {error}")));
+    }
+
+    read_answer(answer)
 }
 
 fn input_json(value: &InputValue) -> Value {

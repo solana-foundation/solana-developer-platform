@@ -2,7 +2,14 @@
   "head": "1.0.0",
   "approveNewVersions": false,
   "approvals": {
-    "solana.org/jupiter-lend-withdraw": ["1.0.0"],
-    "solana.org/kamino-withdraw": ["1.0.0"]
+    "solana.org/jupiter-lend-withdraw": [
+      "1.0.0"
+    ],
+    "solana.org/kamino-withdraw": [
+      "1.0.0"
+    ],
+    "solana.org/ondo-usdy-withdraw": [
+      "1.0.0"
+    ]
   }
 }

@@ -322,7 +322,8 @@ mod tests {
     }
 
     /// The sender's token account is the only guarded value, so the segment snapshots its amount
-    /// and asserts the outflow around the two built instructions, in its one simulation.
+    /// and asserts the outflow around the two built instructions, in its one simulation. Rule 3
+    /// adds three assertions on its authorities.
     #[test]
     fn assertions_guard_the_segment() {
         let documents = Compiled::compile(
@@ -341,6 +342,9 @@ mod tests {
                 account(ASSOCIATED_TOKEN),
                 account(TOKEN_PROGRAM),
                 LIGHTHOUSE_PROGRAM,
+                LIGHTHOUSE_PROGRAM,
+                LIGHTHOUSE_PROGRAM,
+                LIGHTHOUSE_PROGRAM,
                 LIGHTHOUSE_PROGRAM
             ]
         );
@@ -349,7 +353,7 @@ mod tests {
         let Ok(Step::Done(plan)) = planner.next(&accounts) else { panic!("the plan is done") };
 
         assert_eq!(plan.intents[0].span, 1..3);
-        assert_eq!(plan.transaction.instructions.len(), 5);
+        assert_eq!(plan.transaction.instructions.len(), 8);
         assert!(plan.message.contains(" | onchain checks: assertions | rent cap 2039280 lamports"));
     }
 

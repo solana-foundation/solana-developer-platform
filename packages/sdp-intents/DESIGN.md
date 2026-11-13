@@ -782,7 +782,9 @@ Kamino deposit takes two. The report counts the calls for each flow (section 10)
 1. Each postcondition of the interface and the implementation.
 2. `noOtherOutflows`: no balance of a signer input goes down, except as a postcondition or the
    input's payer role allows.
-3. No delegate, close authority, or owner of a signer input's accounts changes.
+3. No delegate, close authority, or owner of a signer input's accounts changes. The rule holds with
+   no postcondition that states it. Lighthouse asserts the three fields of each token account of a
+   signer input that the segment can change.
 4. The fee payer loses at most the fee plus capped rent. Each segment answers for the signature
    fees that it adds.
 5. No instruction names a payer or a signer input, except as the fee payer, as the funder of a new
@@ -1861,9 +1863,12 @@ The message names the tier of each part. `prepare` refuses a tier 3 record unles
 `assertions` and `verifyIntent` to false, so the weaker trust is the caller's explicit choice. Its
 part of the message reads `onchain checks: none | checked by: simulation`.
 
-The prototype builds the instructions form first, with the Jupiter wrapper and a `vault.deposit`
-record for Ondo USDY that routes through Jupiter and states `invokesOnly: [Jupiter]`. Hastra's
-deposit and requests follow, then Plume's transaction form.
+The prototype builds the instructions form. `intents/adapters/jupiter.mjs` is the Jupiter wrapper,
+and `solana.org/ondo-usdy-deposit` and `ondo-usdy-withdraw` route through it. Each pins the USDY
+mint as its share mint, and lists Jupiter, Token, and ATA in `invokesOnly`. A switch makes the
+wrapper add a token approval to an attacker, and the segment's rule 3 assertions refuse it in the
+planner's simulation, as they would onchain. Hastra's deposit and requests follow, then Plume's
+transaction form.
 
 ## 5. Security
 

@@ -1,5 +1,6 @@
 //! The postconditions of an intent, the interface's then the implementation's, with their values
-//! resolved. The planner checks them in simulation, and the Lighthouse assertions check them
+//! resolved, then the standing rule of `DESIGN.md`, 4.5, rule 3: no authority of a signer input's
+//! accounts changes. The planner checks them in simulation, and the Lighthouse assertions check them
 //! onchain, so both read them from here.
 
 use sdp_intents_spec::wire::PostConditionV1;
@@ -53,8 +54,22 @@ impl<'a> Recipe<'a> {
         let implementation =
             self.implementation().post_conditions()?.iter().map(|check| (check, Table::Implementation));
         let values = ConditionValues { recipe: self, outputs };
+        let stated = interface.chain(implementation).map(move |(check, table)| values.condition(check, table));
 
-        Ok(interface.chain(implementation).map(move |(check, table)| values.condition(check, table)))
+        Ok(stated.chain(self.signer_authorities()?))
+    }
+
+    /// A `NoAuthorityChange` for each required signer input, whether or not a postcondition
+    /// states it.
+    pub fn signer_authorities<'r>(
+        &'r self,
+    ) -> Result<impl Iterator<Item = Result<Condition, EngineError>> + 'r, EngineError> {
+        let values = ConditionValues { recipe: self, outputs: &[] };
+        let signers =
+            self.interface().inputs()?.iter().zip(0u8..).filter(|(input, _)| input.signer() && !input.optional());
+
+        Ok(signers
+            .map(move |(_, index)| Ok(Condition::NoAuthorityChange { owner: to_address(values.input(index)?.bytes)? })))
     }
 }
 
@@ -166,6 +181,7 @@ mod tests {
     use super::*;
     use crate::test_support::*;
 
+    /// The interface's postconditions, then rule 3 for the signer input `from`.
     #[test]
     fn resolves_the_interface_conditions_of_a_transfer() {
         let compiled = Compiled::compile(SYSTEM_TRANSFER, INTENT_SYSTEM_TRANSFER);
@@ -178,6 +194,7 @@ mod tests {
             [
                 Condition::Outflow { from: address(FROM), mint: Address::default(), max: 250_000_000 },
                 Condition::NoOtherOutflows { from: address(FROM) },
+                Condition::NoAuthorityChange { owner: address(FROM) },
             ]
         );
     }
