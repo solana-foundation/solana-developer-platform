@@ -18,7 +18,12 @@ import { getLogger } from "@/runtime/logger";
 import { actionUrlSchema } from "@/services/email-layout";
 import { iterableEmailConfig, sendIterableEmail } from "@/services/iterable-email";
 import type { Env } from "@/types/env";
-import { ADMIN_ALERT_KINDS, adminAlertDetailsSchema, adminAlertEmail } from "./content";
+import {
+  ADMIN_ALERT_KINDS,
+  ALERT_KINDS_SENT_WHEN_OFF,
+  adminAlertDetailsSchema,
+  adminAlertEmail,
+} from "./content";
 import { ADMIN_ALERT_MAX_AGE_MS } from "./enqueue";
 
 /** Sends per run; the rest wait for the next run. */
@@ -146,7 +151,7 @@ async function deliverOne(
   const turnedOff =
     target.audience === "admin" &&
     target.alert_emails === "false" &&
-    target.kind !== "alert_emails_changed";
+    !ALERT_KINDS_SENT_WHEN_OFF.has(target.kind);
   if (target.recipient_email === null || turnedOff) {
     await settle(db, delivery, claimId, {
       set: "status = 'suppressed', claimed_until = NULL",

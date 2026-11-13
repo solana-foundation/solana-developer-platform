@@ -28,6 +28,16 @@ export const CONFIG_ALERT_KINDS = [
 
 export const ADMIN_ALERT_KINDS = [...CONFIG_ALERT_KINDS, "money_movement"] as const;
 
+/**
+ * Alerts an organization's admins get even with alert emails turned off: turning them off, so it
+ * never happens unnoticed, and mainnet turning on or off, which answers the organization's own
+ * request (the request page promises the email).
+ */
+export const ALERT_KINDS_SENT_WHEN_OFF: ReadonlySet<AdminAlertKind> = new Set([
+  "alert_emails_changed",
+  "mainnet_entitlement_changed",
+]);
+
 export type ConfigAlertKind = (typeof CONFIG_ALERT_KINDS)[number];
 export type AdminAlertKind = (typeof ADMIN_ALERT_KINDS)[number];
 
@@ -190,7 +200,10 @@ function describe(
           };
     case "mainnet_entitlement_changed":
       return details.enabled
-        ? { heading: "Mainnet enabled", summary: `${organization} can now use mainnet projects.` }
+        ? {
+            heading: "Mainnet enabled",
+            summary: `${organization} can now use mainnet. Sign in to start with your production project.`,
+          }
         : {
             heading: "Mainnet disabled",
             summary: `${organization} can no longer use mainnet projects.`,
@@ -289,6 +302,7 @@ export function adminAlertEmail(input: {
 }): AdminAlertEmail {
   const { kind, details } = input;
   const { heading, summary } = describe(kind, details);
+  const welcome = isMainnetWelcome(kind, details);
   return {
     subject: `${heading} in ${details.organizationName}`,
     content: {
@@ -297,10 +311,20 @@ export function adminAlertEmail(input: {
       summary,
       details: detailRows(kind, details, input.occurredAt),
       action: {
-        label: "Review in dashboard",
+        label: welcome ? "Open dashboard" : "Review in dashboard",
         url: `${input.dashboardOrigin}${dashboardPath(kind, details)}`,
       },
-      note: alertNote(input.audience, details.organizationName),
+      note: welcome
+        ? `You get this email because you're an admin of ${details.organizationName}.`
+        : alertNote(input.audience, details.organizationName),
     },
   };
+}
+
+/**
+ * Mainnet turned on: the answer to the organization's request, so it reads as a welcome, not as an
+ * alert to review.
+ */
+function isMainnetWelcome(kind: AdminAlertKind, details: AdminAlertDetails): boolean {
+  return kind === "mainnet_entitlement_changed" && details.enabled === true;
 }

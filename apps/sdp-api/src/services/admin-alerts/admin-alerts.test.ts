@@ -415,6 +415,29 @@ describe("admin alert emails (HOO-2299)", () => {
       expect(new Set(emails.map((email) => email.subject))).toEqual(new Set([subject]));
     });
 
+    it("still welcomes the organization to mainnet with alert emails turned off", async () => {
+      await asWorker(() =>
+        getDb(env).execute("UPDATE organizations SET settings = ? WHERE id = ?", [
+          JSON.stringify({ enableProductionProject: true, alertEmails: false }),
+          ORGANIZATION_ID,
+        ])
+      );
+      await audit({
+        action: "update",
+        resourceType: "organization",
+        resourceId: ORGANIZATION_ID,
+        metadata: { event: "production_entitlement_changed", enabled: true, source: "clerk" },
+      });
+      await runWorker();
+      const emails = sentEmails();
+      expect(emails.length).toBeGreaterThan(0);
+      expect(emails[0]?.body).toContain(
+        "Acme Pay can now use mainnet. Sign in to start with your production project."
+      );
+      expect(emails[0]?.body).toContain("Open dashboard");
+      expect(emails[0]?.body).not.toContain("If you did not expect this change");
+    });
+
     it("names the member a role change is about", async () => {
       await audit({
         action: "update",
