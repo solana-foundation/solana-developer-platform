@@ -8,7 +8,9 @@ mod state;
 
 use sdp_intents_spec::{AccountRole, Address};
 
-pub use addresses::{buffer_address, index_address, name_hash, organization_address, version_address};
+pub use addresses::{
+    buffer_address, find_program_address, index_address, name_hash, organization_address, version_address,
+};
 pub use instructions::{
     create_implementation, create_interface, create_organization, set_organization_authority, write_buffer, Approval,
     IndexAuthorities, IndexChange, NewImplementation, NewInterface, Publication,

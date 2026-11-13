@@ -1,5 +1,6 @@
 // Runs the whole flow against a local surfnet that forks mainnet: publish the definitions to the
-// registry, then plan, verify, sign, and send intents with every onchain check on. Start the
+// registry through a Squads multisig, then plan, verify, sign, and send intents with every onchain
+// check on. Start the
 // surfnet with `just surfnet`, then run `just e2e`, which places the programs first.
 //
 //   node e2e/run.mjs [rpc]
@@ -24,6 +25,8 @@ const USDT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 const JUPITER_USDT_VAULT = "F7tLdeF2YZZex9MR8HgGggyFiz7UU2UgUube2tmfwNPE";
 const JUPITER_SHARES = "Cmn4v2wipYV41dkakDvCgFJpxhtaaKt11NyWV8pjSE8A";
 const KAMINO_USDC_VAULT = "HDsayqAsDWy3QvANGqh2yNraqcD8Fnjgh73Mhb3WRS5E";
+/// The registry address of the organization `solana.org`.
+const ORGANIZATION = "8Zth9xaiuwMGKHhdh3hWbFHSE8fhwseKnTKUa75VAEnp";
 
 function base58(bytes) {
   let value = 0n;
@@ -106,9 +109,19 @@ for (const { address } of [authority, payer, sender]) {
 await rpc("surfnet_setTokenAccount", [sender.address, USDC, { amount: 1_000_000_000 }, TOKEN_PROGRAM]);
 await rpc("surfnet_setTokenAccount", [sender.address, USDT, { amount: 1_000_000_000 }, TOKEN_PROGRAM]);
 
-console.log("publish the definitions");
-cli("apply", "--rpc", RPC, "--keypair", authority.path);
-expect(cli("plan", "--rpc", RPC, "--keypair", authority.path).includes("holds every definition"), "the registry holds every definition");
+console.log("publish the definitions through a Squads multisig");
+const created = cli("squads-create", "--rpc", RPC, "--keypair", authority.path);
+const multisig = created.match(/multisig (\S+)/)[1];
+const vault = created.match(/vault (\S+)/)[1];
+await rpc("surfnet_setAccount", [vault, { lamports: 100_000_000_000 }]);
+
+const squads = ["--rpc", RPC, "--keypair", authority.path, "--squads", multisig];
+cli("apply", ...squads, "--execute");
+expect(cli("plan", ...squads).includes("holds every definition"), "the registry holds every definition");
+
+const organization = await rpc("getAccountInfo", [ORGANIZATION, { encoding: "base64" }]);
+const organizationAuthority = base58(Buffer.from(organization.value.data[0], "base64").subarray(8, 40));
+expect(organizationAuthority === vault, "the vault is the authority of solana.org");
 
 console.log("a USDC transfer and a SOL transfer in one transaction");
 run(

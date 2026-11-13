@@ -1,6 +1,8 @@
 //! `sdp-intents plan` and `sdp-intents apply`: compare the definitions with the registry, then print
-//! or send the steps that make the registry hold them. The signer creates each organization as its
-//! authority, and pays for every account.
+//! or send the steps that make the registry hold them. The key that runs them writes each buffer.
+//! It is also the authority that signs and pays every other step, unless `--squads` names a
+//! multisig, whose vault is the authority. Then `apply` proposes each of those steps to the
+//! multisig, and the members approve and execute them in order.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -13,7 +15,8 @@ use sdp_intents_spec::Address;
 use crate::lint::{compile_tree, Outcome};
 use crate::output::{self, Format};
 use crate::settings::read_settings;
-use crate::sync::{Step, Sync};
+use crate::squads;
+use crate::sync::{Step, StepSigner, Sync};
 use crate::tree::Tree;
 
 /// The budget of each registry transaction. The largest, `publish`, hashes a document of at most
@@ -27,9 +30,19 @@ pub struct SyncArgs {
     #[arg(long)]
     rpc: String,
 
-    /// The keypair that signs, pays, and is each new organization's authority.
+    /// The keypair that writes each buffer. Without `--squads`, it is also the authority.
     #[arg(long)]
     keypair: PathBuf,
+
+    /// A Squads v4 multisig, whose vault is the authority. The keypair must be a member who can
+    /// initiate.
+    #[arg(long)]
+    squads: Option<String>,
+
+    /// With `--squads`, approves and executes each proposal with the keypair. Only a member who meets
+    /// the threshold alone can, as on a local multisig.
+    #[arg(long, requires = "squads")]
+    execute: bool,
 
     /// The folder that holds `<organization>/<kind>/<name>/<version>.json`.
     #[arg(long, default_value = "definitions")]
@@ -53,25 +66,84 @@ pub fn plan(args: &SyncArgs) -> Result<Outcome, String> {
 
 pub fn apply(args: &SyncArgs) -> Result<Outcome, String> {
     let Planned { keypair, steps } = planned(args)?;
-    let client = Client::new(&args.rpc);
+    let sender = Sender { client: Client::new(&args.rpc), keypair, multisig: multisig(args)?, execute: args.execute };
 
     for step in &steps {
-        for instructions in &step.transactions {
-            let transaction = Transaction {
-                fee_payer: Address(keypair.pubkey().to_bytes()),
-                instructions: instructions.iter().map(instruction).collect(),
-                budget: REGISTRY_BUDGET,
-                priority_fee_lamports: 0,
+        for transaction in &step.transactions {
+            let instructions: Vec<Instruction> = transaction.instructions.iter().map(instruction).collect();
+            let sent = match (transaction.signer, sender.multisig) {
+                (StepSigner::Authority, Some(multisig)) => sender.propose(&multisig, &instructions),
+                _ => sender.send(instructions),
             };
-            client.send(&transaction, &[&keypair]).map_err(|error| format!("{}: {error}", step.description))?;
+
+            sent.map_err(|error| format!("{}: {error}", step.description))?;
         }
 
         println!("{}", step.description);
     }
 
-    println!("The registry holds every definition.");
+    let done = match sender.multisig.is_some() && !args.execute {
+        true => "Each step that needs the authority is a proposal. The members approve and execute them in order.",
+        false => "The registry holds every definition.",
+    };
+    println!("{done}");
 
     Ok(Outcome::Clean)
+}
+
+/// What sends the steps of `apply`.
+struct Sender {
+    client: Client,
+    keypair: Keypair,
+    multisig: Option<Address>,
+    execute: bool,
+}
+
+impl Sender {
+    fn send(&self, instructions: Vec<Instruction>) -> Result<(), String> {
+        let transaction = Transaction {
+            fee_payer: Address(self.keypair.pubkey().to_bytes()),
+            instructions,
+            budget: REGISTRY_BUDGET,
+            priority_fee_lamports: 0,
+        };
+
+        self.client.send(&transaction, &[&self.keypair]).map(|_| ()).map_err(|error| error.to_string())
+    }
+
+    /// Creates a vault transaction and its proposal at the multisig's next index, and with
+    /// `--execute`, approves and executes it.
+    fn propose(&self, multisig: &Address, instructions: &[Instruction]) -> Result<(), String> {
+        let account =
+            self.client.accounts(&[*multisig]).map_err(|error| error.to_string())?.into_iter().next().flatten();
+        let last = squads::transaction_index(&account.ok_or("the multisig does not exist")?.data)?;
+        let proposer = Address(self.keypair.pubkey().to_bytes());
+        let vault_transaction = squads::VaultTransaction {
+            multisig,
+            index: last.checked_add(1).ok_or("the multisig has no next index")?,
+            proposer: &proposer,
+            instructions,
+        };
+
+        self.send(vault_transaction.create()?)?;
+
+        if self.execute {
+            self.send(vault_transaction.approve_and_execute()?)?;
+        }
+
+        Ok(())
+    }
+}
+
+fn multisig(args: &SyncArgs) -> Result<Option<Address>, String> {
+    args.squads
+        .as_deref()
+        .map(|text| parse_address(text).ok_or_else(|| format!("`{text}` is not an address")))
+        .transpose()
+}
+
+fn parse_address(text: &str) -> Option<Address> {
+    bs58::decode(text).into_vec().ok().and_then(|bytes| bytes.try_into().ok()).map(Address)
 }
 
 /// The signer, and the steps that the registry still needs.
@@ -100,12 +172,18 @@ fn planned(args: &SyncArgs) -> Result<Planned, String> {
         .filter_map(|(address, account)| account.map(|account| (address, account)))
         .collect();
 
+    let writer = Address(keypair.pubkey().to_bytes());
+    let authority = match multisig(args)? {
+        Some(multisig) => squads::vault_address(&multisig)?,
+        None => writer,
+    };
     let sync = Sync {
         catalog: &compiled.catalog,
         organizations: &settings.organizations,
         indexes: &settings.indexes,
         accounts: &accounts,
-        signer: Address(keypair.pubkey().to_bytes()),
+        writer,
+        authority,
     };
     let steps = sync.steps()?;
 

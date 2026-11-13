@@ -3,11 +3,13 @@
 //! `prepare` plans intents over RPC, and `verify` and `send` act as the plan's signer.
 
 mod lint;
+mod multisig;
 mod output;
 mod prepare;
 mod registry;
 mod settings;
 mod sign;
+mod squads;
 mod sync;
 mod tree;
 
@@ -16,6 +18,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 
 use crate::lint::{LintArgs, Outcome};
+use crate::multisig::SquadsCreateArgs;
 use crate::prepare::PrepareArgs;
 use crate::registry::SyncArgs;
 use crate::sign::{SendArgs, VerifyArgs};
@@ -41,6 +44,8 @@ enum Command {
     Verify(VerifyArgs),
     /// Verifies a plan, then signs and sends its transaction.
     Send(SendArgs),
+    /// Creates a Squads v4 multisig of one member, for `apply --squads` on a local surfnet.
+    SquadsCreate(SquadsCreateArgs),
 }
 
 /// Exits 1 on a finding, and 2 when the command cannot run, as `clap` does for a bad argument.
@@ -52,6 +57,7 @@ fn main() -> ExitCode {
         Command::Prepare(args) => prepare::run(&args),
         Command::Verify(args) => sign::verify(&args),
         Command::Send(args) => sign::send(&args),
+        Command::SquadsCreate(args) => multisig::run(&args),
     };
 
     match outcome {

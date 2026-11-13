@@ -41,7 +41,12 @@ pub fn buffer_address(writer: &Address, buffer_id: u32) -> Result<Address, Regis
 }
 
 fn find(seeds: &[&[u8]]) -> Result<Address, RegistryError> {
-    let program = solana_address::Address::new_from_array(REGISTRY_PROGRAM.0);
+    find_program_address(seeds, &REGISTRY_PROGRAM)
+}
+
+/// The program address of `seeds` under `program`, with the first bump that puts it off the curve.
+pub fn find_program_address(seeds: &[&[u8]], program: &Address) -> Result<Address, RegistryError> {
+    let program = solana_address::Address::new_from_array(program.0);
     let (address, _bump) =
         solana_address::Address::try_find_program_address(seeds, &program).ok_or(RegistryError::NoAddress)?;
 

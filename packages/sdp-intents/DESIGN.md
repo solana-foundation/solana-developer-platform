@@ -1529,15 +1529,17 @@ from implementation id to the approved versions:
 | `sdp-intents lint [paths]` | Checks every definition, and exits with an error on a finding. `--format github` writes GitHub annotations. |
 | `sdp-intents plan --rpc <url> --keypair <path>` | Reads the registry and prints the steps that make it hold the definitions |
 | `sdp-intents apply --rpc <url> --keypair <path>` | Sends those steps, signed and paid by the key |
-| `sdp-intents apply --rpc <url> --squads <multisig>` | Proposes the steps to a Squads v4 multisig instead of sending them. Not built yet. |
+| `sdp-intents apply --rpc <url> --keypair <path> --squads <multisig>` | The multisig's vault is the authority. The key writes each buffer and creates each organization, and every other step becomes a Squads vault transaction and proposal, in order. `--execute` also approves and executes each one, which only a member who meets the threshold alone can do. |
+| `sdp-intents squads-create --rpc <url> --keypair <path>` | Creates a Squads multisig whose only member is the key, with a threshold of 1, for a local run |
 | `sdp-intents prepare <request> --rpc <url>` | Plans the plan request over RPC and prints the plan. It compiles the documents from the definitions with each organization's registry address, so `verify_intent` finds them once `apply` has run. |
 | `sdp-intents verify <plan> --rpc <url>` | Renders the message from the plan's compiled transaction and the registry, as its signer does (4.6), and lists each instruction that no segment holds |
 | `sdp-intents send <plan> --rpc <url> --keypair <path>…` | Verifies the plan, then signs its compiled transaction with each key and sends it. It refuses a plan that does not verify, unless `--allow-unverified` is set. |
 
-The prototype reads the `approveNewVersions` and `approvals` of each interface's `index.json`.
-The key that runs `apply` is the authority of each organization that it creates, and both
-authorities of each index follow the organization's. It reads no `organization.json`, no
-implementation `index.json`, and no authorities or heads yet.
+An authority that a file leaves out is `Address::default()` in an index, which follows the
+organization authority. An `organization.json` with no `authority` leaves the organization with
+the authority that creates it. `apply` creates each organization and index with the authority that
+runs it, and moves each authority that a file names last, because each earlier step needs that
+authority.
 
 `lint` checks:
 
@@ -1552,16 +1554,18 @@ implementation `index.json`, and no authorities or heads yet.
    the part of the version that 4.8 requires.
 7. Approvals and heads name versions that exist.
 
-`plan` and `apply` will cover every registry instruction: organizations, indexes, authorities,
-`write_buffer`, `publish`, `set_head`, `remove`, approvals, and the approval policy. The prototype
-covers the organizations, the indexes, the documents, the approvals, and the approval policy.
-`plan` refuses a published version whose bytes differ from the definition's. `plan` never
+`plan` and `apply` cover the organizations, the indexes, authorities, `write_buffer`, `publish`,
+`set_head`, approvals, and the approval policy. `plan` refuses a published version whose bytes
+differ from the definition's. It never removes a version, and no command does yet. The catalog holds
+one version of each id, so the tree publishes one version of each document. `plan` never
 removes a version on its own. A removal needs `--remove`.
 
 **Multisig.** Any authority can be a Squads vault. With `--squads`, `apply` uploads each document
-with `write_buffer` from the proposer's key. It then wraps the other instructions, in order, in
-Squads vault transactions and proposals. The members approve in Squads. `publish` carries the
-SHA-256 of the document, so the members approve the exact bytes, and the upload needs no vote.
+with `write_buffer` from the proposer's key, and creates each organization with the vault as its
+authority, because creation needs no signature of the authority. It then wraps each other step, in
+order, in a Squads vault transaction and a proposal, which the vault pays for. The members approve
+in Squads. `publish` carries the SHA-256 of the document, so the members approve the exact bytes,
+and the upload needs no vote.
 
 **GitHub.** Later, a workflow runs `lint` and `plan` on each pull request, and posts the plan as a
 comment. On merge to `main`, it runs `apply --squads`, so the registry changes only through a
@@ -1570,7 +1574,8 @@ multisig vote on a reviewed plan.
 **Local run.** `just surfnet` starts surfpool, which forks mainnet, so Lighthouse, Jupiter Lend,
 and Kamino run with live state. `just e2e` then builds the programs and places each one at the
 address that its `declare_id!` names, with the `surfnet_setAccount` cheatcode
-(`programs/deploy-surfnet.mjs`). It runs `apply` with a new key, funds new wallets with
+(`programs/deploy-surfnet.mjs`). It creates a Squads multisig of a new key, runs
+`apply --squads --execute` through the Squads program of the fork, funds new wallets with
 cheatcodes, and for each plan runs `prepare`, `verify`, and `send` with every onchain check on: a
 USDC transfer and a SOL transfer in one transaction, a Jupiter Lend deposit, and a Kamino vault
 deposit. It checks each balance after (`e2e/run.mjs`).

@@ -6,8 +6,8 @@
 //! The steps run in an order that the registry accepts. An interface version comes before the
 //! implementations of it. An implementation's approval comes before its versions, so that an
 //! interface with `approveNewVersions` approves them at publish. Each organization and index is
-//! created with the signer's authority, and the authorities move last, because each earlier step
-//! needs the signer to be the authority.
+//! created with the authority that runs `apply`, and the authorities that the files name move last,
+//! because each earlier step needs that authority.
 //!
 //! The catalog holds one version of each id, so a step publishes at most one version of a document.
 
@@ -35,16 +35,33 @@ const BUFFER_PART: usize = 800;
 /// One change to the registry, and the transactions that make it, in order.
 pub struct Step {
     pub description: String,
-    pub transactions: Vec<Vec<RegistryInstruction>>,
+    pub transactions: Vec<StepTransaction>,
 }
 
-/// The definitions, the accounts that the registry holds for them, and the key that signs.
+pub struct StepTransaction {
+    pub signer: StepSigner,
+    pub instructions: Vec<RegistryInstruction>,
+}
+
+/// Who signs a transaction of a step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StepSigner {
+    /// The key that runs `apply`. It writes buffers and creates organizations, which need no
+    /// authority.
+    Writer,
+    /// The organization authority, which also pays. With `--squads` it is a vault.
+    Authority,
+}
+
+/// The definitions, the accounts that the registry holds for them, and the keys that sign. Without
+/// `--squads`, the writer and the authority are the same key.
 pub struct Sync<'s> {
     pub catalog: &'s Catalog,
     pub organizations: &'s [OrganizationSettings],
     pub indexes: &'s [IndexSettings],
     pub accounts: &'s HashMap<Address, Account>,
-    pub signer: Address,
+    pub writer: Address,
+    pub authority: Address,
 }
 
 /// A document's place in the registry.
@@ -129,22 +146,29 @@ impl Sync<'_> {
     }
 
     /// Each step signs as the organization authority, so an organization that the registry holds
-    /// must have the signer as its authority.
+    /// must have that authority.
     fn check_signer(&self, name: &str) -> Result<(), String> {
         let Some(account) = self.accounts.get(&publisher(name)) else { return Ok(()) };
         let organization = OrganizationView::parse(&account.data).map_err(|error| format!("{name}: {error}"))?;
 
-        match *organization.authority() == self.signer {
+        match *organization.authority() == self.authority {
             true => Ok(()),
-            false => Err(format!("the authority of {name} is {}, not the signer", base58(organization.authority()))),
+            false => Err(format!(
+                "the authority of {name} is {}, not {}",
+                base58(organization.authority()),
+                base58(&self.authority)
+            )),
         }
     }
 
-    /// An organization that the registry does not hold is created with the signer's authority.
+    /// An organization that the registry does not hold is created with the authority. The writer
+    /// creates it, because creation needs no signature of the authority.
     fn create_organization(&self, name: &str) -> Option<Result<Step, String>> {
         let Some(account) = self.accounts.get(&publisher(name)) else {
-            let created = registry::create_organization(&self.signer, name, &self.signer)
-                .map(|instruction| step(format!("create the organization {name}"), vec![instruction]));
+            let created = registry::create_organization(&self.writer, name, &self.authority).map(|instruction| Step {
+                description: format!("create the organization {name}"),
+                transactions: vec![StepTransaction { signer: StepSigner::Writer, instructions: vec![instruction] }],
+            });
 
             return Some(created.map_err(|error| error.to_string()));
         };
@@ -155,7 +179,7 @@ impl Sync<'_> {
     fn move_organization_authority(&self, name: &str) -> Option<Result<Step, String>> {
         let wanted = self.organizations.iter().find(|settings| settings.organization == name)?.authority?;
         let current = match self.accounts.get(&publisher(name)) {
-            None => self.signer,
+            None => self.authority,
             Some(account) => match OrganizationView::parse(&account.data) {
                 Ok(view) => *view.authority(),
                 Err(error) => return Some(Err(format!("{name}: {error}"))),
@@ -173,8 +197,8 @@ impl Sync<'_> {
         let at = place(DocumentKind::Interface, &interface.id, &interface.version)?;
         let index = (!self.exists(&at.index)).then(|| {
             let new = NewInterface {
-                payer: &self.signer,
-                authority: &self.signer,
+                payer: &self.authority,
+                authority: &self.authority,
                 organization: &at.organization,
                 index: &at.index,
             };
@@ -202,8 +226,8 @@ impl Sync<'_> {
 
         let interface_index = implemented_index(implementation)?;
         let new = NewImplementation {
-            payer: &self.signer,
-            authority: &self.signer,
+            payer: &self.authority,
+            authority: &self.authority,
             organization: &at.organization,
             interface_index: &interface_index,
             index: &at.index,
@@ -241,28 +265,32 @@ impl Sync<'_> {
         let bytes = document.bytes;
         let document_hash: [u8; 32] = Sha256::digest(bytes).into();
         let buffer_id = document_hash.first_chunk::<4>().map_or(0, |prefix| u32::from_le_bytes(*prefix));
-        let buffer = registry::buffer_address(&self.signer, buffer_id).map_err(|error| error.to_string())?;
+        let buffer = registry::buffer_address(&self.writer, buffer_id).map_err(|error| error.to_string())?;
         let writes = bytes
             .chunks(BUFFER_PART)
             .zip((0..).step_by(BUFFER_PART))
             .map(|(part, offset)| {
-                registry::write_buffer(&self.signer, &buffer, buffer_id, bytes.len(), offset, part)
-                    .map(|instruction| vec![instruction])
+                registry::write_buffer(&self.writer, &buffer, buffer_id, bytes.len(), offset, part)
+                    .map(|instruction| StepTransaction { signer: StepSigner::Writer, instructions: vec![instruction] })
                     .map_err(|error| error.to_string())
             })
             .collect::<Result<Vec<_>, _>>()?;
         let publication = Publication {
-            payer: self.signer,
-            authority: self.signer,
+            payer: self.authority,
+            authority: self.authority,
             organization: at.organization,
             index: at.index,
             buffer,
-            buffer_writer: self.signer,
+            buffer_writer: self.writer,
             version: at.version,
             interface_index: document.interface_index,
         };
 
-        let transactions = writes.into_iter().chain([vec![publication.instruction(&document_hash)]]).collect();
+        let publish = StepTransaction {
+            signer: StepSigner::Authority,
+            instructions: vec![publication.instruction(&document_hash)],
+        };
+        let transactions = writes.into_iter().chain([publish]).collect();
 
         Ok(Some(Step { description: format!("publish {label}"), transactions }))
     }
@@ -295,7 +323,7 @@ impl Sync<'_> {
                     self.index(&interface_index)?.is_some_and(|view| view.approves(&approval.implementation_index));
                 let description = format!("approve {} for {interface}", implementation.id);
 
-                Ok((!approved).then(|| step(description, vec![approval.approve_implementation(&self.signer)])))
+                Ok((!approved).then(|| step(description, vec![approval.approve_implementation(&self.authority)])))
             })
             .filter_map(Result::transpose)
             .collect()
@@ -358,7 +386,7 @@ impl Sync<'_> {
 
     fn approval(&self, interface: &Id, interface_index: &Address, implementation: &Id) -> Result<Approval, String> {
         Ok(Approval {
-            authority: self.signer,
+            authority: self.authority,
             organization: publisher(&interface.organization),
             interface_index: *interface_index,
             implementation_index: index_of(DocumentKind::Implementation, implementation)?,
@@ -366,7 +394,7 @@ impl Sync<'_> {
     }
 
     fn change(&self, id: &Id, index: Address) -> IndexChange {
-        IndexChange { authority: self.signer, organization: publisher(&id.organization), index }
+        IndexChange { authority: self.authority, organization: publisher(&id.organization), index }
     }
 
     fn index_settings(&self, kind: Kind, id: &Id) -> Option<&IndexSettings> {
@@ -391,9 +419,9 @@ fn all<S: IntoIterator<Item = Step>>(results: impl Iterator<Item = Result<S, Str
     results.collect::<Result<Vec<_>, _>>().map(|steps| steps.into_iter().flatten().collect())
 }
 
-/// A step of one transaction.
+/// A step of one transaction, which the authority signs.
 fn step(description: String, instructions: Vec<RegistryInstruction>) -> Step {
-    Step { description, transactions: vec![instructions] }
+    Step { description, transactions: vec![StepTransaction { signer: StepSigner::Authority, instructions }] }
 }
 
 fn organization_names(interfaces: &[&CompiledInterface], implementations: &[&CompiledImplementation]) -> Vec<String> {
@@ -481,7 +509,8 @@ mod tests {
             organizations: &settings.organizations,
             indexes: &settings.indexes,
             accounts: &accounts,
-            signer: SIGNER,
+            writer: SIGNER,
+            authority: SIGNER,
         };
 
         sync.steps().unwrap().into_iter().map(|step| step.description).collect()
