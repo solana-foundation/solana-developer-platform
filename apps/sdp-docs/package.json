@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "build": "pnpm generate:api && pnpm generate:ai && pnpm generate:source && next build",
-    "start": "next start --port 3001",
+    "start": "next start --port ${SDP_DOCS_PORT:-3001}",
     "pretypecheck": "pnpm generate:source",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",

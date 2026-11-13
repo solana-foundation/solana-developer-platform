@@ -45,7 +45,7 @@ SDP Docs is the comprehensive external-facing documentation for the SDP platform
    pnpm dev:docs
    ```
 
-   The documentation site will be available at `http://localhost:3001` (or the next available port)
+   The documentation site will be available at `http://localhost:3001` (or the next available port). `pnpm start` serves a production build on `SDP_DOCS_PORT` too, default 3001, so a second worktree's build can run beside the first.
 
 ## Documentation Structure
 
