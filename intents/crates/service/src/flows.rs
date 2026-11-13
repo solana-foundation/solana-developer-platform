@@ -19,7 +19,8 @@ use crate::registry::{catalog, IntentReference, Registry};
 const MAX_VERIFY_ROUNDS: usize = 8;
 
 /// A plan request as `DESIGN.md`, section 4.1, writes it. The documents come from the registry.
-pub async fn prepare(chain: &CachedRpc, text: &str) -> Result<Value, ServiceError> {
+/// With `tamper`, the transaction differs from the plan, as `tamper` says.
+pub async fn prepare(chain: &CachedRpc, text: &str, tamper: bool) -> Result<Value, ServiceError> {
     let request: Value = serde_json::from_str(text)?;
     let references = references(&request)?;
     let documents = Registry { chain }.intent_documents(&references).await?;
@@ -40,7 +41,12 @@ pub async fn prepare(chain: &CachedRpc, text: &str) -> Result<Value, ServiceErro
         priority_fee_lamports: compiled.priority_fee_lamports,
     };
 
-    let plan = plan(chain, &plan_request).await?;
+    let mut plan = plan(chain, &plan_request).await?;
+
+    if tamper {
+        tamper_with(&mut plan);
+    }
+
     let blockhash = chain.latest_blockhash().await?;
 
     Ok(plan_json::plan(&prepared(plan, blockhash)?, request))
@@ -59,6 +65,20 @@ pub async fn verify(chain: &CachedRpc, body: &Value) -> Result<Value, ServiceErr
     let verified = verified(chain, &message).await?;
 
     Ok(plan_json::verified(&verified, body.get("expected").and_then(Value::as_str)))
+}
+
+/// Changes the last data byte of the first built instruction, and keeps the message. The client's
+/// verifier reads only `verify_intent`, so it still renders the plan's message, and `verify_intent`
+/// refuses the transaction onchain. The playground shows that refusal.
+fn tamper_with(plan: &mut Plan) {
+    let first_built = plan.intents.first().map(|intent| intent.span.start);
+    let byte = first_built
+        .and_then(|position| plan.transaction.instructions.get_mut(position))
+        .and_then(|instruction| instruction.data.last_mut());
+
+    if let Some(byte) = byte {
+        *byte = byte.wrapping_add(1);
+    }
 }
 
 async fn plan(chain: &CachedRpc, request: &PlanRequest<'_>) -> Result<Plan, ServiceError> {

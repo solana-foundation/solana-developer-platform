@@ -1765,6 +1765,18 @@ the request. It reads the local registry on surfpool and is never deployed.
 
 Programs run only on local surfpool. Local keypairs sign. No provider credential is used.
 
+The prototype builds items 1 to 3, and the tamper switch of item 5. The service signs with the
+wallets of `--wallets`, and honors `x-sdp-tamper: 1` only then. The Plan tab shows the builder
+simulations of each intent, not each round. The Record tab shows the document's description and
+its bytes, not annotated hex or the recipe's instructions. The swap switch waits for the remote
+recipe. `apps/intents-playground/README.md` shows how to run it.
+
+**Rent payer in a builder's accounts.** `verify_intent` maps each account at the rent payer's address
+back to the placeholder. A builder that names that address itself, such as an owner who also pays
+the rent, then fails the hash. `prepare` refuses such a plan with `RentPayerInRecipe`. A fix marks
+each placeholder account in the builder roles of `verify_intent`, so that only those accounts map
+back.
+
 ## 5. Security
 
 _SDLC §2 · §3.1 · §11_

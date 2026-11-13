@@ -101,6 +101,31 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
 
+  apps/intents-playground:
+    dependencies:
+      react:
+        specifier: 19.3.1
+        version: 19.3.1
+      react-dom:
+        specifier: 19.3.1
+        version: 19.3.1(react@19.3.1)
+    devDependencies:
+      '@biomejs/biome':
+        specifier: 2.6.3
+        version: 2.6.3
+      '@types/react':
+        specifier: 19.3.0
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: 19.3.0
+        version: 19.3.0(@types/react@19.3.0)
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vite:
+        specifier: 7.3.7
+        version: 7.3.7(@types/node@26.6.5)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
+
   apps/sdp-api:
     dependencies:
       '@clerk/backend':
@@ -6200,11 +6225,6 @@ packages:
 
   base64-js@1.5.1:
     resolution: {integrity: sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==}
-
-  baseline-browser-mapping@2.11.32:
-    resolution: {integrity: sha512-UvuxFU9P3hM29LrQdwu0cD6w6/+SFr+UlB9s/knI7+O2rK9xFxKUwSDWxGdbbqQ9/V7BJ5s0NI5nQAE4uJp3gQ==}
-    engines: {node: '>=6.0.0'}
-    hasBin: true
 
   baseline-browser-mapping@2.11.33:
     resolution: {integrity: sha512-yiVKDX+qCMRKBE084lXvq9EcwFUhKZ2nU8TK1EQQuOgPNR/lmbGxXOeDdlGUqC2Zz11Cs9rk1d/8NfgBmlkt0w==}
@@ -14699,8 +14719,6 @@ snapshots:
 
   base64-js@1.5.1: {}
 
-  baseline-browser-mapping@2.11.32: {}
-
   baseline-browser-mapping@2.11.33: {}
 
   bcrypt-pbkdf@1.0.2:
@@ -14743,7 +14761,7 @@ snapshots:
 
   browserslist@4.29.4:
     dependencies:
-      baseline-browser-mapping: 2.11.32
+      baseline-browser-mapping: 2.11.33
       caniuse-lite: 1.0.30001819
       electron-to-chromium: 1.5.464
       node-releases: 2.0.60

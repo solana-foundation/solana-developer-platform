@@ -1,0 +1,258 @@
+/* The playground's layout over the SDP classes: the registry in the sidebar, then the interface page
+   and the side panel inside the content card. */
+
+.sidebar {
+  overflow-y: auto;
+}
+
+.tree {
+  gap: 24px;
+  padding: 24px 20px;
+}
+
+.tree-item {
+  width: 100%;
+  background: none;
+  border: 1px solid transparent;
+  font-family: var(--font);
+  text-align: left;
+  justify-content: space-between;
+}
+
+.nav-item.tree-item {
+  height: 40px;
+  font-size: 15px;
+}
+
+.tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-version {
+  font-size: 12px;
+  color: var(--emph-l);
+}
+
+.sub-nav .tree-item {
+  gap: 8px;
+}
+
+.sb-bottom {
+  padding: 20px;
+}
+
+.tree-switch,
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--emph-m);
+  cursor: pointer;
+}
+
+.tree-switch {
+  justify-content: flex-start;
+}
+
+.switch-label {
+  display: block;
+  font-size: 14px;
+  font-weight: 550;
+  color: var(--emph-h);
+}
+
+.workspace {
+  flex-direction: row;
+}
+
+.interface-page {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.interface-header {
+  padding: 32px 40px 20px;
+}
+
+.interface-body {
+  padding: 24px 40px 40px;
+}
+
+.field-tags {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: 8px;
+}
+
+.field-tags .type-pill {
+  padding: 1px 8px;
+  font-size: 11px;
+}
+
+.guarantees {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--emph-h);
+}
+
+.check {
+  color: var(--green-tx);
+  margin-right: 10px;
+}
+
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.candidate {
+  width: 100%;
+  text-align: left;
+  font-family: var(--font);
+  cursor: pointer;
+}
+
+.candidate.selected {
+  border-color: var(--emph-xh);
+}
+
+.candidate-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.candidate-badges {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.side-panel {
+  width: 460px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1.5px solid var(--border-l);
+  background: white;
+}
+
+.side-tabs {
+  padding: 0 24px;
+}
+
+.side-tabs .ph-tab {
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  font-family: var(--font);
+}
+
+.side-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.side-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.side-actions.row {
+  flex-direction: row;
+  justify-content: flex-end;
+}
+
+.message {
+  font-size: 14px;
+  color: var(--emph-xh);
+  word-break: break-word;
+}
+
+.error-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Code surfaces are the only place that uses a monospace font. */
+.code {
+  position: relative;
+  background: var(--gray-50);
+  border: 1px solid var(--border-xl);
+  border-radius: 12px;
+}
+
+.code pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 18px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  max-height: 420px;
+}
+
+.code-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+
+.snippets {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.snippet-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.snippet-active {
+  background: var(--emph-xh);
+  color: white;
+}
+
+.snippet-active:hover {
+  background: var(--emph-xh);
+}
+
+.loading {
+  align-items: center;
+  justify-content: center;
+}
+
+.loading-card {
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.side-body thead th,
+.side-body tbody td {
+  padding: 10px 14px;
+}
+
+/* Each part keeps its height, and the column scrolls. */
+.side-body > *,
+.interface-body > * {
+  flex-shrink: 0;
+}

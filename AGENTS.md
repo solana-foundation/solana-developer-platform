@@ -7,6 +7,7 @@ This file is the canonical agent guide for this repository.
 - `apps/sdp-api`: Node.js API deployed to Cloud Run, OpenAPI source, route handlers, Postgres/Redis integrations
 - `apps/sdp-web`: dashboard application
 - `apps/sdp-docs`: public documentation site and generated API reference
+- `apps/intents-playground`: a local explorer for the intents prototype's registry, over `intents/crates/service`; never deployed
 - `packages/sdp-types`: shared runtime types and shared product constants
 - `packages/sdp-design-tokens`: shared design tokens (CSS custom properties, Tailwind theme mapping); see its README
 - `packages/sdp-ui`: the dashboard's UI primitives (`@sdp/ui`) over `@solana/design-system` and the design tokens; `apps/sdp-web/src/components/ui/*` re-exports them; see its README

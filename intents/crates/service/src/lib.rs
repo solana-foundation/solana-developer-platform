@@ -11,6 +11,8 @@
 //! | `POST /v1/implementations` | `{ interface, inputs, payers, all }` | `implementationsFor` |
 //! | `GET /v1/wallets` | | The local wallets, with `--wallets` |
 //! | `POST /v1/send` | `{ message }` | Signs with the local wallets and sends, with `--wallets` |
+//!
+//! With `--wallets`, `POST /v1/prepare` also takes `x-sdp-tamper: 1`, for the playground.
 
 mod describe;
 mod error;
@@ -26,6 +28,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use axum::extract::State;
+use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -62,9 +65,12 @@ async fn registry(State(service): Shared) -> Response {
     observed(&service, "registry", listing::listing(&service.chain)).await
 }
 
-async fn prepare(State(service): Shared, body: String) -> Response {
+/// `x-sdp-tamper: 1` asks for a transaction that `verify_intent` refuses. Only a service with local
+/// wallets honors it, because only the playground needs it.
+async fn prepare(State(service): Shared, headers: HeaderMap, body: String) -> Response {
+    let tamper = !service.wallets.is_empty() && headers.get("x-sdp-tamper").is_some_and(|value| value == "1");
     let before = service.chain.calls();
-    let prepared = flows::prepare(&service.chain, &body).await.map(|mut plan| {
+    let prepared = flows::prepare(&service.chain, &body, tamper).await.map(|mut plan| {
         if let Some(plan) = plan.as_object_mut() {
             plan.insert("rpcCalls".to_owned(), flows::calls_json(before, service.chain.calls()));
         }

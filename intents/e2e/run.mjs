@@ -9,64 +9,33 @@
 // The keys are new on each run and live in `target/e2e/wallets`. The cheatcodes fund them, so
 // nothing here touches a real key or a real cluster.
 
-import { execFileSync, spawn } from "node:child_process";
-import { generateKeyPairSync } from "node:crypto";
+import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 
+import {
+  JUPITER_SHARES,
+  JUPITER_USDT_VAULT,
+  KAMINO_USDC_VAULT,
+  ORGANIZATION,
+  SYSTEM,
+  TOKEN_PROGRAM,
+  USDC,
+  USDT,
+  base58,
+  cli,
+  keypair as keypairIn,
+  rpcClient,
+} from "./surfnet.mjs";
+
 const RPC = process.argv[2] ?? "http://127.0.0.1:8899";
-const CLI = new URL("../target/debug/sdp-intents", import.meta.url).pathname;
-const ROOT = new URL("..", import.meta.url).pathname;
 const SERVICE_BINARY = new URL("../target/debug/sdp-intents-service", import.meta.url).pathname;
 const SERVICE_LISTEN = "127.0.0.1:8788";
 const SERVICE = `http://${SERVICE_LISTEN}`;
 const OUT = new URL("../target/e2e/", import.meta.url).pathname;
 const WALLETS = `${OUT}wallets/`;
-const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
-const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
-const SYSTEM = "11111111111111111111111111111111";
-const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-const USDT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
-const JUPITER_USDT_VAULT = "F7tLdeF2YZZex9MR8HgGggyFiz7UU2UgUube2tmfwNPE";
-const JUPITER_SHARES = "Cmn4v2wipYV41dkakDvCgFJpxhtaaKt11NyWV8pjSE8A";
-const KAMINO_USDC_VAULT = "HDsayqAsDWy3QvANGqh2yNraqcD8Fnjgh73Mhb3WRS5E";
-/// The registry address of the organization `solana.org`.
-const ORGANIZATION = "8Zth9xaiuwMGKHhdh3hWbFHSE8fhwseKnTKUa75VAEnp";
-
-function base58(bytes) {
-  let value = 0n;
-  for (const byte of bytes) value = value * 256n + BigInt(byte);
-
-  let text = "";
-  for (; value > 0n; value /= 58n) text = ALPHABET[Number(value % 58n)] + text;
-
-  const zeros = bytes.findIndex((byte) => byte !== 0);
-  return "1".repeat(zeros === -1 ? bytes.length : zeros) + text;
-}
-
-async function rpc(method, params) {
-  const response = await fetch(RPC, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  const { result, error } = await response.json();
-
-  if (error) throw new Error(`${method}: ${JSON.stringify(error)}`);
-
-  return result;
-}
-
-/// A new keypair in the Solana CLI's file format: the 32-byte secret, then the 32-byte public key.
-function keypair(name) {
-  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-  const secret = Buffer.from(privateKey.export({ format: "jwk" }).d, "base64url");
-  const pub = Buffer.from(publicKey.export({ format: "jwk" }).x, "base64url");
-  const path = `${WALLETS}${name}.json`;
-  writeFileSync(path, JSON.stringify([...secret, ...pub]));
-
-  return { path, address: base58(pub) };
-}
+const rpc = rpcClient(RPC);
+const keypair = (name) => keypairIn(WALLETS, name);
 
 async function service(path, body) {
   const init = body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body };
@@ -92,10 +61,6 @@ async function startService() {
 
   child.kill();
   throw new Error("the service did not start");
-}
-
-function cli(...args) {
-  return execFileSync(CLI, args, { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
 }
 
 async function tokenAmount(owner, mint) {
