@@ -2,6 +2,7 @@ import { ORGANIZATION_NOT_ADMITTED_REASON } from "@sdp/types/organizations";
 import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { inspectRoutes } from "hono/dev";
 import { beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createApp } from "@/app";
 import { getDb } from "@/db/client";
 import { assertProjectEnvironmentsConfig } from "@/lib/production-entitlement";
@@ -70,11 +71,27 @@ async function seedOrganization(productionEntitled: boolean): Promise<Actor> {
   });
 }
 
+const errorBodySchema = z.object({
+  error: z
+    .object({
+      message: z.string().optional(),
+      details: z.object({ reason: z.string().optional() }).passthrough().optional(),
+    })
+    .passthrough()
+    .optional(),
+});
+
+const projectListSchema = z.object({
+  data: z.object({ projects: z.array(z.object({ id: z.string() }).passthrough()) }),
+});
+
 async function errorOf(response: Response) {
-  const body = (await response.json().catch(() => null)) as {
-    error?: { message?: string; details?: { reason?: string } };
-  } | null;
-  return { status: response.status, ...body?.error };
+  const body = errorBodySchema.safeParse(await response.json().catch(() => null));
+  return { status: response.status, ...(body.success ? body.data.error : undefined) };
+}
+
+async function projectIdsOf(response: Response): Promise<string[]> {
+  return projectListSchema.parse(await response.json()).data.projects.map((project) => project.id);
 }
 
 describe("a mainnet-only deployment, for an organization with mainnet access", () => {
@@ -111,8 +128,7 @@ describe("a mainnet-only deployment, for an organization with mainnet access", (
       { headers: clerkHeadersWithoutProject(actor.token) },
       env
     );
-    const listed = (await list.json()) as { data: { projects: { id: string }[] } };
-    expect(listed.data.projects.map((project) => project.id)).toEqual([PRODUCTION_PROJECT_ID]);
+    expect(await projectIdsOf(list)).toEqual([PRODUCTION_PROJECT_ID]);
   });
 
   it("serves its production project", async () => {
@@ -135,7 +151,7 @@ describe("a mainnet-only deployment, for an organization without mainnet access"
   it("lists no project, and still serves its organization, members and mainnet status", async () => {
     const headers = clerkHeadersWithoutProject(actor.token);
     const list = await app.request("/v1/projects", { headers }, env);
-    expect(((await list.json()) as { data: { projects: unknown[] } }).data.projects).toEqual([]);
+    expect(await projectIdsOf(list)).toEqual([]);
     for (const path of [
       `/v1/organizations/${TEST_ORG.id}`,
       `/v1/organizations/${TEST_ORG.id}/mainnet-access`,
@@ -148,7 +164,11 @@ describe("a mainnet-only deployment, for an organization without mainnet access"
       { headers },
       env
     );
-    expect((await access.json()).data).toMatchObject({ mainnetOnly: true, sandboxOnly: false });
+    expect(
+      z
+        .object({ data: z.object({ mainnetOnly: z.boolean(), sandboxOnly: z.boolean() }) })
+        .parse(await access.json()).data
+    ).toEqual({ mainnetOnly: true, sandboxOnly: false });
   });
 
   it("refuses an organization-level action, naming why", async () => {
@@ -161,6 +181,45 @@ describe("a mainnet-only deployment, for an organization without mainnet access"
       status: 403,
       details: { reason: ORGANIZATION_NOT_ADMITTED_REASON },
     });
+  });
+
+  it("refuses changing the organization's settings", async () => {
+    const response = await app.request(
+      `/v1/organizations/${TEST_ORG.id}`,
+      {
+        method: "PATCH",
+        headers: { ...clerkHeadersWithoutProject(actor.token), "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Renamed" }),
+      },
+      env
+    );
+    expect(await errorOf(response)).toMatchObject({
+      status: 403,
+      details: { reason: ORGANIZATION_NOT_ADMITTED_REASON },
+    });
+  });
+
+  it("lets the mainnet request through the lock", async () => {
+    const response = await app.request(
+      `/v1/organizations/${TEST_ORG.id}/mainnet-access`,
+      {
+        method: "POST",
+        headers: { ...clerkHeadersWithoutProject(actor.token), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      },
+      env
+    );
+    // Past the lock, the empty body fails validation.
+    expect((await errorOf(response)).status).toBe(400);
+  });
+
+  it("keeps the Earn reads and exits a production project holds after losing mainnet", async () => {
+    const response = await app.request(
+      "/v1/earn/strategies",
+      { headers: actor.headers(PRODUCTION_PROJECT_ID) },
+      env
+    );
+    expect(response.status).toBe(200);
   });
 
   it("refuses feedback, which emails SDP", async () => {

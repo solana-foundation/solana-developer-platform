@@ -58,12 +58,13 @@ function named(
 
 /**
  * What an organization a mainnet-only deployment does not admit may still do: read its own
- * organization, projects (it has none it can see) and members, and request mainnet access, which
- * takes `organizations.manage`. Everything else, inviting members included, waits for approval.
+ * organization, projects (it has none it can see) and members. Two routes go further, each
+ * marking itself exempt (`organizationAdmissionExempt`): requesting mainnet access, and the Earn
+ * exits and reads a production project keeps after losing the entitlement. Everything else,
+ * changing the organization's settings and inviting members included, waits for approval.
  */
 const NOT_ADMITTED_ACTIONS: ReadonlySet<Action> = new Set<Action>([
   "organizations.read",
-  "organizations.manage",
   "projects.read",
   "members.read",
 ]);
@@ -73,9 +74,19 @@ const NOT_ADMITTED_ACTIONS: ReadonlySet<Action> = new Set<Action>([
  * Runs after the caller is known to hold the action, so a missing grant is still named as such.
  */
 function assertOrganizationAdmittedFor(c: Context<{ Bindings: Env }>, action: Action): void {
-  if (!NOT_ADMITTED_ACTIONS.has(action) && !isOrganizationAdmitted(c)) {
-    throw organizationNotAdmitted();
-  }
+  if (NOT_ADMITTED_ACTIONS.has(action) || c.get("organizationAdmissionExempt")) return;
+  if (!isOrganizationAdmitted(c)) throw organizationNotAdmitted();
+}
+
+/**
+ * Lets an organization a mainnet-only deployment does not admit through the next
+ * {@link requireAction}: for the mainnet-access request, which is how it gets admitted.
+ */
+export function admitWhileNotApproved(): MiddlewareHandler<{ Bindings: Env }> {
+  return async (c, next) => {
+    c.set("organizationAdmissionExempt", true);
+    await next();
+  };
 }
 
 /**

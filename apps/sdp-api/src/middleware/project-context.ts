@@ -56,12 +56,13 @@ export function projectContextMiddleware(options: ProjectContextOptions = {}) {
 
     // A deployment that admits no production project refuses it to every
     // request, exits included: it never held production money to unwind.
-    if (
-      scope.environment === "production" &&
-      (!productionProjectsAllowed(c.env) ||
-        (!isProductionEntitled(c) && !(await options.allowUnentitledProduction?.(c))))
-    ) {
-      throw productionNotEnabled();
+    if (scope.environment === "production") {
+      if (!productionProjectsAllowed(c.env)) throw productionNotEnabled();
+      if (!isProductionEntitled(c)) {
+        if (!(await options.allowUnentitledProduction?.(c))) throw productionNotEnabled();
+        // The same exit stays open past the organization lock of a mainnet-only deployment.
+        c.set("organizationAdmissionExempt", true);
+      }
     }
     // A mainnet-only deployment refuses its sandbox projects the same way.
     if (scope.environment === "sandbox" && !sandboxProjectsAllowed(c.env)) {

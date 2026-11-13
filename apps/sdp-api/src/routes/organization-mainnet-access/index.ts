@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { requireHumanSession } from "@/middleware/human-session";
 import { meteredQuota } from "@/middleware/metered-quota";
-import { requireAction } from "@/middleware/require-action";
+import { admitWhileNotApproved, requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import { getMainnetAccess, notifyMainnetAccess, requestMainnetAccess } from "./handlers";
@@ -29,6 +29,7 @@ const sendQuota = meteredQuota({ name: "mainnet-access-request", actorMax: 5, or
 organizationMainnetAccess.post(
   "/",
   requireHumanSession(),
+  admitWhileNotApproved(),
   requireAction("organizations.manage"),
   sendQuota,
   validateBody(requestMainnetAccessSchema),
@@ -37,6 +38,7 @@ organizationMainnetAccess.post(
 organizationMainnetAccess.post(
   "/notify",
   requireHumanSession(),
+  admitWhileNotApproved(),
   requireAction("organizations.manage"),
   sendQuota,
   notifyMainnetAccess
