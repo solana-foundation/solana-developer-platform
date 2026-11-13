@@ -1,4 +1,4 @@
-import type { Candidate, InterfaceDocument, ListedInterface, Wallet } from "@/api";
+import type { Candidate, CandidateStatus, InterfaceDocument, ListedInterface, Wallet } from "@/api";
 import { InputField } from "@/components/InputField";
 import { type FormValues, type IntentOptions, renderTemplate } from "@/intent";
 
@@ -117,7 +117,7 @@ function Implementations({ candidates, candidatesError, selected, onSelect }: Pr
               <span className="candidate-badges">
                 <span className="badge badge-gray">{candidate.recipe}</span>
                 {!candidate.approved && <span className="badge badge-amber">unapproved</span>}
-                <FitBadge fits={candidate.fits} />
+                <StatusBadge status={candidate.status} />
               </span>
             </div>
             {candidate.reason !== null && <div className="sel-card-sub">{candidate.reason}</div>}
@@ -128,16 +128,17 @@ function Implementations({ candidates, candidatesError, selected, onSelect }: Pr
   );
 }
 
-function FitBadge({ fits }: { fits: boolean | null }) {
-  if (fits === null) {
-    return <span className="badge badge-gray">needs inputs</span>;
-  }
+const STATUS_BADGES: Record<CandidateStatus, { label: string; tone: string }> = {
+  applies: { label: "applies", tone: "badge-green" },
+  doesNotApply: { label: "does not apply", tone: "badge-red" },
+  invalidInputs: { label: "invalid inputs", tone: "badge-amber" },
+  unknown: { label: "unknown", tone: "badge-gray" },
+};
 
-  return fits ? (
-    <span className="badge badge-green">fits</span>
-  ) : (
-    <span className="badge badge-red">does not fit</span>
-  );
+function StatusBadge({ status }: { status: CandidateStatus }) {
+  const badge = STATUS_BADGES[status];
+
+  return <span className={`badge ${badge.tone}`}>{badge.label}</span>;
 }
 
 function OnchainChecks({

@@ -18,6 +18,7 @@ import {
   type IntentOptions,
   intentInputs,
   intentJson,
+  type Output,
   planRequest,
 } from "@/intent";
 import { MINTS, VAULTS } from "@/known";
@@ -46,6 +47,7 @@ export function App() {
   const [tab, setTab] = useState<Tab>("intent");
   const [tamper, setTamper] = useState(false);
   const [malicious, setMalicious] = useState(false);
+  const [output, setOutput] = useState<Output>("transaction");
   const [planState, setPlanState] = useState(NO_PLAN);
 
   useEffect(() => {
@@ -95,7 +97,7 @@ export function App() {
 
   const selected =
     candidates?.find((candidate) => candidate.id === pinned) ??
-    candidates?.find((candidate) => candidate.fits) ??
+    candidates?.find((candidate) => candidate.status === "applies") ??
     null;
   const record =
     registry?.implementations.find((implementation) => implementation.id === selected?.id) ?? null;
@@ -109,7 +111,11 @@ export function App() {
           }),
     [listed, document, values, selected, options]
   );
-  const request = useMemo(() => planRequest(intent, feePayer), [intent, feePayer]);
+  const frozen = record?.document?.recipe === "remote transaction";
+  const request = useMemo(
+    () => planRequest(intent, feePayer, frozen ? "transaction" : output),
+    [intent, feePayer, frozen, output]
+  );
   const requestKey = JSON.stringify(request);
 
   useEffect(() => {
@@ -128,12 +134,10 @@ export function App() {
   const selectImplementation = (implementation: ListedImplementation) => {
     selectInterface(implementation.interface, implementation.id);
     if (!implementation.approved) setShowUnapproved(true);
-    setTab("record");
   };
 
   const prepare = () => {
     setPlanState({ ...NO_PLAN, busy: "prepare" });
-    setTab("plan");
     api
       .prepare(request, tamper)
       .then((plan) => setPlanState({ ...NO_PLAN, plan }))
@@ -141,23 +145,23 @@ export function App() {
   };
   const verify = () => {
     const plan = planState.plan;
-    if (plan === null) return;
+    if (plan?.transaction === undefined) return;
 
     setPlanState({ ...planState, busy: "verify", error: null });
     api
-      .verify(plan)
+      .verify(plan.transaction, plan)
       .then((verified) => setPlanState({ ...planState, verified, busy: null, error: null }))
       .catch((error: unknown) =>
         setPlanState({ ...planState, busy: null, error: describe(error) })
       );
   };
   const send = () => {
-    const plan = planState.plan;
-    if (plan === null) return;
+    const transaction = planState.plan?.transaction;
+    if (transaction === undefined) return;
 
     setPlanState({ ...planState, busy: "send", error: null });
     api
-      .send(plan)
+      .send(transaction)
       .then(({ signature }) => setPlanState({ ...planState, signature, busy: null, error: null }))
       .catch((error: unknown) =>
         setPlanState({ ...planState, busy: null, error: describe(error) })
@@ -205,7 +209,10 @@ export function App() {
             intent={intent}
             request={request}
             record={record}
+            organizations={registry.organizations}
             planState={planState}
+            output={output}
+            onOutput={setOutput}
             tamper={tamper}
             malicious={malicious}
             onMalicious={(on) => {

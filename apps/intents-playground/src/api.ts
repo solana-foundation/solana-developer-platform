@@ -69,12 +69,16 @@ export interface Wallet {
   address: string;
 }
 
+/// Whether a record applies to the inputs: its `applies` checks hold, one fails, or the inputs do
+/// not compile.
+export type CandidateStatus = "applies" | "doesNotApply" | "invalidInputs" | "unknown";
+
 export interface Candidate {
   id: string;
   version: string;
   recipe: Recipe;
   approved: boolean;
-  fits: boolean | null;
+  status: CandidateStatus;
   reason: string | null;
 }
 
@@ -84,6 +88,8 @@ export interface PlannedInstruction {
   data: string;
 }
 
+/// `instructions` and `computeBudget` are absent for a provider's signed transaction. `transaction`
+/// is absent when the request asks for the instructions alone.
 export interface Plan {
   message: string;
   intents: {
@@ -94,11 +100,14 @@ export interface Plan {
     builderSimulations: number;
   }[];
   request: unknown;
-  transaction: {
-    instructions: PlannedInstruction[];
-    config: Record<string, string>;
-    compiled: string;
-    signatures: { address: string; role: string; status: string }[];
+  signers: { address: string; role: string }[];
+  priorityFeeLamports: string;
+  instructions?: PlannedInstruction[];
+  computeBudget?: Record<string, string>;
+  transaction?: {
+    version: "legacy" | 0 | 1;
+    messageBytes: string;
+    lastValidBlockHeight: string | null;
     presigned: { address: string; signature: string }[];
   };
   simulation: { unitsConsumed: string };
@@ -160,19 +169,26 @@ export const api = {
     ),
   prepare: (request: unknown, tamper: boolean) =>
     post<Plan>("/v1/prepare", request, tamper ? { "x-sdp-tamper": "1" } : {}),
-  verify: (plan: Plan) => {
-    return post<Verified>("/v1/verify", {
-      message: plan.transaction.compiled,
+  verify: (transaction: NonNullable<Plan["transaction"]>, plan: Plan) =>
+    post<Verified>("/v1/verify", {
+      message: transaction.messageBytes,
       expected: plan.message,
-      presigned: plan.transaction.presigned,
+      presigned: transaction.presigned,
       request: plan.request,
-    });
-  },
-  send: (plan: Plan) =>
-    post<{ signature: string }>("/v1/send", {
-      message: plan.transaction.compiled,
-      presigned: plan.transaction.presigned,
     }),
+  send: (transaction: NonNullable<Plan["transaction"]>) =>
+    post<{ signature: string }>("/v1/send", {
+      message: transaction.messageBytes,
+      presigned: transaction.presigned,
+    }),
+  /// The definition as it is in `intents/definitions`, which the dev server serves.
+  definition: (kind: "interfaces" | "implementations", id: string, version: string) => {
+    const [organization, name] = id.split("/");
+
+    return fetch(`/definitions/${organization}/${kind}/${name}/${version}.json`).then((response) =>
+      response.ok ? response.text() : null
+    );
+  },
   /// The Jupiter wrapper's switch that adds an approval to an attacker.
   adapterMode: (malicious: boolean) =>
     fetch("/adapter/mode", { method: "POST", body: JSON.stringify({ malicious }) }).then(

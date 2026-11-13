@@ -1,4 +1,4 @@
-// The requests of the Intent and Plan tabs as curl, TypeScript, and Rust.
+// The requests of the Intent tab as curl, TypeScript, and Rust.
 
 const SERVICE = "http://127.0.0.1:8787";
 
@@ -14,6 +14,15 @@ export function prepareSnippets(request: object): Record<string, string> {
     curl: `curl -s ${SERVICE}/v1/prepare \\\n  -H 'content-type: application/json' \\\n  -d ${shellJson(request)}`,
     TypeScript: `const plan = await fetch("${SERVICE}/v1/prepare", {\n  method: "POST",\n  headers: { "content-type": "application/json" },\n  body: JSON.stringify(${body.replace(/\n/g, "\n  ")}),\n}).then((response) => response.json());`,
     Rust: `// sdp-intents prepare plans the same request against RPC, with no service.\nlet request = serde_json::json!(${body});\nlet plan: serde_json::Value = reqwest::blocking::Client::new()\n    .post("${SERVICE}/v1/prepare")\n    .json(&request)\n    .send()?\n    .json()?;`,
+  };
+}
+
+/// A plan of instructions alone: the CLI compiles it to a version, verifies that message, then
+/// signs and sends it. `/v1/verify` reads a message of any version.
+export function compileSnippets(): Record<string, string> {
+  return {
+    CLI: `# Compile the instructions as a legacy, v0, or v1 transaction, then verify and send it.\nsdp-intents verify plan.json --rpc http://127.0.0.1:8899 --version 0 --lookup-table <table>\nsdp-intents send plan.json --rpc http://127.0.0.1:8899 --version 0 --lookup-table <table> --keypair <signer.json>`,
+    curl: `# Verify a message that the caller compiled, of any version.\ncurl -s ${SERVICE}/v1/verify \\\n  -H 'content-type: application/json' \\\n  -d ${shellJson({ message: "<base64 message>", expected: "<plan message>" })}`,
   };
 }
 

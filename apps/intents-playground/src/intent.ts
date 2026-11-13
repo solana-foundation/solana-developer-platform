@@ -90,11 +90,20 @@ export function intentJson(
   };
 }
 
+/// What `prepare` returns: a compiled transaction, or the instructions alone.
+export type Output = "transaction" | "instructions";
+
 /// A plan's intents leave out `spec` and `kind`, which the plan states once.
-export function planRequest(intent: object, feePayer: string) {
+export function planRequest(intent: object, feePayer: string, output: Output) {
   const { spec: _spec, kind: _kind, ...planned } = intent as Record<string, unknown>;
 
-  return { spec: "sdp-intents@1.0", kind: "plan", payers: { fee: feePayer }, intents: [planned] };
+  return {
+    spec: "sdp-intents@1.0",
+    kind: "plan",
+    payers: { fee: feePayer },
+    ...(output === "instructions" ? { options: { output } } : {}),
+    intents: [planned],
+  };
 }
 
 /// A template with each `{inputs.x}` as the form shows the value: a wallet's name, a mint's symbol,

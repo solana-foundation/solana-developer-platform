@@ -45,6 +45,13 @@ export const PROGRAMS: Record<string, string> = {
   MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr: "Memo",
 };
 
+/// The surfnet, as Solana Explorer reaches it from the browser.
+const CLUSTER = `cluster=custom&customUrl=${encodeURIComponent("http://localhost:8899")}`;
+
+export function explorerUrl(kind: "tx" | "address", value: string): string {
+  return `https://explorer.solana.com/${kind}/${value}?${CLUSTER}`;
+}
+
 export function shortAddress(address: string): string {
   return address.length > 12 ? `${address.slice(0, 4)}…${address.slice(-4)}` : address;
 }

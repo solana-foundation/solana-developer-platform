@@ -1,11 +1,15 @@
-import type { ListedImplementation, Plan, Verified } from "@/api";
+import { useEffect, useState } from "react";
+
+import type { ListedImplementation, Plan, Registry, Verified } from "@/api";
+import { api } from "@/api";
 import { Code, hexDump, Snippets } from "@/components/Code";
-import { PROGRAMS, shortAddress } from "@/known";
-import { prepareSnippets, sendSnippets } from "@/snippets";
+import type { Output } from "@/intent";
+import { explorerUrl, PROGRAMS, shortAddress } from "@/known";
+import { compileSnippets, prepareSnippets, sendSnippets } from "@/snippets";
 
-export type Tab = "intent" | "plan" | "record";
+export type Tab = "intent" | "record";
 
-/// What the Plan tab shows: the plan, then what each step after it returned.
+/// The plan of the Intent tab, then what each step after it returned.
 export interface PlanState {
   plan: Plan | null;
   error: string | null;
@@ -19,12 +23,15 @@ interface Props {
   intent: object;
   request: object;
   record: ListedImplementation | null;
+  organizations: Registry["organizations"];
   planState: PlanState;
+  output: Output;
   tamper: boolean;
   malicious: boolean;
   onMalicious: (malicious: boolean) => void;
   ready: boolean;
   onTab: (tab: Tab) => void;
+  onOutput: (output: Output) => void;
   onTamper: (tamper: boolean) => void;
   onPrepare: () => void;
   onVerify: () => void;
@@ -33,7 +40,6 @@ interface Props {
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "intent", label: "Intent" },
-  { key: "plan", label: "Plan" },
   { key: "record", label: "Record" },
 ];
 
@@ -55,8 +61,9 @@ export function SidePanel(props: Props) {
 
       <div className="side-body">
         {props.tab === "intent" && <IntentTab {...props} />}
-        {props.tab === "plan" && <PlanTab {...props} />}
-        {props.tab === "record" && <RecordTab record={props.record} />}
+        {props.tab === "record" && (
+          <RecordTab record={props.record} organizations={props.organizations} />
+        )}
       </div>
     </section>
   );
@@ -69,7 +76,36 @@ function IntentTab(props: Props) {
       <div className="section-sub">The plan request holds the intent with its payers.</div>
       <Snippets snippets={prepareSnippets(props.request)} />
       <PrepareControls {...props} />
+      {props.planState.error !== null && (
+        <div className="callout callout-red error-text">{props.planState.error}</div>
+      )}
+      {props.planState.plan !== null && <PlanResult {...props} plan={props.planState.plan} />}
     </>
+  );
+}
+
+function Switch(props: {
+  label: string;
+  sub: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="switch-row">
+      <span>
+        <span className="switch-label">{props.label}</span>
+        <span className="section-sub">{props.sub}</span>
+      </span>
+      <span className="toggle">
+        <input
+          type="checkbox"
+          checked={props.checked}
+          onChange={(event) => props.onChange(event.target.checked)}
+        />
+        <span className="toggle-track" />
+        <span className="toggle-thumb" />
+      </span>
+    </label>
   );
 }
 
@@ -86,41 +122,27 @@ function PrepareControls(props: Props) {
         </div>
       )}
       {remote && (
-        <label className="switch-row">
-          <span>
-            <span className="switch-label">Malicious endpoint</span>
-            <span className="section-sub">
-              The Jupiter wrapper also approves an attacker. The assertions refuse it.
-            </span>
-          </span>
-          <span className="toggle">
-            <input
-              type="checkbox"
-              checked={props.malicious}
-              onChange={(event) => props.onMalicious(event.target.checked)}
-            />
-            <span className="toggle-track" />
-            <span className="toggle-thumb" />
-          </span>
-        </label>
+        <Switch
+          label="Malicious endpoint"
+          sub="The Jupiter wrapper also approves an attacker. The assertions refuse it."
+          checked={props.malicious}
+          onChange={props.onMalicious}
+        />
       )}
-      <label className="switch-row">
-        <span>
-          <span className="switch-label">Tamper with the plan</span>
-          <span className="section-sub">
-            The service changes one built byte. verify_intent refuses it onchain.
-          </span>
-        </span>
-        <span className="toggle">
-          <input
-            type="checkbox"
-            checked={props.tamper}
-            onChange={(event) => props.onTamper(event.target.checked)}
-          />
-          <span className="toggle-track" />
-          <span className="toggle-thumb" />
-        </span>
-      </label>
+      {!frozen && (
+        <Switch
+          label="Instructions only"
+          sub="The plan holds no transaction. The caller compiles the instructions as legacy, v0, or v1."
+          checked={props.output === "instructions"}
+          onChange={(checked) => props.onOutput(checked ? "instructions" : "transaction")}
+        />
+      )}
+      <Switch
+        label="Tamper with the plan"
+        sub="The service changes one built byte. verify_intent refuses it onchain."
+        checked={props.tamper}
+        onChange={props.onTamper}
+      />
       <button
         type="button"
         className="btn btn-pri"
@@ -133,65 +155,90 @@ function PrepareControls(props: Props) {
   );
 }
 
-function PlanTab(props: Props) {
-  const { plan, error, verified, signature, busy } = props.planState;
-
-  if (plan === null) {
-    return (
-      <>
-        {error !== null && <div className="callout callout-red error-text">{error}</div>}
-        <div className="section-sub">Prepare the intent to see its plan.</div>
-        <PrepareControls {...props} />
-      </>
-    );
-  }
-
-  const transaction = plan.transaction;
+function PlanResult(props: Props & { plan: Plan }) {
+  const { plan } = props;
+  const { verified, signature } = props.planState;
 
   return (
     <>
+      <div className="section-title">Plan</div>
       <div className="callout callout-gray message">{plan.message}</div>
-      <div className="data-rows">
-        <Row label="Instructions" value={String(transaction.instructions.length)} />
-        <Row label="Compute units" value={plan.simulation.unitsConsumed} />
-        <Row
-          label="Signers"
-          value={transaction.signatures.map((signer) => shortAddress(signer.address)).join(", ")}
-        />
-        <Row
-          label="Builder simulations"
-          value={plan.intents.map((intent) => intent.builderSimulations).join(", ")}
-        />
-        <Row
-          label="Tier"
-          value={
-            plan.message
-              .match(/\| tier (\d)/g)
-              ?.map((tier) => tier.slice(-1))
-              .join(", ") ?? "1"
-          }
-        />
-        {transaction.presigned.length > 0 && (
-          <Row
-            label="Signed by the provider"
-            value={transaction.presigned.map((signed) => shortAddress(signed.address)).join(", ")}
-          />
-        )}
-        {Object.entries(plan.rpcCalls).map(([method, count]) => (
-          <Row key={method} label={`Service ${method}`} value={String(count)} />
-        ))}
-      </div>
+      <PlanRows plan={plan} />
 
-      <Instructions plan={plan} />
+      {plan.instructions !== undefined && <Instructions plan={plan} />}
 
-      {error !== null && <div className="callout callout-red error-text">{error}</div>}
       {verified !== null && <VerifiedResult verified={verified} />}
       {signature !== null && (
         <div className="callout callout-green">
-          Landed on the surfnet: {shortAddress(signature)}
+          Landed on the surfnet:{" "}
+          <a href={explorerUrl("tx", signature)} target="_blank" rel="noreferrer">
+            {signature}
+          </a>
         </div>
       )}
 
+      <SignerSteps {...props} />
+    </>
+  );
+}
+
+function PlanRows({ plan }: { plan: Plan }) {
+  const transaction = plan.transaction;
+  const tiers = plan.message.match(/\| tier (\d)/g)?.map((tier) => tier.slice(-1));
+
+  return (
+    <div className="data-rows">
+      <Row label="Message" value={`${new TextEncoder().encode(plan.message).length} bytes`} />
+      <Row
+        label="Instructions"
+        value={
+          plan.instructions === undefined
+            ? "signed by the provider"
+            : String(plan.instructions.length)
+        }
+      />
+      <Row label="Compute units" value={plan.simulation.unitsConsumed} />
+      <Row
+        label="Signers"
+        value={plan.signers.map((signer) => shortAddress(signer.address)).join(", ")}
+      />
+      <Row
+        label="Builder simulations"
+        value={plan.intents.map((intent) => intent.builderSimulations).join(", ")}
+      />
+      <Row label="Tier" value={tiers?.join(", ") ?? "1"} />
+      {transaction !== undefined && (
+        <Row label="Transaction version" value={String(transaction.version)} />
+      )}
+      {transaction !== undefined && transaction.presigned.length > 0 && (
+        <Row
+          label="Signed by the provider"
+          value={transaction.presigned.map((signed) => shortAddress(signed.address)).join(", ")}
+        />
+      )}
+      {Object.entries(plan.rpcCalls).map(([method, count]) => (
+        <Row key={method} label={`Service ${method}`} value={String(count)} />
+      ))}
+    </div>
+  );
+}
+
+/// A plan of instructions alone goes to the caller's compiler. A plan with its transaction goes to
+/// the signer: verify it, then sign and send it.
+function SignerSteps(props: Props & { plan: Plan }) {
+  const transaction = props.plan.transaction;
+  const busy = props.planState.busy;
+
+  return transaction === undefined ? (
+    <>
+      <div className="section-sub">
+        The plan holds the instructions alone. Compile them into a transaction of any version, then
+        verify that transaction before it is signed.
+      </div>
+      <Snippets snippets={compileSnippets()} />
+    </>
+  ) : (
+    <>
       <div className="side-actions row">
         <button
           type="button"
@@ -210,10 +257,7 @@ function PlanTab(props: Props) {
           {busy === "send" ? "Sending…" : "Send"}
         </button>
       </div>
-
-      {transaction !== undefined && (
-        <Snippets snippets={sendSnippets(transaction.compiled, plan.message)} />
-      )}
+      <Snippets snippets={sendSnippets(transaction.messageBytes, props.plan.message)} />
     </>
   );
 }
@@ -223,6 +267,20 @@ function Row({ label, value }: { label: string; value: string }) {
     <div className="data-row">
       <span className="dr-label">{label}</span>
       <span className="dr-value">{value}</span>
+    </div>
+  );
+}
+
+function AddressRow({ label, address, sub }: { label: string; address: string; sub?: string }) {
+  return (
+    <div className="data-row">
+      <span className="dr-label">{label}</span>
+      <span className="dr-value">
+        <a href={explorerUrl("address", address)} target="_blank" rel="noreferrer">
+          {shortAddress(address)}
+        </a>
+        {sub !== undefined && <span className="section-sub"> {sub}</span>}
+      </span>
     </div>
   );
 }
@@ -255,7 +313,7 @@ function Instructions({ plan }: { plan: Plan }) {
           </tr>
         </thead>
         <tbody>
-          {plan.transaction.instructions.map((instruction, position) => (
+          {(plan.instructions ?? []).map((instruction, position) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: an instruction's position is its identity.
             <tr key={position}>
               <td>{position}</td>
@@ -296,16 +354,38 @@ function VerifiedResult({ verified }: { verified: Verified }) {
 }
 
 /// The default address means that the index follows its organization's authority.
-function authority(address: string): string {
-  return address === "11111111111111111111111111111111"
-    ? "the organization's authority"
-    : shortAddress(address);
-}
+const FOLLOWS_ORGANIZATION = "11111111111111111111111111111111";
 
-function RecordTab({ record }: { record: ListedImplementation | null }) {
+function RecordTab({
+  record,
+  organizations,
+}: {
+  record: ListedImplementation | null;
+  organizations: Registry["organizations"];
+}) {
+  const [definition, setDefinition] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDefinition(null);
+    if (record?.id == null || record.shown === null) return;
+
+    let current = true;
+    api
+      .definition("implementations", record.id, record.shown)
+      .then((text) => current && setDefinition(text))
+      .catch(() => current && setDefinition(null));
+
+    return () => {
+      current = false;
+    };
+  }, [record?.id, record?.shown]);
+
   if (record === null) {
     return <div className="section-sub">Select an implementation to see its record.</div>;
   }
+
+  const organization = organizations.find((listed) => listed.name === record.organization);
+  const follows = record.updateAuthority === FOLLOWS_ORGANIZATION && organization !== undefined;
 
   return (
     <>
@@ -317,8 +397,12 @@ function RecordTab({ record }: { record: ListedImplementation | null }) {
         </div>
       </div>
       <div className="data-rows">
-        <Row label="Index" value={shortAddress(record.address)} />
-        <Row label="Update authority" value={authority(record.updateAuthority)} />
+        <AddressRow label="Index" address={record.address} />
+        <AddressRow
+          label="Update authority"
+          address={follows ? organization.authority : record.updateAuthority}
+          sub={follows ? `the authority of ${record.organization}` : undefined}
+        />
         {record.versions.map((entry) => (
           <Row
             key={entry.version}
@@ -327,7 +411,17 @@ function RecordTab({ record }: { record: ListedImplementation | null }) {
           />
         ))}
       </div>
-      {record.document !== null && <Code text={JSON.stringify(record.document, null, 2)} />}
+      {definition !== null ? (
+        <>
+          <div className="section-sub">
+            The record as <code>intents/definitions</code> writes it. The registry holds its
+            compiled bytes, and <code>sdp-intents plan</code> checks that they match.
+          </div>
+          <Code text={definition} />
+        </>
+      ) : (
+        <div className="section-sub">The definitions folder holds no file for this version.</div>
+      )}
       {record.bytes !== null && (
         <>
           <div className="section-sub">
