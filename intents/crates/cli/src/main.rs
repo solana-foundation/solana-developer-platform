@@ -2,6 +2,7 @@
 //! commands. `lint` checks the definitions, `plan` and `apply` publish them to the registry,
 //! `prepare` plans intents over RPC, and `verify` and `send` act as the plan's signer.
 
+mod config;
 mod lint;
 mod multisig;
 mod output;
@@ -46,6 +47,12 @@ enum Command {
     Send(SendArgs),
     /// Creates a Squads v4 multisig of one member, for `apply --squads` on a local surfnet.
     SquadsCreate(SquadsCreateArgs),
+    /// Creates the registry config, signed by the program's upgrade authority. Organizations start gated.
+    InitRegistry(config::InitArgs),
+    /// Lets only the admin create organizations (`on`), or anyone (`off`).
+    SetOrganizationsGated(config::GateArgs),
+    /// Moves the registry admin.
+    SetRegistryAdmin(config::SetAdminArgs),
 }
 
 /// Exits 1 on a finding, and 2 when the command cannot run, as `clap` does for a bad argument.
@@ -58,6 +65,9 @@ fn main() -> ExitCode {
         Command::Verify(args) => sign::verify(&args),
         Command::Send(args) => sign::send(&args),
         Command::SquadsCreate(args) => multisig::run(&args),
+        Command::InitRegistry(args) => config::init(&args),
+        Command::SetOrganizationsGated(args) => config::set_gate(&args),
+        Command::SetRegistryAdmin(args) => config::set_admin(&args),
     };
 
     match outcome {

@@ -6,12 +6,12 @@ use anchor_lang::Address;
 use anchor_v2_testing::Signer;
 use sdp_intents_program_testing::definitions;
 use sdp_intents_registry_client as registry_client;
-use sdp_intents_registry_client::{IndexView, OrganizationView, RegistryInstruction};
+use sdp_intents_registry_client::{ConfigView, IndexView, OrganizationView, RegistryInstruction};
 use sdp_intents_spec::wire::{DocumentKind, PodU16, SemverV1};
 
 use crate::client;
 use crate::intents::{publish_transfer, spec_address};
-use crate::svm::svm;
+use crate::svm::{registry_admin, svm};
 
 fn assert_same(ours: RegistryInstruction, anchor: Instruction) {
     let accounts: Vec<_> = ours
@@ -33,6 +33,7 @@ fn spec(address: &Address) -> sdp_intents_spec::Address {
 fn builds_the_instructions_that_anchor_builds() {
     let payer = Address::new_unique();
     let authority = Address::new_unique();
+    let creator = Address::new_unique();
     let organization = client::organization_address("solana.org");
     let name_hash = client::name_hash("token.transfer");
     let interface_index = client::index_address(DocumentKind::Interface, &organization, "token.transfer");
@@ -40,9 +41,23 @@ fn builds_the_instructions_that_anchor_builds() {
     let version = SemverV1 { major: PodU16::new(1), minor: PodU16::new(2), patch: PodU16::new(3) };
 
     assert_eq!(registry_client::organization_address("solana.org").unwrap(), spec(&organization));
+    assert_eq!(registry_client::config_address().unwrap(), spec(&client::config_address()));
+    assert_eq!(registry_client::program_data_address().unwrap(), spec(&client::program_data_address()));
     assert_same(
-        registry_client::create_organization(&spec(&payer), "solana.org", &spec(&authority)).unwrap(),
-        client::create_organization(&payer, "solana.org", &authority),
+        registry_client::initialize_config(&spec(&payer), &spec(&authority), &spec(&creator)).unwrap(),
+        client::initialize_config(&payer, &authority, &creator),
+    );
+    assert_same(
+        registry_client::set_registry_admin(&spec(&authority), &spec(&creator)).unwrap(),
+        client::set_registry_admin(&authority, &creator),
+    );
+    assert_same(
+        registry_client::set_organizations_gated(&spec(&authority), false).unwrap(),
+        client::set_organizations_gated(&authority, false),
+    );
+    assert_same(
+        registry_client::create_organization(&spec(&payer), &spec(&creator), "solana.org", &spec(&authority)).unwrap(),
+        client::create_organization(&payer, &creator, "solana.org", &authority),
     );
     let new_interface = registry_client::NewInterface {
         payer: &spec(&payer),
@@ -143,6 +158,11 @@ fn reads_the_accounts_that_the_registry_writes() {
     let published = publish_transfer(&mut svm, definitions::SYSTEM_TRANSFER, true).unwrap();
     let accounts = &published.accounts;
     let read = |address: &Address| svm.get_account(address).unwrap().data;
+
+    let config = read(&client::config_address());
+    assert_eq!(config.get(..8), Some(&registry_client::CONFIG_DISCRIMINATOR[..]));
+    assert_eq!(ConfigView::parse(&config).unwrap().admin(), &spec(&registry_admin().pubkey()));
+    assert!(ConfigView::parse(&config).unwrap().organizations_gated());
 
     let organization = read(&published.organization.address);
     assert_eq!(organization.get(..8), Some(&registry_client::ORGANIZATION_DISCRIMINATOR[..]));

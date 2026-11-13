@@ -7,7 +7,7 @@ use sdp_intents_spec::wire::{DocumentKind, SemverV1};
 use sdp_intents_spec::{Implementation, Interface};
 
 use crate::client::{self, Approval, Publication};
-use crate::svm::{failure, funded, send, Failure, SOL};
+use crate::svm::{failure, funded, registry_admin, send, Failure, SOL};
 
 /// A transaction holds at most 1,232 bytes, so a buffer takes a document in parts.
 const BUFFER_PART: usize = 800;
@@ -21,8 +21,9 @@ pub struct Organization {
 impl Organization {
     pub fn create(svm: &mut LiteSVM, name: &str) -> Result<Self, Failure> {
         let authority = funded(svm, 10 * SOL)?;
-        let create = client::create_organization(&authority.pubkey(), name, &authority.pubkey());
-        send(svm, &[create], &[&authority])?;
+        let admin = registry_admin();
+        let create = client::create_organization(&authority.pubkey(), &admin.pubkey(), name, &authority.pubkey());
+        send(svm, &[create], &[&authority, &admin])?;
 
         Ok(Self { name: name.to_owned(), address: client::organization_address(name), authority })
     }

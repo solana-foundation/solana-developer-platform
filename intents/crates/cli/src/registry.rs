@@ -92,15 +92,15 @@ pub fn apply(args: &SyncArgs) -> Result<Outcome, String> {
 }
 
 /// What sends the steps of `apply`.
-struct Sender {
-    client: Client,
-    keypair: Keypair,
-    multisig: Option<Address>,
-    execute: bool,
+pub(crate) struct Sender {
+    pub(crate) client: Client,
+    pub(crate) keypair: Keypair,
+    pub(crate) multisig: Option<Address>,
+    pub(crate) execute: bool,
 }
 
 impl Sender {
-    fn send(&self, instructions: Vec<Instruction>) -> Result<(), String> {
+    pub(crate) fn send(&self, instructions: Vec<Instruction>) -> Result<(), String> {
         let transaction = Transaction {
             fee_payer: Address(self.keypair.pubkey().to_bytes()),
             instructions,
@@ -113,7 +113,7 @@ impl Sender {
 
     /// Creates a vault transaction and its proposal at the multisig's next index, and with
     /// `--execute`, approves and executes it.
-    fn propose(&self, multisig: &Address, instructions: &[Instruction]) -> Result<(), String> {
+    pub(crate) fn propose(&self, multisig: &Address, instructions: &[Instruction]) -> Result<(), String> {
         let account =
             self.client.accounts(&[*multisig]).map_err(|error| error.to_string())?.into_iter().next().flatten();
         let last = squads::transaction_index(&account.ok_or("the multisig does not exist")?.data)?;
@@ -142,7 +142,7 @@ fn multisig(args: &SyncArgs) -> Result<Option<Address>, String> {
         .transpose()
 }
 
-fn parse_address(text: &str) -> Option<Address> {
+pub(crate) fn parse_address(text: &str) -> Option<Address> {
     bs58::decode(text).into_vec().ok().and_then(|bytes| bytes.try_into().ok()).map(Address)
 }
 
@@ -190,7 +190,7 @@ fn planned(args: &SyncArgs) -> Result<Planned, String> {
     Ok(Planned { keypair, steps })
 }
 
-fn instruction(instruction: &RegistryInstruction) -> Instruction {
+pub(crate) fn instruction(instruction: &RegistryInstruction) -> Instruction {
     Instruction {
         program: REGISTRY_PROGRAM,
         accounts: instruction

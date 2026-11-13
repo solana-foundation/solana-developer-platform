@@ -19,6 +19,7 @@ import {
   JUPITER_USDT_VAULT,
   KAMINO_USDC_VAULT,
   ORGANIZATION,
+  REGISTRY,
   SYSTEM,
   TOKEN_PROGRAM,
   USDC,
@@ -194,6 +195,20 @@ const created = cli("squads-create", "--rpc", RPC, "--keypair", authority.path);
 const multisig = created.match(/multisig (\S+)/)[1];
 const vault = created.match(/vault (\S+)/)[1];
 await rpc("surfnet_setAccount", [vault, { lamports: 100_000_000_000 }]);
+
+console.log("create the registry config, with the multisig as the admin that admits organizations");
+await rpc("surfnet_setProgramAuthority", [REGISTRY, authority.address]);
+cli("init-registry", "--rpc", RPC, "--keypair", authority.path, "--admin", vault);
+
+const opened = (() => {
+  try {
+    cli("set-organizations-gated", "--rpc", RPC, "--keypair", payer.path, "off");
+    return true;
+  } catch {
+    return false;
+  }
+})();
+expect(!opened, "a key other than the admin cannot open organization creation");
 
 const squads = ["--rpc", RPC, "--keypair", authority.path, "--squads", multisig];
 cli("apply", ...squads, "--execute");

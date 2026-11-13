@@ -16,6 +16,7 @@ export const USDT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 export const JUPITER_USDT_VAULT = "F7tLdeF2YZZex9MR8HgGggyFiz7UU2UgUube2tmfwNPE";
 export const JUPITER_SHARES = "Cmn4v2wipYV41dkakDvCgFJpxhtaaKt11NyWV8pjSE8A";
 export const KAMINO_USDC_VAULT = "HDsayqAsDWy3QvANGqh2yNraqcD8Fnjgh73Mhb3WRS5E";
+export const REGISTRY = "9sgttDZ2vnzb85HWuQbx8vy6Boga32zpP5QRZ7UtbWpp";
 /// The registry address of the organization `solana.org`.
 export const ORGANIZATION = "8Zth9xaiuwMGKHhdh3hWbFHSE8fhwseKnTKUa75VAEnp";
 

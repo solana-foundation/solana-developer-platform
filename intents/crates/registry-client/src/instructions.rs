@@ -7,19 +7,58 @@ use sha2::{Digest as _, Sha256};
 use sdp_intents_spec::wire::SemverV1;
 use sdp_intents_spec::{AccountRole, Address};
 
-use crate::{organization_address, Meta, RegistryError, RegistryInstruction, REGISTRY_PROGRAM};
+use crate::{
+    config_address, organization_address, program_data_address, Meta, RegistryError, RegistryInstruction,
+    REGISTRY_PROGRAM,
+};
 
 const SYSTEM_PROGRAM: Address = Address([0; 32]);
 /// A registry buffer holds a document of at most 10,000 bytes.
 const MAX_DOCUMENT_LEN: usize = 10_000;
 
-/// Creates the organization `name` with `authority`.
+/// Creates the config with `admin`, with organizations gated. The program's upgrade authority
+/// signs.
+pub fn initialize_config(
+    payer: &Address,
+    upgrade_authority: &Address,
+    admin: &Address,
+) -> Result<RegistryInstruction, RegistryError> {
+    let accounts = vec![
+        writable_signer(payer),
+        signer(upgrade_authority),
+        readonly(&program_data_address()?),
+        writable(&config_address()?),
+        readonly(&SYSTEM_PROGRAM),
+    ];
+
+    Ok(instruction("initialize_config", &[&admin.0], accounts))
+}
+
+/// Moves the registry admin to `new_admin`. The current admin signs.
+pub fn set_registry_admin(admin: &Address, new_admin: &Address) -> Result<RegistryInstruction, RegistryError> {
+    Ok(instruction("set_registry_admin", &[&new_admin.0], vec![writable(&config_address()?), signer(admin)]))
+}
+
+/// Gates organization creation to the admin, or opens it to anyone. The admin signs.
+pub fn set_organizations_gated(admin: &Address, gated: bool) -> Result<RegistryInstruction, RegistryError> {
+    Ok(instruction("set_organizations_gated", &[&[u8::from(gated)]], vec![writable(&config_address()?), signer(admin)]))
+}
+
+/// Creates the organization `name` with `authority`. While the registry gates organizations, the
+/// creator must be its admin.
 pub fn create_organization(
     payer: &Address,
+    creator: &Address,
     name: &str,
     authority: &Address,
 ) -> Result<RegistryInstruction, RegistryError> {
-    let accounts = vec![writable_signer(payer), writable(&organization_address(name)?), readonly(&SYSTEM_PROGRAM)];
+    let accounts = vec![
+        writable_signer(payer),
+        signer(creator),
+        readonly(&config_address()?),
+        writable(&organization_address(name)?),
+        readonly(&SYSTEM_PROGRAM),
+    ];
 
     Ok(instruction(
         "create_organization",

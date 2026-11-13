@@ -13,6 +13,18 @@ pub fn name_hash(name: &str) -> [u8; 32] {
     anchor_lang::sha256(name.as_bytes())
 }
 
+pub fn upgradeable_loader() -> Address {
+    Address::from_str_const("BPFLoaderUpgradeab1e11111111111111111111111")
+}
+
+pub fn config_address() -> Address {
+    Address::find_program_address(&[b"config"], &registry::ID).0
+}
+
+pub fn program_data_address() -> Address {
+    Address::find_program_address(&[registry::ID.as_ref()], &upgradeable_loader()).0
+}
+
 pub fn organization_address(name: &str) -> Address {
     Address::find_program_address(&[b"org", &name_hash(name)], &registry::ID).0
 }
@@ -37,14 +49,47 @@ fn registry_instruction(data: Vec<u8>, accounts: impl ToAccountMetas) -> Instruc
     Instruction::new_with_bytes(registry::ID, &data, accounts.to_account_metas(None))
 }
 
-pub fn create_organization(payer: &Address, name: &str, authority: &Address) -> Instruction {
+pub fn initialize_config(payer: &Address, upgrade_authority: &Address, admin: &Address) -> Instruction {
+    registry_instruction(
+        instruction::InitializeConfig { admin: *admin }.data(),
+        accounts::InitializeConfig {
+            payer: *payer,
+            upgrade_authority: *upgrade_authority,
+            program_data: program_data_address(),
+            config: config_address(),
+            system_program: system_program(),
+        },
+    )
+}
+
+pub fn set_registry_admin(admin: &Address, new_admin: &Address) -> Instruction {
+    registry_instruction(
+        instruction::SetRegistryAdmin { new_admin: *new_admin }.data(),
+        accounts::ChangeConfig { config: config_address(), admin: *admin },
+    )
+}
+
+pub fn set_organizations_gated(admin: &Address, gated: bool) -> Instruction {
+    registry_instruction(
+        instruction::SetOrganizationsGated { gated }.data(),
+        accounts::ChangeConfig { config: config_address(), admin: *admin },
+    )
+}
+
+pub fn create_organization(payer: &Address, creator: &Address, name: &str, authority: &Address) -> Instruction {
     let organization = organization_address(name);
     let data =
         instruction::CreateOrganization { name_hash: name_hash(name), name: name.as_bytes(), authority: *authority };
 
     registry_instruction(
         data.data(),
-        accounts::CreateOrganization { payer: *payer, organization, system_program: system_program() },
+        accounts::CreateOrganization {
+            payer: *payer,
+            creator: *creator,
+            config: config_address(),
+            organization,
+            system_program: system_program(),
+        },
     )
 }
 

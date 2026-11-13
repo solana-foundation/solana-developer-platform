@@ -4,8 +4,10 @@
 //
 //   node deploy-surfnet.mjs [rpc]
 //
-// Each program goes in as an executable account of BPF Loader 2, which runs it like any other
-// program and has no upgrade authority. This is for a local surfnet only.
+// Each program goes in as an upgradeable program, as on a real cluster, with the `surfnet_writeProgram`
+// cheatcode. A setup script then names the registry's upgrade authority with
+// `surfnet_setProgramAuthority`, because only that authority creates the registry config. This is
+// for a local surfnet only.
 //
 // The IDL that `cargo run -p idl` writes to `target/idl` goes in beside its program, so that Solana
 // Explorer decodes the program's instructions.
@@ -15,7 +17,6 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { idlAccount } from "./anchor-idl.mjs";
 
 const RPC = process.argv[2] ?? "http://127.0.0.1:8899";
-const LOADER = "BPFLoader2111111111111111111111111111111111";
 const LAMPORTS = 10_000_000_000;
 
 async function rpc(method, params) {
@@ -47,7 +48,7 @@ for (const { name, address } of programs) {
   if (!existsSync(path)) throw new Error(`${name}.so is not built. Run \`just build-programs\`.`);
 
   const data = readFileSync(path).toString("hex");
-  await rpc("surfnet_setAccount", [address, { lamports: LAMPORTS, data, owner: LOADER, executable: true }]);
+  await rpc("surfnet_writeProgram", [address, data, 0]);
   console.log(`placed ${name} at ${address}`);
 
   const idlPath = new URL(`./target/idl/${name}.json`, import.meta.url);

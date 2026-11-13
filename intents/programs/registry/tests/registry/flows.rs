@@ -13,7 +13,7 @@ use sdp_intents_spec::wire::{DocumentKind, SemverV1};
 use crate::client::{self, IndexChange, Removal};
 use crate::fixture::{write_buffer, DocumentTarget, Organization};
 use crate::intents::{catalog, report};
-use crate::svm::{failure, funded, send, svm, Failure, SOL};
+use crate::svm::{failure, funded, registry_admin, send, svm, unconfigured_svm, Failure, SOL};
 
 const INTERFACE: &str = "token.transfer";
 const IMPLEMENTATION: &str = "system-transfer";
@@ -54,18 +54,89 @@ fn creates_an_organization_once() {
     assert_eq!(stored.authority, organization.authority.pubkey());
     assert_eq!(&stored.name[..usize::from(stored.name_len)], b"solana.org");
 
-    let other = funded(&mut svm, SOL).unwrap();
-    let again = client::create_organization(&other.pubkey(), "solana.org", &other.pubkey());
-    assert!(send(&mut svm, &[again], &[&other]).is_err());
+    let admin = registry_admin();
+    let again = client::create_organization(&admin.pubkey(), &admin.pubkey(), "solana.org", &admin.pubkey());
+    assert!(send(&mut svm, &[again], &[&admin]).is_err());
 
-    let bad_name = client::create_organization(&other.pubkey(), "solana org", &other.pubkey());
-    assert!(send(&mut svm, &[bad_name], &[&other]).unwrap_err().is(RegistryError::BadName));
+    let bad_name = client::create_organization(&admin.pubkey(), &admin.pubkey(), "solana org", &admin.pubkey());
+    assert!(send(&mut svm, &[bad_name], &[&admin]).unwrap_err().is(RegistryError::BadName));
 
-    let mut wrong_hash = client::create_organization(&other.pubkey(), "jup.ag", &other.pubkey());
+    let mut wrong_hash = client::create_organization(&admin.pubkey(), &admin.pubkey(), "jup.ag", &admin.pubkey());
     let hash = client::name_hash("jup.ag");
     let name_at = wrong_hash.data.windows(32).position(|window| window == hash).unwrap() + 32 + 4;
     wrong_hash.data[name_at] = b'k';
-    assert!(send(&mut svm, &[wrong_hash], &[&other]).unwrap_err().is(RegistryError::WrongNameHash));
+    assert!(send(&mut svm, &[wrong_hash], &[&admin]).unwrap_err().is(RegistryError::WrongNameHash));
+}
+
+#[test]
+fn only_the_admin_creates_an_organization_while_the_registry_gates_them() {
+    let mut svm = svm().unwrap();
+    let squatter = funded(&mut svm, SOL).unwrap();
+    let owner = Address::new_unique();
+
+    let taken = client::create_organization(&squatter.pubkey(), &squatter.pubkey(), "solana", &squatter.pubkey());
+    assert!(send(&mut svm, &[taken], &[&squatter]).unwrap_err().is(RegistryError::OrganizationsGated));
+
+    let admin = registry_admin();
+    let given = client::create_organization(&squatter.pubkey(), &admin.pubkey(), "solana", &owner);
+    send(&mut svm, &[given], &[&squatter, &admin]).unwrap();
+
+    let data = svm.get_account(&client::organization_address("solana")).unwrap().data;
+    let stored: &OrganizationV1 = bytemuck::from_bytes(&data[8..]);
+    assert_eq!(stored.authority, owner);
+}
+
+#[test]
+fn anyone_creates_an_organization_once_the_admin_opens_the_registry() {
+    let mut svm = svm().unwrap();
+    let admin = registry_admin();
+    let anyone = funded(&mut svm, SOL).unwrap();
+
+    let stranger_opens = client::set_organizations_gated(&anyone.pubkey(), false);
+    assert!(send(&mut svm, &[stranger_opens], &[&anyone]).unwrap_err().is(RegistryError::WrongAuthority));
+
+    send(&mut svm, &[client::set_organizations_gated(&admin.pubkey(), false)], &[&admin]).unwrap();
+    let created = client::create_organization(&anyone.pubkey(), &anyone.pubkey(), "jup.ag", &anyone.pubkey());
+    send(&mut svm, &[created], &[&anyone]).unwrap();
+
+    send(&mut svm, &[client::set_organizations_gated(&admin.pubkey(), true)], &[&admin]).unwrap();
+    let gated = client::create_organization(&anyone.pubkey(), &anyone.pubkey(), "kamino", &anyone.pubkey());
+    assert!(send(&mut svm, &[gated], &[&anyone]).unwrap_err().is(RegistryError::OrganizationsGated));
+}
+
+#[test]
+fn the_admin_moves_to_a_new_key() {
+    let mut svm = svm().unwrap();
+    let admin = registry_admin();
+    let successor = funded(&mut svm, SOL).unwrap();
+
+    send(&mut svm, &[client::set_registry_admin(&admin.pubkey(), &successor.pubkey())], &[&admin]).unwrap();
+
+    let old = client::create_organization(&admin.pubkey(), &admin.pubkey(), "solana", &admin.pubkey());
+    assert!(send(&mut svm, &[old], &[&admin]).unwrap_err().is(RegistryError::OrganizationsGated));
+
+    let new = client::create_organization(&successor.pubkey(), &successor.pubkey(), "solana", &successor.pubkey());
+    send(&mut svm, &[new], &[&successor]).unwrap();
+}
+
+#[test]
+fn only_the_upgrade_authority_creates_the_config() {
+    let mut svm = unconfigured_svm().unwrap();
+    let stranger = funded(&mut svm, SOL).unwrap();
+
+    let organization =
+        client::create_organization(&stranger.pubkey(), &stranger.pubkey(), "solana", &stranger.pubkey());
+    assert!(send(&mut svm, &[organization], &[&stranger]).is_err(), "no organization exists before the config");
+
+    let taken = client::initialize_config(&stranger.pubkey(), &stranger.pubkey(), &stranger.pubkey());
+    assert!(send(&mut svm, &[taken], &[&stranger]).unwrap_err().is(RegistryError::NotUpgradeAuthority));
+
+    let admin = registry_admin();
+    svm.airdrop(&admin.pubkey(), SOL).unwrap();
+    send(&mut svm, &[client::initialize_config(&admin.pubkey(), &admin.pubkey(), &admin.pubkey())], &[&admin]).unwrap();
+
+    let again = client::initialize_config(&admin.pubkey(), &admin.pubkey(), &stranger.pubkey());
+    assert!(send(&mut svm, &[again], &[&admin]).is_err(), "the config is created once");
 }
 
 #[test]

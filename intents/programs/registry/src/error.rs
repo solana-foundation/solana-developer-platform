@@ -82,4 +82,8 @@ pub enum RegistryError {
     WrongRecipeKind,
     #[msg("The implementation is for another cluster than the registry serves")]
     WrongCluster,
+    #[msg("Only the registry admin creates organizations while the registry gates them")]
+    OrganizationsGated,
+    #[msg("The signer is not the upgrade authority of the registry program")]
+    NotUpgradeAuthority,
 }

@@ -46,8 +46,8 @@ pub struct StepTransaction {
 /// Who signs a transaction of a step.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StepSigner {
-    /// The key that runs `apply`. It writes buffers and creates organizations, which need no
-    /// authority.
+    /// The key that runs `apply`. It writes buffers, and creates organizations unless only another
+    /// key, the registry admin, may.
     Writer,
     /// The organization authority, which also pays. With `--squads` it is a vault.
     Authority,
@@ -91,8 +91,10 @@ impl Sync<'_> {
             .map(|implementation| place(DocumentKind::Implementation, &implementation.id, &implementation.version));
         let places = interfaces.chain(implementations).collect::<Result<Vec<_>, _>>()?;
 
+        let config = registry::config_address().map_err(|error| error.to_string())?;
+
         Ok(places.iter().flat_map(|at| [at.organization, at.index, at.version]).fold(
-            Vec::new(),
+            vec![config],
             |mut unique, address| {
                 if !unique.contains(&address) {
                     unique.push(address);
@@ -162,18 +164,47 @@ impl Sync<'_> {
     }
 
     /// An organization that the registry does not hold is created with the authority. The writer
-    /// creates it, because creation needs no signature of the authority.
+    /// creates it, unless the registry gates organizations to an admin. Then the admin must be the
+    /// writer or the authority.
     fn create_organization(&self, name: &str) -> Option<Result<Step, String>> {
         let Some(account) = self.accounts.get(&publisher(name)) else {
-            let created = registry::create_organization(&self.writer, name, &self.authority).map(|instruction| Step {
-                description: format!("create the organization {name}"),
-                transactions: vec![StepTransaction { signer: StepSigner::Writer, instructions: vec![instruction] }],
-            });
-
-            return Some(created.map_err(|error| error.to_string()));
+            return Some(self.creation(name));
         };
 
         OrganizationView::parse(&account.data).err().map(|error| Err(format!("{name}: {error}")))
+    }
+
+    fn creation(&self, name: &str) -> Result<Step, String> {
+        let signer = self.organization_creator(name)?;
+        let creator = if signer == StepSigner::Writer { self.writer } else { self.authority };
+        let instruction = registry::create_organization(&creator, &creator, name, &self.authority)
+            .map_err(|error| error.to_string())?;
+
+        Ok(Step {
+            description: format!("create the organization {name}"),
+            transactions: vec![StepTransaction { signer, instructions: vec![instruction] }],
+        })
+    }
+
+    fn organization_creator(&self, name: &str) -> Result<StepSigner, String> {
+        let config_address = registry::config_address().map_err(|error| error.to_string())?;
+        let account = self
+            .accounts
+            .get(&config_address)
+            .ok_or("the registry has no config. Its upgrade authority runs `sdp-intents init-registry` first.")?;
+        let config =
+            registry::ConfigView::parse(&account.data).map_err(|error| format!("the registry config: {error}"))?;
+
+        match (config.organizations_gated(), *config.admin()) {
+            (false, _) => Ok(StepSigner::Writer),
+            (true, admin) if admin == self.writer => Ok(StepSigner::Writer),
+            (true, admin) if admin == self.authority => Ok(StepSigner::Authority),
+            (true, admin) => Err(format!(
+                "only the registry admin {} creates organizations. Ask it to create {name} with the authority {}.",
+                base58(&admin),
+                base58(&self.authority)
+            )),
+        }
     }
 
     fn move_organization_authority(&self, name: &str) -> Option<Result<Step, String>> {
@@ -501,9 +532,17 @@ mod tests {
         Tree::read(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../definitions")).unwrap()
     }
 
+    /// The registry config, gated to `admin` or open.
+    fn config(admin: Address, gated: bool) -> HashMap<Address, Account> {
+        let data = [registry::CONFIG_DISCRIMINATOR.as_slice(), &admin.0, &[u8::from(gated)]].concat();
+        let account = Account { owner: registry::REGISTRY_PROGRAM, lamports: 1, data };
+
+        HashMap::from([(registry::config_address().unwrap(), account)])
+    }
+
     fn descriptions(tree: &Tree, settings: &TreeSettings) -> Vec<String> {
         let compiled = compile_tree(tree);
-        let accounts = HashMap::new();
+        let accounts = config(SIGNER, true);
         let sync = Sync {
             catalog: &compiled.catalog,
             organizations: &settings.organizations,
@@ -514,6 +553,31 @@ mod tests {
         };
 
         sync.steps().unwrap().into_iter().map(|step| step.description).collect()
+    }
+
+    fn creator(accounts: &HashMap<Address, Account>, authority: Address) -> Result<StepSigner, String> {
+        let tree = definitions();
+        let compiled = compile_tree(&tree);
+        let settings = read_settings(&tree).unwrap();
+        let sync = Sync {
+            catalog: &compiled.catalog,
+            organizations: &settings.organizations,
+            indexes: &settings.indexes,
+            accounts,
+            writer: SIGNER,
+            authority,
+        };
+
+        sync.organization_creator("solana.org")
+    }
+
+    #[test]
+    fn the_admin_creates_each_organization_while_the_registry_gates_them() {
+        assert_eq!(creator(&config(SIGNER, true), VAULT), Ok(StepSigner::Writer));
+        assert_eq!(creator(&config(VAULT, true), VAULT), Ok(StepSigner::Authority));
+        assert!(creator(&config(Address([3; 32]), true), VAULT).unwrap_err().contains("only the registry admin"));
+        assert_eq!(creator(&config(Address([3; 32]), false), VAULT), Ok(StepSigner::Writer));
+        assert!(creator(&HashMap::new(), VAULT).unwrap_err().contains("no config"));
     }
 
     /// An empty registry needs the organization first, then each interface, then each

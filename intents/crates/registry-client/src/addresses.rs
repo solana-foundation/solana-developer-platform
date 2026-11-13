@@ -13,6 +13,21 @@ pub fn name_hash(name: &str) -> [u8; 32] {
     Sha256::digest(name.as_bytes()).into()
 }
 
+/// `BPFLoaderUpgradeab1e11111111111111111111111`, which owns each upgradeable program's data.
+pub const UPGRADEABLE_LOADER: Address = Address([
+    2, 168, 246, 145, 78, 136, 161, 176, 226, 16, 21, 62, 247, 99, 174, 43, 0, 194, 185, 61, 22, 193, 36, 210, 192, 83,
+    122, 16, 4, 128, 0, 0,
+]);
+
+pub fn config_address() -> Result<Address, RegistryError> {
+    find(&[b"config"])
+}
+
+/// The registry's program data, which names its upgrade authority.
+pub fn program_data_address() -> Result<Address, RegistryError> {
+    find_program_address(&[&REGISTRY_PROGRAM.0], &UPGRADEABLE_LOADER)
+}
+
 pub fn organization_address(name: &str) -> Result<Address, RegistryError> {
     find(&[b"org", &name_hash(name)])
 }
@@ -60,5 +75,10 @@ mod tests {
     #[test]
     fn the_constant_is_the_registry() {
         assert_eq!(bs58::encode(REGISTRY_PROGRAM.0).into_string(), "9sgttDZ2vnzb85HWuQbx8vy6Boga32zpP5QRZ7UtbWpp");
+    }
+
+    #[test]
+    fn the_constant_is_the_upgradeable_loader() {
+        assert_eq!(bs58::encode(UPGRADEABLE_LOADER.0).into_string(), "BPFLoaderUpgradeab1e11111111111111111111111");
     }
 }

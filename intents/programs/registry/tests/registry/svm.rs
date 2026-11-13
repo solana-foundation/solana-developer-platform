@@ -2,12 +2,15 @@
 //! the custom error code.
 
 use anchor_lang::solana_program::instruction::Instruction;
+use anchor_lang::Address;
 use anchor_v2_testing::litesvm::types::TransactionMetadata;
 use anchor_v2_testing::litesvm::LiteSVM;
 use anchor_v2_testing::{Keypair, Message, Signer, VersionedMessage, VersionedTransaction};
 use registry::RegistryError;
 use sdp_intents_planner::Plan;
 use sdp_intents_program_testing::SendError;
+
+use crate::client;
 
 const REGISTRY: &[u8] = include_bytes!("../../../target/deploy/registry.so");
 const TEST_BUILDER: &[u8] = include_bytes!("../../../target/deploy/test_builder.so");
@@ -44,12 +47,43 @@ impl Failure {
     }
 }
 
+/// The registry's upgrade authority in every test, and the admin of its config.
+pub fn registry_admin() -> Keypair {
+    Keypair::new_from_array([7; 32])
+}
+
+/// The registry with its config, which gates organizations to [`registry_admin`].
 pub fn svm() -> Result<LiteSVM, Failure> {
+    let mut svm = unconfigured_svm()?;
+    let admin = registry_admin();
+    svm.airdrop(&admin.pubkey(), 10 * SOL).map_err(|failed| failure(format!("{:?}", failed.err)))?;
+    send(&mut svm, &[client::initialize_config(&admin.pubkey(), &admin.pubkey(), &admin.pubkey())], &[&admin])?;
+
+    Ok(svm)
+}
+
+/// The registry with [`registry_admin`] as its upgrade authority, and no config.
+pub fn unconfigured_svm() -> Result<LiteSVM, Failure> {
     let mut svm = sdp_intents_program_testing::svm().map_err(failure)?;
     svm.add_program(registry::ID, REGISTRY).map_err(|error| failure(format!("{error:?}")))?;
     svm.add_program(test_builder::ID, TEST_BUILDER).map_err(|error| failure(format!("{error:?}")))?;
+    set_upgrade_authority(&mut svm, &registry_admin().pubkey())?;
 
     Ok(svm)
+}
+
+/// LiteSVM deploys a program with no upgrade authority. The loader's program data keeps the
+/// authority at bytes 12 to 45: a tag byte of 1, then the key.
+fn set_upgrade_authority(svm: &mut LiteSVM, authority: &Address) -> Result<(), Failure> {
+    let address = client::program_data_address();
+    let mut account = svm.get_account(&address).ok_or_else(|| failure("the registry has no program data".into()))?;
+    let Some([tag, key @ ..]) = account.data.get_mut(12..45) else {
+        return Err(failure("the program data is too short".into()));
+    };
+    *tag = 1;
+    key.copy_from_slice(authority.as_ref());
+
+    svm.set_account(address, account).map_err(|error| failure(format!("{error:?}")))
 }
 
 /// A new keypair that holds `lamports`.

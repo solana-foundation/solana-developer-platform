@@ -638,12 +638,22 @@ which the build sets: mainnet by default, devnet or testnet by feature, because 
 read the genesis hash. `sdp-intents-spec` holds the one table of cluster names and hashes, which
 programs and offchain code share. `publish` refuses an implementation for another cluster (`WrongCluster`).
 
-An organization owns interfaces and implementations. Anyone can create an organization, with a name that
-is first come, and anyone can propose an implementation for any interface. Each interface's approve
-authority approves the implementations that UIs show.
+An organization owns interfaces and implementations. Anyone can propose an implementation for any
+interface, and each interface's approve authority approves the implementations that UIs show.
+
+**Organizations.** A name is not first come at launch. The config's admin creates each
+organization, so no one takes a name such as `solana` before its owner. The admin names the
+requester's key as the authority, so only one key signs. A request is a pull request that adds
+`<organization>/organization.json` to the definitions, and `apply --squads` makes the admin's
+multisig vote on it. The admin can open creation to anyone, and close it again.
+
+1. Only the program's upgrade authority creates the config, once, so no one can take it between
+   the deploy and its first use. Organizations start gated.
+2. `create_organization` refuses until the config exists.
 
 | Account | Seeds | Contents |
 | :-- | :-- | :-- |
+| `RegistryConfigV1` | `"config"` | The admin, and whether only the admin creates organizations |
 | `OrganizationV1` | `"org"`, SHA-256 of the name | Authority and name |
 | `VersionIndexV1` | `"index"`, kind, organization, name hash | Authorities, head, versions, and approved implementations |
 | `InterfaceV1`, `ImplementationV1` | Kind seed, organization, name hash, version | Publish slot and the document |
@@ -684,7 +694,9 @@ pub struct VersionIndexV1 {
 
 | Instruction | Signer | Effect |
 | :-- | :-- | :-- |
-| `create_organization` | Any payer | Creates an organization |
+| `initialize_config` | Program upgrade authority | Creates the config with an admin, with organizations gated |
+| `set_registry_admin`, `set_organizations_gated` | Admin | Moves the admin, or gates or opens organization creation |
+| `create_organization` | The admin while gated, otherwise any key | Creates an organization with an authority that need not sign |
 | `set_organization_authority` | Organization authority | Changes it |
 | `create_interface`, `create_implementation` | Organization authority | Creates an index |
 | `set_update_authority`, `set_approve_authority` | That authority | Changes it |
@@ -742,7 +754,9 @@ one file for each version. The repository is the source of truth, and the regist
 | :-- | :-- |
 | `sdp-intents lint` | Checks the schema, the compile and round trip, references, encodings, `implements`, version bumps, and approvals |
 | `sdp-intents plan` | Prints the steps that make the registry hold the definitions. It refuses a published version whose bytes differ. |
-| `sdp-intents apply [--squads <multisig>]` | Sends those steps. With `--squads`, each step that needs an authority becomes a Squads proposal. `publish` carries the document's SHA-256, so members vote on exact bytes. |
+| `sdp-intents apply [--squads <multisig>]` | Sends those steps. With `--squads`, each step that needs an authority becomes a Squads proposal. `publish` carries the document's SHA-256, so members vote on exact bytes. While the registry gates organizations, the admin must be the keypair or the vault. |
+| `sdp-intents init-registry --admin <key>` | Creates the config, signed by the upgrade authority. It changes nothing when the config exists. |
+| `sdp-intents set-organizations-gated on\|off`, `set-registry-admin <key>` | Changes the config as the admin, or as a proposal with `--squads` |
 | `sdp-intents prepare <request>` | Plans over RPC from the definitions, with no service |
 | `sdp-intents verify <plan>`, `send <plan>` | Renders the message as the signer does, and lists unverified instructions. `send` signs and sends a plan that verifies. A plan of instructions alone compiles first, as `--version legacy\|0\|1` and `--lookup-table` say. |
 
@@ -938,6 +952,7 @@ transaction over any RPC.
 | Builder | That implementation cannot plan | Instructions within the postconditions that the signer approved, and a false output | That implementation cannot plan | Another implementation of the interface |
 | Builder or target program upgrade | | A changed layout fails. A new meaning for the same bytes passes, within the postconditions. | | The approve authority unapproves the implementation |
 | Registry program | No plans | A `verify_intent` bug can pass a transaction within the assertions | No plans | An audit, and a multisig upgrade authority |
+| Registry admin | No new organizations | A stolen admin can create organizations for free names, or open creation. It cannot change an existing organization. | No new organizations | A multisig admin. The upgrade authority can replace the program. |
 | Lighthouse | The transaction fails | A bug can pass a bad transaction. It is immutable. | Every guarded transaction fails | An audit |
 | The signer's RPC | The signer cannot verify, so it does not sign | A false document can change the message text. The chain still runs the real implementation within its real postconditions. | The signer cannot verify | A trusted RPC, or a local copy of each document, which never changes |
 
@@ -952,7 +967,7 @@ transaction over any RPC.
 
 | STRIDE | Where | Control |
 | :-- | :-- | :-- |
-| Spoofing | A false builder, version, or name | Organization accounts, approvals, and immutable versions |
+| Spoofing | A false builder, version, or name, or a squatted organization name | Organization accounts created only by the admin at launch, approvals, and immutable versions |
 | Tampering | Builder, remote, or RPC output, and instructions outside every span | `verify_intent`, the assertions, and the signer's verifier |
 | Repudiation | Which code built a transaction | Exact versions and the builder in the plan |
 | Information disclosure | Inputs to a remote endpoint | Only inputs and payers go out |
@@ -1003,7 +1018,7 @@ Production is a separate project with its own design document.
 1. Critical tier (§2), internal security review, and external audit (§3.4.3) of the service, the
    registry with `verify_intent`, and every builder.
 2. Builders and the registry deployed per §3.5.1: verified builds, IDLs, and multisig upgrade
-   authorities. With no pins, the multisig is the control on builder code.
+   authorities, and a multisig registry admin. With no pins, the multisig is the control on builder code.
 3. A threat model for the service and the registry (§3.1).
 4. Monitoring as in section 7 (§8.1).
 5. A review of Lighthouse: its audit, and how SDP handles an upgrade.

@@ -14,6 +14,7 @@ pub const VERSION_DOCUMENT_OFFSET: usize = 8 + 6 + 8;
 const DISCRIMINATOR_LEN: usize = 8;
 
 /// The Anchor discriminator of each account: the first 8 bytes of `sha256("account:<name>")`.
+pub const CONFIG_DISCRIMINATOR: [u8; 8] = [54, 17, 171, 183, 128, 65, 162, 34];
 pub const ORGANIZATION_DISCRIMINATOR: [u8; 8] = [179, 162, 27, 240, 122, 53, 153, 129];
 pub const INDEX_DISCRIMINATOR: [u8; 8] = [177, 63, 132, 129, 187, 8, 159, 245];
 pub const INTERFACE_DISCRIMINATOR: [u8; 8] = [57, 128, 27, 73, 123, 154, 34, 182];
@@ -21,6 +22,13 @@ pub const IMPLEMENTATION_DISCRIMINATOR: [u8; 8] = [65, 167, 68, 231, 67, 72, 161
 
 const MAX_ORGANIZATION_NAME: usize = 64;
 const INDEX_LISTS_OFFSET: usize = DISCRIMINATOR_LEN + size_of::<VersionIndexV1>();
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct RegistryConfigV1 {
+    admin: Address,
+    organizations_gated: PodBool,
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -55,6 +63,25 @@ struct VersionEntryV1 {
     approved: PodBool,
     removed: PodBool,
     tier: u8,
+}
+
+/// The registry's config: its admin, and whether only the admin creates organizations.
+pub struct ConfigView<'a> {
+    fixed: &'a RegistryConfigV1,
+}
+
+impl<'a> ConfigView<'a> {
+    pub fn parse(data: &'a [u8]) -> Result<Self, RegistryError> {
+        Ok(Self { fixed: fixed(data, &CONFIG_DISCRIMINATOR)? })
+    }
+
+    pub fn admin(&self) -> &'a Address {
+        &self.fixed.admin
+    }
+
+    pub fn organizations_gated(&self) -> bool {
+        self.fixed.organizations_gated.get()
+    }
 }
 
 pub struct OrganizationView<'a> {
@@ -200,6 +227,7 @@ mod tests {
 
     #[test]
     fn layouts_are_pinned() {
+        assert_eq!(size_of::<RegistryConfigV1>(), 33);
         assert_eq!(size_of::<OrganizationV1>(), 129);
         assert_eq!(size_of::<VersionIndexV1>(), 177);
         assert_eq!(size_of::<VersionEntryV1>(), 17);

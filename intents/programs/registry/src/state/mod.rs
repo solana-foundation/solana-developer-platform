@@ -5,6 +5,7 @@
 //! view checks the owner, the discriminator, and the length of the tail before it returns.
 
 pub mod buffer;
+pub mod config;
 pub mod index;
 pub mod organization;
 pub mod version;
@@ -17,6 +18,7 @@ use pinocchio::account::{Ref, RefMut};
 use wire::SemverV1;
 pub use wire::{semver, stored_version};
 
+pub const CONFIG_SEED: &[u8] = b"config";
 pub const ORGANIZATION_SEED: &[u8] = b"org";
 pub const INDEX_SEED: &[u8] = b"index";
 pub const INTERFACE_SEED: &[u8] = b"interface";

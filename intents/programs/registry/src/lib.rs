@@ -35,6 +35,18 @@ pub const CLUSTER: sdp_intents_spec::Address = sdp_intents_spec::cluster::MAINNE
 pub mod registry {
     use super::*;
 
+    pub fn initialize_config(ctx: &mut Context<InitializeConfig>, admin: Address) -> Result<()> {
+        ctx.accounts.initialize(admin)
+    }
+
+    pub fn set_registry_admin(ctx: &mut Context<ChangeConfig>, new_admin: Address) -> Result<()> {
+        ctx.accounts.set_admin(new_admin)
+    }
+
+    pub fn set_organizations_gated(ctx: &mut Context<ChangeConfig>, gated: bool) -> Result<()> {
+        ctx.accounts.set_organizations_gated(gated)
+    }
+
     pub fn create_organization(
         ctx: &mut Context<CreateOrganization>,
         name_hash: [u8; 32],

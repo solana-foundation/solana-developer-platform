@@ -9,15 +9,17 @@ mod state;
 use sdp_intents_spec::{AccountRole, Address};
 
 pub use addresses::{
-    buffer_address, find_program_address, index_address, name_hash, organization_address, version_address,
+    buffer_address, config_address, find_program_address, index_address, name_hash, organization_address,
+    program_data_address, version_address, UPGRADEABLE_LOADER,
 };
 pub use instructions::{
-    create_implementation, create_interface, create_organization, set_organization_authority, write_buffer, Approval,
-    IndexAuthorities, IndexChange, NewImplementation, NewInterface, Publication,
+    create_implementation, create_interface, create_organization, initialize_config, set_organization_authority,
+    set_organizations_gated, set_registry_admin, write_buffer, Approval, IndexAuthorities, IndexChange,
+    NewImplementation, NewInterface, Publication,
 };
 pub use state::{
-    IndexView, OrganizationView, VersionEntry, IMPLEMENTATION_DISCRIMINATOR, INDEX_DISCRIMINATOR,
-    INTERFACE_DISCRIMINATOR, ORGANIZATION_DISCRIMINATOR, VERSION_DOCUMENT_OFFSET,
+    ConfigView, IndexView, OrganizationView, VersionEntry, CONFIG_DISCRIMINATOR, IMPLEMENTATION_DISCRIMINATOR,
+    INDEX_DISCRIMINATOR, INTERFACE_DISCRIMINATOR, ORGANIZATION_DISCRIMINATOR, VERSION_DOCUMENT_OFFSET,
 };
 
 /// `9sgttDZ2vnzb85HWuQbx8vy6Boga32zpP5QRZ7UtbWpp`.

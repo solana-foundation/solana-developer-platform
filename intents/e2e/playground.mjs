@@ -7,7 +7,7 @@
 
 import { mkdirSync } from "node:fs";
 
-import { TOKEN_PROGRAM, USDC, USDT, cli, keypair, rpcClient } from "./surfnet.mjs";
+import { REGISTRY, TOKEN_PROGRAM, USDC, USDT, cli, keypair, rpcClient } from "./surfnet.mjs";
 
 const RPC = process.argv[2] ?? "http://127.0.0.1:8899";
 const WALLETS = new URL("../target/playground/wallets/", import.meta.url).pathname;
@@ -31,6 +31,11 @@ for (const { address } of wallets.slice(0, 2)) {
 await rpc("surfnet_setTokenAccount", ["ProviderWa11et11111111111111111111111111111", USDC, { amount: 0 }, TOKEN_PROGRAM]);
 
 const registry = ["--rpc", RPC, "--keypair", authority.path];
+
+// The `authority` wallet is the registry's upgrade authority and its admin, so it admits
+// `solana.org`. `init-registry` changes nothing when the config exists.
+await rpc("surfnet_setProgramAuthority", [REGISTRY, authority.address]);
+cli("init-registry", ...registry, "--admin", authority.address);
 
 if (!cli("plan", ...registry).includes("holds every definition")) {
   cli("apply", ...registry);
