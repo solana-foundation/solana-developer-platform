@@ -4,6 +4,15 @@ import { EARN_GROUPS } from "./paths/earn-groups";
 import { DOCS_GROUP } from "./paths/helpers";
 import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
 
+/** The reference groups the public document carries. Every other group is internal. */
+const PUBLISHED_GROUPS: readonly string[] = [
+  EARN_GROUPS.discovery,
+  EARN_GROUPS.embeddedYield,
+  EARN_GROUPS.treasury,
+];
+/** An operator's report that sits with Treasury in the internal reference and is never published. */
+const INTERNAL_TREASURY_PATHS = new Set(["/v1/earn/vault-share-reconciliation"]);
+
 describe("Earn API contract coverage", () => {
   it("documents every mounted Earn operation internally, with an operation id and response", () => {
     const document = createOpenApiDocument();
@@ -40,12 +49,14 @@ describe("Earn API contract coverage", () => {
         if (!operation) continue;
         expect(operation.security).toBeDefined();
         expect(operation.security).not.toContainEqual({});
-        if (
-          operation[DOCS_GROUP] !== EARN_GROUPS.discovery &&
-          operation[DOCS_GROUP] !== EARN_GROUPS.embeddedYield
-        ) {
-          expect(published.paths[path]?.[method]).toBeUndefined();
-        }
+        const group = operation[DOCS_GROUP];
+        const isPublished =
+          typeof group === "string" &&
+          PUBLISHED_GROUPS.includes(group) &&
+          !INTERNAL_TREASURY_PATHS.has(path);
+        expect(published.paths[path]?.[method] !== undefined, `${method} ${path}`).toBe(
+          isPublished
+        );
       }
     }
   });
@@ -73,7 +84,7 @@ describe("Earn API contract coverage", () => {
       for (const method of ["get", "post"] as const) {
         const operation = item[method];
         if (!operation) continue;
-        expect([EARN_GROUPS.discovery, EARN_GROUPS.embeddedYield]).toContain(operation[DOCS_GROUP]);
+        expect(PUBLISHED_GROUPS).toContain(operation[DOCS_GROUP]);
       }
     }
   });

@@ -1349,3 +1349,44 @@ its own scope.
    shared and never provider-specific.
 
 2026-11-05: MARKETS_ENABLED and EARN_ENABLED were removed; the release channel alone gates Markets and Earn.
+
+## Addendum: 2026-11-13 Treasury enters the public contract
+
+The custody-wallet Treasury routes join the public Earn document: deposits,
+positions, direct withdrawals, withdrawal requests and their cancellation, and
+the Treasury movements feed. That is 15 operations, so the document pins 36,
+every one requiring an API key. This supersedes "Custody queue routes remain
+internal" above.
+
+Nothing about the routes changes: they were already mounted, authenticated and
+callable with an API key. What changes is that the OpenAPI document, the
+generated API reference, the Treasury guides and the AI discovery files now
+describe them as supported.
+
+The two published money paths differ in who signs. An `external-wallet` route
+never resolves a signer: the customer's signature is the authorization. A
+Treasury route signs from the organization's custody wallet, so the API key's
+wallet scope bounds it. The four routes that sign (deposit, withdrawal,
+withdrawal request, cancellation) refuse a wallet outside the scope with
+`wallet_out_of_scope` before anything is built or recorded
+(`assertCallerWalletInScope`), and `createOrgSignerForCustodyWallet` decides
+every signature again. Reads are project-scoped, as every Earn read is, and a
+position, movement or wallet from another project answers 404.
+
+Dependencies are unchanged. The custody provider signs, the movement is recorded
+before broadcast, and the required Idempotency-Key makes a retry after a provider
+or RPC failure safe. The worst case is a leaked key that holds `earn.execute` and
+has a wallet in its scope. It can move that wallet's funds into a catalog
+strategy and redeem its positions back to the same wallet. It also sets each
+movement's loss tolerance: a swap-funded deposit's `swapSlippageBps` (up to 500),
+the deposit and withdrawal floors (`minSharesOut`, `minAmountOut`), and a solver
+queue request's discount, up to the queue's maximum. No Treasury request names a
+destination address.
+
+Programs, provider actions, onboarding and the share reconciliation report stay
+internal. One Programs detail does become public: the movements feed is the
+unified ledger, so its schema carries provider-program rows (`executionModel:
+custodial`, the program statuses, `payoutToken`), and a project with programs
+sees them there. This is an EARN-027 scope change under the PRO-1872 gate: it merges
+only with the named security approval on its pull request, recorded here at the
+approved head as the 2026-09-22 addendum records its own.
