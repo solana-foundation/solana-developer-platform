@@ -1,6 +1,6 @@
 //! Reads at start the accounts that most plans read, so that a plan fetches only its own accounts.
 //! The service follows the registry's organizations and indexes, and the programs and the fixed
-//! accounts that the records name. It pins each version account, which never changes while it
+//! accounts that the implementations name. It pins each version account, which never changes while it
 //! exists. The clock is not followed, because a cluster need not notify each change of a sysvar,
 //! and a stale clock fails a program that checks time. Each plan's first fetch reads it.
 
@@ -36,14 +36,15 @@ pub async fn warm(chain: &CachedRpc) -> Result<Warmed, ServiceError> {
     chain.pin(&version_addresses).await?;
 
     let accounts = chain.accounts(&version_addresses, Freshness::Published).await?;
-    let records = versions
+    let implementations = versions
         .iter()
         .zip(accounts)
         .filter(|(choice, _)| choice.kind == DocumentKind::Implementation)
         .filter_map(|(choice, account)| choice.document(account).ok())
         .collect::<Vec<_>>();
-    let fixed =
-        records.iter().filter_map(|bytes| Implementation::parse(bytes).ok()?.addresses().ok().map(<[_]>::to_vec));
+    let fixed = implementations
+        .iter()
+        .filter_map(|bytes| Implementation::parse(bytes).ok()?.addresses().ok().map(<[_]>::to_vec));
 
     let mut followed: Vec<Address> = organizations
         .iter()

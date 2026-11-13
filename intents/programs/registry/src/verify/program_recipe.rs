@@ -46,7 +46,7 @@ pub struct Hashed {
     pub outputs: Vec<u8>,
 }
 
-/// Calls the builder. `chain` holds the record's accounts, then the accounts of the builder's last
+/// Calls the builder. `chain` holds the implementation's accounts, then the accounts of the builder's last
 /// round.
 pub fn call(recipe: &Recipe<'_>, chain: &PassedAccounts<'_>) -> Result<Hashed> {
     let call = builder_call(recipe, chain)?;

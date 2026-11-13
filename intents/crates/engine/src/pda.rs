@@ -40,7 +40,7 @@ pub(crate) fn find(seeds: &[Bytes<'_>], program: &Address) -> Option<Derived> {
     Some(Derived { address: Address(address.to_bytes()), bump })
 }
 
-/// [`with_bump`] for seeds as byte slices, as a builder holds them.
+/// `with_bump` for seeds as byte slices, as a builder holds them.
 pub fn program_address(seeds: &[&[u8]], bump: u8, program: &Address) -> Option<Address> {
     let mut storage = [Bytes::EMPTY; MAX_SEEDS];
     let parts = storage.get_mut(..seeds.len())?;

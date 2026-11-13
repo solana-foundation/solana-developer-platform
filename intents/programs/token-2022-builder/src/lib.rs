@@ -58,7 +58,7 @@ pub mod token_2022_builder {
     }
 }
 
-/// The record's accounts, all readonly. The ATAs are those of Token-2022.
+/// The implementation's accounts, all readonly. The ATAs are those of Token-2022.
 #[derive(Accounts)]
 pub struct BuildTransferV1 {
     pub mint: UncheckedAccount,

@@ -24,9 +24,9 @@ pub const DEPOSIT_INTERFACE: &str =
     include_str!("../../../../definitions/solana.org/interfaces/vault.deposit/1.0.0.json");
 pub const WITHDRAW_INTERFACE: &str =
     include_str!("../../../../definitions/solana.org/interfaces/vault.withdraw/1.0.0.json");
-pub const DEPOSIT_RECORD: &str =
+pub const DEPOSIT_IMPLEMENTATION: &str =
     include_str!("../../../../definitions/solana.org/implementations/kamino-deposit/1.0.0.json");
-pub const WITHDRAW_RECORD: &str =
+pub const WITHDRAW_IMPLEMENTATION: &str =
     include_str!("../../../../definitions/solana.org/implementations/kamino-withdraw/1.0.0.json");
 
 const SOL: u64 = 1_000_000_000;
@@ -166,7 +166,7 @@ pub fn prepare(svm: &LiteSVM, documents: &Documents) -> Result<Measured, PlanErr
                 let fetched = addresses.iter().map(|address| fetch(svm, address)).collect();
                 accounts.insert_fetched(&addresses, fetched);
             }
-            // A builder record makes no remote call.
+            // A builder implementation makes no remote call.
             Step::Call(_) => return Err(sdp_intents_planner::PlanError::OutOfOrder),
             Step::Simulate(simulation) => {
                 let result = simulate(svm, &simulation);

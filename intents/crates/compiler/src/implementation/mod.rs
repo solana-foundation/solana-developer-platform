@@ -1,4 +1,4 @@
-//! Compiles an implementation record against its interface.
+//! Compiles an implementation against its interface.
 
 mod accounts;
 mod applies;
@@ -31,7 +31,7 @@ pub struct CompiledImplementation {
     pub id: Id,
     pub version: SemverV1,
     pub document_id: DocumentIdV1,
-    /// The interface, at the lowest version that the record implements.
+    /// The interface, at the lowest version that the implementation implements.
     pub implements: DocumentIdV1,
     pub bytes: Vec<u8>,
 }
@@ -47,7 +47,7 @@ pub(crate) fn compile_implementation(text: &str, catalog: &Catalog) -> Result<Co
     }
 }
 
-/// The tables of one record, as the compile adds to them. The steps are methods in the files of
+/// The tables of one implementation, as the compile adds to them. The steps are methods in the files of
 /// this module.
 struct Build<'c, 's> {
     schema: &'c Schema,
@@ -155,8 +155,8 @@ impl<'c, 's> Build<'c, 's> {
         let Some(nodes) = object.field("postConditions").and_then(|conditions| conditions.array(self.sink)) else {
             return;
         };
-        // A record's postcondition can name its accounts, such as a provider's receiving wallet
-        // that the record pins (`DESIGN.md`, 4.15).
+        // An implementation's postcondition can name its accounts, such as a provider's receiving wallet
+        // that the implementation pins (`DESIGN.md`, 4.15).
         let account_names = self.account_names.clone();
         let names = Names::new(self.schema, &account_names, Allowed { payers: false, accounts: true, builder: false });
 
@@ -198,14 +198,14 @@ mod tests {
     #[test]
     fn compiles_the_system_transfer() {
         let compiled = compile_implementation(SYSTEM_TRANSFER, &catalog()).unwrap();
-        let record = Implementation::parse(&compiled.bytes).unwrap();
-        let instruction = record.instructions().unwrap().first().unwrap();
+        let implementation = Implementation::parse(&compiled.bytes).unwrap();
+        let instruction = implementation.instructions().unwrap().first().unwrap();
 
-        assert_eq!(record.recipe(), Ok(RecipeKind::Static));
-        assert_eq!(record.applies().unwrap().len(), 2);
-        assert_eq!(record.accounts().unwrap().len(), 3);
-        assert_eq!(record.instruction_accounts(instruction).unwrap(), &[0, 1]);
-        assert_eq!(record.message().unwrap(), b"transfer {i3} SOL from {i0} to {i1}");
+        assert_eq!(implementation.recipe(), Ok(RecipeKind::Static));
+        assert_eq!(implementation.applies().unwrap().len(), 2);
+        assert_eq!(implementation.accounts().unwrap().len(), 3);
+        assert_eq!(implementation.instruction_accounts(instruction).unwrap(), &[0, 1]);
+        assert_eq!(implementation.message().unwrap(), b"transfer {i3} SOL from {i0} to {i1}");
     }
 
     /// A remote transfer with a pinned account, which the interface has no output to bind.
@@ -221,11 +221,11 @@ mod tests {
     #[test]
     fn compiles_a_remote_recipe_with_pinned_accounts() {
         let compiled = compile_implementation(REMOTE_TRANSFER, &catalog()).unwrap();
-        let record = Implementation::parse(&compiled.bytes).unwrap();
+        let implementation = Implementation::parse(&compiled.bytes).unwrap();
 
-        assert_eq!(record.recipe(), Ok(RecipeKind::Remote));
-        assert_eq!(record.url().unwrap(), b"https://example.invalid");
-        assert_eq!(record.accounts().unwrap().len(), 1);
+        assert_eq!(implementation.recipe(), Ok(RecipeKind::Remote));
+        assert_eq!(implementation.url().unwrap(), b"https://example.invalid");
+        assert_eq!(implementation.accounts().unwrap().len(), 1);
     }
 
     #[test]
@@ -244,7 +244,9 @@ mod tests {
                 &REMOTE_TRANSFER.replace(r#""returns": "instructions""#, r#""returns": "transaction""#),
                 &catalog()
             )
-            .map(|compiled| Implementation::parse(&compiled.bytes).and_then(|record| record.recipe()).ok()),
+            .map(|compiled| Implementation::parse(&compiled.bytes)
+                .and_then(|implementation| implementation.recipe())
+                .ok()),
             Ok(Some(RecipeKind::RemoteTransaction))
         );
     }
@@ -252,12 +254,12 @@ mod tests {
     #[test]
     fn compiles_the_spl_token_transfer() {
         let compiled = compile_implementation(SPL_TOKEN_TRANSFER, &catalog()).unwrap();
-        let record = Implementation::parse(&compiled.bytes).unwrap();
-        let instructions = record.instructions().unwrap();
-        let transfer_data = record.instruction_segments(instructions.get(1).unwrap()).unwrap();
+        let implementation = Implementation::parse(&compiled.bytes).unwrap();
+        let instructions = implementation.instructions().unwrap();
+        let transfer_data = implementation.instruction_segments(instructions.get(1).unwrap()).unwrap();
 
         assert_eq!(instructions.len(), 2);
-        assert!(matches!(record.accounts().unwrap().get(6).unwrap().address(), Ok(AddressSource::Ata { .. })));
+        assert!(matches!(implementation.accounts().unwrap().get(6).unwrap().address(), Ok(AddressSource::Ata { .. })));
         assert_eq!(
             transfer_data.get(2).unwrap().decode(),
             Ok(Segment::AccountBytes { account: 3, owner: 0, offset: 44, length: 1 })
@@ -267,22 +269,22 @@ mod tests {
     #[test]
     fn compiles_the_token_2022_builder_call() {
         let compiled = compile_implementation(TOKEN_2022_TRANSFER, &catalog()).unwrap();
-        let record = Implementation::parse(&compiled.bytes).unwrap();
-        let call = record.instructions().unwrap().first().unwrap();
+        let implementation = Implementation::parse(&compiled.bytes).unwrap();
+        let call = implementation.instructions().unwrap().first().unwrap();
 
-        assert_eq!(record.recipe(), Ok(RecipeKind::Program));
-        assert_eq!(record.instruction_accounts(call).unwrap(), &[0, 1, 2, 3, 4]);
-        assert_eq!(record.instruction_segments(call).unwrap().len(), 4);
-        assert_eq!(record.post_conditions().unwrap().len(), 1);
+        assert_eq!(implementation.recipe(), Ok(RecipeKind::Program));
+        assert_eq!(implementation.instruction_accounts(call).unwrap(), &[0, 1, 2, 3, 4]);
+        assert_eq!(implementation.instruction_segments(call).unwrap().len(), 4);
+        assert_eq!(implementation.post_conditions().unwrap().len(), 1);
     }
 
     /// A builder call can pass the builder's bumps, in borsh. No other place can name them.
     #[test]
     fn only_a_builder_call_names_the_bumps() {
         let compiled = compile_implementation(TOKEN_2022_TRANSFER, &catalog()).unwrap();
-        let record = Implementation::parse(&compiled.bytes).unwrap();
-        let call = record.instructions().unwrap().first().unwrap();
-        let last = record.instruction_segments(call).unwrap().last().unwrap().decode().unwrap();
+        let implementation = Implementation::parse(&compiled.bytes).unwrap();
+        let call = implementation.instructions().unwrap().first().unwrap();
+        let last = implementation.instruction_segments(call).unwrap().last().unwrap().decode().unwrap();
         let static_bumps = edit(
             SYSTEM_TRANSFER,
             r#"{ "value": "{inputs.amount}", "encoding": "u64le" }"#,

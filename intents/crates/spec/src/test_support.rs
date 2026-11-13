@@ -48,7 +48,7 @@ pub(crate) struct Fixture {
 }
 
 impl Fixture {
-    /// The static record for a SOL transfer: `from` pays `amount` lamports to `to`.
+    /// The static implementation for a SOL transfer: `from` pays `amount` lamports to `to`.
     pub(crate) fn system_transfer() -> Self {
         let mut pool = Pool::default();
         let name = pool.text(b"system-transfer");

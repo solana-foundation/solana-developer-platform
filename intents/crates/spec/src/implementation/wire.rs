@@ -84,9 +84,9 @@ pub(crate) const MAX_DISCRIMINATOR: u8 = 8;
 pub struct ImplementationDocV1 {
     pub header: DocumentHeaderV1,
     pub id: DocumentIdV1,
-    /// The interface and the lowest version of it that this record implements.
+    /// The interface and the lowest version of it that this implementation implements.
     pub implements: DocumentIdV1,
-    /// The genesis hash of the cluster whose programs the record names.
+    /// The genesis hash of the cluster whose programs the implementation names.
     pub cluster: Address,
     pub recipe_kind: u8,
     pub name: PoolRefV1,

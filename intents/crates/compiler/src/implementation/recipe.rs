@@ -91,7 +91,7 @@ impl Build<'_, '_> {
         Some(Recipe { kind: returns?, url: url? })
     }
 
-    /// The builder call is one instruction, which passes every record account, in order, to the
+    /// The builder call is one instruction, which passes every implementation account, in order, to the
     /// builder program.
     fn read_program(&mut self, object: &mut Object<'_>) -> Option<Recipe> {
         let program = object.required("program", self.sink).and_then(|program| self.read_literal_address(&program));

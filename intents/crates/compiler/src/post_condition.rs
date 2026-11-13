@@ -72,7 +72,7 @@ pub fn read_post_condition(
         sink.push(
             Diagnostic::new(Code::InvalidValue, &body.pointer, "an interface cannot state `invokesOnly`")
                 .at_key()
-                .help("an interface names no programs. State `invokesOnly` in the implementation record."),
+                .help("an interface names no programs. State `invokesOnly` in the implementation."),
         );
 
         return None;

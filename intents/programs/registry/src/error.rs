@@ -44,13 +44,13 @@ pub enum RegistryError {
     VerificationOff,
     #[msg("A Lighthouse instruction differs from what the postconditions assert")]
     WrongAssertions,
-    #[msg("The record refuses the intent")]
+    #[msg("The implementation refuses the intent")]
     RecipeRefused,
-    #[msg("An account differs from the one that the record derives at its place")]
+    #[msg("An account differs from the one that the implementation derives at its place")]
     WrongRecipeAccount,
     #[msg("A registry instruction is in the span of verify_intent")]
     RegistryInstructionInSpan,
-    #[msg("An instruction differs from what the record builds")]
+    #[msg("An instruction differs from what the implementation builds")]
     WrongInstruction,
     #[msg("The builder returned no HashedReadyV1")]
     BadBuilderResult,
@@ -72,14 +72,14 @@ pub enum RegistryError {
     AssertionsRefused,
     #[msg("The layout states other counts than the segment holds")]
     WrongSegmentLayout,
-    #[msg("The outputs differ from the record's or the builder's")]
+    #[msg("The outputs differ from the implementation's or the builder's")]
     WrongOutputs,
     #[msg("A remote recipe needs the assertions, because verify_intent cannot rebuild its instructions")]
     RemoteNeedsAssertions,
-    #[msg("A built instruction calls a program that the record's invokesOnly does not list")]
+    #[msg("A built instruction calls a program that the implementation's invokesOnly does not list")]
     ProgramNotListed,
     #[msg("verify_intent cannot check a recipe that returns a whole transaction")]
     WrongRecipeKind,
-    #[msg("The record is for another cluster than the registry serves")]
+    #[msg("The implementation is for another cluster than the registry serves")]
     WrongCluster,
 }

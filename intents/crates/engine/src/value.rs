@@ -106,7 +106,7 @@ impl<'r, C: Chain> Context<'r, C> {
         }
     }
 
-    /// The data of an account that the record reads, once the owner is the program it names.
+    /// The data of an account that the implementation reads, once the owner is the program it names.
     pub(crate) fn account_data(&self, account: u8, owner: u8) -> Result<&'r [u8], EngineError> {
         let address = self.addresses.get(account).ok_or(EngineError::Unresolved { account })?;
         let found = self.chain.account(address).ok_or(EngineError::MissingData { account })?;

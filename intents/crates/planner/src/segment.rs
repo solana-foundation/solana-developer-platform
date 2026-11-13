@@ -422,7 +422,7 @@ impl<'a> SegmentPlanner<'a> {
         }
     }
 
-    /// The payers, each account of the record that resolved, the mints and organizations that the
+    /// The payers, each account of the implementation that resolved, the mints and organizations that the
     /// message reads, the segment's Lighthouse memory, and the clock, which every simulation reads.
     fn known_accounts(&self) -> Result<Vec<Address>, PlanError> {
         let payers = self.recipe.payers();
@@ -441,7 +441,7 @@ impl<'a> SegmentPlanner<'a> {
             .collect())
     }
 
-    /// The genesis hash of the record's cluster.
+    /// The genesis hash of the implementation's cluster.
     pub(crate) fn cluster(&self) -> &Address {
         self.recipe.implementation().cluster()
     }
@@ -461,14 +461,14 @@ fn snapshot_of<C: Chain>(chain: &C, address: &Address) -> Account {
 }
 
 /// Each observed account before the simulation and after it.
-/// Each account that a provider signed for is one that the record lists, or one that the
+/// Each account that a provider signed for is one that the implementation lists, or one that the
 /// transaction creates, which holds nothing before it.
 fn check_provider_signers(recipe: &Recipe<'_>, built: &Built, snapshots: &[Snapshot]) -> Result<(), PlanError> {
     if built.frozen.is_none() {
         return Ok(());
     }
 
-    let listed = remote::record_signers(recipe)?;
+    let listed = remote::implementation_signers(recipe)?;
     let created = |address: &Address| {
         snapshots.iter().any(|snapshot| {
             snapshot.address == *address && snapshot.before.lamports == 0 && snapshot.after.lamports > 0

@@ -10,9 +10,9 @@ use sdp_intents_program_testing::prepare_answering;
 use crate::intents::{publish_transfer, spec_address, system_transfer, Published};
 use crate::svm::{failure, funded, send_plan, svm, Failure, SOL};
 
-/// `token.transfer` of SOL by an endpoint. The record adds the recipient's inflow, because the
+/// `token.transfer` of SOL by an endpoint. The implementation adds the recipient's inflow, because the
 /// interface does not promise it, and only the postconditions hold for a remote recipe.
-const RECORD: &str = r#"{
+const IMPLEMENTATION: &str = r#"{
   "spec": "sdp-intents@1.0",
   "kind": "implementation",
   "id": "solana.org/remote-transfer",
@@ -41,7 +41,7 @@ struct Setup {
 
 fn setup() -> Result<Setup, Failure> {
     let mut svm = svm()?;
-    let published = publish_transfer(&mut svm, RECORD, true)?;
+    let published = publish_transfer(&mut svm, IMPLEMENTATION, true)?;
     let fee_payer = funded(&mut svm, SOL)?;
     let from = funded(&mut svm, 10 * SOL)?;
 
@@ -147,7 +147,7 @@ fn refuses_verify_intent_without_the_assertions() {
 }
 
 /// The same transfer from a provider that returns a whole transaction, at tier 3.
-const FROZEN_RECORD: &str = r#"{
+const FROZEN_IMPLEMENTATION: &str = r#"{
   "spec": "sdp-intents@1.0",
   "kind": "implementation",
   "id": "solana.org/remote-transfer",
@@ -173,7 +173,7 @@ mod frozen {
 
     fn setup() -> Result<Setup, Failure> {
         let mut svm = svm()?;
-        let published = publish_transfer(&mut svm, FROZEN_RECORD, true)?;
+        let published = publish_transfer(&mut svm, FROZEN_IMPLEMENTATION, true)?;
         let fee_payer = funded(&mut svm, SOL)?;
         let from = funded(&mut svm, 10 * SOL)?;
 
@@ -247,7 +247,7 @@ mod frozen {
         assert!(matches!(refused, Err(PlanError::RemoteTransaction(_))), "{refused:?}");
     }
 
-    /// An account that holds lamports before the transaction is no fresh account, and the record
+    /// An account that holds lamports before the transaction is no fresh account, and the implementation
     /// lists no signer.
     #[test]
     fn refuses_a_provider_signature_for_an_account_that_exists() {

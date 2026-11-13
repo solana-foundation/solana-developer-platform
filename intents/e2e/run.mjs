@@ -73,10 +73,10 @@ async function start(command, args, url) {
 const startService = () =>
   start(SERVICE_BINARY, ["--rpc", RPC, "--listen", SERVICE_LISTEN, "--wallets", WALLETS], `${SERVICE}/health`);
 
-/// The Jupiter swap wrapper that the Ondo records name.
+/// The Jupiter swap wrapper that the Ondo implementations name.
 const startAdapter = () => start(process.execPath, [ADAPTER], "http://127.0.0.1:8791/mode");
 
-/// The stand-in provider that the tier 3 record names.
+/// The stand-in provider that the tier 3 implementation names.
 const startProvider = () => start(PROVIDER_BINARY, [RPC], "http://127.0.0.1:8792/deposit");
 
 async function tokenAmount(owner, mint) {

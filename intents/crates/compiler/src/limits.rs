@@ -22,7 +22,7 @@ pub fn check(sink: &mut Sink, pointer: &str, what: &str, count: usize, limit: us
     if count > limit {
         sink.push(
             Diagnostic::new(Code::LimitExceeded, pointer, format!("{count} {what}, and the limit is {limit}"))
-                .help("a record that needs more than a limit uses a builder program"),
+                .help("an implementation that needs more than a limit uses a builder program"),
         );
     }
 }

@@ -11,7 +11,7 @@ use crate::{FrozenTransaction, Instruction, PlanError, RequiredSignature, Signer
 /// The plan of one or more intents: what the signers read, and the transaction they sign.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Plan {
-    /// What a signer reads and signs once for the whole transaction: each intent's record message,
+    /// What a signer reads and signs once for the whole transaction: each intent's implementation message,
     /// documents, and onchain checks, then the payers and the priority fee.
     pub message: String,
     /// Each intent, in the order of its segment in the transaction.
@@ -174,14 +174,14 @@ impl<C: Chain> Values<'_, '_, C> {
             .collect()
     }
 
-    /// The intent's part of the plan message: `<record message> | interface: <id> | implementation:
+    /// The intent's part of the plan message: `<implementation message> | interface: <id> | implementation:
     /// <id> | <tier> | onchain checks: <checks>`. An id is the organization, the name, and the
     /// version, such as `solana.org/token.transfer@1.0.0`. The registry never publishes a version
     /// twice, so an id names one document. The segment adds the rent cap after its first simulation.
     pub(crate) fn message(&self) -> Result<String, PlanError> {
         let interface = self.recipe.interface();
         let implementation = self.recipe.implementation();
-        let record = self.render(implementation.message()?, Column::Message)?;
+        let rendered = self.render(implementation.message()?, Column::Message)?;
         let id = |id: &sdp_intents_spec::wire::DocumentIdV1, name: &[u8]| {
             let version = format!("{}.{}.{}", id.version.major.get(), id.version.minor.get(), id.version.patch.get());
 
@@ -206,7 +206,7 @@ impl<C: Chain> Values<'_, '_, C> {
         let settlement = if interface.settles_later() { " | settles later, outside this transaction" } else { "" };
 
         Ok(format!(
-            "{record}{settlement} | interface: {} | implementation: {}{tier} | onchain checks: {checks}",
+            "{rendered}{settlement} | interface: {} | implementation: {}{tier} | onchain checks: {checks}",
             id(interface.id(), interface.name()?)?,
             id(implementation.id(), implementation.name()?)?,
         ))

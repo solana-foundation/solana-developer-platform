@@ -1,5 +1,5 @@
 //! `verify_intent` for static recipes: the planner plans with `verifyIntent` off, the test puts
-//! `verify_intent` first, and the transaction lands only when the instructions are the record's.
+//! `verify_intent` first, and the transaction lands only when the instructions are the implementation's.
 
 use anchor_lang::Address;
 use anchor_v2_testing::litesvm::LiteSVM;
@@ -108,7 +108,7 @@ fn refuses_a_system_transfer_of_another_amount_or_to_another_wallet() {
     assert!(setup.svm.get_account(&setup.wallets.to.pubkey()).is_none());
 }
 
-/// The span is the record's one instruction, so the instructions before and after it are
+/// The span is the implementation's one instruction, so the instructions before and after it are
 /// unverified, and the transaction lands.
 #[test]
 fn verifies_a_span_between_unverified_instructions() {
@@ -200,7 +200,7 @@ fn refuses_an_intent_that_turns_verification_off() {
 }
 
 #[test]
-fn refuses_payer_registry_and_record_accounts_that_do_not_fit_the_intent() {
+fn refuses_payer_registry_and_implementation_accounts_that_do_not_fit_the_intent() {
     let mut setup = setup(definitions::SYSTEM_TRANSFER, true).unwrap();
     let verified = plan_and_verify(&setup, "system-transfer", &system_program(), SOL).unwrap();
     let signers = [&setup.wallets.fee_payer, &setup.wallets.from];

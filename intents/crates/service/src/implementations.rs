@@ -19,7 +19,7 @@ use crate::describe::{applies_text, base58, recipe_name, Names};
 use crate::error::ServiceError;
 use crate::registry::{catalog, first_finding, pick, released, Document, IndexKey, Registry, VersionChoice};
 
-/// A record has at most 4 `hasOne` levels, and the hints can need one more read.
+/// An implementation has at most 4 `hasOne` levels, and the hints can need one more read.
 const MAX_RESOLVE_ROUNDS: usize = 6;
 
 struct Request {
@@ -38,8 +38,8 @@ struct Candidate {
     choice: VersionChoice,
 }
 
-/// Whether a record applies to the inputs. `DoesNotApply` is a failed `applies` check of the
-/// record, and `InvalidInputs` is inputs that do not compile or that the recipe cannot read.
+/// Whether an implementation applies to the inputs. `DoesNotApply` is a failed `applies` check of the
+/// implementation, and `InvalidInputs` is inputs that do not compile or that the recipe cannot read.
 enum Fit {
     Applies,
     DoesNotApply(String),

@@ -1,4 +1,4 @@
-//! A payload byte that its variant does not use must be zero, so that one record has one encoding.
+//! A payload byte that its variant does not use must be zero, so that one implementation has one encoding.
 
 use crate::SpecError;
 

@@ -10,7 +10,7 @@ use sdp_intents_program_testing::prepare;
 use crate::intents::{builder_roles, built_count, publish_transfer, unguarded, with_verify, Published};
 use crate::svm::{failure, funded, send_plan, svm, units_consumed, Failure, SOL};
 
-const RECORD: &str = include_str!("../../../test-builder/fixtures/test-builder-transfer.json");
+const IMPLEMENTATION: &str = include_str!("../../../test-builder/fixtures/test-builder-transfer.json");
 
 /// `BuildError::MissingAccounts` of the builder library.
 const BUILDER_MISSING_ACCOUNTS: u32 = 0x5d1b_0003;
@@ -40,7 +40,7 @@ fn intent(setup: &Setup, amount: u64, options: &str) -> String {
 
 fn setup() -> Result<Setup, Failure> {
     let mut svm = svm()?;
-    let published = publish_transfer(&mut svm, RECORD, true)?;
+    let published = publish_transfer(&mut svm, IMPLEMENTATION, true)?;
     let fee_payer = funded(&mut svm, SOL)?;
     let from = funded(&mut svm, 10 * SOL)?;
 

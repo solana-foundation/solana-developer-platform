@@ -13,7 +13,7 @@ use solana_pubkey::Pubkey;
 use crate::kamino::{address, pubkey, KVAULT};
 use crate::reserve::{self, FRACTION_BITS};
 
-/// The accounts of the record that the build reads.
+/// The accounts of the implementation that the build reads.
 pub(crate) struct VaultAccounts<'a> {
     pub(crate) vault: &'a AccountView,
     pub(crate) owner: &'a Address,

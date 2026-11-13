@@ -15,8 +15,10 @@ pub const VAULT_ASSET_MISMATCH: Refusal =
     Refusal { code: "vaultAssetMismatch", message: "the vault lends another asset" };
 pub const UNSUPPORTED_TOKEN_PROGRAM: Refusal =
     Refusal { code: "unsupportedTokenProgram", message: "the asset is not an SPL Token mint" };
-pub const VAULT_ACCOUNTS_MISMATCH: Refusal =
-    Refusal { code: "vaultAccountsMismatch", message: "the vault names other market accounts than the record derives" };
+pub const VAULT_ACCOUNTS_MISMATCH: Refusal = Refusal {
+    code: "vaultAccountsMismatch",
+    message: "the vault names other market accounts than the implementation derives",
+};
 pub const LIQUIDITY_UNREADABLE: Refusal = Refusal {
     code: "liquidityUnreadable",
     message: "the liquidity account or the supply position of the vault is not readable",

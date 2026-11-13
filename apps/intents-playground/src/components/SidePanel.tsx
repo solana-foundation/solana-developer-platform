@@ -7,7 +7,7 @@ import type { Output } from "@/intent";
 import { explorerUrl, PROGRAMS, shortAddress } from "@/known";
 import { compileSnippets, prepareSnippets, sendSnippets } from "@/snippets";
 
-export type Tab = "intent" | "record";
+export type Tab = "intent" | "implementation";
 
 /// The plan of the Intent tab, then what each step after it returned.
 export interface PlanState {
@@ -22,7 +22,7 @@ interface Props {
   tab: Tab;
   intent: object;
   request: object;
-  record: ListedImplementation | null;
+  implementation: ListedImplementation | null;
   organizations: Registry["organizations"];
   planState: PlanState;
   output: Output;
@@ -40,7 +40,7 @@ interface Props {
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "intent", label: "Intent" },
-  { key: "record", label: "Record" },
+  { key: "implementation", label: "Implementation" },
 ];
 
 export function SidePanel(props: Props) {
@@ -61,8 +61,8 @@ export function SidePanel(props: Props) {
 
       <div className="side-body">
         {props.tab === "intent" && <IntentTab {...props} />}
-        {props.tab === "record" && (
-          <RecordTab record={props.record} organizations={props.organizations} />
+        {props.tab === "implementation" && (
+          <ImplementationTab implementation={props.implementation} organizations={props.organizations} />
         )}
       </div>
     </section>
@@ -110,8 +110,8 @@ function Switch(props: {
 }
 
 function PrepareControls(props: Props) {
-  const remote = props.record?.document?.recipe === "remote";
-  const frozen = props.record?.document?.recipe === "remote transaction";
+  const remote = props.implementation?.document?.recipe === "remote";
+  const frozen = props.implementation?.document?.recipe === "remote transaction";
 
   return (
     <div className="side-actions">
@@ -358,55 +358,55 @@ function VerifiedResult({ verified }: { verified: Verified }) {
 /// The default address means that the index follows its organization's authority.
 const FOLLOWS_ORGANIZATION = "11111111111111111111111111111111";
 
-function RecordTab({
-  record,
+function ImplementationTab({
+  implementation,
   organizations,
 }: {
-  record: ListedImplementation | null;
+  implementation: ListedImplementation | null;
   organizations: Registry["organizations"];
 }) {
   const [definition, setDefinition] = useState<string | null>(null);
 
   useEffect(() => {
     setDefinition(null);
-    if (record?.id == null || record.shown === null) return;
+    if (implementation?.id == null || implementation.shown === null) return;
 
     let current = true;
     api
-      .definition("implementations", record.id, record.shown)
+      .definition("implementations", implementation.id, implementation.shown)
       .then((text) => current && setDefinition(text))
       .catch(() => current && setDefinition(null));
 
     return () => {
       current = false;
     };
-  }, [record?.id, record?.shown]);
+  }, [implementation?.id, implementation?.shown]);
 
-  if (record === null) {
-    return <div className="section-sub">Select an implementation to see its record.</div>;
+  if (implementation === null) {
+    return <div className="section-sub">Select an implementation to see its definition.</div>;
   }
 
-  const organization = organizations.find((listed) => listed.name === record.organization);
-  const follows = record.updateAuthority === FOLLOWS_ORGANIZATION && organization !== undefined;
+  const organization = organizations.find((listed) => listed.name === implementation.organization);
+  const follows = implementation.updateAuthority === FOLLOWS_ORGANIZATION && organization !== undefined;
 
   return (
     <>
       <div>
-        <div className="section-title">{record.id}</div>
+        <div className="section-title">{implementation.id}</div>
         <div className="section-sub">
-          {record.shown} · {record.document?.cluster ?? "unknown cluster"} ·{" "}
-          {record.document?.recipe ?? "unknown"} recipe ·{" "}
-          {record.approved ? "approved" : "unapproved"}
+          {implementation.shown} · {implementation.document?.cluster ?? "unknown cluster"} ·{" "}
+          {implementation.document?.recipe ?? "unknown"} recipe ·{" "}
+          {implementation.approved ? "approved" : "unapproved"}
         </div>
       </div>
       <div className="data-rows">
-        <AddressRow label="Index" address={record.address} />
+        <AddressRow label="Index" address={implementation.address} />
         <AddressRow
           label="Update authority"
-          address={follows ? organization.authority : record.updateAuthority}
-          sub={follows ? `the authority of ${record.organization}` : undefined}
+          address={follows ? organization.authority : implementation.updateAuthority}
+          sub={follows ? `the authority of ${implementation.organization}` : undefined}
         />
-        {record.versions.map((entry) => (
+        {implementation.versions.map((entry) => (
           <Row
             key={entry.version}
             label={`Version ${entry.version}`}
@@ -417,7 +417,7 @@ function RecordTab({
       {definition !== null ? (
         <>
           <div className="section-sub">
-            The record as <code>intents/definitions</code> writes it. The registry holds its
+            The implementation as <code>intents/definitions</code> writes it. The registry holds its
             compiled bytes, and <code>sdp-intents plan</code> checks that they match.
           </div>
           <Code text={definition} />
@@ -425,12 +425,12 @@ function RecordTab({
       ) : (
         <div className="section-sub">The definitions folder holds no file for this version.</div>
       )}
-      {record.bytes !== null && (
+      {implementation.bytes !== null && (
         <>
           <div className="section-sub">
-            The document as the registry holds it, {atob(record.bytes).length} bytes.
+            The document as the registry holds it, {atob(implementation.bytes).length} bytes.
           </div>
-          <Code text={hexDump(record.bytes)} />
+          <Code text={hexDump(implementation.bytes)} />
         </>
       )}
     </>

@@ -71,7 +71,7 @@ export interface Wallet {
   address: string;
 }
 
-/// Whether a record applies to the inputs: its `applies` checks hold, one fails, or the inputs do
+/// Whether an implementation applies to the inputs: its `applies` checks hold, one fails, or the inputs do
 /// not compile.
 export type CandidateStatus = "applies" | "doesNotApply" | "invalidInputs" | "unknown";
 

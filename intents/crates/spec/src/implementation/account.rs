@@ -2,7 +2,7 @@ use super::payload::require_zero;
 use super::wire::{AccountSourceKind, AccountV1, ACCOUNT_SIGNER, ACCOUNT_WRITABLE};
 use crate::{PoolRefV1, RangeV1, SpecError, ValueRef};
 
-/// Where an account's address comes from. Indexes name entries of the record's tables.
+/// Where an account's address comes from. Indexes name entries of the implementation's tables.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AddressSource {
     Value(ValueRef),

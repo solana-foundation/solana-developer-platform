@@ -41,7 +41,7 @@ impl<'a> Documents<'a> {
         Ok(documents)
     }
 
-    /// The accounts of the record that are program addresses, PDAs and ATAs, in record order.
+    /// The accounts of the implementation that are program addresses, PDAs and ATAs, in implementation order.
     pub(crate) fn program_addresses(&self) -> Result<crate::resolve::AccountSet, EngineError> {
         let accounts = self.implementation.accounts()?;
 

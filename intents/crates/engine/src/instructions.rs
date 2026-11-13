@@ -16,7 +16,7 @@ pub struct BuiltAccount<'r> {
 pub struct BuiltInstruction<'r, C> {
     pub program: &'r Address,
     account_indexes: &'r [u8],
-    /// The accounts that a builder asked for in earlier rounds, after the record's accounts.
+    /// The accounts that a builder asked for in earlier rounds, after the implementation's accounts.
     extra_accounts: &'r [Address],
     segments: &'r [SegmentV1],
     context: Context<'r, C>,

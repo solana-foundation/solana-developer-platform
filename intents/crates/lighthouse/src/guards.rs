@@ -83,7 +83,7 @@ struct Holding {
 pub(crate) struct GuardInputs<'g> {
     pub(crate) conditions: &'g [Condition],
     pub(crate) accounts: &'g [GuardedAccount<'g>],
-    /// The associated token accounts that the record names, which need no derivation.
+    /// The associated token accounts that the implementation names, which need no derivation.
     pub(crate) named_atas: &'g [NamedAta],
     pub(crate) payers: Payers<'g>,
     pub(crate) rent_cap: u64,
@@ -195,7 +195,7 @@ impl GuardInputs<'_> {
             .collect()
     }
 
-    /// The record's own ATA of `owner` for `mint` when it names one. Otherwise the ATA of each token
+    /// The implementation's own ATA of `owner` for `mint` when it names one. Otherwise the ATA of each token
     /// program, which costs two derivations in a program.
     fn new_account(&self, owner: &Address, mint: &Address, min: u128) -> Result<NewAccountGuard, GuardError> {
         let min = u64::try_from(min).map_err(|_| GuardError::Overflow)?;

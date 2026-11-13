@@ -44,7 +44,7 @@ pub enum InputValue {
 }
 
 /// What the endpoint returned: the instructions, or a whole transaction that the provider signed,
-/// and the outputs that the record leaves unbound.
+/// and the outputs that the implementation leaves unbound.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RemoteAnswer {
     pub instructions: Vec<Instruction>,
@@ -108,7 +108,7 @@ pub(crate) fn call(recipe: &Recipe<'_>, priority_fee_lamports: u64) -> Result<Re
 }
 
 impl Built {
-    /// The endpoint's instructions, with each output from the record when it binds one, and from the
+    /// The endpoint's instructions, with each output from the implementation when it binds one, and from the
     /// answer otherwise. An answer that names a bound output with another address is refused, and so
     /// is an answer that leaves an unbound output out.
     pub(crate) fn from_remote(recipe: &Recipe<'_>, answer: RemoteAnswer) -> Result<Self, PlanError> {
@@ -143,7 +143,7 @@ impl Built {
     /// A provider's transaction. It is the whole plan, so it has one intent and no onchain checks,
     /// the request's fee payer, at most the request's priority fee, and no signature for the owner,
     /// a payer, or a signer input. A legacy or v0 transaction sets its priority fee as a price for
-    /// each compute unit, so the fee can round below the request's. Each other signature must be one that the record lists, or one for an account
+    /// each compute unit, so the fee can round below the request's. Each other signature must be one that the implementation lists, or one for an account
     /// that the transaction creates, which `verify` checks in the simulation.
     pub(crate) fn from_frozen(
         recipe: &Recipe<'_>,
@@ -209,8 +209,8 @@ fn signer_inputs(recipe: &Recipe<'_>) -> Result<Vec<Address>, PlanError> {
         .collect()
 }
 
-/// The signers that the record lists: its accounts with the signer flag.
-pub(crate) fn record_signers(recipe: &Recipe<'_>) -> Result<Vec<Address>, PlanError> {
+/// The signers that the implementation lists: its accounts with the signer flag.
+pub(crate) fn implementation_signers(recipe: &Recipe<'_>) -> Result<Vec<Address>, PlanError> {
     let accounts = recipe.implementation().accounts()?;
 
     Ok((0u8..)

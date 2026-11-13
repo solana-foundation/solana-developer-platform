@@ -21,7 +21,7 @@ pub fn count(recipe: &Recipe<'_>) -> Result<usize> {
     Ok(recipe.implementation().instructions().map_err(|error| refused(error.into()))?.len())
 }
 
-/// The output addresses that the record binds, in borsh.
+/// The output addresses that the implementation binds, in borsh.
 pub fn outputs(recipe: &Recipe<'_>) -> Result<Vec<u8>> {
     let count = recipe.interface().outputs().map_err(|error| refused(error.into()))?.len();
 
@@ -39,7 +39,7 @@ pub struct Compared {
     roles: TransactionRoles,
 }
 
-/// Builds the record's instructions once, and compares each with the sysvar's instruction at its
+/// Builds the implementation's instructions once, and compares each with the sysvar's instruction at its
 /// place in `built`: the program, each account's address, and the data, byte for byte.
 pub fn compare<C: Chain>(
     recipe: &Recipe<'_>,

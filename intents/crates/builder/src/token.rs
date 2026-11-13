@@ -71,7 +71,7 @@ impl Build<'_> {
     }
 
     /// The same instruction for an `account` that the caller already holds, such as an associated
-    /// token account that the record derives. It saves the derivation. The ATA program checks
+    /// token account that the implementation derives. It saves the derivation. The ATA program checks
     /// that `account` is the associated token account of `owner` and `mint`.
     pub fn create_associated_token_account_idempotent_at(
         &mut self,

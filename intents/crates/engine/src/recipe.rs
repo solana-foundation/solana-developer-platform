@@ -11,7 +11,7 @@ use crate::resolve::{AccountSet, Addresses};
 use crate::value::Context;
 use crate::{BuiltInstruction, Chain, EngineError, Instructions, Payers};
 
-/// An associated token account of a record: its owner, its mint, and its address.
+/// An associated token account of an implementation: its owner, its mint, and its address.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NamedAta {
     pub owner: Address,
@@ -19,7 +19,7 @@ pub struct NamedAta {
     pub address: Address,
 }
 
-/// The bump of each program address of a record, in record order.
+/// The bump of each program address of an implementation, in implementation order.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Bumps {
     values: [u8; 32],
@@ -153,7 +153,7 @@ impl<'a> Recipe<'a> {
         Ok(Resolution::Complete)
     }
 
-    /// States the bump of each program address of the record, in record order, so that each
+    /// States the bump of each program address of the implementation, in implementation order, so that each
     /// derives with one hash. A program states the bumps that the plan holds. Only the canonical
     /// bump is supported, and the signer's verifier checks offchain that each bump is canonical.
     pub fn state_bumps(&mut self, bumps: &[u8]) -> Result<(), EngineError> {
@@ -175,7 +175,7 @@ impl<'a> Recipe<'a> {
         self.addresses.state_builder_bumps(bumps).ok_or(EngineError::WrongBumps)
     }
 
-    /// The bump of each program address of the record, in record order, once `resolve` completes.
+    /// The bump of each program address of the implementation, in implementation order, once `resolve` completes.
     pub fn bumps(&self) -> Result<Bumps, EngineError> {
         let accounts = self.documents.program_addresses()?;
         let mut bumps = Bumps::default();
@@ -187,7 +187,7 @@ impl<'a> Recipe<'a> {
         Ok(bumps)
     }
 
-    /// Each associated token account that the record names and resolved, with its owner and mint.
+    /// Each associated token account that the implementation names and resolved, with its owner and mint.
     pub fn associated_token_accounts(&self) -> impl Iterator<Item = NamedAta> + '_ {
         let context =
             Context { documents: self.documents, addresses: &self.addresses, chain: &crate::chain::NoAccounts };
@@ -206,7 +206,7 @@ impl<'a> Recipe<'a> {
         })
     }
 
-    /// The address of account `account` of the record. A program compares it with the account that
+    /// The address of account `account` of the implementation. A program compares it with the account that
     /// its instruction holds at that place.
     pub fn address(&self, account: u8) -> Option<&Address> {
         self.addresses.get(account)
@@ -243,7 +243,7 @@ impl<'a> Recipe<'a> {
         Instructions::new(self.context(RecipeKind::Static, chain)?)
     }
 
-    /// The builder call of a program recipe: the record's accounts, then `extra_accounts`, which
+    /// The builder call of a program recipe: the implementation's accounts, then `extra_accounts`, which
     /// the builder asked for in earlier rounds. Every extra account is readonly, and none is a
     /// payer, so the builder can change nothing.
     pub fn builder_call<'r, C: Chain>(

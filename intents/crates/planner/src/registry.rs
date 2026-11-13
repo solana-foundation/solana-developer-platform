@@ -24,9 +24,9 @@ pub(crate) struct VerifyIntent<'v> {
     pub(crate) extra_accounts: &'v [Address],
     /// The builder's role of each account of its instructions, in order. A static recipe has none.
     pub(crate) builder_roles: Vec<u8>,
-    /// The interface's outputs, in borsh, which `verify_intent` checks against the record.
+    /// The interface's outputs, in borsh, which `verify_intent` checks against the implementation.
     pub(crate) outputs: &'v [u8],
-    /// The canonical bump of each program address of the record, in record order.
+    /// The canonical bump of each program address of the implementation, in implementation order.
     pub(crate) bumps: &'v [u8],
     /// The canonical bumps of a builder's program addresses, which the builder call names as
     /// `{builder.bumps}`.
@@ -49,7 +49,7 @@ pub(crate) struct SegmentCounts {
 
 impl VerifyIntent<'_> {
     /// The accounts are the instructions sysvar, the fee payer, the rent payer, the two indexes, the
-    /// two version accounts, the record's account table, the extra accounts, and the guarded
+    /// two version accounts, the implementation's account table, the extra accounts, and the guarded
     /// accounts. Each one is readonly.
     pub(crate) fn instruction(&self, recipe: &Recipe<'_>) -> Result<Instruction, PlanError> {
         let interface = recipe.interface().id();
@@ -65,14 +65,14 @@ impl VerifyIntent<'_> {
             version_address(DocumentKind::Implementation, implementation)?,
         ];
         let table_len = recipe.implementation().accounts()?.len();
-        let record = (0u8..)
+        let table = (0u8..)
             .take(table_len)
             .map(|account| recipe.address(account).copied().ok_or(PlanError::Unresolved))
             .collect::<Result<Vec<_>, _>>()?;
 
         let accounts = registry
             .into_iter()
-            .chain(record)
+            .chain(table)
             .chain(self.extra_accounts.iter().copied())
             .chain(self.guarded.iter().copied())
             .map(|address| AccountMeta { address, role: AccountRole::Readonly })

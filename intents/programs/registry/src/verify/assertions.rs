@@ -23,7 +23,7 @@ pub struct SegmentAssertions<'v, 'a> {
     pub sysvar: &'v SysvarInstructions,
     pub recipe: &'v Recipe<'a>,
     pub outputs: &'v [u8],
-    /// Each account of the built instructions with the role that the record or the builder gives it.
+    /// Each account of the built instructions with the role that the implementation or the builder gives it.
     pub named: Vec<Meta>,
     pub guarded: &'v [AccountView],
     pub rent_cap: u64,

@@ -16,7 +16,7 @@ const TRANSACTION_LEVEL_STACK_HEIGHT: usize = 1;
 /// The result of one builder instruction, as the handler adds to it.
 pub struct Build<'a> {
     mode: Mode,
-    /// The accounts that earlier `MoreAccounts` rounds asked for, after the record's accounts.
+    /// The accounts that earlier `MoreAccounts` rounds asked for, after the implementation's accounts.
     extra_accounts: &'a [AccountView],
     returned: usize,
     requested: Vec<Address>,
@@ -43,14 +43,14 @@ enum Mode {
 }
 
 impl<'a> Build<'a> {
-    /// Reads the mode from the stack height. `record_accounts` is the number of accounts that the
-    /// record names, which in Anchor v2 is `<T as TryAccounts>::HEADER_SIZE`. `accounts` are the ones
+    /// Reads the mode from the stack height. `implementation_accounts` is the number of accounts that the
+    /// implementation names, which in Anchor v2 is `<T as TryAccounts>::HEADER_SIZE`. `accounts` are the ones
     /// after them: the extra accounts, then scratch in staged mode. `bumps` is the argument that the
-    /// record passes as `{builder.bumps}`: empty in a simulation, and the bumps that the simulation
+    /// implementation passes as `{builder.bumps}`: empty in a simulation, and the bumps that the simulation
     /// found under `verify_intent`.
     pub fn new(
         program_id: &Address,
-        record_accounts: usize,
+        implementation_accounts: usize,
         accounts: &'a [AccountView],
         bumps: &'a [u8],
     ) -> Result<Self, BuildError> {
@@ -61,7 +61,8 @@ impl<'a> Build<'a> {
                 return Err(BuildError::NoScratch);
             }
 
-            let scratch_index = record_accounts.checked_add(extra_accounts.len()).ok_or(BuildError::TooLarge)?;
+            let scratch_index =
+                implementation_accounts.checked_add(extra_accounts.len()).ok_or(BuildError::TooLarge)?;
             let scratch_index = u8::try_from(scratch_index).map_err(|_| BuildError::TooLarge)?;
 
             (Mode::Staged { scratch: *scratch, scratch_index }, extra_accounts)

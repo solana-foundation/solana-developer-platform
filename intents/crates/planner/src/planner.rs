@@ -40,7 +40,7 @@ pub struct Planner<'a> {
     segments: Vec<SegmentPlanner<'a>>,
     payers: Payers<'a>,
     priority_fee_lamports: u64,
-    /// The genesis hash of the cluster that every record of the plan is for.
+    /// The genesis hash of the cluster that every implementation of the plan is for.
     cluster: Address,
 
     intents: Vec<PlannedIntent>,
@@ -465,9 +465,9 @@ mod tests {
         assert!(planner.next(&accounts).is_err_and(|error| error == PlanError::TooManyRounds));
     }
 
-    /// One message names one cluster, so a plan cannot hold records of two.
+    /// One message names one cluster, so a plan cannot hold implementations of two.
     #[test]
-    fn refuses_records_of_two_clusters() {
+    fn refuses_implementations_of_two_clusters() {
         let mainnet = Compiled::spl_transfer();
         let devnet = Compiled::compile(
             &include_str!("../../../definitions/solana.org/implementations/spl-token-transfer/1.0.0.json")

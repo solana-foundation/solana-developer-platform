@@ -55,16 +55,16 @@ nothing on a real cluster.
 - Plan: the message, each instruction with its part of the segment, the compute units, and the RPC
   calls that the service made. `Verify` runs the service's verifier, and `Send` lands the
   transaction.
-- Record: the selected implementation, its versions, and its document as the registry holds it.
+- Implementation: the selected implementation, its versions, and its document as the registry holds it.
 
 "Tamper with the plan" makes the service change one byte of a built instruction. The verifier still
 renders the plan's message, because it reads only `verify_intent`, and `verify_intent` refuses the
 transaction onchain.
 
-The Ondo records route through the Jupiter wrapper, at tier 2. Their side panel has a switch that
+The Ondo implementations route through the Jupiter wrapper, at tier 2. Their side panel has a switch that
 makes the wrapper also approve an attacker, which the segment's assertions refuse. The test
-provider's record returns a transaction that the provider signed, at tier 3. Turn both onchain
-checks off to accept it. Hastra's records show the request interfaces, which settle later.
+provider's implementation returns a transaction that the provider signed, at tier 3. Turn both onchain
+checks off to accept it. Hastra's implementations show the request interfaces, which settle later.
 
 A builder cannot name its rent payer as one of its own accounts yet, so a wallet that deposits into
 a vault cannot also pay the fee. The playground defaults the fee payer to `alice` for that reason.

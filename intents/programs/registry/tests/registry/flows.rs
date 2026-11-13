@@ -440,9 +440,9 @@ fn an_implementation_must_name_a_published_interface_version() {
     assert_eq!(DocumentTarget::of(&document).unwrap().kind, DocumentKind::Implementation);
 }
 
-/// A deployment serves one cluster, so it refuses a record for another.
+/// A deployment serves one cluster, so it refuses an implementation for another.
 #[test]
-fn publish_refuses_a_record_of_another_cluster() {
+fn publish_refuses_an_implementation_of_another_cluster() {
     let mut svm = svm().unwrap();
     let organization = Organization::create(&mut svm, "solana.org").unwrap();
     let interface_index = organization.create_interface(&mut svm, INTERFACE).unwrap();

@@ -1,13 +1,13 @@
-//! `verify_intent`: proves in the transaction that its segment is what the record builds for the
+//! `verify_intent`: proves in the transaction that its segment is what the implementation builds for the
 //! intent, guarded by the assertions of its postconditions, so a signer needs only the transaction
 //! bytes. [`position`] gives where the segment is.
 //!
 //! The accounts are the instructions sysvar, the fee payer, the rent payer, the two indexes, the
-//! two version accounts, every account of the record's account table in order, for a program
+//! two version accounts, every account of the implementation's account table in order, for a program
 //! recipe the accounts of the builder's last `MoreAccounts` round, then the guarded accounts.
 //!
 //! The data is the intent in binary form, the builder's role of each account of its instructions
-//! for a program recipe, the interface's outputs, the bump of each program address of the record,
+//! for a program recipe, the interface's outputs, the bump of each program address of the implementation,
 //! the bumps of a builder's program addresses, and the [`SegmentLayout`]. A static recipe holds
 //! no roles, because `verify_intent` builds its instructions itself. A remote recipe holds the roles
 //! that its endpoint stated, and [`remote_recipe`] checks what holds for any instructions.
@@ -55,7 +55,7 @@ pub struct VerifyArgs<'a> {
     pub builder_roles: &'a [u8],
     /// The interface's outputs, in borsh.
     pub outputs: &'a [u8],
-    /// The canonical bump of each program address of the record, in record order, so that each
+    /// The canonical bump of each program address of the implementation, in implementation order, so that each
     /// derives with one hash. The signer's verifier checks offchain that each bump is canonical.
     pub bumps: &'a [u8],
     /// The canonical bumps of a builder's program addresses, which `verify_intent` passes to the
@@ -97,9 +97,9 @@ pub fn verify_intent(accounts: &VerifyIntent, passed: &[AccountView], args: Veri
     registry::check_indexes(accounts, &recipe)?;
 
     let layout = args.layout;
-    let record_len = passed.len().checked_sub(usize::from(layout.guarded_accounts));
-    let (record, guarded) = passed.split_at(record_len.ok_or(RegistryError::WrongGuardedAccounts)?);
-    let chain = PassedAccounts::borrow(record)?;
+    let implementation_len = passed.len().checked_sub(usize::from(layout.guarded_accounts));
+    let (implementation, guarded) = passed.split_at(implementation_len.ok_or(RegistryError::WrongGuardedAccounts)?);
+    let chain = PassedAccounts::borrow(implementation)?;
     resolve(&mut recipe, &chain)?;
 
     let first = position::first_after(sysvar)?;
@@ -158,7 +158,7 @@ struct SegmentEnds<'v, 'a> {
 }
 
 impl SegmentEnds<'_, '_> {
-    /// The built span after the snapshots. `len` comes from the record or the builder, and the
+    /// The built span after the snapshots. `len` comes from the implementation or the builder, and the
     /// layout must state it.
     fn built(&self, sysvar: &SysvarInstructions, len: usize) -> Result<Range<usize>> {
         require!(usize::from(self.layout.built) == len, RegistryError::WrongSegmentLayout);
@@ -223,7 +223,7 @@ fn check_options(intent: &[u8]) -> Result<IntentOptions> {
 }
 
 /// One `resolve` completes, because every account is in the instruction. Each resolved address
-/// must be the account at its place in the record's table.
+/// must be the account at its place in the implementation's table.
 fn resolve(recipe: &mut Recipe<'_>, chain: &PassedAccounts<'_>) -> Result<()> {
     if let Resolution::Missing(_) = recipe.resolve(chain).map_err(refused)? {
         return Err(RegistryError::WrongRecipeAccount.into());

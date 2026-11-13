@@ -19,7 +19,7 @@ const DEFAULT_STATE_FROZEN: u8 = 2;
 /// The offset of `allow_non_confidential_credits` in `ConfidentialTransferAccount`.
 const NON_CONFIDENTIAL_CREDITS_OFFSET: usize = 262;
 
-/// The accounts of the record, as the builder reads them.
+/// The accounts of the implementation, as the builder reads them.
 pub struct TransferAccounts<'v> {
     pub mint: &'v AccountView,
     pub from: &'v AccountView,

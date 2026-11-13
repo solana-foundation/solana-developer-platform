@@ -1,6 +1,6 @@
 //! A remote recipe: no builder can rebuild its instructions, so `verify_intent` checks what holds
-//! for any instructions. Each built program is one that every `invokesOnly` of the record lists.
-//! Each output that the record binds is the record's. Each account's role in the transaction is the
+//! for any instructions. Each built program is one that every `invokesOnly` of the implementation lists.
+//! Each output that the implementation binds is the implementation's. Each account's role in the transaction is the
 //! union of the roles that the planner states. The assertions then follow from the postconditions,
 //! as for any recipe.
 
@@ -17,7 +17,7 @@ use crate::verify::refused;
 /// An output is one address of 32 bytes.
 const OUTPUT_LEN: usize = 32;
 
-/// Each output that the record binds must be the record's, and every output must be present.
+/// Each output that the implementation binds must be the implementation's, and every output must be present.
 pub fn check_outputs(recipe: &Recipe<'_>, outputs: &[u8]) -> Result<()> {
     let count = recipe.interface().outputs().map_err(|error| refused(error.into()))?.len();
     let (chunks, rest) = outputs.as_chunks::<OUTPUT_LEN>();
@@ -31,7 +31,7 @@ pub fn check_outputs(recipe: &Recipe<'_>, outputs: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Each instruction of the built span calls a program that every `invokesOnly` of the record lists.
+/// Each instruction of the built span calls a program that every `invokesOnly` of the implementation lists.
 pub fn check_programs(recipe: &Recipe<'_>, sysvar: &SysvarInstructions, built: &Range<usize>) -> Result<()> {
     let implementation = recipe.implementation();
     let spec = |error: sdp_intents_spec::SpecError| refused(error.into());

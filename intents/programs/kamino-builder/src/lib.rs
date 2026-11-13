@@ -2,7 +2,7 @@
 //! interfaces, with the layouts and the instruction account lists of `kvault-interface` and
 //! `klend-interface`.
 //!
-//! - The record names the vault, the owner, the asset, and the owner's two token accounts. Round 1
+//! - The implementation names the vault, the owner, the asset, and the owner's two token accounts. Round 1
 //!   reads the vault in place and asks for its reserves with `MoreAccounts`, because the vault holds
 //!   a list of up to 25 allocations that the static language cannot read.
 //! - Round 2 reads the reserves. Each kvault instruction names every reserve and its lending market,
@@ -56,7 +56,7 @@ pub mod kamino_builder {
     }
 }
 
-/// The accounts of both records, in their order. The records name `token_program` and `share_mint`
+/// The accounts of both implementations, in their order. The implementations name `token_program` and `share_mint`
 /// to derive the owner's token accounts. The builder reads both from the vault.
 #[derive(Accounts)]
 pub struct BuildVaultV1 {

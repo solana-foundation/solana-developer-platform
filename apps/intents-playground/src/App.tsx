@@ -99,7 +99,7 @@ export function App() {
     candidates?.find((candidate) => candidate.id === pinned) ??
     candidates?.find((candidate) => candidate.status === "applies") ??
     null;
-  const record =
+  const selectedImplementation =
     registry?.implementations.find((implementation) => implementation.id === selected?.id) ?? null;
   const intent = useMemo(
     () =>
@@ -111,7 +111,7 @@ export function App() {
           }),
     [listed, document, values, selected, options]
   );
-  const frozen = record?.document?.recipe === "remote transaction";
+  const frozen = selectedImplementation?.document?.recipe === "remote transaction";
   const request = useMemo(
     () => planRequest(intent, feePayer, frozen ? "transaction" : output),
     [intent, feePayer, frozen, output]
@@ -208,7 +208,7 @@ export function App() {
             tab={tab}
             intent={intent}
             request={request}
-            record={record}
+            implementation={selectedImplementation}
             organizations={registry.organizations}
             planState={planState}
             output={output}

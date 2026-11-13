@@ -6,7 +6,7 @@
   "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
   "implements": "solana.org/vault.deposit@^1",
   "annotations": {
-    "endpoint": "The local Jupiter swap wrapper of the prototype, intents/adapters/jupiter.mjs. A published record names SDP's hosted wrapper."
+    "endpoint": "The local Jupiter swap wrapper of the prototype, intents/adapters/jupiter.mjs. A published implementation names SDP's hosted wrapper."
   },
   "applies": [{ "value": "{inputs.vault}", "equals": "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6" }],
   "message": "deposit {inputs.amount} of {inputs.asset} from {inputs.owner} into Ondo USDY for at least {inputs.minShares} of {outputs.shareMint}, by a Jupiter route",

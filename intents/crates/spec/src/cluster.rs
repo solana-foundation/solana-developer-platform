@@ -1,4 +1,4 @@
-//! The clusters that have a name. A record names its cluster by genesis hash, and a message names
+//! The clusters that have a name. An implementation names its cluster by genesis hash, and a message names
 //! it by its name, or by the hash when it has none. A program and an offchain reader use the same
 //! table, so both map a name and a hash the same way.
 

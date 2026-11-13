@@ -5,7 +5,7 @@ import { defineConfig, type Plugin } from "vite";
 
 const DEFINITIONS = resolve(new URL("../../intents/definitions", import.meta.url).pathname);
 
-/// Serves `intents/definitions` at `/definitions`, so the Record tab shows a record as it is
+/// Serves `intents/definitions` at `/definitions`, so the Implementation tab shows an implementation as it is
 /// written. A path that leaves the folder is refused.
 function definitions(): Plugin {
   return {

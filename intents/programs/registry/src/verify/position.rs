@@ -2,7 +2,7 @@
 //!
 //! `verify_intent` is a top-level instruction, and its segment is the instructions right after it:
 //! the Lighthouse snapshots, the built instructions, then the Lighthouse assertions. Its layout
-//! states each count, and the counts must be the ones that the record, the builder, and the
+//! states each count, and the counts must be the ones that the implementation, the builder, and the
 //! postconditions give. So a signer finds each intent's instructions from the `verify_intent`
 //! instructions alone. Instructions outside
 //! every segment are unverified, and the signer reads them as they are.
@@ -57,7 +57,7 @@ pub fn span(sysvar: &SysvarInstructions, first: usize, len: usize) -> Result<Ran
 }
 
 /// True when an instruction outside `segment` names `address`. `verify_intent` instructions do not
-/// count, because each one names its record's accounts readonly.
+/// count, because each one names its implementation's accounts readonly.
 pub fn named_outside(sysvar: &SysvarInstructions, segment: &Range<usize>, address: &Address) -> bool {
     (0..sysvar.num_instructions()).filter(|position| !segment.contains(position)).any(|position| {
         sysvar.load_instruction_at(position).is_ok_and(|instruction| {

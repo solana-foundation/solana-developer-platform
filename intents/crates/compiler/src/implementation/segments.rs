@@ -74,7 +74,7 @@ impl Build<'_, '_> {
                         &node.pointer,
                         format!("{length} bytes, and a read is at most 32"),
                     )
-                    .help("a record that reads more uses a builder program"),
+                    .help("an implementation that reads more uses a builder program"),
                 );
                 return None;
             }

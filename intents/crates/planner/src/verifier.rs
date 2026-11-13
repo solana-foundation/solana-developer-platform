@@ -54,7 +54,7 @@ pub struct VerifiedTransaction {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VerifiedIntent {
     pub verify: usize,
-    /// The instructions that the record built.
+    /// The instructions that the implementation built.
     pub built: Range<usize>,
     /// `verify_intent` and every instruction after it that the segment holds.
     pub segment: Range<usize>,
@@ -69,7 +69,7 @@ pub enum VerifyError {
     /// another `verify_intent`.
     BadSegment(usize),
     /// The `verify_intent` at this position states a bump that is not the canonical bump of a
-    /// program address of its record.
+    /// program address of its implementation.
     NonCanonicalBump(usize),
     /// A `verify_intent` names another fee payer than the transaction's.
     WrongFeePayer(usize),
@@ -111,7 +111,7 @@ struct DecodedVerify<'t> {
     instruction: &'t Instruction,
     intent: &'t [u8],
     outputs: &'t [u8],
-    /// The bumps that `verify_intent` derives the record's program addresses with.
+    /// The bumps that `verify_intent` derives the implementation's program addresses with.
     bumps: &'t [u8],
     rent_cap: u64,
     segment: Range<usize>,
@@ -124,7 +124,7 @@ enum Part {
     Rendered(Rendered),
 }
 
-/// An intent's part of the message, and the cluster that its record is for.
+/// An intent's part of the message, and the cluster that its implementation is for.
 struct Rendered {
     text: String,
     cluster: Address,

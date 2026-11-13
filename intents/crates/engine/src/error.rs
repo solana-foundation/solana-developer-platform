@@ -2,7 +2,7 @@ use core::fmt;
 
 use sdp_intents_spec::{RecipeKind, SpecError};
 
-/// Why the engine refuses an intent. An index names an entry of the record or the interface.
+/// Why the engine refuses an intent. An index names an entry of the implementation or the interface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EngineError {
     Spec(SpecError),
@@ -32,15 +32,15 @@ pub enum EngineError {
     /// A builder asked for a payer as an account. A builder names the rent payer only with the
     /// placeholder.
     PayerAccount,
-    /// The account's owner is not the program that the record names.
+    /// The account's owner is not the program that the implementation names.
     WrongOwner {
         account: u8,
     },
-    /// The account's data ends before the bytes that the record reads.
+    /// The account's data ends before the bytes that the implementation reads.
     ShortData {
         account: u8,
     },
-    /// The caller does not hold the data of an account that the record reads. `resolve` returns
+    /// The caller does not hold the data of an account that the implementation reads. `resolve` returns
     /// these accounts, so this error means that the caller did not supply them.
     MissingData {
         account: u8,
@@ -49,7 +49,7 @@ pub enum EngineError {
     BadSeeds {
         account: u8,
     },
-    /// The caller stated another count of bumps than the record has program addresses.
+    /// The caller stated another count of bumps than the implementation has program addresses.
     WrongBumps,
     /// `instructions` runs only after `resolve` returns `Complete`.
     NotResolved,
@@ -57,7 +57,7 @@ pub enum EngineError {
     Unresolved {
         account: u8,
     },
-    /// The output has no account that the record binds it to.
+    /// The output has no account that the implementation binds it to.
     UnboundOutput {
         output: u8,
     },
@@ -90,7 +90,7 @@ impl fmt::Display for EngineError {
             Self::ShortData { account } => write!(f, "the data of account {account} is too short"),
             Self::MissingData { account } => write!(f, "the data of account {account} is not loaded"),
             Self::BadSeeds { account } => write!(f, "the seeds of account {account} give no address"),
-            Self::WrongBumps => f.write_str("the bumps are not one for each program address of the record"),
+            Self::WrongBumps => f.write_str("the bumps are not one for each program address of the implementation"),
             Self::NotResolved => f.write_str("the recipe is not resolved"),
             Self::Unresolved { account } => write!(f, "account {account} is not resolved"),
             Self::UnboundOutput { output } => write!(f, "output {output} has no account"),

@@ -129,7 +129,7 @@ fn verify_intent_refuses_a_layout_or_outputs_that_lie() {
 
     let mut other_outputs = plan.clone();
     let data = &mut other_outputs.transaction.instructions[verify_position].data;
-    // The SOL transfer's record has no program address and no builder, so both bump vectors are
+    // The SOL transfer's implementation has no program address and no builder, so both bump vectors are
     // empty: 4 bytes each before the 12-byte layout.
     let bumps = data.len() - 12 - 4 - 4;
     let outputs = bumps - 4;

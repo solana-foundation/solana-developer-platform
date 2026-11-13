@@ -1,4 +1,4 @@
-//! Turns an intent and its records into instructions. The service and the registry program run the
+//! Turns an intent and its implementations into instructions. The service and the registry program run the
 //! same code.
 //!
 //! The engine reads the views of `sdp-intents-spec`. It allocates nothing and never fetches an

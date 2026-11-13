@@ -7,8 +7,8 @@
 //! use pinocchio::{account::AccountView, address::Address};
 //! use sdp_intents_builder::{Build, BuildError, Meta};
 //!
-//! /// `accounts` are the accounts after the record's: in Anchor v2, `ctx.remaining_accounts()`.
-//! /// `bumps` is the argument that the record passes as `{builder.bumps}`.
+//! /// `accounts` are the accounts after the implementation's: in Anchor v2, `ctx.remaining_accounts()`.
+//! /// `bumps` is the argument that the implementation passes as `{builder.bumps}`.
 //! fn build_transfer(
 //!     program_id: &Address,
 //!     accounts: &[AccountView],

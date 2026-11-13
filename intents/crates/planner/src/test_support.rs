@@ -82,12 +82,13 @@ impl Compiled {
         )
     }
 
-    /// The Token-2022 record, with its builder at `BUILDER`. The sender pays the rent.
+    /// The Token-2022 implementation, with its builder at `BUILDER`. The sender pays the rent.
     pub(crate) fn token_2022_transfer() -> Self {
-        let record = include_str!("../../../definitions/solana.org/implementations/token-2022-transfer/1.0.0.json");
+        let implementation =
+            include_str!("../../../definitions/solana.org/implementations/token-2022-transfer/1.0.0.json");
         let builder = bs58::encode(BUILDER.0).into_string();
         let compiled = Self::compile(
-            &record.replace("2gMFoKF3p5eB2m72ccjncZH8e5agVYbHBH8A29zDMdBm", &builder),
+            &implementation.replace("2gMFoKF3p5eB2m72ccjncZH8e5agVYbHBH8A29zDMdBm", &builder),
             include_str!("../../../fixtures/intents/token-2022-transfer.json"),
         );
 

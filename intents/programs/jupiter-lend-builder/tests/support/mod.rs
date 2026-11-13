@@ -19,9 +19,9 @@ use solana_clock::Clock;
 
 const VAULT_DEPOSIT: &str = include_str!("../../../../definitions/solana.org/interfaces/vault.deposit/1.0.0.json");
 const VAULT_WITHDRAW: &str = include_str!("../../../../definitions/solana.org/interfaces/vault.withdraw/1.0.0.json");
-const DEPOSIT_RECORD: &str =
+const DEPOSIT_IMPLEMENTATION: &str =
     include_str!("../../../../definitions/solana.org/implementations/jupiter-lend-deposit/1.0.0.json");
-const WITHDRAW_RECORD: &str =
+const WITHDRAW_IMPLEMENTATION: &str =
     include_str!("../../../../definitions/solana.org/implementations/jupiter-lend-withdraw/1.0.0.json");
 
 const BUILDER: &[u8] = include_bytes!("../../../target/deploy/jupiter_lend_builder.so");
@@ -170,8 +170,9 @@ pub fn deposit_plan(setup: &Setup, vault: &Address, asset: &Address, amounts: Am
         amounts.floor,
     );
 
-    let documents = Documents::compile(&[VAULT_DEPOSIT], &[DEPOSIT_RECORD], &intent, &setup.wallets.fee_payer.pubkey())
-        .map_err(Failure::Compile)?;
+    let documents =
+        Documents::compile(&[VAULT_DEPOSIT], &[DEPOSIT_IMPLEMENTATION], &intent, &setup.wallets.fee_payer.pubkey())
+            .map_err(Failure::Compile)?;
 
     prepare_measured(&setup.svm, &documents).map_err(Failure::Plan)
 }
@@ -192,7 +193,7 @@ pub fn withdraw_plan(setup: &Setup, amounts: Amounts) -> Result<Measured, Failur
     );
 
     let documents =
-        Documents::compile(&[VAULT_WITHDRAW], &[WITHDRAW_RECORD], &intent, &setup.wallets.fee_payer.pubkey())
+        Documents::compile(&[VAULT_WITHDRAW], &[WITHDRAW_IMPLEMENTATION], &intent, &setup.wallets.fee_payer.pubkey())
             .map_err(Failure::Compile)?;
 
     prepare_measured(&setup.svm, &documents).map_err(Failure::Plan)
@@ -213,7 +214,7 @@ fn prepare_measured(svm: &LiteSVM, documents: &Documents) -> Result<Measured, Pl
                 let fetched = addresses.iter().map(|address| fetch(svm, address)).collect();
                 accounts.insert_fetched(&addresses, fetched);
             }
-            // A builder record makes no remote call.
+            // A builder implementation makes no remote call.
             Step::Call(_) => return Err(sdp_intents_planner::PlanError::OutOfOrder),
             Step::Simulate(simulation) => {
                 let result = simulate(svm, &simulation);

@@ -1,15 +1,15 @@
-//! A builder for Jupiter Lend Earn, the `jupiter-lend-deposit` and `jupiter-lend-withdraw` records
+//! A builder for Jupiter Lend Earn, the `jupiter-lend-deposit` and `jupiter-lend-withdraw` implementations
 //! of `vault.deposit` and `vault.withdraw`. It builds the instructions that `@sdp/jupiter-lend`
 //! builds through `@jup-ag/lend`: `deposit_with_min_amount_out` and `redeem_with_min_amount_out` of
 //! the lending program, after an ATA create when the owner has no token account to receive into.
 //!
-//! - The vault input is the market's `Lending` account. The records derive every other account
+//! - The vault input is the market's `Lending` account. The implementations derive every other account
 //!   from the vault and the asset, so the builder needs one round and asks for no accounts.
-//! - The builder checks that the vault names the accounts that the record derives, and refuses a
+//! - The builder checks that the vault names the accounts that the implementation derives, and refuses a
 //!   precondition that it can read. The lending program checks the rest when the transaction lands.
 //! - The ATA create runs only when the account does not exist. The planner refuses an instruction
 //!   that names the rent payer and creates no account.
-//! - The records cover SPL Token assets, because an ATA seed names the token program.
+//! - The implementations cover SPL Token assets, because an ATA seed names the token program.
 
 #![no_std]
 
@@ -63,7 +63,7 @@ pub mod jupiter_lend_builder {
     }
 }
 
-/// The accounts of one earn market, in the order of the records.
+/// The accounts of one earn market, in the order of the implementations.
 #[derive(Accounts)]
 pub struct Market {
     pub vault: UncheckedAccount,

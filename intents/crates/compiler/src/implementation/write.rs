@@ -51,7 +51,11 @@ impl Build<'_, '_> {
         limits::check(self.sink, "", "bytes in the document", bytes.len(), limits::DOCUMENT_BYTES);
 
         if let Err(error) = Implementation::parse(&bytes) {
-            self.sink.push(Diagnostic::new(Code::Internal, "", format!("the compiled record does not parse: {error}")));
+            self.sink.push(Diagnostic::new(
+                Code::Internal,
+                "",
+                format!("the compiled implementation does not parse: {error}"),
+            ));
         }
 
         self.sink.is_empty().then_some(bytes)

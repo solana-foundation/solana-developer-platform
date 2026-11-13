@@ -46,7 +46,7 @@ impl<'a> Implementation<'a> {
         &self.fixed.implements
     }
 
-    /// The genesis hash of the record's cluster.
+    /// The genesis hash of the implementation's cluster.
     pub fn cluster(&self) -> &'a crate::Address {
         &self.fixed.cluster
     }

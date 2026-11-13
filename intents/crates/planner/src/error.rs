@@ -33,15 +33,15 @@ pub enum PlanError {
     TooManyRounds,
     /// A remote recipe that returns a whole transaction, which prepare cannot plan yet.
     RemoteRecipe,
-    /// The endpoint names this output with another address than the record binds, or leaves out
-    /// an output that the record does not bind.
+    /// The endpoint names this output with another address than the implementation binds, or leaves out
+    /// an output that the implementation does not bind.
     RemoteOutput(u8),
     /// A remote recipe with `verify_intent` needs the assertions, because `verify_intent` cannot
     /// rebuild its instructions.
     RemoteNeedsAssertions,
     /// The provider's transaction breaks a rule of `DESIGN.md`, 4.16, which the text names.
     RemoteTransaction(&'static str),
-    /// A provider signed for an account that the record does not list and the transaction does not
+    /// A provider signed for an account that the implementation does not list and the transaction does not
     /// create.
     ProviderSigner(sdp_intents_spec::Address),
     /// A builder names the rent payer's address itself, such as an owner who pays the rent.
@@ -53,7 +53,7 @@ pub enum PlanError {
     Unavailable(&'static str),
     /// A postcondition or a payer rule does not hold in the simulation of the final transaction.
     CheckFailed(String),
-    /// The records of a plan are for different clusters.
+    /// The implementations of a plan are for different clusters.
     ClustersDiffer,
     /// A document's publisher is not an organization of the registry.
     NotAnOrganization(sdp_intents_spec::Address),
@@ -127,11 +127,11 @@ impl fmt::Display for PlanError {
             Self::NoScratch => f.write_str("the simulation returned no scratch account"),
             Self::TooManyRounds => f.write_str("the builder asked for accounts in more than 4 rounds"),
             Self::RemoteRecipe => f.write_str("remote recipes that return a transaction are not supported yet"),
-            Self::RemoteOutput(output) => write!(f, "the endpoint's output {output} differs from the record, or is missing"),
+            Self::RemoteOutput(output) => write!(f, "the endpoint's output {output} differs from the implementation, or is missing"),
             Self::RemoteTransaction(rule) => write!(f, "the provider's transaction is refused: {rule}"),
             Self::ProviderSigner(address) => write!(
                 f,
-                "the provider signed for {}, which the record does not list and the transaction does not create",
+                "the provider signed for {}, which the implementation does not list and the transaction does not create",
                 crate::render::base58(address)
             ),
             Self::RemoteNeedsAssertions => f.write_str(
@@ -147,7 +147,7 @@ impl fmt::Display for PlanError {
             ),
             Self::CheckFailed(check) => write!(f, "the simulation breaks a guarantee: {check}"),
             Self::UnknownSigner(address) => write!(f, "{} signs, and no role names it", bs58::encode(address.0).into_string()),
-            Self::ClustersDiffer => f.write_str("the records of the plan are for different clusters"),
+            Self::ClustersDiffer => f.write_str("the implementations of the plan are for different clusters"),
             Self::NotAnOrganization(address) => {
                 write!(f, "{} is not an organization of the registry", bs58::encode(address.0).into_string())
             }

@@ -1,4 +1,4 @@
-//! The implementation record. `wire` holds the stored structs, with their decoders beside them in
+//! The implementation. `wire` holds the stored structs, with their decoders beside them in
 //! `account` and `segment`. `view` finds tables in a document without copying them.
 
 mod account;

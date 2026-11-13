@@ -14,7 +14,7 @@ use registry::SegmentLayout;
 use crate::fixture::{DocumentTarget, Organization};
 use crate::svm::{failure, Failure};
 
-/// The accounts of `verify_intent` before the record's.
+/// The accounts of `verify_intent` before the implementation's.
 pub struct VerifyAccounts {
     pub interface_index: Address,
     pub implementation_index: Address,
@@ -72,7 +72,7 @@ impl Published {
     }
 
     /// `verify_intent` for `documents` with no guarded accounts: the payers, the registry's accounts,
-    /// the record's account table, then `extra_accounts`, the accounts of a builder's last round.
+    /// the implementation's account table, then `extra_accounts`, the accounts of a builder's last round.
     /// `builder_roles` holds the builder's role of each account of its instructions, and is empty for
     /// a static recipe.
     pub fn verify_instruction(
@@ -94,9 +94,9 @@ impl Published {
             accounts.interface_version,
             accounts.implementation_version,
         ];
-        let record = record_accounts(svm, documents)?;
-        let bumps = record.bumps;
-        let record = record.addresses;
+        let implementation = implementation_accounts(svm, documents)?;
+        let bumps = implementation.bumps;
+        let implementation = implementation.addresses;
         let readonly = |address: &Address| AccountMeta { address: spec_address(address), role: AccountRole::Readonly };
         let data = anchor_lang::InstructionData::data(&registry::instruction::VerifyIntent {
             intent: &documents.intent,
@@ -109,7 +109,7 @@ impl Published {
 
         Ok(Instruction {
             program: spec_address(&registry::ID),
-            accounts: fixed.iter().chain(&record).chain(extra_accounts).map(readonly).collect(),
+            accounts: fixed.iter().chain(&implementation).chain(extra_accounts).map(readonly).collect(),
             data,
         })
     }
@@ -170,15 +170,15 @@ pub fn around(plan: &Plan, before: Instruction, after: Instruction) -> Plan {
     Plan { transaction: Transaction { instructions, ..plan.transaction.clone() }, ..plan.clone() }
 }
 
-/// The record's accounts as the engine resolves them against `svm`.
-struct RecordAccounts {
-    /// The address of each account of the record's table.
+/// The implementation's accounts as the engine resolves them against `svm`.
+struct ImplementationAccounts {
+    /// The address of each account of the implementation's table.
     addresses: Vec<Address>,
     /// The canonical bump of each program address of the table.
     bumps: Vec<u8>,
 }
 
-fn record_accounts(svm: &LiteSVM, documents: &Documents) -> Result<RecordAccounts, Failure> {
+fn implementation_accounts(svm: &LiteSVM, documents: &Documents) -> Result<ImplementationAccounts, Failure> {
     let payers = Payers { fee: &documents.fee_payer, rent: &documents.fee_payer };
     let mut recipe = Recipe::parse(&documents.interface, &documents.implementation, &documents.intent, payers)
         .map_err(|error| failure(error.to_string()))?;
@@ -202,7 +202,7 @@ fn record_accounts(svm: &LiteSVM, documents: &Documents) -> Result<RecordAccount
         .ok_or_else(|| failure("an account is not resolved".into()))?;
     let bumps = recipe.bumps().map_err(|error| failure(error.to_string()))?.as_slice().to_vec();
 
-    Ok(RecordAccounts { addresses, bumps })
+    Ok(ImplementationAccounts { addresses, bumps })
 }
 
 pub fn spec_address(address: &Address) -> sdp_intents_spec::Address {

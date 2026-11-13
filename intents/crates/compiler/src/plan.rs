@@ -1,6 +1,6 @@
 //! Compiles a plan request: the payers, the cluster, and the priority fee once, then each intent.
 //! Each intent compiles to the binary form of an intent document. `cluster` is a name, such as
-//! `mainnet`, or a genesis hash. It is not stored, and each record must be for it.
+//! `mainnet`, or a genesis hash. It is not stored, and each implementation must be for it.
 
 use sdp_intents_spec::{Address, BaseType, ValueType};
 use serde_json::Value;
@@ -136,20 +136,20 @@ fn read_options(node: &Node<'_>, sink: &mut Sink) -> Option<PlanOptions> {
     Some(PlanOptions { priority_fee_lamports: priority_fee?, output: output? })
 }
 
-/// Each record of the plan must be for the plan's cluster.
+/// Each implementation of the plan must be for the plan's cluster.
 fn check_cluster(cluster: &Address, intents: &[Option<CompiledIntent<'_>>], pointer: &str, sink: &mut Sink) {
     let name = |hash: &Address| sdp_intents_spec::cluster::name(hash).map_or_else(|| bs58_text(hash), str::to_owned);
     let other = intents.iter().flatten().find_map(|intent| {
-        let record = sdp_intents_spec::Implementation::parse(&intent.implementation.bytes).ok()?;
+        let implementation = sdp_intents_spec::Implementation::parse(&intent.implementation.bytes).ok()?;
 
-        (record.cluster() != cluster).then(|| (intent.implementation.id.to_string(), *record.cluster()))
+        (implementation.cluster() != cluster).then(|| (intent.implementation.id.to_string(), *implementation.cluster()))
     });
 
-    if let Some((id, record_cluster)) = other {
+    if let Some((id, implementation_cluster)) = other {
         sink.push(Diagnostic::new(
             Code::InvalidValue,
             pointer,
-            format!("the plan is for {}, and `{id}` is for {}", name(cluster), name(&record_cluster)),
+            format!("the plan is for {}, and `{id}` is for {}", name(cluster), name(&implementation_cluster)),
         ));
     }
 }
@@ -179,9 +179,9 @@ mod tests {
         assert_eq!(plan.intents[1].implementation.id.name, "system-transfer");
     }
 
-    /// A cluster is a name or a genesis hash, and every record must be for it.
+    /// A cluster is a name or a genesis hash, and every implementation must be for it.
     #[test]
-    fn every_record_is_for_the_plan_cluster() {
+    fn every_implementation_is_for_the_plan_cluster() {
         let catalog = full_catalog();
         let named =
             edit(PLAN, "\"cluster\": \"5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d\"", "\"cluster\": \"mainnet\"");

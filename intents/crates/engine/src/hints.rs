@@ -1,5 +1,5 @@
 //! Checks the owner hints of `applies`: the account that a hint names is owned by the program it
-//! names, and its data starts with the discriminator. A hint selects the record, and an intent that
+//! names, and its data starts with the discriminator. A hint selects the implementation, and an intent that
 //! breaks it is refused before any simulation.
 
 use sdp_intents_spec::wire::AppliesV1;
@@ -10,7 +10,7 @@ use crate::resolve::Addresses;
 use crate::value::Context;
 use crate::{Chain, EngineError};
 
-/// A record has at most 4 `applies` checks.
+/// An implementation has at most 4 `applies` checks.
 const MAX_HINTS: usize = 4;
 
 /// The hint accounts whose data the chain does not hold yet.
@@ -95,14 +95,14 @@ mod tests {
     #[test]
     fn a_discriminator_must_start_the_data() {
         let hint = format!(r#"{{ "account": "{{inputs.mint}}", "owner": "{TOKEN_PROGRAM}" }}"#);
-        let record = SPL_TOKEN_TRANSFER.replacen(
+        let implementation = SPL_TOKEN_TRANSFER.replacen(
             &format!("\"owner\": \"{TOKEN_PROGRAM}\"\n    }}"),
             &format!("\"owner\": \"{TOKEN_PROGRAM}\", \"discriminator\": \"0a0b\"\n    }}"),
             1,
         );
-        assert_ne!(record, SPL_TOKEN_TRANSFER, "the hint {hint} is in the record");
+        assert_ne!(implementation, SPL_TOKEN_TRANSFER, "the hint {hint} is in the implementation");
 
-        let documents = Compiled::compile(&record, INTENT_SPL_TRANSFER);
+        let documents = Compiled::compile(&implementation, INTENT_SPL_TRANSFER);
         let mut chain = MapChain::default();
         chain.insert(address(USDC), address(TOKEN_PROGRAM), [&[0x0a, 0x0b][..], &mint_data(6)].concat());
         assert!(documents.recipe().unwrap().resolve(&chain).is_ok());

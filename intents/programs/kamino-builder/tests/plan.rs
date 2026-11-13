@@ -25,7 +25,7 @@ const SHARES_OUT_BELOW_MINIMUM: u32 = 7064;
 fn deposit_documents(wallets: &Wallets, amount: u64, min_shares: u64) -> Result<Documents, String> {
     Documents::compile(
         &[DEPOSIT_INTERFACE],
-        &[DEPOSIT_RECORD],
+        &[DEPOSIT_IMPLEMENTATION],
         &deposit_intent(wallets, amount, min_shares),
         &wallets.fee_payer.pubkey(),
     )
@@ -34,7 +34,7 @@ fn deposit_documents(wallets: &Wallets, amount: u64, min_shares: u64) -> Result<
 fn withdraw_documents(wallets: &Wallets, shares: u64, min_amount: u64) -> Result<Documents, String> {
     Documents::compile(
         &[WITHDRAW_INTERFACE],
-        &[WITHDRAW_RECORD],
+        &[WITHDRAW_IMPLEMENTATION],
         &withdraw_intent(wallets, shares, min_amount),
         &wallets.fee_payer.pubkey(),
     )

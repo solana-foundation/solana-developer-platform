@@ -9,10 +9,10 @@ use crate::pda::{self, ASSOCIATED_TOKEN_PROGRAM, MAX_SEEDS};
 use crate::value::{Bytes, Context};
 use crate::{Chain, EngineError};
 
-/// A record has at most 32 accounts.
+/// An implementation has at most 32 accounts.
 const MAX_ACCOUNTS: usize = 32;
 
-/// The address of each account of a recipe, in record order, and the bump of each program address.
+/// The address of each account of a recipe, in implementation order, and the bump of each program address.
 /// It is about 1 KB, so a program can hold it in one stack frame.
 pub(crate) struct Addresses {
     slots: [Address; MAX_ACCOUNTS],
@@ -101,7 +101,7 @@ impl Derived {
     }
 }
 
-/// A set of account indexes of a record.
+/// A set of account indexes of an implementation.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct AccountSet(u32);
 
@@ -266,7 +266,7 @@ mod tests {
 
     /// The vault's authority is the 32 bytes at offset 8 of the vault, and the deposit goes to the
     /// authority's token account and a PDA of the depositor.
-    fn vault_record() -> String {
+    fn vault_implementation() -> String {
         format!(
             r#"{{
   "spec": "sdp-intents@1.0",
@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn a_has_one_waits_for_one_fetch() {
-        let documents = Compiled::compile(&vault_record(), &vault_intent());
+        let documents = Compiled::compile(&vault_implementation(), &vault_intent());
         let authority = address(TO);
         let mut source = MapChain::default();
         source.insert(address(VAULT), address(VAULT_PROGRAM), vault_data(&authority));
@@ -338,11 +338,11 @@ mod tests {
         let read = format!(
             r#"{{ "read": {{ "account": "{{accounts.mint}}", "owner": "{TOKEN_PROGRAM}", "offset": "44", "length": "1" }} }}"#
         );
-        let record = vault_record().replace(r#"{ "name": "vault","#, mint).replace(
+        let implementation = vault_implementation().replace(r#"{ "name": "vault","#, mint).replace(
             r#"[{ "value": "01", "encoding": "hex" }]"#,
             &format!(r#"[{{ "value": "01", "encoding": "hex" }}, {read}]"#),
         );
-        let documents = Compiled::compile(&record, &vault_intent());
+        let documents = Compiled::compile(&implementation, &vault_intent());
         let mut source = MapChain::default();
         source.insert(address(VAULT), address(VAULT_PROGRAM), vault_data(&address(TO)));
         source.insert(address(USDC), address(TOKEN_PROGRAM), mint_data(6));
@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn a_has_one_refuses_an_account_of_another_owner() {
-        let documents = Compiled::compile(&vault_record(), &vault_intent());
+        let documents = Compiled::compile(&vault_implementation(), &vault_intent());
         let mut recipe = documents.recipe().unwrap();
         let mut chain = MapChain::default();
         chain.insert(address(VAULT), address(TOKEN_PROGRAM), vault_data(&address(TO)));

@@ -124,7 +124,7 @@ impl Documents {
     }
 }
 
-/// The instructions that the record built for the plan's first intent, without `verify_intent` and
+/// The instructions that the implementation built for the plan's first intent, without `verify_intent` and
 /// the Lighthouse instructions around them.
 pub fn built(plan: &Plan) -> &[Instruction] {
     plan.intents.first().and_then(|intent| plan.transaction.instructions.get(intent.span.clone())).unwrap_or_default()

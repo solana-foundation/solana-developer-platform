@@ -2,7 +2,7 @@
 //!
 //! The request holds the interface, the implementation, each input by name, and the payers. An
 //! address is base58, an integer is a decimal string in base units, and absent is `null`. The
-//! answer holds the instructions in the plan's instruction shape, and the outputs that the record
+//! answer holds the instructions in the plan's instruction shape, and the outputs that the implementation
 //! leaves unbound, or a whole transaction that the provider signed, of any version.
 
 use base64::Engine as _;

@@ -62,7 +62,7 @@ pub fn build_transfer<'a: 'v, 'v>(
     Ok(())
 }
 
-/// The record derives the source and the destination, so another account is a caller error.
+/// The implementation derives the source and the destination, so another account is a caller error.
 fn check_address(given: &Address, derived: Option<Address>) -> Result<(), BuildError> {
     if derived.as_ref() != Some(given) {
         return Err(BuildError::WrongAccounts);
