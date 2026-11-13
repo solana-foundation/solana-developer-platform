@@ -1,0 +1,65 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "implementation",
+  "id": "solana.org/jupiter-lend-deposit",
+  "version": "1.0.0",
+  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "implements": "solana.org/vault.deposit@^1",
+  "annotations": { "builder": "The address is a placeholder until jupiter-lend-builder is deployed." },
+  "applies": [
+    { "account": "{inputs.vault}", "owner": "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9", "discriminator": "87c75210f983b6f1" },
+    { "account": "{inputs.asset}", "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" }
+  ],
+  "message": "deposit {inputs.amount} of {inputs.asset} from {inputs.owner} into Jupiter Lend vault {inputs.vault} for at least {inputs.minShares} of {outputs.shareMint}",
+  "recipe": {
+    "kind": "program",
+    "program": "koLiHYTtLE26sbQgv5P51J3ap6m8GLUUMoKtQgLb1Hw",
+    "accounts": [
+      { "name": "vault", "address": "{inputs.vault}" },
+      { "name": "asset", "address": "{inputs.asset}" },
+      { "name": "shareMint", "address": { "pda": { "program": "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9", "seeds": [
+        { "value": "f_token_mint", "encoding": "utf8" },
+        { "value": "{inputs.asset}", "encoding": "address" }
+      ] } } },
+      { "name": "lendingAdmin", "address": { "pda": { "program": "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9", "seeds": [
+        { "value": "lending_admin", "encoding": "utf8" }
+      ] } } },
+      { "name": "tokenReserve", "address": { "pda": { "program": "jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC", "seeds": [
+        { "value": "reserve", "encoding": "utf8" },
+        { "value": "{inputs.asset}", "encoding": "address" }
+      ] } } },
+      { "name": "supplyPosition", "address": { "pda": { "program": "jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC", "seeds": [
+        { "value": "user_supply_position", "encoding": "utf8" },
+        { "value": "{inputs.asset}", "encoding": "address" },
+        { "value": "{inputs.vault}", "encoding": "address" }
+      ] } } },
+      { "name": "rateModel", "address": { "pda": { "program": "jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC", "seeds": [
+        { "value": "rate_model", "encoding": "utf8" },
+        { "value": "{inputs.asset}", "encoding": "address" }
+      ] } } },
+      { "name": "liquidity", "address": { "pda": { "program": "jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC", "seeds": [
+        { "value": "liquidity", "encoding": "utf8" }
+      ] } } },
+      { "name": "liquidityVault", "address": { "ata": { "owner": "{accounts.liquidity}", "mint": "{inputs.asset}", "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" } } },
+      { "name": "rewardsRateModel", "address": { "pda": { "program": "jup7TthsMgcR9Y3L277b8Eo9uboVSmu1utkuXHNUKar", "seeds": [
+        { "value": "lending_rewards_rate_model", "encoding": "utf8" },
+        { "value": "{inputs.asset}", "encoding": "address" }
+      ] } } },
+      { "name": "owner", "address": "{inputs.owner}" },
+      { "name": "ownerAssetAccount", "address": { "ata": { "owner": "{inputs.owner}", "mint": "{inputs.asset}", "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" } } },
+      { "name": "ownerShareAccount", "address": { "ata": { "owner": "{inputs.owner}", "mint": "{accounts.shareMint}", "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" } } }
+    ],
+    "data": [
+      { "value": "3b3ea155eec4ff43", "encoding": "hex" },
+      { "value": "{inputs.amount}", "encoding": "u64le" },
+      { "value": "{inputs.minShares}", "encoding": "u64le" }
+    ]
+  },
+  "postConditions": [
+    { "invokesOnly": [
+        "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9",
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+      ],
+      "message": "only Jupiter Lend and ATA instructions run" }
+  ]
+}
