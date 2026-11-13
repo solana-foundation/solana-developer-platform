@@ -1,4 +1,8 @@
-import { DEFAULT_SDP_AI_LLMS_URL, DEFAULT_SDP_DOCS_URL } from "@sdp/types/site";
+import {
+  DEFAULT_SDP_AI_LLMS_URL,
+  DEFAULT_SDP_DOCS_URL,
+  DEFAULT_SDP_SANDBOX_WEB_URL,
+} from "@sdp/types/site";
 import { SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/clerk-config";
 import { resolveDocsUrl } from "@/lib/docs-url";
 
@@ -39,6 +43,11 @@ export type SignupLink = {
 
 export type HomepageLinks = {
   signup: SignupLink;
+  /**
+   * Where the homepage's sandbox links lead: the account entry itself, or the hosted sandbox's
+   * sign-up when the deployment serves mainnet only (`sandboxOnBeta`).
+   */
+  sandbox: SignupLink;
   signIn: string;
   /** The visitor has a session: `signup` and `signIn` both open the dashboard. */
   signedIn?: boolean;
@@ -80,15 +89,20 @@ function accountEntry({
 export function resolveHomepageLinks({
   signedIn = false,
   openSignup,
+  hostedSandbox = false,
   createAccountLabel,
   joinWaitlistLabel,
   dashboardLabel,
+  trySandboxLabel,
 }: {
   signedIn?: boolean;
   openSignup: boolean;
+  /** The sandbox lives on its own host (the `sandboxOnBeta` flag). */
+  hostedSandbox?: boolean;
   createAccountLabel: string;
   joinWaitlistLabel: string;
   dashboardLabel: string;
+  trySandboxLabel: string;
 }): HomepageLinks {
   let signup: SignupLink;
   const entry = accountEntry({ signedIn, openSignup });
@@ -109,10 +123,18 @@ export function resolveHomepageLinks({
   }
   return {
     signup,
+    sandbox: hostedSandbox
+      ? { href: hostedSandboxSignUpHref(), label: trySandboxLabel, external: true }
+      : signup,
     signIn: signedIn ? DASHBOARD_PATH : SIGN_IN_PATH,
     signedIn,
     docs: resolveDocsUrl(),
     openapi: resolveDocsUrl(OPENAPI_PATH),
     llms: resolveDocsUrl(LLMS_PATH),
   };
+}
+
+/** The hosted sandbox's sign-up form. */
+export function hostedSandboxSignUpHref(): string {
+  return `${DEFAULT_SDP_SANDBOX_WEB_URL}${SIGN_UP_PATH}`;
 }

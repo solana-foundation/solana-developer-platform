@@ -97,6 +97,7 @@ function wrapper({ children }: { children: ReactNode }) {
           privateChannels: false,
           releaseChannel: "experimental",
           ramps: true,
+          sandboxOnBeta: false,
         }}
         serverDashboardCacheScope={{ orgId: "org_test", userId: "user_test" }}
         projects={[]}

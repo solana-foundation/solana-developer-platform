@@ -19,6 +19,7 @@ import { HomepageFooter } from "./homepage-footer";
 
 const links: HomepageLinks = {
   signup: { href: "/sign-up", label: "Create account", external: false },
+  sandbox: { href: "/sign-up", label: "Create account", external: false },
   signIn: "/sign-in",
   docs: "https://docs.example/docs",
   openapi: "https://docs.example/docs/reference/api",

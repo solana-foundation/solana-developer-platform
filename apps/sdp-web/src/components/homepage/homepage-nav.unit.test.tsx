@@ -23,6 +23,7 @@ import { pickGround } from "./nav/use-nav-scroll";
 
 const waitlistLinks: HomepageLinks = {
   signup: { href: "https://example.com/waitlist", label: "Join the waitlist", external: true },
+  sandbox: { href: "https://example.com/waitlist", label: "Join the waitlist", external: true },
   signIn: "/sign-in",
   docs: "https://docs.example/docs",
   openapi: "https://docs.example/docs/reference/api",
@@ -35,6 +36,7 @@ const t = (key: MessageKey, values?: TranslationValues) =>
 const openLinks: HomepageLinks = {
   ...waitlistLinks,
   signup: { href: "/sign-up", label: "Create account", external: false },
+  sandbox: { href: "/sign-up", label: "Create account", external: false },
 };
 
 async function renderNav(links: HomepageLinks) {
@@ -97,6 +99,7 @@ describe("HomepageNav", () => {
     await renderNav({
       ...openLinks,
       signup: { href: "/dashboard", label: "Dashboard", external: false },
+      sandbox: { href: "/dashboard", label: "Dashboard", external: false },
       signIn: "/dashboard",
       signedIn: true,
     });

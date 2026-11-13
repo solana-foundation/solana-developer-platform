@@ -2,16 +2,20 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { parseDashboardPathname, projectHref } from "@/lib/dashboard-project-path";
 import { resolveProjectFromList } from "@/lib/dashboard-project-selection";
+import { MAINNET_ACCESS_PATH, resolveMainnetOnlyLanding } from "@/lib/mainnet-only-landing";
 import { PROJECT_COOKIE_NAME } from "@/lib/project-cookie";
-import { listSdpProjects } from "@/lib/sdp-api";
+import { createOrgSdpApiClient, listSdpProjects } from "@/lib/sdp-api";
 import { normalizeWorkspaceReturnPath, WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
+import { resolveOrganizationId } from "./[projectId]/settings/organization-id";
 
 /**
  * Bare `/dashboard` renders nothing: it lands on the last-used Project while the
  * user can still reach it, else the Organization's Sandbox Project, at the page
  * `return_to` names (inbound links that cannot know the Project, such as the docs' playground
  * links and admin alert emails) or the Project's home. An Organization whose Projects are still being provisioned waits on the
- * workspace loading page, which returns here once they exist.
+ * workspace loading page, which returns here once they exist. On a deployment that serves mainnet
+ * only, an Organization lists no Sandbox: it lands on its Production Project once SDP has turned
+ * mainnet on, else on the mainnet request page.
  *
  * @param props.searchParams - The landing's query; `return_to` is a project-less dashboard path.
  * @returns Never; always redirects.
@@ -27,7 +31,10 @@ export default async function DashboardLandingPage({
     cookies(),
   ]);
   const returnPath = normalizeWorkspaceReturnPath(returnTo);
-  const project = resolveProjectFromList(projects, cookieStore.get(PROJECT_COOKIE_NAME)?.value);
+  const lastUsedProjectId = cookieStore.get(PROJECT_COOKIE_NAME)?.value;
+  const project =
+    resolveProjectFromList(projects, lastUsedProjectId) ??
+    (await resolveMainnetOnlyProject(projects, lastUsedProjectId));
   if (project === null) {
     redirect(`${WORKSPACE_LOADING_PATH}?return_to=${encodeURIComponent(returnPath)}`);
   }
@@ -38,4 +45,27 @@ export default async function DashboardLandingPage({
       `${parseDashboardPathname(returnUrl.pathname).dashboardPath}${returnUrl.search}${returnUrl.hash}`
     )
   );
+}
+
+/**
+ * The Production Project a mainnet-only deployment lands on, or null while the landing should
+ * wait. Redirects an Organization SDP has not turned mainnet on for to the mainnet request page.
+ */
+async function resolveMainnetOnlyProject<TProject extends { id: string; slug: string }>(
+  projects: readonly TProject[],
+  lastUsedProjectId: string | undefined
+): Promise<TProject | null> {
+  const landing = await createOrgSdpApiClient()
+    .then(async (client) =>
+      resolveMainnetOnlyLanding(
+        client,
+        await resolveOrganizationId(client),
+        projects,
+        lastUsedProjectId
+      )
+    )
+    // Not linked yet, or the API is unreachable: the loading page waits and says which.
+    .catch(() => null);
+  if (landing?.kind === "locked") redirect(MAINNET_ACCESS_PATH);
+  return landing?.kind === "project" ? landing.project : null;
 }

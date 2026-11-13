@@ -23,6 +23,7 @@ import { StartSection } from "./start-section";
 
 const openLinks: HomepageLinks = {
   signup: { href: "/sign-up", label: "Create account", external: false },
+  sandbox: { href: "/sign-up", label: "Create account", external: false },
   signIn: "/sign-in",
   docs: "https://docs.example/docs",
   openapi: "https://docs.example/docs/reference/api",
@@ -32,6 +33,7 @@ const openLinks: HomepageLinks = {
 const waitlistLinks: HomepageLinks = {
   ...openLinks,
   signup: { href: "https://waitlist.example/form", label: "Join the waitlist", external: true },
+  sandbox: { href: "https://waitlist.example/form", label: "Join the waitlist", external: true },
 };
 
 async function renderSection(links: HomepageLinks) {

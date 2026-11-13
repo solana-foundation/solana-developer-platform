@@ -8,7 +8,8 @@
       "signIn": "Sign in",
       "dashboard": "Dashboard",
       "readDocs": "Read the docs",
-      "joinWaitlist": "Join the waitlist"
+      "joinWaitlist": "Join the waitlist",
+      "trySandbox": "Try the sandbox"
     },
     "comingSoon": "Coming soon",
     "nav": {

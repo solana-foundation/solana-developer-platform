@@ -48,4 +48,6 @@ export type NavShellProps = {
   signup: SignupLink;
   /** Show only the dashboard link (`signup`), not sign in beside it. */
   signedIn?: boolean;
+  /** A badge beside the wordmark (Beta on the hosted sandbox), or null for none. */
+  brandBadge?: string | null;
 };

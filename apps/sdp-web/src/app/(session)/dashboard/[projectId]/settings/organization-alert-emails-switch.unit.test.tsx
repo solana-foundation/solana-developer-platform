@@ -52,14 +52,14 @@ describe("OrganizationAlertEmailsSwitch", () => {
     const toggle = renderSwitch(true);
 
     expect(toggle.getAttribute("aria-checked")).toBe("true");
-    screen.getByText(/Turning them off is itself emailed to admins/);
+    screen.getByText(/Admins still get an email when alerts are turned off/);
 
     await user.click(toggle);
 
     await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("false"));
     expect(mocks.save).toHaveBeenCalledWith("org_sdp", false, expect.any(String));
     expect(mocks.toast.success).toHaveBeenCalledWith("Alert emails turned off");
-    screen.getByText("No alert emails are sent to admins.");
+    screen.getByText("Admins only get an email when this setting or mainnet access changes.");
     expect(dashboardRouter.replace).toHaveBeenCalledWith(SETTINGS_URL, { scroll: false });
   });
 

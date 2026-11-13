@@ -105,6 +105,7 @@ function WorkspaceFixture({
           privateChannels: false,
           releaseChannel: "experimental",
           ramps: false,
+          sandboxOnBeta: false,
         }}
         serverDashboardCacheScope={scope}
         projects={[SANDBOX_PROJECT, PRODUCTION_PROJECT]}

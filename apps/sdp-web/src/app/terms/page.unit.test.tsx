@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
 
+vi.mock("@/flags", () => ({ betaLabel: async () => false }));
 vi.mock("@/i18n/server", async () => {
   const { getMessages } = await import("@/i18n/messages");
   const { translate } = await import("@/i18n/translate");
