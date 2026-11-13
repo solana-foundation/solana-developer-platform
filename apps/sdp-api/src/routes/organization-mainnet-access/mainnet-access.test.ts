@@ -562,8 +562,8 @@ describe("Organization mainnet access (HOO-2427)", () => {
     }
   });
 
-  it("refuses a member who is not an admin", async () => {
-    expect((await get(memberToken)).status).toBe(403);
+  it("lets a member who is not an admin read where it stands, and refuses the writes", async () => {
+    expect((await get(memberToken)).status).toBe(200);
     expect((await post(SUBMISSION, `Bearer ${memberToken}`)).status).toBe(403);
     expect((await notify(`Bearer ${memberToken}`)).status).toBe(403);
     expect(await storedRow()).toBeNull();
