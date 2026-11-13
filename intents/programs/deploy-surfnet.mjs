@@ -9,7 +9,7 @@
 // `surfnet_setProgramAuthority`, because only that authority creates the registry config. This is
 // for a local surfnet only.
 //
-// The IDL that `cargo run -p idl` writes to `target/idl` goes in beside its program, so that Solana
+// The IDL that `just idl` writes to `target/idl` goes in beside its program, so that Solana
 // Explorer decodes the program's instructions.
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";

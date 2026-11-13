@@ -31,7 +31,7 @@ build-programs:
 # The IDL of each Anchor program, in `programs/target/idl`. `deploy-surfnet.mjs` places each one
 # beside its program, so that Solana Explorer decodes the instructions.
 idl:
-    cd programs && cargo run -q -p idl
+    cd programs && cargo run -q -p sdp-intents-idl
 
 # The verifier as WebAssembly, in `packages/sdp-intents-verifier/wasm`. The playground and the e2e
 # verify with it.

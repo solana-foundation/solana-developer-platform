@@ -1,5 +1,5 @@
 [package]
-name = "idl"
+name = "sdp-intents-idl"
 description = "Writes the IDL of each Anchor program of this workspace to target/idl"
 version.workspace = true
 edition.workspace = true

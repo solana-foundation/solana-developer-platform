@@ -13,7 +13,8 @@ use anchor_lang_idl::build::IdlBuilder;
 use anyhow::{Context, Result};
 
 fn main() -> Result<()> {
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().context("the crate has no parent directory")?;
+    let workspace =
+        Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).context("the crate is not in programs/tools")?;
     let output = workspace.join("target/idl");
     let target_dir = workspace.join("target/idl-build");
     fs::create_dir_all(&output)?;

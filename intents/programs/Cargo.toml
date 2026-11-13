@@ -5,13 +5,13 @@ resolver = "2"
 members = [
     "../crates/builder",
     "../crates/program-testing",
-    "idl",
     "jupiter-lend-builder",
     "kamino-builder",
     "registry",
     "test-builder",
     "test-transfer-hook",
     "token-2022-builder",
+    "tools/idl",
 ]
 
 [workspace.package]

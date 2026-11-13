@@ -1508,15 +1508,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 
 [[package]]
-name = "idl"
-version = "0.1.0"
-dependencies = [
- "anchor-lang-idl",
- "anyhow",
- "serde_json",
-]
-
-[[package]]
 name = "indexmap"
 version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2403,6 +2394,15 @@ dependencies = [
  "sdp-intents-spec",
  "solana-address 2.7.0",
  "solana-sha256-hasher 3.1.0",
+]
+
+[[package]]
+name = "sdp-intents-idl"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang-idl",
+ "anyhow",
+ "serde_json",
 ]
 
 [[package]]
