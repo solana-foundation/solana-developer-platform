@@ -450,7 +450,7 @@ erDiagram
 | :-- | :-- | :-- |
 | `program` | A builder instruction, simulated | The preferred kind. Anything beyond the static language. |
 | `static` | Accounts and instructions, as data | A stopgap for a program with no builder. Only for an operation that the static language covers and that is unlikely to change. |
-| `remote` | `{ "kind": "remote", "url": "…" }` | Offchain search, such as a Jupiter route |
+| `remote` | `{ "kind": "remote", "url": "…", "returns": "instructions" }` | Offchain search, such as a Jupiter route. A provider that must sign returns a whole transaction (4.16). |
 
 Each kind returns outputs and instructions, or a refusal. The service verifies all of them the same
 way.
@@ -1381,8 +1381,10 @@ pub struct VersionIndexV1 {
    and the version entry's `approved` is set. Only the interface's approve authority changes
    either one. The list makes approved implementations discoverable with no `getProgramAccounts`.
 8. `approve_new_versions` is the interface's policy, and defaults to false. When it is true,
-   `publish` marks a new version of an approved implementation as approved. When it is false, each
-   version needs its own approval.
+   `publish` marks a new version of an approved implementation as approved, unless the new version
+   has a worse trust tier (4.16) than the highest approved version. When it is false, each version
+   needs its own approval. Each `VersionEntryV1` records its tier, so `publish` compares them with no
+   other account.
 
 | Instruction | Signer | Effect |
 | :-- | :-- | :-- |
@@ -1781,6 +1783,87 @@ back to the placeholder. A builder that names that address itself, such as an ow
 the rent, then fails the hash. `prepare` refuses such a plan with `RentPayerInRecipe`. A fix marks
 each placeholder account in the builder roles of `verify_intent`, so that only those accounts map
 back.
+
+### 4.15 Async settlement
+
+Some providers take the money now and settle later: an order at the next NAV strike, a
+cross-chain mint, or a redemption that an operator pays. A transaction cannot show the settlement,
+so an interface states what the transaction does, and states that the rest happens later.
+
+| Interface | Shows |
+| :-- | :-- |
+| `vault.requestDeposit` | WisdomTree subscription, Plume mint |
+| `vault.requestWithdrawal` | Hastra par redemption, WisdomTree redemption, Plume standard redemption |
+| `vault.cancelRequest` | Hastra `cancel_redeem`, Plume cancellation |
+
+1. An interface with `"settlement": "async"` is a request. The compiler writes the flag into the
+   binary form, and the message says "settles later, outside this transaction". No UI can show a
+   request as a settled operation, because the signer reads the flag in the message.
+2. A request's postconditions bound what leaves the owner: `outflow` and `noOtherOutflows`. They
+   never promise an inflow that settles later.
+3. `delegates` is a new postcondition: `{ "delegates": { "from": "{inputs.owner}", "mint": "…",
+   "to": "…", "max": "{inputs.shares}" } }`. It is the only authority change that it allows on the
+   owner's accounts of that mint. Hastra's `request_redeem` sets such a delegate. Lighthouse
+   asserts the delegate and the delegated amount of the token account.
+4. A record states where the money goes. WisdomTree's receiving wallet is one standing wallet for
+   each trade type, fund, and currency. The record holds it as a literal and adds "{accounts.wallet}
+   receives {inputs.amount}". A new wallet is a new version, which the approve authority approves.
+   The adapter of 4.16 also reads the wallet from WisdomTree's API, and `prepare` refuses the intent
+   when the two differ. A wallet that WisdomTree moves then fails closed.
+5. The plan returns the request: the request account, or the signature when there is none. Earn's
+   order tracking follows the settlement. The intent system does not.
+6. `vault.claim` waits for a provider whose user claims the settlement. None of these does.
+
+### 4.16 Remote recipes and trust tiers
+
+A remote record names an endpoint that speaks one protocol. The request holds the intent in JSON
+and in binary form, the payers, and the cluster. The answer is one of two forms, and the record's
+`returns` states which:
+
+```json
+{ "kind": "instructions", "instructions": [ … ], "outputs": { … } }
+{ "kind": "transaction", "transaction": "<base64>", "outputs": { … } }
+```
+
+A provider that does not speak the protocol gets a small SDP adapter, such as the Jupiter swap
+wrapper. The adapter holds the provider's credentials. The service and the signer do not trust it:
+they check what it returns.
+
+**Instructions** compose like any other segment. They get the Lighthouse assertions, and
+`verify_intent` runs in remote mode. It cannot rebuild the instructions, because no builder
+exists. It checks the intent, the assertions against the postconditions, and each built
+instruction's program against the record's `invokesOnly`, which a remote record must state.
+
+**Transaction** is for a provider that must sign, such as Plume, whose keeper and a fresh CCTP
+account sign each mint. The provider's signatures cover the whole message, so nothing can change:
+
+1. The plan holds the provider's transaction as its own transaction, with no `verify_intent`, no
+   assertions, and no other intent.
+2. The provider picks the blockhash, so the plan states when it expires. A slow signer, such as a
+   Ledger, can miss it.
+3. The transaction can be v0 with lookup tables. The verifier reads the tables to resolve the
+   accounts.
+4. The record lists each signer that the provider can sign for: a fixed address, or a fresh
+   account that does not exist before the transaction. `prepare` refuses any other signature, and
+   any signature of the owner, a payer, or a signer input.
+5. The fee payer must be the request's `payers.fee`. A sponsor pays only when the provider's API
+   lets the caller pick the fee payer.
+6. `prepare` and the signer's verifier simulate the transaction and check each postcondition, the
+   payer rules, and `invokesOnly`. The client's verifier simulates for this kind only.
+
+| Tier | Recipes | Proves |
+| :-- | :-- | :-- |
+| 1 | `static`, `program` | `verify_intent` rebuilds the instructions onchain, and Lighthouse asserts the postconditions |
+| 2 | `remote` instructions | Lighthouse asserts the postconditions, and `verify_intent` limits the programs. Nothing proves the instructions. |
+| 3 | `remote` transaction | Only a simulation, by the service and by the signer, checks the postconditions |
+
+The message names the tier of each part. `prepare` refuses a tier 3 record unless the intent sets
+`assertions` and `verifyIntent` to false, so the weaker trust is the caller's explicit choice. Its
+part of the message reads `onchain checks: none | checked by: simulation`.
+
+The prototype builds the instructions form first, with the Jupiter wrapper and a `vault.deposit`
+record for Ondo USDY that routes through Jupiter and states `invokesOnly: [Jupiter]`. Hastra's
+deposit and requests follow, then Plume's transaction form.
 
 ## 5. Security
 
