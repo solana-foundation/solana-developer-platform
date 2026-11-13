@@ -110,7 +110,6 @@ describe("ByokCredentialForm", () => {
 
   afterEach(() => {
     cleanup();
-    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -152,8 +151,6 @@ describe("ByokCredentialForm", () => {
   });
 
   it("reloads registration after every rejected Fireblocks attempt and connects with a fresh CSR", async () => {
-    // Only the clock and timeouts are faked; time still passes, so reads and RTL's waits settle.
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
     const csrs = [1, 2, 3].map((attempt) => ({
       id: `fbcsr_attempt_${attempt}`,
       csrPem: `public-csr-${attempt}`,
@@ -182,25 +179,32 @@ describe("ByokCredentialForm", () => {
       }
     );
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const user = userEvent.setup();
     renderForm("fireblocks");
+    // Found by its idle name, so a submit still settling (named "… Loading") is not it.
+    const connect = () => screen.getByRole("button", { name: "Connect and verify" });
+    const generate = () => screen.getByRole("button", { name: "Generate and download CSR" });
+    const signingKeyId = () =>
+      document.querySelector<HTMLInputElement>('input[name="signingKeyId"]')?.value;
 
+    // Each press waits for the state that lets it act: a disabled or busy control drops it.
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) {
-        const generate = await screen.findByRole("button", { name: "Generate and download CSR" });
-        expect(screen.getByRole("button", { name: "Connect and verify" })).toHaveProperty(
-          "disabled",
-          true
-        );
+        // The remounted fields have read again and found no registration.
+        await waitFor(() => {
+          expect(generate()).toHaveProperty("disabled", false);
+          expect(connect()).toHaveProperty("disabled", true);
+        });
         expect(screen.queryByRole("checkbox")).toBeNull();
         expect(screen.getByLabelText("API user ID")).toHaveProperty("value", "");
-        await user.click(generate);
+        await user.click(generate());
       }
-      await screen.findByRole("button", { name: "Download CSR" });
+      await waitFor(() => expect(signingKeyId()).toBe(csrs[attempt].id));
       await user.type(screen.getByLabelText("API user ID"), `api-user-${attempt}`);
       await user.click(screen.getByRole("button", { name: "Load vaults" }));
       await user.click(await screen.findByRole("checkbox", { name: /Treasury/ }));
-      await user.click(screen.getByRole("button", { name: "Connect and verify" }));
+      await waitFor(() => expect(connect()).toHaveProperty("disabled", false));
+      await user.click(connect());
       await waitFor(() => expect(submitPrivyCredentialAction).toHaveBeenCalledTimes(attempt + 1));
       // The submit keeps its words and spins while the check runs.
       expect(
@@ -212,11 +216,6 @@ describe("ByokCredentialForm", () => {
         expect(payload.get("connectionId")).toBe("cconn_test");
         expect(submittedKey(attempt)).not.toBe(submittedKey(attempt - 1));
       }
-      // A person takes longer than SWR's 2s dedupe window between the read and a rejection, so
-      // the remounted fields read the registration again instead of reusing the last answer.
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(2_000);
-      });
       // Finish the parent transition before interacting with the remounted CSR form.
       // The action being called (or the child appearing) does not mean it has settled.
       await act(async () => {

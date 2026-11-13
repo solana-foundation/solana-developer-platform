@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import * as csrActions from "@/app/(session)/dashboard/[projectId]/wallets/setup/fireblocks-csr-actions";
 import { getMessages, type Messages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import {
@@ -15,10 +17,10 @@ import { FireblocksCredentialFields } from "./fireblocks-credential-fields";
 
 const ready = vi.fn();
 const pending = vi.fn();
-function fields(messages: Messages) {
+function fields(messages: Messages, mount = 0) {
   return (
     <I18nProvider locale="en" messages={messages}>
-      <FireblocksCredentialFields onReadyChange={ready} onPendingChange={pending} />
+      <FireblocksCredentialFields key={mount} onReadyChange={ready} onPendingChange={pending} />
     </I18nProvider>
   );
 }
@@ -40,6 +42,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 it("reads the registration once when a route render hands the provider new messages", async () => {
@@ -99,4 +102,42 @@ it("marks a registration that expires while the form is open and withdraws it", 
   expect(ready).toHaveBeenCalledWith(false);
   expect(signingKeyId(container)).toBe("");
   expect(screen.getByRole("button", { name: "Generate and download CSR" })).toBeTruthy();
+});
+
+it("offers a new registration, not the cached one, when the read after a remount fails", async () => {
+  // jsdom has no object URLs; the generated CSR downloads through one.
+  URL.createObjectURL = vi.fn(() => "blob:csr");
+  URL.revokeObjectURL = vi.fn();
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+  vi.spyOn(csrActions, "generateFireblocksCsrAction").mockResolvedValue({
+    status: "success",
+    csr: { ...pendingCsr(86_400_000), id: "fbcsr_generated" },
+  });
+  const read = vi
+    .fn<() => Response>()
+    .mockReturnValueOnce(dashboardDataResponse(200, { csr: pendingCsr(86_400_000) }))
+    .mockReturnValueOnce(dashboardErrorResponse(503, "Upstream unavailable"));
+  stubDashboardFetch(() => read());
+  const view = render(fields(getMessages("en")), { wrapper: FreshSWRCache });
+  await screen.findByRole("button", { name: "Download CSR" });
+  expect(signingKeyId(view.container)).toBe("fbcsr_test");
+
+  // A rejected attempt remounts the fields under the same cache, which still holds that answer.
+  ready.mockClear();
+  view.rerender(fields(getMessages("en"), 1));
+  expect(await screen.findByRole("alert")).toHaveProperty(
+    "textContent",
+    "Could not generate your CSR. Try again."
+  );
+  await waitFor(() => expect(pending).toHaveBeenLastCalledWith(false));
+  const generate = screen.getByRole("button", { name: "Generate and download CSR" });
+  expect(generate).toHaveProperty("disabled", false);
+  expect(signingKeyId(view.container)).toBe("");
+  expect(ready).not.toHaveBeenCalledWith(true);
+  expect(read).toHaveBeenCalledTimes(2);
+
+  await userEvent.setup().click(generate);
+  await screen.findByRole("button", { name: "Download CSR" });
+  expect(signingKeyId(view.container)).toBe("fbcsr_generated");
+  expect(screen.queryByRole("alert")).toBeNull();
 });
