@@ -1,0 +1,20 @@
+{
+  "name": "embedded-yield-quickstart",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Earn's Embedded Yield quickstart: a sandbox deposit from a customer's wallet.",
+  "packageManager": "pnpm@10.16.0",
+  "engines": {
+    "node": ">=20.18.0"
+  },
+  "type": "module",
+  "scripts": {
+    "deposit": "tsx deposit.ts"
+  },
+  "dependencies": {
+    "@solana/kit": "8.6.0"
+  },
+  "devDependencies": {
+    "tsx": "4.23.15"
+  }
+}

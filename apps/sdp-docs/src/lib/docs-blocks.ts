@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { ApiMethod } from "@sdp/api-catalog/reference";
 import { embedSource } from "fumadocs-core/mdx-plugins/stringifier";
-import type { Parent, Root, RootContent } from "mdast";
+import type { Code, Link, Parent, Root, RootContent } from "mdast";
 import remarkGfm from "remark-gfm";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
@@ -403,9 +403,51 @@ function embedGuideExample(
 }
 
 /**
- * Remark plugin for the Fumadocs MDX pipeline; source.config.ts runs it first. On a generated
- * reference page it also lays out what the page shows differently from its Markdown
- * (`referenceNodes`).
+ * A fenced code node as its page shows it. The page writes the canonical API host, and its code
+ * calls this deployment's API.
+ *
+ * @param code - The code node.
+ * @param searchable - Whether search indexes the code: code identifiers are useful Earn queries
+ *   too, and Fumadocs keeps the enclosing heading, so a hit opens the correct stage or example.
+ */
+function showCode(code: Code, searchable: boolean): void {
+  code.value = code.value.replaceAll(canonicalSite.apiUrl, apiUrl);
+  if (searchable) {
+    code.data = {
+      ...code.data,
+      structuredData: { contents: [{ heading: undefined, content: code.value }] },
+    };
+  }
+}
+
+/**
+ * A link to the API as its page shows it: this deployment's, and so is its text when that is the
+ * URL itself. Inline code and prose keep the canonical host their author wrote.
+ */
+function pointLinkAtApi(link: Link): void {
+  if (!link.url.startsWith(canonicalSite.apiUrl)) return;
+  link.url = apiUrl + link.url.slice(canonicalSite.apiUrl.length);
+  for (const child of link.children) {
+    if (child.type === "text") child.value = child.value.replaceAll(canonicalSite.apiUrl, apiUrl);
+  }
+}
+
+/**
+ * A node as its page shows it: fenced code and API links name this deployment's API.
+ *
+ * @param node - Any node of the page.
+ * @param searchable - Whether search indexes the page's code (`showCode`).
+ */
+function showAtDeployment(node: RootContent, searchable: boolean): void {
+  if (node.type === "code") showCode(node, searchable);
+  else if (node.type === "link") pointLinkAtApi(node);
+}
+
+/**
+ * Remark plugin for the Fumadocs MDX pipeline; source.config.ts runs it first. It points every
+ * page's fenced code and API links at this deployment's API (`apiUrl`, from
+ * `NEXT_PUBLIC_SDP_API_URL`) in place of the canonical host the page writes. On a generated reference page it also lays out what the
+ * page shows differently from its Markdown (`referenceNodes`).
  */
 export function remarkDocsBlocks(
   options: { surface?: PublicSurface; examples?: GuideApiExamples } = {}
@@ -418,6 +460,7 @@ export function remarkDocsBlocks(
     const pagePublished = isPagePublished(pageData, where, surface);
     const earnPage = pageData.module === "earn" || EARN_REFERENCE_PAGE.test(where);
     const referencePage = REFERENCE_PAGE.test(where);
+    const searchable = earnPage && pagePublished;
     const walk = (parent: Parent) => {
       parent.children = parent.children.flatMap((child) => {
         const block = blockOf(child, where);
@@ -447,14 +490,7 @@ export function remarkDocsBlocks(
           };
           return [child];
         }
-        if (child.type === "code" && earnPage && pagePublished) {
-          // Code identifiers are useful Earn queries too. Fumadocs keeps the
-          // enclosing heading, so a hit opens the correct stage or example.
-          child.data = {
-            ...child.data,
-            structuredData: { contents: [{ heading: undefined, content: child.value }] },
-          };
-        }
+        showAtDeployment(child, searchable);
         const referenceContent = referencePage ? referenceNodes(child, parent) : undefined;
         if (referenceContent !== undefined) return referenceContent;
         if ("children" in child) walk(child);
@@ -467,9 +503,8 @@ export function remarkDocsBlocks(
 
 /**
  * A generated reference page's node as the page shows it, where the Markdown agents get keeps the
- * node as it is: a field's facts with their separators set apart, a family table's method cell as
- * its badge, and code pointed at this deployment's API (`apiUrl`, from `NEXT_PUBLIC_SDP_API_URL`)
- * instead of the canonical one.
+ * node as it is: a field's facts with their separators set apart, and a family table's method
+ * cell as its badge.
  *
  * @param child - The node.
  * @param parent - The node that holds it.
@@ -485,10 +520,6 @@ function referenceNodes(child: RootContent, parent: Parent): RootContent[] | und
     Object.hasOwn(API_METHOD_NAMES, child.value)
   ) {
     return [methodBadge(child.value)];
-  }
-  if (child.type === "code") {
-    child.value = child.value.replaceAll(canonicalSite.apiUrl, apiUrl);
-    return [child];
   }
   return undefined;
 }

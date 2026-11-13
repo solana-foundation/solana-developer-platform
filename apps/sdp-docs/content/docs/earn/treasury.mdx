@@ -1,0 +1,201 @@
+---
+module: earn
+title: Treasury guide
+description: Earn on your organization's own funds from a custody wallet, with deposits, positions, and withdrawals SDP signs.
+---
+
+Treasury puts your organization's own funds to work from a custody wallet in
+your SDP project. SDP builds each transaction, signs it through the wallet's
+custody provider, and broadcasts it. The wallet holds the shares. Run the
+[Treasury quickstart](/docs/earn/treasury-quickstart) first.
+
+To let your customers earn from their own wallets, use the
+[Embedded Yield guide](/docs/guides/embedded-yield) instead.
+
+## Set up
+
+| You need | Details |
+| --- | --- |
+| A custody wallet | [Create one](/docs/guides/setup-wallets). [`GET /v1/wallets`](/docs/reference/api/wallets/list-wallets) returns its `id` (`cwlt_...`), which Earn calls `custodyWalletId`, and its `publicKey`. |
+| Funds | The strategy's deposit token, in that wallet. SDP pays network fees while the strategy's `feeSponsored` is `true`, though never for a swap-funded deposit; otherwise the wallet also needs SOL. |
+| Grants | `earn.execute` to deposit and withdraw, `wallets.read` to look the wallet up, and `earn.manage` to cancel a withdrawal request. |
+| Wallet access | A key signs only with the wallets in its [wallet scope](/docs/developing-with-sdp/manage-api-keys#wallet-access). Reads cover every custody wallet in the project. |
+
+SDP access authorizes API calls, not investment. For a restricted strategy,
+confirm your organization's eligibility with the provider.
+
+## Deposit
+
+| Step | Request |
+| --- | --- |
+| 1. Choose a strategy | The [catalog](/docs/earn/strategies). |
+| 2. Preview | [`POST /v1/earn/vault-deposit-previews`](/docs/reference/api/earn/create-earn-vault-deposit-preview) with `strategyId` and `amount`. Resolve every `blockingIssues` entry. |
+| 3. Deposit | [`POST /v1/earn/vault-deposits`](/docs/reference/api/earn/create-earn-vault-deposit) with `strategyId`, `custodyWalletId`, and `amount`. |
+
+When the strategy's `depositSlippage` is not null, also send `minSharesOut`,
+computed from the preview as [Slippage floors](/docs/earn/integration-details#slippage-floors)
+shows.
+
+Send a new UUID as the `Idempotency-Key`, and save it with the request body
+before you send. SDP writes the key into the transaction's onchain memo, so
+never put customer or order data in it.
+
+```json title="Response (trimmed)"
+{
+  "data": {
+    "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
+    "movementId": "earn_movement_a6aed3f5-4f89-4dc6-9d4b-0864021bd80d",
+    "status": "submitted",
+    "signature": "3dhkSPLiQZQPXL96fWzMdWJtdbtAffkBKXw2xhsYbV3VNSnYrVAcdx1czsnLsE1ou4SvLecGdSYe4QpAuZdfjJAf",
+    "replayed": false
+  }
+}
+```
+
+Save `movementId` and `positionId`. Never send tokens to a strategy's
+`providerReference`: it identifies the instrument, not a deposit address.
+
+## Track a deposit
+
+| Task | Request | Stop at |
+| --- | --- | --- |
+| Track it | [`GET /v1/earn/vault-deposits/{movementId}`](/docs/reference/api/earn/get-earn-vault-deposit) returns `data.deposit`. | `confirmed` or `failed` |
+| Check finality | [`GET /v1/earn/movements?positionId=...`](/docs/reference/api/earn/list-earn-movements) lists the movement. | `finalized` or `failed` |
+| Recover a lost response | Retry with the same key and body, or [list deposits](/docs/reference/api/earn/list-earn-vault-deposits) with `requestId` set to your `Idempotency-Key`. | |
+
+The deposit record's `pending` means SDP recorded the deposit but has not seen
+it on the network yet, and its `confirmed` covers finality too. The movements
+feed reports `requested`, `submitted`, `confirmed`, and `finalized` separately.
+
+A retry with the same key and body returns the deposit in its current state
+with `replayed: true`. The same key with a different body returns `409`.
+
+## Read positions
+
+[`GET /v1/earn/vault-positions`](/docs/reference/api/earn/list-earn-vault-positions)
+lists your project's custody positions with live `shares`,
+`withdrawableShares`, and `tokenValue`.
+
+- **Show the position you read,** never a requested amount added to an old
+  balance.
+- **Missing live values mean unavailable,** not zero. Read again.
+- **`afterMovementIds`** reads each affected balance at or after the slot those
+  movements confirmed at. `balanceReadContext` echoes the bound.
+
+## Withdraw
+
+Read the position's live `withdrawableShares`, then:
+
+| Step | Request | Body |
+| --- | --- | --- |
+| 1. Choose a route | [`POST /v1/earn/vault-withdrawal-options`](/docs/reference/api/earn/get-earn-vault-withdrawal-options) | `positionId` |
+| 2. Preview | [`POST /v1/earn/vault-withdrawal-previews`](/docs/reference/api/earn/create-earn-vault-withdrawal-preview) | `positionId`, `shares` |
+| 3. Withdraw | [`POST /v1/earn/vault-withdrawals`](/docs/reference/api/earn/create-earn-vault-withdrawal) | `positionId`, `shares`, and `minAmountOut` when required |
+
+`minAmountOut` is required when the strategy's `withdrawalSlippage` is not
+null. Save that policy when you deposit: a delisted strategy stays
+withdrawable, so never look it up in today's catalog.
+
+`withdraw` takes the position you saved and a share amount. It imports
+`floor.ts` from [Slippage floors](/docs/earn/integration-details#slippage-floors):
+
+```typescript title="withdraw.ts"
+import { randomUUID } from "node:crypto";
+import { floorForTolerance } from "./floor";
+
+const api = "https://api.solana.com/v1/earn";
+const headers = {
+  Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+  "Content-Type": "application/json",
+};
+
+/** Returns the response's `data`, or throws the API's error. */
+async function data(response: Response) {
+  const body = await response.json();
+  if (!response.ok) throw new Error(`${body.error.code}: ${body.error.message}`);
+  return body.data;
+}
+
+const post = (path: string, body: object, extraHeaders = {}) =>
+  fetch(`${api}${path}`, {
+    method: "POST",
+    headers: { ...headers, ...extraHeaders },
+    body: JSON.stringify(body),
+  }).then(data);
+
+type SavedPosition = {
+  positionId: string;
+  withdrawalSlippage: { defaultToleranceBps: number } | null;
+};
+
+/** Withdraws `shares` from a saved custody position. SDP signs. */
+export async function withdraw(saved: SavedPosition, shares: string) {
+  const { positionId } = saved;
+
+  // An instant route pays out in the same transaction.
+  const options = await post("/vault-withdrawal-options", { positionId });
+  if (!options.instant) throw new Error("No instant route: create a withdrawal request");
+
+  const preview = await post("/vault-withdrawal-previews", { positionId, shares });
+  if (preview.blockingIssues.length > 0) {
+    throw new Error(`Preview blocked: ${JSON.stringify(preview.blockingIssues)}`);
+  }
+
+  // Send a floor only when the saved policy takes one. An exit never needs the catalog.
+  const policy = saved.withdrawalSlippage;
+  const minAmountOut = policy
+    ? floorForTolerance(preview.assetsOut, preview.assetDecimals, policy.defaultToleranceBps)
+    : undefined;
+
+  // In production, save the key with the body before you send.
+  const { withdrawal } = await post(
+    "/vault-withdrawals",
+    { positionId, shares, minAmountOut },
+    { "Idempotency-Key": randomUUID() },
+  );
+  return withdrawal; // The payout returns to the same custody wallet.
+}
+```
+
+Track the withdrawal with
+[`GET /v1/earn/vault-withdrawals/{movementId}`](/docs/reference/api/earn/get-earn-vault-withdrawal)
+until `finalized` or `failed`. Its `shares` is what you asked to withdraw; the
+payout is `tokenAmount` on the
+[movements feed](/docs/reference/api/earn/list-earn-movements).
+
+## Withdrawals that pay out later
+
+When the live options offer a solver queue or an operator redemption, create a
+withdrawal request. [Withdraw funds](/docs/earn/withdrawals#asynchronous-withdrawals)
+explains each route's terms, timing, and statuses: they are the same for a
+custody wallet.
+
+| Step | Request |
+| --- | --- |
+| Preview | [`POST /v1/earn/vault-queued-withdrawal-previews`](/docs/reference/api/earn/create-earn-vault-queued-withdrawal-preview) |
+| Create | [`POST /v1/earn/vault-withdrawal-requests`](/docs/reference/api/earn/create-earn-vault-withdrawal-request), with an `Idempotency-Key` |
+| Track | [`GET /v1/earn/vault-withdrawal-requests/{withdrawalRequestId}`](/docs/reference/api/earn/get-earn-vault-withdrawal-request) |
+| Restore | [`GET /v1/earn/vault-withdrawal-requests?settled=false`](/docs/reference/api/earn/list-earn-vault-withdrawal-requests), every page |
+| Cancel | [`POST /v1/earn/vault-withdrawal-requests/{withdrawalRequestId}/cancel`](/docs/reference/api/earn/cancel-earn-vault-withdrawal-request), with `earn.manage` and a new `Idempotency-Key` |
+
+Only `fulfilled`, `cancelled`, and `failed` are final, and only `fulfilled`
+pays out. Keep tracking a `closedOrUnknown` request.
+
+Cancel a solver queue request only at `expiredCancelable`. An operator
+redemption can be canceled while `pending` when its live terms allow it. A
+fulfillment can race the cancellation, so refresh first and keep tracking. A
+canceled solver request returns the escrowed shares; a canceled operator
+redemption leaves the intermediate token instead.
+
+## Errors
+
+| Status | Meaning | Do this |
+| --- | --- | --- |
+| `400` | The `Idempotency-Key` header is missing, or the body carries `requestId`. | Send the key in the header only. |
+| `403` `wallet_out_of_scope` | The key's wallet scope does not include the wallet. | Add the wallet to the key, or use another key. |
+| `403` `provider_not_entitled` | SDP has not activated the strategy's provider for your organization. | Ask your SDP contact. |
+| `404` | The wallet, position, or movement is not in the key's project. | Check the ID and the project. |
+| `409` | The idempotency key was already used with a different body. | Use a new key for a new operation. |
+
+For lost responses and `503`, follow
+[Retry safely](/docs/earn/integration-details#retry-safely).

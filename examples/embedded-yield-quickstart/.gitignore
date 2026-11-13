@@ -1,0 +1,6 @@
+node_modules
+
+# The sandbox keypair and the responses deposit.sh saves. Never commit a keypair.
+test-wallet.json
+build.json
+deposit.json

@@ -484,6 +484,29 @@
         "**/packages/sdp-ui/**/*.tsx"
       ],
       "plugins": ["./.biome-plugins/one-design.grit"]
+    },
+    {
+      "includes": [
+        "**/examples/embedded-yield-quickstart/deposit.ts",
+        "**/examples/embedded-yield-quickstart/sign.mjs",
+        "**/examples/treasury-quickstart/deposit.mts"
+      ],
+      "formatter": {
+        "enabled": false
+      },
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnresolvedImports": "off"
+          },
+          "security": {
+            "noSecrets": "off"
+          },
+          "suspicious": {
+            "noImplicitAnyLet": "off"
+          }
+        }
+      }
     }
   ],
   "files": {

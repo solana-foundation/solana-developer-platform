@@ -2299,6 +2299,266 @@
               }
             }
           }
+        },
+        {
+          "name": "List Treasury movements",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/earn/movements",
+            "description": "Lists your project's recorded Treasury movements, newest first, one page at a time: custody-wallet deposits and withdrawals, plus any provider-program movements. Amounts use each row's `denomination`, so never sum rows of different tokens or mix them with USD. A withdrawal's payout is `tokenAmount`, set once it is final. A customer wallet's movements have their own endpoint. History stays available after a provider is disabled."
+          }
+        },
+        {
+          "name": "List custody deposits",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/earn/vault-deposits",
+            "description": "Lists your project's custody deposits, newest first, one page at a time. Filter by `requestId` with the original Idempotency-Key to recover a deposit whose response you lost, or by `settled=false` to restore the deposits still being tracked."
+          }
+        },
+        {
+          "name": "Deposit from a custody wallet",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey.createEarnVaultDeposit}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/earn/vault-deposits",
+            "description": "Builds, signs and broadcasts a deposit from a custody wallet your API key may sign with. SDP signs through the wallet's custody provider, so there is no transaction for you to sign. Preview first when the strategy's `depositSlippage` is not null, and send `minSharesOut`. A swap-funded deposit is one atomic transaction: when it cannot fit, the request is refused without sending, so convert the funds first or deposit the strategy's own token. A new intentional operation needs a new Idempotency-Key, even with identical terms. Retrying an uncertain operation must reuse its key and exact payload.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"strategyId\": \"earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e\",\n  \"custodyWalletId\": \"cwlt_5d0c2c0e-8f3a-4c59-9b1e-2a7f4e6d8c31\",\n  \"amount\": \"25\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get a custody deposit",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/earn/vault-deposits/{{movementId}}",
+            "description": "Gets one custody deposit and refreshes its onchain status when it can. `pending` means recorded but not yet seen on the network, and `confirmed` covers both confirmation and finality: read the movements feed for `finalized`. For a provider-order deposit, `confirmed` does not prove the shares arrived; the `settled=false` list keeps it until the provider completes it."
+          }
+        },
+        {
+          "name": "List custody positions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/earn/vault-positions",
+            "description": "Lists your project's custody positions with live balances, one page at a time. After a deposit or withdrawal, pass `afterMovementIds` to read each affected balance at or after the slot it confirmed at; `balanceReadContext` echoes the bound. Live values are left out, never set to zero, when the provider read is unavailable or not fresh enough."
+          }
+        },
+        {
+          "name": "List custody withdrawals",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/earn/vault-withdrawals",
+            "description": "Lists your project's custody withdrawals, newest first, one page at a time. Filter by `requestId` with the original Idempotency-Key after a lost response, or by `settled=false` to restore the withdrawals still being tracked."
+          }
+        },
+        {
+          "name": "Withdraw from a custody position",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey.createEarnVaultWithdrawal}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/earn/vault-withdrawals",
+            "description": "Redeems a position's shares and pays the deposit token to the custody wallet that owns them. SDP builds and signs the withdrawal. List the withdrawal options first to choose a route, and preview to set `minAmountOut` when the strategy's `withdrawalSlippage` is not null. A strategy that stopped taking deposits stays withdrawable. A provider-order withdrawal finishes only when the provider completes the payout. A new intentional operation needs a new Idempotency-Key, even with identical terms. Retrying an uncertain operation must reuse its key and exact payload.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"positionId\": \"earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b\",\n  \"shares\": \"10\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get a custody withdrawal",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/earn/vault-withdrawals/{{movementId}}",
+            "description": "Gets one recorded custody withdrawal and refreshes its onchain status when it can. An atomic withdrawal can show as done at `confirmed`; a provider-order withdrawal stays pending until the provider completes it. `shares` is the requested share quantity, not the payout; the movements feed reports `tokenAmount` once SDP observes a finalized payout."
+          }
+        },
+        {
+          "name": "Preview a custody withdrawal",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/earn/vault-withdrawal-previews",
+            "description": "Quotes the deposit-token payout for a custody position's shares, live. Derive `minAmountOut` from `assetsOut` minus your tolerance, rounded down to `assetDecimals`. Read-only and safe to retry. A provider without exit quotes returns 501; a provider-order route with no slippage policy needs no preview.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"positionId\": \"earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b\",\n  \"shares\": \"10\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "List custody withdrawal options",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/earn/vault-withdrawal-options",
+            "description": "Lists the withdrawal routes a custody position supports right now, from live provider state: instant, provider order, solver queue, or operator redemption. Call it when you start a withdrawal and choose among the routes it returns. Never infer a route from `liquidityTerm`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"positionId\": \"earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Preview a custody withdrawal request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/earn/vault-queued-withdrawal-previews",
+            "description": "Quotes a solver queue request's payout and timing, or an operator redemption's intermediate-token conversion and expected par payout. Read the live withdrawal options first, and resolve every `blockingIssues` entry before you create the request. Nothing moves.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"positionId\": \"earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc\",\n  \"mechanism\": \"solverQueue\",\n  \"shares\": \"15\",\n  \"discountBps\": 10,\n  \"deadlineSeconds\": 60\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "List custody withdrawal requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/earn/vault-withdrawal-requests",
+            "description": "Lists your project's custody withdrawal requests, one page at a time. Restore open requests with `settled=false` and page until `hasMore` is false. A `closedOrUnknown` request stays open until provider evidence resolves it."
+          }
+        },
+        {
+          "name": "Create a custody withdrawal request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey.createEarnVaultWithdrawalRequest}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/earn/vault-withdrawal-requests",
+            "description": "Signs and submits a withdrawal request that pays out later. A solver queue escrows the shares; an operator redemption converts them into the provider's intermediate token, or delegates intermediate the wallet already holds. The request transaction is not a payout: track `withdrawalRequestId` until `fulfilled`, `cancelled` or `failed`. A new intentional operation needs a new Idempotency-Key, even with identical terms. Retrying an uncertain operation must reuse its key and exact payload.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"positionId\": \"earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc\",\n  \"mechanism\": \"solverQueue\",\n  \"shares\": \"15\",\n  \"discountBps\": 10,\n  \"deadlineSeconds\": 60\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get a custody withdrawal request",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/earn/vault-withdrawal-requests/{{withdrawalRequestId}}",
+            "description": "Gets one custody withdrawal request as SDP last observed it. Only `fulfilled`, `cancelled` and `failed` are final. A finalized request transaction does not prove a payout: keep polling a `closedOrUnknown` request until its outcome is known."
+          }
+        },
+        {
+          "name": "Cancel a custody withdrawal request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey.cancelEarnVaultWithdrawalRequest}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/earn/vault-withdrawal-requests/{{withdrawalRequestId}}/cancel",
+            "description": "Signs and submits a cancellation for a cancelable custody withdrawal request. It needs `earn.manage` and a key that may sign with the custody wallet. A solver queue request returns its escrowed shares, and only after its deadline; an operator redemption returns the intermediate token, not the original shares. Cancellation stays available without production access and while Earn is disabled; a suspended organization still cannot authenticate. A fulfillment can race the cancellation, so keep tracking the returned request. A new intentional operation needs a new Idempotency-Key, even with identical terms. Retrying an uncertain operation must reuse its key and exact payload.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
         }
       ]
     }

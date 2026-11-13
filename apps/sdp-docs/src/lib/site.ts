@@ -81,7 +81,8 @@ function buildSiteUrls(docsUrl: string, apiUrl: string) {
  * Canonical production URLs for committed artifacts (llms.txt, llms-full.txt).
  * Always built from the @sdp/types defaults so a local or staging
  * NEXT_PUBLIC_SDP_DOCS_URL/NEXT_PUBLIC_SDP_API_URL never leaks into files
- * that get committed and served from every deployment.
+ * that get committed. A deployment swaps in its own when it serves them
+ * (deployment-api.ts).
  */
 export const canonicalSite = buildSiteUrls(DEFAULT_SDP_DOCS_URL, DEFAULT_SDP_API_URL);
 

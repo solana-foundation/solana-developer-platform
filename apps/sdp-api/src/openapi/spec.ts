@@ -61,7 +61,7 @@ import {
 import routeActionsJson from "./route-actions.generated.json";
 
 const EARN_TAG_DESCRIPTION =
-  "Strategy reads, previews, withdrawal-route discovery, unsigned builds, submission, queued actions, and tenant tracking. Availability follows the deployment's release channel.";
+  "Yield strategies, from a customer's wallet (Embedded Yield) or your custody wallet (Treasury): strategy reads, previews, deposits, withdrawals, withdrawal requests, and tracking. Availability follows the deployment's release channel.";
 
 const OPENAPI_TAG = {
   HEALTH: { name: "Health", description: "Service health and readiness endpoints." },

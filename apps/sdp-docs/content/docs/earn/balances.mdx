@@ -5,22 +5,42 @@ description: Show each customer's live positions, movement history, and exact ea
 ---
 
 Read balances from live positions and history from recorded movements. Each
-per-wallet read takes the customer's wallet as `ownerAddress`, so your
-backend decides which wallet a signed-in customer may see. The examples read
-it from `OWNER_ADDRESS`, as in [Deposit funds](/docs/earn/deposits#before-you-begin).
+per-customer read takes that customer's wallet as `ownerAddress`, so your
+backend decides which wallet a signed-in customer may see. For custody
+wallets, see [Treasury positions](/docs/earn/treasury#read-positions).
 
-Set `SDP_API_URL` and `SDP_API_KEY` as shown in the
-[Quickstart](/docs/earn/quickstart#before-you-begin).
+| Read | Request | Scope |
+| --- | --- | --- |
+| Positions | [`GET /v1/earn/external-wallet/positions`](/docs/reference/api/earn/list-earn-external-wallet-positions) | One wallet |
+| Movements | [`GET /v1/earn/external-wallet/movements`](/docs/reference/api/earn/list-earn-external-wallet-movements) | One wallet |
+| Earnings | [`GET /v1/earn/external-wallet/earnings`](/docs/reference/api/earn/get-earn-external-wallet-earnings) | One wallet |
+| Position totals | [`GET /v1/earn/external-wallet/positions/summary`](/docs/reference/api/earn/get-earn-external-wallet-position-summary) | Every wallet in your project |
 
 ## Positions
 
-[`GET /v1/earn/external-wallet/positions`](/docs/reference/api/earn/list-earn-external-wallet-positions)
-returns the wallet's live positions.
-
 ```bash title="Terminal"
-curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/positions" \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  --data-urlencode "ownerAddress=$OWNER_ADDRESS"
+curl -sS "https://api.solana.com/v1/earn/external-wallet/positions?ownerAddress=$WALLET" \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
+```json title="Response (trimmed)"
+{
+  "data": {
+    "ownerAddress": "Af89Mkuvo6AcLDbs7Fxs1FPsnnbD9KrY9NfmaFXHqmPo",
+    "positions": [
+      {
+        "id": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
+        "label": "Kamino Vault USDC",
+        "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "shares": "25",
+        "withdrawableShares": "25",
+        "tokenValue": "25"
+      }
+    ],
+    "hasMore": false,
+    "nextCursor": null
+  }
+}
 ```
 
 | Field | Show it as |
@@ -37,29 +57,26 @@ same position.
 
 - **A missing live value is unavailable.** When the provider read fails,
   `shares`, `withdrawableShares`, and `tokenValue` are left out. Show
-  "Unavailable" and disable withdrawals until a fresh read succeeds. Never
-  show zero or an old quote.
-- **A wallet with no positions returns an empty list,** not `404`. A fully
-  withdrawn position drops out of the list.
-- **An open withdrawal request holds shares outside the position.** They
-  leave `shares` and `tokenValue` until the request pays out or is canceled,
-  so show its `quotedAssets` as an expected payout.
-- **`parIntermediate`** appears while the wallet holds an operator
-  redemption's intermediate token outside an open request. It keeps the
-  position open and counts toward earnings' `currentValue`. See
-  [Operator redemptions](/docs/earn/withdrawals#operator-redemptions).
+  "Unavailable" and disable withdrawals until a read succeeds. Never show zero
+  or an old quote.
+- **No positions is an empty list,** not `404`. A fully withdrawn position
+  drops out.
+- **An open withdrawal request holds shares outside the position** until it
+  pays out or is canceled. Show its `quotedAssets` as an expected payout.
+- **`parIntermediate`** appears while the wallet holds an
+  [operator redemption](/docs/earn/withdrawals#asynchronous-withdrawals)'s
+  intermediate token outside an open request. It keeps the position open and
+  counts toward earnings' `currentValue`.
 
 ## Movements
 
-Each deposit and withdrawal is a movement. Read one with
-[`GET /v1/earn/external-wallet/movements/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement),
-or list a wallet's history, newest first, with
-[`GET /v1/earn/external-wallet/movements`](/docs/reference/api/earn/list-earn-external-wallet-movements).
+Each deposit and withdrawal is a movement. List a wallet's history, newest
+first, or read one by
+[its ID](/docs/reference/api/earn/get-earn-external-wallet-movement).
 
 ```bash title="Terminal"
-curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/movements" \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  --data-urlencode "ownerAddress=$OWNER_ADDRESS"
+curl -sS "https://api.solana.com/v1/earn/external-wallet/movements?ownerAddress=$WALLET" \
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```json title="Response (trimmed)"
@@ -89,21 +106,16 @@ curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/externa
 
 Show `tokenAmount` in `tokenMint` units for both directions. On a withdrawal,
 `amount` is the share quantity, not the payout, and `tokenAmount` stays null
-until SDP observes the payout. `confirmedAt` is when the network confirmed
-the movement, and `settledAt` is when it finalized. Label requested amounts
-and expected queue payouts as such.
-[How a movement settles](/docs/earn/concepts#how-a-movement-settles) explains
-each status and `settlement`.
+until SDP observes the payout. Label requested amounts and expected queue
+payouts as such. `confirmedAt` is when the network confirmed the movement, and
+`settledAt` is when it finalized; see
+[How a movement settles](/docs/earn/concepts#how-a-movement-settles).
 
 ## Earnings
 
-[`GET /v1/earn/external-wallet/earnings`](/docs/reference/api/earn/get-earn-external-wallet-earnings)
-returns the wallet's balance and earnings for each deposit token.
-
 ```bash title="Terminal"
-curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/earnings" \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  --data-urlencode "ownerAddress=$OWNER_ADDRESS"
+curl -sS "https://api.solana.com/v1/earn/external-wallet/earnings?ownerAddress=$WALLET" \
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```json title="Response (trimmed)"
@@ -130,8 +142,8 @@ curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/externa
 `currentValue` is the sum of the positions' `tokenValue`, plus any
 intermediate tokens. `earned` is
 `currentValue + totalWithdrawn - totalDeposited`, and it appears only when it
-is exact. It can be negative: right after a deposit, the strategy's share
-rounding can leave it slightly below zero. When it is left out,
+is exact. It can be slightly negative right after a deposit, from the
+strategy's share rounding. When it is left out, show a dash, never `$0`;
 `earnedUnavailableReason` says why:
 
 | Reason | Meaning |
@@ -141,8 +153,6 @@ rounding can leave it slightly below zero. When it is left out,
 | `withdrawals_pending` | An open withdrawal request holds shares that have not paid out yet. |
 | `deposits_not_valued` | SDP did not observe a finalized deposit's amount. |
 | `withdrawals_not_valued` | SDP did not observe a finalized withdrawal's payout. |
-
-Show a dash, never `$0`, while `earned` is missing. Three limits apply:
 
 - **Only held positions count.** A fully withdrawn position drops out of
   earnings but stays in the movement history.
@@ -154,21 +164,18 @@ Show a dash, never `$0`, while `earned` is missing. Three limits apply:
 
 ## Position totals
 
-[`GET /v1/earn/external-wallet/positions/summary`](/docs/reference/api/earn/get-earn-external-wallet-position-summary)
-returns live totals across every customer wallet in your project, by token and
-by strategy. It takes no `ownerAddress`.
+The summary returns live totals across every customer wallet in your project,
+by token and by strategy. It takes no `ownerAddress`.
 
 ```bash title="Terminal"
-curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/positions/summary" \
+curl -sS https://api.solana.com/v1/earn/external-wallet/positions/summary \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 Wallet addresses are personal data, so they are left out unless you pass
 `includeOwnerAddresses=true`. Add `includePositions=true` to also get each
-wallet's positions; it requires the address opt-in, or the request returns
-`400`.
-
-Never send this summary, or your API key, to a customer's browser.
+wallet's positions; without the address opt-in it returns `400`. Never send
+this summary, or your API key, to a customer's browser.
 
 ## Paginate every list
 

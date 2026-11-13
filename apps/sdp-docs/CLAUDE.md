@@ -119,7 +119,10 @@ The shared MDX mappings use `CodeExample`, `DocsCodeBlockTabs`, `DocsTabs` and
 has one frame and one header with its language and Copy button. Alternative
 languages use a dropdown; a single language uses a static label. Workflow steps
 and HTTP response statuses remain tabs. A panel with prose or several blocks
-keeps each block's own header. Do not nest another code frame or copy control.
+keeps each block's own header, and then every panel of its group nests a frame
+per block. Keep a language tab to one code block and no prose so the group stays
+one frame: put shared prose and shared commands outside the tabs. Do not nest
+another code frame or copy control.
 
 Keep the Shiki `data-language` transformer in `source.config.ts`: the shared
 components identify server-rendered code through that metadata and its Shiki
@@ -342,7 +345,8 @@ keep Swagger UI for their own release channel.
   component needs both forms. `check:links` accepts a page's `.md`, and
   `generate-ai-resources.ts` reads a family folder's index as its first page
   and names a group's section after its family (`Payments: Transfers`).
-- On a reference page, `remarkDocsBlocks` sets each `·` between a field's facts in a `.launch-api-separator` span so the dots get room, turns a family table's method cells into `.launch-api-method` badges (the Markdown keeps the code span), and points the code at this deployment's API: it swaps `canonicalSite.apiUrl` for `apiUrl` (`src/lib/site.ts`, from `NEXT_PUBLIC_SDP_API_URL`, which the Docker image fills in at start). On Vercel the variable needs setting per environment, like `SDP_RELEASE_CHANNEL`; a deployment without it shows the canonical host. The MDX, the `.md` route and the llms files keep the plain text and the canonical host.
+- On a reference page, `remarkDocsBlocks` sets each `·` between a field's facts in a `.launch-api-separator` span so the dots get room and turns a family table's method cells into `.launch-api-method` badges (the Markdown keeps the code span).
+- Every page writes the canonical API host (`https://api.solana.com`) and shows this deployment's: `remarkDocsBlocks` swaps `canonicalSite.apiUrl` for `apiUrl` (`src/lib/site.ts`, from `NEXT_PUBLIC_SDP_API_URL`, which the Docker image fills in at start) in fenced code and in links to the API, on guides and reference pages alike. The `.md` route does the same to the Markdown it serves (`pointAtApi` in `src/lib/deployment-api.ts`), so Copy page matches the page. The llms routes (`/docs/ai/llms.txt`, `/docs/ai/llms-full.txt`) serve the generated files through `llmsForDeployment`, which also swaps the canonical docs and skill URLs for this deployment's (`NEXT_PUBLIC_SDP_DOCS_URL`), so an agent on beta is sent to beta's pages and API. Never write a placeholder host or ask the reader to set one. On Vercel the variables need setting per environment, like `SDP_RELEASE_CHANNEL`; a deployment without them serves the canonical hosts. Inline code and prose keep the host as written. The committed MDX and `public/llms*.txt` always hold the canonical URLs, whatever the environment that generated them (`scripts/deployment-api.test.ts`).
 - On an operation page, `apiReference: true` makes the page full width with no table of contents and scopes the `.is-api-reference` styles in `globals.css`, and `icon: method:<METHOD>` puts its method beside it in the sidebar (`src/lib/source.ts`). Each sample is a box whose code scrolls inside it. From 1280px its `<ApiPanel>` (the samples and example responses) sits beside the body; on a window at least 750px tall it stays in view, sized to the window, and never scrolls itself: the last box (the example responses) takes the height left, which 750px keeps at 10 lines or more. Below, it follows the body.
 
 Reference > Conventions (`content/docs/reference/conventions/`) holds the rules every route shares (errors, pagination, rate limits, versioning) and links the authentication, environments and idempotency guides; the API Reference index links it. It is written by hand, apart from `<RateLimitTable />`, names no module, and lives outside `reference/api/`, which `generate:api` rewrites.
@@ -355,15 +359,50 @@ the same filtered page map.
 ### Earn docs
 
 Earn uses the same `module: earn` frontmatter and release-channel rules as
-every other module. Its guides live in `content/docs/earn`, with Embedded
-Yield in `content/docs/guides/embedded-yield.mdx`. The public API reference,
+every other module. Its guides live in `content/docs/earn`, with the Embedded
+Yield guide in `content/docs/guides/embedded-yield.mdx`. The public API reference,
 Postman, playground and AI resources regenerate from the channel's public
 OpenAPI document. No branch or deployment-preview override admits content.
 
-The Treasury and provider-integration guides remain under
-`content/unpublished/earn` because they describe internal operations. Treasury, Programs and provider administration
-stay outside the pinned public API contract. A change to that contract needs
-security review; publication follows module maturity.
+Earn has two paths, and every page says which it covers. Embedded Yield is a
+customer's own wallet: build, sign, submit (`/v1/earn/external-wallet/*`).
+Treasury is the organization's custody wallet, which SDP signs for
+(`/v1/earn/vault-*`). The sidebar gives each its own section, quickstart first,
+then the pages both share (`earn/meta.json`). The landing page compares the two
+in one table; keep that table the only place that does, and keep the two guides'
+titles, descriptions and intros parallel. Titles name their path
+("Embedded Yield quickstart", "Treasury quickstart") because `llms.txt` and
+search list pages without the sidebar's section labels.
+
+Each quickstart runs in TypeScript (the default tab) and cURL: three requests
+and one signature for Embedded Yield, two requests and no signature for
+Treasury. Keep them that small: no helper modules to copy, one
+code block per tab, the canonical API host in every sample, and the one setup
+gate (provider activation) stated with its exact error. A sample that runs must be self-contained on its page;
+`scripts/earn-guide-examples.test.ts` runs both quickstarts, Withdraw funds'
+`withdraw.ts` and the Treasury guide's `withdraw.ts` against a fake API, and
+checks the cURL and TypeScript tabs call the same endpoints. The landing page and How Earn works
+answer what a partner asks first: standalone use, where funds go, one key for
+many customer wallets, what it costs, and what a wallet's policy must allow.
+State only what the code or the API response shows; fees and eligibility
+wording there is a product commitment, so change it with product sign-off.
+
+Each quickstart has a folder of its code to clone and run, which its Next steps
+link: `examples/embedded-yield-quickstart` and `examples/treasury-quickstart`.
+The TypeScript file (and `sign.mjs`) is the page's blocks verbatim and
+`deposit.sh` runs its cURL commands; the one difference is the API host, which
+an example reads from `SDP_API_URL` and defaults to the hosted sandbox.
+`scripts/earn-quickstart-example.test.ts` fails when a page and its folder
+differ, so change them together. The root `biome.json` leaves the mirrored
+files unformatted. CI runs that test only when sdp-docs or a package it depends
+on changes: the examples sit outside the workspace, so neither the test filter
+nor turbo's cache sees them. After editing only an example, run
+`pnpm --filter sdp-docs test`.
+
+The provider-integration guide remains under `content/unpublished/earn`
+because it describes internal operations. Programs, provider actions and
+onboarding stay outside the pinned public API contract. A change to that
+contract needs security review; publication follows module maturity.
 
 ---
 
