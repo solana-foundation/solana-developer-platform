@@ -163,6 +163,22 @@ describe("a mainnet-only deployment, for an organization without mainnet access"
     });
   });
 
+  it("refuses feedback, which emails SDP", async () => {
+    const response = await app.request(
+      `/v1/organizations/${TEST_ORG.id}/feedback`,
+      {
+        method: "POST",
+        headers: { ...clerkHeadersWithoutProject(actor.token), "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "hello" }),
+      },
+      env
+    );
+    expect(await errorOf(response)).toMatchObject({
+      status: 403,
+      details: { reason: ORGANIZATION_NOT_ADMITTED_REASON },
+    });
+  });
+
   it("refuses its production project, which it may not use yet", async () => {
     for (const path of [`/v1/projects/${PRODUCTION_PROJECT_ID}/api-keys`, "/v1/wallets"]) {
       const response = await app.request(

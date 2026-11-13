@@ -344,3 +344,4 @@ Resolve each resource's image reference, choose the intended release SHA/digest,
 - [Production Cloud Run workflow](../../.github/workflows/deploy-sdp-api-gcp-prod.yml)
 - [Release Flow workflow](../../.github/workflows/release-please.yml)
 - [Doppler Secrets Operations](./doppler-secrets.md)
+- [Beta cutover: production serves mainnet only](./beta-cutover.md)
