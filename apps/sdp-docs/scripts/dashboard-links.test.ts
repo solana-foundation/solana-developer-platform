@@ -1,7 +1,30 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import type { Link, Paragraph, Root } from "mdast";
+import { afterEach, test } from "node:test";
+import type { Link, Root } from "mdast";
 import { remarkDashboardLinks } from "@/lib/dashboard-links";
+
+const DEPLOYMENT_KEYS = ["NODE_ENV", "VERCEL_ENV", "NEXT_PUBLIC_SDP_WEB_URL"] as const;
+const original = Object.fromEntries(DEPLOYMENT_KEYS.map((key) => [key, process.env[key]]));
+
+/** Builds this deployment's environment: a production build paired with `webUrl`, or a preview. */
+function deploy(target: { webUrl: string } | "unpaired preview") {
+  for (const key of DEPLOYMENT_KEYS) delete process.env[key];
+  Object.assign(process.env, { NODE_ENV: "production" });
+  if (target === "unpaired preview") {
+    process.env.VERCEL_ENV = "preview";
+  } else {
+    process.env.VERCEL_ENV = "production";
+    process.env.NEXT_PUBLIC_SDP_WEB_URL = target.webUrl;
+  }
+}
+
+afterEach(() => {
+  for (const key of DEPLOYMENT_KEYS) {
+    const value = original[key];
+    if (value === undefined) delete process.env[key];
+    else Object.assign(process.env, { [key]: value });
+  }
+});
 
 function linkTree(url: string, text: string): Root {
   return {
@@ -16,12 +39,16 @@ function linkTree(url: string, text: string): Root {
 }
 
 function linkOf(tree: Root): Link {
-  const paragraph = tree.children[0] as Paragraph;
-  return paragraph.children[0] as Link;
+  const paragraph = tree.children[0];
+  if (paragraph?.type !== "paragraph") throw new Error("linkTree builds a paragraph");
+  const link = paragraph.children[0];
+  if (link?.type !== "link") throw new Error("linkTree builds a link");
+  return link;
 }
 
 test("a beta build links its own dashboard and names its host", () => {
-  const transform = remarkDashboardLinks({ dashboardUrl: "https://platform-beta.solana.com/" });
+  deploy({ webUrl: "https://platform-beta.solana.com" });
+  const transform = remarkDashboardLinks();
 
   const signUp = linkTree("https://platform.solana.com", "platform.solana.com");
   transform(signUp);
@@ -35,7 +62,7 @@ test("a beta build links its own dashboard and names its host", () => {
 });
 
 test("docs and dashboard pages, other sites and the production build keep their links", () => {
-  const beta = remarkDashboardLinks({ dashboardUrl: "https://platform-beta.solana.com/" });
+  deploy({ webUrl: "https://platform-beta.solana.com" });
   for (const url of [
     "https://platform.solana.com/docs/guides/go-to-mainnet",
     "https://platform.solana.com/dashboard",
@@ -43,13 +70,14 @@ test("docs and dashboard pages, other sites and the production build keep their 
     "/docs/reference/api",
   ]) {
     const tree = linkTree(url, "x");
-    beta(tree);
+    remarkDashboardLinks()(tree);
     assert.equal(linkOf(tree).url, url);
   }
 
-  for (const dashboardUrl of ["https://platform.solana.com/", null]) {
+  for (const target of [{ webUrl: "https://platform.solana.com" }, "unpaired preview"] as const) {
+    deploy(target);
     const tree = linkTree("https://platform.solana.com", "platform.solana.com");
-    remarkDashboardLinks({ dashboardUrl })(tree);
+    remarkDashboardLinks()(tree);
     assert.equal(linkOf(tree).url, "https://platform.solana.com");
   }
 });

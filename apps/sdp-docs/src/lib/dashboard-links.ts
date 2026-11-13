@@ -14,16 +14,13 @@ const ACCOUNT_PATHS = new Set(["/", "/sign-up", "/sign-in"]);
  * paired one. Every other link stays canonical: a docs page, and a dashboard page such as Go to
  * mainnet's, which only production serves.
  *
- * @param options.dashboardUrl - The paired dashboard, or null to leave every link alone. Defaults
- *   to `resolveDashboardUrl()`.
+ * The paired dashboard is `resolveDashboardUrl()`, read when each page compiles.
+ *
  * @returns The remark transformer.
  */
-export function remarkDashboardLinks(
-  options: { dashboardUrl?: string | null } = {}
-): (tree: Root) => void {
-  const dashboardUrl =
-    options.dashboardUrl === undefined ? resolveDashboardUrl() : options.dashboardUrl;
+export function remarkDashboardLinks(): (tree: Root) => void {
   return (tree) => {
+    const dashboardUrl = resolveDashboardUrl();
     if (dashboardUrl === null) return;
     const target = new URL(dashboardUrl);
     if (target.origin === DEFAULT_DASHBOARD.origin) return;
