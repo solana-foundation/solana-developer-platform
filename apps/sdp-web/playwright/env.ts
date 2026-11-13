@@ -51,7 +51,7 @@ type E2EEnv = E2EEnvCommon &
       }
   );
 
-function parseEnvFile(filePath: string): Record<string, string> {
+export function parseEnvFile(filePath: string): Record<string, string> {
   if (!fs.existsSync(filePath)) {
     return {};
   }

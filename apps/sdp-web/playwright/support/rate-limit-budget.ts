@@ -2,7 +2,7 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { z } from "zod";
-import { getE2EEnv } from "@/playwright/env";
+import { getE2EEnv, parseEnvFile } from "@/playwright/env";
 
 /**
  * Keeps the suite under sdp-api's per-user rate limits by pausing before a test or a
@@ -146,16 +146,32 @@ function redisCommand(url: URL, command: readonly (string | number)[]): Promise<
   });
 }
 
+const SDP_API_DIR = path.resolve(__dirname, "../../../sdp-api");
+
 /**
- * The run's own Redis, or null when the run talks to a deployed API whose Redis it
- * cannot read (the external smoke).
+ * The Redis the local API was started with, or null when the run talks to a deployed
+ * API whose Redis it cannot read (the external smoke).
  *
- * @throws When a run against the local API has no REDIS_URL: the local API cannot
- *   start without one, so its absence here means the run is misconfigured.
+ * Resolved exactly as the API launcher resolves it (`redisUrl` in
+ * apps/sdp-api/scripts/lib/dev-env.mjs), because the launcher reads its own env files
+ * and they win over the runner's env: Kora's api.env, then apps/sdp-api/.env.local,
+ * then REDIS_URL, then the launcher's own local default. Reading any other Redis
+ * would pace against counters the API never touches.
+ *
+ * @throws When the resolved value is not a URL.
  */
 function redisUrl(): URL | null {
   if (getE2EEnv().useExternalApi) return null;
-  return new URL(z.string().trim().min(1).parse(process.env.REDIS_URL));
+  const koraEnvPath = path.resolve(
+    process.env.KORA_LOCAL_STATE_DIR ?? path.resolve(SDP_API_DIR, "../../.secrets/kora-local"),
+    "api.env"
+  );
+  const launcherEnv = {
+    ...parseEnvFile(koraEnvPath),
+    ...parseEnvFile(path.join(SDP_API_DIR, ".env.local")),
+  };
+  // The same default the launcher starts the API with, not a guess: see the doc above.
+  return new URL(launcherEnv.REDIS_URL ?? process.env.REDIS_URL ?? "redis://127.0.0.1:6379");
 }
 
 export interface RateLimitReading {
