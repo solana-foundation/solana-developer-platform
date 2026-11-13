@@ -3,7 +3,12 @@ import { afterEach, test } from "node:test";
 import type { Link, Root } from "mdast";
 import { remarkDashboardLinks } from "@/lib/dashboard-links";
 
-const DEPLOYMENT_KEYS = ["NODE_ENV", "VERCEL_ENV", "NEXT_PUBLIC_SDP_WEB_URL"] as const;
+const DEPLOYMENT_KEYS = [
+  "NODE_ENV",
+  "VERCEL_ENV",
+  "NEXT_PUBLIC_SDP_WEB_URL",
+  "VERCEL_RELATED_PROJECTS",
+] as const;
 const original = Object.fromEntries(DEPLOYMENT_KEYS.map((key) => [key, process.env[key]]));
 
 /** Builds this deployment's environment: a production build paired with `webUrl`, or a preview. */
