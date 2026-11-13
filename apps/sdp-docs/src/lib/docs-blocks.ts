@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { ApiMethod } from "@sdp/api-catalog/reference";
 import { embedSource } from "fumadocs-core/mdx-plugins/stringifier";
-import type { Parent, Root, RootContent } from "mdast";
+import type { Code, Parent, Root, RootContent } from "mdast";
 import remarkGfm from "remark-gfm";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
@@ -403,9 +403,28 @@ function embedGuideExample(
 }
 
 /**
- * Remark plugin for the Fumadocs MDX pipeline; source.config.ts runs it first. On a generated
- * reference page it also lays out what the page shows differently from its Markdown
- * (`referenceNodes`).
+ * A fenced code node as its page shows it. The page writes the canonical API host, and its code
+ * calls this deployment's API.
+ *
+ * @param code - The code node.
+ * @param searchable - Whether search indexes the code: code identifiers are useful Earn queries
+ *   too, and Fumadocs keeps the enclosing heading, so a hit opens the correct stage or example.
+ */
+function showCode(code: Code, searchable: boolean): void {
+  code.value = code.value.replaceAll(canonicalSite.apiUrl, apiUrl);
+  if (searchable) {
+    code.data = {
+      ...code.data,
+      structuredData: { contents: [{ heading: undefined, content: code.value }] },
+    };
+  }
+}
+
+/**
+ * Remark plugin for the Fumadocs MDX pipeline; source.config.ts runs it first. It points every
+ * page's fenced code at this deployment's API (`apiUrl`, from `NEXT_PUBLIC_SDP_API_URL`) in place
+ * of the canonical host the page writes. On a generated reference page it also lays out what the
+ * page shows differently from its Markdown (`referenceNodes`).
  */
 export function remarkDocsBlocks(
   options: { surface?: PublicSurface; examples?: GuideApiExamples } = {}
@@ -447,14 +466,7 @@ export function remarkDocsBlocks(
           };
           return [child];
         }
-        if (child.type === "code" && earnPage && pagePublished) {
-          // Code identifiers are useful Earn queries too. Fumadocs keeps the
-          // enclosing heading, so a hit opens the correct stage or example.
-          child.data = {
-            ...child.data,
-            structuredData: { contents: [{ heading: undefined, content: child.value }] },
-          };
-        }
+        if (child.type === "code") showCode(child, earnPage && pagePublished);
         const referenceContent = referencePage ? referenceNodes(child, parent) : undefined;
         if (referenceContent !== undefined) return referenceContent;
         if ("children" in child) walk(child);
@@ -467,9 +479,8 @@ export function remarkDocsBlocks(
 
 /**
  * A generated reference page's node as the page shows it, where the Markdown agents get keeps the
- * node as it is: a field's facts with their separators set apart, a family table's method cell as
- * its badge, and code pointed at this deployment's API (`apiUrl`, from `NEXT_PUBLIC_SDP_API_URL`)
- * instead of the canonical one.
+ * node as it is: a field's facts with their separators set apart, and a family table's method
+ * cell as its badge.
  *
  * @param child - The node.
  * @param parent - The node that holds it.
@@ -485,10 +496,6 @@ function referenceNodes(child: RootContent, parent: Parent): RootContent[] | und
     Object.hasOwn(API_METHOD_NAMES, child.value)
   ) {
     return [methodBadge(child.value)];
-  }
-  if (child.type === "code") {
-    child.value = child.value.replaceAll(canonicalSite.apiUrl, apiUrl);
-    return [child];
   }
   return undefined;
 }
@@ -551,6 +558,29 @@ export function stripMdxEsm(markdown: string, where: string): string {
   let result = markdown;
   for (const span of statements.sort((left, right) => right.start - left.start)) {
     result = result.slice(0, span.start) + result.slice(span.end);
+  }
+  return result;
+}
+
+/**
+ * Markdown whose fenced code calls this deployment's API (`apiUrl`), as its page shows it. The
+ * Markdown route serves this, so Copy page matches the page. Prose keeps the canonical host, and
+ * so do the committed llms files, which never pass through here.
+ */
+export function pointCodeAtApi(markdown: string, where: string): string {
+  if (apiUrl === canonicalSite.apiUrl) return markdown;
+  const fences: { start: number; end: number }[] = [];
+  const walk = (parent: Parent) => {
+    for (const child of parent.children) {
+      if (child.type === "code") fences.push(spanOf(child, where));
+      else if ("children" in child) walk(child);
+    }
+  };
+  walk(parser.parse(markdown));
+  let result = markdown;
+  for (const fence of fences.sort((left, right) => right.start - left.start)) {
+    const code = result.slice(fence.start, fence.end).replaceAll(canonicalSite.apiUrl, apiUrl);
+    result = result.slice(0, fence.start) + code + result.slice(fence.end);
   }
   return result;
 }

@@ -15,28 +15,43 @@ async function loadDocs() {
     import("@/lib/site"),
     import("@/lib/docs-blocks"),
   ]);
-  const sample = `\`\`\`bash tab="cURL"\ncurl '${canonicalSite.apiUrl}/v1/widgets/wdg_1'\n\`\`\`\n`;
+  const prose = `The canonical API is \`${canonicalSite.apiUrl}\`.\n\n`;
+  const fence = (api: string) => `\`\`\`bash tab="cURL"\ncurl '${api}/v1/widgets/wdg_1'\n\`\`\`\n`;
+  const sample = prose + fence(canonicalSite.apiUrl);
   const compiled = (path: string) => {
     const processor = unified().use(remarkParse).use(remarkMdx).use(blocks.remarkDocsBlocks);
     const tree = processor.parse(sample);
     processor.runSync(tree, { path });
     return JSON.stringify(tree);
   };
-  return { canonicalSite, expandDocsBlocks: blocks.expandDocsBlocks, sample, compiled };
+  return { canonicalSite, blocks, sample, deployed: prose + fence(DEPLOYMENT_API), compiled };
 }
 
 describe("the samples' API", () => {
-  it("is this deployment's on a generated reference page, and only there", async () => {
+  it("is this deployment's in a page's fenced code, on a reference page and a guide", async () => {
     const { canonicalSite, compiled } = await loadDocs();
-    const reference = compiled("/repo/apps/sdp-docs/content/docs/reference/api/widgets/get.mdx");
-    assert.ok(reference.includes(`${DEPLOYMENT_API}/v1/widgets/wdg_1`));
-    assert.ok(!reference.includes(canonicalSite.apiUrl));
-    const guide = compiled("/repo/apps/sdp-docs/content/docs/guides/widgets.mdx");
-    assert.ok(guide.includes(`${canonicalSite.apiUrl}/v1/widgets/wdg_1`));
+    for (const path of [
+      "/repo/apps/sdp-docs/content/docs/reference/api/widgets/get.mdx",
+      "/repo/apps/sdp-docs/content/docs/guides/widgets.mdx",
+    ]) {
+      const page = compiled(path);
+      assert.ok(page.includes(`${DEPLOYMENT_API}/v1/widgets/wdg_1`), path);
+      assert.ok(!page.includes(`${canonicalSite.apiUrl}/v1/widgets`), path);
+      // Prose names the canonical API on purpose, so it keeps the host its author wrote.
+      assert.ok(page.includes(`"value":"${canonicalSite.apiUrl}"`), path);
+    }
   });
 
-  it("stays canonical in the Markdown agents and the llms files get", async () => {
-    const { expandDocsBlocks, sample } = await loadDocs();
-    assert.equal(expandDocsBlocks(sample, "content/docs/reference/api/widgets/get.mdx"), sample);
+  it("is this deployment's in the Markdown a page serves, as Copy page copies it", async () => {
+    const { blocks, sample, deployed } = await loadDocs();
+    assert.equal(blocks.pointCodeAtApi(sample, "content/docs/guides/widgets.mdx"), deployed);
+  });
+
+  it("stays canonical in the Markdown the llms files get", async () => {
+    const { blocks, sample } = await loadDocs();
+    assert.equal(
+      blocks.expandDocsBlocks(sample, "content/docs/reference/api/widgets/get.mdx"),
+      sample
+    );
   });
 });

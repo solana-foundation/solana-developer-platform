@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { expandDocsBlocks, stripMdxEsm } from "@/lib/docs-blocks";
+import { expandDocsBlocks, pointCodeAtApi, stripMdxEsm } from "@/lib/docs-blocks";
 import { renderDocsIndexMarkdown } from "@/lib/docs-index-markdown";
 import { aiLlmsUrl, aiSkillUrl, getDocsMarkdownUrl } from "@/lib/site";
 import { source } from "@/lib/source";
@@ -83,6 +83,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug?: 
   }
 
   const raw = await readFile(filePath, "utf8");
-  const body = stripMdxShell(expandDocsBlocks(raw, filePath), filePath);
+  // Code calls this deployment's API, as the page shows it and Copy page copies it.
+  const body = pointCodeAtApi(stripMdxShell(expandDocsBlocks(raw, filePath), filePath), filePath);
   return markdownResponse(pageMarkdown(page.data, body), `/docs/${slug.join("/")}`);
 }
