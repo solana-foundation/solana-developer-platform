@@ -94,17 +94,16 @@ digests, and bytes.
     "mint": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
     "amount": "100000000",
     "memo": null
-  },
-  "options": { "assertions": true, "verifyIntent": true }
+  }
 }
 ```
 
 1. The caller selects the implementation, usually through a UI that reads the `applies` hints
    (4.2).
 2. An intent is the operation only. The plan request names who pays and the priority fee.
-3. `options` hold `allowUnapproved` (4.10) and the onchain checks `assertions` and `verifyIntent`
-   (4.6). `allowUnapproved` defaults to false, and both checks default to true. An intent can turn
-   off a check so that the plan fits.
+3. An intent needs no `options`. Both onchain checks, `assertions` and `verifyIntent` (4.6), are
+   on. `options` only override: an intent can turn off a check so that the plan fits, or set
+   `allowUnapproved` (4.10).
 4. Amounts are base units.
 
 **Plan request.** What `prepare` takes: one or more intents in one transaction.
@@ -120,8 +119,7 @@ digests, and bytes.
     {
       "interface": "solana.org/token.transfer@^1",
       "implementation": "solana.org/token-2022-transfer@^1",
-      "inputs": { "from": "7xKX…", "to": "9aBc…", "mint": "2b1kV6…", "amount": "100000000", "memo": null },
-      "options": { "assertions": true, "verifyIntent": true }
+      "inputs": { "from": "7xKX…", "to": "9aBc…", "mint": "2b1kV6…", "amount": "100000000", "memo": null }
     }
   ]
 }
