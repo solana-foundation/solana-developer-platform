@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { ApiMethod } from "@sdp/api-catalog/reference";
 import { embedSource } from "fumadocs-core/mdx-plugins/stringifier";
-import type { Code, Parent, Root, RootContent } from "mdast";
+import type { Code, Link, Parent, Root, RootContent } from "mdast";
 import remarkGfm from "remark-gfm";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
@@ -421,9 +421,32 @@ function showCode(code: Code, searchable: boolean): void {
 }
 
 /**
+ * A link to the API as its page shows it: this deployment's, and so is its text when that is the
+ * URL itself. Inline code and prose keep the canonical host their author wrote.
+ */
+function pointLinkAtApi(link: Link): void {
+  if (!link.url.startsWith(canonicalSite.apiUrl)) return;
+  link.url = apiUrl + link.url.slice(canonicalSite.apiUrl.length);
+  for (const child of link.children) {
+    if (child.type === "text") child.value = child.value.replaceAll(canonicalSite.apiUrl, apiUrl);
+  }
+}
+
+/**
+ * A node as its page shows it: fenced code and API links name this deployment's API.
+ *
+ * @param node - Any node of the page.
+ * @param searchable - Whether search indexes the page's code (`showCode`).
+ */
+function showAtDeployment(node: RootContent, searchable: boolean): void {
+  if (node.type === "code") showCode(node, searchable);
+  else if (node.type === "link") pointLinkAtApi(node);
+}
+
+/**
  * Remark plugin for the Fumadocs MDX pipeline; source.config.ts runs it first. It points every
- * page's fenced code at this deployment's API (`apiUrl`, from `NEXT_PUBLIC_SDP_API_URL`) in place
- * of the canonical host the page writes. On a generated reference page it also lays out what the
+ * page's fenced code and API links at this deployment's API (`apiUrl`, from
+ * `NEXT_PUBLIC_SDP_API_URL`) in place of the canonical host the page writes. On a generated reference page it also lays out what the
  * page shows differently from its Markdown (`referenceNodes`).
  */
 export function remarkDocsBlocks(
@@ -437,6 +460,7 @@ export function remarkDocsBlocks(
     const pagePublished = isPagePublished(pageData, where, surface);
     const earnPage = pageData.module === "earn" || EARN_REFERENCE_PAGE.test(where);
     const referencePage = REFERENCE_PAGE.test(where);
+    const searchable = earnPage && pagePublished;
     const walk = (parent: Parent) => {
       parent.children = parent.children.flatMap((child) => {
         const block = blockOf(child, where);
@@ -466,7 +490,7 @@ export function remarkDocsBlocks(
           };
           return [child];
         }
-        if (child.type === "code") showCode(child, earnPage && pagePublished);
+        showAtDeployment(child, searchable);
         const referenceContent = referencePage ? referenceNodes(child, parent) : undefined;
         if (referenceContent !== undefined) return referenceContent;
         if ("children" in child) walk(child);
@@ -558,29 +582,6 @@ export function stripMdxEsm(markdown: string, where: string): string {
   let result = markdown;
   for (const span of statements.sort((left, right) => right.start - left.start)) {
     result = result.slice(0, span.start) + result.slice(span.end);
-  }
-  return result;
-}
-
-/**
- * Markdown whose fenced code calls this deployment's API (`apiUrl`), as its page shows it. The
- * Markdown route serves this, so Copy page matches the page. Prose keeps the canonical host, and
- * so do the committed llms files, which never pass through here.
- */
-export function pointCodeAtApi(markdown: string, where: string): string {
-  if (apiUrl === canonicalSite.apiUrl) return markdown;
-  const fences: { start: number; end: number }[] = [];
-  const walk = (parent: Parent) => {
-    for (const child of parent.children) {
-      if (child.type === "code") fences.push(spanOf(child, where));
-      else if ("children" in child) walk(child);
-    }
-  };
-  walk(parser.parse(markdown));
-  let result = markdown;
-  for (const fence of fences.sort((left, right) => right.start - left.start)) {
-    const code = result.slice(fence.start, fence.end).replaceAll(canonicalSite.apiUrl, apiUrl);
-    result = result.slice(0, fence.start) + code + result.slice(fence.end);
   }
   return result;
 }
