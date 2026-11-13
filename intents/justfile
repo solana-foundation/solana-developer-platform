@@ -41,6 +41,6 @@ surfnet:
 # The whole flow against a running surfnet: place the programs, publish the definitions, then plan,
 # verify, and send intents with every onchain check on.
 e2e rpc="http://127.0.0.1:8899": build-programs
-    cargo build -q -p sdp-intents-cli
+    cargo build -q -p sdp-intents-cli -p sdp-intents-service
     cd programs && node deploy-surfnet.mjs {{rpc}}
     node e2e/run.mjs {{rpc}}

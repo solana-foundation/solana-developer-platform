@@ -17,7 +17,7 @@ const MAX_FETCH_ROUNDS: usize = 8;
 impl Client {
     /// The plan message that `message` proves, and the instructions that no segment holds.
     pub fn verify_message(&self, message: &[u8]) -> Result<VerifiedTransaction, ClientError> {
-        self.verify(&transaction(message)?)
+        self.verify(&decode_message(message)?)
     }
 
     pub fn verify(&self, transaction: &Transaction) -> Result<VerifiedTransaction, ClientError> {
@@ -34,9 +34,10 @@ impl Client {
     }
 }
 
-/// The transaction of a serialized v1 message, which starts with its version byte. The header gives each account's role: the signers
-/// come first, writable before readonly, then the other writable accounts, then the readonly ones.
-pub(crate) fn transaction(message: &[u8]) -> Result<Transaction, ClientError> {
+/// The transaction of a serialized v1 message, which starts with its version byte. The header gives
+/// each account's role: the signers come first, writable before readonly, then the other writable
+/// accounts, then the readonly ones.
+pub fn decode_message(message: &[u8]) -> Result<Transaction, ClientError> {
     let body = match message.split_first() {
         Some((&v1::V1_PREFIX, body)) => body,
         _ => return Err(ClientError::Decode("the message is not a v1 message".into())),
@@ -114,6 +115,6 @@ mod tests {
         };
         let message = rpc::message(&original, Hash::default()).unwrap().serialize();
 
-        assert_eq!(transaction(&message).unwrap(), original);
+        assert_eq!(decode_message(&message).unwrap(), original);
     }
 }

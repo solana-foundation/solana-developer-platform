@@ -3,7 +3,7 @@
 
 use bytemuck::{Pod, Zeroable};
 
-use sdp_intents_spec::wire::{PodBool, PodU32, PodU64, SemverV1};
+use sdp_intents_spec::wire::{DocumentKind, PodBool, PodU32, PodU64, SemverV1};
 use sdp_intents_spec::Address;
 
 use crate::RegistryError;
@@ -12,6 +12,13 @@ use crate::RegistryError;
 /// document.
 pub const VERSION_DOCUMENT_OFFSET: usize = 8 + 6 + 8;
 const DISCRIMINATOR_LEN: usize = 8;
+
+/// The Anchor discriminator of each account: the first 8 bytes of `sha256("account:<name>")`.
+pub const ORGANIZATION_DISCRIMINATOR: [u8; 8] = [179, 162, 27, 240, 122, 53, 153, 129];
+pub const INDEX_DISCRIMINATOR: [u8; 8] = [177, 63, 132, 129, 187, 8, 159, 245];
+pub const INTERFACE_DISCRIMINATOR: [u8; 8] = [57, 128, 27, 73, 123, 154, 34, 182];
+pub const IMPLEMENTATION_DISCRIMINATOR: [u8; 8] = [65, 167, 68, 231, 67, 72, 161, 41];
+
 const MAX_ORGANIZATION_NAME: usize = 64;
 const INDEX_LISTS_OFFSET: usize = DISCRIMINATOR_LEN + size_of::<VersionIndexV1>();
 
@@ -55,11 +62,17 @@ pub struct OrganizationView<'a> {
 
 impl<'a> OrganizationView<'a> {
     pub fn parse(data: &'a [u8]) -> Result<Self, RegistryError> {
-        Ok(Self { fixed: fixed(data)? })
+        Ok(Self { fixed: fixed(data, &ORGANIZATION_DISCRIMINATOR)? })
     }
 
     pub fn authority(&self) -> &'a Address {
         &self.fixed.authority
+    }
+
+    pub fn name(&self) -> Result<&'a str, RegistryError> {
+        let name = self.fixed.name.get(..usize::from(self.fixed.name_len)).ok_or(RegistryError::WrongAccount)?;
+
+        core::str::from_utf8(name).map_err(|_| RegistryError::WrongAccount)
     }
 }
 
@@ -74,14 +87,27 @@ pub struct IndexView<'a> {
 /// What an index holds about one version.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VersionEntry {
+    pub version: SemverV1,
+    pub publish_slot: u64,
     pub approved: bool,
     pub removed: bool,
+}
+
+impl From<&VersionEntryV1> for VersionEntry {
+    fn from(entry: &VersionEntryV1) -> Self {
+        Self {
+            version: entry.version,
+            publish_slot: entry.publish_slot.get(),
+            approved: entry.approved.get(),
+            removed: entry.removed.get(),
+        }
+    }
 }
 
 impl<'a> IndexView<'a> {
     /// The account must be exactly the fixed part and the two lists that the counts give.
     pub fn parse(data: &'a [u8]) -> Result<Self, RegistryError> {
-        let fixed: &VersionIndexV1 = fixed(data)?;
+        let fixed: &VersionIndexV1 = fixed(data, &INDEX_DISCRIMINATOR)?;
         let lists = data.get(INDEX_LISTS_OFFSET..).ok_or(RegistryError::WrongAccount)?;
         let count = |value: PodU32| usize::try_from(value.get()).map_err(|_| RegistryError::WrongAccount);
         let versions_len =
@@ -99,6 +125,33 @@ impl<'a> IndexView<'a> {
         }
 
         Ok(index)
+    }
+
+    pub fn kind(&self) -> Result<DocumentKind, RegistryError> {
+        DocumentKind::try_from(self.fixed.kind).map_err(|_| RegistryError::WrongAccount)
+    }
+
+    pub fn organization(&self) -> &'a Address {
+        &self.fixed.organization
+    }
+
+    pub fn name_hash(&self) -> &'a [u8; 32] {
+        &self.fixed.name_hash
+    }
+
+    /// The interface's index, on an implementation index.
+    pub fn interface(&self) -> &'a Address {
+        &self.fixed.interface
+    }
+
+    /// Each version, oldest first.
+    pub fn versions(&self) -> impl Iterator<Item = VersionEntry> + 'a {
+        self.versions.iter().map(VersionEntry::from)
+    }
+
+    /// The index address of each implementation that an interface approves.
+    pub fn approved(&self) -> &'a [Address] {
+        self.approved
     }
 
     pub fn update_authority(&self) -> &'a Address {
@@ -122,15 +175,16 @@ impl<'a> IndexView<'a> {
     }
 
     pub fn entry(&self, version: &SemverV1) -> Option<VersionEntry> {
-        self.versions
-            .iter()
-            .find(|entry| entry.version == *version)
-            .map(|entry| VersionEntry { approved: entry.approved.get(), removed: entry.removed.get() })
+        self.versions.iter().find(|entry| entry.version == *version).map(VersionEntry::from)
     }
 }
 
 /// The fixed part after the discriminator.
-fn fixed<T: Pod>(data: &[u8]) -> Result<&T, RegistryError> {
+fn fixed<'a, T: Pod>(data: &'a [u8], discriminator: &[u8; 8]) -> Result<&'a T, RegistryError> {
+    if !data.starts_with(discriminator) {
+        return Err(RegistryError::WrongAccount);
+    }
+
     let end = DISCRIMINATOR_LEN.checked_add(size_of::<T>()).ok_or(RegistryError::WrongAccount)?;
     let bytes = data.get(DISCRIMINATOR_LEN..end).ok_or(RegistryError::WrongAccount)?;
 

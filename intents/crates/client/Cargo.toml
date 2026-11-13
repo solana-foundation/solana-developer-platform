@@ -14,6 +14,7 @@ base64.workspace = true
 bs58.workspace = true
 sdp-intents-planner.workspace = true
 sdp-intents-spec.workspace = true
+serde_json.workspace = true
 solana-account-decoder-client-types = "=4.5.0-beta.0"
 solana-address.workspace = true
 solana-commitment-config = "=3.1.1"
@@ -29,7 +30,6 @@ solana-transaction = "=6.0.0"
 
 [dev-dependencies]
 sdp-intents-compiler.workspace = true
-serde_json.workspace = true
 
 [lints]
 workspace = true

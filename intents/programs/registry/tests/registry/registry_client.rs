@@ -145,12 +145,15 @@ fn reads_the_accounts_that_the_registry_writes() {
     let read = |address: &Address| svm.get_account(address).unwrap().data;
 
     let organization = read(&published.organization.address);
+    assert_eq!(organization.get(..8), Some(&registry_client::ORGANIZATION_DISCRIMINATOR[..]));
+    assert_eq!(OrganizationView::parse(&organization).unwrap().name(), Ok("solana.org"));
     assert_eq!(
         OrganizationView::parse(&organization).unwrap().authority(),
         &spec(&published.organization.authority.pubkey())
     );
 
     let interface = read(&accounts.interface_index);
+    assert_eq!(interface.get(..8), Some(&registry_client::INDEX_DISCRIMINATOR[..]));
     let interface = IndexView::parse(&interface).unwrap();
     assert!(interface.approves(&spec(&accounts.implementation_index)));
     assert!(!interface.approve_new_versions());
@@ -161,6 +164,8 @@ fn reads_the_accounts_that_the_registry_writes() {
     assert!(entry.approved && !entry.removed);
 
     let version_account = read(&accounts.implementation_version);
+    assert_eq!(version_account.get(..8), Some(&registry_client::IMPLEMENTATION_DISCRIMINATOR[..]));
+    assert_eq!(read(&accounts.interface_version).get(..8), Some(&registry_client::INTERFACE_DISCRIMINATOR[..]));
     assert_eq!(registry_client::VERSION_DOCUMENT_OFFSET, registry::state::version::FIXED_LEN);
     assert!(
         sdp_intents_spec::Implementation::parse(&version_account[registry_client::VERSION_DOCUMENT_OFFSET..]).is_ok()

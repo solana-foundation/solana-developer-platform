@@ -1,0 +1,37 @@
+[package]
+name = "sdp-intents-service"
+description = "The SDP intents planner behind an HTTP API, over a cached view of the chain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "sdp-intents-service"
+path = "src/main.rs"
+
+# `axum` serves the HTTP API, over the `hyper`, `tower`, and `tokio` versions that the Solana RPC
+# client already uses. The other Solana crates are the types that the clients take and return.
+[dependencies]
+axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+base64.workspace = true
+bs58.workspace = true
+clap.workspace = true
+futures-util = "=0.3.34"
+sdp-intents-chain = { path = "../chain" }
+sdp-intents-client.workspace = true
+sdp-intents-compiler.workspace = true
+sdp-intents-engine.workspace = true
+sdp-intents-planner.workspace = true
+sdp-intents-registry-client.workspace = true
+sdp-intents-spec.workspace = true
+serde_json.workspace = true
+solana-keypair = "=4.0.1"
+solana-message = "=6.0.0"
+solana-signer = "=4.0.0"
+solana-transaction = "=6.0.0"
+tokio = { version = "=1.54.1", features = ["macros", "net", "rt-multi-thread", "signal"] }
+
+[lints]
+workspace = true

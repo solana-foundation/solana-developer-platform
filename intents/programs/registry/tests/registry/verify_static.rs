@@ -255,7 +255,9 @@ fn verifies_an_spl_token_transfer() {
 
     assert_eq!(token_amount(&setup.svm, &tokens.destination), Some(100_000_000));
     assert_eq!(token_amount(&setup.svm, &tokens.source), Some(400_000_000));
-    assert!(units < 30_000, "verify_intent used {units} CU");
+    // The wallets are random, so the bump search of each associated token account varies the
+    // count in steps of 1,500 CU.
+    assert!(units < 36_000, "verify_intent used {units} CU");
 }
 
 #[test]

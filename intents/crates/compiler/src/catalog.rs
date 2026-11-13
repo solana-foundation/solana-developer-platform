@@ -32,7 +32,7 @@ impl Catalog {
     /// finding that says so, not `unknownInterface`.
     pub fn compile_interface(&mut self, text: &str) -> Result<&CompiledInterface, Report> {
         match compile_interface(text, self) {
-            Ok(interface) => Ok(self.interfaces.entry(interface.id.to_string()).insert_entry(interface).into_mut()),
+            Ok(interface) => Ok(self.insert_compiled_interface(interface)),
             Err(report) => {
                 self.failed_interfaces.extend(stated_id(text));
                 Err(report)
@@ -43,7 +43,7 @@ impl Catalog {
     pub fn compile_implementation(&mut self, text: &str) -> Result<&CompiledImplementation, Report> {
         let implementation = compile_implementation(text, self)?;
 
-        Ok(self.implementations.entry(implementation.id.to_string()).insert_entry(implementation).into_mut())
+        Ok(self.insert_compiled_implementation(implementation))
     }
 
     /// Every interface that compiled, in no order.
@@ -63,6 +63,17 @@ impl Catalog {
     /// A plan request: one or more intents that share the payers and the priority fee.
     pub fn compile_plan(&self, text: &str) -> Result<CompiledPlan<'_>, Report> {
         compile_plan(text, self)
+    }
+
+    pub(crate) fn insert_compiled_interface(&mut self, interface: CompiledInterface) -> &CompiledInterface {
+        self.interfaces.entry(interface.id.to_string()).insert_entry(interface).into_mut()
+    }
+
+    pub(crate) fn insert_compiled_implementation(
+        &mut self,
+        implementation: CompiledImplementation,
+    ) -> &CompiledImplementation {
+        self.implementations.entry(implementation.id.to_string()).insert_entry(implementation).into_mut()
     }
 
     #[cfg(test)]

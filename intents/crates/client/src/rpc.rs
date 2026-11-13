@@ -1,10 +1,12 @@
 //! Converts the planner's requests to RPC calls, and the RPC answers back.
 
 use base64::Engine as _;
-use solana_account_decoder_client_types::UiAccount;
+use solana_account_decoder_client_types::{UiAccount, UiAccountEncoding};
+use solana_commitment_config::CommitmentConfig;
 use solana_hash::Hash;
 use solana_message::v1::{self, TransactionConfig};
 use solana_message::VersionedMessage;
+use solana_rpc_client_api::config::{RpcSimulateTransactionAccountsConfig, RpcSimulateTransactionConfig};
 use solana_rpc_client_api::response::RpcSimulateTransactionResult;
 use solana_signature::Signature;
 use solana_transaction::versioned::VersionedTransaction;
@@ -14,16 +16,16 @@ use sdp_intents_spec::Address;
 
 use crate::ClientError;
 
-pub(crate) fn solana_address(address: Address) -> solana_address::Address {
+pub fn solana_address(address: Address) -> solana_address::Address {
     solana_address::Address::new_from_array(address.0)
 }
 
-pub(crate) fn base58(address: Address) -> String {
+pub fn base58(address: Address) -> String {
     bs58::encode(address.0).into_string()
 }
 
 /// The v1 message of a transaction: what its signers sign.
-pub(crate) fn message(transaction: &Transaction, blockhash: Hash) -> Result<v1::Message, ClientError> {
+pub fn message(transaction: &Transaction, blockhash: Hash) -> Result<v1::Message, ClientError> {
     let instructions: Vec<solana_instruction::Instruction> = transaction.instructions.iter().map(instruction).collect();
     let budget = transaction.budget;
     let config = TransactionConfig::empty()
@@ -38,11 +40,25 @@ pub(crate) fn message(transaction: &Transaction, blockhash: Hash) -> Result<v1::
 
 /// A simulation as a v1 transaction with empty signatures. A simulation with `sigVerify` off does
 /// not read them, and one with `replaceRecentBlockhash` on replaces the default blockhash.
-pub(crate) fn simulation_transaction(simulation: &Simulation) -> Result<VersionedTransaction, ClientError> {
+pub fn simulation_transaction(simulation: &Simulation) -> Result<VersionedTransaction, ClientError> {
     let message = message(&simulation.transaction, Hash::default())?;
     let signatures = vec![Signature::default(); usize::from(message.header.num_required_signatures)];
 
     Ok(VersionedTransaction { signatures, message: VersionedMessage::V1(message) })
+}
+
+/// Simulates at `processed`, and returns each account of `observe` in base64.
+pub fn simulation_config(simulation: &Simulation) -> RpcSimulateTransactionConfig {
+    RpcSimulateTransactionConfig {
+        sig_verify: false,
+        replace_recent_blockhash: true,
+        commitment: Some(CommitmentConfig::processed()),
+        accounts: Some(RpcSimulateTransactionAccountsConfig {
+            encoding: Some(UiAccountEncoding::Base64),
+            addresses: simulation.observe.iter().copied().map(base58).collect(),
+        }),
+        ..RpcSimulateTransactionConfig::default()
+    }
 }
 
 fn instruction(instruction: &Instruction) -> solana_instruction::Instruction {
@@ -63,7 +79,7 @@ fn instruction(instruction: &Instruction) -> solana_instruction::Instruction {
     }
 }
 
-pub(crate) fn simulation_result(result: RpcSimulateTransactionResult) -> Result<SimulationResult, ClientError> {
+pub fn simulation_result(result: RpcSimulateTransactionResult) -> Result<SimulationResult, ClientError> {
     let return_data = result
         .return_data
         .map(|return_data| {
@@ -90,7 +106,7 @@ pub(crate) fn simulation_result(result: RpcSimulateTransactionResult) -> Result<
     })
 }
 
-fn ui_account(account: &UiAccount) -> Result<Account, ClientError> {
+pub fn ui_account(account: &UiAccount) -> Result<Account, ClientError> {
     let data = account.data.decode().ok_or_else(|| ClientError::Decode("account data is not binary".to_owned()))?;
 
     Ok(Account { owner: parse_address(&account.owner)?, lamports: account.lamports, data })

@@ -471,7 +471,8 @@ at most 4 hints on the record. A record fits an intent when all of its hints hol
 2. `implementationsFor(interface, inputs, cluster)` returns the approved records (4.10) whose hints
    hold. It reads the interface's approved list, then batches the implementation indexes and the
    hint accounts. It ranks them: a builder in the target program (4.3), a static recipe, another
-   builder, then a remote endpoint.
+   builder, then a remote endpoint. The prototype does not find the target program yet, so it ranks
+   a static recipe first.
 3. An input check matters most, because a recipe that does not read an input cannot fail on it.
    For the same reason, `prepare` refuses an optional input that the record does not use. The
    engine finds the inputs that a record reads in its sources, seeds, and segments.
@@ -719,8 +720,9 @@ protection. A pin would also stop `prepare` after each upgrade until a new recor
 The planner (4.14) runs `prepare` with no IO. It asks for accounts to fetch and for transactions to
 simulate, and its caller answers. The client answers with RPC: `getMultipleAccounts`, and
 `simulateTransaction` with `sigVerify` off, `replaceRecentBlockhash` on, and scratch in `accounts`.
-The service answers from an account cache, and simulates in LiteSVM over it. The
-`intents/crates/chain` crate holds both, and starts as a copy of relay's `chain-source` (4.14).
+The service answers from an account cache in `intents/crates/chain`, and simulates on the RPC.
+In-process LiteSVM simulation waits for a LiteSVM with v1 transactions. LiteSVM 0.18 has none, and
+it pins `solana-address` 2.7, which `solana-message` 6 refuses in the same build.
 
 1. Reads use `processed`. The blockhash uses `confirmed`.
 2. A cached account is served only while a live subscription covers it. Other accounts are fetched
@@ -1424,8 +1426,8 @@ interface index lists the lowest version in that range.
 8. `prepare` resolves the range from the two indexes, then reads both version accounts in one
    batched call. The service keeps the indexes cached under a subscription, as in 4.4, so a
    `prepare` usually makes one call. `implementationsFor` reads the interface index, then the
-   listed implementation indexes in one `getMultipleAccounts` call. The registry needs no
-   `getProgramAccounts`.
+   listed implementation indexes in one `getMultipleAccounts` call. Neither needs
+   `getProgramAccounts`. A listing of the whole registry uses two, filtered by discriminator.
 9. An unapproved implementation is not in any list. An intent that uses one names it, and sets
    `allowUnapproved`.
 10. `cluster` is implied. The JSON form keeps it for copies outside the chain.
@@ -1613,9 +1615,10 @@ intents/
                         payer, and token helpers. In the programs workspace.
     program-testing/    sdp-intents-program-testing: the planner against LiteSVM, for the tests
                         of the programs. In the programs workspace.
-    chain/              account cache, subscriptions, and LiteSVM simulation, copied from relay
-    service/            the planner over chain/, the HTTP API, verify, the remote client, and
-                        monitoring
+    chain/              sdp-intents-chain: the account cache over RPC, its subscriptions, and its
+                        RPC counters
+    service/            sdp-intents-service: prepare, verify, implementationsFor, and the registry
+                        listing over chain/, as a JSON API with metrics
   programs/             the programs workspace: Cargo.toml, Cargo.lock
     registry/           organizations, interfaces, implementations, approvals, versions, and
                         verify_intent
@@ -1684,10 +1687,24 @@ depends only on inputs.
 **Anchor v2 builders.** Each builder pins Anchor v2 to one git revision and builds with platform
 tools v1.54, because v1.52 miscompiles Anchor v2 programs. Tests load the programs in LiteSVM.
 
-**Code from relay.** Relay (`github.com/velocity-exchange/relay`) is not maintained, so the
-prototype copies what it needs and owns the copies. `spec/` starts from `relay-spec`, and `chain/`
-from `chain-source`: the account cache, the subscriptions, and in-process LiteSVM simulation. Relay
-is Apache-2.0. Each copied file keeps its notice, and `intents/NOTICE` names the source.
+**Service.** `sdp-intents-service --rpc <url>` reads every document from the registry. The
+compiler reads a published document back into its catalog, so the service needs no JSON
+definitions. With `--wallets <folder>`, it also signs and sends with the local keypairs, for the
+playground.
+
+| Route | Body | Returns |
+| :-- | :-- | :-- |
+| `GET /v1/registry` | | Every organization, interface, and implementation, each described |
+| `POST /v1/prepare` | A plan request | The plan, and the RPC calls that it made |
+| `POST /v1/verify` | `{ message, expected }` | What the message proves to its signer |
+| `POST /v1/implementations` | `{ interface, inputs, payers, all }` | Each implementation, and whether its hints hold |
+| `GET /v1/wallets`, `POST /v1/send` | `{ message }` | The local wallets, and a send signed by them |
+| `GET /metrics` | | Requests, RPC calls by method, and cache reads |
+
+A version account never changes while it exists, so the cache keeps it. An index is read live, and
+stays under a subscription after the first read. `just e2e` plans each flow with the service and
+with the CLI, checks that both plan the same message, and verifies it with both verifiers. In that
+run, the USDC and SOL plan makes two `getMultipleAccounts` calls and two simulations.
 
 `kamino-builder` uses `kvault-interface` 0.1.0 and `klend-interface` 0.6.0. `kvault-interface`
 declares Apache-2.0. `klend-interface` is BUSL-1.1, whose Additional Use Grant allows use in
@@ -1870,7 +1887,8 @@ The prototype is not a production system, so it is not in the systems inventory 
 
 _SDLC §8.1_
 
-Not applicable to the prototype. Production alerts on `verify` failures, payer rule failures,
+The prototype service counts requests by outcome, RPC calls by method, and cache reads at
+`GET /metrics`, and alerts on nothing. Production alerts on `verify` failures, payer rule failures,
 builder upgrades, refusal rates, simulation rounds, and simulation latency.
 
 ## 8. Platform controls
@@ -1907,7 +1925,7 @@ Production is a separate project with its own design document. Minimum gates:
 | :-- | :-- | :-- |
 | M0 | This document, reviewed | 1 |
 | M1 | Workspaces and toolchains. The copies from relay. `sdp-intents-spec` and `sdp-intents-builder`. The binary form, the views, the JSON compiler, the limits, and the round-trip check. SBF build check of each client crate. | 4 |
-| M2 | The registry program on surfpool. The CLI: `lint`, `plan`, `apply`, and `--squads`. Service `prepare` that reads the registry, with LiteSVM and rounds. Static recipes for SOL and SPL Token transfers. `implementationsFor` with approvals. `token-2022-builder` without extensions. Rendering. Transfer parity. First corpus items. | 8 |
+| M2 | The registry program on surfpool. The CLI: `lint`, `plan`, `apply`, and `--squads`. Service `prepare` that reads the registry, with rounds. Static recipes for SOL and SPL Token transfers. `implementationsFor` with approvals. `token-2022-builder` without extensions. Rendering. Transfer parity. First corpus items. | 8 |
 | M3 | All extensions in `token-2022-builder`. `jupiter-lend-builder`. `kamino-builder` deposit. Surfpool parity. | 6 |
 | M4 | `verify`, Lighthouse assertions, `verify_intent`, the remote recipe, the Jupiter swap wrapper, and the `kamino-builder` withdrawal. Property and mutation tests. | 8 |
 | M5 | Playground: the registry explorer, the intent form, and the plan view | 4 |

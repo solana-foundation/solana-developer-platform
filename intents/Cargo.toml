@@ -8,6 +8,8 @@ members = [
     "crates/planner",
     "crates/registry-client",
     "crates/client",
+    "crates/chain",
+    "crates/service",
     "crates/cli",
 ]
 # `crates/builder` and `crates/program-testing` belong to the programs workspace, because they

@@ -39,6 +39,7 @@ mod interface;
 mod limits;
 mod plan;
 mod post_condition;
+mod published;
 mod reader;
 mod reference;
 mod resolve;
@@ -53,8 +54,9 @@ mod writer;
 mod test_support;
 
 pub use catalog::Catalog;
-pub use id::{parse_version, Id};
+pub use id::{format_version, parse_version, Id, IdRange};
 pub use implementation::CompiledImplementation;
 pub use intent::CompiledIntent;
 pub use interface::CompiledInterface;
 pub use plan::{CompiledPlan, PlanPayers};
+pub use published::PublishedError;

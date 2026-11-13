@@ -1,6 +1,9 @@
 //! Plans intents over RPC, with no service. It answers the planner's fetches with
 //! `getMultipleAccounts`, and its simulations with `simulateTransaction`.
 //!
+//! [`rpc`] holds the conversions, so a service with its own cache can answer the planner the same
+//! way.
+//!
 //! ```no_run
 //! # fn run(request: &sdp_intents_planner::PlanRequest<'_>) -> Result<(), sdp_intents_client::ClientError> {
 //! let client = sdp_intents_client::Client::new("https://api.mainnet-beta.solana.com");
@@ -11,17 +14,17 @@
 //! # }
 //! ```
 
-mod rpc;
+pub mod json;
+pub mod rpc;
 mod send;
 mod verify;
 
 use core::fmt;
 use std::hash::{BuildHasher, RandomState};
 
-use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_commitment_config::CommitmentConfig;
+use solana_hash::Hash;
 use solana_rpc_client::rpc_client::RpcClient;
-use solana_rpc_client_api::config::{RpcSimulateTransactionAccountsConfig, RpcSimulateTransactionConfig};
 
 use solana_message::v1::{MAX_TRANSACTION_SIZE, SIGNATURE_SIZE};
 
@@ -30,8 +33,11 @@ use sdp_intents_planner::{
 };
 use sdp_intents_spec::Address;
 
+pub use send::sign_message;
+pub use solana_hash::Hash as Blockhash;
 pub use solana_keypair::{read_keypair_file, Keypair};
 pub use solana_signer::Signer;
+pub use verify::decode_message;
 
 /// `getMultipleAccounts` takes at most 100 addresses.
 const MAX_ACCOUNTS_PER_FETCH: usize = 100;
@@ -67,16 +73,8 @@ impl Client {
         };
 
         let (blockhash, _) = self.rpc.get_latest_blockhash_with_commitment(CommitmentConfig::confirmed())?;
-        let message = rpc::message(&plan.transaction, blockhash)?;
-        let signatures = usize::from(message.header.num_required_signatures);
-        let message = message.serialize();
-        let size = message.len().saturating_add(signatures.saturating_mul(SIGNATURE_SIZE));
 
-        if size > MAX_TRANSACTION_SIZE {
-            return Err(PlanError::DoesNotFit { limit: Limit::Bytes, used: size, max: MAX_TRANSACTION_SIZE }.into());
-        }
-
-        Ok(Prepared { plan: *plan, message })
+        prepared(*plan, blockhash)
     }
 
     /// Each account at `addresses`, in order, with `getMultipleAccounts` split at 100.
@@ -104,25 +102,31 @@ impl Client {
     }
 
     fn simulate(&self, simulation: &Simulation) -> Result<SimulationResult, ClientError> {
-        let config = RpcSimulateTransactionConfig {
-            sig_verify: false,
-            replace_recent_blockhash: true,
-            commitment: Some(CommitmentConfig::processed()),
-            accounts: Some(RpcSimulateTransactionAccountsConfig {
-                encoding: Some(UiAccountEncoding::Base64),
-                addresses: simulation.observe.iter().copied().map(rpc::base58).collect(),
-            }),
-            ..RpcSimulateTransactionConfig::default()
-        };
-        let response = self.rpc.simulate_transaction_with_config(&rpc::simulation_transaction(simulation)?, config)?;
+        let transaction = rpc::simulation_transaction(simulation)?;
+        let response = self.rpc.simulate_transaction_with_config(&transaction, rpc::simulation_config(simulation))?;
 
         rpc::simulation_result(response.value)
     }
 }
 
+/// The plan with its v1 message compiled at `blockhash`, or `DoesNotFit` when the signed
+/// transaction is over 4,096 bytes.
+pub fn prepared(plan: Plan, blockhash: Hash) -> Result<Prepared, ClientError> {
+    let message = rpc::message(&plan.transaction, blockhash)?;
+    let signatures = usize::from(message.header.num_required_signatures);
+    let message = message.serialize();
+    let size = message.len().saturating_add(signatures.saturating_mul(SIGNATURE_SIZE));
+
+    if size > MAX_TRANSACTION_SIZE {
+        return Err(PlanError::DoesNotFit { limit: Limit::Bytes, used: size, max: MAX_TRANSACTION_SIZE }.into());
+    }
+
+    Ok(Prepared { plan, message })
+}
+
 /// A scratch address that others cannot predict, so that no one can create an account there
 /// first. Each `RandomState` hashes with new random keys.
-fn fresh_address() -> Address {
+pub fn fresh_address() -> Address {
     let mut bytes = [0u8; 32];
 
     for (chunk, word) in bytes.as_chunks_mut::<8>().0.iter_mut().zip(0u64..) {
