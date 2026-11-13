@@ -33,6 +33,9 @@ pub enum PlanError {
     TooManyRounds,
     /// A remote recipe needs the endpoint client, which does not exist yet.
     RemoteRecipe,
+    /// A builder names the rent payer's address itself, such as an owner who pays the rent.
+    /// `verify_intent` cannot tell that account from the rent placeholder yet.
+    RentPayerInRecipe,
     /// `next` ran while a simulation has no answer, or `simulated` ran with no simulation asked.
     OutOfOrder,
     /// The intent asks for a check that prepare cannot build yet, by its option name.
@@ -104,6 +107,9 @@ impl fmt::Display for PlanError {
             Self::NoScratch => f.write_str("the simulation returned no scratch account"),
             Self::TooManyRounds => f.write_str("the builder asked for accounts in more than 4 rounds"),
             Self::RemoteRecipe => f.write_str("remote recipes are not supported yet"),
+            Self::RentPayerInRecipe => f.write_str(
+                "the builder names the rent payer as one of its own accounts, which verify_intent cannot check yet. Pay the rent from another wallet.",
+            ),
             Self::OutOfOrder => f.write_str("the planner steps ran out of order"),
             Self::Unavailable(option) => write!(
                 f,

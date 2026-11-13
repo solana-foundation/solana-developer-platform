@@ -133,3 +133,17 @@ fn the_builder_fails_without_the_accounts_of_its_last_round() {
 
     assert_eq!(failed.custom_code(), Some(BUILDER_MISSING_ACCOUNTS), "{failed}");
 }
+
+/// `verify_intent` maps the rent payer's address back to the placeholder, so a builder that names
+/// the rent payer as its own account fails the hash. The planner refuses that plan first.
+#[test]
+fn refuses_a_builder_that_names_the_rent_payer() {
+    let mut setup = setup().unwrap();
+    setup.fee_payer = setup.from.insecure_clone();
+    let intent =
+        setup.published.compile(&intent(&setup, SOL, r#"{ "assertions": false }"#), &setup.from.pubkey()).unwrap();
+
+    let refused = prepare(&setup.svm, &intent);
+
+    assert!(matches!(refused, Err(sdp_intents_planner::PlanError::RentPayerInRecipe)), "{refused:?}");
+}

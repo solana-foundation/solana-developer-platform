@@ -94,8 +94,22 @@ impl Built {
         Ok(Self { instructions, signers: Vec::new(), outputs: outputs.concat() })
     }
 
+    /// `verify_intent` maps each account at the rent payer's address back to the placeholder, so a
+    /// builder that names that address itself fails the check onchain. The planner refuses it first.
     pub(crate) fn from_ready(recipe: &Recipe<'_>, ready: &Ready<'_>) -> Result<Self, PlanError> {
         let payers = recipe.payers();
+        let names_rent_payer = ready
+            .instructions()?
+            .map(|instruction| {
+                instruction.map(|instruction| instruction.accounts.iter().any(|meta| meta.address == *payers.rent))
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .contains(&true);
+
+        if names_rent_payer && recipe.intent().options()?.verify_intent {
+            return Err(PlanError::RentPayerInRecipe);
+        }
+
         let instructions = ready
             .instructions()?
             .map(|instruction| instruction.and_then(|instruction| Instruction::ready(&instruction, payers)))

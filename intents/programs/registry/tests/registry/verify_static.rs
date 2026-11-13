@@ -327,3 +327,18 @@ fn refuses_a_role_that_no_built_instruction_explains() {
 
     assert!(failed.is(RegistryError::WrongRole), "{failed}");
 }
+
+/// A sender that pays its own fee is named as the transfer's authority. Rule 5 allows a payer that
+/// is a signer input. The destination exists, so the transaction creates no account.
+#[test]
+fn a_sender_that_pays_its_own_fee_sends_to_an_existing_account() {
+    let mut setup = setup(definitions::SPL_TOKEN_TRANSFER, true).unwrap();
+    setup.wallets.fee_payer = setup.wallets.from.insecure_clone();
+    let tokens = token_accounts(&mut setup).unwrap();
+    set_token_account(&mut setup.svm, &tokens.destination, &tokens.mint, &setup.wallets.to.pubkey(), 0).unwrap();
+
+    let verified = plan_and_verify(&setup, "spl-token-transfer", &tokens.mint, 100_000_000).unwrap();
+    send_plan(&mut setup.svm, &with_verify(&verified.plan, verified.verify), &[&setup.wallets.from]).unwrap();
+
+    assert_eq!(token_amount(&setup.svm, &tokens.destination), Some(100_000_000));
+}

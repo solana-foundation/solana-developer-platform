@@ -4,7 +4,7 @@
 
 use sdp_intents_engine::{AccountData, Chain, Recipe};
 use sdp_intents_spec::wire::{PostConditionV1, RangeV1};
-use sdp_intents_spec::{Address, CheckKind, SpecError, ValueRef};
+use sdp_intents_spec::{Address, CheckKind, SpecError, ValueRef, ValueSource};
 
 use crate::values::{Table, Values};
 use crate::{Account, Instruction, PlanError};
@@ -144,7 +144,9 @@ impl<'v, 'a> Verification<'v, 'a> {
     }
 
     /// The fee payer loses at most the fee and the rent of the accounts that the transaction
-    /// creates, and an instruction names a payer only where it creates an account.
+    /// creates, and an instruction names a payer only where it creates an account. A payer that is
+    /// also a signer input can be named anywhere, because the interface requires that signer, and
+    /// the postconditions guard it.
     fn check_payers(&self) -> Result<(), PlanError> {
         let payers = self.values.recipe.payers();
         let fee_payer = *payers.fee;
@@ -160,9 +162,11 @@ impl<'v, 'a> Verification<'v, 'a> {
             return Err(PlanError::CheckFailed("the rent payer loses more than the new accounts' rent".into()));
         }
 
-        let names_payer = |instruction: &Instruction| {
-            instruction.accounts.iter().any(|meta| meta.address == fee_payer || meta.address == rent_payer)
-        };
+        let signers = self.signer_inputs()?;
+        let guarded_payers: Vec<Address> =
+            [fee_payer, rent_payer].into_iter().filter(|payer| !signers.contains(payer)).collect();
+        let names_payer =
+            |instruction: &Instruction| instruction.accounts.iter().any(|meta| guarded_payers.contains(&meta.address));
         let creates = |instruction: &Instruction| {
             funds_only(instruction) || instruction.accounts.iter().any(|meta| self.created(&meta.address))
         };
@@ -172,6 +176,18 @@ impl<'v, 'a> Verification<'v, 'a> {
         }
 
         Ok(())
+    }
+
+    /// The address of each signer input of the interface.
+    fn signer_inputs(&self) -> Result<Vec<Address>, PlanError> {
+        let inputs = self.values.recipe.interface().inputs()?;
+
+        inputs
+            .iter()
+            .zip(0u8..)
+            .filter(|(input, _)| input.signer())
+            .map(|(_, index)| self.values.address(ValueRef { source: ValueSource::Input, index }, Table::Interface))
+            .collect()
     }
 
     fn conditions(&self) -> Result<Vec<Condition<'_>>, PlanError> {
