@@ -4,13 +4,14 @@
 use pinocchio::account::AccountView;
 use pinocchio::address::Address;
 
-use crate::programs::{ASSOCIATED_TOKEN, SYSTEM};
+use crate::programs::{ASSOCIATED_TOKEN, SYSTEM, TOKEN, TOKEN_2022};
 use crate::{Build, BuildError, Meta};
 
 const CREATE_IDEMPOTENT: u8 = 1;
 const TRANSFER_CHECKED: u8 = 12;
 /// A mint's decimals are byte 44 of its data.
 const MINT_DECIMALS_OFFSET: usize = 44;
+const TOKEN_ACCOUNT_AMOUNT_OFFSET: usize = 64;
 
 /// `None` in the statistically improbable case that no bump gives an address off the curve.
 pub fn associated_token_address(owner: &Address, mint: &Address, token_program: &Address) -> Option<Address> {
@@ -24,6 +25,23 @@ pub fn mint_decimals(mint: &AccountView) -> Result<u8, BuildError> {
     let data = mint.try_borrow().map_err(|_| BuildError::WrongAccounts)?;
 
     data.get(MINT_DECIMALS_OFFSET).copied().ok_or(BuildError::WrongAccounts)
+}
+
+/// What a token account of either token program holds. `None` means that the account does not
+/// exist. An account that exists and that no token program owns is an error.
+pub fn token_account_amount(account: &AccountView) -> Result<Option<u64>, BuildError> {
+    if account.lamports() == 0 {
+        return Ok(None);
+    }
+
+    if !(account.owned_by(&TOKEN) || account.owned_by(&TOKEN_2022)) {
+        return Err(BuildError::WrongAccounts);
+    }
+
+    let data = account.try_borrow().map_err(|_| BuildError::WrongAccounts)?;
+    let amount = data.get(TOKEN_ACCOUNT_AMOUNT_OFFSET..).and_then(|rest| rest.first_chunk::<8>());
+
+    amount.map(|bytes| Some(u64::from_le_bytes(*bytes))).ok_or(BuildError::WrongAccounts)
 }
 
 impl Build<'_> {
@@ -48,6 +66,29 @@ impl Build<'_> {
         self.instruction(&ASSOCIATED_TOKEN, &accounts, &[CREATE_IDEMPOTENT])?;
 
         Ok(account)
+    }
+
+    /// Creates `account`, the associated token account of `owner` for `mint`, only when it holds no
+    /// lamports. The planner refuses an instruction that names a payer and creates no account, so a
+    /// builder that reads the account adds the create only when it is needed.
+    pub fn create_associated_token_account_if_missing(
+        &mut self,
+        account: &AccountView,
+        owner: &Address,
+        mint: &Address,
+        token_program: &Address,
+    ) -> Result<(), BuildError> {
+        if account.lamports() > 0 {
+            return Ok(());
+        }
+
+        let created = self.create_associated_token_account_idempotent(owner, mint, token_program)?;
+
+        if created != *account.address() {
+            return Err(BuildError::WrongAccounts);
+        }
+
+        Ok(())
     }
 
     /// `transferChecked`, with `extra_accounts` after the four that it names, such as the accounts
