@@ -151,16 +151,6 @@ export function isStagedProviderRefusalReason(
 export const CUSTODY_PROVIDER_DISPLAY_STATUSES = ["available", "active"] as const;
 export type CustodyProviderDisplayStatus = (typeof CUSTODY_PROVIDER_DISPLAY_STATUSES)[number];
 
-/**
- * Launch classification from the remove-signup-waitlist decision map: `general`
- * providers are open to every organization and gate only on deployment
- * credentials; `manual` providers additionally need the SDP team to grant the
- * organization access.
- */
-export const CUSTODY_PROVIDER_AVAILABILITY_CLASSES = ["general", "manual"] as const;
-export type CustodyProviderAvailabilityClass =
-  (typeof CUSTODY_PROVIDER_AVAILABILITY_CLASSES)[number];
-
 export const FULL_SIGNING_CUSTODY_PROVIDERS = [
   "fireblocks",
   "privy",
@@ -298,7 +288,6 @@ interface CustodyProviderCatalogEntryShape {
   label: string;
   descriptionKey: string;
   category: CustodyProviderCategory;
-  availability: CustodyProviderAvailabilityClass;
   visible: boolean;
   technicalCapabilities: CustodyProviderCapabilities;
   useCases: readonly CustodyProviderUseCase[];
@@ -331,7 +320,6 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     label: "Local Signer",
     descriptionKey: "DashboardCustody.providerLocalDescription",
     category: "server",
-    availability: "general",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.local,
     useCases: ["issuance", "transfers"],
@@ -342,7 +330,6 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     label: "Privy",
     descriptionKey: "DashboardCustody.providerPrivyDescription",
     category: "server",
-    availability: "general",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.privy,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
@@ -402,7 +389,6 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     label: "Fireblocks",
     descriptionKey: "DashboardCustody.providerFireblocksDescription",
     category: "institutional",
-    availability: "manual",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.fireblocks,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
@@ -445,7 +431,6 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     label: "Coinbase CDP",
     descriptionKey: "DashboardCustody.providerCoinbaseCdpDescription",
     category: "server",
-    availability: "general",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.coinbase_cdp,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
@@ -456,7 +441,6 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     label: "Para",
     descriptionKey: "DashboardCustody.providerParaDescription",
     category: "server",
-    availability: "general",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.para,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
@@ -467,7 +451,6 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     label: "Turnkey",
     descriptionKey: "DashboardCustody.providerTurnkeyDescription",
     category: "server",
-    availability: "general",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.turnkey,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
@@ -478,7 +461,6 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     label: "DFNS",
     descriptionKey: "DashboardCustody.providerDfnsDescription",
     category: "institutional",
-    availability: "manual",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.dfns,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
@@ -489,7 +471,6 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     label: "IBM Digital Asset Haven",
     descriptionKey: "DashboardCustody.providerIbmHavenDescription",
     category: "institutional",
-    availability: "manual",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.ibm_haven,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
@@ -500,7 +481,6 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     label: "Anchorage",
     descriptionKey: "DashboardCustody.providerAnchorageDescription",
     category: "institutional",
-    availability: "manual",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.anchorage,
     useCases: ["transfers", "compliance"],
@@ -511,7 +491,6 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     label: "Utila",
     descriptionKey: "DashboardCustody.providerUtilaDescription",
     category: "institutional",
-    availability: "manual",
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.utila,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,

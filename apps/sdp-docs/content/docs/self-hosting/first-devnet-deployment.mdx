@@ -45,7 +45,7 @@ In your Clerk development application, follow the [Clerk setup guide](https://gi
 - Give the API a public HTTPS URL, because Clerk can't reach `localhost`. To test locally, reserve a free static domain at [dashboard.ngrok.com/domains](https://dashboard.ngrok.com/domains) and run `ngrok http --url=<your-domain> 8787`.
 - Add a webhook endpoint at `https://<your-domain>/webhooks/clerk/link-orgs`, subscribed to the events the guide lists. Copy its signing secret for `CLERK_WEBHOOK_SECRET`.
 
-The API starts without `CLERK_WEBHOOK_SECRET`, but this tutorial needs it. The webhook is how SDP learns the settings you add to the organization in Clerk, including the one that turns on the local signer.
+The API starts without `CLERK_WEBHOOK_SECRET`, but set it now. The webhook is how SDP learns the settings you add to the organization in Clerk, such as a provider you turn on or off for it.
 
 </Step>
 
@@ -82,20 +82,6 @@ docker compose logs -f sdp-api
 ```
 
 `webhooks: refused a Clerk webhook with an invalid signature` means `CLERK_WEBHOOK_SECRET` doesn't match the endpoint's signing secret. Clerk's delivery log shows the same refusal as `Invalid webhook signature`.
-
-</Step>
-
-<Step>
-
-## Turn on the local signer
-
-The local signer needs a per-organization activation. In the Clerk dashboard, open your organization's private metadata (**Organizations** → your organization → **Metadata** → **Private**) and add:
-
-```json
-{ "sdp": { "providerOverrides": { "custody": { "local": true } } } }
-```
-
-The `organization.updated` webhook brings it into SDP. Until it does, choosing the local signer returns `403` with `Local requires manual activation for this organization.`
 
 </Step>
 

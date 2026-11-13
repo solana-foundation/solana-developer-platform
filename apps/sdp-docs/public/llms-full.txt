@@ -47274,7 +47274,7 @@ In your Clerk development application, follow the [Clerk setup guide](https://gi
 - Give the API a public HTTPS URL, because Clerk can't reach `localhost`. To test locally, reserve a free static domain at [dashboard.ngrok.com/domains](https://dashboard.ngrok.com/domains) and run `ngrok http --url=<your-domain> 8787`.
 - Add a webhook endpoint at `https://<your-domain>/webhooks/clerk/link-orgs`, subscribed to the events the guide lists. Copy its signing secret for `CLERK_WEBHOOK_SECRET`.
 
-The API starts without `CLERK_WEBHOOK_SECRET`, but this tutorial needs it. The webhook is how SDP learns the settings you add to the organization in Clerk, including the one that turns on the local signer.
+The API starts without `CLERK_WEBHOOK_SECRET`, but set it now. The webhook is how SDP learns the settings you add to the organization in Clerk, such as a provider you turn on or off for it.
 
 </Step>
 
@@ -47311,20 +47311,6 @@ docker compose logs -f sdp-api
 ```
 
 `webhooks: refused a Clerk webhook with an invalid signature` means `CLERK_WEBHOOK_SECRET` doesn't match the endpoint's signing secret. Clerk's delivery log shows the same refusal as `Invalid webhook signature`.
-
-</Step>
-
-<Step>
-
-## Turn on the local signer
-
-The local signer needs a per-organization activation. In the Clerk dashboard, open your organization's private metadata (**Organizations** → your organization → **Metadata** → **Private**) and add:
-
-```json
-{ "sdp": { "providerOverrides": { "custody": { "local": true } } } }
-```
-
-The `organization.updated` webhook brings it into SDP. Until it does, choosing the local signer returns `403` with `Local requires manual activation for this organization.`
 
 </Step>
 
@@ -47451,7 +47437,7 @@ The cache choice (`CACHE_MODE`) isn't written to the file either. For an externa
 
 The configurator offers `local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, and `utila`. Its list of providers to enable (`SIGNING_PROVIDERS`) only decides which credential fields it shows, and isn't written to the file. Each provider other than `local` needs its own credentials, such as an API key and secret for Fireblocks. Each project picks its signer when you set up custody in the dashboard.
 
-Privy, Coinbase CDP, Para, and Turnkey are open to every organization. The others, `local` included, also need a per-organization activation: [First devnet deployment](/docs/self-hosting/first-devnet-deployment) shows how for the local signer.
+Every configured provider, `local` included, is open to every organization. An organization override of `false` in its Clerk private metadata turns one off for that organization.
 
 For provider co-signers that run outside the stack, see [External co-signers](/docs/self-hosting/external-co-signers).
 
@@ -47627,7 +47613,7 @@ Most sign-in failures are Clerk configuration. Check `NEXT_PUBLIC_CLERK_PUBLISHA
 
 ## The local signer isn't offered
 
-If the local provider is missing from the dashboard, `CUSTODY_PRIVATE_KEY` isn't set. If choosing it returns `Local requires manual activation for this organization.`, add the organization override from [First devnet deployment](/docs/self-hosting/first-devnet-deployment), and check that the Clerk webhook reaches the API.
+If the local provider is missing from the dashboard, `CUSTODY_PRIVATE_KEY` isn't set. If choosing it returns `Local is turned off for this organization.`, the organization's private metadata in Clerk sets `providerOverrides.custody.local` to `false`: remove that override, and check that the Clerk webhook reaches the API.
 
 ## Still stuck?
 
@@ -47656,7 +47642,7 @@ Run each co-signer on a managed container service, such as Google Cloud Run or y
 
 ## Utila
 
-SDP signs with Utila directly: select `utila` in the configurator and fill in its `UTILA_*` credentials. SDP submits each transaction to Utila and polls until it's signed, up to `UTILA_MAX_POLL_ATTEMPTS` times every `UTILA_POLL_INTERVAL_MS` (60 tries, a second apart, by default). Like the local signer, Utila needs a per-organization activation.
+SDP signs with Utila directly: select `utila` in the configurator and fill in its `UTILA_*` credentials. SDP submits each transaction to Utila and polls until it's signed, up to `UTILA_MAX_POLL_ATTEMPTS` times every `UTILA_POLL_INTERVAL_MS` (60 tries, a second apart, by default).
 
 `UTILA_DESIGNATED_SIGNERS` lists the Utila users asked to sign each transaction. Left empty, it's the service account itself.
 

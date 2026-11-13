@@ -11,7 +11,7 @@ import { HASTRA_DEPLOYMENTS } from "./hastra-programs";
 import { JUPITER_LEND_EARN_PROGRAM_IDS } from "./jupiter-lend-programs";
 import { KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT, KAMINO_KVAULT_PROGRAM_IDS } from "./kamino-programs";
 import { ONDO_DEPLOYMENTS } from "./ondo-programs";
-import { normalizeOrganizationTier, type OrganizationTier } from "./organizations";
+import type { OrganizationTier } from "./organizations";
 import { VEDA_DEPLOYMENTS } from "./veda-programs";
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
@@ -724,64 +724,48 @@ export const projectProviderAvailabilitySchema = z.object({
 
 export type ProjectProviderAvailability = z.infer<typeof projectProviderAvailabilitySchema>;
 
-function createBooleanRecord<const T extends readonly string[]>(
-  values: T,
-  enabledValues: readonly T[number][]
-): Record<T[number], boolean> {
-  const enabledSet = new Set<string>(enabledValues);
+/**
+ * Whether an organization may use a family's providers when its settings carry
+ * no override for them. A family that is on by default is turned off for one
+ * organization with a `false` override per provider; a family that is off by
+ * default needs a `true` override per provider (for Earn that override is the
+ * money-in gate of ADR 0002).
+ */
+export const PROVIDER_FAMILY_DEFAULT_ENTITLEMENT = {
+  custody: true,
+  compliance: false,
+  ramps: true,
+  earn: false,
+} as const satisfies Record<OrganizationProviderFamily, boolean>;
 
-  return Object.fromEntries(values.map((value) => [value, enabledSet.has(value)])) as Record<
-    T[number],
-    boolean
-  >;
+function resolveFamilyEntitlements<const Provider extends string>(
+  providers: readonly Provider[],
+  entitledByDefault: boolean,
+  overrides: Partial<Record<Provider, boolean>> | undefined
+): Record<Provider, boolean> {
+  // SAFETY: the entries are built from `providers`, so the keys are exactly `Provider`.
+  return Object.fromEntries(
+    providers.map((provider) => [provider, overrides?.[provider] ?? entitledByDefault])
+  ) as Record<Provider, boolean>;
 }
 
-function applyOverrides<T extends string>(
-  base: Record<T, boolean>,
-  overrides?: Partial<Record<T, boolean>>
-): Record<T, boolean> {
-  if (!overrides) {
-    return { ...base };
-  }
-
-  const next = { ...base };
-  for (const [key, value] of Object.entries(overrides)) {
-    if (typeof value !== "boolean") {
-      continue;
-    }
-    if (key in next) {
-      next[key as T] = value;
-    }
-  }
-
-  return next;
-}
-
-export const GENERAL_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
-  custody: createBooleanRecord(CUSTODY_PROVIDERS, ["privy", "coinbase_cdp", "para", "turnkey"]),
-  compliance: createBooleanRecord(COMPLIANCE_PROVIDERS, []),
-  ramps: createBooleanRecord(RAMP_PROVIDERS, RAMP_PROVIDERS),
-  earn: createBooleanRecord(EARN_PROVIDERS, []),
-};
-
-export function resolveOrganizationProviderEntitlements(input: {
-  tier: string | null | undefined;
-  providerOverrides?: OrganizationProviderOverrides | null;
-}): { tier: OrganizationTier; providers: OrganizationProviderEntitlements } {
-  const tier = normalizeOrganizationTier(input.tier);
-  // `tier` is retained in the response for backwards compatibility, but provider
-  // access is organization-scoped: general providers are available to every org,
-  // while manual providers require an explicit provider override.
-  const defaults = GENERAL_PROVIDER_DEFAULTS;
-
+/**
+ * The providers an organization may use: each family's default
+ * (`PROVIDER_FAMILY_DEFAULT_ENTITLEMENT`) with the organization's overrides applied.
+ */
+export function resolveOrganizationProviderEntitlements(
+  overrides: OrganizationProviderOverrides | undefined
+): OrganizationProviderEntitlements {
+  const defaults = PROVIDER_FAMILY_DEFAULT_ENTITLEMENT;
   return {
-    tier,
-    providers: {
-      custody: applyOverrides(defaults.custody, input.providerOverrides?.custody),
-      compliance: applyOverrides(defaults.compliance, input.providerOverrides?.compliance),
-      ramps: applyOverrides(defaults.ramps, input.providerOverrides?.ramps),
-      earn: applyOverrides(defaults.earn, input.providerOverrides?.earn),
-    },
+    custody: resolveFamilyEntitlements(CUSTODY_PROVIDERS, defaults.custody, overrides?.custody),
+    compliance: resolveFamilyEntitlements(
+      COMPLIANCE_PROVIDERS,
+      defaults.compliance,
+      overrides?.compliance
+    ),
+    ramps: resolveFamilyEntitlements(RAMP_PROVIDERS, defaults.ramps, overrides?.ramps),
+    earn: resolveFamilyEntitlements(EARN_PROVIDERS, defaults.earn, overrides?.earn),
   };
 }
 

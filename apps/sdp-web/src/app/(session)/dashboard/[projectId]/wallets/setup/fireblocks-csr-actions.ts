@@ -11,18 +11,6 @@ export type FireblocksCsrResult =
   | { status: "success"; csr: FireblocksCsr | null }
   | { status: "error"; message: string };
 
-export async function loadFireblocksCsrAction(): Promise<FireblocksCsrResult> {
-  try {
-    const client = await createSdpApiClient();
-    const result = await client.fetch<{ csr: FireblocksCsr | null }>(
-      "/internal/dashboard/custody/fireblocks/csr"
-    );
-    return { status: "success", csr: result.csr };
-  } catch {
-    return { status: "error", message: "Could not load Fireblocks registration. Try again." };
-  }
-}
-
 export async function generateFireblocksCsrAction(
   idempotencyKey: string
 ): Promise<FireblocksCsrResult> {

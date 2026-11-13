@@ -11,6 +11,8 @@ export const custodyQueryKeys = {
   walletBalances: ({ walletId, readAt }: { walletId: string; readAt: number }) =>
     ["wallet-balances", walletId, readAt] as const,
   walletCardBalances: () => "wallet-card-balances",
+  /** The Project's pending Fireblocks registration; the SWR cache itself is per Project. */
+  pendingFireblocksCsr: () => "pending-fireblocks-csr",
   walletCardBalanceFallback: ({ walletId }: { walletId: string }) =>
     `${WALLET_CARD_BALANCE_FALLBACK_PREFIX}${walletId}`,
   /** Balances and activity of any wallet, as shown on the wallet pages. */

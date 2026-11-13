@@ -222,7 +222,7 @@ describe("estimateAcrossProviders", () => {
     const refusal: ProjectProviderRefusal = {
       ...MOONPAY_NOT_CONFIGURED,
       reason: "provider_not_entitled",
-      error: forbidden("MoonPay requires manual activation for this organization.", {
+      error: forbidden("MoonPay is turned off for this organization.", {
         reason: "provider_not_entitled",
       }),
     };
@@ -243,7 +243,7 @@ describe("estimateAcrossProviders", () => {
       {
         provider: "moonpay",
         status: "error",
-        error: "MoonPay requires manual activation for this organization.",
+        error: "MoonPay is turned off for this organization.",
         reason: "provider_not_entitled",
       },
       { provider: "stripe", status: "unsupported" },

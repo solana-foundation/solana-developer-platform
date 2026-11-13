@@ -54,7 +54,7 @@ Most sign-in failures are Clerk configuration. Check `NEXT_PUBLIC_CLERK_PUBLISHA
 
 ## The local signer isn't offered
 
-If the local provider is missing from the dashboard, `CUSTODY_PRIVATE_KEY` isn't set. If choosing it returns `Local requires manual activation for this organization.`, add the organization override from [First devnet deployment](/docs/self-hosting/first-devnet-deployment), and check that the Clerk webhook reaches the API.
+If the local provider is missing from the dashboard, `CUSTODY_PRIVATE_KEY` isn't set. If choosing it returns `Local is turned off for this organization.`, the organization's private metadata in Clerk sets `providerOverrides.custody.local` to `false`: remove that override, and check that the Clerk webhook reaches the API.
 
 ## Still stuck?
 

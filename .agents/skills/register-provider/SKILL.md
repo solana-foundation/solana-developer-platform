@@ -14,7 +14,7 @@ Build the smallest honest skeleton for the capabilities the provider supports. R
 
 ## 1. Add the closed provider id
 
-Add the lowercase id to `RAMP_PROVIDERS` in `packages/sdp-types/src/provider-access.ts`. `GENERAL_PROVIDER_DEFAULTS.ramps` currently enables every registered ramp for every organization; availability still fails closed when deployment credentials are absent. Registration is therefore a launch decision, not a hidden stub. Do not add the id until the implemented capability is safe to surface.
+Add the lowercase id to `RAMP_PROVIDERS` in `packages/sdp-types/src/provider-access.ts`. `PROVIDER_FAMILY_DEFAULT_ENTITLEMENT.ramps` is `true`, so every registered ramp is enabled for every organization; availability still fails closed when deployment credentials are absent. Registration is therefore a launch decision, not a hidden stub. Do not add the id until the implemented capability is safe to surface.
 
 Run these immediately and follow every exhaustive error:
 

@@ -2,19 +2,24 @@
 
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { toast } from "sonner";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type {
   InitializeCustodySetupActionResult,
   WalletSetupActionResult,
 } from "@/app/(session)/dashboard/[projectId]/wallets/actions";
 import type { PrivyByokSubmitResult } from "@/app/(session)/dashboard/[projectId]/wallets/byok-actions";
-import * as csrActions from "@/app/(session)/dashboard/[projectId]/wallets/setup/fireblocks-csr-actions";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { availableCustodyProviders } from "@/lib/provider-availability";
+import {
+  dashboardDataResponse,
+  sentDashboardRequests,
+  stubDashboardFetch,
+} from "@/test/dashboard-fetch";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
+import { FreshSWRCache } from "@/test/swr";
 
 const mocks = vi.hoisted(() => ({
   projectId: "prj_test_sandbox",
@@ -121,13 +126,15 @@ const PRODUCTION_BYOK_PAIR_AVAILABILITY = availableCustodyProviders(
 function renderFlow(props: Partial<FlowProps> = {}) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <WalletSetupFlow
-        connectedProviders={props.connectedProviders ?? ["turnkey"]}
-        custodyAvailability={props.custodyAvailability ?? SANDBOX_AVAILABILITY}
-        environment={props.environment ?? "sandbox"}
-        initialProvider={props.initialProvider ?? null}
-        connections={props.connections ?? []}
-      />
+      <FreshSWRCache>
+        <WalletSetupFlow
+          connectedProviders={props.connectedProviders ?? ["turnkey"]}
+          custodyAvailability={props.custodyAvailability ?? SANDBOX_AVAILABILITY}
+          environment={props.environment ?? "sandbox"}
+          initialProvider={props.initialProvider ?? null}
+          connections={props.connections ?? []}
+        />
+      </FreshSWRCache>
     </I18nProvider>
   );
 }
@@ -180,17 +187,22 @@ function submitted(action: { mock: { calls: [FormData][] } }): FormData {
   return call[0];
 }
 
+let dashboardFetch: Mock<typeof fetch>;
+
 beforeEach(() => {
   resetDashboardNavigation();
   // Fireblocks' fields read the project's registration CSR on mount; none is open yet.
-  vi.spyOn(csrActions, "loadFireblocksCsrAction").mockResolvedValue({
-    status: "success",
-    csr: null,
+  dashboardFetch = stubDashboardFetch((request) => {
+    if (request.path === "/api/dashboard/fireblocks/csr") {
+      return dashboardDataResponse(200, { csr: null });
+    }
+    throw new Error(`Unexpected dashboard request: ${request.path}`);
   });
 });
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   vi.clearAllMocks();
   mocks.projectId = "prj_test_sandbox";
 });
@@ -687,7 +699,14 @@ describe("whose account", () => {
     for (let settle = 0; settle < 5; settle += 1) {
       await act(async () => {});
     }
-    expect(csrActions.loadFireblocksCsrAction).toHaveBeenCalledTimes(1);
+    expect(sentDashboardRequests(dashboardFetch)).toEqual([
+      {
+        path: "/api/dashboard/fireblocks/csr",
+        method: "GET",
+        idempotencyKey: null,
+        body: undefined,
+      },
+    ]);
 
     // Nothing was typed and nothing was sent, so Cancel leaves at once.
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
