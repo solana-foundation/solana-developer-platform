@@ -2,7 +2,7 @@
 # Cargo.lock, so the Anchor v2 dependencies never unify with those of the service.
 [workspace]
 resolver = "2"
-members = ["builder", "test-builder", "testing"]
+members = ["builder", "kamino-builder", "test-builder", "testing"]
 
 [workspace.package]
 version = "0.1.0"

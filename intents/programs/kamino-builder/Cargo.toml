@@ -1,0 +1,42 @@
+[package]
+name = "kamino-builder"
+description = "Builds Kamino vault deposits and withdrawals for vault.deposit and vault.withdraw"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = ["no-log-ix-name"]
+no-entrypoint = []
+cpi = ["no-entrypoint"]
+idl-build = []
+no-log-ix-name = []
+
+# The interface crates use `solana-pubkey` 2 and `solana-instruction` 2. The builder names their types
+# and converts them through 32-byte arrays.
+[dependencies]
+anchor-lang.workspace = true
+klend-interface = "=0.6.0"
+kvault-interface = "=0.1.0"
+pinocchio.workspace = true
+sdp-intents-builder = { path = "../builder" }
+solana-instruction-2 = { package = "solana-instruction", version = "=2.3.3", default-features = false }
+solana-pubkey = { version = "=2.4.0", default-features = false }
+
+[dev-dependencies]
+anchor-v2-testing.workspace = true
+base64 = "=0.22.1"
+sdp-intents-planner = { path = "../../planner" }
+sdp-intents-program-testing = { path = "../testing" }
+sdp-intents-spec.workspace = true
+serde_json = "=1.0.154"
+solana-account = "=4.7.0"
+solana-address = { version = "=2.7.0", features = ["curve25519", "decode"] }
+
+[lints]
+workspace = true
