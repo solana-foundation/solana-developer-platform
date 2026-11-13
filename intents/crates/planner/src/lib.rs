@@ -59,7 +59,9 @@ pub use instruction::{AccountMeta, Instruction};
 pub use plan::{Digests, Plan, PlannedIntent};
 pub use planner::{PlanRequest, Planner, Step};
 pub use registry::REGISTRY_PROGRAM;
-pub use remote::{InputValue, RemoteAnswer, RemoteCall, RemoteInput, RemoteOutput};
+pub use remote::{
+    FrozenTransaction, InputValue, ProviderSignature, RemoteAnswer, RemoteCall, RemoteInput, RemoteOutput,
+};
 pub use sdp_intents_engine::Payers;
 pub use simulation::{ReturnData, Simulation, SimulationResult};
 pub use transaction::{Budget, RequiredSignature, SignerRole, Transaction};

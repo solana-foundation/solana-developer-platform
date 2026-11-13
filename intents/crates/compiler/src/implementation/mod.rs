@@ -146,7 +146,10 @@ impl<'c, 's> Build<'c, 's> {
         let Some(nodes) = object.field("postConditions").and_then(|conditions| conditions.array(self.sink)) else {
             return;
         };
-        let names = Names::new(self.schema, &[], Allowed { payers: false, accounts: false });
+        // A record's postcondition can name its accounts, such as a provider's receiving wallet
+        // that the record pins (`DESIGN.md`, 4.15).
+        let account_names = self.account_names.clone();
+        let names = Names::new(self.schema, &account_names, Allowed { payers: false, accounts: true });
 
         let conditions: Vec<PostConditionV1> = nodes
             .iter()

@@ -35,7 +35,8 @@ pub fn plan(prepared: &Prepared, request: Value) -> Value {
                 "heapSize": budget.heap_size.to_string(),
             },
             "compiled": base64(&prepared.message),
-            "lastValidBlockHeight": prepared.last_valid_block_height.to_string(),
+            "lastValidBlockHeight": prepared.last_valid_block_height.map(|height| height.to_string()),
+            "presigned": presigned(prepared),
             "signatures": signatures,
         }],
         "simulation": { "unitsConsumed": plan.units_consumed.to_string() },
@@ -78,6 +79,15 @@ fn digest(digest: &[u8; 32]) -> String {
     let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
 
     format!("sha256:{hex}")
+}
+
+/// The provider's signatures of a plan that is a provider's transaction.
+fn presigned(prepared: &Prepared) -> Vec<Value> {
+    let signatures = prepared.plan.frozen.iter().flat_map(|frozen| &frozen.signatures);
+
+    signatures
+        .map(|signed| json!({ "address": base58(&signed.signer), "signature": bs58::encode(signed.signature).into_string() }))
+        .collect()
 }
 
 /// What a transaction proves to its signer. `matches` compares the message with `expected`, the

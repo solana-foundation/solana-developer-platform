@@ -1,0 +1,26 @@
+[package]
+name = "sdp-intents-test-provider"
+description = "A local stand-in for a provider that signs its own transactions, for the tier 3 flow of the SDP intents prototype"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+base64.workspace = true
+bs58.workspace = true
+sdp-intents-client.workspace = true
+sdp-intents-engine.workspace = true
+sdp-intents-planner.workspace = true
+sdp-intents-spec.workspace = true
+serde_json.workspace = true
+solana-commitment-config = "=3.1.1"
+solana-keypair = "=3.1.2"
+solana-rpc-client = "=4.3.2"
+solana-signer = "=3.0.1"
+tokio = { version = "=1.54.1", features = ["macros", "net", "rt-multi-thread"] }
+
+[lints]
+workspace = true

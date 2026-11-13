@@ -6,7 +6,7 @@ use sdp_intents_spec::Address;
 
 use crate::plan::Built;
 use crate::values::{Reader, Value};
-use crate::{Instruction, PlanError};
+use crate::{Instruction, PlanError, Transaction};
 
 /// The call that a remote recipe needs. The endpoint is untrusted: the planner checks what it
 /// returns as it checks any recipe.
@@ -20,6 +20,8 @@ pub struct RemoteCall {
     pub inputs: Vec<RemoteInput>,
     pub fee_payer: Address,
     pub rent_payer: Address,
+    /// A provider that returns a whole transaction must set this priority fee.
+    pub priority_fee_lamports: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,11 +43,30 @@ pub enum InputValue {
     List(Vec<InputValue>),
 }
 
-/// What the endpoint returned: the instructions, and the outputs that the record leaves unbound.
+/// What the endpoint returned: the instructions, or a whole transaction that the provider signed,
+/// and the outputs that the record leaves unbound.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RemoteAnswer {
     pub instructions: Vec<Instruction>,
     pub outputs: Vec<RemoteOutput>,
+    pub frozen: Option<FrozenTransaction>,
+}
+
+/// A whole transaction that a provider built and signed. Its signatures cover every byte of the
+/// message, so the plan keeps the message as it is (`DESIGN.md`, 4.16).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FrozenTransaction {
+    /// The serialized v1 message, with its version byte.
+    pub message: Vec<u8>,
+    pub transaction: Transaction,
+    /// The provider's signatures. The caller checks each against `message`.
+    pub signatures: Vec<ProviderSignature>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProviderSignature {
+    pub signer: Address,
+    pub signature: [u8; 64],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,7 +75,7 @@ pub struct RemoteOutput {
     pub address: Address,
 }
 
-pub(crate) fn call(recipe: &Recipe<'_>) -> Result<RemoteCall, PlanError> {
+pub(crate) fn call(recipe: &Recipe<'_>, priority_fee_lamports: u64) -> Result<RemoteCall, PlanError> {
     let interface = recipe.interface();
     let implementation = recipe.implementation();
     let version = interface.id().version;
@@ -79,6 +100,7 @@ pub(crate) fn call(recipe: &Recipe<'_>) -> Result<RemoteCall, PlanError> {
         inputs,
         fee_payer: *recipe.payers().fee,
         rent_payer: *recipe.payers().rent,
+        priority_fee_lamports,
     })
 }
 
@@ -106,8 +128,76 @@ impl Built {
             })
             .collect::<Result<Vec<_>, PlanError>>()?;
 
-        Ok(Self { instructions: answer.instructions, signers: Vec::new(), outputs: outputs.concat() })
+        Ok(Self { instructions: answer.instructions, signers: Vec::new(), outputs: outputs.concat(), frozen: None })
     }
+
+    /// A provider's transaction. It is the whole plan, so it has one intent and no onchain checks,
+    /// the request's fee payer and priority fee, and no signature for the owner, a payer, or a
+    /// signer input. Each other signature must be one that the record lists, or one for an account
+    /// that the transaction creates, which `verify` checks in the simulation.
+    pub(crate) fn from_frozen(
+        recipe: &Recipe<'_>,
+        answer: RemoteAnswer,
+        priority_fee_lamports: u64,
+    ) -> Result<Self, PlanError> {
+        let frozen = answer.frozen.ok_or(PlanError::RemoteTransaction("the endpoint returned no transaction"))?;
+        let options = recipe.intent().options()?;
+        let payers = recipe.payers();
+
+        if options.verify_intent || options.assertions {
+            return Err(PlanError::RemoteTransaction("set `verifyIntent` and `assertions` to false to accept it"));
+        }
+
+        if frozen.transaction.fee_payer != *payers.fee
+            || frozen.transaction.priority_fee_lamports != priority_fee_lamports
+        {
+            return Err(PlanError::RemoteTransaction("its fee payer or priority fee is not the request's"));
+        }
+
+        let user_signers = signer_inputs(recipe)?;
+        let refused = frozen.signatures.iter().any(|signed| {
+            signed.signer == *payers.fee || signed.signer == *payers.rent || user_signers.contains(&signed.signer)
+        });
+
+        if refused {
+            return Err(PlanError::RemoteTransaction("the provider signed for a payer or a signer input"));
+        }
+
+        let outputs = Self::from_remote(recipe, RemoteAnswer { frozen: None, ..answer })?.outputs;
+        let signers = frozen.signatures.iter().map(|signed| signed.signer).collect();
+
+        Ok(Self { instructions: frozen.transaction.instructions.clone(), signers, outputs, frozen: Some(frozen) })
+    }
+}
+
+/// The address of each signer input that the intent holds.
+fn signer_inputs(recipe: &Recipe<'_>) -> Result<Vec<Address>, PlanError> {
+    let interface = recipe.interface();
+
+    interface
+        .inputs()?
+        .iter()
+        .zip(0u8..)
+        .filter(|(input, _)| input.signer())
+        .filter_map(|(input, index)| {
+            match Reader(recipe.intent().input(index).ok()?).read(input.value_type().ok()?, input.optional()) {
+                Ok(Value::Address(address)) => Some(Ok(address)),
+                Ok(_) => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+        .collect()
+}
+
+/// The signers that the record lists: its accounts with the signer flag.
+pub(crate) fn record_signers(recipe: &Recipe<'_>) -> Result<Vec<Address>, PlanError> {
+    let accounts = recipe.implementation().accounts()?;
+
+    Ok((0u8..)
+        .zip(accounts)
+        .filter(|(_, account)| account.signer())
+        .filter_map(|(index, _)| recipe.address(index).copied())
+        .collect())
 }
 
 impl From<Value<'_>> for InputValue {

@@ -17,7 +17,7 @@ pub struct PlanRequest<'a> {
     pub payers: Payers<'a>,
     pub priority_fee_lamports: u64,
 }
-use crate::{RemoteAnswer, RemoteCall, SimulationResult, Transaction};
+use crate::{FrozenTransaction, RemoteAnswer, RemoteCall, SimulationResult, Transaction};
 
 /// What the caller does next for the planner.
 #[derive(Debug)]
@@ -44,6 +44,7 @@ pub struct Planner<'a> {
     signatures: Vec<RequiredSignature>,
     after: AccountMap,
     last: Option<Measured>,
+    frozen: Option<FrozenTransaction>,
 }
 
 /// The simulation of the transaction up to the end of the last planned segment.
@@ -82,6 +83,7 @@ impl<'a> Planner<'a> {
             signatures: Vec::new(),
             after: AccountMap::default(),
             last: None,
+            frozen: None,
         })
     }
 
@@ -147,18 +149,31 @@ impl<'a> Planner<'a> {
             units_consumed: segment.units_consumed,
             loaded_accounts_data_size: segment.loaded_accounts_data_size,
         });
+        self.frozen = self.frozen.take().or(segment.frozen);
         self.messages.push(segment.message);
         self.intents.push(PlannedIntent { verify, span: start..end, ..segment.intent });
     }
 
-    /// The last simulation ran the whole transaction, so it measures the budget.
+    /// The last simulation ran the whole transaction, so it measures the budget. A provider's
+    /// transaction keeps its own budget, and is the whole plan.
     fn finish(&mut self) -> Result<Plan, PlanError> {
         let last = self.last.take().ok_or(PlanError::OutOfOrder)?;
-        let transaction = Transaction {
-            fee_payer: *self.payers.fee,
-            instructions: core::mem::take(&mut self.instructions),
-            budget: Budget::measured(last.units_consumed, last.loaded_accounts_data_size),
-            priority_fee_lamports: self.priority_fee_lamports,
+        let frozen = self.frozen.take();
+
+        if frozen.is_some() && self.intents.len() > 1 {
+            return Err(PlanError::RemoteTransaction(
+                "a provider's transaction is the whole plan, with no other intent",
+            ));
+        }
+
+        let transaction = match &frozen {
+            Some(frozen) => frozen.transaction.clone(),
+            None => Transaction {
+                fee_payer: *self.payers.fee,
+                instructions: core::mem::take(&mut self.instructions),
+                budget: Budget::measured(last.units_consumed, last.loaded_accounts_data_size),
+                priority_fee_lamports: self.priority_fee_lamports,
+            },
         };
 
         Ok(Plan {
@@ -167,6 +182,7 @@ impl<'a> Planner<'a> {
             transaction,
             signatures: core::mem::take(&mut self.signatures),
             units_consumed: last.units_consumed,
+            frozen,
         })
     }
 }

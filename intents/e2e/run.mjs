@@ -30,6 +30,9 @@ import {
 const RPC = process.argv[2] ?? "http://127.0.0.1:8899";
 const SERVICE_BINARY = new URL("../target/debug/sdp-intents-service", import.meta.url).pathname;
 const ADAPTER = new URL("../adapters/jupiter.mjs", import.meta.url).pathname;
+const PROVIDER_BINARY = new URL("../target/debug/sdp-intents-test-provider", import.meta.url).pathname;
+const PROVIDER_WALLET = "ProviderWa11et11111111111111111111111111111";
+const NOPAL = "GArhnnDj3GYhmQeApKVXaRv4TQFwhPcs3SNF6FXsTeXq";
 const USDY = "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6";
 const PRIME = "3b8X44fLF9ooXaUm3hhSgjpmVs6rZZ3pPoGnGahc3Uu7";
 const WYLDS = "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih";
@@ -72,6 +75,9 @@ const startService = () =>
 /// The Jupiter swap wrapper that the Ondo records name.
 const startAdapter = () => start(process.execPath, [ADAPTER], "http://127.0.0.1:8791/mode");
 
+/// The stand-in provider that the tier 3 record names.
+const startProvider = () => start(PROVIDER_BINARY, [RPC], "http://127.0.0.1:8792/deposit");
+
 async function tokenAmount(owner, mint) {
   const result = await rpc("getTokenAccountsByOwner", [owner, { mint }, { encoding: "jsonParsed" }]);
 
@@ -102,11 +108,16 @@ async function run(name, request, signers) {
   expect(verified.includes("The message matches the plan."), `${name}: the client's verifier proves the message`);
 
   const compiled = plan.transactions[0].compiled;
-  const remote = await service("/v1/verify", JSON.stringify({ message: compiled, expected: plan.message }));
+  // A provider's transaction is planned again from its request, with its signatures.
+  const presigned = plan.transactions[0].presigned;
+  const remote = await service(
+    "/v1/verify",
+    JSON.stringify({ message: compiled, expected: plan.message, presigned, request: plan.request }),
+  );
   expect(remote.matches && remote.unverified.length === 0, `${name}: the service's verifier proves it too`);
 
   if (signers === undefined) {
-    const sent = await service("/v1/send", JSON.stringify({ message: compiled }));
+    const sent = await service("/v1/send", JSON.stringify({ message: compiled, presigned }));
     expect(sent.signature !== undefined, `${name}: the service signed it, and it landed`);
   } else {
     const sent = cli("send", planPath, "--rpc", RPC, ...signers.flatMap((signer) => ["--keypair", signer.path]));
@@ -148,11 +159,12 @@ expect(organizationAuthority === vault, "the vault is the authority of solana.or
 
 const child = await startService();
 const adapter = await startAdapter();
+const provider = await startProvider();
 
 try {
   console.log("the service reads the registry");
   const listing = await service("/v1/registry");
-  expect(listing.interfaces.length === 5 && listing.implementations.length === 13, "it lists 5 interfaces and 13 implementations");
+  expect(listing.interfaces.length === 6 && listing.implementations.length === 14, "it lists 6 interfaces and 14 implementations");
 
   const candidates = await service(
     "/v1/implementations",
@@ -299,6 +311,25 @@ try {
   const cancelled = await rpc("getTokenAccountsByOwner", [sender.address, { mint: WYLDS }, { encoding: "jsonParsed" }]);
   expect(cancelled.value[0].account.data.parsed.info.delegate === undefined, "the cancellation revokes the delegate");
 
+  console.log("a deposit request through a provider that signs its own transaction, at tier 3");
+  await rpc("surfnet_setTokenAccount", [PROVIDER_WALLET, USDC, { amount: 0 }, TOKEN_PROGRAM]);
+  const walletBefore = await tokenAmount(PROVIDER_WALLET, USDC);
+  const provided = await run(
+    "provider-deposit",
+    plan(payer, [
+      {
+        interface: "solana.org/vault.requestDeposit@^1",
+        implementation: "solana.org/test-provider-deposit@^1",
+        inputs: { owner: sender.address, vault: NOPAL, asset: USDC, amount: "10000000" },
+        options: { verifyIntent: false, assertions: false },
+      },
+    ]),
+    [payer, sender],
+  );
+  expect(provided.message.includes("tier 3, checked by simulation only | onchain checks: none"), "the message names tier 3");
+  expect(provided.transactions[0].presigned.length === 1, "the provider signed for its order account");
+  expect((await tokenAmount(PROVIDER_WALLET, USDC)) - walletBefore === 10_000_000n, "the provider's wallet received 10 USDC");
+
   console.log("an endpoint that adds an approval to an attacker");
   await fetch("http://127.0.0.1:8791/mode", { method: "POST", body: JSON.stringify({ malicious: true }) });
   const refused = await service(
@@ -325,4 +356,5 @@ try {
 } finally {
   child.kill();
   adapter.kill();
+  provider.kill();
 }

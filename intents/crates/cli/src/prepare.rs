@@ -11,6 +11,8 @@ use serde_json::Value;
 use sdp_intents_client::{json, Client, ClientError};
 use sdp_intents_planner::{IntentDocuments, Payers, PlanError, PlanRequest};
 
+use sdp_intents_compiler::CompiledPlan;
+
 use crate::lint::{compile_tree, Outcome};
 use crate::output::{self, Format};
 use crate::tree::Tree;
@@ -48,7 +50,19 @@ pub fn run(args: &PrepareArgs) -> Result<Outcome, String> {
         }
     };
 
-    let plan_request = PlanRequest {
+    let plan_request = plan_request(&request);
+    let prepared = Client::new(&args.rpc).prepare(&plan_request).map_err(describe)?;
+    let request_json: Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+    let plan = serde_json::to_string_pretty(&json::plan(&prepared, request_json)).map_err(|error| error.to_string())?;
+
+    println!("{plan}");
+
+    Ok(Outcome::Clean)
+}
+
+/// The planner's request for a compiled plan request.
+pub fn plan_request<'a>(request: &'a CompiledPlan<'_>) -> PlanRequest<'a> {
+    PlanRequest {
         intents: request
             .intents
             .iter()
@@ -60,14 +74,7 @@ pub fn run(args: &PrepareArgs) -> Result<Outcome, String> {
             .collect(),
         payers: Payers { fee: &request.payers.fee, rent: &request.payers.rent },
         priority_fee_lamports: request.priority_fee_lamports,
-    };
-    let prepared = Client::new(&args.rpc).prepare(&plan_request).map_err(describe)?;
-    let request_json: Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
-    let plan = serde_json::to_string_pretty(&json::plan(&prepared, request_json)).map_err(|error| error.to_string())?;
-
-    println!("{plan}");
-
-    Ok(Outcome::Clean)
+    }
 }
 
 /// A failed simulation also shows the program logs, which name the instruction and the reason.

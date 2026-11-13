@@ -13,6 +13,28 @@ use sdp_intents_client::sign_message;
 
 use crate::error::ServiceError;
 
+/// The provider's signatures that a plan of a provider's transaction holds, as `presigned`.
+pub fn presigned(body: &Value) -> Result<Vec<sdp_intents_planner::ProviderSignature>, ServiceError> {
+    let listed = body.get("presigned").and_then(Value::as_array).cloned().unwrap_or_default();
+
+    listed
+        .iter()
+        .map(|entry| {
+            let decode =
+                |key: &str| entry.get(key).and_then(Value::as_str).and_then(|text| bs58::decode(text).into_vec().ok());
+            let signer = decode("address").and_then(|bytes| <[u8; 32]>::try_from(bytes).ok());
+            let signature = decode("signature").and_then(|bytes| <[u8; 64]>::try_from(bytes).ok());
+
+            match (signer, signature) {
+                (Some(signer), Some(signature)) => {
+                    Ok(sdp_intents_planner::ProviderSignature { signer: sdp_intents_spec::Address(signer), signature })
+                }
+                _ => Err(ServiceError::invalid_request("each `presigned` entry has a base58 address and signature")),
+            }
+        })
+        .collect()
+}
+
 pub struct NamedKeypair {
     pub name: String,
     pub keypair: Keypair,
@@ -72,7 +94,7 @@ impl Wallets {
             .and_then(|message| base64::engine::general_purpose::STANDARD.decode(message).ok())
             .ok_or_else(|| ServiceError::invalid_request("`message` is the base64 of a v1 message"))?;
         let signers: Vec<&Keypair> = self.keypairs.iter().map(|named| &named.keypair).collect();
-        let transaction = sign_message(&message, &signers)?;
+        let transaction = sign_message(&message, &signers, &presigned(body)?)?;
         let signature =
             chain.send(&transaction).await.map_err(|error| ServiceError::refused("sendFailed", error.to_string()))?;
 

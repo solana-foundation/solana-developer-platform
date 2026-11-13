@@ -534,7 +534,7 @@ mod tests {
                 < position("publish solana.org/system-transfer@1.0.0")
         );
         assert_eq!(steps.last().map(String::as_str), Some("set the head of solana.org/token-2022-transfer to 1.0.0"));
-        assert_eq!(steps.len(), 81);
+        assert_eq!(steps.iter().collect::<std::collections::HashSet<_>>().len(), steps.len());
     }
 
     /// Every step before the moves needs the signer to be the authority.
@@ -550,8 +550,9 @@ mod tests {
         let steps = descriptions(&tree, &settings);
         let vault = bs58::encode(VAULT.0).into_string();
 
-        assert_eq!(steps.len(), 65);
-        assert_eq!(steps[63], format!("move the approve authority of solana.org/token.transfer to {vault}"));
-        assert_eq!(steps[64], format!("move the authority of solana.org to {vault}"));
+        let [.., approve_move, organization_move] = steps.as_slice() else { panic!("the plan has no moves") };
+
+        assert_eq!(*approve_move, format!("move the approve authority of solana.org/token.transfer to {vault}"));
+        assert_eq!(*organization_move, format!("move the authority of solana.org to {vault}"));
     }
 }

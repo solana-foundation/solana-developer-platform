@@ -39,6 +39,11 @@ pub enum PlanError {
     /// A remote recipe with `verify_intent` needs the assertions, because `verify_intent` cannot
     /// rebuild its instructions.
     RemoteNeedsAssertions,
+    /// The provider's transaction breaks a rule of `DESIGN.md`, 4.16, which the text names.
+    RemoteTransaction(&'static str),
+    /// A provider signed for an account that the record does not list and the transaction does not
+    /// create.
+    ProviderSigner(sdp_intents_spec::Address),
     /// A builder names the rent payer's address itself, such as an owner who pays the rent.
     /// `verify_intent` cannot tell that account from the rent placeholder yet.
     RentPayerInRecipe,
@@ -114,6 +119,12 @@ impl fmt::Display for PlanError {
             Self::TooManyRounds => f.write_str("the builder asked for accounts in more than 4 rounds"),
             Self::RemoteRecipe => f.write_str("remote recipes that return a transaction are not supported yet"),
             Self::RemoteOutput(output) => write!(f, "the endpoint's output {output} differs from the record, or is missing"),
+            Self::RemoteTransaction(rule) => write!(f, "the provider's transaction is refused: {rule}"),
+            Self::ProviderSigner(address) => write!(
+                f,
+                "the provider signed for {}, which the record does not list and the transaction does not create",
+                crate::render::base58(address)
+            ),
             Self::RemoteNeedsAssertions => f.write_str(
                 "a remote recipe needs `assertions`, because verify_intent cannot rebuild its instructions. Turn both checks off to trust the endpoint.",
             ),

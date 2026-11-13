@@ -23,6 +23,20 @@ const MAX_VERIFY_ROUNDS: usize = 8;
 /// With `tamper`, the transaction differs from the plan, as `tamper` says.
 pub async fn prepare(chain: &CachedRpc, text: &str, tamper: bool) -> Result<Value, ServiceError> {
     let request: Value = serde_json::from_str(text)?;
+    let mut plan = planned(chain, text, None).await?;
+
+    if tamper {
+        tamper_with(&mut plan);
+    }
+
+    let recent = chain.latest_blockhash().await?;
+
+    Ok(plan_json::plan(&prepared(plan, recent.blockhash, recent.last_valid_block_height)?, request))
+}
+
+/// Plans `text` with the registry's documents. A remote call takes `answer` when it is set.
+async fn planned(chain: &CachedRpc, text: &str, answer: Option<RemoteAnswer>) -> Result<Plan, ServiceError> {
+    let request: Value = serde_json::from_str(text)?;
     let references = references(&request)?;
     let documents = Registry { chain }.intent_documents(&references).await?;
 
@@ -42,19 +56,12 @@ pub async fn prepare(chain: &CachedRpc, text: &str, tamper: bool) -> Result<Valu
         priority_fee_lamports: compiled.priority_fee_lamports,
     };
 
-    let mut plan = plan(chain, &plan_request).await?;
-
-    if tamper {
-        tamper_with(&mut plan);
-    }
-
-    let recent = chain.latest_blockhash().await?;
-
-    Ok(plan_json::plan(&prepared(plan, recent.blockhash, recent.last_valid_block_height)?, request))
+    plan(chain, &plan_request, answer).await
 }
 
 /// A body of `{ "message": base64, "expected": text }`. `expected` is the plan's message, when the
-/// caller has one.
+/// caller has one. A provider's transaction also holds `presigned` and the plan's `request`, and is
+/// planned again with the transaction as the endpoint's answer.
 pub async fn verify(chain: &CachedRpc, body: &Value) -> Result<Value, ServiceError> {
     let message = body
         .get("message")
@@ -63,9 +70,28 @@ pub async fn verify(chain: &CachedRpc, body: &Value) -> Result<Value, ServiceErr
     let message = base64::engine::general_purpose::STANDARD
         .decode(message)
         .map_err(|error| ServiceError::invalid_request(format!("`message` is not base64: {error}")))?;
-    let verified = verified(chain, &message).await?;
+    let expected = body.get("expected").and_then(Value::as_str);
+    let presigned = crate::wallets::presigned(body)?;
 
-    Ok(plan_json::verified(&verified, body.get("expected").and_then(Value::as_str)))
+    if presigned.is_empty() {
+        return Ok(plan_json::verified(&verified(chain, &message).await?, expected));
+    }
+
+    let request = body
+        .get("request")
+        .ok_or_else(|| ServiceError::invalid_request("a provider's transaction needs its `request`"))?;
+    let frozen = remote::frozen_from_parts(&message, presigned)?;
+    let replanned =
+        planned(chain, &request.to_string(), Some(RemoteAnswer { frozen: Some(frozen), ..RemoteAnswer::default() }))
+            .await?;
+
+    Ok(json!({
+        "message": replanned.message,
+        "matches": expected.map(|expected| expected == replanned.message),
+        "intents": [],
+        "unverified": [],
+        "checkedBy": "simulation",
+    }))
 }
 
 /// Changes the last data byte of the first built instruction, and keeps the message. The client's
@@ -82,7 +108,11 @@ fn tamper_with(plan: &mut Plan) {
     }
 }
 
-async fn plan(chain: &CachedRpc, request: &PlanRequest<'_>) -> Result<Plan, ServiceError> {
+async fn plan(
+    chain: &CachedRpc,
+    request: &PlanRequest<'_>,
+    answer: Option<RemoteAnswer>,
+) -> Result<Plan, ServiceError> {
     let mut planner = Planner::new(request, fresh_address())?;
     let mut accounts = AccountMap::default();
 
@@ -93,7 +123,10 @@ async fn plan(chain: &CachedRpc, request: &PlanRequest<'_>) -> Result<Plan, Serv
                 accounts.insert_fetched(&addresses, fetched);
             }
             Step::Simulate(simulation) => planner.simulated(chain.simulate(&simulation).await?)?,
-            Step::Call(call) => planner.called(call_remote(&call).await?)?,
+            Step::Call(call) => match &answer {
+                Some(answer) => planner.called(answer.clone())?,
+                None => planner.called(call_remote(&call).await?)?,
+            },
             Step::Done(plan) => return Ok(*plan),
         }
     }

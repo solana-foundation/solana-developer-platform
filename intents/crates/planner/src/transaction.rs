@@ -130,6 +130,8 @@ pub enum SignerRole {
     Input(String),
     /// A new account that a builder asked the plan's signer to sign for.
     Builder,
+    /// An account that the provider of a remote transaction signed for already.
+    Provider,
 }
 
 impl SignerRole {
@@ -140,6 +142,7 @@ impl SignerRole {
             Self::RentPayer => "payer:rent".to_owned(),
             Self::Input(name) => format!("input:{name}"),
             Self::Builder => "builder".to_owned(),
+            Self::Provider => "provider".to_owned(),
         }
     }
 }

@@ -21,8 +21,8 @@ use crate::render::Column;
 use crate::values::Values;
 use crate::verify::{rent_cap, Snapshot, Verification};
 use crate::{
-    Account, Digests, Instruction, IntentDocuments, PlanError, RequiredSignature, Simulation, SimulationResult,
-    Transaction,
+    Account, Digests, FrozenTransaction, Instruction, IntentDocuments, PlanError, RequiredSignature, Simulation,
+    SimulationResult, Transaction,
 };
 
 /// A builder asks for accounts in at most 4 rounds.
@@ -50,6 +50,7 @@ pub(crate) struct Segment {
     pub(crate) message: String,
     pub(crate) onchain: OnchainChecks,
     pub(crate) built: Vec<Instruction>,
+    pub(crate) frozen: Option<FrozenTransaction>,
     pub(crate) signatures: Vec<RequiredSignature>,
     /// The accounts that the segment can change, and their state after it, in the same order.
     pub(crate) observed: Vec<Address>,
@@ -160,7 +161,13 @@ impl<'a> SegmentPlanner<'a> {
     pub(crate) fn called(&mut self, answer: RemoteAnswer) -> Result<(), PlanError> {
         match core::mem::replace(&mut self.state, State::Finished) {
             State::AwaitingRemote => {
-                self.state = State::Built(Built::from_remote(&self.recipe, answer)?);
+                let built = match self.recipe.implementation().recipe()? {
+                    RecipeKind::RemoteTransaction => {
+                        Built::from_frozen(&self.recipe, answer, self.priority_fee_lamports)?
+                    }
+                    _ => Built::from_remote(&self.recipe, answer)?,
+                };
+                self.state = State::Built(built);
                 Ok(())
             }
             other => {
@@ -175,13 +182,15 @@ impl<'a> SegmentPlanner<'a> {
     fn call_remote(&mut self) -> Result<SegmentStep, PlanError> {
         let options = self.recipe.intent().options()?;
 
-        if options.verify_intent && !options.assertions {
+        let remote_instructions = self.recipe.implementation().recipe()? == RecipeKind::Remote;
+
+        if remote_instructions && options.verify_intent && !options.assertions {
             return Err(PlanError::RemoteNeedsAssertions);
         }
 
         self.state = State::AwaitingRemote;
 
-        Ok(SegmentStep::Call(remote::call(&self.recipe)?))
+        Ok(SegmentStep::Call(remote::call(&self.recipe, self.priority_fee_lamports)?))
     }
 
     fn resolve<C: Chain>(&mut self, earlier: &Earlier<'_, C>) -> Result<SegmentStep, PlanError> {
@@ -195,8 +204,7 @@ impl<'a> SegmentPlanner<'a> {
         match self.recipe.implementation().recipe()? {
             RecipeKind::Static => self.simulate_segment(Built::from_static(&self.recipe, earlier.chain)?, earlier),
             RecipeKind::Program => self.simulate_builder(earlier),
-            RecipeKind::Remote => self.call_remote(),
-            RecipeKind::RemoteTransaction => Err(PlanError::RemoteRecipe),
+            RecipeKind::Remote | RecipeKind::RemoteTransaction => self.call_remote(),
         }
     }
 
@@ -314,6 +322,7 @@ impl<'a> SegmentPlanner<'a> {
             fee.saturating_sub(checking.earlier_fee),
         )
         .check(&checking.guarantees)?;
+        check_provider_signers(&self.recipe, &checking.built, &snapshots)?;
 
         let rent_cap = rent_cap(&snapshots);
         let message = with_rent_cap(&checking.message, rent_cap);
@@ -370,6 +379,7 @@ impl<'a> SegmentPlanner<'a> {
                 span: 0..0,
             },
             onchain,
+            frozen: checking.built.frozen,
             built: checking.built.instructions,
             signatures: checking.signatures,
             observed: checking.observe,
@@ -402,6 +412,26 @@ fn snapshot_of<C: Chain>(chain: &C, address: &Address) -> Account {
 }
 
 /// Each observed account before the simulation and after it.
+/// Each account that a provider signed for is one that the record lists, or one that the
+/// transaction creates, which holds nothing before it.
+fn check_provider_signers(recipe: &Recipe<'_>, built: &Built, snapshots: &[Snapshot]) -> Result<(), PlanError> {
+    if built.frozen.is_none() {
+        return Ok(());
+    }
+
+    let listed = remote::record_signers(recipe)?;
+    let created = |address: &Address| {
+        snapshots.iter().any(|snapshot| {
+            snapshot.address == *address && snapshot.before.lamports == 0 && snapshot.after.lamports > 0
+        })
+    };
+
+    match built.signers.iter().find(|signer| !listed.contains(signer) && !created(signer)) {
+        Some(signer) => Err(PlanError::ProviderSigner(*signer)),
+        None => Ok(()),
+    }
+}
+
 fn snapshots(checking: &Checking, result: &SimulationResult) -> Result<Vec<Snapshot>, PlanError> {
     if let Some(error) = &result.error {
         return Err(PlanError::Simulation { error: error.clone(), logs: result.logs.clone() });

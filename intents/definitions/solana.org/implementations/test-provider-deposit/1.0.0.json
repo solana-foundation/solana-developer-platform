@@ -1,0 +1,32 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "implementation",
+  "id": "solana.org/test-provider-deposit",
+  "version": "1.0.0",
+  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "implements": "solana.org/vault.requestDeposit@^1",
+  "annotations": {
+    "provider": "A local stand-in, crates/test-provider, for a provider that signs its own transactions, such as Plume's nOPAL mint. Its share mint is nOPAL's, for the display only."
+  },
+  "applies": [
+    { "value": "{inputs.vault}", "equals": "GArhnnDj3GYhmQeApKVXaRv4TQFwhPcs3SNF6FXsTeXq" },
+    { "value": "{inputs.asset}", "equals": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" }
+  ],
+  "message": "request that the test provider mint {outputs.shareMint} for {inputs.amount} of {inputs.asset} from {inputs.owner}",
+  "recipe": {
+    "kind": "remote",
+    "url": "http://127.0.0.1:8792/deposit",
+    "returns": "transaction",
+    "accounts": [
+      { "name": "shareMint", "address": "GArhnnDj3GYhmQeApKVXaRv4TQFwhPcs3SNF6FXsTeXq" },
+      { "name": "wallet", "address": "ProviderWa11et11111111111111111111111111111" }
+    ],
+    "outputs": { "shareMint": "shareMint" }
+  },
+  "postConditions": [
+    { "invokesOnly": ["11111111111111111111111111111111", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+      "message": "only System and token instructions run" },
+    { "inflow": { "to": "{accounts.wallet}", "mint": "{inputs.asset}", "min": "{inputs.amount}" },
+      "message": "the provider's wallet {accounts.wallet} receives at least {inputs.amount} of {inputs.asset}" }
+  ]
+}

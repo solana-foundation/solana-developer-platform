@@ -1,0 +1,21 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "interface",
+  "id": "solana.org/vault.requestDeposit",
+  "version": "1.0.0",
+  "settlement": "async",
+  "inputs": [
+    { "name": "owner", "type": "address", "signer": true },
+    { "name": "vault", "type": "address" },
+    { "name": "asset", "type": "mint" },
+    { "name": "amount", "type": "u64", "display": { "amount": { "mint": "{inputs.asset}" } } }
+  ],
+  "outputs": [{ "name": "shareMint", "type": "mint" }],
+  "display": "Request a deposit of {inputs.amount} {inputs.asset} into vault {inputs.vault}, paid later in {outputs.shareMint}",
+  "postConditions": [
+    { "outflow": { "from": "{inputs.owner}", "mint": "{inputs.asset}", "max": "{inputs.amount}" },
+      "message": "{inputs.owner} sends at most {inputs.amount} of {inputs.asset}" },
+    { "noOtherOutflows": { "from": "{inputs.owner}" },
+      "message": "nothing else leaves {inputs.owner}" }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "head": "1.0.0",
+  "approveNewVersions": false,
+  "approvals": {
+    "solana.org/test-provider-deposit": [
+      "1.0.0"
+    ]
+  }
+}

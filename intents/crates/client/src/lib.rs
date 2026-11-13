@@ -30,7 +30,8 @@ use solana_rpc_client::rpc_client::RpcClient;
 use solana_message::v1::{MAX_TRANSACTION_SIZE, SIGNATURE_SIZE};
 
 use sdp_intents_planner::{
-    Account, AccountMap, Limit, Plan, PlanError, PlanRequest, Planner, Simulation, SimulationResult, Step,
+    Account, AccountMap, FrozenTransaction, Limit, Plan, PlanError, PlanRequest, Planner, RemoteAnswer, Simulation,
+    SimulationResult, Step,
 };
 use sdp_intents_spec::Address;
 
@@ -53,8 +54,9 @@ pub struct Prepared {
     pub plan: Plan,
     /// The v1 message that the signers sign, with a recent `confirmed` blockhash.
     pub message: Vec<u8>,
-    /// The last block height at which the message can land.
-    pub last_valid_block_height: u64,
+    /// The last block height at which the message can land. A provider's transaction has its own
+    /// blockhash, whose height the plan does not know.
+    pub last_valid_block_height: Option<u64>,
 }
 
 impl Client {
@@ -64,22 +66,36 @@ impl Client {
     }
 
     pub fn prepare(&self, request: &PlanRequest<'_>) -> Result<Prepared, ClientError> {
-        let mut planner = Planner::new(request, fresh_address())?;
-        let mut accounts = AccountMap::default();
-
-        let plan = loop {
-            match planner.next(&accounts)? {
-                Step::Fetch(addresses) => accounts.insert_fetched(&addresses, self.fetch(&addresses)?),
-                Step::Simulate(simulation) => planner.simulated(self.simulate(&simulation)?)?,
-                Step::Call(call) => planner.called(self.call_remote(&call)?)?,
-                Step::Done(plan) => break plan,
-            }
-        };
-
+        let plan = self.plan(request, None)?;
         let (blockhash, last_valid_block_height) =
             self.rpc.get_latest_blockhash_with_commitment(CommitmentConfig::confirmed())?;
 
-        prepared(*plan, blockhash, last_valid_block_height)
+        prepared(plan, blockhash, last_valid_block_height)
+    }
+
+    /// Plans `request` again with `frozen` as the endpoint's answer, as the signer of a provider's
+    /// transaction verifies it: every postcondition and payer rule is checked in a new simulation.
+    /// The plan's message must be the one that the signer was shown.
+    pub fn replan(&self, request: &PlanRequest<'_>, frozen: FrozenTransaction) -> Result<Plan, ClientError> {
+        self.plan(request, Some(RemoteAnswer { frozen: Some(frozen), ..RemoteAnswer::default() }))
+    }
+
+    /// The planner's loop. A remote call takes `answer` when it is set, and the endpoint otherwise.
+    fn plan(&self, request: &PlanRequest<'_>, answer: Option<RemoteAnswer>) -> Result<Plan, ClientError> {
+        let mut planner = Planner::new(request, fresh_address())?;
+        let mut accounts = AccountMap::default();
+
+        loop {
+            match planner.next(&accounts)? {
+                Step::Fetch(addresses) => accounts.insert_fetched(&addresses, self.fetch(&addresses)?),
+                Step::Simulate(simulation) => planner.simulated(self.simulate(&simulation)?)?,
+                Step::Call(call) => match &answer {
+                    Some(answer) => planner.called(answer.clone())?,
+                    None => planner.called(self.call_remote(&call)?)?,
+                },
+                Step::Done(plan) => return Ok(*plan),
+            }
+        }
     }
 
     /// Each account at `addresses`, in order, with `getMultipleAccounts` split at 100.
@@ -117,6 +133,17 @@ impl Client {
 /// The plan with its v1 message compiled at `blockhash`, or `DoesNotFit` when the signed
 /// transaction is over 4,096 bytes.
 pub fn prepared(plan: Plan, blockhash: Hash, last_valid_block_height: u64) -> Result<Prepared, ClientError> {
+    if let Some(frozen) = &plan.frozen {
+        let message = frozen.message.clone();
+        let size = message.len().saturating_add(plan.signatures.len().saturating_mul(SIGNATURE_SIZE));
+
+        if size > MAX_TRANSACTION_SIZE {
+            return Err(PlanError::DoesNotFit { limit: Limit::Bytes, used: size, max: MAX_TRANSACTION_SIZE }.into());
+        }
+
+        return Ok(Prepared { plan, message, last_valid_block_height: None });
+    }
+
     let message = rpc::message(&plan.transaction, blockhash)?;
     let signatures = usize::from(message.header.num_required_signatures);
     let message = message.serialize();
@@ -126,7 +153,7 @@ pub fn prepared(plan: Plan, blockhash: Hash, last_valid_block_height: u64) -> Re
         return Err(PlanError::DoesNotFit { limit: Limit::Bytes, used: size, max: MAX_TRANSACTION_SIZE }.into());
     }
 
-    Ok(Prepared { plan, message, last_valid_block_height })
+    Ok(Prepared { plan, message, last_valid_block_height: Some(last_valid_block_height) })
 }
 
 /// A scratch address that others cannot predict, so that no one can create an account there

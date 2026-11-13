@@ -6,7 +6,7 @@ use sdp_intents_spec::{Address, RecipeKind, ValueRef, ValueSource};
 
 use crate::render::{base58, Column};
 use crate::values::{Table, Values};
-use crate::{Instruction, PlanError, RequiredSignature, SignerRole, Transaction};
+use crate::{FrozenTransaction, Instruction, PlanError, RequiredSignature, SignerRole, Transaction};
 
 /// The plan of one or more intents: what the signers read, and the transaction they sign.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -19,6 +19,8 @@ pub struct Plan {
     pub transaction: Transaction,
     pub signatures: Vec<RequiredSignature>,
     pub units_consumed: u64,
+    /// The provider's transaction, when the plan is one. A signer signs its message as it is.
+    pub frozen: Option<FrozenTransaction>,
 }
 
 /// One intent of a plan, and where its segment is in the transaction.
@@ -77,6 +79,8 @@ pub(crate) struct Built {
     pub(crate) instructions: Vec<Instruction>,
     pub(crate) signers: Vec<Address>,
     pub(crate) outputs: Vec<u8>,
+    /// The provider's transaction of a remote recipe that returns one.
+    pub(crate) frozen: Option<FrozenTransaction>,
 }
 
 impl Built {
@@ -91,7 +95,7 @@ impl Built {
             .map(|output| recipe.output_address(output).map(|address| address.0))
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(Self { instructions, signers: Vec::new(), outputs: outputs.concat() })
+        Ok(Self { instructions, signers: Vec::new(), outputs: outputs.concat(), frozen: None })
     }
 
     /// `verify_intent` maps each account at the rent payer's address back to the placeholder, so a
@@ -115,7 +119,7 @@ impl Built {
             .map(|instruction| instruction.and_then(|instruction| Instruction::ready(&instruction, payers)))
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(Self { instructions, signers: ready.signers()?.to_vec(), outputs: ready.outputs()?.to_vec() })
+        Ok(Self { instructions, signers: ready.signers()?.to_vec(), outputs: ready.outputs()?.to_vec(), frozen: None })
     }
 
     /// The role of each account of the instructions, in order, as a builder writes them.
@@ -167,7 +171,9 @@ impl<C: Chain> Values<'_, '_, C> {
         let tier = match implementation.recipe()? {
             RecipeKind::Static | RecipeKind::Program => " | tier 1".to_owned(),
             RecipeKind::Remote => format!(" | endpoint: {} | tier 2", printable(implementation.url()?)?),
-            RecipeKind::RemoteTransaction => " | tier 3".to_owned(),
+            RecipeKind::RemoteTransaction => {
+                format!(" | endpoint: {} | tier 3, checked by simulation only", printable(implementation.url()?)?)
+            }
         };
         let options = self.recipe.intent().options()?;
         let checks = match (options.verify_intent, options.assertions) {
@@ -213,6 +219,7 @@ impl<C: Chain> Values<'_, '_, C> {
                     Some((_, input)) => SignerRole::Input(
                         String::from_utf8_lossy(self.recipe.interface().text(input.name)?).into_owned(),
                     ),
+                    None if built.signers.contains(&address) && built.frozen.is_some() => SignerRole::Provider,
                     None if built.signers.contains(&address) => SignerRole::Builder,
                     None => return Err(PlanError::UnknownSigner(address)),
                 };

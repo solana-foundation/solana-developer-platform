@@ -1860,7 +1860,9 @@ account sign each mint. The provider's signatures cover the whole message, so no
 5. The fee payer must be the request's `payers.fee`. A sponsor pays only when the provider's API
    lets the caller pick the fee payer.
 6. `prepare` and the signer's verifier simulate the transaction and check each postcondition, the
-   payer rules, and `invokesOnly`. The client's verifier simulates for this kind only.
+   payer rules, and `invokesOnly`. The signer's verifier plans the plan's request again, with the
+   plan's transaction as the endpoint's answer, and compares the message. The plan holds the
+   provider's signatures in `presigned`, and the signer adds its own.
 
 | Tier | Recipes | Proves |
 | :-- | :-- | :-- |
@@ -1876,8 +1878,14 @@ The prototype builds the instructions form. `intents/adapters/jupiter.mjs` is th
 and `solana.org/ondo-usdy-deposit` and `ondo-usdy-withdraw` route through it. Each pins the USDY
 mint as its share mint, and lists Jupiter, Token, and ATA in `invokesOnly`. A switch makes the
 wrapper add a token approval to an attacker, and the segment's rule 3 assertions refuse it in the
-planner's simulation, as they would onchain. Hastra's deposit and requests follow, then Plume's
-transaction form.
+planner's simulation, as they would onchain.
+
+The transaction form runs against `crates/test-provider`, a local stand-in for a provider that
+signs, because Plume's API answers only a wallet that Plume approved, and its CCTP mint settles on
+another chain. The stand-in creates a new order account, signs for it, and moves the owner's USDC
+to its wallet, which `solana.org/test-provider-deposit` pins. A record states a fixed provider
+signer, such as Plume's keeper, as an account with `"signer": true`. A Plume record waits for an
+approved wallet and a v0 decoder.
 
 ## 5. Security
 

@@ -8,7 +8,9 @@
 use base64::Engine as _;
 use serde_json::{json, Map, Value};
 
-use sdp_intents_planner::{AccountMeta, InputValue, Instruction, RemoteAnswer, RemoteCall, RemoteOutput};
+use sdp_intents_planner::{
+    AccountMeta, FrozenTransaction, InputValue, Instruction, ProviderSignature, RemoteAnswer, RemoteCall, RemoteOutput,
+};
 use sdp_intents_spec::{AccountRole, Address};
 
 use crate::json::base58;
@@ -28,14 +30,26 @@ pub fn request_body(call: &RemoteCall) -> Value {
         "implementation": call.implementation,
         "inputs": inputs,
         "payers": { "fee": base58(&call.fee_payer), "rent": base58(&call.rent_payer) },
+        "priorityFeeLamports": call.priority_fee_lamports.to_string(),
     })
 }
 
 pub fn read_answer(answer: &Value) -> Result<RemoteAnswer, ClientError> {
     let error = |message: &str| ClientError::Remote(format!("the endpoint's answer {message}"));
+    let outputs = outputs(answer)?;
 
-    if answer.get("kind").and_then(Value::as_str) != Some("instructions") {
-        return Err(error("is not `{ \"kind\": \"instructions\" }`"));
+    match answer.get("kind").and_then(Value::as_str) {
+        Some("instructions") => {}
+        Some("transaction") => {
+            let transaction =
+                answer.get("transaction").and_then(Value::as_str).ok_or_else(|| error("has no transaction"))?;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(transaction)
+                .map_err(|_| error("holds a transaction that is not base64"))?;
+
+            return Ok(RemoteAnswer { instructions: Vec::new(), outputs, frozen: Some(frozen(&bytes)?) });
+        }
+        _ => return Err(error("is not `{ \"kind\": \"instructions\" }` or `{ \"kind\": \"transaction\" }`")),
     }
 
     let instructions = answer
@@ -45,19 +59,89 @@ pub fn read_answer(answer: &Value) -> Result<RemoteAnswer, ClientError> {
         .iter()
         .map(instruction)
         .collect::<Result<Vec<_>, _>>()?;
-    let outputs = answer
-        .get("outputs")
-        .and_then(Value::as_object)
+    Ok(RemoteAnswer { instructions, outputs, frozen: None })
+}
+
+fn outputs(answer: &Value) -> Result<Vec<RemoteOutput>, ClientError> {
+    let outputs = answer.get("outputs").and_then(Value::as_object);
+
+    outputs
         .map(|outputs| {
             outputs
                 .iter()
                 .map(|(name, address)| Ok(RemoteOutput { name: name.clone(), address: parse_address(address)? }))
                 .collect::<Result<Vec<_>, ClientError>>()
         })
-        .transpose()?
-        .unwrap_or_default();
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
 
-    Ok(RemoteAnswer { instructions, outputs })
+/// A signed v1 transaction in wire form: the count of signatures as a compact `u16`, each
+/// signature, then the message. Each signature that is not empty must sign the message, for the
+/// account at its place.
+pub fn frozen(bytes: &[u8]) -> Result<FrozenTransaction, ClientError> {
+    let error = |message: &str| ClientError::Remote(format!("the provider's transaction {message}"));
+    let (count, rest) = compact_u16(bytes).ok_or_else(|| error("has no signature count"))?;
+    let signatures_len = usize::from(count).checked_mul(64).ok_or_else(|| error("is too long"))?;
+    let (signatures, message) =
+        rest.split_at_checked(signatures_len).ok_or_else(|| error("ends inside its signatures"))?;
+
+    let keys = signer_keys(message)?;
+    let (chunks, _) = signatures.as_chunks::<64>();
+
+    if chunks.len() != keys.len() {
+        return Err(error("holds another count of signatures than its message needs"));
+    }
+
+    let signed = keys.iter().zip(chunks).filter(|(_, signature)| **signature != [0; 64]);
+    let signatures =
+        signed.map(|(signer, signature)| ProviderSignature { signer: *signer, signature: *signature }).collect();
+
+    frozen_from_parts(message, signatures)
+}
+
+/// A provider's transaction from its message and its signatures, such as a plan holds them. Each
+/// signature must sign the message for an account that the message requires.
+pub fn frozen_from_parts(message: &[u8], signatures: Vec<ProviderSignature>) -> Result<FrozenTransaction, ClientError> {
+    let keys = signer_keys(message)?;
+    let checked = signatures.iter().all(|signed| {
+        keys.contains(&signed.signer)
+            && solana_signature::Signature::from(signed.signature).verify(&signed.signer.0, message)
+    });
+
+    if !checked {
+        return Err(ClientError::Remote("a provider's signature does not sign the message for a signer of it".into()));
+    }
+
+    Ok(FrozenTransaction { message: message.to_vec(), transaction: crate::decode_message(message)?, signatures })
+}
+
+/// The signers of a serialized v1 message, in the order of its signatures.
+fn signer_keys(message: &[u8]) -> Result<Vec<Address>, ClientError> {
+    let body = message
+        .strip_prefix(&[solana_message::v1::V1_PREFIX])
+        .ok_or_else(|| ClientError::Remote("the provider's transaction is not v1".into()))?;
+    let decoded = solana_message::v1::deserialize(body).map_err(|error| ClientError::Remote(error.to_string()))?;
+    let signers = usize::from(decoded.header.num_required_signatures);
+
+    Ok(decoded.account_keys.iter().take(signers).map(|key| Address(key.to_bytes())).collect())
+}
+
+/// A compact `u16`: 7 bits a byte, low bits first, at most 3 bytes.
+fn compact_u16(bytes: &[u8]) -> Option<(u16, &[u8])> {
+    let mut value: u32 = 0;
+
+    for (position, byte) in (0u32..).zip(bytes.iter().take(3)) {
+        value |= u32::from(byte & 0x7f).checked_shl(position.checked_mul(7)?)?;
+
+        if byte & 0x80 == 0 {
+            let consumed = usize::try_from(position).ok()?.checked_add(1)?;
+
+            return Some((u16::try_from(value).ok()?, bytes.get(consumed..)?));
+        }
+    }
+
+    None
 }
 
 impl Client {
@@ -166,7 +250,47 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_transaction_answer() {
-        assert!(read_answer(&json!({ "kind": "transaction", "transaction": "" })).is_err());
+    fn reads_compact_lengths() {
+        assert_eq!(compact_u16(&[1, 9]), Some((1, &[9u8][..])));
+        assert_eq!(compact_u16(&[0x80, 0x01]), Some((128, &[][..])));
+        assert_eq!(compact_u16(&[0xac, 0x02, 7]), Some((300, &[7u8][..])));
+        assert_eq!(compact_u16(&[0x80]), None);
+    }
+
+    /// A provider's transaction signed for its order account, with the payer's signature empty.
+    fn signed_by_provider(corrupt: bool) -> Vec<u8> {
+        use solana_signer::Signer as _;
+
+        let payer = Address([1; 32]);
+        let order = solana_keypair::Keypair::new();
+        let order_address = Address(order.pubkey().to_bytes());
+        let create = Instruction {
+            program: Address::default(),
+            accounts: vec![
+                AccountMeta { address: payer, role: AccountRole::WritableSigner },
+                AccountMeta { address: order_address, role: AccountRole::WritableSigner },
+            ],
+            data: vec![0; 52],
+        };
+        let transaction = sdp_intents_planner::Transaction {
+            fee_payer: payer,
+            instructions: vec![create],
+            budget: sdp_intents_planner::Budget::MAXIMUM,
+            priority_fee_lamports: 0,
+        };
+        let message = crate::rpc::message(&transaction, solana_hash::Hash::default()).unwrap().serialize();
+        let mut signature = <[u8; 64]>::from(order.sign_message(&message));
+        signature[0] ^= u8::from(corrupt);
+
+        [&[2u8][..], &[0; 64], &signature, &message].concat()
+    }
+
+    #[test]
+    fn reads_a_provider_transaction_and_checks_its_signature() {
+        let read = frozen(&signed_by_provider(false)).unwrap();
+
+        assert_eq!(read.signatures.len(), 1);
+        assert_eq!(read.transaction.fee_payer, Address([1; 32]));
+        assert!(frozen(&signed_by_provider(true)).is_err());
     }
 }
