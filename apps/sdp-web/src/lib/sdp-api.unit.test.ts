@@ -417,6 +417,27 @@ describe("proxyToSdpApi", () => {
     );
   });
 
+  it("relays an organization-scoped call from a page outside any project, sending no project", async () => {
+    setApiRequest(null);
+    const fetchMock = apiFetchMock(() => new Response("{}", { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await proxyToSdpApi({
+      request: new Request("https://dashboard.example.test/api/dashboard/organizations/o/x", {
+        method: "POST",
+        body: "{}",
+      }),
+      traceSource: "test.proxy.organization-scoped",
+      path: "/v1/organizations/org_test/mainnet-access",
+      organizationScoped: true,
+    });
+
+    expect(response.status).toBe(201);
+    const headers = headersOfCall(fetchMock, "/v1/organizations/org_test/mainnet-access");
+    expect(headers.has("x-project-id")).toBe(false);
+    expect(headers.get("Authorization")).toBe("Bearer token_test");
+  });
+
   it("refuses a call without the project header before any upstream call", async () => {
     setApiRequest(null);
     const fetchMock = okFetchMock();

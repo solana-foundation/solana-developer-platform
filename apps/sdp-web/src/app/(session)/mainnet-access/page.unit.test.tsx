@@ -67,6 +67,9 @@ describe("mainnet request page", () => {
     render(await MainnetAccessPage(), { wrapper: EnglishI18n });
 
     expect(screen.getByRole("heading", { name: "Acme isn't on mainnet yet" })).toBeTruthy();
+    expect(
+      screen.getByText("You can request mainnet access below or try the sandbox.")
+    ).toBeTruthy();
     expect(screen.getByText("request section")).toBeTruthy();
     const sandbox = screen.getByRole("link", { name: "Try the sandbox" });
     expect(sandbox.getAttribute("href")).toBe("https://platform-beta.solana.com");
@@ -79,5 +82,17 @@ describe("mainnet request page", () => {
     render(await MainnetAccessPage(), { wrapper: EnglishI18n });
 
     expect(screen.queryByRole("link", { name: "Try the sandbox" })).toBeNull();
+    expect(screen.getByText("You can request mainnet access below.")).toBeTruthy();
+  });
+
+  it("says the request is in review once an Admin has sent it", async () => {
+    loadAccess({ ...LOCKED, state: "pending" });
+    state.sandboxOnBeta = true;
+
+    render(await MainnetAccessPage(), { wrapper: EnglishI18n });
+
+    expect(
+      screen.getByText("You've requested mainnet access. You can try the sandbox while you wait.")
+    ).toBeTruthy();
   });
 });

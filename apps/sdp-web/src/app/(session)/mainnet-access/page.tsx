@@ -7,6 +7,7 @@ import { MainnetAccessSection } from "@/app/(session)/dashboard/[projectId]/sett
 import { SdpProductLockup } from "@/components/auth-page-shell";
 import { externalLinkProps } from "@/components/homepage/homepage-links";
 import { sandboxOnBeta } from "@/flags";
+import type { MessageKey } from "@/i18n/messages";
 import { getTranslations } from "@/i18n/server";
 import { MainnetAccessAccountActions } from "./mainnet-access-account-actions";
 
@@ -38,7 +39,7 @@ export default async function MainnetAccessPage() {
               ? t("Shared.mainnetAccessLock.title", { organization: loaded.organizationName })
               : t("Shared.mainnetAccess.title")}
           </h1>
-          <p className="text-body text-secondary">{t("Shared.mainnetAccessLock.body")}</p>
+          <p className="text-body text-secondary">{t(lockBodyKey(loaded, linkSandbox))}</p>
           {linkSandbox ? (
             <div>
               <Button asChild variant="outline" size="sm">
@@ -55,3 +56,33 @@ export default async function MainnetAccessPage() {
     </main>
   );
 }
+
+/** What the organization can do next: request mainnet, wait on its request, or neither yet. */
+function lockBodyKey(
+  loaded: Awaited<ReturnType<typeof loadMainnetAccess>>,
+  linkSandbox: boolean
+): MessageKey {
+  const state = !loaded.ok
+    ? "unavailable"
+    : loaded.access.state === "pending"
+      ? "pending"
+      : loaded.access.available
+        ? "notRequested"
+        : "unavailable";
+  return linkSandbox ? LOCK_BODY_KEYS[state].withSandbox : LOCK_BODY_KEYS[state].alone;
+}
+
+const LOCK_BODY_KEYS = {
+  notRequested: {
+    withSandbox: "Shared.mainnetAccessLock.bodyRequest",
+    alone: "Shared.mainnetAccessLock.bodyRequestNoSandbox",
+  },
+  pending: {
+    withSandbox: "Shared.mainnetAccessLock.bodyPending",
+    alone: "Shared.mainnetAccessLock.bodyPendingNoSandbox",
+  },
+  unavailable: {
+    withSandbox: "Shared.mainnetAccessLock.bodyUnavailable",
+    alone: "Shared.mainnetAccessLock.bodyUnavailableNoSandbox",
+  },
+} as const satisfies Record<string, { withSandbox: MessageKey; alone: MessageKey }>;

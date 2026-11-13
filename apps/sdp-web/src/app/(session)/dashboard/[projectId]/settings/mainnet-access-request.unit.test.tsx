@@ -44,7 +44,7 @@ function giveReaderOverflow() {
 
 /** Picks Singapore and moves on to the About step. */
 async function chooseJurisdiction(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: "Request mainnet access…" }));
+  await user.click(screen.getByRole("button", { name: "Request mainnet access" }));
   await user.click(screen.getByRole("button", { name: /Country or region/ }));
   await user.type(screen.getByPlaceholderText("Search countries"), "Singa");
   await user.keyboard("{Enter}");
@@ -66,7 +66,7 @@ describe("MainnetAccessRequestHost", () => {
     const user = userEvent.setup();
     renderHost();
 
-    await user.click(screen.getByRole("button", { name: "Request mainnet access…" }));
+    await user.click(screen.getByRole("button", { name: "Request mainnet access" }));
     const proceed = screen.getByRole("button", { name: "Continue" });
     expect(proceed).toHaveProperty("disabled", true);
 

@@ -56,7 +56,7 @@ describe("MainnetAccessSection", () => {
     expect(rowLabels()).toEqual(["Status"]);
     expect(screen.getByRole("definition").textContent).toBe("Sandbox only");
     expect(screen.getByRole("button", { name: help })).toBeTruthy();
-    expect(screen.queryAllByRole("button", { name: "Request mainnet access…" })).toHaveLength(
+    expect(screen.queryAllByRole("button", { name: "Request mainnet access" })).toHaveLength(
       requestButtons
     );
   });
@@ -85,7 +85,7 @@ describe("MainnetAccessSection", () => {
     expect(screen.getByRole("link", { name: "mainnet@example.test" }).getAttribute("href")).toBe(
       "mailto:mainnet@example.test"
     );
-    expect(screen.queryByRole("button", { name: "Request mainnet access…" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Request mainnet access" })).toBeNull();
   });
 
   it("shows a request in review as a band, not a status row", async () => {
@@ -107,7 +107,7 @@ describe("MainnetAccessSection", () => {
     expect(screen.getByText("In review")).toBeTruthy();
     expect(
       screen.getByText(
-        "SDP reviews every request by hand and emails the Admins once mainnet is on for Acme."
+        "Our team will review your request and we will email you once mainnet is enabled."
       )
     ).toBeTruthy();
     expect(rowLabels()).toEqual(["Requested", "Based in", "Terms and Conditions", "Changes"]);
@@ -124,13 +124,13 @@ describe("MainnetAccessSection", () => {
       contactEmail: "mainnet@example.test",
     });
 
-    expect(screen.getByRole("definition").textContent).toBe("Not on yet");
+    expect(screen.getByRole("definition").textContent).toBe("Not enabled");
     expect(
       screen.getByRole("button", {
-        name: "SDP turns on mainnet for Acme once, when an Admin asks. Until then the organization can't use SDP here.",
+        name: "Acme can use SDP here once mainnet is on. An Admin can request it.",
       })
     ).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "Request mainnet access…" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Request mainnet access" })).toHaveLength(1);
   });
 
   it("points a sandbox-only deployment at mainnet's own host instead of a request", async () => {
@@ -148,6 +148,6 @@ describe("MainnetAccessSection", () => {
     expect(
       screen.getByRole("link", { name: "Go to platform.solana.com" }).getAttribute("href")
     ).toBe("https://platform.solana.com");
-    expect(screen.queryByRole("button", { name: "Request mainnet access…" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Request mainnet access" })).toBeNull();
   });
 });

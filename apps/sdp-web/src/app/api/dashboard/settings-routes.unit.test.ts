@@ -18,7 +18,7 @@ afterEach(() => {
 });
 
 describe("Settings dashboard routes", () => {
-  it.each<[string, (request: Request) => Promise<Response>, string]>([
+  it.each<[string, (request: Request) => Promise<Response>, string, boolean?]>([
     [
       "route.dashboard.members.api-keys",
       (request) => memberApiKeys(request, memberParams),
@@ -51,20 +51,30 @@ describe("Settings dashboard routes", () => {
       "route.dashboard.organizations.mainnet-access.request",
       (request) => requestMainnetAccess(request, organizationParams),
       "/v1/organizations/org_test%2F1/mainnet-access",
+      true,
     ],
     [
       "route.dashboard.organizations.mainnet-access.notify",
       (request) => notifyMainnetAccess(request, organizationParams),
       "/v1/organizations/org_test%2F1/mainnet-access/notify",
+      true,
     ],
-  ])("%s proxies to its sdp-api path, the id encoded", async (traceSource, handle, path) => {
-    const proxy = vi
-      .spyOn(sdpApi, "proxyToSdpApi")
-      .mockResolvedValue(NextResponse.json({ data: {} }));
-    const request = new Request("https://dashboard.example.com/api/dashboard/settings");
+  ])(
+    "%s proxies to its sdp-api path, the id encoded",
+    async (traceSource, handle, path, organizationScoped) => {
+      const proxy = vi
+        .spyOn(sdpApi, "proxyToSdpApi")
+        .mockResolvedValue(NextResponse.json({ data: {} }));
+      const request = new Request("https://dashboard.example.com/api/dashboard/settings");
 
-    await handle(request);
+      await handle(request);
 
-    expect(proxy).toHaveBeenCalledWith({ request, traceSource, path });
-  });
+      // The mainnet request page of an organization that lists no project sends none.
+      expect(proxy).toHaveBeenCalledWith(
+        organizationScoped
+          ? { request, traceSource, path, organizationScoped }
+          : { request, traceSource, path }
+      );
+    }
+  );
 });

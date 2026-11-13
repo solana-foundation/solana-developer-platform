@@ -514,17 +514,22 @@ function idempotencyResponseHeaders(
  * shared selection cookie, so a tab rendering project A keeps acting on A after
  * another tab switches to B. Unauthenticated callers get 401/403, a request
  * without the header 400, other local failures 500, with the standard
- * `{ error: { message } }` envelope.
+ * `{ error: { message } }` envelope. An `organizationScoped` route names no
+ * project: it serves pages outside any project, such as the mainnet request
+ * page of an organization that lists none.
  */
 export async function proxyToSdpApi({
   request,
   traceSource,
   path,
   upstreamHeaders,
+  organizationScoped = false,
 }: {
   request: Request;
   traceSource: string;
   path: string;
+  /** The upstream route sits outside any project, so no `x-project-id` is required or sent. */
+  organizationScoped?: boolean;
   /**
    * Headers deliberately selected by the route handler for the upstream API.
    * The proxy never copies the incoming header bag: auth, project and tracing
@@ -541,12 +546,15 @@ export async function proxyToSdpApi({
   if (!orgId) {
     return proxyFailure(trace, 403, "Active organization required");
   }
-  if (request.headers.get(PROJECT_HEADER_NAME) === null) {
+  if (!organizationScoped && request.headers.get(PROJECT_HEADER_NAME) === null) {
     return proxyFailure(trace, 400, `${PROJECT_HEADER_NAME} header required`);
   }
 
   try {
-    const apiClient = await createSdpApiClient(trace.childContext(`${traceSource}.api`));
+    const traceContext = trace.childContext(`${traceSource}.api`);
+    const apiClient = organizationScoped
+      ? await createOrgSdpApiClient(traceContext)
+      : await createSdpApiClient(traceContext);
     const method = request.method;
     const rawBody = method === "GET" || method === "HEAD" ? "" : await request.text();
     const response = await apiClient.request(path, {
