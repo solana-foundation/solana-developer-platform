@@ -1,46 +1,37 @@
 ---
 module: earn
 title: Quickstart
-description: Deposit test USDC into a strategy from a sandbox wallet, then read the position, in about ten minutes.
+description: Make a sandbox deposit with three API requests and one wallet signature.
 ---
 
-Everything here runs in your sandbox project on devnet, with a local test
-wallet standing in for your customer's wallet. Nothing touches real funds.
+A deposit is three requests and one signature: pick a strategy, build the
+transaction, sign it, submit it. This runs on devnet with test tokens.
 
-## Before you begin
-
-Create the project folder. Run the remaining commands from it:
-
-```bash title="Terminal"
-mkdir earn-quickstart && cd earn-quickstart
-```
+## Before you start
 
 | You need | How to get it |
 | --- | --- |
-| An API URL for a beta or experimental deployment | Use the API URL supplied with your SDP deployment. Stable deployments do not include Earn. |
-| A sandbox API key with `earn.execute` | [Create an API key](/docs/developing-with-sdp/manage-api-keys) in your sandbox project. Keep it on your backend. |
-| The Solana CLI | [Install it](https://solana.com/docs/intro/installation) for `solana-keygen` and `solana airdrop`. |
-| A test wallet | `solana-keygen new --no-bip39-passphrase -o test-wallet.json` creates one. It plays your customer's wallet. |
-| Devnet SOL | `solana airdrop 1 $(solana-keygen pubkey test-wallet.json) --url devnet`, or the [Solana faucet](https://faucet.solana.com). The wallet pays network fees and the rent for its new accounts, under 0.004 SOL. |
-| Devnet USDC | The [Circle faucet](https://faucet.circle.com) on Solana Devnet. Most sandbox strategies take this mint: `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`. The examples deposit 25, so request enough or lower `amount`. |
-| Node.js 20.18 or later | For the TypeScript steps. |
+| An API key | [Create an account](https://platform.solana.com/sign-up), then [create a key](/docs/developing-with-sdp/manage-api-keys#create-a-key) with Earn **Execute**. Nothing else in SDP needs setup. |
+| A test wallet | `solana-keygen new --no-bip39-passphrase -o test-wallet.json` |
+| Devnet SOL and USDC | The [Solana faucet](https://faucet.solana.com) and the [Circle faucet](https://faucet.circle.com) on Solana Devnet. The deposit is 10 USDC. |
+| Node.js 20.18 or later | It signs the transaction. The cURL examples also use jq. |
 
-Your organization also needs the strategy's provider activated. If a preview
-returns `403` with `provider_not_entitled`, ask your SDP contact.
-
-Install the TypeScript tools, then set your deployment URL and key:
+In the folder that holds `test-wallet.json`:
 
 ```bash title="Terminal"
-npm init -y && npm pkg set type=module
-npm install @solana/kit@8 && npm install -D tsx
-export SDP_API_URL="https://YOUR_SDP_API_HOST"
+npm init -y && npm pkg set type=module && npm install @solana/kit@8
 export SDP_API_KEY="sf_..."
+export WALLET="$(solana-keygen pubkey test-wallet.json)"
 ```
 
-Then add the test wallet helper. It signs exactly the bytes SDP builds, which
-is what your customer's wallet will do in production:
+Then save the file for your language. TypeScript adds each step to
+`deposit.ts`; cURL signs with `sign.mjs`.
 
-```typescript title="test-wallet.ts"
+<Tabs items={["TypeScript", "cURL"]} groupId="earn-code-language">
+<Tab value="TypeScript">
+
+```typescript title="deposit.ts"
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   createKeyPairFromBytes,
@@ -51,223 +42,299 @@ import {
   partiallySignTransaction,
 } from "@solana/kit";
 
+const api = "https://api.solana.com/v1/earn";
+const headers = {
+  Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+  "Content-Type": "application/json",
+};
+
+/** Returns the response's `data`, or throws the API's error. */
+async function data(response: Response) {
+  const body = await response.json();
+  if (!response.ok) throw new Error(`${body.error.code}: ${body.error.message}`);
+  return body.data;
+}
+
 // Sandbox only: a local keypair stands in for your customer's wallet.
-const secretKey = new Uint8Array(JSON.parse(await readFile("test-wallet.json", "utf8")));
-const keyPair = await createKeyPairFromBytes(secretKey);
-
-export const ownerAddress = await getAddressFromPublicKey(keyPair.publicKey);
-
-/** Signs SDP's unsigned base64 transaction without changing it. */
-export async function signWithTestWallet(transactionBase64: string): Promise<string> {
-  const transaction = getTransactionDecoder().decode(getBase64Encoder().encode(transactionBase64));
-  // Partial: it leaves any other signer's slot, such as your fee payer's, empty.
-  const signed = await partiallySignTransaction([keyPair], transaction);
-  return getBase64EncodedWireTransaction(signed);
-}
+const keyPair = await createKeyPairFromBytes(
+  new Uint8Array(JSON.parse(await readFile("test-wallet.json", "utf8"))),
+);
+const ownerAddress = await getAddressFromPublicKey(keyPair.publicKey);
 ```
 
-## Make the deposit
+</Tab>
+<Tab value="cURL">
 
-Call the Earn API with a small request helper, then write the deposit as one
-file, `deposit.ts`.
+```javascript title="sign.mjs"
+// Sandbox only: signs SDP's base64 transaction with test-wallet.json.
+import { readFile } from "node:fs/promises";
+import {
+  createKeyPairFromBytes,
+  getBase64EncodedWireTransaction,
+  getBase64Encoder,
+  getTransactionDecoder,
+  partiallySignTransaction,
+} from "@solana/kit";
 
-### 1. Add the request helper
-
-```typescript title="earn-api.ts"
-const SDP_API_URL = process.env.SDP_API_URL;
-if (!SDP_API_URL) throw new Error("Set SDP_API_URL to your beta or experimental API URL");
-const SDP_API_KEY = process.env.SDP_API_KEY;
-if (!SDP_API_KEY) throw new Error("Set SDP_API_KEY to your sandbox API key");
-
-/** Calls the Earn API: GET without a body, POST with one. Returns `data`. */
-export async function earnRequest(path: string, body?: unknown, idempotencyKey?: string) {
-  const response = await fetch(`${SDP_API_URL}${path}`, {
-    method: body === undefined ? "GET" : "POST",
-    headers: {
-      Authorization: `Bearer ${SDP_API_KEY}`,
-      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  if (!response.ok) {
-    throw new Error(`SDP returned ${response.status}: ${await response.text()}`);
-  }
-  return (await response.json()).data;
-}
-
-/** Polls a movement until it is final: every second for a minute, then every five seconds. */
-export async function waitForMovement(movementId: string, timeoutMs = 300_000) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const { movement } = await earnRequest(
-      `/v1/earn/external-wallet/movements/${encodeURIComponent(movementId)}`,
-    );
-    if (movement.status === "finalized" || movement.status === "failed") return movement;
-    const delayMs = Date.now() - startedAt < 60_000 ? 1_000 : 5_000;
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-  }
-  throw new Error(`Movement ${movementId} is not final yet; keep tracking it`);
-}
+const keyPair = await createKeyPairFromBytes(
+  new Uint8Array(JSON.parse(await readFile("test-wallet.json", "utf8"))),
+);
+const unsigned = getTransactionDecoder().decode(getBase64Encoder().encode(process.argv[2]));
+const signed = await partiallySignTransaction([keyPair], unsigned);
+process.stdout.write(getBase64EncodedWireTransaction(signed));
 ```
 
-### 2. Choose a strategy, then build
+</Tab>
+</Tabs>
 
-This example picks an active, fundable strategy whose first deposit mint is
-devnet USDC and needs no slippage floor.
-[Strategies](/docs/earn/strategies) explains each check.
+## 1. Pick a strategy
 
-```typescript title="deposit.ts"
-import { randomUUID } from "node:crypto";
-import { earnRequest, waitForMovement } from "./earn-api";
-import { ownerAddress, signWithTestWallet } from "./test-wallet";
+[`GET /v1/earn/strategies`](/docs/reference/api/earn/list-earn-strategies)
+lists the strategies your project can see.
 
+<Tabs items={["TypeScript", "cURL"]} groupId="earn-code-language">
+<Tab value="TypeScript">
+
+```typescript title="deposit.ts (continued)"
 type Strategy = {
   id: string;
   status: string;
   fundable: boolean;
   depositMints: string[];
-  depositSlippage: unknown;
-  withdrawalSlippage: { defaultToleranceBps: number } | null;
+  depositSlippage: object | null;
 };
 
-const { strategies }: { strategies: Strategy[] } = await earnRequest(
-  "/v1/earn/strategies?pageSize=100",
-);
+// Fetch the strategies your project can see.
+const { strategies }: { strategies: Strategy[] } = await fetch(
+  `${api}/strategies?pageSize=100`,
+  { headers },
+).then(data);
+
+// Take one that is open for deposits, takes devnet USDC, and needs no slippage floor.
+const USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 const strategy = strategies.find(
   (s) => s.fundable && s.status === "active" && s.depositSlippage === null
-    && s.depositMints[0] === "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+    && s.depositMints[0] === USDC,
 );
 if (!strategy) throw new Error("No devnet USDC strategy is open for deposits");
-const amount = "25"; // in the deposit token, depositMints[0]
-
-const preview = await earnRequest("/v1/earn/vault-deposit-previews", {
-  strategyId: strategy.id,
-  amount,
-});
-if (preview.blockingIssues.length > 0) {
-  throw new Error(`Preview blocked: ${JSON.stringify(preview.blockingIssues)}`);
-}
-
-const { transaction: built } = await earnRequest(
-  "/v1/earn/external-wallet/deposit-transactions",
-  { strategyId: strategy.id, ownerAddress, amount },
-);
 ```
 
-The build is an unsigned transaction. Nothing has moved yet.
-
-### 3. Sign and submit
-
-```typescript title="deposit.ts (continued)"
-const signedTransaction = await signWithTestWallet(built.transaction);
-
-// In production, save the idempotency key with the signed transaction before you send it,
-// and retry an uncertain response with both unchanged.
-const idempotencyKey = randomUUID();
-const { deposit } = await earnRequest(
-  "/v1/earn/external-wallet/deposits",
-  { transactionId: built.transactionId, signedTransaction },
-  idempotencyKey,
-);
-```
-
-SDP checks the signature against the exact bytes it built, records the
-deposit, then broadcasts it.
-
-Persist `deposit.positionId` with the selected strategy's `withdrawalSlippage`
-in your backend. Save `null` explicitly when no floor is supported. Keep this
-record for withdrawals even if the strategy leaves the catalog.
-
-### 4. Track it and read the position
-
-```typescript title="deposit.ts (continued)"
-const movement = await waitForMovement(deposit.movementId);
-if (movement.status === "failed") throw new Error(movement.failureReason ?? "Deposit failed");
-
-const { positions } = await earnRequest(
-  `/v1/earn/external-wallet/positions?${new URLSearchParams({ ownerAddress })}`,
-);
-console.log(JSON.stringify(positions, null, 2));
-```
-
-Run it:
+</Tab>
+<Tab value="cURL">
 
 ```bash title="Terminal"
-npx tsx deposit.ts
+# Fetch the strategies, and take one that is open for deposits, takes devnet USDC,
+# and needs no slippage floor.
+export STRATEGY_ID="$(curl -sS "https://api.solana.com/v1/earn/strategies?pageSize=100" \
+  -H "Authorization: Bearer $SDP_API_KEY" | jq -r '
+    [.data.strategies[] | select(.fundable and .status == "active" and .depositSlippage == null
+      and .depositMints[0] == "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU")][0].id')"
+echo "$STRATEGY_ID" # "null" means no strategy matched
 ```
 
-## See the result
+</Tab>
+</Tabs>
 
-The movement usually reaches `finalized` within 30 seconds, and the wallet
-holds shares in the strategy. Your strategy and its `label` may differ:
+```json title="A strategy (trimmed)"
+{
+  "id": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
+  "name": "Kamino Vault USDC",
+  "depositMints": ["4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"],
+  "status": "active",
+  "fundable": true,
+  "depositSlippage": null
+}
+```
 
-```json title="Output (trimmed)"
+## 2. Build the deposit
+
+The build returns an unsigned transaction. Nothing moves yet.
+
+<Tabs items={["TypeScript", "cURL"]} groupId="earn-code-language">
+<Tab value="TypeScript">
+
+```typescript title="deposit.ts (continued)"
+// Build an unsigned deposit of 10 USDC from the wallet.
+const { transaction: built } = await fetch(`${api}/external-wallet/deposit-transactions`, {
+  method: "POST",
+  headers,
+  body: JSON.stringify({ strategyId: strategy.id, ownerAddress, amount: "10" }),
+}).then(data);
+```
+
+</Tab>
+<Tab value="cURL">
+
+```bash title="Terminal"
+curl -sS https://api.solana.com/v1/earn/external-wallet/deposit-transactions \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d @- <<EOF | tee build.json | jq .
+{ "strategyId": "$STRATEGY_ID", "ownerAddress": "$WALLET", "amount": "10" }
+EOF
+```
+
+</Tab>
+</Tabs>
+
+```json title="Response (trimmed)"
+{
+  "data": {
+    "transaction": {
+      "transactionId": "earn_external_wallet_transaction_b116f3ed-5f19-41b1-85cd-8afe6b37875d",
+      "transaction": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA...",
+      "lastValidBlockHeight": "14846",
+      "amount": "10"
+    }
+  }
+}
+```
+
+The transaction expires about a minute after the build.
+
+<Callout type="info">
+A `403` with `details.reason` set to `provider_not_entitled` means SDP has not
+activated this strategy's provider for your organization yet. Ask your SDP
+contact, then build again.
+</Callout>
+
+## 3. Sign it
+
+The wallet signs the exact bytes, without changing or broadcasting them.
+
+<Tabs items={["TypeScript", "cURL"]} groupId="earn-code-language">
+<Tab value="TypeScript">
+
+```typescript title="deposit.ts (continued)"
+// Sign the exact bytes SDP built.
+const unsigned = getTransactionDecoder().decode(getBase64Encoder().encode(built.transaction));
+const signedTransaction = getBase64EncodedWireTransaction(
+  await partiallySignTransaction([keyPair], unsigned),
+);
+```
+
+</Tab>
+<Tab value="cURL">
+
+```bash title="Terminal"
+SIGNED="$(node sign.mjs "$(jq -r .data.transaction.transaction build.json)")"
+```
+
+</Tab>
+</Tabs>
+
+## 4. Submit it
+
+SDP checks the signed transaction against the build, records the deposit, then
+broadcasts it. The `Idempotency-Key` header is required.
+
+<Tabs items={["TypeScript", "cURL"]} groupId="earn-code-language">
+<Tab value="TypeScript">
+
+```typescript title="deposit.ts (continued)"
+// Submit it. Each new deposit takes a new idempotency key.
+const { deposit } = await fetch(`${api}/external-wallet/deposits`, {
+  method: "POST",
+  headers: { ...headers, "Idempotency-Key": randomUUID() },
+  body: JSON.stringify({ transactionId: built.transactionId, signedTransaction }),
+}).then(data);
+```
+
+</Tab>
+<Tab value="cURL">
+
+```bash title="Terminal"
+curl -sS https://api.solana.com/v1/earn/external-wallet/deposits \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: $(node -e 'console.log(crypto.randomUUID())')" \
+  -d @- <<EOF | tee deposit.json | jq .
+{
+  "transactionId": "$(jq -r .data.transaction.transactionId build.json)",
+  "signedTransaction": "$SIGNED"
+}
+EOF
+```
+
+</Tab>
+</Tabs>
+
+```json title="Response (trimmed)"
+{
+  "data": {
+    "deposit": {
+      "movementId": "earn_movement_505a6c34-f804-4abd-b6a9-315d031bdf1f",
+      "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
+      "status": "submitted",
+      "signature": "3dhkSPLiQZQPXL96fWzMdWJtdbtAffkBKXw2xhsYbV3VNSnYrVAcdx1czsnLsE1ou4SvLecGdSYe4QpAuZdfjJAf"
+    }
+  }
+}
+```
+
+## 5. Watch it land
+
+The movement reaches `finalized` within about 30 seconds. Then the wallet
+holds a position.
+
+<Tabs items={["TypeScript", "cURL"]} groupId="earn-code-language">
+<Tab value="TypeScript">
+
+```typescript title="deposit.ts (continued)"
+// Poll until the deposit is final.
+let movement;
+do {
+  await new Promise((resolve) => setTimeout(resolve, 2_000));
+  ({ movement } = await fetch(`${api}/external-wallet/movements/${deposit.movementId}`, {
+    headers,
+  }).then(data));
+} while (movement.status !== "finalized" && movement.status !== "failed");
+
+// Read the wallet's positions.
+const { positions } = await fetch(
+  `${api}/external-wallet/positions?ownerAddress=${ownerAddress}`,
+  { headers },
+).then(data);
+console.log(movement.status, positions);
+```
+
+</Tab>
+<Tab value="cURL">
+
+```bash title="Terminal"
+# Run again until this prints "finalized".
+curl -sS "https://api.solana.com/v1/earn/external-wallet/movements/$(jq -r .data.deposit.movementId deposit.json)" \
+  -H "Authorization: Bearer $SDP_API_KEY" | jq .data.movement.status
+
+# Read the wallet's positions.
+curl -sS "https://api.solana.com/v1/earn/external-wallet/positions?ownerAddress=$WALLET" \
+  -H "Authorization: Bearer $SDP_API_KEY" | jq .data.positions
+```
+
+</Tab>
+</Tabs>
+
+In TypeScript, run the file with `npx tsx deposit.ts`.
+
+```json title="Positions (trimmed)"
 [
   {
     "id": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
-    "ownerAddress": "Af89Mkuvo6AcLDbs7Fxs1FPsnnbD9KrY9NfmaFXHqmPo",
-    "provider": "kamino",
     "label": "Kamino Vault USDC",
-    "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-    "shareMint": "CeirL1mAehaM6g2EccgMUQwohNfnuyicskVQ4r9ekXk6",
-    "shares": "25",
-    "withdrawableShares": "25",
-    "tokenValue": "25"
+    "shares": "10",
+    "withdrawableShares": "10",
+    "tokenValue": "10"
   }
 ]
 ```
 
-`tokenValue` is the position's live value in the deposit token. Share and
-token amounts are equal here only because this vault's shares are still worth
-one USDC each.
-
-## Sign in your customer's wallet
-
-In production, the signing step runs in your app, not on your backend. With a
-[Wallet Standard](https://github.com/wallet-standard/wallet-standard) wallet
-and `@solana/react` (`npm install @solana/react@8 @solana/kit@8` in your app),
-sign the same base64 transaction and check that the wallet returned it
-unchanged:
-
-```typescript title="use-sign-in-wallet.ts"
-import { useWalletAccountTransactionSigner } from "@solana/react";
-import {
-  getBase64EncodedWireTransaction,
-  getBase64Encoder,
-  getTransactionDecoder,
-} from "@solana/kit";
-
-type WalletAccount = Parameters<typeof useWalletAccountTransactionSigner>[0];
-
-/** Signs SDP's base64 transaction in the customer's connected wallet. */
-export function useSignInWallet(account: WalletAccount) {
-  // Use "solana:mainnet" for a production project.
-  const signer = useWalletAccountTransactionSigner(account, "solana:devnet");
-  return async (transactionBase64: string): Promise<string> => {
-    const unsigned = getTransactionDecoder().decode(getBase64Encoder().encode(transactionBase64));
-    // Wallet Standard signers may modify before signing, so check the result below.
-    const [signed] = await signer.modifyAndSignTransactions([unsigned]);
-    if (!signed) throw new Error("The wallet returned no signed transaction");
-    const unchanged =
-      signed.messageBytes.length === unsigned.messageBytes.length &&
-      signed.messageBytes.every((byte, index) => byte === unsigned.messageBytes[index]);
-    if (!unchanged) throw new Error("The wallet changed the transaction; build a new one");
-    return getBase64EncodedWireTransaction(signed);
-  };
-}
-```
-
-Send the signed transaction to your backend, which submits it. Some wallets
-add instructions before they sign. SDP refuses a changed transaction with
-`400`, so check first and ask for a fresh build. Never broadcast it from the
-wallet: SDP broadcasts after it records the deposit.
+`tokenValue` is the position's live value in the deposit token.
 
 ## Next steps
 
-| Next | Where |
-| --- | --- |
-| Handle an uncertain submit | [Retry safely](/docs/earn/integration-details#retry-safely) |
-| Show balances and earnings | [Balances and earnings](/docs/earn/balances) |
-| Withdraw the position | [Withdraw funds](/docs/earn/withdrawals) |
-| Ship the full integration | [Embedded Yield](/docs/guides/embedded-yield) |
+- [Sign in your customer's wallet](/docs/earn/deposits#sign-in-your-customers-wallet), not a local keypair
+- [Send a slippage floor](/docs/earn/integration-details#slippage-floors) when a strategy needs one
+- [Retry safely](/docs/earn/integration-details#retry-safely) with a saved idempotency key
+- [Serve many customers](/docs/earn/concepts#one-integration-many-customers) with one API key
+- [Show balances](/docs/earn/balances) and [withdraw](/docs/earn/withdrawals)
+- [Ship the full integration](/docs/guides/embedded-yield)

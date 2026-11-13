@@ -119,7 +119,10 @@ The shared MDX mappings use `CodeExample`, `DocsCodeBlockTabs`, `DocsTabs` and
 has one frame and one header with its language and Copy button. Alternative
 languages use a dropdown; a single language uses a static label. Workflow steps
 and HTTP response statuses remain tabs. A panel with prose or several blocks
-keeps each block's own header. Do not nest another code frame or copy control.
+keeps each block's own header, and then every panel of its group nests a frame
+per block. Keep a language tab to one code block and no prose so the group stays
+one frame: put shared prose and shared commands outside the tabs. Do not nest
+another code frame or copy control.
 
 Keep the Shiki `data-language` transformer in `source.config.ts`: the shared
 components identify server-rendered code through that metadata and its Shiki
@@ -360,6 +363,18 @@ every other module. Its guides live in `content/docs/earn`, with Embedded
 Yield in `content/docs/guides/embedded-yield.mdx`. The public API reference,
 Postman, playground and AI resources regenerate from the channel's public
 OpenAPI document. No branch or deployment-preview override admits content.
+
+The Quickstart is three requests and one signature, each step in TypeScript
+(the default tab) and cURL. Keep it that small: no helper modules to copy, one
+code block per tab, the canonical API host in every sample, and the one setup
+gate (provider activation) stated with its exact error. A sample that runs must be self-contained on its page;
+`scripts/earn-guide-examples.test.ts` runs the Quickstart's `deposit.ts` and
+Withdraw funds' `withdraw.ts` against a fake API, and checks the cURL and
+TypeScript tabs call the same endpoints. The landing page and How Earn works
+answer what a partner asks first: standalone use, where funds go, one key for
+many customer wallets, what it costs, and what a wallet's policy must allow.
+State only what the code or the API response shows; fees and eligibility
+wording there is a product commitment, so change it with product sign-off.
 
 The Treasury and provider-integration guides remain under
 `content/unpublished/earn` because they describe internal operations. Treasury, Programs and provider administration

@@ -4,9 +4,15 @@ title: Earn
 description: Offer stablecoin yield in your app, from your customers' own wallets, through one API.
 ---
 
-Earn lets your customers earn yield on stablecoins without handing over their
-keys. Your backend builds each deposit and withdrawal through SDP, your
-customer's wallet signs it, and SDP broadcasts it and tracks it to settlement.
+Earn lets your customers earn yield on stablecoins from wallets they already
+hold. A deposit is three requests and one signature, and the position stays in
+your customer's wallet.
+
+| Step | Request |
+| --- | --- |
+| 1. Pick a strategy | [`GET /v1/earn/strategies`](/docs/reference/api/earn/list-earn-strategies) |
+| 2. Build the deposit | [`POST /v1/earn/external-wallet/deposit-transactions`](/docs/reference/api/earn/create-earn-external-wallet-deposit-transaction) |
+| 3. Submit it, signed by the wallet | [`POST /v1/earn/external-wallet/deposits`](/docs/reference/api/earn/create-earn-external-wallet-deposit) |
 
 <ActionLinks>
 
@@ -15,18 +21,6 @@ customer's wallet signs it, and SDP broadcasts it and tracks it to settlement.
 [API reference](/docs/reference/api/earn)
 
 </ActionLinks>
-
-## What you can build
-
-| Capability | What Earn gives you |
-| --- | --- |
-| [Strategies](/docs/earn/strategies) | A catalog of DeFi and real-world-asset strategies with live rates, deposit tokens, and withdrawal terms. |
-| [Deposits](/docs/earn/deposits) | Live quotes, unsigned transactions for your customer's wallet, and tracking from submit to finality. |
-| [Balances and earnings](/docs/earn/balances) | Live positions, recorded movements, and exact earnings for each customer wallet. |
-| [Withdrawals](/docs/earn/withdrawals) | Instant withdrawals, plus provider orders, solver queues, and operator redemptions that pay out later. |
-
-Returns, losses, fees, and withdrawal timing depend on the strategy. An APY is
-a rate, not a promise.
 
 ## How it works
 
@@ -46,14 +40,27 @@ a rate, not a promise.
 
 </EarnFlow>
 
-SDP never holds your customer's keys or pools their funds in an SDP account.
-Funds sit with the strategy's protocol or provider, whose custody and
-withdrawal risks still apply. [How Earn works](/docs/earn/concepts) explains
-shares, signing, and settlement.
+Your backend builds each transaction, your customer's wallet signs it, and SDP
+broadcasts and tracks it. Returns, losses, fees, and withdrawal timing depend
+on the strategy. An APY is a rate, not a promise.
 
-## Start building
+## Common questions
 
-Run the [Quickstart](/docs/earn/quickstart) to make your first sandbox deposit
-through the Earn API, then follow [Embedded Yield](/docs/guides/embedded-yield)
-to ship the full integration. Every request field and response is in the
-[Earn API reference](/docs/reference/api/earn).
+| Question | Answer |
+| --- | --- |
+| Do I need the rest of SDP? | No. Create an account, create an API key, and call Earn. |
+| Who holds the funds? | The strategy holds deposits, and your customer's wallet holds the position. SDP never holds a key or a balance. [Trace it onchain](/docs/earn/concepts#where-funds-go). |
+| Can one integration serve many customers? | Yes. [One API key serves every customer wallet](/docs/earn/concepts#one-integration-many-customers), and each balance is recorded per wallet. |
+| What does it cost? | Network fees and the strategy's own fees. [No transaction SDP builds pays SDP](/docs/earn/concepts#what-it-costs). |
+| Who checks eligibility? | You do, for your customers, under [each strategy's terms](/docs/earn/strategies#confirm-eligibility). |
+
+## Guides
+
+| Guide | Covers |
+| --- | --- |
+| [How Earn works](/docs/earn/concepts) | Custody, many customers on one key, costs, and settlement. |
+| [Strategies](/docs/earn/strategies) | The catalog, rates, slippage policy, and eligibility. |
+| [Deposits](/docs/earn/deposits) | Each step of a deposit, and signing in your customer's wallet. |
+| [Balances and earnings](/docs/earn/balances) | Positions, movements, and earnings for each wallet. |
+| [Withdrawals](/docs/earn/withdrawals) | Instant withdrawals and requests that pay out later. |
+| [Embedded Yield](/docs/guides/embedded-yield) | The full integration, from first request to go-live. |
