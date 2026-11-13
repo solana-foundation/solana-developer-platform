@@ -886,24 +886,40 @@ counterparties.
 
 ```mermaid
 flowchart TB
-  subgraph Trusted["Registry, trusted"]
-    DOC[Interfaces and implementations]
-    BLD[Builders, with their upgrade authorities]
-  end
-  subgraph Untrusted
+  subgraph Untrusted["Untrusted: a lie fails the transaction"]
     SVC[Intent service]
     REM[Remote endpoints and adapters]
-    RPC[RPC]
+    SRPC[The service's RPC]
+  end
+  subgraph Signer["Signer side"]
+    VER[Client verifier]
+    SIGN[Signer]
+    VRPC[The signer's RPC]
+  end
+  subgraph Chain["On-chain, in the same transaction"]
+    REG[Registry: interfaces and implementations]
+    VI[verify_intent]
+    BLD[Builders, under CPI]
+    LH[Lighthouse, immutable]
   end
   CALLER[Caller] -->|intent| SVC
-  DOC --> SVC
-  BLD -->|simulated result| SVC
   REM -->|result| SVC
-  RPC --> SVC
-  SVC -->|plan| SIGNER[Signer and its verifier]
-  DOC --> SIGNER
-  SIGNER -->|transaction with verify_intent and assertions| CHAIN[Cluster]
+  SRPC --> SVC
+  REG -->|documents, simulated builders| SVC
+  SVC -->|"plan: transaction and message"| VER
+  REG -->|documents| VRPC
+  VRPC --> VER
+  VER -->|"message rendered from the transaction, unverified instructions listed"| SIGN
+  SIGN -->|signed transaction| VI
+  VI -->|"rebuilds and compares the built instructions"| BLD
+  VI -->|reads| REG
+  VI -->|"checks the assertions"| LH
 ```
+
+The client verifier never trusts the plan. It reads the documents over the signer's own RPC,
+renders the message from the transaction, and lists each instruction that no segment holds. The
+chain then proves the rest: `verify_intent` rebuilds the built instructions, and Lighthouse asserts
+the postconditions.
 
 | Dependency | Fails | Lies or goes stale | Disappears |
 | :-- | :-- | :-- | :-- |
@@ -913,7 +929,8 @@ flowchart TB
 | Builder upgrade | | Every implementation that names it follows, within the postconditions | |
 | Static target program upgrade | | A changed layout fails. A reused discriminator passes, within the postconditions. | That implementation is unavailable |
 | Remote endpoint | `prepare` errors | As a builder. At tier 3, the simulation is the only check. | That implementation is unavailable |
-| RPC | `prepare` errors | A false account builds a wrong transaction that fails onchain, unless the intent opts out of the checks | No plans |
+| The service's RPC | `prepare` errors | A false account builds a wrong transaction that fails onchain, unless the intent opts out of the checks | No plans |
+| The signer's RPC | Verification errors | A false document can show a false message. The chain still runs the real implementation within its real postconditions. | No verification |
 | Lighthouse | The transaction fails | A bug can pass a bad transaction. It is immutable. | Every guarded transaction fails |
 
 **Worst case.** A compromised service can only stop plans, unless an intent opts out of the onchain
