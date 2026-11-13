@@ -786,9 +786,10 @@ what the record builds for the intent, so a signer needs only the transaction by
 [verify_intent] [built instructions]
 ```
 
-`verify_intent` is an instruction of the registry program. Its data is the intent in binary form,
-as one Anchor `&[u8]` argument. The recipe logic and the registry change together, so one program
-holds both.
+`verify_intent` is an instruction of the registry program. Its data is two Anchor `&[u8]`
+arguments: the intent in binary form, then for a program recipe the builder's role of each account
+of its instructions, one byte each, in order. The recipe logic and the registry change together, so
+one program holds both.
 
 Its accounts, all readonly: the instructions sysvar, the interface index, the implementation
 index, the interface version account, the implementation version account, every account of the
@@ -814,18 +815,23 @@ boundaries of the built instructions stay exact.
 3. It resolves the record's accounts with the engine over its own accounts, so one resolve
    completes or fails. Each resolved address must be the account at its place in the table.
 4. Static recipe: it builds the instructions and compares each one, byte for byte, with the
-   sysvar's instruction at its place: program, accounts, roles, and data. Their count must be the
-   recipe's.
+   sysvar's instruction at its place: program, accounts, and data. Their count must be the
+   recipe's. Each role must be the account's role in the transaction, below.
 5. Program recipe: it calls the builder by CPI with the record's data, and every account readonly
    and unsigned. The builder returns `HashedReadyV1` (4.2). It serializes the instructions after
    itself into the instruction section, with the rent payer's address mapped back to the
-   placeholder, compares the SHA-256 with `instructions_hash`, and checks that a built instruction
-   names each builder signer as a signer.
+   placeholder and each account's role from the builder's roles, compares the SHA-256 with
+   `instructions_hash`, and checks that a built instruction names each builder signer as a
+   signer. The hash proves the builder's roles. Each role in the sysvar must then be the
+   account's role in the transaction.
 6. Any difference fails the transaction.
 
-The sysvar holds each account's role in the transaction, not in one instruction. A record that
-declares an account readonly fails when another instruction makes it writable, such as a `from`
-that is also the fee payer.
+**Roles.** The sysvar holds each account's role in the whole transaction, not in one instruction.
+An account is writable or a signer everywhere when one instruction, or the fee payer slot, makes it
+so, such as a `from` that is also the fee payer. So an account's role in the transaction is the
+union of its roles in the built instructions, and the intent's fee payer is a writable signer.
+`verify_intent` passes its own accounts readonly and every instruction after it is built, so the
+union is every reason for a role. A role that it does not explain fails.
 
 A signer decodes the intent from `verify_intent`, renders the message from the intent and the
 record, and checks the fee payer and its own signature. It needs no simulation and no trust in the

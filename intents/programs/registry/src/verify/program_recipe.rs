@@ -4,6 +4,11 @@
 //! The section names the rent payer with the placeholder, as the builder does. Only the rent payer
 //! maps back, and the fee payer never appears, so the mapping is exact. A builder that names the
 //! rent payer's address as an input address also maps, and fails the check.
+//!
+//! The sysvar holds each account's role in the transaction, which can differ from its role in the
+//! builder's instruction. So the data of `verify_intent` holds the builder's roles, one byte for each
+//! account of the section. The section takes those roles, so the hash proves them, and each
+//! account's role in the sysvar must be their union, as [`super::roles`] gives it.
 
 use alloc::vec::Vec;
 use core::ops::Range;
@@ -12,7 +17,7 @@ use anchor_lang::prelude::*;
 use pinocchio::cpi::{get_return_data, invoke_with_slice};
 use pinocchio::instruction::{InstructionAccount, InstructionView};
 use pinocchio::sysvars::instructions::IntrospectedInstruction;
-use sdp_intents_engine::Recipe;
+use sdp_intents_engine::{Payers, Recipe};
 use sdp_intents_spec::builder::{AccountMetaV1, HashedReady, InstructionHeaderV1, PAYER_RENT_PLACEHOLDER};
 use sdp_intents_spec::wire::PodU16;
 use sdp_intents_spec::AccountRole;
@@ -21,6 +26,7 @@ use crate::error::RegistryError;
 use crate::state::spec_address;
 use crate::verify::chain::PassedAccounts;
 use crate::verify::refused;
+use crate::verify::roles::TransactionRoles;
 
 /// The call of the builder, in the form that a CPI takes.
 struct BuilderCall<'a> {
@@ -35,6 +41,7 @@ pub fn verify(
     chain: &PassedAccounts<'_>,
     sysvar: &SysvarInstructions,
     built: Range<usize>,
+    builder_roles: &[u8],
 ) -> Result<()> {
     let call = builder_call(recipe, chain)?;
     call.invoke()?;
@@ -43,8 +50,12 @@ pub fn verify(
     require!(*return_data.program_id() == call.program, RegistryError::BadBuilderResult);
 
     let hashed = HashedReady::parse(return_data.as_slice()).map_err(|_| RegistryError::BadBuilderResult)?;
-    let section = instruction_section(sysvar, built.clone(), recipe.payers().rent)?;
-    require!(anchor_lang::sha256(&section) == hashed.fixed.instructions_hash, RegistryError::WrongInstructionsHash);
+    let section = instruction_section(sysvar, built.clone(), recipe.payers(), builder_roles)?;
+    require!(
+        anchor_lang::sha256(&section.bytes) == hashed.fixed.instructions_hash,
+        RegistryError::WrongInstructionsHash
+    );
+    check_roles(sysvar, built.clone(), &section.roles)?;
 
     let signs = |signer: &sdp_intents_spec::Address| {
         built.clone().any(|position| {
@@ -92,13 +103,23 @@ impl BuilderCall<'_> {
     }
 }
 
-/// The instructions at `built` as the builder lays out its instruction section.
+/// The instructions at `built` in the layout of the instruction section, and the union of each
+/// account's roles in them.
+struct Section {
+    bytes: Vec<u8>,
+    roles: TransactionRoles,
+}
+
+/// Each account takes its role from `builder_roles`, in order, which must hold one role for each
+/// account.
 fn instruction_section(
     sysvar: &SysvarInstructions,
     built: Range<usize>,
-    rent_payer: &sdp_intents_spec::Address,
-) -> Result<Vec<u8>> {
-    let mut section = Vec::new();
+    payers: Payers<'_>,
+    builder_roles: &[u8],
+) -> Result<Section> {
+    let mut section = Section { bytes: Vec::new(), roles: TransactionRoles::new(payers.fee) };
+    let mut roles = builder_roles.iter();
 
     for position in built {
         let instruction = sysvar.load_instruction_at(position)?;
@@ -108,21 +129,39 @@ fn instruction_section(
             num_accounts: u8::try_from(instruction.num_account_metas()).map_err(|_| RegistryError::WrongInstruction)?,
             data_len: PodU16::new(u16::try_from(data.len()).map_err(|_| RegistryError::WrongInstruction)?),
         };
-        section.extend_from_slice(bytemuck::bytes_of(&header));
+        section.bytes.extend_from_slice(bytemuck::bytes_of(&header));
+
+        for account in 0..instruction.num_account_metas() {
+            let address = spec_address(&instruction.get_instruction_account_at(account)?.key);
+            let role = roles.next().and_then(|role| AccountRole::try_from(*role).ok());
+            let role = role.ok_or(RegistryError::WrongBuilderRoles)?;
+            let placed = if address == *payers.rent { PAYER_RENT_PLACEHOLDER } else { address };
+
+            section.roles.add(&address, role);
+            section.bytes.extend_from_slice(bytemuck::bytes_of(&AccountMetaV1 { address: placed, role: role.into() }));
+        }
+
+        section.bytes.extend_from_slice(data);
+    }
+
+    require!(roles.next().is_none(), RegistryError::WrongBuilderRoles);
+
+    Ok(section)
+}
+
+fn check_roles(sysvar: &SysvarInstructions, built: Range<usize>, roles: &TransactionRoles) -> Result<()> {
+    for position in built {
+        let instruction = sysvar.load_instruction_at(position)?;
 
         for account in 0..instruction.num_account_metas() {
             let meta = instruction.get_instruction_account_at(account)?;
-            let address = spec_address(&meta.key);
-            let address = if address == *rent_payer { PAYER_RENT_PLACEHOLDER } else { address };
             let role = AccountRole::new(meta.is_writable(), meta.is_signer());
 
-            section.extend_from_slice(bytemuck::bytes_of(&AccountMetaV1 { address, role: role.into() }));
+            require!(role == roles.role(&spec_address(&meta.key)), RegistryError::WrongRole);
         }
-
-        section.extend_from_slice(data);
     }
 
-    Ok(section)
+    Ok(())
 }
 
 fn names_signer(instruction: &IntrospectedInstruction<'_>, signer: &sdp_intents_spec::Address) -> bool {

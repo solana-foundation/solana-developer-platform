@@ -69,12 +69,14 @@ impl Published {
     }
 
     /// `verify_intent` for `documents`: the registry's accounts, the record's account table, then
-    /// `extra_accounts`, the accounts of a builder's last round.
+    /// `extra_accounts`, the accounts of a builder's last round. `builder_roles` holds the builder's
+    /// role of each account of its instructions, and is empty for a static recipe.
     pub fn verify_instruction(
         &self,
         svm: &LiteSVM,
         documents: &Documents,
         extra_accounts: &[Address],
+        builder_roles: &[u8],
     ) -> Result<Instruction, Failure> {
         let accounts = &self.accounts;
         let fixed = [
@@ -86,8 +88,10 @@ impl Published {
         ];
         let record = record_accounts(svm, documents)?;
         let readonly = |address: &Address| AccountMeta { address: spec_address(address), role: AccountRole::Readonly };
-        let data =
-            anchor_lang::InstructionData::data(&registry::instruction::VerifyIntent { intent: &documents.intent });
+        let data = anchor_lang::InstructionData::data(&registry::instruction::VerifyIntent {
+            intent: &documents.intent,
+            builder_roles,
+        });
 
         Ok(Instruction {
             program: spec_address(&registry::ID),
@@ -95,6 +99,16 @@ impl Published {
             data,
         })
     }
+}
+
+/// The role of each account of the plan's instructions, in order. A builder's plan holds the roles
+/// of the builder's own instructions.
+pub fn builder_roles(plan: &Plan) -> Vec<u8> {
+    plan.transaction
+        .instructions
+        .iter()
+        .flat_map(|instruction| instruction.accounts.iter().map(|meta| u8::from(meta.role)))
+        .collect()
 }
 
 /// `plan` with `verify` first, and the highest budget, because the planner measured the budget

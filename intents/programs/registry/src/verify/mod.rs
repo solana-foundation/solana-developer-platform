@@ -4,11 +4,16 @@
 //! The accounts are the instructions sysvar, the two indexes, the two version accounts, then every
 //! account of the record's account table in order, then for a program recipe the accounts of the
 //! builder's last `MoreAccounts` round. [`position`] gives where the checked instructions are.
+//!
+//! For a program recipe, the data also holds the builder's role of each account of its
+//! instructions, one byte each, in order. A static recipe holds none, because `verify_intent`
+//! builds those instructions itself.
 
 mod chain;
 mod position;
 mod program_recipe;
 mod registry;
+mod roles;
 mod static_recipe;
 
 use anchor_lang::prelude::*;
@@ -29,7 +34,12 @@ pub struct VerifyIntent {
     pub implementation_version: UncheckedAccount,
 }
 
-pub fn verify_intent(accounts: &VerifyIntent, record_accounts: &[AccountView], intent: &[u8]) -> Result<()> {
+pub fn verify_intent(
+    accounts: &VerifyIntent,
+    record_accounts: &[AccountView],
+    intent: &[u8],
+    builder_roles: &[u8],
+) -> Result<()> {
     let built = position::built_instructions(&accounts.instructions)?;
     check_options(intent)?;
 
@@ -45,8 +55,11 @@ pub fn verify_intent(accounts: &VerifyIntent, record_accounts: &[AccountView], i
     resolve(&mut recipe, &chain)?;
 
     match recipe.implementation().recipe().map_err(|error| refused(error.into()))? {
-        RecipeKind::Static => static_recipe::verify(&recipe, &chain, &accounts.instructions, built),
-        RecipeKind::Program => program_recipe::verify(&recipe, &chain, &accounts.instructions, built),
+        RecipeKind::Static => {
+            require!(builder_roles.is_empty(), RegistryError::WrongBuilderRoles);
+            static_recipe::verify(&recipe, &chain, &accounts.instructions, built)
+        }
+        RecipeKind::Program => program_recipe::verify(&recipe, &chain, &accounts.instructions, built, builder_roles),
         RecipeKind::Remote => Ok(()),
     }
 }

@@ -58,4 +58,8 @@ pub enum RegistryError {
     WrongInstructionsHash,
     #[msg("A builder signer does not sign a built instruction")]
     UnsignedBuilderSigner,
+    #[msg("The builder roles do not name one role for each account of the built instructions")]
+    WrongBuilderRoles,
+    #[msg("An account's role is not the union of its roles in the built instructions and the fee payer slot")]
+    WrongRole,
 }

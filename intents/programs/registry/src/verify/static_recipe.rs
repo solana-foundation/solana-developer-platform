@@ -1,7 +1,6 @@
 //! A static recipe: the engine builds the instructions, and each one must equal the sysvar's
-//! instruction at its place, byte for byte. The sysvar holds each account's role in the
-//! transaction, so an account that another instruction makes writable or a signer differs from a
-//! record that declares it readonly.
+//! instruction at its place: the program, each account, and the data, byte for byte. Each account's
+//! role must be its role in the transaction, as [`super::roles`] gives it.
 
 use core::ops::Range;
 
@@ -12,6 +11,7 @@ use sdp_intents_spec::AccountRole;
 
 use crate::error::RegistryError;
 use crate::verify::refused;
+use crate::verify::roles::TransactionRoles;
 
 pub fn verify<C: Chain>(
     recipe: &Recipe<'_>,
@@ -22,14 +22,33 @@ pub fn verify<C: Chain>(
     let count = recipe.implementation().instructions().map_err(|error| refused(error.into()))?.len();
     require!(built.len() == count, RegistryError::WrongInstructionCount);
 
+    let roles = transaction_roles(recipe, chain)?;
+
     recipe.instructions(chain).map_err(refused)?.zip(built).try_for_each(|(expected, position)| {
         let expected = expected.map_err(refused)?;
 
-        compare(&expected, &sysvar.load_instruction_at(position)?)
+        compare(&expected, &sysvar.load_instruction_at(position)?, &roles)
     })
 }
 
-fn compare<C: Chain>(expected: &BuiltInstruction<'_, C>, actual: &IntrospectedInstruction<'_>) -> Result<()> {
+fn transaction_roles<C: Chain>(recipe: &Recipe<'_>, chain: &C) -> Result<TransactionRoles> {
+    let mut roles = TransactionRoles::new(recipe.payers().fee);
+
+    for expected in recipe.instructions(chain).map_err(refused)? {
+        for account in expected.map_err(refused)?.accounts() {
+            let account = account.map_err(refused)?;
+            roles.add(account.address, account.role);
+        }
+    }
+
+    Ok(roles)
+}
+
+fn compare<C: Chain>(
+    expected: &BuiltInstruction<'_, C>,
+    actual: &IntrospectedInstruction<'_>,
+    roles: &TransactionRoles,
+) -> Result<()> {
     require!(actual.get_program_id().as_ref() == expected.program.0, RegistryError::WrongInstruction);
     require!(actual.num_account_metas() == expected.accounts_len(), RegistryError::WrongInstruction);
 
@@ -38,7 +57,8 @@ fn compare<C: Chain>(expected: &BuiltInstruction<'_, C>, actual: &IntrospectedIn
         let meta = actual.get_instruction_account_at(position)?;
         let role = AccountRole::new(meta.is_writable(), meta.is_signer());
 
-        require!(meta.key.as_ref() == account.address.0 && role == account.role, RegistryError::WrongInstruction);
+        require!(meta.key.as_ref() == account.address.0, RegistryError::WrongInstruction);
+        require!(role == roles.role(account.address), RegistryError::WrongRole);
 
         Ok::<(), anchor_lang::Error>(())
     })?;

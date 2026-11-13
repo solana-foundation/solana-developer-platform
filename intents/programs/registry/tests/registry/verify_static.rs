@@ -63,7 +63,7 @@ fn plan_and_verify(setup: &Setup, implementation: &str, mint: &Address, amount: 
     let planned = setup.published.compile(&intent(implementation, &setup.wallets, mint, amount, PLANNED))?;
     let verified = setup.published.compile(&intent(implementation, &setup.wallets, mint, amount, VERIFIED))?;
     let plan = prepare(&setup.svm, &planned).map_err(|error| crate::svm::failure(format!("{error}")))?;
-    let verify = setup.published.verify_instruction(&setup.svm, &verified, &[])?;
+    let verify = setup.published.verify_instruction(&setup.svm, &verified, &[], &[])?;
 
     Ok(Verified { plan, verify })
 }
@@ -141,7 +141,7 @@ fn refuses_an_unapproved_implementation_unless_the_intent_allows_it() {
         .compile(&intent("system-transfer", &setup.wallets, &system_program(), SOL, &allowing(VERIFIED)))
         .unwrap();
     let plan = prepare(&setup.svm, &planned).unwrap();
-    let verify = setup.published.verify_instruction(&setup.svm, &verified, &[]).unwrap();
+    let verify = setup.published.verify_instruction(&setup.svm, &verified, &[], &[]).unwrap();
 
     send_plan(&mut setup.svm, &with_verify(&plan, verify), &signers).unwrap();
 }
@@ -152,7 +152,7 @@ fn refuses_an_intent_that_turns_verification_off() {
     let planned =
         setup.published.compile(&intent("system-transfer", &setup.wallets, &system_program(), SOL, PLANNED)).unwrap();
     let plan = prepare(&setup.svm, &planned).unwrap();
-    let verify = setup.published.verify_instruction(&setup.svm, &planned, &[]).unwrap();
+    let verify = setup.published.verify_instruction(&setup.svm, &planned, &[], &[]).unwrap();
     let signers = [&setup.wallets.fee_payer, &setup.wallets.from];
 
     let failed = send_plan(&mut setup.svm, &with_verify(&plan, verify), &signers).unwrap_err();
@@ -230,5 +230,36 @@ fn refuses_an_spl_token_transfer_with_other_decimals() {
     readonly_destination.transaction.instructions[1].accounts[2].role = sdp_intents_spec::AccountRole::Readonly;
     readonly_destination.transaction.instructions[0].accounts[1].role = sdp_intents_spec::AccountRole::Readonly;
     let failed = send_plan(&mut setup.svm, &with_verify(&readonly_destination, verified.verify), &signers).unwrap_err();
-    assert!(failed.is(RegistryError::WrongInstruction), "{failed}");
+    assert!(failed.is(RegistryError::WrongRole), "{failed}");
+}
+
+/// The transfer names the sender as a readonly signer, and the fee payer slot makes it a writable
+/// signer in the whole transaction. The union of the two explains the role.
+#[test]
+fn verifies_an_spl_token_transfer_whose_sender_pays_the_fee() {
+    let mut setup = setup(definitions::SPL_TOKEN_TRANSFER, true).unwrap();
+    setup.wallets.fee_payer = setup.wallets.from.insecure_clone();
+    let tokens = token_accounts(&mut setup).unwrap();
+    let verified = plan_and_verify(&setup, "spl-token-transfer", &tokens.mint, 100_000_000).unwrap();
+
+    send_plan(&mut setup.svm, &with_verify(&verified.plan, verified.verify), &[&setup.wallets.from]).unwrap();
+
+    assert_eq!(token_amount(&setup.svm, &tokens.destination), Some(100_000_000));
+}
+
+/// The receiver pays the transaction's fee, so it is a writable signer, and no built instruction or
+/// the intent's fee payer explains that role.
+#[test]
+fn refuses_a_role_that_no_built_instruction_explains() {
+    let mut setup = setup(definitions::SPL_TOKEN_TRANSFER, true).unwrap();
+    let tokens = token_accounts(&mut setup).unwrap();
+    let verified = plan_and_verify(&setup, "spl-token-transfer", &tokens.mint, 100_000_000).unwrap();
+    setup.svm.airdrop(&setup.wallets.to.pubkey(), SOL).unwrap();
+
+    let mut paid_by_receiver = with_verify(&verified.plan, verified.verify);
+    paid_by_receiver.transaction.fee_payer = sdp_intents_spec::Address(setup.wallets.to.pubkey().to_bytes());
+    let signers = [&setup.wallets.to, &setup.wallets.from, &setup.wallets.fee_payer];
+    let failed = send_plan(&mut setup.svm, &paid_by_receiver, &signers).unwrap_err();
+
+    assert!(failed.is(RegistryError::WrongRole), "{failed}");
 }

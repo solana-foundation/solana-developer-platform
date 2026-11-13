@@ -7,7 +7,7 @@ use registry::RegistryError;
 use sdp_intents_planner::Plan;
 use sdp_intents_program_testing::prepare;
 
-use crate::intents::{publish_transfer, with_verify, Published};
+use crate::intents::{builder_roles, publish_transfer, with_verify, Published};
 use crate::svm::{failure, funded, send_plan, svm, units_consumed, Failure, SOL};
 
 const RECORD: &str = include_str!("../../../test-builder/fixtures/test-builder-transfer.json");
@@ -51,6 +51,11 @@ fn setup() -> Result<Setup, Failure> {
 
 /// The two-round plan, and `verify_intent` with the account of the last round when `extra` is set.
 fn plan_and_verify(setup: &Setup, amount: u64, extra: bool) -> Result<Plan, Failure> {
+    plan_and_verify_with_roles(setup, amount, extra, None)
+}
+
+/// `plan_and_verify`, with `roles` in place of the builder's roles in `verify_intent` when set.
+fn plan_and_verify_with_roles(setup: &Setup, amount: u64, extra: bool, roles: Option<&[u8]>) -> Result<Plan, Failure> {
     let planned =
         setup.published.compile(&intent(setup, amount, r#"{ "assertions": false, "verifyIntent": false }"#))?;
     let verified = setup.published.compile(&intent(setup, amount, r#"{ "assertions": false }"#))?;
@@ -61,9 +66,26 @@ fn plan_and_verify(setup: &Setup, amount: u64, extra: bool) -> Result<Plan, Fail
     }
 
     let extra_accounts = if extra { vec![test_builder::EXTRA_ACCOUNT] } else { Vec::new() };
-    let verify = setup.published.verify_instruction(&setup.svm, &verified, &extra_accounts)?;
+    let roles = roles.map_or_else(|| builder_roles(&plan), <[u8]>::to_vec);
+    let verify = setup.published.verify_instruction(&setup.svm, &verified, &extra_accounts, &roles)?;
 
     Ok(with_verify(&plan, verify))
+}
+
+/// The hash covers the builder's roles, so roles that the builder did not write fail it, and a
+/// count that does not match the accounts fails first.
+#[test]
+fn refuses_builder_roles_that_the_builder_did_not_write() {
+    let mut setup = setup().unwrap();
+    let lying = plan_and_verify_with_roles(&setup, 2 * SOL, true, Some(&[3, 3])).unwrap();
+    let short = plan_and_verify_with_roles(&setup, 2 * SOL, true, Some(&[3])).unwrap();
+    let signers = [&setup.fee_payer, &setup.from];
+
+    let failed = send_plan(&mut setup.svm, &lying, &signers).unwrap_err();
+    assert!(failed.is(RegistryError::WrongInstructionsHash), "{failed}");
+
+    let failed = send_plan(&mut setup.svm, &short, &signers).unwrap_err();
+    assert!(failed.is(RegistryError::WrongBuilderRoles), "{failed}");
 }
 
 #[test]
@@ -93,7 +115,7 @@ fn refuses_instructions_that_differ_from_the_builder() {
     let mut added = plan.clone();
     added.transaction.instructions.push(plan.transaction.instructions[1].clone());
     let failed = send_plan(&mut setup.svm, &added, &signers).unwrap_err();
-    assert!(failed.is(RegistryError::WrongInstructionsHash), "{failed}");
+    assert!(failed.is(RegistryError::WrongBuilderRoles), "{failed}");
 
     assert!(setup.svm.get_account(&setup.to.pubkey()).is_none());
 }

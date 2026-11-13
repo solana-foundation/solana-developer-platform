@@ -115,9 +115,9 @@ pub mod registry {
         ctx.accounts.set(false, major, minor, patch)
     }
 
-    pub fn verify_intent(ctx: &mut Context<VerifyIntent>, intent: &[u8]) -> Result<()> {
+    pub fn verify_intent(ctx: &mut Context<VerifyIntent>, intent: &[u8], builder_roles: &[u8]) -> Result<()> {
         let record_accounts = ctx.remaining_accounts();
 
-        verify::verify_intent(&ctx.accounts, &record_accounts, intent)
+        verify::verify_intent(&ctx.accounts, &record_accounts, intent, builder_roles)
     }
 }
