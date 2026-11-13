@@ -1,0 +1,37 @@
+[package]
+name = "registry"
+description = "The SDP intents registry: organizations, interfaces, implementations, their versions and approvals, and verify_intent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = ["no-log-ix-name"]
+no-entrypoint = []
+cpi = ["no-entrypoint"]
+idl-build = []
+no-log-ix-name = []
+
+[dependencies]
+anchor-lang.workspace = true
+bytemuck.workspace = true
+pinocchio.workspace = true
+sdp-intents-engine = { path = "../../engine" }
+sdp-intents-spec.workspace = true
+solana-instruction.workspace = true
+
+[dev-dependencies]
+anchor-v2-testing.workspace = true
+sdp-intents-compiler = { path = "../../compiler" }
+sdp-intents-planner = { path = "../../planner" }
+sdp-intents-program-testing = { path = "../testing" }
+solana-account = "=4.7.0"
+test-builder = { path = "../test-builder", features = ["no-entrypoint"] }
+
+[lints]
+workspace = true
