@@ -319,6 +319,9 @@ declare module "hono" {
     projectEnvironment?: ApiKeyEnvironment;
     // Loaded once by authentication for every actor; see lib/production-entitlement.ts
     organizationEntitlements: OrganizationEntitlements;
+    // Set by the one check that may let an organization a mainnet-only deployment does not admit
+    // through (an Earn exit or read, a mainnet-access request); requireAction reads it
+    organizationAdmissionExempt?: true;
     // Set by requestGate middleware for gated routes
     requestGate?: RequestGateContext;
     // Set by authorize(): what the route's access check loaded (middleware/authorize.ts)
