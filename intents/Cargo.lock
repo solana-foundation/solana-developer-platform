@@ -3170,6 +3170,7 @@ dependencies = [
  "sdp-intents-client",
  "sdp-intents-compiler",
  "sdp-intents-engine",
+ "sdp-intents-lighthouse",
  "sdp-intents-planner",
  "sdp-intents-registry-client",
  "sdp-intents-spec",

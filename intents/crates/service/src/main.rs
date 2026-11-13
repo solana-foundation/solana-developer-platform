@@ -59,6 +59,15 @@ async fn run(args: Args) -> Result<(), String> {
         metrics: Metrics::default(),
     };
 
+    let service = Arc::new(service);
+    let starting = Arc::clone(&service);
+    tokio::spawn(async move {
+        match sdp_intents_service::warm::warm(&starting.chain).await {
+            Ok(warm) => eprintln!("followed {} accounts and pinned {} versions", warm.followed, warm.pinned),
+            Err(error) => eprintln!("the start-up read failed, so plans read the registry: {}", error.message),
+        }
+    });
+
     let listener = tokio::net::TcpListener::bind(args.listen)
         .await
         .map_err(|error| format!("cannot listen on {}: {error}", args.listen))?;
@@ -67,7 +76,7 @@ async fn run(args: Args) -> Result<(), String> {
         args.listen, args.rpc
     );
 
-    axum::serve(listener, router(Arc::new(service)))
+    axum::serve(listener, router(service))
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
         })

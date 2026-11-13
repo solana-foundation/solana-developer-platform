@@ -25,6 +25,12 @@ use crate::{
     Simulation, SimulationResult, Transaction,
 };
 
+/// `SysvarC1ock11111111111111111111111111111111`.
+const CLOCK_SYSVAR: Address = Address([
+    6, 167, 213, 23, 24, 199, 116, 201, 40, 86, 99, 152, 105, 29, 94, 182, 139, 94, 184, 163, 155, 75, 109, 92, 115,
+    85, 91, 33, 0, 0, 0, 0,
+]);
+
 /// A builder asks for accounts in at most 4 rounds.
 const MAX_BUILDER_SIMULATIONS: usize = 4;
 
@@ -57,6 +63,8 @@ pub(crate) struct Segment {
     pub(crate) after: Vec<Option<Account>>,
     pub(crate) fee: u64,
     pub(crate) units_consumed: u64,
+    /// The units of each top-level instruction of the simulation, which ran the transaction so far.
+    pub(crate) units_by_instruction: Vec<Option<u64>>,
     pub(crate) loaded_accounts_data_size: Option<u32>,
 }
 
@@ -193,9 +201,19 @@ impl<'a> SegmentPlanner<'a> {
         Ok(SegmentStep::Call(remote::call(&self.recipe, self.priority_fee_lamports)?))
     }
 
+    /// A fetch that the recipe needs also asks for every account that the segment names and that
+    /// the recipe already resolved, so that a static recipe's accounts arrive in one call.
     fn resolve<C: Chain>(&mut self, earlier: &Earlier<'_, C>) -> Result<SegmentStep, PlanError> {
         if let Resolution::Missing(missing) = self.recipe.resolve(earlier.chain)? {
-            let addresses = missing.addresses().copied().collect();
+            let needed: Vec<Address> = missing.addresses().copied().collect();
+            let known = self.known_accounts()?;
+            let addresses = needed.into_iter().chain(known).fold(Vec::new(), |mut addresses, address| {
+                if earlier.chain.account(&address).is_none() && !addresses.contains(&address) {
+                    addresses.push(address);
+                }
+
+                addresses
+            });
             self.state = State::Resolving;
 
             return Ok(SegmentStep::Fetch(addresses));
@@ -392,6 +410,7 @@ impl<'a> SegmentPlanner<'a> {
             after: result.accounts,
             fee: result.fee.unwrap_or(checking.estimated_fee),
             units_consumed: result.units_consumed.ok_or(PlanError::NoUnits)?,
+            units_by_instruction: crate::simulation::units_by_instruction(&result.logs),
             loaded_accounts_data_size: result.loaded_accounts_data_size,
         })
     }
@@ -401,6 +420,25 @@ impl<'a> SegmentPlanner<'a> {
             priority_fee_lamports: self.priority_fee_lamports,
             ..Transaction::unbudgeted(*self.recipe.payers().fee, instructions.cloned().collect())
         }
+    }
+
+    /// The payers, each account of the record that resolved, the mints and organizations that the
+    /// message reads, the segment's Lighthouse memory, and the clock, which every simulation reads.
+    fn known_accounts(&self) -> Result<Vec<Address>, PlanError> {
+        let payers = self.recipe.payers();
+        let table_len = self.recipe.implementation().accounts()?.len();
+        let resolved = (0u8..).take(table_len).filter_map(|account| self.recipe.address(account).copied());
+        let values = Values { recipe: &self.recipe, chain: &crate::AccountMap::default(), outputs: &[] };
+        let memory = sdp_intents_lighthouse::Memory::find(payers.fee, self.memory_id).map(|memory| memory.address);
+
+        Ok([*payers.fee, *payers.rent]
+            .into_iter()
+            .chain(resolved)
+            .chain(values.input_mints()?)
+            .chain(values.publishers())
+            .chain(memory)
+            .chain([CLOCK_SYSVAR])
+            .collect())
     }
 
     /// The builder program of a program recipe.

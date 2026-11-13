@@ -308,6 +308,7 @@ function Instructions({ plan }: { plan: Plan }) {
             <th>#</th>
             <th>Program</th>
             <th>Part</th>
+            <th>Compute units</th>
             <th>Accounts</th>
             <th>Data</th>
           </tr>
@@ -321,6 +322,7 @@ function Instructions({ plan }: { plan: Plan }) {
                 {PROGRAMS[instruction.programAddress] ?? shortAddress(instruction.programAddress)}
               </td>
               <td>{part(position, instruction.programAddress)}</td>
+              <td>{plan.simulation.unitsByInstruction[position] ?? "builtin"}</td>
               <td>{instruction.accounts.length}</td>
               <td>{atob(instruction.data).length} B</td>
             </tr>

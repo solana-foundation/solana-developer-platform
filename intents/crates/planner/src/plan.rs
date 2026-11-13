@@ -19,6 +19,9 @@ pub struct Plan {
     pub transaction: Transaction,
     pub signatures: Vec<RequiredSignature>,
     pub units_consumed: u64,
+    /// The compute units of each instruction in the last simulation, which ran the whole
+    /// transaction. A builtin program logs no units, so its entry is `None`.
+    pub units_by_instruction: Vec<Option<u64>>,
     /// The provider's transaction, when the plan is one. A signer signs its message as it is.
     pub frozen: Option<FrozenTransaction>,
 }

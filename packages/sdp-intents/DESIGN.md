@@ -770,6 +770,15 @@ or fails.
 with one `getMultipleAccounts` call, split at 100 accounts. Concurrent requests for the same
 account share one fetch, and the cache never stores a failure (`AGENTS.md`, "RPC is a budget").
 
+At start, the service follows the registry's organizations and indexes, the programs and fixed
+accounts that the records name, and their program data. It pins each version account, which never
+changes while it exists. A plan then reads only its own accounts. The planner's first fetch asks
+for what the recipe needs, every account that it already resolved, and the clock, so a static
+transfer takes one `getMultipleAccounts` call for its mint and token accounts. The service does not
+follow the clock, because a cluster need not notify each change of a sysvar, and a stale clock
+fails a program that checks time. A
+plan's `rpcCalls` counts the requests of that plan only.
+
 | Step | Accounts | Calls on a miss |
 | :-- | :-- | :-- |
 | Registry | Two `VersionIndexV1` accounts, under a subscription, and two version accounts, which never change | One `getMultipleAccounts` |
@@ -778,8 +787,10 @@ account share one fetch, and the cache never stores a failure (`AGENTS.md`, "RPC
 | Simulation round | The accounts that the transaction names and the cache does not hold, then the program data of a program that is new to the cache | One `getMultipleAccounts`, or two for a new program. No `simulateTransaction`. |
 | `verify` | The accounts of the final simulation, already loaded | None |
 
-With a warm cache, an SPL Token or Token-2022 transfer takes one `getMultipleAccounts` call, and a
-Kamino deposit takes two. The report counts the calls for each flow (section 10).
+An SPL Token transfer takes one `getMultipleAccounts` call, and a Kamino deposit takes two. The
+report counts the calls for each flow (section 10). `simulation.unitsByInstruction` in a plan holds
+the compute units of each instruction, from the final simulation's logs. A builtin program logs no
+units, so its entry is `null`.
 
 ### 4.5 Signers, payers, and verification
 

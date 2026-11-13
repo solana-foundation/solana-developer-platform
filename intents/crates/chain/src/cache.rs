@@ -58,6 +58,8 @@ pub(crate) struct State {
     pub(crate) subscribed: HashSet<Address>,
     /// The accounts that a subscription task follows, live or restarting.
     pub(crate) watched: HashSet<Address>,
+    /// The accounts that never change while they exist, such as registry version accounts.
+    pinned: HashSet<Address>,
 }
 
 /// The answer of one `getMultipleAccounts` call or more. `slot` is the lowest context slot.
@@ -70,7 +72,11 @@ impl State {
     fn cached(&self, address: &Address, freshness: Freshness, max_age: Duration) -> Option<Option<Account>> {
         let entry = self.entries.get(address)?;
         let fresh = match freshness {
-            Freshness::Live => self.subscribed.contains(address) || entry.stored.elapsed() < max_age,
+            Freshness::Live => {
+                self.subscribed.contains(address)
+                    || self.pinned.contains(address) && entry.account.is_some()
+                    || entry.stored.elapsed() < max_age
+            }
             Freshness::Published => entry.account.is_some(),
         };
 
@@ -88,6 +94,31 @@ impl State {
 }
 
 impl CachedRpc {
+    /// Reads `addresses` once, and serves each that exists at any age after. Only an account that
+    /// never changes while it exists is pinned, such as a registry version account.
+    pub async fn pin(&self, addresses: &[Address]) -> Result<(), ChainError> {
+        let fetched = self.accounts(addresses, Freshness::Published).await?;
+        let existing = addresses.iter().zip(&fetched).filter(|(_, account)| account.is_some());
+
+        self.inner.state().pinned.extend(existing.map(|(address, _)| *address));
+
+        Ok(())
+    }
+
+    /// Reads `addresses` once, then follows each with a subscription, and the program data of each
+    /// upgradeable program among them. A service calls it at start for the accounts that most plans
+    /// read, so that no plan fetches them.
+    pub async fn follow(&self, addresses: &[Address]) -> Result<(), ChainError> {
+        let fetched = self.accounts(addresses, Freshness::Live).await?;
+        let accounts: HashMap<Address, Option<Account>> = addresses.iter().copied().zip(fetched).collect();
+        let found = crate::simulator::Programs::of(&accounts);
+        self.accounts(&found.program_data, Freshness::Live).await?;
+
+        addresses.iter().chain(&found.program_data).for_each(|address| self.subscribe(*address));
+
+        Ok(())
+    }
+
     /// Each account at `addresses`, in order. `None` is an account that does not exist.
     pub async fn accounts(
         &self,

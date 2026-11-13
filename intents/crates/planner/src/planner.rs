@@ -51,10 +51,11 @@ pub struct Planner<'a> {
 }
 
 /// The simulation of the transaction up to the end of the last planned segment.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Measured {
     fee: u64,
     units_consumed: u64,
+    units_by_instruction: Vec<Option<u64>>,
     loaded_accounts_data_size: Option<u32>,
 }
 
@@ -104,7 +105,7 @@ impl<'a> Planner<'a> {
             };
 
             let overlay = Overlay { after: &self.after, base: chain };
-            let fee = self.last.map_or(0, |last| last.fee);
+            let fee = self.last.as_ref().map_or(0, |last| last.fee);
             let earlier = Earlier { instructions: &self.instructions, fee, chain: &overlay };
 
             match segment.next(&earlier)? {
@@ -150,6 +151,7 @@ impl<'a> Planner<'a> {
         self.last = Some(Measured {
             fee: segment.fee,
             units_consumed: segment.units_consumed,
+            units_by_instruction: segment.units_by_instruction,
             loaded_accounts_data_size: segment.loaded_accounts_data_size,
         });
         self.frozen = self.frozen.take().or(segment.frozen);
@@ -192,6 +194,7 @@ impl<'a> Planner<'a> {
             transaction,
             signatures: core::mem::take(&mut self.signatures),
             units_consumed: last.units_consumed,
+            units_by_instruction: last.units_by_instruction,
             frozen,
         })
     }
@@ -250,22 +253,26 @@ mod tests {
         simulation
     }
 
-    /// The SPL transfer up to its final simulation. The observed accounts are the fee payer, the
-    /// destination ATA, and the source ATA, in that order.
-    fn spl_final_simulation(planner: &mut Planner<'_>, accounts: &mut AccountMap) -> Simulation {
-        let step = fetch(planner, accounts, |_| Some(mint(TOKEN_PROGRAM)));
-        assert!(matches!(step, Step::Fetch(_)), "the planner fetches the writable accounts before the final run");
-
-        let Step::Fetch(addresses) = step else { unreachable!() };
-        let before = |address: &Address| match addresses.iter().position(|known| known == address) {
-            Some(0) => Some(wallet(SOL)),
-            Some(1) => None,
-            _ => Some(usdc(FROM, 500_000_000)),
+    /// The accounts of the SPL transfer by address: the fee payer's wallet, the source ATA with
+    /// 500 USDC, `destination` as the receiver's ATA, and a mint for each other account.
+    fn spl_accounts(destination: Option<Account>) -> impl Fn(&Address) -> Option<Account> {
+        let ata = |owner: &str| {
+            sdp_intents_engine::associated_token_account(&account(owner), &account(USDC), &account(TOKEN_PROGRAM))
         };
-        let fetched = addresses.iter().map(before).collect();
-        accounts.insert_fetched(&addresses, fetched);
+        let (source, receiver) = (ata(FROM), ata(TO));
 
-        simulation(planner.next(accounts).unwrap())
+        move |address| match Some(*address) {
+            known if known == Some(account(FEE_PAYER)) => Some(wallet(SOL)),
+            known if known == source => Some(usdc(FROM, 500_000_000)),
+            known if known == receiver => destination.clone(),
+            _ => Some(mint(TOKEN_PROGRAM)),
+        }
+    }
+
+    /// The SPL transfer up to its final simulation, after one fetch. The observed accounts are the
+    /// fee payer, the destination ATA, and the source ATA, in that order.
+    fn spl_final_simulation(planner: &mut Planner<'_>, accounts: &mut AccountMap) -> Simulation {
+        simulation(fetch(planner, accounts, spl_accounts(None)))
     }
 
     fn spl_result(source_after: u64, fee_payer_after: u64) -> SimulationResult {
@@ -311,16 +318,7 @@ mod tests {
         let mut planner = Planner::new(&request(&[&documents], 5_000), SCRATCH).unwrap();
         let mut accounts = chain();
 
-        let Step::Fetch(addresses) = fetch(&mut planner, &mut accounts, |_| Some(mint(TOKEN_PROGRAM))) else {
-            panic!("the planner fetches the writable accounts")
-        };
-        let before = |address: &Address| match addresses.iter().position(|known| known == address) {
-            Some(0) => Some(wallet(SOL)),
-            Some(1) => Some(usdc(TO, 0)),
-            _ => Some(usdc(FROM, 500_000_000)),
-        };
-        accounts.insert_fetched(&addresses, addresses.iter().map(before).collect());
-        simulation(planner.next(&accounts).unwrap());
+        simulation(fetch(&mut planner, &mut accounts, spl_accounts(Some(usdc(TO, 0)))));
 
         planner.simulated(spl_result(400_000_000, SOL - 15_000)).unwrap();
 

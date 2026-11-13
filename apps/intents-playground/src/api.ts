@@ -110,7 +110,8 @@ export interface Plan {
     lastValidBlockHeight: string | null;
     presigned: { address: string; signature: string }[];
   };
-  simulation: { unitsConsumed: string };
+  /// `unitsByInstruction` is `null` for a builtin program, which logs no units.
+  simulation: { unitsConsumed: string; unitsByInstruction: (string | null)[] };
   rpcCalls: Record<string, number>;
 }
 

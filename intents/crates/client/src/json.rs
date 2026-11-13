@@ -4,7 +4,7 @@
 use base64::Engine as _;
 use serde_json::{json, Value};
 
-use sdp_intents_planner::{Instruction, PlannedIntent, VerifiedIntent, VerifiedTransaction};
+use sdp_intents_planner::{Instruction, Plan, PlannedIntent, VerifiedIntent, VerifiedTransaction};
 use sdp_intents_spec::Address;
 
 use crate::Prepared;
@@ -57,9 +57,21 @@ pub fn plan(prepared: &Prepared, request: Value) -> Value {
     .into_iter()
     .chain(built.into_iter().flatten())
     .chain(transaction)
-    .chain([("simulation", json!({ "unitsConsumed": plan.units_consumed.to_string() }))]);
+    .chain([("simulation", simulation_json(plan))]);
 
     Value::Object(fields.map(|(key, value)| (key.to_owned(), value)).collect())
+}
+
+/// The units of the whole run, and of each instruction. A builtin program logs no units, so its
+/// entry is `null`.
+fn simulation_json(plan: &Plan) -> Value {
+    let units: Vec<Value> = plan
+        .units_by_instruction
+        .iter()
+        .map(|units| units.map_or(Value::Null, |units| json!(units.to_string())))
+        .collect();
+
+    json!({ "unitsConsumed": plan.units_consumed.to_string(), "unitsByInstruction": units })
 }
 
 /// `verify` and `span` are positions in the transaction's instructions.

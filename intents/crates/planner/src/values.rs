@@ -117,12 +117,25 @@ impl<'r, C: Chain> Values<'r, '_, C> {
             .collect()
     }
 
+    /// The mints of the amounts that an input names. A mint that an output names is not known
+    /// before the recipe runs.
+    pub(crate) fn input_mints(&self) -> Result<Vec<Address>, PlanError> {
+        let inputs = self.recipe.interface().inputs()?;
+        let mints =
+            inputs.iter().filter_map(|input| input.amount_mint().ok()).filter(|mint| mint.source == ValueSource::Input);
+
+        mints.map(|mint| self.address(mint, Table::Interface)).collect()
+    }
+
+    /// The organization that publishes each document.
+    pub(crate) fn publishers(&self) -> [Address; 2] {
+        [self.recipe.interface().id().publisher, self.recipe.implementation().id().publisher]
+    }
+
     /// The accounts that the message reads: the mint of each amount, and the organization that
     /// publishes each document.
     pub(crate) fn message_accounts(&self) -> Result<Vec<Address>, PlanError> {
-        let publishers = [self.recipe.interface().id().publisher, self.recipe.implementation().id().publisher];
-
-        Ok(self.amount_mints()?.into_iter().chain(publishers).collect())
+        Ok(self.amount_mints()?.into_iter().chain(self.publishers()).collect())
     }
 
     /// The name of the organization at `publisher`. The registry owns the account, and the

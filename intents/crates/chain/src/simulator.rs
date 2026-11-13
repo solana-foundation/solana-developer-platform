@@ -37,6 +37,8 @@ const SYSVARS: [solana_address::Address; 7] = [
 
 /// An upgradeable program account is its 4-byte state tag, then the address of its program data.
 const PROGRAM_DATA_ADDRESS: core::ops::Range<usize> = 4..36;
+/// The runtime builds the instructions sysvar for each transaction, so no account holds it.
+const INSTRUCTIONS_SYSVAR: Address = Address(sysvar::instructions::ID.to_bytes());
 
 pub(crate) struct Simulator {
     state: Mutex<SimulatorState>,
@@ -108,25 +110,40 @@ impl CachedRpc {
         addresses.sort_unstable_by_key(|address| address.0);
         addresses.dedup();
 
+        addresses.retain(|address| *address != INSTRUCTIONS_SYSVAR);
+
         let fetched = self.accounts(&addresses, Freshness::Live).await?;
         let mut accounts: HashMap<Address, Option<Account>> = addresses.into_iter().zip(fetched).collect();
 
+        let found = Programs::of(&accounts);
+        let fetched = self.accounts(&found.program_data, Freshness::Live).await?;
+        accounts.extend(found.program_data.iter().copied().zip(fetched));
+        found.programs.iter().chain(&found.program_data).for_each(|address| self.subscribe(*address));
+
+        Ok(Loaded { accounts, program_data: found.program_data })
+    }
+}
+
+/// The programs among some accounts, and the program data of each upgradeable one.
+pub(crate) struct Programs {
+    pub(crate) programs: Vec<Address>,
+    pub(crate) program_data: Vec<Address>,
+}
+
+impl Programs {
+    pub(crate) fn of(accounts: &HashMap<Address, Option<Account>>) -> Self {
         let programs: Vec<Address> = accounts
             .iter()
             .filter_map(|(address, account)| account.as_ref().filter(|account| is_program(account)).map(|_| *address))
             .collect();
-        let program_data: Vec<Address> = programs
+        let program_data = programs
             .iter()
             .filter_map(|program| accounts.get(program).cloned().flatten())
             .filter(|account| owned_by(account, &bpf_loader_upgradeable::ID))
             .filter_map(|account| account.data.get(PROGRAM_DATA_ADDRESS)?.try_into().ok().map(Address))
             .collect();
 
-        let fetched = self.accounts(&program_data, Freshness::Live).await?;
-        accounts.extend(program_data.iter().copied().zip(fetched));
-        programs.iter().chain(&program_data).for_each(|address| self.subscribe(*address));
-
-        Ok(Loaded { accounts, program_data })
+        Self { programs, program_data }
     }
 }
 

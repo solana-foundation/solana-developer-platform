@@ -22,6 +22,7 @@ mod listing;
 mod metrics;
 mod registry;
 mod wallets;
+pub mod warm;
 
 use std::future::Future;
 use std::sync::Arc;
