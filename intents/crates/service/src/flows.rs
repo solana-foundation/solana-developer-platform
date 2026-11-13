@@ -248,14 +248,12 @@ fn references(request: &Value) -> Result<Vec<IntentReference>, ServiceError> {
         .collect()
 }
 
-/// The RPC calls that one request made, as the metrics count them. Requests that run at once share
-/// the counters, so the numbers are exact only for one request at a time.
-pub fn calls_json(before: sdp_intents_chain::RpcCalls, after: sdp_intents_chain::RpcCalls) -> Value {
+/// The RPC requests that one plan made. The cache's hits and misses count accounts, so only
+/// `/metrics` shows them.
+pub fn calls_json(calls: sdp_intents_chain::RpcCalls) -> Value {
     json!({
-        "getMultipleAccounts": after.get_multiple_accounts.saturating_sub(before.get_multiple_accounts),
-        "simulateTransaction": after.simulate_transaction.saturating_sub(before.simulate_transaction),
-        "getLatestBlockhash": after.get_latest_blockhash.saturating_sub(before.get_latest_blockhash),
-        "cacheHits": after.cache_hits.saturating_sub(before.cache_hits),
-        "cacheMisses": after.cache_misses.saturating_sub(before.cache_misses),
+        "getMultipleAccounts": calls.get_multiple_accounts,
+        "simulateTransaction": calls.simulate_transaction,
+        "getLatestBlockhash": calls.get_latest_blockhash,
     })
 }

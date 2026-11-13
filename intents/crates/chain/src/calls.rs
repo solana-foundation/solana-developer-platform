@@ -1,4 +1,27 @@
+use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
+tokio::task_local! {
+    /// The calls of the request that the current task serves, when it counts them.
+    static REQUEST_CALLS: Arc<Calls>;
+}
+
+/// What a future returned, and the RPC calls that its task made.
+pub struct Counted<T> {
+    pub output: T,
+    pub calls: RpcCalls,
+}
+
+/// Runs `future`, and counts the RPC calls that it makes. A fetch that another request started
+/// counts for that request only, because this one made no call for it. A subscription runs on its
+/// own task, so its calls never count here.
+pub async fn counted<F: Future>(future: F) -> Counted<F::Output> {
+    let calls = Arc::new(Calls::default());
+    let output = REQUEST_CALLS.scope(Arc::clone(&calls), future).await;
+
+    Counted { output, calls: calls.snapshot() }
+}
 
 /// The RPC calls and the cache reads since the start, for the service's metrics.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -45,8 +68,11 @@ impl Calls {
         self.add(counter, 1);
     }
 
+    /// Adds to the service's counters, and to the current request's, when it counts them.
     pub(crate) fn add(&self, counter: Counter, amount: u64) {
         self.counter(counter).fetch_add(amount, Ordering::Relaxed);
+
+        let _ = REQUEST_CALLS.try_with(|request| request.counter(counter).fetch_add(amount, Ordering::Relaxed));
     }
 
     pub(crate) fn snapshot(&self) -> RpcCalls {

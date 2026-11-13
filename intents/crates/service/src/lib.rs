@@ -69,10 +69,10 @@ async fn registry(State(service): Shared) -> Response {
 /// wallets honors it, because only the playground needs it.
 async fn prepare(State(service): Shared, headers: HeaderMap, body: String) -> Response {
     let tamper = !service.wallets.is_empty() && headers.get("x-sdp-tamper").is_some_and(|value| value == "1");
-    let before = service.chain.calls();
-    let prepared = flows::prepare(&service.chain, &body, tamper).await.map(|mut plan| {
+    let counted = sdp_intents_chain::counted(flows::prepare(&service.chain, &body, tamper)).await;
+    let prepared = counted.output.map(|mut plan| {
         if let Some(plan) = plan.as_object_mut() {
-            plan.insert("rpcCalls".to_owned(), flows::calls_json(before, service.chain.calls()));
+            plan.insert("rpcCalls".to_owned(), flows::calls_json(counted.calls));
         }
 
         plan

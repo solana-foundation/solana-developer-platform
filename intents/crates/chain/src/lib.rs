@@ -33,7 +33,7 @@ use crate::cache::State;
 use crate::calls::{Calls, Counter};
 
 pub use crate::cache::Freshness;
-pub use crate::calls::RpcCalls;
+pub use crate::calls::{counted, Counted, RpcCalls};
 
 /// About one slot.
 pub const DEFAULT_MAX_AGE: Duration = Duration::from_millis(400);

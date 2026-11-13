@@ -277,6 +277,19 @@ mod tests {
         assert_eq!(rpc.calls().get_multiple_accounts, 2);
     }
 
+    /// A counted request counts its own fetch, and not the fetch of a request outside it.
+    #[tokio::test]
+    async fn a_request_counts_only_its_own_calls() {
+        let rpc = rpc(2, Duration::ZERO);
+
+        rpc.accounts(&[Address([1; 32])], Freshness::Live).await.unwrap();
+        let counted = crate::counted(rpc.accounts(&[Address([2; 32])], Freshness::Live)).await;
+
+        assert!(counted.output.is_ok());
+        assert_eq!(counted.calls.get_multiple_accounts, 1);
+        assert_eq!(rpc.calls().get_multiple_accounts, 2);
+    }
+
     /// A failed fetch stores nothing, so the next request fetches again.
     #[tokio::test]
     async fn a_failed_fetch_stores_nothing() {
