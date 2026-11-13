@@ -1,5 +1,6 @@
 [package]
 name = "sdp-intents-program-testing"
+workspace = "../../programs"
 description = "Prepares SDP intents against LiteSVM with the planner, for the tests of the programs"
 version.workspace = true
 edition.workspace = true
@@ -14,8 +15,8 @@ solana-account = "=4.7.0"
 solana-address = "=2.7.0"
 solana-instruction = "=3.5.1"
 solana-signature = "=3.5.2"
-sdp-intents-compiler = { path = "../../compiler" }
-sdp-intents-planner = { path = "../../planner" }
+sdp-intents-compiler = { path = "../compiler" }
+sdp-intents-planner = { path = "../planner" }
 sdp-intents-spec.workspace = true
 
 [lints]

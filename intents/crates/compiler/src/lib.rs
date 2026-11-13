@@ -16,9 +16,9 @@
 //!     catalog.compile_intent(intent).map(|intent| intent.bytes)
 //! }
 //! # let compiled = compile_intent(
-//! #     include_str!("../../definitions/solana.org/interfaces/token.transfer/1.0.0.json"),
-//! #     include_str!("../../definitions/solana.org/implementations/system-transfer/1.0.0.json"),
-//! #     include_str!("../../fixtures/intents/system-transfer.json"),
+//! #     include_str!("../../../definitions/solana.org/interfaces/token.transfer/1.0.0.json"),
+//! #     include_str!("../../../definitions/solana.org/implementations/system-transfer/1.0.0.json"),
+//! #     include_str!("../../../fixtures/intents/system-transfer.json"),
 //! # );
 //! # assert!(compiled.is_ok());
 //! ```

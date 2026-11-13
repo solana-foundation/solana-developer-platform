@@ -24,15 +24,15 @@ anchor-lang.workspace = true
 klend-interface = "=0.6.0"
 kvault-interface = "=0.1.0"
 pinocchio.workspace = true
-sdp-intents-builder = { path = "../builder" }
+sdp-intents-builder = { path = "../../crates/builder" }
 solana-instruction-2 = { package = "solana-instruction", version = "=2.3.3", default-features = false }
 solana-pubkey = { version = "=2.4.0", default-features = false }
 
 [dev-dependencies]
 anchor-v2-testing.workspace = true
 base64 = "=0.22.1"
-sdp-intents-planner = { path = "../../planner" }
-sdp-intents-program-testing = { path = "../testing" }
+sdp-intents-planner = { path = "../../crates/planner" }
+sdp-intents-program-testing = { path = "../../crates/program-testing" }
 sdp-intents-spec.workspace = true
 serde_json = "=1.0.154"
 solana-account = "=4.7.0"

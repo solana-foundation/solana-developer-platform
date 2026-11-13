@@ -7,15 +7,15 @@ use crate::Catalog;
 pub(crate) const SOLANA_ORG: Address = Address([7; 32]);
 
 pub(crate) const TOKEN_TRANSFER: &str =
-    include_str!("../../definitions/solana.org/interfaces/token.transfer/1.0.0.json");
+    include_str!("../../../definitions/solana.org/interfaces/token.transfer/1.0.0.json");
 pub(crate) const SYSTEM_TRANSFER: &str =
-    include_str!("../../definitions/solana.org/implementations/system-transfer/1.0.0.json");
+    include_str!("../../../definitions/solana.org/implementations/system-transfer/1.0.0.json");
 pub(crate) const SPL_TOKEN_TRANSFER: &str =
-    include_str!("../../definitions/solana.org/implementations/spl-token-transfer/1.0.0.json");
+    include_str!("../../../definitions/solana.org/implementations/spl-token-transfer/1.0.0.json");
 pub(crate) const TOKEN_2022_TRANSFER: &str =
-    include_str!("../../definitions/solana.org/implementations/token-2022-transfer/1.0.0.json");
+    include_str!("../../../definitions/solana.org/implementations/token-2022-transfer/1.0.0.json");
 
-pub(crate) const INTENT_SPL_TRANSFER: &str = include_str!("../../fixtures/intents/spl-token-transfer.json");
+pub(crate) const INTENT_SPL_TRANSFER: &str = include_str!("../../../fixtures/intents/spl-token-transfer.json");
 
 pub(crate) fn publishers() -> Catalog {
     Catalog::default().with_publisher("solana.org", SOLANA_ORG)

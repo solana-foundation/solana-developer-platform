@@ -181,14 +181,14 @@ mod tests {
         let url = std::env::var("SDP_INTENTS_RPC_URL").unwrap();
         let mut catalog = Catalog::default().with_publisher("solana.org", Address([7; 32]));
         catalog
-            .compile_interface(include_str!("../../definitions/solana.org/interfaces/token.transfer/1.0.0.json"))
+            .compile_interface(include_str!("../../../definitions/solana.org/interfaces/token.transfer/1.0.0.json"))
             .unwrap();
         catalog
             .compile_implementation(include_str!(
-                "../../definitions/solana.org/implementations/spl-token-transfer/1.0.0.json"
+                "../../../definitions/solana.org/implementations/spl-token-transfer/1.0.0.json"
             ))
             .unwrap();
-        let plan = catalog.compile_plan(include_str!("../../fixtures/plans/mainnet/usdc-transfer.json")).unwrap();
+        let plan = catalog.compile_plan(include_str!("../../../fixtures/plans/mainnet/usdc-transfer.json")).unwrap();
         let request = PlanRequest {
             intents: plan
                 .intents

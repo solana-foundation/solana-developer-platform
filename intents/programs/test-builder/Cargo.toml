@@ -19,12 +19,12 @@ no-log-ix-name = []
 
 [dependencies]
 anchor-lang.workspace = true
-sdp-intents-builder = { path = "../builder" }
+sdp-intents-builder = { path = "../../crates/builder" }
 
 [dev-dependencies]
 anchor-v2-testing.workspace = true
-sdp-intents-planner = { path = "../../planner" }
-sdp-intents-program-testing = { path = "../testing" }
+sdp-intents-planner = { path = "../../crates/planner" }
+sdp-intents-program-testing = { path = "../../crates/program-testing" }
 
 [lints]
 workspace = true

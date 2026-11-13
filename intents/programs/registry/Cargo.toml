@@ -21,15 +21,15 @@ no-log-ix-name = []
 anchor-lang.workspace = true
 bytemuck.workspace = true
 pinocchio.workspace = true
-sdp-intents-engine = { path = "../../engine" }
+sdp-intents-engine = { path = "../../crates/engine" }
 sdp-intents-spec.workspace = true
 solana-instruction.workspace = true
 
 [dev-dependencies]
 anchor-v2-testing.workspace = true
-sdp-intents-compiler = { path = "../../compiler" }
-sdp-intents-planner = { path = "../../planner" }
-sdp-intents-program-testing = { path = "../testing" }
+sdp-intents-compiler = { path = "../../crates/compiler" }
+sdp-intents-planner = { path = "../../crates/planner" }
+sdp-intents-program-testing = { path = "../../crates/program-testing" }
 solana-account = "=4.7.0"
 test-builder = { path = "../test-builder", features = ["no-entrypoint"] }
 

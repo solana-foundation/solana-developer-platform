@@ -309,8 +309,8 @@ mod tests {
     #[test]
     fn an_intent_that_keeps_the_onchain_checks_is_refused() {
         let documents = Compiled::compile(
-            include_str!("../../definitions/solana.org/implementations/spl-token-transfer/1.0.0.json"),
-            &include_str!("../../fixtures/intents/spl-token-transfer.json").replace(r#""assertions": false, "#, ""),
+            include_str!("../../../definitions/solana.org/implementations/spl-token-transfer/1.0.0.json"),
+            &include_str!("../../../fixtures/intents/spl-token-transfer.json").replace(r#""assertions": false, "#, ""),
         );
 
         let refused = Planner::new(&request(&[&documents], 5_000), SCRATCH);

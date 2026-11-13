@@ -114,7 +114,7 @@ mod tests {
     use super::*;
     use crate::test_support::{edit, full_catalog};
 
-    const PLAN: &str = include_str!("../../fixtures/plans/mainnet/usdc-and-sol-transfers.json");
+    const PLAN: &str = include_str!("../../../fixtures/plans/mainnet/usdc-and-sol-transfers.json");
 
     #[test]
     fn the_plan_holds_the_payers_and_the_priority_fee() {

@@ -21,13 +21,13 @@ no-log-ix-name = []
 anchor-lang.workspace = true
 bytemuck.workspace = true
 pinocchio.workspace = true
-sdp-intents-builder = { path = "../builder" }
+sdp-intents-builder = { path = "../../crates/builder" }
 
 # The Solana crates are the versions that LiteSVM 0.18 uses.
 [dev-dependencies]
 anchor-v2-testing.workspace = true
-sdp-intents-planner = { path = "../../planner" }
-sdp-intents-program-testing = { path = "../testing" }
+sdp-intents-planner = { path = "../../crates/planner" }
+sdp-intents-program-testing = { path = "../../crates/program-testing" }
 sdp-intents-spec.workspace = true
 solana-account = "=4.7.0"
 solana-address = "=2.7.0"

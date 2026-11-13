@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn reads_the_definitions_in_this_repository() {
-        let tree = Tree::read(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../definitions")).unwrap();
+        let tree = Tree::read(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../definitions")).unwrap();
 
         assert_eq!(tree.definitions.len(), 10);
         assert_eq!(tree.of_kind(Kind::Interface).count(), 3);

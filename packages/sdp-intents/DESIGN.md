@@ -720,8 +720,8 @@ protection. A pin would also stop `prepare` after each upgrade until a new recor
 The planner (4.14) runs `prepare` with no IO. It asks for accounts to fetch and for transactions to
 simulate, and its caller answers. The client answers with RPC: `getMultipleAccounts`, and
 `simulateTransaction` with `sigVerify` off, `replaceRecentBlockhash` on, and scratch in `accounts`.
-The service answers from an account cache, and simulates in LiteSVM over it. The `intents/chain`
-crate holds both, and starts as a copy of relay's `chain-source` (4.14).
+The service answers from an account cache, and simulates in LiteSVM over it. The
+`intents/crates/chain` crate holds both, and starts as a copy of relay's `chain-source` (4.14).
 
 1. Reads use `processed`. The blockhash uses `confirmed`.
 2. A cached account is served only while a live subscription covers it. Other accounts are fetched
@@ -1526,39 +1526,46 @@ local surfpool, with a Squads v4 program cloned from a mainnet fork.
 
 ### 4.14 Prototype
 
-**Layout.** Two Cargo workspaces in `intents/`. `intents/programs/` has its own `Cargo.lock`, so the
-Anchor v2 dependencies never unify with those of the service.
+**Layout.** `intents/crates/` holds every library and tool, and `intents/programs/` holds only the
+onchain programs. Two Cargo workspaces divide them. The programs workspace has its own
+`Cargo.lock`, so the Anchor v2 dependencies never unify with those of the service. It also owns
+`crates/builder` and `crates/program-testing`, because they depend on pinocchio and LiteSVM.
 
 ```
 intents/
-  Cargo.toml
+  Cargo.toml            the service workspace: spec, compiler, engine, planner, client, cli
   rust-toolchain.toml
   justfile
-  spec/                 sdp-intents-spec: binary documents, views, limits, and the zero-copy
+  crates/
+    spec/               sdp-intents-spec: binary documents, views, limits, and the zero-copy
                         builder ABI and result layout. no_std, bytemuck only.
-  compiler/             sdp-intents-compiler: JSON to binary and back, and the lint checks
-  engine/               sdp-intents-engine: binds an intent to its records, resolves accounts, and
+    compiler/           sdp-intents-compiler: JSON to binary and back, and the lint checks
+    engine/             sdp-intents-engine: binds an intent to its records, resolves accounts, and
                         builds instructions. no_std, no heap. The planner and verify_intent use it.
-  planner/              sdp-intents-planner: prepare with no IO. Asks for fetches and simulations,
+    planner/            sdp-intents-planner: prepare with no IO. Asks for fetches and simulations,
                         plans each intent as a segment, and builds verify_intent.
-  client/               sdp-intents-client: the planner over RPC. No service, cache, or LiteSVM.
-  programs/             Anchor v2 workspace: Cargo.toml, Cargo.lock
+    client/             sdp-intents-client: the planner over RPC. No service, cache, or LiteSVM.
+    cli/                sdp-intents: lint and prepare, later plan and apply with Squads (4.13)
     builder/            sdp-intents-builder: the builder library, over pinocchio, for Anchor v2
                         and other programs. Staged and hashed modes, require_accounts, the rent
-                        payer, and token helpers.
-    testing/            the planner against LiteSVM, for the programs' tests
-    test-builder/       a builder with one MoreAccounts round, for the library's tests
+                        payer, and token helpers. In the programs workspace.
+    program-testing/    sdp-intents-program-testing: the planner against LiteSVM, for the tests
+                        of the programs. In the programs workspace.
+    chain/              account cache, subscriptions, and LiteSVM simulation, copied from relay
+    service/            the planner over chain/, the HTTP API, verify, the remote client, and
+                        monitoring
+  programs/             the programs workspace: Cargo.toml, Cargo.lock
     registry/           organizations, interfaces, implementations, approvals, versions, and
                         verify_intent
     token-2022-builder/ token.transfer for Token-2022 mints
     jupiter-lend-builder/
     kamino-builder/     vault.deposit and vault.withdraw
-  chain/                account cache, subscriptions, and LiteSVM simulation, copied from relay
-  service/              the planner over chain/, the HTTP API, verify, the remote client, and
-                        monitoring
-  cli/                  sdp-intents: lint, plan, and apply, with Squads support (4.13)
+    test-builder/       a builder with one MoreAccounts round, for the library's tests
+    test-transfer-hook/ a transfer hook, for the Token-2022 builder's tests
   definitions/          organizations, interfaces, and implementations in JSON (4.13)
   fixtures/
+    intents/
+    plans/
     golden/
     corpus/
 apps/intents-playground/

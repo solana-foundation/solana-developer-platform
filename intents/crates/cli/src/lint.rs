@@ -156,9 +156,9 @@ mod tests {
     use super::*;
     use crate::tree::Position;
 
-    const TOKEN_TRANSFER: &str = include_str!("../../definitions/solana.org/interfaces/token.transfer/1.0.0.json");
+    const TOKEN_TRANSFER: &str = include_str!("../../../definitions/solana.org/interfaces/token.transfer/1.0.0.json");
     const SYSTEM_TRANSFER: &str =
-        include_str!("../../definitions/solana.org/implementations/system-transfer/1.0.0.json");
+        include_str!("../../../definitions/solana.org/implementations/system-transfer/1.0.0.json");
 
     fn definition(path: &str, text: &str) -> Definition {
         Definition {
@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn the_definitions_in_this_repository_have_no_findings() {
-        let tree = Tree::read(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../definitions")).unwrap();
+        let tree = Tree::read(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../definitions")).unwrap();
 
         assert!(lint(&tree).is_empty());
     }

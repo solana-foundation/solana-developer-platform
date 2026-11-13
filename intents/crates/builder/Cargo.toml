@@ -1,5 +1,6 @@
 [package]
 name = "sdp-intents-builder"
+workspace = "../../programs"
 description = "The builder library: what an SDP builder program writes, in staged mode and in hashed mode"
 version.workspace = true
 edition.workspace = true

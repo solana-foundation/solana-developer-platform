@@ -8,17 +8,17 @@ use sdp_intents_spec::Address;
 use crate::{AccountData, Chain, Payers, Recipe, Resolution};
 
 pub(crate) const TOKEN_TRANSFER: &str =
-    include_str!("../../definitions/solana.org/interfaces/token.transfer/1.0.0.json");
+    include_str!("../../../definitions/solana.org/interfaces/token.transfer/1.0.0.json");
 pub(crate) const SYSTEM_TRANSFER: &str =
-    include_str!("../../definitions/solana.org/implementations/system-transfer/1.0.0.json");
+    include_str!("../../../definitions/solana.org/implementations/system-transfer/1.0.0.json");
 pub(crate) const SPL_TOKEN_TRANSFER: &str =
-    include_str!("../../definitions/solana.org/implementations/spl-token-transfer/1.0.0.json");
+    include_str!("../../../definitions/solana.org/implementations/spl-token-transfer/1.0.0.json");
 pub(crate) const TOKEN_2022_TRANSFER: &str =
-    include_str!("../../definitions/solana.org/implementations/token-2022-transfer/1.0.0.json");
+    include_str!("../../../definitions/solana.org/implementations/token-2022-transfer/1.0.0.json");
 
-pub(crate) const INTENT_SYSTEM_TRANSFER: &str = include_str!("../../fixtures/intents/system-transfer.json");
-pub(crate) const INTENT_SPL_TRANSFER: &str = include_str!("../../fixtures/intents/spl-token-transfer.json");
-pub(crate) const INTENT_TOKEN_2022_TRANSFER: &str = include_str!("../../fixtures/intents/token-2022-transfer.json");
+pub(crate) const INTENT_SYSTEM_TRANSFER: &str = include_str!("../../../fixtures/intents/system-transfer.json");
+pub(crate) const INTENT_SPL_TRANSFER: &str = include_str!("../../../fixtures/intents/spl-token-transfer.json");
+pub(crate) const INTENT_TOKEN_2022_TRANSFER: &str = include_str!("../../../fixtures/intents/token-2022-transfer.json");
 
 pub(crate) const FROM: &str = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
 pub(crate) const TO: &str = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";

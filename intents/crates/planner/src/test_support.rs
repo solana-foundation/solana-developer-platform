@@ -33,7 +33,7 @@ impl Compiled {
     pub(crate) fn compile(implementation: &str, intent: &str) -> Self {
         let mut catalog = Catalog::default().with_publisher("solana.org", Address([7; 32]));
         let interface = catalog
-            .compile_interface(include_str!("../../definitions/solana.org/interfaces/token.transfer/1.0.0.json"));
+            .compile_interface(include_str!("../../../definitions/solana.org/interfaces/token.transfer/1.0.0.json"));
         let interface = interface.unwrap().bytes.clone();
         let implementation = catalog.compile_implementation(implementation).unwrap().bytes.clone();
 
@@ -43,23 +43,26 @@ impl Compiled {
     }
 
     pub(crate) fn system_transfer(intent: &str) -> Self {
-        Self::compile(include_str!("../../definitions/solana.org/implementations/system-transfer/1.0.0.json"), intent)
+        Self::compile(
+            include_str!("../../../definitions/solana.org/implementations/system-transfer/1.0.0.json"),
+            intent,
+        )
     }
 
     pub(crate) fn spl_transfer() -> Self {
         Self::compile(
-            include_str!("../../definitions/solana.org/implementations/spl-token-transfer/1.0.0.json"),
-            include_str!("../../fixtures/intents/spl-token-transfer.json"),
+            include_str!("../../../definitions/solana.org/implementations/spl-token-transfer/1.0.0.json"),
+            include_str!("../../../fixtures/intents/spl-token-transfer.json"),
         )
     }
 
     /// The Token-2022 record, with its builder at `BUILDER`. The sender pays the rent.
     pub(crate) fn token_2022_transfer() -> Self {
-        let record = include_str!("../../definitions/solana.org/implementations/token-2022-transfer/1.0.0.json");
+        let record = include_str!("../../../definitions/solana.org/implementations/token-2022-transfer/1.0.0.json");
         let builder = bs58::encode(BUILDER.0).into_string();
         let compiled = Self::compile(
             &record.replace("2gMFoKF3p5eB2m72ccjncZH8e5agVYbHBH8A29zDMdBm", &builder),
-            include_str!("../../fixtures/intents/token-2022-transfer.json"),
+            include_str!("../../../fixtures/intents/token-2022-transfer.json"),
         );
 
         Self { rent_payer: account("7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"), ..compiled }
@@ -77,7 +80,7 @@ pub(crate) fn request<'a>(intents: &[&'a Compiled], priority_fee_lamports: u64) 
     }
 }
 
-pub(crate) const SYSTEM_TRANSFER: &str = include_str!("../../fixtures/intents/system-transfer.json");
+pub(crate) const SYSTEM_TRANSFER: &str = include_str!("../../../fixtures/intents/system-transfer.json");
 
 pub(crate) fn account(address: &str) -> Address {
     Address(bs58::decode(address).into_vec().unwrap().try_into().unwrap())
