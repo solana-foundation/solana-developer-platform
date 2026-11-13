@@ -6,8 +6,13 @@
 //
 // Each program goes in as an executable account of BPF Loader 2, which runs it like any other
 // program and has no upgrade authority. This is for a local surfnet only.
+//
+// The IDL that `cargo run -p idl` writes to `target/idl` goes in beside its program, so that Solana
+// Explorer decodes the program's instructions.
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+
+import { idlAccount } from "./anchor-idl.mjs";
 
 const RPC = process.argv[2] ?? "http://127.0.0.1:8899";
 const LOADER = "BPFLoader2111111111111111111111111111111111";
@@ -44,4 +49,12 @@ for (const { name, address } of programs) {
   const data = readFileSync(path).toString("hex");
   await rpc("surfnet_setAccount", [address, { lamports: LAMPORTS, data, owner: LOADER, executable: true }]);
   console.log(`placed ${name} at ${address}`);
+
+  const idlPath = new URL(`./target/idl/${name}.json`, import.meta.url);
+
+  if (!existsSync(idlPath)) continue;
+
+  const idl = idlAccount(address, JSON.parse(readFileSync(idlPath, "utf8")));
+  await rpc("surfnet_setAccount", [idl.address, { lamports: LAMPORTS, data: idl.data.toString("hex"), owner: address }]);
+  console.log(`placed the IDL of ${name} at ${idl.address}`);
 }

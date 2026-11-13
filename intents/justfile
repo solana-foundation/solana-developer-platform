@@ -8,6 +8,7 @@ check:
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo build -q -p sdp-intents-engine --target thumbv7em-none-eabi
+    cargo build -q -p sdp-intents-verifier-wasm --target wasm32-unknown-unknown
     RUSTDOCFLAGS="-D warnings" cargo doc -q --no-deps --workspace
     cargo run -q -p sdp-intents-cli -- lint
 
@@ -27,11 +28,21 @@ unit-test:
 build-programs:
     cd programs && for manifest in */Cargo.toml; do if grep -q cdylib "$manifest"; then cargo build-sbf --manifest-path "$manifest"; fi; done
 
+# The IDL of each Anchor program, in `programs/target/idl`. `deploy-surfnet.mjs` places each one
+# beside its program, so that Solana Explorer decodes the instructions.
+idl:
+    cd programs && cargo run -q -p idl
+
+# The verifier as WebAssembly, in `packages/sdp-intents-verifier/wasm`. The playground and the e2e
+# verify with it.
+build-verifier:
+    node ../packages/sdp-intents-verifier/build-wasm.mjs
+
 # The mainnet programs that the tests run, checked against their pinned hashes.
 fetch-programs:
     cd programs && node fetch-programs.mjs
 
-test-programs: build-programs fetch-programs
+test-programs: build-programs fetch-programs idl
     cd programs && cargo test --workspace
 
 # A local surfnet that forks mainnet, for `e2e`. It runs in the foreground.
@@ -40,14 +51,14 @@ surfnet:
 
 # The whole flow against a running surfnet: place the programs, publish the definitions, then plan,
 # verify, and send intents with every onchain check on.
-e2e rpc="http://127.0.0.1:8899": build-programs
+e2e rpc="http://127.0.0.1:8899": build-programs build-verifier
     cargo build -q -p sdp-intents-cli -p sdp-intents-service -p sdp-intents-test-provider
     cd programs && node deploy-surfnet.mjs {{rpc}}
     node e2e/run.mjs {{rpc}}
 
 # A surfnet for `apps/intents-playground`: place the programs, fund the playground wallets, publish
 # the definitions, then serve the API with those wallets. It runs in the foreground.
-playground rpc="http://127.0.0.1:8899": build-programs
+playground rpc="http://127.0.0.1:8899": build-programs idl build-verifier
     cargo build -q -p sdp-intents-cli -p sdp-intents-service -p sdp-intents-test-provider
     cd programs && node deploy-surfnet.mjs {{rpc}}
     node e2e/playground.mjs {{rpc}}

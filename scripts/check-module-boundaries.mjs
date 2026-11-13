@@ -77,6 +77,12 @@ const MODULE_METADATA = [
     ],
   },
   {
+    name: "intents-playground",
+    directory: "apps/intents-playground",
+    purpose: "Local explorer for the intents prototype's registry. It is never deployed.",
+    allowedDependencies: ["@sdp/intents-verifier"],
+  },
+  {
     name: "@sdp/api-catalog",
     directory: "packages/sdp-api-catalog",
     purpose:
@@ -155,6 +161,12 @@ const MODULE_METADATA = [
     // injected API-owned port, while provider identities live in @sdp/types so
     // the lightweight @sdp/earn catalogue never imports this execution code.
     allowedDependencies: ["@sdp/earn", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
+  },
+  {
+    name: "@sdp/intents-verifier",
+    directory: "packages/sdp-intents-verifier",
+    purpose: "The intents prototype's transaction verifier, the Rust verifier compiled to WebAssembly.",
+    allowedDependencies: [],
   },
   {
     name: "@sdp/ip",

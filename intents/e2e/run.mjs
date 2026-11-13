@@ -10,7 +10,9 @@
 // nothing here touches a real key or a real cluster.
 
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+
+import { Verifier } from "../../packages/sdp-intents-verifier/src/index.ts";
 
 import {
   JUPITER_SHARES,
@@ -43,6 +45,9 @@ const OUT = new URL("../target/e2e/", import.meta.url).pathname;
 const WALLETS = `${OUT}wallets/`;
 
 const rpc = rpcClient(RPC);
+const verifier = await Verifier.load(
+  readFileSync(new URL("../../packages/sdp-intents-verifier/wasm/verifier.wasm", import.meta.url)),
+);
 const keypair = (name) => keypairIn(WALLETS, name);
 
 async function service(path, body) {
@@ -91,7 +96,16 @@ function expect(condition, message) {
   console.log(`  ✓ ${message}`);
 }
 
-/// Prepares a plan request with the service and with the CLI, verifies it with both verifiers, then
+/// Whether the TypeScript verifier, which reads only the RPC, proves the plan's message from the
+/// base64 `message`.
+async function typescriptProves(message, plan) {
+  const bytes = Uint8Array.from(atob(message), (character) => character.charCodeAt(0));
+  const verified = await verifier.verifyMessage(bytes, RPC);
+
+  return verified.message === plan.message && verified.unverified.length === 0;
+}
+
+/// Prepares a plan request with the service and with the CLI, verifies it with each verifier, then
 /// signs and sends it. The service signs with its wallets, and the CLI with `signers`.
 async function run(name, request, signers) {
   const requestPath = `${OUT}${name}.request.json`;
@@ -116,6 +130,11 @@ async function run(name, request, signers) {
     JSON.stringify({ message: compiled, expected: plan.message, presigned, request: plan.request }),
   );
   expect(remote.matches && remote.unverified.length === 0, `${name}: the service's verifier proves it too`);
+
+  // No `verify_intent` proves a provider's transaction. Only a new plan of its request checks it.
+  if (presigned.length === 0) {
+    expect(await typescriptProves(compiled, plan), `${name}: the TypeScript verifier proves it too`);
+  }
 
   if (signers === undefined) {
     const sent = await service("/v1/send", JSON.stringify({ message: compiled, presigned }));
@@ -149,6 +168,7 @@ async function runEachVersion(name, request, signers, lookupTable) {
     const message = verified.match(/^messageBytes (\S+)$/m)[1];
     const remote = await service("/v1/verify", JSON.stringify({ message, expected: plan.message }));
     expect(remote.matches && remote.unverified.length === 0, `${name} as ${version}: the service's verifier proves it too`);
+    expect(await typescriptProves(message, plan), `${name} as ${version}: the TypeScript verifier proves it too`);
 
     const sent = cli("send", planPath, ...compile, ...signers.flatMap((signer) => ["--keypair", signer.path]));
     expect(sent.includes("sent "), `${name} as ${version}: the CLI compiled it, signed it, and it landed`);

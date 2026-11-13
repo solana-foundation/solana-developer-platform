@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use sdp_intents_spec::wire::{DocumentIdV1, DocumentKind, PodBool, PodU64, SemverV1};
+use sdp_intents_spec::wire::{DocumentIdV1, DocumentKind};
 use sdp_intents_spec::{Implementation, Interface};
 
 use crate::error::RegistryError;
@@ -7,7 +7,8 @@ use crate::state::buffer::{self, BufferV1, MAX_DOCUMENT_LEN};
 use crate::state::index::{self, Index, VersionEntryV1};
 use crate::state::organization::OrganizationV1;
 use crate::state::version::{self, InterfaceV1, VersionSeeds};
-use crate::state::{close, owned_data, spec_address};
+use crate::state::wire::{PodBool, PodU64, SemverV1};
+use crate::state::{close, owned_data, spec_address, stored_version};
 
 /// Publishes the document in `buffer` as a new version of `index`, and closes the buffer. The head
 /// does not move. `interface_index` is the interface's index when `index` is an implementation's.
@@ -64,9 +65,9 @@ impl Publish {
 
         let entry = VersionEntryV1 {
             version: published.version,
-            publish_slot: PodU64::new(publish_slot),
-            approved: PodBool::new(published.approved),
-            removed: PodBool::new(false),
+            publish_slot: PodU64::from(publish_slot),
+            approved: PodBool::from(published.approved),
+            removed: PodBool::from(false),
             tier: published.tier,
         };
 
@@ -117,7 +118,7 @@ impl Publish {
 
         self.check_id(target, &id)?;
 
-        Ok(Published { version: id.version, approved, tier })
+        Ok(Published { version: stored_version(&id.version), approved, tier })
     }
 
     fn check_id(&self, target: &Target, id: &DocumentIdV1) -> Result<()> {
@@ -148,7 +149,7 @@ impl Publish {
         );
 
         let interface_version =
-            interface.entry(&implements.version).ok_or(RegistryError::InterfaceVersionNotPublished)?;
+            interface.entry(&stored_version(&implements.version)).ok_or(RegistryError::InterfaceVersionNotPublished)?;
         require!(!interface_version.removed.get(), RegistryError::VersionRemoved);
 
         Ok(interface.header.approve_new_versions.get() && interface.approves(self.index.address()))
@@ -193,7 +194,7 @@ impl Publish {
         )?;
 
         // Both kinds share the layout of `InterfaceV1`. The discriminator names the kind.
-        let header = InterfaceV1 { version: *version, publish_slot: PodU64::new(publish_slot) };
+        let header = InterfaceV1 { version: *version, publish_slot: PodU64::from(publish_slot) };
         let discriminator = version::discriminator(target.kind)?;
         let mut view = *self.version.account();
         let mut data = view.try_borrow_mut()?;

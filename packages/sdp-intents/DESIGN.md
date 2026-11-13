@@ -507,10 +507,11 @@ which 18,000 creates the receiver's new ATA and 15,000 is Lighthouse.
 **Signer.** A signer renders the message from the transaction and the registry, never from the
 service. `verify_transaction` in the planner does it with no IO, and `Client::verify_message`
 answers over RPC: the lookup tables of a v0 message, the version and organization accounts, and the
-accounts that each recipe reads. It takes a message or a transaction of any version. A legacy or
-v0 fee is the unit price times the limit, rounded up. Each instruction outside every span shows as
-unverified. An intent with `verifyIntent` off has no onchain form, and its part says
-`onchain checks: none`.
+accounts that each recipe reads. It takes a message or a transaction of any version.
+`@sdp/intents-verifier` runs the same verifier in TypeScript, compiled to WebAssembly, against the
+signer's own RPC. It takes a message. A legacy or v0 fee is the unit price times the limit, rounded
+up. Each instruction outside every span shows as unverified. An intent with `verifyIntent` off has
+no onchain form, and its part says `onchain checks: none`.
 
 **Limits.**
 
@@ -765,7 +766,9 @@ service.
 | `engine` | Binds an intent to its implementations, resolves accounts, and builds instructions. `no_std`, no heap. |
 | `lighthouse` | The snapshots and assertions of a segment |
 | `planner` | `prepare` and the signer's verifier, with no IO |
-| `client` | The planner and verifier over RPC, every transaction version, and sending |
+| `message` | Legacy, v0, and v1 messages, decoded to plan transactions, with no IO |
+| `client` | The planner and verifier over RPC, and sending |
+| `verifier-wasm` | The verifier as WebAssembly, for `packages/sdp-intents-verifier` |
 | `chain` | The account cache, its subscriptions, LiteSVM, and RPC counters |
 | `service` | The JSON API over `chain` |
 | `cli`, `registry-client` | The CLI, and the registry's instructions and views without Anchor |
@@ -804,7 +807,8 @@ local surfnet and is never deployed (`apps/intents-playground/README.md`).
 1. The left pane lists organizations, interfaces, and implementations, with version, recipe, and approval.
 2. The center pane is the interface: a typed form, the guarantees, and each implementation's status.
 3. The Intent tab shows the intent, `prepare` snippets, the plan with each instruction's compute
-   units, `verify`, and `send`. A switch asks for instructions alone. Each signature and address
+   units, `verify`, and `send`. `verify` runs `@sdp/intents-verifier` in the browser against the
+   surfnet's RPC, not on the service. A switch asks for instructions alone. Each signature and address
    links to Solana Explorer.
 4. The Implementation tab shows the definition file, the cluster, and the bytes that the registry holds.
 5. Two switches show the checks: a malicious remote endpoint, which the assertions refuse, and a

@@ -26,6 +26,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/hastra` | Hastra PRIME mint/stake, Jupiter DEX exit, par-redemption lifecycle, and position plans. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/helius-rings` | Helius Rings shielded-wallet domain types, state machine, and gateway port (devnet). | `@sdp/types` |
 | `@sdp/helius-rings-sdk` | Helius Rings gateway adapter running the Zolana SDK in process: health, identity provisioning, and shielded balance reads. | `@sdp/helius-rings` |
+| `@sdp/intents-verifier` | The intents prototype's transaction verifier, the Rust verifier compiled to WebAssembly. | None |
 | `@sdp/ip` | IPv4 and IPv6 address and CIDR range parsing and canonical form. | None |
 | `@sdp/issuance` | Token issuance domain services and Mosaic integration. | `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/jupiter-lend` | Jupiter Lend Earn USDT deposit/withdraw plans over the official SDK. | `@sdp/earn`, `@sdp/rpc`, `@sdp/types` |
@@ -44,6 +45,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/veda` | Kit-native Veda SVM vault deposit, instant and queued withdrawal plans, plus position and lifecycle reads over @vedatech/svm-sdk. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/wisdomtree` | Kit-native WisdomTree Connect transfer plans (on-receipt subscription/redemption legs) and Token-2022 fund position reads. | `@sdp/earn`, `@sdp/rpc`, `@sdp/types` |
 | `bigint-buffer` | Private pure-JavaScript compatibility package replacing bigint-buffer's vulnerable native binding. | None |
+| `intents-playground` | Local explorer for the intents prototype's registry. It is never deployed. | `@sdp/intents-verifier` |
 | `sdp-docs` | Public documentation site and generated API reference. | `@sdp/api-catalog`, `@sdp/design-tokens`, `@sdp/env-config`, `@sdp/types` |
 | `sdp-web` | Dashboard application. | `@sdp/api-catalog`, `@sdp/design-tokens`, `@sdp/ip`, `@sdp/issuance`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types`, `@sdp/ui` |
 
@@ -61,6 +63,7 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/hastra` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/helius-rings` -> `@sdp/types`
 - `@sdp/helius-rings-sdk` -> `@sdp/helius-rings`
+- `@sdp/intents-verifier` -> None
 - `@sdp/ip` -> None
 - `@sdp/issuance` -> `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/jupiter-lend` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/types`
@@ -79,5 +82,6 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/veda` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/wisdomtree` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/types`
 - `bigint-buffer` -> None
+- `intents-playground` -> `@sdp/intents-verifier`
 - `sdp-docs` -> `@sdp/api-catalog`, `@sdp/design-tokens`, `@sdp/env-config`, `@sdp/types`
 - `sdp-web` -> `@sdp/api-catalog`, `@sdp/design-tokens`, `@sdp/ip`, `@sdp/issuance`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types`, `@sdp/ui`

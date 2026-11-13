@@ -283,7 +283,7 @@ mod tests {
             budget: sdp_intents_planner::Budget::MAXIMUM,
             priority_fee_lamports: 0,
         };
-        let message = crate::rpc::message(&transaction, solana_hash::Hash::default()).unwrap().serialize();
+        let message = crate::rpc::v1_message(&transaction, solana_hash::Hash::default()).unwrap().serialize();
         let mut signature = <[u8; 64]>::from(order.sign_message(&message));
         signature[0] ^= u8::from(corrupt);
 

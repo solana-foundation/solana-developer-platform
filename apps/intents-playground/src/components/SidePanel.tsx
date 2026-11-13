@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 
-import type { ListedImplementation, Plan, Registry, Verified } from "@/api";
+import type { ListedImplementation, Plan, Registry } from "@/api";
 import { api } from "@/api";
 import { Code, hexDump, Snippets } from "@/components/Code";
 import type { Output } from "@/intent";
 import { explorerUrl, PROGRAMS, shortAddress } from "@/known";
 import { compileSnippets, prepareSnippets, sendSnippets } from "@/snippets";
+import type { Verified } from "@/verifier";
 
 export type Tab = "intent" | "implementation";
 
@@ -62,7 +63,10 @@ export function SidePanel(props: Props) {
       <div className="side-body">
         {props.tab === "intent" && <IntentTab {...props} />}
         {props.tab === "implementation" && (
-          <ImplementationTab implementation={props.implementation} organizations={props.organizations} />
+          <ImplementationTab
+            implementation={props.implementation}
+            organizations={props.organizations}
+          />
         )}
       </div>
     </section>
@@ -118,7 +122,8 @@ function PrepareControls(props: Props) {
       {frozen && (
         <div className="callout callout-amber">
           The provider signs this transaction, so nothing onchain checks it. Turn both onchain
-          checks off to accept it. A new simulation checks every guarantee.
+          checks off to accept it. The service's simulation checks every guarantee, and the verifier
+          proves none of them.
         </div>
       )}
       {remote && (
@@ -257,7 +262,11 @@ function SignerSteps(props: Props & { plan: Plan }) {
           {busy === "send" ? "Sending…" : "Send"}
         </button>
       </div>
-      <Snippets snippets={sendSnippets(transaction.messageBytes, props.plan.message)} />
+      <div className="section-sub">
+        Verify runs <code>@sdp/intents-verifier</code> in this browser. It reads the registry from
+        the surfnet's RPC, not from the service that planned the transaction.
+      </div>
+      <Snippets snippets={sendSnippets(transaction.messageBytes)} />
     </>
   );
 }
@@ -334,14 +343,13 @@ function Instructions({ plan }: { plan: Plan }) {
 }
 
 function VerifiedResult({ verified }: { verified: Verified }) {
-  const proves = verified.matches === true && verified.unverified.length === 0;
+  const proves = verified.matches && verified.unverified.length === 0;
+  const unverified = verified.unverified.join(", ") || "none";
 
-  if (verified.checkedBy === "simulation") {
+  if (verified.intents.length === 0) {
     return (
-      <div className={`callout ${verified.matches ? "callout-amber" : "callout-red"}`}>
-        {verified.matches
-          ? "A new simulation of the provider's transaction checks every guarantee, and the message matches. Nothing onchain checks them."
-          : "The provider's transaction does not plan to the plan's message."}
+      <div className="callout callout-red">
+        No verify_intent proves this transaction. Instructions in no segment: {unverified}.
       </div>
     );
   }
@@ -350,7 +358,7 @@ function VerifiedResult({ verified }: { verified: Verified }) {
     <div className={`callout ${proves ? "callout-green" : "callout-amber"}`}>
       {proves
         ? "The transaction proves the plan's message, and every instruction is in a segment."
-        : `The message ${verified.matches ? "matches" : "differs"}. Instructions in no segment: ${verified.unverified.join(", ") || "none"}.`}
+        : `The message ${verified.matches ? "matches" : "differs"}. Instructions in no segment: ${unverified}.`}
     </div>
   );
 }
@@ -387,7 +395,8 @@ function ImplementationTab({
   }
 
   const organization = organizations.find((listed) => listed.name === implementation.organization);
-  const follows = implementation.updateAuthority === FOLLOWS_ORGANIZATION && organization !== undefined;
+  const follows =
+    implementation.updateAuthority === FOLLOWS_ORGANIZATION && organization !== undefined;
 
   return (
     <>

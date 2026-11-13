@@ -8,9 +8,10 @@
 use anchor_lang::prelude::*;
 use bytemuck::{bytes_of, Pod, Zeroable};
 use pinocchio::account::{Ref, RefMut};
-use sdp_intents_spec::wire::{DocumentKind, PodBool, PodU32, PodU64, SemverV1};
+use sdp_intents_spec::wire::DocumentKind;
 
 use crate::error::RegistryError;
+use crate::state::wire::{PodBool, PodU32, PodU64, SemverV1};
 use crate::state::{compare_versions, owned_data, owned_data_mut};
 
 #[account]
@@ -32,7 +33,7 @@ pub struct VersionIndexV1 {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Pod, Zeroable)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Pod, Zeroable)]
 pub struct VersionEntryV1 {
     pub version: SemverV1,
     pub publish_slot: PodU64,
@@ -152,8 +153,8 @@ pub fn insert_version(view: &mut AccountView, payer: &AccountView, entry: Versio
 /// Marks the entry at `position` removed and no longer approved. The entry keeps its place.
 pub fn mark_removed(view: &mut AccountView, position: usize) -> Result<()> {
     let mut entry = entry_mut(view, position)?;
-    entry.removed = PodBool::new(true);
-    entry.approved = PodBool::new(false);
+    entry.removed = PodBool::from(true);
+    entry.approved = PodBool::from(false);
 
     Ok(())
 }
@@ -168,7 +169,7 @@ pub fn set_version_approved(view: &mut AccountView, version: &SemverV1, approved
         index.find(version).map_err(|_| RegistryError::VersionNotPublished)?
     };
 
-    entry_mut(view, position)?.approved = PodBool::new(approved);
+    entry_mut(view, position)?.approved = PodBool::from(approved);
 
     Ok(())
 }
@@ -282,11 +283,11 @@ fn u32_from(value: usize) -> Result<u32> {
 }
 
 fn add(count: PodU32, value: u32) -> Result<PodU32> {
-    count.get().checked_add(value).map(PodU32::new).ok_or(ProgramError::ArithmeticOverflow)
+    count.get().checked_add(value).map(PodU32::from).ok_or(ProgramError::ArithmeticOverflow)
 }
 
 fn sub(count: PodU32, value: u32) -> Result<PodU32> {
-    count.get().checked_sub(value).map(PodU32::new).ok_or(ProgramError::ArithmeticOverflow)
+    count.get().checked_sub(value).map(PodU32::from).ok_or(ProgramError::ArithmeticOverflow)
 }
 
 #[cfg(test)]
@@ -303,15 +304,15 @@ mod tests {
     fn entry(minor: u16, approved: bool) -> VersionEntryV1 {
         VersionEntryV1 {
             version: crate::state::semver(1, minor, 0),
-            publish_slot: PodU64::new(9),
-            approved: PodBool::new(approved),
-            removed: PodBool::new(false),
+            publish_slot: PodU64::from(9),
+            approved: PodBool::from(approved),
+            removed: PodBool::from(false),
             tier: 1,
         }
     }
 
     fn index_bytes(versions: &[VersionEntryV1], approved: &[Address]) -> Vec<u8> {
-        let count = |len: usize| PodU32::new(u32::try_from(len).unwrap_or(u32::MAX));
+        let count = |len: usize| PodU32::from(u32::try_from(len).unwrap_or(u32::MAX));
         let header = VersionIndexV1 {
             version_count: count(versions.len()),
             approved_count: count(approved.len()),

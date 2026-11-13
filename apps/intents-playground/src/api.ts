@@ -117,19 +117,6 @@ export interface Plan {
   rpcCalls: Record<string, number>;
 }
 
-export interface Verified {
-  message: string;
-  matches: boolean | null;
-  intents: {
-    verify: number;
-    built: { start: number; end: number };
-    segment: { start: number; end: number };
-  }[];
-  unverified: number[];
-  /// `simulation` for a provider's transaction, which no `verify_intent` proves.
-  checkedBy?: string;
-}
-
 export class ServiceError extends Error {
   constructor(
     readonly code: string,
@@ -172,13 +159,6 @@ export const api = {
     ),
   prepare: (request: unknown, tamper: boolean) =>
     post<Plan>("/v1/prepare", request, tamper ? { "x-sdp-tamper": "1" } : {}),
-  verify: (transaction: NonNullable<Plan["transaction"]>, plan: Plan) =>
-    post<Verified>("/v1/verify", {
-      message: transaction.messageBytes,
-      expected: plan.message,
-      presigned: transaction.presigned,
-      request: plan.request,
-    }),
   send: (transaction: NonNullable<Plan["transaction"]>) =>
     post<{ signature: string }>("/v1/send", {
       message: transaction.messageBytes,

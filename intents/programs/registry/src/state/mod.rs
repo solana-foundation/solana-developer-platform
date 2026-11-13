@@ -8,12 +8,14 @@ pub mod buffer;
 pub mod index;
 pub mod organization;
 pub mod version;
+pub mod wire;
 
 use anchor_lang::prelude::*;
-use sdp_intents_spec::wire::SemverV1;
 
 use crate::error::RegistryError;
 use pinocchio::account::{Ref, RefMut};
+use wire::SemverV1;
+pub use wire::{semver, stored_version};
 
 pub const ORGANIZATION_SEED: &[u8] = b"org";
 pub const INDEX_SEED: &[u8] = b"index";
@@ -49,12 +51,6 @@ pub(crate) fn close(view: &mut AccountView, recipient: &mut AccountView) -> Resu
     view.set_lamports(0);
 
     view.close()
-}
-
-pub fn semver(major: u16, minor: u16, patch: u16) -> SemverV1 {
-    use sdp_intents_spec::wire::PodU16;
-
-    SemverV1 { major: PodU16::new(major), minor: PodU16::new(minor), patch: PodU16::new(patch) }
 }
 
 pub fn compare_versions(a: &SemverV1, b: &SemverV1) -> core::cmp::Ordering {

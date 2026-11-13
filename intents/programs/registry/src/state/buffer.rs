@@ -2,7 +2,8 @@
 //! address is the PDA of `"buffer"`, the writer, and a `u32` that the writer picks.
 
 use anchor_lang::prelude::*;
-use sdp_intents_spec::wire::PodU16;
+
+use crate::state::wire::PodU16;
 
 #[account]
 pub struct BufferV1 {

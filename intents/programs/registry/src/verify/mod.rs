@@ -65,7 +65,7 @@ pub struct VerifyArgs<'a> {
 }
 
 /// The rent cap, and the counts of the accounts and the instructions of the segment.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, AnchorSerialize, AnchorDeserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, AnchorSerialize, AnchorDeserialize, IdlType)]
 pub struct SegmentLayout {
     /// The most that the rent payer spends on new accounts in the segment.
     pub rent_cap: u64,

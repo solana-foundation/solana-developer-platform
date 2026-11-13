@@ -16,7 +16,6 @@
 //! ```
 
 pub mod json;
-pub mod message;
 pub mod remote;
 pub mod rpc;
 mod send;
@@ -35,7 +34,8 @@ use sdp_intents_planner::{
 };
 use sdp_intents_spec::Address;
 
-pub use message::{MessageVersion, WireMessage};
+pub use sdp_intents_message as message;
+pub use sdp_intents_message::{MessageError, MessageVersion, WireMessage};
 pub use send::{sign, sign_message};
 pub use solana_hash::Hash as Blockhash;
 pub use solana_keypair::{read_keypair_file, Keypair};
@@ -201,6 +201,16 @@ pub enum ClientError {
 impl From<PlanError> for ClientError {
     fn from(error: PlanError) -> Self {
         Self::Plan(error)
+    }
+}
+
+impl From<MessageError> for ClientError {
+    fn from(error: MessageError) -> Self {
+        match error {
+            MessageError::Plan(error) => Self::Plan(error),
+            MessageError::Compile(error) => Self::Compile(error),
+            MessageError::Decode(error) => Self::Decode(error),
+        }
     }
 }
 

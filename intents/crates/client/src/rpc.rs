@@ -4,38 +4,21 @@ use base64::Engine as _;
 use solana_account_decoder_client_types::{UiAccount, UiAccountEncoding};
 use solana_commitment_config::CommitmentConfig;
 use solana_hash::Hash;
-use solana_message::v1::{self, TransactionConfig};
 use solana_message::VersionedMessage;
 use solana_rpc_client_api::config::{RpcSimulateTransactionAccountsConfig, RpcSimulateTransactionConfig};
 use solana_rpc_client_api::response::RpcSimulateTransactionResult;
 use solana_signature::Signature;
 use solana_transaction::versioned::VersionedTransaction;
 
-use sdp_intents_planner::{Account, Instruction, ReturnData, Simulation, SimulationResult, Transaction};
+use sdp_intents_planner::{Account, ReturnData, Simulation, SimulationResult};
 use sdp_intents_spec::Address;
 
 use crate::ClientError;
 
-pub fn solana_address(address: Address) -> solana_address::Address {
-    solana_address::Address::new_from_array(address.0)
-}
+pub use sdp_intents_message::{solana_address, v1_message};
 
 pub fn base58(address: Address) -> String {
     bs58::encode(address.0).into_string()
-}
-
-/// The v1 message of a transaction: what its signers sign.
-pub fn message(transaction: &Transaction, blockhash: Hash) -> Result<v1::Message, ClientError> {
-    let instructions: Vec<solana_instruction::Instruction> = transaction.instructions.iter().map(instruction).collect();
-    let budget = transaction.budget;
-    let config = TransactionConfig::empty()
-        .with_priority_fee(transaction.priority_fee_lamports)
-        .with_compute_unit_limit(budget.compute_unit_limit)
-        .with_loaded_accounts_data_size_limit(budget.loaded_accounts_data_size_limit)
-        .with_heap_size(budget.heap_size);
-
-    v1::Message::try_compile_with_config(&solana_address(transaction.fee_payer), &instructions, blockhash, config)
-        .map_err(|error| ClientError::Compile(format!("{error:?}")))
 }
 
 /// A simulation as a v1 transaction with empty signatures, or as its fixed message of any version. A
@@ -44,7 +27,7 @@ pub fn message(transaction: &Transaction, blockhash: Hash) -> Result<v1::Message
 pub fn simulation_transaction(simulation: &Simulation) -> Result<VersionedTransaction, ClientError> {
     let message = match &simulation.fixed {
         Some(fixed) => crate::WireMessage::parse(&fixed.bytes)?.solana().clone(),
-        None => VersionedMessage::V1(message(&simulation.transaction, Hash::default())?),
+        None => VersionedMessage::V1(v1_message(&simulation.transaction, Hash::default())?),
     };
     let signatures = vec![Signature::default(); usize::from(message.header().num_required_signatures)];
 
@@ -62,24 +45,6 @@ pub fn simulation_config(simulation: &Simulation) -> RpcSimulateTransactionConfi
             addresses: simulation.observe.iter().copied().map(base58).collect(),
         }),
         ..RpcSimulateTransactionConfig::default()
-    }
-}
-
-pub(crate) fn instruction(instruction: &Instruction) -> solana_instruction::Instruction {
-    let accounts = instruction
-        .accounts
-        .iter()
-        .map(|meta| solana_instruction::AccountMeta {
-            pubkey: solana_address(meta.address),
-            is_signer: meta.role.signer(),
-            is_writable: meta.role.writable(),
-        })
-        .collect();
-
-    solana_instruction::Instruction {
-        program_id: solana_address(instruction.program),
-        accounts,
-        data: instruction.data.clone(),
     }
 }
 
@@ -125,7 +90,7 @@ fn parse_address(text: &str) -> Result<Address, ClientError> {
 
 #[cfg(test)]
 mod tests {
-    use sdp_intents_planner::{AccountMeta, Budget};
+    use sdp_intents_planner::{AccountMeta, Budget, Instruction, Transaction};
     use sdp_intents_spec::AccountRole;
 
     use super::*;

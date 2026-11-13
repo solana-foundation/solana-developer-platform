@@ -5,11 +5,16 @@
 //! tables, and the caller fetches them, so decoding does no IO. A legacy or v0 message sets its
 //! budget with ComputeBudget instructions. Those instructions stay in the decoded transaction, so
 //! each position is the one that the instructions sysvar gives onchain.
+//!
+//! The crate makes no RPC calls, so it also builds for WebAssembly.
+
+use core::fmt;
 
 use serde_json::Value;
 use solana_hash::Hash;
 use solana_message::compiled_instruction::CompiledInstruction;
 use solana_message::v0::MessageAddressTableLookup;
+use solana_message::v1::TransactionConfig;
 use solana_message::{legacy, v0, v1, AddressLookupTableAccount, MessageHeader, VersionedMessage};
 use solana_transaction::versioned::VersionedTransaction;
 
@@ -17,8 +22,6 @@ use sdp_intents_planner::{
     Account, AccountMeta, Budget, Instruction, Limit, PlanError, Transaction, COMPUTE_BUDGET_PROGRAM,
 };
 use sdp_intents_spec::{AccountRole, Address};
-
-use crate::{rpc, ClientError};
 
 /// `AddressLookupTab1e1111111111111111111111111`.
 const LOOKUP_TABLE_PROGRAM: Address = Address([
@@ -85,21 +88,89 @@ pub struct LookupTable {
     pub addresses: Vec<Address>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MessageError {
+    Plan(PlanError),
+    /// The transaction does not compile to a message of its version.
+    Compile(String),
+    /// The message, the transaction, or a lookup table does not decode.
+    Decode(String),
+}
+
+impl From<PlanError> for MessageError {
+    fn from(error: PlanError) -> Self {
+        Self::Plan(error)
+    }
+}
+
+impl fmt::Display for MessageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Plan(error) => write!(f, "{error}"),
+            Self::Compile(error) => write!(f, "the message does not compile: {error}"),
+            Self::Decode(error) => write!(f, "the message does not decode: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for MessageError {}
+
+pub fn solana_address(address: Address) -> solana_address::Address {
+    solana_address::Address::new_from_array(address.0)
+}
+
+fn base58(address: Address) -> String {
+    bs58::encode(address.0).into_string()
+}
+
+/// The v1 message of a transaction: what its signers sign.
+pub fn v1_message(transaction: &Transaction, blockhash: Hash) -> Result<v1::Message, MessageError> {
+    let instructions: Vec<solana_instruction::Instruction> =
+        transaction.instructions.iter().map(solana_instruction).collect();
+    let budget = transaction.budget;
+    let config = TransactionConfig::empty()
+        .with_priority_fee(transaction.priority_fee_lamports)
+        .with_compute_unit_limit(budget.compute_unit_limit)
+        .with_loaded_accounts_data_size_limit(budget.loaded_accounts_data_size_limit)
+        .with_heap_size(budget.heap_size);
+
+    v1::Message::try_compile_with_config(&solana_address(transaction.fee_payer), &instructions, blockhash, config)
+        .map_err(|error| MessageError::Compile(format!("{error:?}")))
+}
+
+fn solana_instruction(instruction: &Instruction) -> solana_instruction::Instruction {
+    let accounts = instruction
+        .accounts
+        .iter()
+        .map(|meta| solana_instruction::AccountMeta {
+            pubkey: solana_address(meta.address),
+            is_signer: meta.role.signer(),
+            is_writable: meta.role.writable(),
+        })
+        .collect();
+
+    solana_instruction::Instruction {
+        program_id: solana_address(instruction.program),
+        accounts,
+        data: instruction.data.clone(),
+    }
+}
+
 impl WireMessage {
     /// A message of any version. The bytes must be the canonical form of the message, with nothing
     /// after it, because the signers sign these bytes.
-    pub fn parse(bytes: &[u8]) -> Result<Self, ClientError> {
+    pub fn parse(bytes: &[u8]) -> Result<Self, MessageError> {
         let message: VersionedMessage = wincode::deserialize(bytes).map_err(decode)?;
         let parsed = Self::new(message)?;
 
         if parsed.bytes != bytes {
-            return Err(ClientError::Decode("the message is not in its canonical form".into()));
+            return Err(MessageError::Decode("the message is not in its canonical form".into()));
         }
 
         Ok(parsed)
     }
 
-    fn new(message: VersionedMessage) -> Result<Self, ClientError> {
+    fn new(message: VersionedMessage) -> Result<Self, MessageError> {
         message.sanitize().map_err(decode)?;
 
         Ok(Self { bytes: message.serialize(), message })
@@ -117,7 +188,7 @@ impl WireMessage {
         }
     }
 
-    pub(crate) fn solana(&self) -> &VersionedMessage {
+    pub fn solana(&self) -> &VersionedMessage {
         &self.message
     }
 
@@ -137,22 +208,23 @@ impl WireMessage {
 
     /// The transaction, with the addresses of `tables`. `tables` holds each table that
     /// [`WireMessage::lookup_tables`] names.
-    pub fn decode(&self, tables: &[LookupTable]) -> Result<Transaction, ClientError> {
+    pub fn decode(&self, tables: &[LookupTable]) -> Result<Transaction, MessageError> {
         let keys = self.account_keys(tables)?;
         let key = |index: u8| {
-            keys.get(usize::from(index)).copied().ok_or_else(|| ClientError::Decode("an index has no key".into()))
+            keys.get(usize::from(index)).copied().ok_or_else(|| MessageError::Decode("an index has no key".into()))
         };
         let instruction = |compiled: &CompiledInstruction| {
             let accounts = compiled.accounts.iter().map(|index| key(*index)).collect::<Result<Vec<_>, _>>()?;
 
-            Ok::<_, ClientError>(Instruction {
+            Ok::<_, MessageError>(Instruction {
                 program: key(compiled.program_id_index)?.address,
                 accounts,
                 data: compiled.data.clone(),
             })
         };
         let instructions = self.message.instructions().iter().map(instruction).collect::<Result<Vec<_>, _>>()?;
-        let fee_payer = keys.first().ok_or_else(|| ClientError::Decode("the message has no fee payer".into()))?.address;
+        let fee_payer =
+            keys.first().ok_or_else(|| MessageError::Decode("the message has no fee payer".into()))?.address;
 
         let funded = match &self.message {
             VersionedMessage::V1(message) => v1_budget(&message.config),
@@ -173,7 +245,7 @@ impl WireMessage {
 
     /// Each account with its role: the static keys, then the writable accounts of every table,
     /// then the readonly ones. A table never holds a signer.
-    fn account_keys(&self, tables: &[LookupTable]) -> Result<Vec<AccountMeta>, ClientError> {
+    fn account_keys(&self, tables: &[LookupTable]) -> Result<Vec<AccountMeta>, MessageError> {
         let statics = self.message.static_account_keys();
         let header = self.message.header();
         let static_keys = statics.iter().enumerate().map(|(index, key)| AccountMeta {
@@ -195,12 +267,12 @@ impl WireMessage {
         blockhash: Hash,
         version: MessageVersion,
         tables: &[LookupTable],
-    ) -> Result<Self, ClientError> {
-        let payer = rpc::solana_address(transaction.fee_payer);
-        let failed = |error: solana_message::CompileError| ClientError::Compile(format!("{error:?}"));
+    ) -> Result<Self, MessageError> {
+        let payer = solana_address(transaction.fee_payer);
+        let failed = |error: solana_message::CompileError| MessageError::Compile(format!("{error:?}"));
 
         let message = match version {
-            MessageVersion::V1 => VersionedMessage::V1(rpc::message(transaction, blockhash)?),
+            MessageVersion::V1 => VersionedMessage::V1(v1_message(transaction, blockhash)?),
             MessageVersion::Legacy => VersionedMessage::Legacy(legacy::Message::new_with_blockhash(
                 &budgeted_instructions(transaction)?,
                 Some(&payer),
@@ -221,7 +293,7 @@ impl WireMessage {
 
     /// The transaction in wire form, with a signature for each signer. An empty signature is all
     /// zeros.
-    pub fn signed(&self, signatures: &[[u8; 64]]) -> Result<Vec<u8>, ClientError> {
+    pub fn signed(&self, signatures: &[[u8; 64]]) -> Result<Vec<u8>, MessageError> {
         let signatures = signatures.iter().copied().map(solana_signature::Signature::from).collect();
         let transaction = VersionedTransaction { signatures, message: self.message.clone() };
 
@@ -230,7 +302,7 @@ impl WireMessage {
 
     /// Fails with `DoesNotFit` when the signed transaction is over its version's limit: 4,096 bytes
     /// for v1, and one packet for legacy and v0.
-    pub fn check_size(&self) -> Result<(), ClientError> {
+    pub fn check_size(&self) -> Result<(), MessageError> {
         let signatures = usize::from(self.message.header().num_required_signatures);
         let signature_bytes = signatures.saturating_mul(SIGNATURE_SIZE);
         let (size, max) = match self.version() {
@@ -250,21 +322,21 @@ impl WireMessage {
 
 /// A signed transaction of any version, in wire form. A legacy or v0 transaction writes its
 /// signatures before the message, and a v1 transaction writes them after it.
-pub fn read_transaction(bytes: &[u8]) -> Result<SignedMessage, ClientError> {
+pub fn read_transaction(bytes: &[u8]) -> Result<SignedMessage, MessageError> {
     let transaction: VersionedTransaction = wincode::deserialize(bytes).map_err(decode)?;
     let signatures: Vec<[u8; 64]> =
         transaction.signatures.iter().map(|signature| <[u8; 64]>::from(*signature)).collect();
     let message = WireMessage::new(transaction.message)?;
 
     if signatures.len() != message.signers().len() {
-        return Err(ClientError::Decode("the transaction holds another count of signatures than its signers".into()));
+        return Err(MessageError::Decode("the transaction holds another count of signatures than its signers".into()));
     }
 
     let signature_bytes = signatures.len().saturating_mul(SIGNATURE_SIZE);
     let prefix = if message.version() == MessageVersion::V1 { 0 } else { compact_len(signatures.len()) };
 
     if prefix.saturating_add(signature_bytes).saturating_add(message.bytes.len()) != bytes.len() {
-        return Err(ClientError::Decode("the transaction is not in its canonical form".into()));
+        return Err(MessageError::Decode("the transaction is not in its canonical form".into()));
     }
 
     Ok(SignedMessage { message, signatures })
@@ -272,8 +344,8 @@ pub fn read_transaction(bytes: &[u8]) -> Result<SignedMessage, ClientError> {
 
 impl LookupTable {
     /// The table at `address`, as `getMultipleAccounts` returned it.
-    pub fn read(address: Address, account: Option<&Account>) -> Result<Self, ClientError> {
-        let invalid = |reason: &str| ClientError::Decode(format!("the lookup table {} {reason}", rpc::base58(address)));
+    pub fn read(address: Address, account: Option<&Account>) -> Result<Self, MessageError> {
+        let invalid = |reason: &str| MessageError::Decode(format!("the lookup table {} {reason}", base58(address)));
         let account = account.ok_or_else(|| invalid("does not exist"))?;
 
         if account.owner != LOOKUP_TABLE_PROGRAM || account.data.get(..4) != Some(&LOOKUP_TABLE_TAG[..]) {
@@ -292,8 +364,8 @@ impl LookupTable {
 
     fn solana(&self) -> AddressLookupTableAccount {
         AddressLookupTableAccount {
-            key: rpc::solana_address(self.address),
-            addresses: self.addresses.iter().copied().map(rpc::solana_address).collect(),
+            key: solana_address(self.address),
+            addresses: self.addresses.iter().copied().map(solana_address).collect(),
         }
     }
 }
@@ -308,7 +380,7 @@ fn loaded(
     lookups: &[MessageAddressTableLookup],
     tables: &[LookupTable],
     kind: Loaded,
-) -> Result<Vec<AccountMeta>, ClientError> {
+) -> Result<Vec<AccountMeta>, MessageError> {
     let role = match kind {
         Loaded::Writable => AccountRole::Writable,
         Loaded::Readonly => AccountRole::Readonly,
@@ -318,9 +390,10 @@ fn loaded(
         .iter()
         .map(|lookup| {
             let address = Address(lookup.account_key.to_bytes());
-            let table = tables.iter().find(|table| table.address == address).ok_or_else(|| {
-                ClientError::Decode(format!("the lookup table {} was not fetched", rpc::base58(address)))
-            })?;
+            let table = tables
+                .iter()
+                .find(|table| table.address == address)
+                .ok_or_else(|| MessageError::Decode(format!("the lookup table {} was not fetched", base58(address))))?;
             let indexes = match kind {
                 Loaded::Writable => &lookup.writable_indexes,
                 Loaded::Readonly => &lookup.readonly_indexes,
@@ -330,12 +403,12 @@ fn loaded(
                 .iter()
                 .map(|index| {
                     let address = table.addresses.get(usize::from(*index)).copied().ok_or_else(|| {
-                        ClientError::Decode(format!("the lookup table {} has no index {index}", rpc::base58(address)))
+                        MessageError::Decode(format!("the lookup table {} has no index {index}", base58(address)))
                     })?;
 
                     Ok(AccountMeta { address, role })
                 })
-                .collect::<Result<Vec<_>, ClientError>>()
+                .collect::<Result<Vec<_>, MessageError>>()
         })
         .collect::<Result<Vec<_>, _>>()
         .map(|per_table| per_table.concat())
@@ -380,9 +453,9 @@ struct BudgetRequests {
 }
 
 impl BudgetRequests {
-    fn with(self, data: &[u8]) -> Result<Self, ClientError> {
-        let twice = || ClientError::Decode("a ComputeBudget instruction requests a value twice".into());
-        let unknown = || ClientError::Decode("a ComputeBudget instruction does not decode".into());
+    fn with(self, data: &[u8]) -> Result<Self, MessageError> {
+        let twice = || MessageError::Decode("a ComputeBudget instruction requests a value twice".into());
+        let unknown = || MessageError::Decode("a ComputeBudget instruction does not decode".into());
         let u32_of = |rest: &[u8]| <[u8; 4]>::try_from(rest).map(u32::from_le_bytes).map_err(|_| unknown());
 
         match data.split_first() {
@@ -405,11 +478,11 @@ impl BudgetRequests {
 
     /// The runtime charges the price for each unit of the limit, rounded up to a lamport. With a
     /// price and no limit, the fee depends on the runtime's default limit, so decoding refuses it.
-    fn budget(self) -> Result<Funded, ClientError> {
+    fn budget(self) -> Result<Funded, MessageError> {
         let priority_fee_lamports = match (self.micro_lamports_per_unit, self.compute_unit_limit) {
             (None | Some(0), _) => 0,
             (Some(_), None) => {
-                return Err(ClientError::Decode("the message sets a compute unit price and no limit".into()));
+                return Err(MessageError::Decode("the message sets a compute unit price and no limit".into()));
             }
             (Some(price), Some(limit)) => {
                 let micro_lamports = u128::from(price).saturating_mul(u128::from(limit));
@@ -429,12 +502,12 @@ impl BudgetRequests {
 
 /// The ComputeBudget instructions of the transaction's budget and priority fee, then its own
 /// instructions.
-fn budgeted_instructions(transaction: &Transaction) -> Result<Vec<solana_instruction::Instruction>, ClientError> {
+fn budgeted_instructions(transaction: &Transaction) -> Result<Vec<solana_instruction::Instruction>, MessageError> {
     let budget = transaction.budget;
     let fee = transaction.priority_fee_lamports;
 
     if fee > 0 && budget.compute_unit_limit == 0 {
-        return Err(ClientError::Compile("a priority fee needs a compute unit limit".into()));
+        return Err(MessageError::Compile("a priority fee needs a compute unit limit".into()));
     }
 
     let price = u128::from(fee)
@@ -449,12 +522,12 @@ fn budgeted_instructions(transaction: &Transaction) -> Result<Vec<solana_instruc
         (budget.heap_size > DEFAULT_HEAP_SIZE).then(|| [&[1][..], &budget.heap_size.to_le_bytes()].concat()),
     ];
     let budget_instructions = requests.into_iter().flatten().map(|data| solana_instruction::Instruction {
-        program_id: rpc::solana_address(COMPUTE_BUDGET_PROGRAM),
+        program_id: solana_address(COMPUTE_BUDGET_PROGRAM),
         accounts: Vec::new(),
         data,
     });
 
-    Ok(budget_instructions.chain(transaction.instructions.iter().map(rpc::instruction)).collect())
+    Ok(budget_instructions.chain(transaction.instructions.iter().map(solana_instruction)).collect())
 }
 
 /// The length of a compact `u16` that holds `value`: 7 bits a byte.
@@ -466,15 +539,12 @@ fn compact_len(value: usize) -> usize {
     }
 }
 
-fn decode(error: impl core::fmt::Debug) -> ClientError {
-    ClientError::Decode(format!("{error:?}"))
+fn decode(error: impl core::fmt::Debug) -> MessageError {
+    MessageError::Decode(format!("{error:?}"))
 }
 
 #[cfg(test)]
 mod tests {
-    use solana_keypair::Keypair;
-    use solana_signer::Signer as _;
-
     use super::*;
 
     const FEE_PAYER: Address = Address([1; 32]);
@@ -598,28 +668,6 @@ mod tests {
         let message = WireMessage::compile(&transaction(0), Hash::default(), MessageVersion::Legacy, &[]).unwrap();
 
         assert!(WireMessage::parse(&[message.bytes(), &[0]].concat()).is_err());
-    }
-
-    /// A legacy transaction writes its signatures before the message, and a v1 one after it.
-    #[test]
-    fn reads_a_signed_transaction_of_each_version() {
-        let signer = Keypair::new();
-        let original = Transaction {
-            fee_payer: Address(signer.pubkey().to_bytes()),
-            instructions: vec![Instruction { program: PROGRAM, accounts: Vec::new(), data: vec![1] }],
-            ..transaction(0)
-        };
-
-        for version in [MessageVersion::Legacy, MessageVersion::V0, MessageVersion::V1] {
-            let message = WireMessage::compile(&original, Hash::default(), version, &[]).unwrap();
-            let signed = crate::sign(&message, &[&signer], &[]).unwrap();
-            let bytes = wincode::serialize(&signed).unwrap();
-            let read = read_transaction(&bytes).unwrap();
-
-            assert_eq!(read.message, message);
-            assert_eq!(read.signatures, [<[u8; 64]>::from(signer.sign_message(message.bytes()))]);
-            assert!(read_transaction(&[&bytes[..], &[0]].concat()).is_err());
-        }
     }
 
     #[test]

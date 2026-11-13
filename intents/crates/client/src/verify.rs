@@ -31,7 +31,7 @@ impl Client {
 
     /// The transaction of `message`, with the addresses of its lookup tables read over RPC.
     pub fn decode(&self, message: &WireMessage) -> Result<Transaction, ClientError> {
-        message.decode(&self.lookup_tables(&message.lookup_tables())?)
+        Ok(message.decode(&self.lookup_tables(&message.lookup_tables())?)?)
     }
 
     /// The lookup tables at `addresses`, in one call, or none for none.
@@ -42,6 +42,9 @@ impl Client {
 
         let fetched = self.fetch(addresses)?;
 
-        addresses.iter().zip(&fetched).map(|(address, account)| LookupTable::read(*address, account.as_ref())).collect()
+        let tables =
+            addresses.iter().zip(&fetched).map(|(address, account)| LookupTable::read(*address, account.as_ref()));
+
+        Ok(tables.collect::<Result<_, _>>()?)
     }
 }

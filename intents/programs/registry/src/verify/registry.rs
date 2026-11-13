@@ -11,7 +11,7 @@ use sdp_intents_spec::wire::{DocumentIdV1, DocumentKind};
 
 use crate::error::RegistryError;
 use crate::state::index::{self, Index};
-use crate::state::spec_address;
+use crate::state::{spec_address, stored_version};
 use crate::verify::VerifyIntent;
 
 pub fn check_indexes(accounts: &VerifyIntent, recipe: &Recipe<'_>) -> Result<()> {
@@ -29,7 +29,8 @@ pub fn check_indexes(accounts: &VerifyIntent, recipe: &Recipe<'_>) -> Result<()>
         return Ok(());
     }
 
-    let version_approved = implementation.entry(&implementation_id.version).is_some_and(|entry| entry.approved.get());
+    let version_approved =
+        implementation.entry(&stored_version(&implementation_id.version)).is_some_and(|entry| entry.approved.get());
     require!(
         version_approved && interface.approves(accounts.implementation_index.address()),
         RegistryError::NotApproved

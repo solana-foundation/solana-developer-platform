@@ -22,6 +22,7 @@ import {
   planRequest,
 } from "@/intent";
 import { MINTS, VAULTS } from "@/known";
+import { verifyPlan } from "@/verifier";
 
 const NO_PLAN: PlanState = { plan: null, error: null, verified: null, signature: null, busy: null };
 const DEFAULT_OPTIONS: IntentOptions = {
@@ -148,8 +149,7 @@ export function App() {
     if (plan?.transaction === undefined) return;
 
     setPlanState({ ...planState, busy: "verify", error: null });
-    api
-      .verify(plan.transaction, plan)
+    verifyPlan(plan, plan.transaction)
       .then((verified) => setPlanState({ ...planState, verified, busy: null, error: null }))
       .catch((error: unknown) =>
         setPlanState({ ...planState, busy: null, error: describe(error) })

@@ -20,7 +20,7 @@ Each step runs in its own terminal, from the repository root.
 
    ```sh
    cd intents
-   just build-programs
+   just build-programs idl
    cargo build -p sdp-intents-cli -p sdp-intents-service -p sdp-intents-test-provider
    (cd programs && node deploy-surfnet.mjs)
    node e2e/playground.mjs
@@ -36,11 +36,15 @@ Each step runs in its own terminal, from the repository root.
    ./target/debug/sdp-intents-service --wallets target/playground/wallets
    ```
 
-4. Start the playground, then open <http://localhost:5178>:
+4. Build the verifier module, start the playground, then open <http://localhost:5178>:
 
    ```sh
+   pnpm --filter @sdp/intents-verifier build:wasm
    pnpm --filter intents-playground dev
    ```
+
+`just idl` writes the IDL of each Anchor program, and `deploy-surfnet.mjs` places each IDL beside
+its program, so Solana Explorer decodes the registry's instructions and errors.
 
 The wallets are new keys in `intents/target/playground/wallets`, funded by cheatcodes. They hold
 nothing on a real cluster.
@@ -53,8 +57,9 @@ nothing on a real cluster.
   as guarantees, and each implementation with whether its `applies` checks hold.
 - Intent: the intent JSON and the `prepare` request as curl, TypeScript, and Rust.
 - Plan: the message, each instruction with its part of the segment, the compute units, and the RPC
-  calls that the service made. `Verify` runs the service's verifier, and `Send` lands the
-  transaction.
+  calls that the service made. `Verify` runs `@sdp/intents-verifier` in the browser. It reads the
+  registry from the surfnet's RPC through the dev server's `/rpc`, never from the service. `Send`
+  lands the transaction.
 - Implementation: the selected implementation, its versions, and its document as the registry holds it.
 
 "Tamper with the plan" makes the service change one byte of a built instruction. The verifier still
@@ -64,7 +69,8 @@ transaction onchain.
 The Ondo implementations route through the Jupiter wrapper, at tier 2. Their side panel has a switch that
 makes the wrapper also approve an attacker, which the segment's assertions refuse. The test
 provider's implementation returns a transaction that the provider signed, at tier 3. Turn both onchain
-checks off to accept it. Hastra's implementations show the request interfaces, which settle later.
+checks off to accept it. The browser's verifier proves none of its instructions, because no
+`verify_intent` holds them. Hastra's implementations show the request interfaces, which settle later.
 
 A builder cannot name its rent payer as one of its own accounts yet, so a wallet that deposits into
 a vault cannot also pay the fee. The playground defaults the fee payer to `alice` for that reason.

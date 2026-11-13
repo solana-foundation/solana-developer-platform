@@ -11,7 +11,7 @@
 //!   liquidity that the vault can withdraw, with one kvault `withdraw` for each reserve.
 //! - The builder creates an owner's token account only when it does not exist.
 
-#![no_std]
+#![cfg_attr(not(feature = "idl-build"), no_std)]
 
 extern crate alloc;
 

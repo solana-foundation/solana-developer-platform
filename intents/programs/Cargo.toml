@@ -5,6 +5,7 @@ resolver = "2"
 members = [
     "../crates/builder",
     "../crates/program-testing",
+    "idl",
     "jupiter-lend-builder",
     "kamino-builder",
     "registry",

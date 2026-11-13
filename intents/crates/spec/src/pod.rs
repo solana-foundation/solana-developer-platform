@@ -45,6 +45,12 @@ impl PodBool {
     }
 }
 
+impl From<bool> for PodBool {
+    fn from(value: bool) -> Self {
+        Self::new(value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

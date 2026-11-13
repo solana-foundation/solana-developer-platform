@@ -86,3 +86,39 @@ pub fn sign(
 
     Ok(VersionedTransaction { signatures, message: message.solana().clone() })
 }
+
+#[cfg(test)]
+mod tests {
+    use sdp_intents_planner::{Budget, Instruction};
+    use sdp_intents_spec::Address;
+    use solana_hash::Hash;
+
+    use crate::message::read_transaction;
+
+    use super::*;
+
+    const PROGRAM: Address = Address([9; 32]);
+
+    /// A legacy transaction writes its signatures before the message, and a v1 one after it.
+    #[test]
+    fn reads_a_signed_transaction_of_each_version() {
+        let signer = Keypair::new();
+        let original = Transaction {
+            fee_payer: Address(signer.pubkey().to_bytes()),
+            instructions: vec![Instruction { program: PROGRAM, accounts: Vec::new(), data: vec![1] }],
+            budget: Budget { compute_unit_limit: 20_000, loaded_accounts_data_size_limit: 9_000, heap_size: 64 * 1024 },
+            priority_fee_lamports: 0,
+        };
+
+        for version in [MessageVersion::Legacy, MessageVersion::V0, MessageVersion::V1] {
+            let message = WireMessage::compile(&original, Hash::default(), version, &[]).unwrap();
+            let signed = sign(&message, &[&signer], &[]).unwrap();
+            let bytes = wincode::serialize(&signed).unwrap();
+            let read = read_transaction(&bytes).unwrap();
+
+            assert_eq!(read.message, message);
+            assert_eq!(read.signatures, [<[u8; 64]>::from(signer.sign_message(message.bytes()))]);
+            assert!(read_transaction(&[&bytes[..], &[0]].concat()).is_err());
+        }
+    }
+}

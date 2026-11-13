@@ -2,5 +2,6 @@
 channel = "1.99.1"
 components = ["rustfmt", "clippy"]
 # A bare-metal target with no `std`. Building the engine for it proves that the engine needs neither
-# `std` nor a heap, as the registry program requires.
-targets = ["thumbv7em-none-eabi"]
+# `std` nor a heap, as the registry program requires. `@sdp/intents-verifier` loads the verifier
+# built for WebAssembly.
+targets = ["thumbv7em-none-eabi", "wasm32-unknown-unknown"]

@@ -3,7 +3,7 @@ use anchor_lang::prelude::*;
 use crate::error::RegistryError;
 use crate::state::index::{self, Index};
 use crate::state::organization::OrganizationV1;
-use crate::state::{close, semver, spec_address, version};
+use crate::state::{close, semver, spec_address, stored_version, version};
 
 /// Revokes a version: closes its account, which returns its rent to `recipient`, and marks its entry
 /// in the index removed. The entry stays, so the version cannot be published again. The head
@@ -40,7 +40,7 @@ impl Remove {
             require!(
                 id.publisher == spec_address(&header.organization)
                     && id.name_hash == header.name_hash
-                    && id.version == version,
+                    && stored_version(&id.version) == version,
                 RegistryError::WrongDocumentId
             );
 

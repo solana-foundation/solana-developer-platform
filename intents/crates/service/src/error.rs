@@ -7,7 +7,7 @@ use axum::Json;
 use serde_json::{json, Value};
 
 use sdp_intents_chain::ChainError;
-use sdp_intents_client::ClientError;
+use sdp_intents_client::{ClientError, MessageError};
 use sdp_intents_compiler::diagnostic::Report;
 use sdp_intents_planner::{PlanError, VerifyError};
 
@@ -88,6 +88,12 @@ impl From<ClientError> for ServiceError {
                 Self::refused("missingSigner", format!("no local wallet holds the key of {address}"))
             }
         }
+    }
+}
+
+impl From<MessageError> for ServiceError {
+    fn from(error: MessageError) -> Self {
+        ClientError::from(error).into()
     }
 }
 

@@ -1,6 +1,7 @@
-// The requests of the Intent tab as curl, TypeScript, and Rust.
+// The requests of the Intent tab as curl, TypeScript, Rust, and the CLI.
 
 const SERVICE = "http://127.0.0.1:8787";
+const RPC = "http://127.0.0.1:8899";
 
 // A single quote ends the shell's quoted string, so each one closes, escapes, and reopens it.
 function shellJson(value: object): string {
@@ -17,19 +18,40 @@ export function prepareSnippets(request: object): Record<string, string> {
   };
 }
 
-/// A plan of instructions alone: the CLI compiles it to a version, verifies that message, then
-/// signs and sends it. `/v1/verify` reads a message of any version.
-export function compileSnippets(): Record<string, string> {
+/// The signer verifies against its own RPC, not against the service that planned the transaction.
+/// The TypeScript library runs the Rust client's verifier, compiled to WebAssembly.
+function verifySnippets(message: { typescript: string; rust: string }) {
   return {
-    CLI: `# Compile the instructions as a legacy, v0, or v1 transaction, then verify and send it.\nsdp-intents verify plan.json --rpc http://127.0.0.1:8899 --version 0 --lookup-table <table>\nsdp-intents send plan.json --rpc http://127.0.0.1:8899 --version 0 --lookup-table <table> --keypair <signer.json>`,
-    curl: `# Verify a message that the caller compiled, of any version.\ncurl -s ${SERVICE}/v1/verify \\\n  -H 'content-type: application/json' \\\n  -d ${shellJson({ message: "<base64 message>", expected: "<plan message>" })}`,
+    TypeScript: `import { Verifier } from "@sdp/intents-verifier";\nimport verifierWasm from "@sdp/intents-verifier/verifier.wasm?url";\n\n// Node passes the module's bytes to \`Verifier.load\`, in place of its URL.\nconst verifier = await Verifier.load(verifierWasm);\n${message.typescript}\nconst verified = await verifier.verifyMessage(message, "${RPC}");\n\nif (verified.message !== plan.message || verified.unverified.length > 0) {\n  throw new Error("the transaction does not prove the plan's message");\n}`,
+    Rust: `use base64::Engine as _;\n\nlet client = sdp_intents_client::Client::new("${RPC}");\n${message.rust}\nlet verified = client.verify_message(&message)?;\n\nif verified.message != plan.message || !verified.unverified.is_empty() {\n    return Err("the transaction does not prove the plan's message".into());\n}`,
   };
 }
 
-export function sendSnippets(compiled: string, message: string): Record<string, string> {
+/// A plan of instructions alone: the caller compiles it to a message of any version, then verifies
+/// that message.
+export function compileSnippets(): Record<string, string> {
   return {
-    curl: `# Verify as the signer, then sign with the service's local wallets and send.\ncurl -s ${SERVICE}/v1/verify \\\n  -H 'content-type: application/json' \\\n  -d ${shellJson({ message: compiled, expected: message })}\n\ncurl -s ${SERVICE}/v1/send \\\n  -H 'content-type: application/json' \\\n  -d ${shellJson({ message: compiled })}`,
-    CLI: `# The client's verifier reads the registry over RPC, with no service.\nsdp-intents verify plan.json --rpc http://127.0.0.1:8899\nsdp-intents send plan.json --rpc http://127.0.0.1:8899 --keypair <signer.json>`,
-    Rust: `let client = sdp_intents_client::Client::new("http://127.0.0.1:8899");\nlet compiled = base64::engine::general_purpose::STANDARD.decode("${compiled.slice(0, 24)}…")?;\nlet verified = client.verify_message(&compiled)?;\nassert_eq!(verified.message, plan_message);\nlet signature = client.send_message(&compiled, &[&fee_payer, &owner])?;`,
+    CLI: `# Compile the instructions as a legacy, v0, or v1 transaction, then verify and send it.\nsdp-intents verify plan.json --rpc ${RPC} --version 0 --lookup-table <table>\nsdp-intents send plan.json --rpc ${RPC} --version 0 --lookup-table <table> --keypair <signer.json>`,
+    ...verifySnippets({
+      typescript:
+        "// The message that the caller compiled, of any version.\nconst message = compiledMessage;",
+      rust: "// The message that the caller compiled, of any version.\nlet message = compiled_message;",
+    }),
+  };
+}
+
+export function sendSnippets(compiled: string): Record<string, string> {
+  const verify = verifySnippets({
+    typescript:
+      // biome-ignore lint/security/noSecrets: a code sample, not a secret.
+      "const message = Uint8Array.from(atob(plan.transaction.messageBytes), (c) => c.charCodeAt(0));",
+    rust: `let message = base64::engine::general_purpose::STANDARD.decode("${compiled.slice(0, 24)}…")?;`,
+  });
+
+  return {
+    TypeScript: verify.TypeScript,
+    Rust: `${verify.Rust}\n\nlet signature = client.send_message(&message, &[&fee_payer, &owner])?;`,
+    CLI: `# The client's verifier reads the registry over RPC, with no service.\nsdp-intents verify plan.json --rpc ${RPC}\nsdp-intents send plan.json --rpc ${RPC} --keypair <signer.json>`,
+    curl: `# Sign with the service's local wallets and send. Verify first, with one of the other snippets.\ncurl -s ${SERVICE}/v1/send \\\n  -H 'content-type: application/json' \\\n  -d ${shellJson({ message: compiled })}`,
   };
 }

@@ -11,7 +11,7 @@
 //!   that names the rent payer and creates no account.
 //! - The implementations cover SPL Token assets, because an ATA seed names the token program.
 
-#![no_std]
+#![cfg_attr(not(feature = "idl-build"), no_std)]
 
 extern crate alloc;
 

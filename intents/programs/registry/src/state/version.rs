@@ -3,11 +3,12 @@
 
 use anchor_lang::prelude::*;
 use pinocchio::account::Ref;
-use sdp_intents_spec::wire::{DocumentIdV1, DocumentKind, PodU64, SemverV1};
+use sdp_intents_spec::wire::{DocumentIdV1, DocumentKind};
 use sdp_intents_spec::{Implementation, Interface};
 
 use crate::error::RegistryError;
 use crate::state::owned_data;
+use crate::state::wire::{PodU64, SemverV1};
 
 #[account]
 pub struct InterfaceV1 {
@@ -72,7 +73,11 @@ pub struct VersionSeeds {
 
 impl VersionSeeds {
     pub fn new(version: &SemverV1) -> Self {
-        Self { major: version.major.0, minor: version.minor.0, patch: version.patch.0 }
+        Self {
+            major: version.major.get().to_le_bytes(),
+            minor: version.minor.get().to_le_bytes(),
+            patch: version.patch.get().to_le_bytes(),
+        }
     }
 }
 

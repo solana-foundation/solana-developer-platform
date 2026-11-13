@@ -1,0 +1,16 @@
+[package]
+name = "idl"
+description = "Writes the IDL of each Anchor program of this workspace to target/idl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anchor-lang-idl = { git = "https://github.com/otter-sec/anchor", rev = "7d28d8b5fde8d46b204ebf161c9db3956801146a", features = ["build"] }
+anyhow = "=1.0.104"
+serde_json = "=1.0.154"
+
+[lints]
+workspace = true

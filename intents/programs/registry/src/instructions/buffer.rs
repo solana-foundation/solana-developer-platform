@@ -1,8 +1,8 @@
 use anchor_lang::prelude::*;
-use sdp_intents_spec::wire::PodU16;
 
 use crate::error::RegistryError;
 use crate::state::buffer::{BufferV1, FIXED_LEN, MAX_DOCUMENT_LEN};
+use crate::state::wire::PodU16;
 use crate::state::{close, owned_data, owned_data_mut, BUFFER_SEED};
 
 /// The first write creates the buffer at the size of the whole document, and the writer pays its
@@ -57,7 +57,7 @@ impl WriteBuffer {
         let seeds: [&[u8]; 4] = [BUFFER_SEED, self.writer.address().as_ref(), &buffer_id, &[bump]];
         anchor_lang::create_account_signed(self.writer.account(), self.buffer.account(), space, &crate::ID, &seeds)?;
 
-        let header = BufferV1 { authority: *self.writer.address(), document_len: PodU16::new(document_len) };
+        let header = BufferV1 { authority: *self.writer.address(), document_len: PodU16::from(document_len) };
         let mut view = *self.buffer.account();
         let mut data = view.try_borrow_mut()?;
         data.get_mut(..8).ok_or(RegistryError::WrongAccount)?.copy_from_slice(BufferV1::DISCRIMINATOR);

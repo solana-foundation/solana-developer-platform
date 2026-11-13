@@ -1,9 +1,10 @@
 use anchor_lang::prelude::*;
-use sdp_intents_spec::wire::{DocumentKind, PodBool};
+use sdp_intents_spec::wire::DocumentKind;
 
 use crate::error::RegistryError;
 use crate::state::index::{self, Index, VersionIndexV1};
 use crate::state::organization::OrganizationV1;
+use crate::state::wire::PodBool;
 use crate::state::{semver, INDEX_SEED};
 
 pub const INTERFACE_KIND_SEED: &[u8] = &[DocumentKind::Interface as u8];
@@ -119,7 +120,7 @@ impl ChangeIndex {
         let mut header = index::header_mut(&mut view)?;
         self.require_approve_authority(&header)?;
 
-        header.approve_new_versions = PodBool::new(approve_new_versions);
+        header.approve_new_versions = PodBool::from(approve_new_versions);
 
         Ok(())
     }
@@ -134,7 +135,7 @@ impl ChangeIndex {
         self.require_organization(&header)?;
         self.organization.require_authority(&header.update_authority, &self.authority)?;
 
-        header.has_head = PodBool::new(true);
+        header.has_head = PodBool::from(true);
         header.head = version;
 
         Ok(())
