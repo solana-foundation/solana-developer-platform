@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
-import { getE2EEnv } from "../env";
+import { z } from "zod";
+import { getE2EEnv } from "@/playwright/env";
 
 /**
  * Keeps the suite under sdp-api's per-user rate limits by pausing before a test or a
@@ -23,17 +24,29 @@ const COUNTERS = [
   { name: "clerk-user", match: /^(?:.*:)?ratelimit:(clerk:[^:]+):(\d+)$/, limit: 600 },
   { name: "user-org", match: /^(?:.*:)?ratelimit:(user:[^:]+:org:[^:]+):(\d+)$/, limit: 300 },
 ] as const;
+const SMALLEST_LIMIT = Math.min(...COUNTERS.map((counter) => counter.limit));
 
 /**
  * Requests left free before a test may start. The heaviest dashboard test makes about
- * 110 Clerk-authenticated requests, so 150 lets any one of them finish under the limit.
+ * 110 Clerk-authenticated requests, so the default of 150 lets any one of them finish
+ * under the limit. It must leave room under the smallest limit, or every test waits.
  */
-const HEADROOM = Number(process.env.PLAYWRIGHT_RATE_LIMIT_HEADROOM ?? 150);
+const HEADROOM = z.coerce
+  .number()
+  .int()
+  .min(0)
+  .max(SMALLEST_LIMIT - 1)
+  .default(150)
+  .parse(process.env.PLAYWRIGHT_RATE_LIMIT_HEADROOM);
 /** Longest a pause may last: a full window always drains the previous one. */
 const MAX_WAIT_MS = 2 * WINDOW_MS;
 const POLL_MS = 1_000;
 
 const LOG_PATH = path.join(__dirname, "../../test-results/rate-budget.jsonl");
+
+const scanReplySchema = z.tuple([z.string(), z.array(z.string())]);
+// MGET answers null for a key that expired between SCAN and MGET: no requests left in it.
+const mgetReplySchema = z.array(z.string().nullable());
 
 type RespValue = string | number | null | RespValue[];
 
@@ -75,14 +88,14 @@ function encode(args: readonly (string | number)[]): string {
 }
 
 /**
- * Sends commands over one short-lived connection and returns their replies. This reads
- * a few commands a second at most, so it needs no client library (and no dependency):
+ * Sends one command over a short-lived connection and returns its reply. This reads a
+ * few commands a second at most, so it needs no client library (and no dependency):
  * only SCAN and MGET, after AUTH and SELECT when the URL names them.
+ *
+ * @throws When Redis refuses a command, the connection fails or closes before every
+ *   reply arrives, or nothing arrives within five seconds.
  */
-function redisCommands(
-  url: URL,
-  commands: readonly (readonly (string | number)[])[]
-): Promise<RespValue[]> {
+function redisCommand(url: URL, command: readonly (string | number)[]): Promise<RespValue> {
   const setup: (string | number)[][] = [];
   if (url.password) {
     setup.push(
@@ -93,9 +106,15 @@ function redisCommands(
   }
   const db = url.pathname.replace(/^\//, "");
   if (db) setup.push(["SELECT", db]);
-  const all = [...setup, ...commands];
+  const all = [...setup, command];
 
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (outcome: () => void) => {
+      if (settled) return;
+      settled = true;
+      outcome();
+    };
     const socket = net.createConnection({ host: url.hostname, port: Number(url.port || 6379) });
     socket.setTimeout(5_000, () => socket.destroy(new Error("Redis: timed out")));
     let buffer = Buffer.alloc(0);
@@ -113,22 +132,30 @@ function redisCommands(
         }
       } catch (error) {
         socket.destroy();
-        reject(error);
+        settle(() => reject(error));
         return;
       }
       socket.end();
-      resolve(replies.slice(setup.length));
+      settle(() => resolve(replies[replies.length - 1]));
     });
-    socket.on("error", reject);
+    socket.on("error", (error) => settle(() => reject(error)));
+    // A connection that closes before every reply arrived must not leave the test waiting.
+    socket.on("close", () =>
+      settle(() => reject(new Error("Redis: connection closed before the reply")))
+    );
   });
 }
 
-/** The run's own Redis, or null when the run cannot read the API's counters. */
+/**
+ * The run's own Redis, or null when the run talks to a deployed API whose Redis it
+ * cannot read (the external smoke).
+ *
+ * @throws When a run against the local API has no REDIS_URL: the local API cannot
+ *   start without one, so its absence here means the run is misconfigured.
+ */
 function redisUrl(): URL | null {
-  const raw = process.env.REDIS_URL?.trim();
-  // The external smoke runs against a deployed API whose Redis the run cannot read.
-  if (getE2EEnv().useExternalApi || !raw) return null;
-  return new URL(raw);
+  if (getE2EEnv().useExternalApi) return null;
+  return new URL(z.string().trim().min(1).parse(process.env.REDIS_URL));
 }
 
 export interface RateLimitReading {
@@ -149,17 +176,14 @@ export async function readRateLimits(): Promise<RateLimitReading[]> {
   const keys: string[] = [];
   let cursor = "0";
   do {
-    const [reply] = await redisCommands(url, [
-      ["SCAN", cursor, "MATCH", "*ratelimit:*", "COUNT", 500],
-    ]);
-    const [next, batch] = reply as [string, string[]];
+    const [next, batch] = scanReplySchema.parse(
+      await redisCommand(url, ["SCAN", cursor, "MATCH", "*ratelimit:*", "COUNT", 500])
+    );
     keys.push(...batch);
     cursor = next;
   } while (cursor !== "0");
   const values =
-    keys.length > 0
-      ? ((await redisCommands(url, [["MGET", ...keys]]))[0] as (string | null)[])
-      : [];
+    keys.length > 0 ? mgetReplySchema.parse(await redisCommand(url, ["MGET", ...keys])) : [];
 
   const windows = new Map<
     string,
@@ -176,7 +200,8 @@ export async function readRateLimits(): Promise<RateLimitReading[]> {
         current: 0,
         previous: 0,
       };
-      const count = Number(values[index] ?? 0);
+      const value = values[index];
+      const count = value === null ? 0 : Number(value);
       if (Number(start) === windowStart) entry.current = count;
       if (Number(start) === windowStart - WINDOW_MS) entry.previous = count;
       windows.set(identifier, entry);
@@ -198,51 +223,62 @@ function overBudget(readings: RateLimitReading[]): RateLimitReading | undefined 
   return readings.find((reading) => reading.estimate > reading.limit - HEADROOM);
 }
 
+/** A reading without its Clerk user and org ids: CI uploads the log as an artifact. */
+function loggable(reading: RateLimitReading | undefined) {
+  return reading
+    ? { counter: reading.counter, estimate: reading.estimate, limit: reading.limit }
+    : null;
+}
+
 function record(entry: Record<string, unknown>): void {
-  try {
-    fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true });
-    fs.appendFileSync(LOG_PATH, `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`);
-  } catch {
-    // Instrumentation only: a run never fails on its log.
-  }
+  fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true });
+  fs.appendFileSync(LOG_PATH, `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`);
 }
 
 /**
- * Waits until every per-user counter has HEADROOM requests free, then records what it
- * saw. Never throws: a Redis it cannot read, or a wait that runs out, lets the test run.
+ * Waits until every per-user counter has HEADROOM requests free, then records what it saw.
  *
  * @param label - What is about to run, for the log.
  * @returns How long it waited, in milliseconds.
+ * @throws When the counters cannot be read, or stay over budget for MAX_WAIT_MS: a test
+ *   started then would run into the API's 429 and fail somewhere less obvious.
  */
 export async function waitForRateLimitBudget(label: string): Promise<number> {
   const started = Date.now();
-  try {
-    let readings = await readRateLimits();
-    const before = readings[0] ?? null;
-    while (overBudget(readings) && Date.now() - started < MAX_WAIT_MS) {
-      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-      readings = await readRateLimits();
-    }
-    const waitedMs = Date.now() - started;
-    record({ event: "budget", label, waitedMs, before, after: readings[0] ?? null });
-    if (before && overBudget([before])) {
-      console.log(
-        `[rate-budget] waited ${waitedMs}ms before "${label}" (${before.counter} at ${before.estimate}/${before.limit})`
+  let readings = await readRateLimits();
+  const before = readings[0];
+  let stuck = overBudget(readings);
+  while (stuck) {
+    if (Date.now() - started >= MAX_WAIT_MS) {
+      throw new Error(
+        `Rate-limit budget never freed up before "${label}": ${stuck.counter} stayed at ${stuck.estimate}/${stuck.limit} for ${MAX_WAIT_MS}ms`
       );
     }
-    return waitedMs;
-  } catch (error) {
-    record({ event: "budget-error", label, error: String(error) });
-    return Date.now() - started;
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    readings = await readRateLimits();
+    stuck = overBudget(readings);
   }
+  const waitedMs = Date.now() - started;
+  record({
+    event: "budget",
+    label,
+    waitedMs,
+    before: loggable(before),
+    after: loggable(readings[0]),
+  });
+  if (before && overBudget([before])) {
+    console.log(
+      `[rate-budget] waited ${waitedMs}ms before "${label}" (${before.counter} at ${before.estimate}/${before.limit})`
+    );
+  }
+  return waitedMs;
 }
 
 /** Records the counters after a test, so the log shows what each test used. */
-export async function recordRateLimitUsage(label: string, status: string): Promise<void> {
-  try {
-    const readings = await readRateLimits();
-    record({ event: "after", label, status, top: readings[0] ?? null });
-  } catch (error) {
-    record({ event: "after-error", label, error: String(error) });
-  }
+export async function recordRateLimitUsage(
+  label: string,
+  status: string | undefined
+): Promise<void> {
+  const readings = await readRateLimits();
+  record({ event: "after", label, status: status ?? null, top: loggable(readings[0]) });
 }

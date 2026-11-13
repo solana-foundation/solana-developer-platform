@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { expect, type Page } from "@playwright/test";
 import { projectHref } from "@/lib/dashboard-project-path";
-import { expect, type Page, test } from "@/playwright/support/test";
+import { test } from "@/playwright/support/test";
 import { createLocalApiClient } from "../support/local-api-client";
 import {
   bootstrapLocalWalletFixtures,

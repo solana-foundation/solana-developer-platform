@@ -1,5 +1,6 @@
+import { expect } from "@playwright/test";
 import { projectHref } from "@/lib/dashboard-project-path";
-import { expect, test } from "@/playwright/support/test";
+import { test } from "@/playwright/support/test";
 import {
   bootstrapLocalWalletFixtures,
   provisionWithAdminSession,

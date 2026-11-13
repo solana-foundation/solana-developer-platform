@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createClerkClient } from "@clerk/backend";
 import { clerk, clerkSetup } from "@clerk/testing/playwright";
+import { expect, type Page } from "@playwright/test";
 import { Client } from "pg";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { getE2EEnv } from "@/playwright/env";
@@ -8,7 +9,7 @@ import { activateClerkOrganization } from "@/playwright/support/clerk-activation
 import { resolveClerkTestIdentity } from "@/playwright/support/clerk-admin";
 import { recordClerkSession } from "@/playwright/support/clerk-sessions";
 import { provisionLinkedOrgProjects } from "@/playwright/support/local-dashboard-bootstrap";
-import { expect, type Page, test } from "@/playwright/support/test";
+import { test } from "@/playwright/support/test";
 
 declare global {
   interface Window {

@@ -1,5 +1,6 @@
+import { type Browser, expect, type Page, type Request } from "@playwright/test";
 import { projectHref } from "@/lib/dashboard-project-path";
-import { type Browser, expect, type Page, type Request, test } from "@/playwright/support/test";
+import { test } from "@/playwright/support/test";
 import {
   bootstrapLocalWalletFixtures,
   provisionLinkedOrgProjects,
