@@ -25,10 +25,7 @@ impl Build<'_, '_> {
         let recipe = match kind {
             "static" => self.read_static(&mut object),
             "program" => self.read_program(&mut object),
-            "remote" => object
-                .required("url", self.sink)
-                .and_then(|url| url.str(self.sink).map(|url| url.as_bytes().to_vec()))
-                .map(|url| Recipe { kind: RecipeKind::Remote, url }),
+            "remote" => self.read_remote(&mut object),
             _ => {
                 let diagnostic =
                     Diagnostic::new(Code::InvalidValue, &kind_node.pointer, format!("`{kind}` is not a recipe kind"));
@@ -59,6 +56,39 @@ impl Build<'_, '_> {
         }
 
         Some(Recipe { kind: RecipeKind::Static, url: Vec::new() })
+    }
+
+    /// `{ "url": "…", "returns": "instructions" | "transaction", "accounts": { … }, "outputs": { … } }`.
+    /// The accounts and the output bindings are optional. They pin what the endpoint must not choose,
+    /// such as the share mint or a provider's receiving wallet.
+    fn read_remote(&mut self, object: &mut Object<'_>) -> Option<Recipe> {
+        let url =
+            object.required("url", self.sink).and_then(|url| url.str(self.sink).map(|url| url.as_bytes().to_vec()));
+        let returns = object.required("returns", self.sink).and_then(|returns| match returns.str(self.sink)? {
+            "instructions" => Some(RecipeKind::Remote),
+            "transaction" => Some(RecipeKind::RemoteTransaction),
+            other => {
+                self.sink.push(
+                    Diagnostic::new(
+                        Code::InvalidValue,
+                        &returns.pointer,
+                        format!("`{other}` is not what an endpoint returns"),
+                    )
+                    .help("an endpoint returns `instructions` or `transaction`"),
+                );
+                None
+            }
+        });
+
+        if let Some(accounts) = object.field("accounts") {
+            self.read_accounts(&accounts, Table::Static);
+        }
+
+        if let Some(outputs) = object.field("outputs") {
+            self.read_output_bindings(&outputs);
+        }
+
+        Some(Recipe { kind: returns?, url: url? })
     }
 
     /// The builder call is one instruction, which passes every record account, in order, to the

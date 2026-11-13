@@ -9,10 +9,11 @@ mod write;
 use sdp_intents_spec::wire::{
     AccountV1, AppliesV1, DocumentIdV1, InstructionV1, OutputBindingV1, PostConditionV1, SegmentV1, SemverV1,
 };
+use sdp_intents_spec::{CheckKind, RecipeKind};
 use serde_json::Value;
 
 use crate::catalog::Catalog;
-use crate::diagnostic::Report;
+use crate::diagnostic::{Code, Diagnostic, Report};
 use crate::encoding::address;
 use crate::envelope::{parse_json, read_envelope, reported, root};
 use crate::id::Id;
@@ -88,6 +89,18 @@ fn compile(value: &Value, catalog: &Catalog, sink: &mut Sink) -> Option<Compiled
     build.read_post_conditions(&mut object);
 
     let pointer = object.pointer().to_owned();
+    let remote =
+        recipe.as_ref().is_some_and(|recipe| matches!(recipe.kind, RecipeKind::Remote | RecipeKind::RemoteTransaction));
+    let invokes_only =
+        build.post_conditions.iter().any(|condition| condition.check == u8::from(CheckKind::InvokesOnly));
+
+    if remote && !invokes_only {
+        build.sink.push(
+            Diagnostic::new(Code::MissingKey, &pointer, "a remote recipe needs an `invokesOnly` postcondition")
+                .help("list every program that the endpoint's instructions can call"),
+        );
+    }
+
     object.finish(build.sink);
     build.check_limits(&pointer);
 
@@ -181,6 +194,47 @@ mod tests {
         assert_eq!(record.accounts().unwrap().len(), 3);
         assert_eq!(record.instruction_accounts(instruction).unwrap(), &[0, 1]);
         assert_eq!(record.message().unwrap(), b"transfer {i3} SOL from {i0} to {i1}");
+    }
+
+    /// A remote transfer with a pinned account, which the interface has no output to bind.
+    const REMOTE_TRANSFER: &str = r#"{
+      "spec": "sdp-intents@1.0", "kind": "implementation", "id": "solana.org/remote-transfer", "version": "1.0.0",
+      "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d", "implements": "solana.org/token.transfer@^1",
+      "message": "transfer {inputs.amount} of {inputs.mint}",
+      "recipe": { "kind": "remote", "url": "https://example.invalid", "returns": "instructions",
+                  "accounts": [{ "name": "wallet", "address": "11111111111111111111111111111112" }] },
+      "postConditions": [{ "invokesOnly": ["11111111111111111111111111111111"], "message": "only System instructions run" }]
+    }"#;
+
+    #[test]
+    fn compiles_a_remote_recipe_with_pinned_accounts() {
+        let compiled = compile_implementation(REMOTE_TRANSFER, &catalog()).unwrap();
+        let record = Implementation::parse(&compiled.bytes).unwrap();
+
+        assert_eq!(record.recipe(), Ok(RecipeKind::Remote));
+        assert_eq!(record.url().unwrap(), b"https://example.invalid");
+        assert_eq!(record.accounts().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_remote_recipe_states_invokes_only_and_what_it_returns() {
+        let no_invokes_only = REMOTE_TRANSFER.replace(
+            r#""invokesOnly": ["11111111111111111111111111111111"]"#,
+            r#""outflow": { "from": "{inputs.from}", "mint": "{inputs.mint}", "max": "{inputs.amount}" }"#,
+        );
+        let unknown_returns = REMOTE_TRANSFER.replace(r#""returns": "instructions""#, r#""returns": "quotes""#);
+        let codes = |text: &str| compile_implementation(text, &catalog()).err().map(|report| report.codes());
+
+        assert_eq!(codes(&no_invokes_only), Some(vec![Code::MissingKey]));
+        assert_eq!(codes(&unknown_returns), Some(vec![Code::InvalidValue]));
+        assert_eq!(
+            compile_implementation(
+                &REMOTE_TRANSFER.replace(r#""returns": "instructions""#, r#""returns": "transaction""#),
+                &catalog()
+            )
+            .map(|compiled| Implementation::parse(&compiled.bytes).and_then(|record| record.recipe()).ok()),
+            Ok(Some(RecipeKind::RemoteTransaction))
+        );
     }
 
     #[test]

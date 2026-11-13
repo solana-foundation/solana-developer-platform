@@ -12,6 +12,7 @@ rust-version.workspace = true
 [dependencies]
 base64.workspace = true
 bs58.workspace = true
+reqwest = { version = "=0.12.28", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 sdp-intents-planner.workspace = true
 sdp-intents-spec.workspace = true
 serde_json.workspace = true

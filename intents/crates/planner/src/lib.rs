@@ -1,14 +1,18 @@
-//! Turns an intent into a plan, with no IO. The planner returns each fetch and each simulation that
-//! the plan needs, and its caller answers them. The client answers with RPC, and the service answers
+//! Turns an intent into a plan, with no IO. The planner returns each fetch, each simulation, and each
+//! remote call that the plan needs, and its caller answers them. The client answers with RPC, and the service answers
 //! from its cache and its own simulator. Both run the same planner.
 //!
 //! ```
-//! use sdp_intents_planner::{Account, AccountMap, Plan, PlanError, PlanRequest, Planner, Simulation, SimulationResult, Step};
+//! use sdp_intents_planner::{
+//!     Account, AccountMap, Plan, PlanError, PlanRequest, Planner, RemoteAnswer, RemoteCall, Simulation, SimulationResult,
+//!     Step,
+//! };
 //! use sdp_intents_spec::Address;
 //!
 //! trait Rpc {
 //!     fn get_multiple_accounts(&self, addresses: &[Address]) -> Vec<Option<Account>>;
 //!     fn simulate(&self, simulation: &Simulation) -> SimulationResult;
+//!     fn call(&self, call: &RemoteCall) -> RemoteAnswer;
 //! }
 //!
 //! fn plan(rpc: &impl Rpc, request: &PlanRequest<'_>, scratch: Address) -> Result<Plan, PlanError> {
@@ -19,6 +23,7 @@
 //!         match planner.next(&accounts)? {
 //!             Step::Fetch(addresses) => accounts.insert_fetched(&addresses, rpc.get_multiple_accounts(&addresses)),
 //!             Step::Simulate(simulation) => planner.simulated(rpc.simulate(&simulation))?,
+//!             Step::Call(call) => planner.called(rpc.call(&call))?,
 //!             Step::Done(plan) => return Ok(*plan),
 //!         }
 //!     }
@@ -36,6 +41,7 @@ mod onchain;
 mod plan;
 mod planner;
 mod registry;
+mod remote;
 mod render;
 mod segment;
 mod simulation;
@@ -53,6 +59,7 @@ pub use instruction::{AccountMeta, Instruction};
 pub use plan::{Digests, Plan, PlannedIntent};
 pub use planner::{PlanRequest, Planner, Step};
 pub use registry::REGISTRY_PROGRAM;
+pub use remote::{InputValue, RemoteAnswer, RemoteCall, RemoteInput, RemoteOutput};
 pub use sdp_intents_engine::Payers;
 pub use simulation::{ReturnData, Simulation, SimulationResult};
 pub use transaction::{Budget, RequiredSignature, SignerRole, Transaction};

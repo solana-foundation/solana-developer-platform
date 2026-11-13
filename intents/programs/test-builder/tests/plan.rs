@@ -65,7 +65,7 @@ fn plans_a_builder_transfer_in_two_rounds_and_sends_it() {
     assert!(plan.message.contains(&format!(" || 1: transfer 2 SOL from {}", wallets.from.pubkey())));
     assert!(plan
         .message
-        .contains(&format!("| builder: {} | onchain checks: assertions | rent cap ", test_builder::id())));
+        .contains(&format!("| builder: {} | tier 1 | onchain checks: assertions | rent cap ", test_builder::id())));
 
     send(&mut svm, &plan, &[&wallets.fee_payer, &wallets.from]).unwrap();
 

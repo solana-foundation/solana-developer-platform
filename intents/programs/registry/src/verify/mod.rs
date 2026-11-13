@@ -8,8 +8,8 @@
 //!
 //! The data is the intent in binary form, the builder's role of each account of its instructions
 //! for a program recipe, the interface's outputs, and the [`SegmentLayout`]. A static recipe holds
-//! no roles, because `verify_intent` builds its instructions itself. A remote recipe's span is
-//! empty, so `verify_intent` proves only the record and its accounts.
+//! no roles, because `verify_intent` builds its instructions itself. A remote recipe holds the roles
+//! that its endpoint stated, and [`remote_recipe`] checks what holds for any instructions.
 //!
 //! The outputs and the counts of the layout are what a signer reads to render the message and to
 //! find the segment, so `verify_intent` refuses any that differ from what it derives.
@@ -19,6 +19,7 @@ mod chain;
 mod position;
 mod program_recipe;
 mod registry;
+mod remote_recipe;
 mod roles;
 mod static_recipe;
 
@@ -118,7 +119,23 @@ pub fn verify_intent(accounts: &VerifyIntent, passed: &[AccountView], args: Veri
 
             program_recipe::verify(&hashed, sysvar, payers, args.builder_roles, &Segment { built, whole: first..end })
         }
-        RecipeKind::Remote => Ok(()),
+        RecipeKind::Remote => {
+            require!(options.assertions, RegistryError::RemoteNeedsAssertions);
+            remote_recipe::check_outputs(&recipe, args.outputs)?;
+
+            let built = ends.built(sysvar, usize::from(layout.built))?;
+            remote_recipe::check_programs(&recipe, sysvar, &built)?;
+
+            let named = position::named(sysvar, &built, builder_roles(args.builder_roles)?.into_iter())?;
+            require!(named.len() == args.builder_roles.len(), RegistryError::WrongBuilderRoles);
+
+            let mut roles = roles::TransactionRoles::new(payers.fee);
+            named.iter().for_each(|meta| roles.add(&meta.address, meta.role));
+            let end = ends.end(sysvar, named, args.outputs, &built)?;
+
+            program_recipe::check_roles(sysvar, &Segment { built, whole: first..end }, &roles)
+        }
+        RecipeKind::RemoteTransaction => Err(RegistryError::WrongRecipeKind.into()),
     }
 }
 

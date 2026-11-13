@@ -144,7 +144,7 @@ pub fn implementation(view: &Implementation<'_>, names: &Names) -> Result<Value,
     let applies =
         view.applies()?.iter().map(|applies| applies_text(view, applies, names)).collect::<Result<Vec<_>, _>>()?;
     let url = match view.recipe()? {
-        RecipeKind::Remote => Some(String::from_utf8_lossy(view.url()?).into_owned()),
+        RecipeKind::Remote | RecipeKind::RemoteTransaction => Some(String::from_utf8_lossy(view.url()?).into_owned()),
         _ => None,
     };
 
@@ -181,6 +181,7 @@ pub fn recipe_name(kind: RecipeKind) -> &'static str {
         RecipeKind::Static => "static",
         RecipeKind::Program => "program",
         RecipeKind::Remote => "remote",
+        RecipeKind::RemoteTransaction => "remote transaction",
     }
 }
 

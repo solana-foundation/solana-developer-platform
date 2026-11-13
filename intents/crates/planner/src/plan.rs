@@ -2,7 +2,7 @@ use core::ops::Range;
 
 use sdp_intents_engine::{Chain, Payers, Recipe};
 use sdp_intents_spec::builder::Ready;
-use sdp_intents_spec::{Address, ValueRef, ValueSource};
+use sdp_intents_spec::{Address, RecipeKind, ValueRef, ValueSource};
 
 use crate::render::{base58, Column};
 use crate::values::{Table, Values};
@@ -164,6 +164,11 @@ impl<C: Chain> Values<'_, '_, C> {
         };
 
         let builder = builder.map(|builder| format!(" | builder: {}", base58(builder))).unwrap_or_default();
+        let tier = match implementation.recipe()? {
+            RecipeKind::Static | RecipeKind::Program => " | tier 1".to_owned(),
+            RecipeKind::Remote => format!(" | endpoint: {} | tier 2", printable(implementation.url()?)?),
+            RecipeKind::RemoteTransaction => " | tier 3".to_owned(),
+        };
         let options = self.recipe.intent().options()?;
         let checks = match (options.verify_intent, options.assertions) {
             (true, true) => "verify_intent, assertions",
@@ -173,7 +178,7 @@ impl<C: Chain> Values<'_, '_, C> {
         };
 
         Ok(format!(
-            "{record} | guarantees: {} | interface: {} | implementation: {}{builder} | onchain checks: {checks}",
+            "{record} | guarantees: {} | interface: {} | implementation: {}{builder}{tier} | onchain checks: {checks}",
             guarantees.join("; "),
             id(interface.name()?, interface.id().version, &digests.interface),
             id(implementation.name()?, implementation.id().version, &digests.implementation),
@@ -213,5 +218,15 @@ impl<C: Chain> Values<'_, '_, C> {
                 Ok(RequiredSignature { address, role })
             })
             .collect()
+    }
+}
+
+/// Text that the message can hold: printable ASCII only, so that no character looks like another.
+fn printable(bytes: &[u8]) -> Result<&str, PlanError> {
+    let text = core::str::from_utf8(bytes).map_err(|_| PlanError::UnsafeText)?;
+
+    match text.bytes().all(|byte| (b' '..=b'~').contains(&byte)) {
+        true => Ok(text),
+        false => Err(PlanError::UnsafeText),
     }
 }

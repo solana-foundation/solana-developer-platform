@@ -42,7 +42,7 @@ impl Implementation<'_> {
         let fits = match self.recipe()? {
             RecipeKind::Static => instruction_count > 0 && !has_url,
             RecipeKind::Program => instruction_count == 1 && !has_url,
-            RecipeKind::Remote => instruction_count == 0 && self.accounts()?.is_empty() && has_url,
+            RecipeKind::Remote | RecipeKind::RemoteTransaction => instruction_count == 0 && has_url,
         };
 
         if !fits {

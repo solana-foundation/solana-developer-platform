@@ -74,4 +74,10 @@ pub enum RegistryError {
     WrongSegmentLayout,
     #[msg("The outputs differ from the record's or the builder's")]
     WrongOutputs,
+    #[msg("A remote recipe needs the assertions, because verify_intent cannot rebuild its instructions")]
+    RemoteNeedsAssertions,
+    #[msg("A built instruction calls a program that the record's invokesOnly does not list")]
+    ProgramNotListed,
+    #[msg("verify_intent cannot check a recipe that returns a whole transaction")]
+    WrongRecipeKind,
 }

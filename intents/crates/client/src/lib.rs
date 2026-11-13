@@ -15,6 +15,7 @@
 //! ```
 
 pub mod json;
+pub mod remote;
 pub mod rpc;
 mod send;
 mod verify;
@@ -68,6 +69,7 @@ impl Client {
             match planner.next(&accounts)? {
                 Step::Fetch(addresses) => accounts.insert_fetched(&addresses, self.fetch(&addresses)?),
                 Step::Simulate(simulation) => planner.simulated(self.simulate(&simulation)?)?,
+                Step::Call(call) => planner.called(self.call_remote(&call)?)?,
                 Step::Done(plan) => break plan,
             }
         };
@@ -148,6 +150,8 @@ pub enum ClientError {
     Verify(sdp_intents_planner::VerifyError),
     /// The message needs the signature of this address, and no signer holds its key.
     MissingSigner(String),
+    /// A remote recipe's endpoint did not answer, or answered with an error status.
+    Remote(String),
 }
 
 impl From<PlanError> for ClientError {
@@ -183,6 +187,7 @@ impl fmt::Display for ClientError {
             Self::Decode(error) => write!(f, "the answer does not decode: {error}"),
             Self::Verify(error) => write!(f, "the transaction does not verify: {error}"),
             Self::MissingSigner(address) => write!(f, "no signer holds the key of {address}"),
+            Self::Remote(error) => write!(f, "the remote endpoint failed: {error}"),
         }
     }
 }

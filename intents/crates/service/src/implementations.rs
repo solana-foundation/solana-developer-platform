@@ -262,6 +262,7 @@ fn rank(left: &Evaluated, right: &Evaluated) -> Ordering {
         RecipeKind::Static => 0,
         RecipeKind::Program => 1,
         RecipeKind::Remote => 2,
+        RecipeKind::RemoteTransaction => 3,
     };
 
     fit(left).cmp(&fit(right)).then(recipe(left).cmp(&recipe(right))).then(left.id.cmp(&right.id))

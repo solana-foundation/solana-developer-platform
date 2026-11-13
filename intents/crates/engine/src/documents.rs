@@ -116,7 +116,7 @@ impl<'a> Documents<'a> {
     fn used_inputs(&self) -> Result<InputSet, EngineError> {
         let mut used = InputSet::default();
 
-        if self.implementation.recipe()? == RecipeKind::Remote {
+        if matches!(self.implementation.recipe()?, RecipeKind::Remote | RecipeKind::RemoteTransaction) {
             return Ok(InputSet::ALL);
         }
 

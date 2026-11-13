@@ -147,10 +147,10 @@ impl<'r, C: Chain> Values<'r, '_, C> {
 
 /// Reads borsh values from the front of some bytes. `Recipe::bind` checked every input, so a read
 /// fails only on outputs that a builder wrote wrong.
-struct Reader<'v>(&'v [u8]);
+pub(crate) struct Reader<'v>(pub(crate) &'v [u8]);
 
 impl<'v> Reader<'v> {
-    fn read(&mut self, value_type: ValueType, optional: bool) -> Result<Value<'v>, PlanError> {
+    pub(crate) fn read(&mut self, value_type: ValueType, optional: bool) -> Result<Value<'v>, PlanError> {
         if optional && self.take(1)? == [0] {
             return Ok(Value::Absent);
         }

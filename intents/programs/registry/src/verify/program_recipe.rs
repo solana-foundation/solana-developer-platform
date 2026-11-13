@@ -170,7 +170,7 @@ fn instruction_section(
     Ok(section)
 }
 
-fn check_roles(sysvar: &SysvarInstructions, segment: &Segment, roles: &TransactionRoles) -> Result<()> {
+pub(crate) fn check_roles(sysvar: &SysvarInstructions, segment: &Segment, roles: &TransactionRoles) -> Result<()> {
     for position in segment.built.clone() {
         let instruction = sysvar.load_instruction_at(position)?;
 

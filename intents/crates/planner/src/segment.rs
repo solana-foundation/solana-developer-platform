@@ -16,6 +16,7 @@ use sdp_intents_spec::{Address, RecipeKind};
 
 use crate::onchain::{OnchainChecks, OnchainInputs, PLACEHOLDER_RENT_CAP};
 use crate::plan::{builder_program, with_rent_cap, Built, PlannedIntent};
+use crate::remote::{self, RemoteAnswer, RemoteCall};
 use crate::render::Column;
 use crate::values::Values;
 use crate::verify::{rent_cap, Snapshot, Verification};
@@ -38,6 +39,7 @@ pub(crate) struct Earlier<'e, C> {
 pub(crate) enum SegmentStep {
     Fetch(Vec<Address>),
     Simulate(Simulation),
+    Call(RemoteCall),
     Planned(Box<Segment>),
 }
 
@@ -78,6 +80,8 @@ enum State {
     AwaitingBuilder {
         builder: Address,
     },
+    /// The remote endpoint has no answer yet.
+    AwaitingRemote,
     Built(Built),
     AwaitingChecks(Box<Checking>),
     Planned(Box<Segment>),
@@ -134,7 +138,7 @@ impl<'a> SegmentPlanner<'a> {
             State::Building => self.simulate_builder(earlier),
             State::Built(built) => self.simulate_segment(built, earlier),
             State::Planned(segment) => Ok(SegmentStep::Planned(segment)),
-            awaiting @ (State::AwaitingBuilder { .. } | State::AwaitingChecks(_)) => {
+            awaiting @ (State::AwaitingBuilder { .. } | State::AwaitingChecks(_) | State::AwaitingRemote) => {
                 self.state = awaiting;
                 Err(PlanError::OutOfOrder)
             }
@@ -153,6 +157,33 @@ impl<'a> SegmentPlanner<'a> {
         }
     }
 
+    pub(crate) fn called(&mut self, answer: RemoteAnswer) -> Result<(), PlanError> {
+        match core::mem::replace(&mut self.state, State::Finished) {
+            State::AwaitingRemote => {
+                self.state = State::Built(Built::from_remote(&self.recipe, answer)?);
+                Ok(())
+            }
+            other => {
+                self.state = other;
+                Err(PlanError::OutOfOrder)
+            }
+        }
+    }
+
+    /// A remote segment's guarantees hold only when Lighthouse asserts them, unless the intent turns
+    /// every onchain check off and trusts the endpoint.
+    fn call_remote(&mut self) -> Result<SegmentStep, PlanError> {
+        let options = self.recipe.intent().options()?;
+
+        if options.verify_intent && !options.assertions {
+            return Err(PlanError::RemoteNeedsAssertions);
+        }
+
+        self.state = State::AwaitingRemote;
+
+        Ok(SegmentStep::Call(remote::call(&self.recipe)?))
+    }
+
     fn resolve<C: Chain>(&mut self, earlier: &Earlier<'_, C>) -> Result<SegmentStep, PlanError> {
         if let Resolution::Missing(missing) = self.recipe.resolve(earlier.chain)? {
             let addresses = missing.addresses().copied().collect();
@@ -164,7 +195,8 @@ impl<'a> SegmentPlanner<'a> {
         match self.recipe.implementation().recipe()? {
             RecipeKind::Static => self.simulate_segment(Built::from_static(&self.recipe, earlier.chain)?, earlier),
             RecipeKind::Program => self.simulate_builder(earlier),
-            RecipeKind::Remote => Err(PlanError::RemoteRecipe),
+            RecipeKind::Remote => self.call_remote(),
+            RecipeKind::RemoteTransaction => Err(PlanError::RemoteRecipe),
         }
     }
 

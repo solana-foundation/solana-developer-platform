@@ -9,7 +9,10 @@ wire_code! {
     pub enum RecipeKind {
         Static = 1,
         Program = 2,
+        /// An endpoint that returns instructions.
         Remote = 3,
+        /// An endpoint that returns a whole transaction, which the provider signed (`DESIGN.md`, 4.16).
+        RemoteTransaction = 4,
     }
 }
 

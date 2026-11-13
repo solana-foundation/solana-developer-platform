@@ -3079,6 +3079,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "bs58",
+ "reqwest",
  "sdp-intents-compiler",
  "sdp-intents-planner",
  "sdp-intents-spec",
@@ -3163,6 +3164,7 @@ dependencies = [
  "bs58",
  "clap",
  "futures-util",
+ "reqwest",
  "sdp-intents-chain",
  "sdp-intents-client",
  "sdp-intents-compiler",

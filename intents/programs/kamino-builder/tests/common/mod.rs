@@ -165,6 +165,8 @@ pub fn prepare(svm: &LiteSVM, documents: &Documents) -> Result<Measured, PlanErr
                 let fetched = addresses.iter().map(|address| fetch(svm, address)).collect();
                 accounts.insert_fetched(&addresses, fetched);
             }
+            // A builder record makes no remote call.
+            Step::Call(_) => return Err(sdp_intents_planner::PlanError::OutOfOrder),
             Step::Simulate(simulation) => {
                 let result = simulate(svm, &simulation);
                 let units = result.units_consumed.unwrap_or_default();

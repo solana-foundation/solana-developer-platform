@@ -3,12 +3,13 @@
 use base64::Engine as _;
 use serde_json::{json, Value};
 
+use axum::http::StatusCode;
 use sdp_intents_chain::{CachedRpc, Freshness};
-use sdp_intents_client::{decode_message, fresh_address, json as plan_json, prepared};
+use sdp_intents_client::{decode_message, fresh_address, json as plan_json, prepared, remote};
 use sdp_intents_compiler::IdRange;
 use sdp_intents_planner::{
-    verify_transaction, AccountMap, IntentDocuments, Payers, Plan, PlanRequest, Planner, Step, VerifiedTransaction,
-    VerifyStep,
+    verify_transaction, AccountMap, IntentDocuments, Payers, Plan, PlanRequest, Planner, RemoteAnswer, RemoteCall,
+    Step, VerifiedTransaction, VerifyStep,
 };
 
 use crate::error::ServiceError;
@@ -92,9 +93,28 @@ async fn plan(chain: &CachedRpc, request: &PlanRequest<'_>) -> Result<Plan, Serv
                 accounts.insert_fetched(&addresses, fetched);
             }
             Step::Simulate(simulation) => planner.simulated(chain.simulate(&simulation).await?)?,
+            Step::Call(call) => planner.called(call_remote(&call).await?)?,
             Step::Done(plan) => return Ok(*plan),
         }
     }
+}
+
+/// Calls a remote recipe's endpoint. The planner checks the answer as it checks any recipe.
+async fn call_remote(call: &RemoteCall) -> Result<RemoteAnswer, ServiceError> {
+    let failed = |error: reqwest::Error| {
+        ServiceError::new(StatusCode::BAD_GATEWAY, "remote", format!("the remote endpoint failed: {error}"))
+    };
+    let http = reqwest::Client::builder().timeout(remote::CALL_TIMEOUT).build().map_err(failed)?;
+    let response = http
+        .post(&call.url)
+        .json(&remote::request_body(call))
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .map_err(failed)?;
+    let answer: Value = response.json().await.map_err(failed)?;
+
+    Ok(remote::read_answer(&answer)?)
 }
 
 async fn verified(chain: &CachedRpc, message: &[u8]) -> Result<VerifiedTransaction, ServiceError> {

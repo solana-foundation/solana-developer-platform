@@ -28,7 +28,8 @@ use solana_signature::Signature;
 use sdp_intents_compiler::Catalog;
 use sdp_intents_planner::{
     verify_transaction, Account, AccountMap, Instruction, IntentDocuments, Payers, Plan, PlanError, PlanRequest,
-    Planner, ReturnData, Simulation, SimulationResult, Step, Transaction, VerifiedTransaction, VerifyError, VerifyStep,
+    Planner, RemoteAnswer, ReturnData, Simulation, SimulationResult, Step, Transaction, VerifiedTransaction,
+    VerifyError, VerifyStep,
 };
 use sdp_intents_spec::Address;
 
@@ -135,6 +136,12 @@ pub fn prepare(svm: &LiteSVM, documents: &Documents) -> Result<Plan, PlanError> 
 /// [`prepare`] for a plan of one or more intents, in order. The first intent's fee payer pays the
 /// fee and the rent, with no priority fee.
 pub fn prepare_intents(svm: &LiteSVM, intents: &[&Documents]) -> Result<Plan, PlanError> {
+    prepare_answering(svm, intents, Vec::new())
+}
+
+/// [`prepare_intents`] for remote recipes: each call to an endpoint takes the next of `answers`.
+pub fn prepare_answering(svm: &LiteSVM, intents: &[&Documents], answers: Vec<RemoteAnswer>) -> Result<Plan, PlanError> {
+    let mut answers = answers.into_iter();
     let first = intents.first().ok_or(PlanError::NoIntents)?;
     let request =
         PlanRequest { intents: intents.iter().map(|documents| documents.as_intent()).collect(), ..first.request() };
@@ -148,6 +155,7 @@ pub fn prepare_intents(svm: &LiteSVM, intents: &[&Documents]) -> Result<Plan, Pl
                 accounts.insert_fetched(&addresses, fetched);
             }
             Step::Simulate(simulation) => planner.simulated(simulate(svm, &simulation))?,
+            Step::Call(_) => planner.called(answers.next().ok_or(PlanError::OutOfOrder)?)?,
             Step::Done(plan) => return Ok(*plan),
         }
     }

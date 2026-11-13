@@ -12,4 +12,5 @@ mod svm;
 mod token;
 mod verifier;
 mod verify_program;
+mod verify_remote;
 mod verify_static;

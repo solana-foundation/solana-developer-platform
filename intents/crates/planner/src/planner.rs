@@ -17,7 +17,7 @@ pub struct PlanRequest<'a> {
     pub payers: Payers<'a>,
     pub priority_fee_lamports: u64,
 }
-use crate::{SimulationResult, Transaction};
+use crate::{RemoteAnswer, RemoteCall, SimulationResult, Transaction};
 
 /// What the caller does next for the planner.
 #[derive(Debug)]
@@ -26,6 +26,8 @@ pub enum Step {
     Fetch(Vec<Address>),
     /// Simulate this transaction and pass the result to `simulated`, then call `next` again.
     Simulate(Simulation),
+    /// Call a remote recipe's endpoint and pass its answer to `called`, then call `next` again.
+    Call(RemoteCall),
     Done(Box<Plan>),
 }
 
@@ -103,9 +105,15 @@ impl<'a> Planner<'a> {
             match segment.next(&earlier)? {
                 SegmentStep::Fetch(addresses) => return Ok(Step::Fetch(addresses)),
                 SegmentStep::Simulate(simulation) => return Ok(Step::Simulate(simulation)),
+                SegmentStep::Call(call) => return Ok(Step::Call(call)),
                 SegmentStep::Planned(segment) => self.add(*segment),
             }
         }
+    }
+
+    /// Reads the answer of the remote endpoint that `next` asked for.
+    pub fn called(&mut self, answer: RemoteAnswer) -> Result<(), PlanError> {
+        self.segments.get_mut(self.intents.len()).ok_or(PlanError::OutOfOrder)?.called(answer)
     }
 
     /// Reads the result of the simulation that `next` asked for.

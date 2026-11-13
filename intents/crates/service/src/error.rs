@@ -83,6 +83,7 @@ impl From<ClientError> for ServiceError {
             ClientError::Verify(error) => error.into(),
             ClientError::Rpc(error) => Self::new(StatusCode::BAD_GATEWAY, "rpc", error.to_string()),
             ClientError::Decode(message) | ClientError::Compile(message) => Self::invalid_request(message),
+            ClientError::Remote(message) => Self::new(StatusCode::BAD_GATEWAY, "remote", message),
             ClientError::MissingSigner(address) => {
                 Self::refused("missingSigner", format!("no local wallet holds the key of {address}"))
             }

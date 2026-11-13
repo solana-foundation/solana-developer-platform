@@ -31,8 +31,14 @@ pub enum PlanError {
     NoScratch,
     /// The builder asked for accounts in more than 4 rounds.
     TooManyRounds,
-    /// A remote recipe needs the endpoint client, which does not exist yet.
+    /// A remote recipe that returns a whole transaction, which prepare cannot plan yet.
     RemoteRecipe,
+    /// The endpoint names this output with another address than the record binds, or leaves out
+    /// an output that the record does not bind.
+    RemoteOutput(u8),
+    /// A remote recipe with `verify_intent` needs the assertions, because `verify_intent` cannot
+    /// rebuild its instructions.
+    RemoteNeedsAssertions,
     /// A builder names the rent payer's address itself, such as an owner who pays the rent.
     /// `verify_intent` cannot tell that account from the rent placeholder yet.
     RentPayerInRecipe,
@@ -106,7 +112,11 @@ impl fmt::Display for PlanError {
             Self::NoBuilderResult => f.write_str("the builder returned no result"),
             Self::NoScratch => f.write_str("the simulation returned no scratch account"),
             Self::TooManyRounds => f.write_str("the builder asked for accounts in more than 4 rounds"),
-            Self::RemoteRecipe => f.write_str("remote recipes are not supported yet"),
+            Self::RemoteRecipe => f.write_str("remote recipes that return a transaction are not supported yet"),
+            Self::RemoteOutput(output) => write!(f, "the endpoint's output {output} differs from the record, or is missing"),
+            Self::RemoteNeedsAssertions => f.write_str(
+                "a remote recipe needs `assertions`, because verify_intent cannot rebuild its instructions. Turn both checks off to trust the endpoint.",
+            ),
             Self::RentPayerInRecipe => f.write_str(
                 "the builder names the rent payer as one of its own accounts, which verify_intent cannot check yet. Pay the rent from another wallet.",
             ),
