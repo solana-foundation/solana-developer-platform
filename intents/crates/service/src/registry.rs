@@ -32,6 +32,7 @@ pub struct IndexAccount {
 }
 
 /// A version account to read.
+#[derive(Clone)]
 pub struct VersionChoice {
     pub kind: DocumentKind,
     pub organization: Address,

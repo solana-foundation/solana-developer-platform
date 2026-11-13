@@ -803,14 +803,21 @@ The e2e also compiles a plan of instructions alone as legacy, v0, and v1, and re
 endpoint that adds a token approval to an attacker.
 
 **Service.** `sdp-intents-service --rpc <url>` reads every document from the registry. With
-`--wallets <folder>` it also signs with local keypairs, for the playground.
+`--wallets <folder>` it also signs with local keypairs, for the playground. It serves each document
+as the definition JSON that `intents/definitions` uses, decompiled from the registry's bytes, so a
+client needs only the service and a verifier. A list reads two filtered `getProgramAccounts` calls.
+A single index or version reads only the addresses that its id and version derive.
 
 | Route | Body | Returns |
 | :-- | :-- | :-- |
-| `GET /v1/registry` | | Every organization, interface, and implementation, each described |
+| `GET /v1/registry` | | Every organization, interface, and implementation, in one call |
+| `GET /v1/organizations`, `/v1/interfaces`, `/v1/implementations` | | Every one of that kind |
+| `GET /v1/{interfaces\|implementations}/{organization}/{name}` | | One index: its head, versions, and authorities |
+| `GET /v1/{interfaces\|implementations}/{organization}/{name}/versions/{version}` | | One version, with its document in the definition format |
+| `GET /v1/interfaces/{organization}/{name}/implementations` | | The interface's implementations, each with its approval |
+| `POST /v1/interfaces/{organization}/{name}/versions/{version}/matches` | `{ inputs, payers, all }` | Each implementation, with its status |
 | `POST /v1/prepare` | A plan request | The plan, with its RPC calls |
 | `POST /v1/verify` | A message or a transaction of any version, and the plan's message | What the transaction proves |
-| `POST /v1/implementations` | `{ interface, inputs, payers, all }` | Each implementation, with its status |
 | `GET /v1/wallets`, `POST /v1/send` | A message or a transaction | The local wallets, and a send |
 | `GET /metrics` | | Requests, RPC calls, and cache reads |
 
@@ -824,7 +831,8 @@ local surfnet and is never deployed (`apps/intents-playground/README.md`).
    units, `verify`, and `send`. `verify` runs `@sdp/intents-verifier` in the browser against the
    surfnet's RPC, not on the service. A switch asks for instructions alone. Each signature and address
    links to Solana Explorer.
-4. The Implementation tab shows the definition file, the cluster, and the bytes that the registry holds.
+4. The Implementation tab shows the implementation as the service decompiles it, the cluster, and the
+   bytes that the registry holds.
 5. Two switches show the checks: a malicious remote endpoint, which the assertions refuse, and a
    tampered plan, which `verify_intent` refuses onchain.
 

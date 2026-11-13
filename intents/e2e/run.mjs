@@ -227,10 +227,18 @@ try {
   const listing = await service("/v1/registry");
   expect(listing.interfaces.length === 6 && listing.implementations.length === 14, "it lists 6 interfaces and 14 implementations");
 
+  const transfer = await service("/v1/interfaces/solana.org/token.transfer");
+  expect(transfer.head === "1.0.0", "the interface's head is 1.0.0");
+
+  const published = await service("/v1/interfaces/solana.org/token.transfer/versions/1.0.0");
+  expect(published.document.id === "solana.org/token.transfer", "the service decompiles the interface's document");
+
+  const recipe = (await service("/v1/implementations/solana.org/token-2022-transfer/versions/1.0.0")).document.recipe;
+  expect(recipe.kind === "program" && recipe.data.some((segment) => segment.value === "{builder.bumps}"), "and an implementation's, with its builder call");
+
   const candidates = await service(
-    "/v1/implementations",
+    "/v1/interfaces/solana.org/token.transfer/versions/1.0.0/matches",
     JSON.stringify({
-      interface: "solana.org/token.transfer@^1",
       inputs: { from: sender.address, to: receiver.address, mint: USDC, amount: "1", memo: null },
       payers: { fee: payer.address },
     }),

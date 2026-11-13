@@ -17,7 +17,7 @@ export function RegistryTree(props: Props) {
   const visible = registry.implementations.filter(
     (implementation) => showUnapproved || implementation.approved
   );
-  const ownInterfaces = new Set(registry.interfaces.map((listed) => listed.address));
+  const ownInterfaces = new Set(registry.interfaces.map((listed) => listed.id));
 
   return (
     <aside className="sidebar">
@@ -37,8 +37,8 @@ export function RegistryTree(props: Props) {
             const foreign = visible.filter(
               (implementation) =>
                 implementation.organization === organization.name &&
-                !interfaces.some((listed) => listed.address === implementation.interface) &&
-                ownInterfaces.has(implementation.interface)
+                !interfaces.some((listed) => listed.id === implementation.interface) &&
+                ownInterfaces.has(implementation.interface ?? "")
             );
 
             return (
@@ -49,7 +49,7 @@ export function RegistryTree(props: Props) {
                     key={listed.address}
                     listed={listed}
                     implementations={visible.filter(
-                      (implementation) => implementation.interface === listed.address
+                      (implementation) => implementation.interface === listed.id
                     )}
                     {...props}
                   />

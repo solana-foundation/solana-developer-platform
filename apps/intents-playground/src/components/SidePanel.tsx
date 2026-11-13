@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 
-import type { ListedImplementation, Plan, Registry } from "@/api";
-import { api } from "@/api";
+import type {
+  ImplementationDefinition,
+  ListedImplementation,
+  Plan,
+  Published,
+  Recipe,
+  Registry,
+} from "@/api";
+import { api, recipeOf } from "@/api";
 import { Code, hexDump, Snippets } from "@/components/Code";
 import type { Output } from "@/intent";
 import { explorerUrl, PROGRAMS, shortAddress } from "@/known";
@@ -24,6 +31,8 @@ interface Props {
   intent: object;
   request: object;
   implementation: ListedImplementation | null;
+  /// The selected implementation's recipe, as the service matched it.
+  recipe: Recipe | null;
   organizations: Registry["organizations"];
   planState: PlanState;
   output: Output;
@@ -114,8 +123,8 @@ function Switch(props: {
 }
 
 function PrepareControls(props: Props) {
-  const remote = props.implementation?.document?.recipe === "remote";
-  const frozen = props.implementation?.document?.recipe === "remote transaction";
+  const remote = props.recipe === "remote";
+  const frozen = props.recipe === "remote transaction";
 
   return (
     <div className="side-actions">
@@ -373,22 +382,29 @@ function ImplementationTab({
   implementation: ListedImplementation | null;
   organizations: Registry["organizations"];
 }) {
-  const [definition, setDefinition] = useState<string | null>(null);
+  const [published, setPublished] = useState<Published<ImplementationDefinition> | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const id = implementation?.id ?? null;
+  const version = implementation?.shown ?? null;
 
   useEffect(() => {
-    setDefinition(null);
-    if (implementation?.id == null || implementation.shown === null) return;
+    setPublished(null);
+    setFailed(null);
+    if (id === null || version === null) return;
 
     let current = true;
     api
-      .definition("implementations", implementation.id, implementation.shown)
-      .then((text) => current && setDefinition(text))
-      .catch(() => current && setDefinition(null));
+      .implementationVersion(id, version)
+      .then((answer) => current && setPublished(answer))
+      .catch(
+        (error: unknown) =>
+          current && setFailed(error instanceof Error ? error.message : String(error))
+      );
 
     return () => {
       current = false;
     };
-  }, [implementation?.id, implementation?.shown]);
+  }, [id, version]);
 
   if (implementation === null) {
     return <div className="section-sub">Select an implementation to see its definition.</div>;
@@ -403,8 +419,8 @@ function ImplementationTab({
       <div>
         <div className="section-title">{implementation.id}</div>
         <div className="section-sub">
-          {implementation.shown} · {implementation.document?.cluster ?? "unknown cluster"} ·{" "}
-          {implementation.document?.recipe ?? "unknown"} recipe ·{" "}
+          {implementation.shown} · {published?.document.cluster ?? "unknown cluster"} ·{" "}
+          {published === null ? "unknown" : recipeOf(published.document)} recipe ·{" "}
           {implementation.approved ? "approved" : "unapproved"}
         </div>
       </div>
@@ -423,24 +439,20 @@ function ImplementationTab({
           />
         ))}
       </div>
-      {definition !== null ? (
+      {published !== null ? (
         <>
           <div className="section-sub">
-            The implementation as <code>intents/definitions</code> writes it. The registry holds its
-            compiled bytes, and <code>sdp-intents plan</code> checks that they match.
+            The implementation as the service decompiles it from the registry, in the format of{" "}
+            <code>intents/definitions</code>.
           </div>
-          <Code text={definition} />
+          <Code text={JSON.stringify(published.document, null, 2)} />
+          <div className="section-sub">
+            The document as the registry holds it, {atob(published.bytes).length} bytes.
+          </div>
+          <Code text={hexDump(published.bytes)} />
         </>
       ) : (
-        <div className="section-sub">The definitions folder holds no file for this version.</div>
-      )}
-      {implementation.bytes !== null && (
-        <>
-          <div className="section-sub">
-            The document as the registry holds it, {atob(implementation.bytes).length} bytes.
-          </div>
-          <Code text={hexDump(implementation.bytes)} />
-        </>
+        <div className="section-sub">{failed ?? "Reading the version…"}</div>
       )}
     </>
   );

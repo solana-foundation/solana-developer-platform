@@ -5,6 +5,7 @@ import {
   type Candidate,
   type Input,
   type InterfaceDocument,
+  interfaceForm,
   type ListedImplementation,
   type Registry,
   ServiceError,
@@ -37,6 +38,7 @@ export function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [selectedInterface, setSelectedInterface] = useState<string | null>(null);
+  const [document, setDocument] = useState<InterfaceDocument | null>(null);
   const [pinned, setPinned] = useState<string | null>(null);
   const [showUnapproved, setShowUnapproved] = useState(false);
   const [values, setValues] = useState<FormValues>({});
@@ -58,34 +60,54 @@ export function App() {
         setWallets(localWallets);
         // A builder cannot name its rent payer yet, so the treasury does not pay its own fees.
         setFeePayer(walletNamed(localWallets, "alice"));
-        const first = loaded.interfaces.find((listed) => listed.document !== null);
-        if (first?.document) {
-          setSelectedInterface(first.address);
-          setValues(defaults(first.document, localWallets));
-        }
+        const first = loaded.interfaces.find((listed) => listed.shown !== null);
+        if (first !== undefined) setSelectedInterface(first.address);
       })
       .catch((error: unknown) => setLoadError(describe(error)));
   }, []);
 
   const listed = registry?.interfaces.find((entry) => entry.address === selectedInterface) ?? null;
-  const document = listed?.document ?? null;
+  const interfaceId = listed?.id ?? null;
+  const interfaceVersion = listed?.shown ?? null;
+
+  // A new interface's form starts from defaults that work, once its definition arrives.
+  useEffect(() => {
+    if (interfaceId === null || interfaceVersion === null) return;
+
+    let current = true;
+    setDocument(null);
+    api
+      .interfaceVersion(interfaceId, interfaceVersion)
+      .then((published) => {
+        if (!current) return;
+
+        const form = interfaceForm(published.document);
+        setDocument(form);
+        setValues(defaults(form, wallets));
+      })
+      .catch((error: unknown) => current && setLoadError(describe(error)));
+
+    return () => {
+      current = false;
+    };
+  }, [interfaceId, interfaceVersion, wallets]);
+
   const inputsKey = document === null ? "" : JSON.stringify(intentInputs(document, values));
 
   useEffect(() => {
-    if (listed?.id == null || inputsKey === "") return;
+    if (interfaceId === null || interfaceVersion === null || inputsKey === "") return;
 
     let current = true;
     setCandidates(null);
     setCandidatesError(null);
     const timer = setTimeout(() => {
       const body = {
-        interface: `${listed.id}@^${(listed.shown ?? "1").split(".")[0]}`,
         inputs: JSON.parse(inputsKey),
         payers: { fee: feePayer },
         all: showUnapproved,
       };
       api
-        .implementations(body)
+        .matches(interfaceId, interfaceVersion, body)
         .then((found) => current && setCandidates(found))
         .catch((error: unknown) => current && setCandidatesError(describe(error)));
     }, 250);
@@ -94,7 +116,7 @@ export function App() {
       current = false;
       clearTimeout(timer);
     };
-  }, [listed?.id, listed?.shown, inputsKey, feePayer, showUnapproved]);
+  }, [interfaceId, interfaceVersion, inputsKey, feePayer, showUnapproved]);
 
   const selected =
     candidates?.find((candidate) => candidate.id === pinned) ??
@@ -112,7 +134,7 @@ export function App() {
           }),
     [listed, document, values, selected, options]
   );
-  const frozen = selectedImplementation?.document?.recipe === "remote transaction";
+  const frozen = selected?.recipe === "remote transaction";
   const request = useMemo(
     () => planRequest(intent, feePayer, frozen ? "transaction" : output),
     [intent, feePayer, frozen, output]
@@ -124,16 +146,14 @@ export function App() {
   }, [requestKey]);
 
   const selectInterface = (address: string, implementation: string | null) => {
-    const next = registry?.interfaces.find((entry) => entry.address === address);
-    if (next?.document && address !== selectedInterface) {
-      setValues(defaults(next.document, wallets));
-    }
-
     setSelectedInterface(address);
     setPinned(implementation);
   };
   const selectImplementation = (implementation: ListedImplementation) => {
-    selectInterface(implementation.interface, implementation.id);
+    const interfaceAddress = registry?.interfaces.find(
+      (entry) => entry.id === implementation.interface
+    )?.address;
+    if (interfaceAddress !== undefined) selectInterface(interfaceAddress, implementation.id);
     if (!implementation.approved) setShowUnapproved(true);
   };
 
@@ -209,6 +229,7 @@ export function App() {
             intent={intent}
             request={request}
             implementation={selectedImplementation}
+            recipe={selected?.recipe ?? null}
             organizations={registry.organizations}
             planState={planState}
             output={output}
