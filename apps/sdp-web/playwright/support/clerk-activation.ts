@@ -1,14 +1,9 @@
+// The import brings in @clerk/testing's global `window.Clerk` type, which the
+// browser callbacks below read.
+import "@clerk/testing/playwright";
 import { expect, type Page } from "@playwright/test";
 
 export const CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS = 30_000;
-
-type ClerkActivationWindow = {
-  Clerk?: {
-    session?: { id?: string };
-    organization?: { id?: string };
-    setActive: (params: { session?: string; organization?: string }) => Promise<void>;
-  };
-};
 
 /**
  * Makes `organizationId` the active organization of the page's Clerk session
@@ -28,22 +23,17 @@ type ClerkActivationWindow = {
 export async function activateClerkOrganization(page: Page, organizationId: string): Promise<void> {
   await page.evaluate(
     async ({ organizationId }) => {
-      const clerkClient = (window as unknown as ClerkActivationWindow).Clerk;
-      if (!clerkClient?.session?.id) {
+      const sessionId = window.Clerk.session?.id;
+      if (!sessionId) {
         throw new Error("Clerk session not established before organization activation");
       }
-      await clerkClient.setActive({
-        session: clerkClient.session.id,
-        organization: organizationId,
-      });
+      await window.Clerk.setActive({ session: sessionId, organization: organizationId });
     },
     { organizationId }
   );
   await expect
-    .poll(
-      () =>
-        page.evaluate(() => (window as unknown as ClerkActivationWindow).Clerk?.organization?.id),
-      { timeout: CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS }
-    )
+    .poll(() => page.evaluate(() => window.Clerk.organization?.id), {
+      timeout: CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS,
+    })
     .toBe(organizationId);
 }
