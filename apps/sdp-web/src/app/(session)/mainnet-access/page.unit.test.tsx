@@ -5,11 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { nextNavigationMock, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { EnglishI18n } from "@/test/i18n";
 
-const state = vi.hoisted(() => ({ sandboxOnBeta: false }));
+const state = vi.hoisted(() => ({ sandboxOnBeta: false, betaLabel: false }));
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
-vi.mock("@/flags", () => ({ sandboxOnBeta: async () => state.sandboxOnBeta }));
+vi.mock("@/flags", () => ({
+  sandboxOnBeta: async () => state.sandboxOnBeta,
+  betaLabel: async () => state.betaLabel,
+}));
 vi.mock("@/app/(session)/dashboard/[projectId]/settings/mainnet-access-section", () => ({
   MainnetAccessSection: () => <section>request section</section>,
 }));
@@ -42,6 +45,7 @@ function loadAccess(access: MainnetAccess) {
 beforeEach(() => {
   resetDashboardNavigation();
   state.sandboxOnBeta = false;
+  state.betaLabel = false;
 });
 
 afterEach(() => {
@@ -94,5 +98,14 @@ describe("mainnet request page", () => {
     expect(
       screen.getByText("You've requested mainnet access. You can try the sandbox while you wait.")
     ).toBeTruthy();
+  });
+
+  it("badges the product name Beta on the hosted sandbox", async () => {
+    loadAccess(LOCKED);
+    state.betaLabel = true;
+
+    render(await MainnetAccessPage(), { wrapper: EnglishI18n });
+
+    expect(screen.getByText("Beta")).toBeTruthy();
   });
 });

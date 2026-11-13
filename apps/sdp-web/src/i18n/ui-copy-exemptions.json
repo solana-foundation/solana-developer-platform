@@ -186,5 +186,17 @@
   {
     "candidate": "src/flags/definitions.ts:115:22:Link to the sandbox",
     "reason": "Vercel flag description and option labels, read by operators in the Vercel toolbar, never by dashboard users"
+  },
+  {
+    "candidate": "src/flags/definitions.ts:124:5:Show a Beta badge beside the product name on the homepage and the sign-in, sign-up, terms and mainnet request pages. Turn on for the hosted sandbox (platform-beta).",
+    "reason": "Vercel flag description and option labels, read by operators in the Vercel toolbar, never by dashboard users"
+  },
+  {
+    "candidate": "src/flags/definitions.ts:127:23:No badge",
+    "reason": "Vercel flag description and option labels, read by operators in the Vercel toolbar, never by dashboard users"
+  },
+  {
+    "candidate": "src/flags/definitions.ts:128:22:Beta badge",
+    "reason": "Vercel flag description and option labels, read by operators in the Vercel toolbar, never by dashboard users"
   }
 ]

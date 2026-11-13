@@ -91,6 +91,7 @@
   },
   "authShell": {
     "productName": "Developer Platform",
+    "beta": "Beta",
     "requestAccess": "Request access",
     "emailPlaceholder": "jane@acme.com",
     "forgotPasswordTitle": "Forgot your password?"

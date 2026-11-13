@@ -4,7 +4,14 @@ import { NavShell } from "./nav/nav-shell";
 import { NAV_GROUP_IDS, type NavGroup, type NavLink } from "./nav/nav-types";
 
 /** The homepage's sticky bar: brand, the two groups with their panels, the account actions. */
-export async function HomepageNav({ links }: { links: HomepageLinks }) {
+export async function HomepageNav({
+  links,
+  brandBadge = null,
+}: {
+  links: HomepageLinks;
+  /** A badge beside the wordmark (Beta on the hosted sandbox), or null for none. */
+  brandBadge?: string | null;
+}) {
   const t = await getTranslations();
   const sandbox: NavLink = {
     label: links.sandbox.external ? links.sandbox.label : t("Homepage.nav.platform.sandbox"),
@@ -89,6 +96,7 @@ export async function HomepageNav({ links }: { links: HomepageLinks }) {
       signInHref={links.signIn}
       signup={links.signup}
       signedIn={links.signedIn}
+      brandBadge={brandBadge}
     />
   );
 }

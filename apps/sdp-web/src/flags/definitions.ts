@@ -116,6 +116,19 @@ export function defineDashboardFlags({
     ],
   });
 
+  const betaLabel = flag<boolean, DashboardFlagEntities>({
+    key: "beta-label",
+    adapter: vercel(),
+    identify,
+    defaultValue: flagDefault("SDP_FLAG_BETA_LABEL", false),
+    description:
+      "Show a Beta badge beside the product name on the homepage and the sign-in, sign-up, terms and mainnet request pages. Turn on for the hosted sandbox (platform-beta).",
+    options: [
+      { value: false, label: "No badge" },
+      { value: true, label: "Beta badge" },
+    ],
+  });
+
   const issuance = flag<boolean, DashboardFlagEntities>({
     key: "issuance",
     adapter: moduleAdapter("issuance"),
@@ -213,6 +226,7 @@ export function defineDashboardFlags({
   return {
     homepageOpenSignup,
     sandboxOnBeta,
+    betaLabel,
     issuance,
     assetProfiles,
     privateChannels,

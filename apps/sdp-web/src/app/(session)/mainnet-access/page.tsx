@@ -6,7 +6,7 @@ import { loadMainnetAccess } from "@/app/(session)/dashboard/[projectId]/setting
 import { MainnetAccessSection } from "@/app/(session)/dashboard/[projectId]/settings/mainnet-access-section";
 import { SdpProductLockup } from "@/components/auth-page-shell";
 import { externalLinkProps } from "@/components/homepage/homepage-links";
-import { sandboxOnBeta } from "@/flags";
+import { betaLabel, sandboxOnBeta } from "@/flags";
 import type { MessageKey } from "@/i18n/messages";
 import { getTranslations } from "@/i18n/server";
 import { MainnetAccessAccountActions } from "./mainnet-access-account-actions";
@@ -17,10 +17,11 @@ import { MainnetAccessAccountActions } from "./mainnet-access-account-actions";
  * and the way out. Any other organization goes back to the dashboard.
  */
 export default async function MainnetAccessPage() {
-  const [t, loaded, linkSandbox] = await Promise.all([
+  const [t, loaded, linkSandbox, beta] = await Promise.all([
     getTranslations(),
     loadMainnetAccess(),
     sandboxOnBeta(),
+    betaLabel(),
   ]);
   if (loaded.ok && (!loaded.access.mainnetOnly || loaded.access.state === "approved")) {
     redirect("/dashboard");
@@ -29,7 +30,10 @@ export default async function MainnetAccessPage() {
   return (
     <main className="flex min-h-dvh flex-col bg-surface px-4 pb-10 sm:px-6">
       <div className="flex h-18 items-center justify-between gap-4">
-        <SdpProductLockup productName={t("Shared.authShell.productName")} />
+        <SdpProductLockup
+          productName={t("Shared.authShell.productName")}
+          betaLabel={beta ? t("Shared.authShell.beta") : null}
+        />
         <MainnetAccessAccountActions />
       </div>
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 pt-12">

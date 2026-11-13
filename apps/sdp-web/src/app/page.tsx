@@ -15,7 +15,7 @@ import { NetworkSection } from "@/components/homepage/network-section";
 import { PaymentsSection } from "@/components/homepage/payments-section";
 import { StackSection } from "@/components/homepage/stack-section";
 import { StartSection } from "@/components/homepage/start-section";
-import { homepageOpenSignup, sandboxOnBeta } from "@/flags";
+import { betaLabel, homepageOpenSignup, sandboxOnBeta } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 
 /*
@@ -64,10 +64,11 @@ export async function generateMetadata(
 }
 
 export default async function Home() {
-  const [t, openSignup, hostedSandbox, { userId }] = await Promise.all([
+  const [t, openSignup, hostedSandbox, beta, { userId }] = await Promise.all([
     getTranslations(),
     homepageOpenSignup(),
     sandboxOnBeta(),
+    betaLabel(),
     auth(),
   ]);
   const links = resolveHomepageLinks({
@@ -85,7 +86,7 @@ export default async function Home() {
       <noscript>
         <style>{NOSCRIPT_CSS}</style>
       </noscript>
-      <HomepageNav links={links} />
+      <HomepageNav links={links} brandBadge={beta ? t("Shared.authShell.beta") : null} />
       <main id="main">
         <HeroSection links={links} />
         <StackSection />

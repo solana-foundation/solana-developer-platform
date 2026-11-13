@@ -70,6 +70,15 @@
   justify-self: start;
 }
 
+/* Outside the wordmark's fixed box, so the logo keeps its size. */
+.brand .brandBadge {
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  margin-left: 10px;
+  transform: translateY(-50%);
+}
+
 .brand img {
   display: block;
   width: 100%;
