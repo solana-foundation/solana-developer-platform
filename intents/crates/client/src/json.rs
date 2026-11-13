@@ -25,7 +25,7 @@ pub fn plan(prepared: &Prepared, request: Value) -> Value {
         "request": request,
         "message": plan.message,
         "intents": plan.intents.iter().map(intent_json).collect::<Vec<_>>(),
-        "transactions": [{
+        "transaction": {
             "instructions": plan.transaction.instructions.iter().map(instruction).collect::<Vec<_>>(),
             "version": 1,
             "config": {
@@ -38,7 +38,7 @@ pub fn plan(prepared: &Prepared, request: Value) -> Value {
             "lastValidBlockHeight": prepared.last_valid_block_height.map(|height| height.to_string()),
             "presigned": presigned(prepared),
             "signatures": signatures,
-        }],
+        },
         "simulation": { "unitsConsumed": plan.units_consumed.to_string() },
     })
 }

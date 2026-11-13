@@ -146,19 +146,17 @@ function PlanTab(props: Props) {
     );
   }
 
-  const transaction = plan.transactions[0];
+  const transaction = plan.transaction;
 
   return (
     <>
       <div className="callout callout-gray message">{plan.message}</div>
       <div className="data-rows">
-        <Row label="Instructions" value={String(transaction?.instructions.length ?? 0)} />
+        <Row label="Instructions" value={String(transaction.instructions.length)} />
         <Row label="Compute units" value={plan.simulation.unitsConsumed} />
         <Row
           label="Signers"
-          value={(transaction?.signatures ?? [])
-            .map((signer) => shortAddress(signer.address))
-            .join(", ")}
+          value={transaction.signatures.map((signer) => shortAddress(signer.address)).join(", ")}
         />
         <Row
           label="Builder simulations"
@@ -173,12 +171,10 @@ function PlanTab(props: Props) {
               .join(", ") ?? "1"
           }
         />
-        {(transaction?.presigned.length ?? 0) > 0 && (
+        {transaction.presigned.length > 0 && (
           <Row
             label="Signed by the provider"
-            value={(transaction?.presigned ?? [])
-              .map((signed) => shortAddress(signed.address))
-              .join(", ")}
+            value={transaction.presigned.map((signed) => shortAddress(signed.address)).join(", ")}
           />
         )}
         {Object.entries(plan.rpcCalls).map(([method, count]) => (
@@ -259,7 +255,7 @@ function Instructions({ plan }: { plan: Plan }) {
           </tr>
         </thead>
         <tbody>
-          {(plan.transactions[0]?.instructions ?? []).map((instruction, position) => (
+          {plan.transaction.instructions.map((instruction, position) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: an instruction's position is its identity.
             <tr key={position}>
               <td>{position}</td>

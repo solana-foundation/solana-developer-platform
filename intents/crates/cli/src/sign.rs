@@ -132,12 +132,12 @@ fn read_plan(path: &Path) -> Result<PlanFile, String> {
     let value: Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
     let message = value.get("message").and_then(Value::as_str).ok_or("the plan has no message")?;
     let compiled = value
-        .pointer("/transactions/0/compiled")
+        .pointer("/transaction/compiled")
         .and_then(Value::as_str)
         .ok_or("the plan has no compiled transaction")?;
     let compiled = base64::engine::general_purpose::STANDARD.decode(compiled).map_err(|error| error.to_string())?;
     let presigned = value
-        .pointer("/transactions/0/presigned")
+        .pointer("/transaction/presigned")
         .and_then(Value::as_array)
         .map(|listed| listed.iter().map(provider_signature).collect::<Result<Vec<_>, _>>())
         .transpose()?

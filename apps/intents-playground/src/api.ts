@@ -94,13 +94,13 @@ export interface Plan {
     builderSimulations: number;
   }[];
   request: unknown;
-  transactions: {
+  transaction: {
     instructions: PlannedInstruction[];
     config: Record<string, string>;
     compiled: string;
     signatures: { address: string; role: string; status: string }[];
     presigned: { address: string; signature: string }[];
-  }[];
+  };
   simulation: { unitsConsumed: string };
   rpcCalls: Record<string, number>;
 }
@@ -161,19 +161,17 @@ export const api = {
   prepare: (request: unknown, tamper: boolean) =>
     post<Plan>("/v1/prepare", request, tamper ? { "x-sdp-tamper": "1" } : {}),
   verify: (plan: Plan) => {
-    const transaction = plan.transactions[0];
-
     return post<Verified>("/v1/verify", {
-      message: transaction?.compiled,
+      message: plan.transaction.compiled,
       expected: plan.message,
-      presigned: transaction?.presigned ?? [],
+      presigned: plan.transaction.presigned,
       request: plan.request,
     });
   },
   send: (plan: Plan) =>
     post<{ signature: string }>("/v1/send", {
-      message: plan.transactions[0]?.compiled,
-      presigned: plan.transactions[0]?.presigned ?? [],
+      message: plan.transaction.compiled,
+      presigned: plan.transaction.presigned,
     }),
   /// The Jupiter wrapper's switch that adds an approval to an attacker.
   adapterMode: (malicious: boolean) =>

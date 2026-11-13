@@ -290,46 +290,44 @@ mint. This record handles Token-2022 mints:
       "span": { "start": 2, "end": 4 }
     }
   ],
-  "transactions": [
-    {
-      "instructions": [
-        {
-          "programAddress": "9sgttDZ2vnzb85HWuQbx8vy6Boga32zpP5QRZ7UtbWpp",
-          "accounts": [{ "address": "Sysvar1nstructions1111111111111111111111111", "role": 0 }, "…"],
-          "data": "…"
-        },
-        {
-          "programAddress": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
-          "accounts": [
-            { "address": "KoRa…", "role": 3 },
-            { "address": "DstA…", "role": 1 },
-            { "address": "9aBc…", "role": 0 },
-            { "address": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo", "role": 0 },
-            { "address": "11111111111111111111111111111111", "role": 0 },
-            { "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", "role": 0 }
-          ],
-          "data": "AQ=="
-        },
-        {
-          "programAddress": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
-          "accounts": [
-            { "address": "SrcA…", "role": 1 },
-            { "address": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo", "role": 0 },
-            { "address": "DstA…", "role": 1 },
-            { "address": "7xKX…", "role": 2 }
-          ],
-          "data": "DADh9QUAAAAABg=="
-        }
-      ],
-      "version": 1,
-      "config": { "priorityFeeLamports": "5000", "computeUnitLimit": "61000", "loadedAccountsDataSizeLimit": "131072" },
-      "compiled": "gQIA…",
-      "signatures": [
-        { "address": "KoRa…", "role": "payer:fee", "status": "required" },
-        { "address": "7xKX…", "role": "input:from", "status": "required" }
-      ]
-    }
-  ]
+  "transaction": {
+    "instructions": [
+      {
+        "programAddress": "9sgttDZ2vnzb85HWuQbx8vy6Boga32zpP5QRZ7UtbWpp",
+        "accounts": [{ "address": "Sysvar1nstructions1111111111111111111111111", "role": 0 }, "…"],
+        "data": "…"
+      },
+      {
+        "programAddress": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+        "accounts": [
+          { "address": "KoRa…", "role": 3 },
+          { "address": "DstA…", "role": 1 },
+          { "address": "9aBc…", "role": 0 },
+          { "address": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo", "role": 0 },
+          { "address": "11111111111111111111111111111111", "role": 0 },
+          { "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", "role": 0 }
+        ],
+        "data": "AQ=="
+      },
+      {
+        "programAddress": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "accounts": [
+          { "address": "SrcA…", "role": 1 },
+          { "address": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo", "role": 0 },
+          { "address": "DstA…", "role": 1 },
+          { "address": "7xKX…", "role": 2 }
+        ],
+        "data": "DADh9QUAAAAABg=="
+      }
+    ],
+    "version": 1,
+    "config": { "priorityFeeLamports": "5000", "computeUnitLimit": "61000", "loadedAccountsDataSizeLimit": "131072" },
+    "compiled": "gQIA…",
+    "signatures": [
+      { "address": "KoRa…", "role": "payer:fee", "status": "required" },
+      { "address": "7xKX…", "role": "input:from", "status": "required" }
+    ]
+  }
 }
 ```
 

@@ -107,9 +107,9 @@ async function run(name, request, signers) {
   const verified = cli("verify", planPath, "--rpc", RPC);
   expect(verified.includes("The message matches the plan."), `${name}: the client's verifier proves the message`);
 
-  const compiled = plan.transactions[0].compiled;
+  const compiled = plan.transaction.compiled;
   // A provider's transaction is planned again from its request, with its signatures.
-  const presigned = plan.transactions[0].presigned;
+  const presigned = plan.transaction.presigned;
   const remote = await service(
     "/v1/verify",
     JSON.stringify({ message: compiled, expected: plan.message, presigned, request: plan.request }),
@@ -327,7 +327,7 @@ try {
     [payer, sender],
   );
   expect(provided.message.includes("tier 3, checked by simulation only | onchain checks: none"), "the message names tier 3");
-  expect(provided.transactions[0].presigned.length === 1, "the provider signed for its order account");
+  expect(provided.transaction.presigned.length === 1, "the provider signed for its order account");
   expect((await tokenAmount(PROVIDER_WALLET, USDC)) - walletBefore === 10_000_000n, "the provider's wallet received 10 USDC");
 
   console.log("an endpoint that adds an approval to an attacker");
