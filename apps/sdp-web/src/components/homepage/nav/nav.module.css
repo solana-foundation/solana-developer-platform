@@ -70,6 +70,11 @@
   justify-self: start;
 }
 
+/* With a badge, the room it takes beside the wordmark: its own width and its margin. */
+.brandWithBadge {
+  --brand-badge-space: 60px;
+}
+
 /* Outside the wordmark's fixed box, so the logo keeps its size. */
 .brand .brandBadge {
   position: absolute;
@@ -588,14 +593,14 @@
 
 /* on a phone the wordmark shrinks with the screen, at most 24px tall, so it fits the
    band (100vw - 40px) beside the language button (36px), the burger (34px past its margin) and
-   the bar's: 120px in all */
+   the bar's: 120px in all, plus a badge's room when one shows */
 @media (max-width: 600px) {
   .inner {
     gap: 0;
   }
 
   .brand {
-    height: min(24px, calc((100vw - 120px) * 100 / 1108));
+    height: min(24px, calc((100vw - 120px - var(--brand-badge-space, 0px)) * 100 / 1108));
   }
 }
 

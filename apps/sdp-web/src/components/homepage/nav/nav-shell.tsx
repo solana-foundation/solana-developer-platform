@@ -49,7 +49,11 @@ export function NavShell({
       </a>
       <header id="nav" className={cn(styles.bar, scrolled && styles.scrolled)}>
         <div className={styles.inner}>
-          <Link className={styles.brand} href="/" aria-label={copy.home}>
+          <Link
+            className={cn(styles.brand, brandBadge && styles.brandWithBadge)}
+            href="/"
+            aria-label={copy.home}
+          >
             <Image
               className={styles.onLight}
               src="/homepage/v6/logo-sdp-wordmark-on-light.svg"
