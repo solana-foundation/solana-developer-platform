@@ -921,22 +921,30 @@ renders the message from the transaction, and lists each instruction that no seg
 chain then proves the rest: `verify_intent` rebuilds the built instructions, and Lighthouse asserts
 the postconditions.
 
-| Dependency | Fails | Lies or goes stale | Disappears |
-| :-- | :-- | :-- | :-- |
-| Intent service | No plans | A false plan fails `verify_intent` or the assertions | No plans |
-| Registry program | No plans | A `verify_intent` bug can pass a transaction within the assertions. A false approval shows a bad implementation, within the postconditions. | No new plans |
-| Builder | `prepare` errors | Any instructions within the postconditions, and a false output | That implementation is unavailable |
-| Builder upgrade | | Every implementation that names it follows, within the postconditions | |
-| Static target program upgrade | | A changed layout fails. A reused discriminator passes, within the postconditions. | That implementation is unavailable |
-| Remote endpoint | `prepare` errors | As a builder. At tier 3, the simulation is the only check. | That implementation is unavailable |
-| The service's RPC | `prepare` errors | A false account builds a wrong transaction that fails onchain, unless the intent opts out of the checks | No plans |
-| The signer's RPC | Verification errors | A false document can show a false message. The chain still runs the real implementation within its real postconditions. | No verification |
-| Lighthouse | The transaction fails | A bug can pass a bad transaction. It is immutable. | Every guarded transaction fails |
+**Fail closed.** A dependency that fails, lies, or goes stale stops the transaction. The intent
+service cannot make a signer approve something that the message does not say. The worst case of an
+outage is denial of service. The service is optional: the Rust client and the CLI plan the same
+transaction over any RPC.
 
-**Worst case.** A compromised service can only stop plans, unless an intent opts out of the onchain
-checks. A wrong builder emits the worst transaction that the postconditions allow. An interface
-with loose postconditions is worse, because nothing bounds it. The registry's authorities and the
-builders' upgrade authorities are the main assets.
+| Dependency | Fails | Lies or goes stale | Disappears | Recovery |
+| :-- | :-- | :-- | :-- | :-- |
+| Intent service | No plans | `verify_intent` or the assertions refuse a false plan | No plans | The Rust client plans over any RPC |
+| The service's RPC | No plans | A false or stale account builds a transaction that fails onchain | No plans | Another RPC |
+| Remote endpoint | That implementation cannot plan | Tier 2: the assertions refuse anything outside the postconditions. Tier 3: only the simulation checks it, and the message says so. | That implementation cannot plan | Another implementation of the interface |
+| Builder | That implementation cannot plan | Instructions within the postconditions that the signer approved, and a false output | That implementation cannot plan | Another implementation of the interface |
+| Builder or target program upgrade | | A changed layout fails. A new meaning for the same bytes passes, within the postconditions. | | The approve authority unapproves the implementation |
+| Registry program | No plans | A `verify_intent` bug can pass a transaction within the assertions | No plans | An audit, and a multisig upgrade authority |
+| Lighthouse | The transaction fails | A bug can pass a bad transaction. It is immutable. | Every guarded transaction fails | An audit |
+| The signer's RPC | The signer cannot verify, so it does not sign | A false document can change the message text. The chain still runs the real implementation within its real postconditions. | The signer cannot verify | A trusted RPC, or a local copy of each document, which never changes |
+
+**Where trust remains.** The intent service alone reaches none of these.
+
+1. The signer's RPC, for the message text.
+2. Each builder and its upgrade authority, within the postconditions. Loose postconditions bound less.
+3. The code of `verify_intent` and Lighthouse.
+4. Outputs, which trust the recipe.
+5. Tier 3, and an intent with the onchain checks off. Only the simulation checks them, and the
+   message says `onchain checks: none`, so the signer sees the choice.
 
 | STRIDE | Where | Control |
 | :-- | :-- | :-- |
@@ -946,9 +954,6 @@ builders' upgrade authorities are the main assets.
 | Information disclosure | Inputs to a remote endpoint | Only inputs and payers go out |
 | Denial of service | Slow simulation, RPC, or endpoint | Round and compute limits, and timeouts |
 | Elevation of privilege | A payer or signer input in a built instruction | The builder account rule (4.2) and rule 5 (4.5) |
-
-**Known limits.** Outputs trust the recipe. Tier 2 instructions trust the endpoint within the
-assertions. Tier 3 and an intent that opts out of the onchain checks trust the simulation.
 
 ## 6. Data classification
 
