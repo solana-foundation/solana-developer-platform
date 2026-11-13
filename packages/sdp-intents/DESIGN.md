@@ -21,8 +21,9 @@ recipes:
 3. Remote: an HTTP endpoint with the same result as a builder, for offchain search such as a swap
    route.
 
-The service adds the postconditions as assertions, verifies the result, and returns a plan: the
-transactions, a message for signers, and a display.
+A plan request holds one or more intents. The service adds the postconditions as assertions,
+verifies the result, and returns a plan: one transaction, and a message and a display for each
+intent.
 
 Interfaces and implementations live in a registry program. An organization owns each one, and each
 interface's approve authority approves the implementations that UIs show.
@@ -107,6 +108,31 @@ digests, and bytes.
    (4.10), and the onchain checks `assertions` and `verifyIntent` (4.6). `allowUnapproved` defaults
    to false, and both checks default to true.
 4. Amounts are base units.
+
+**Plan request.** What `prepare` takes: one or more intents in one transaction.
+
+```json
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "plan",
+  "payers": { "fee": "KoRa…" },
+  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "options": { "priorityFeeLamports": "5000" },
+  "intents": [
+    {
+      "interface": "solana.org/token.transfer@^1",
+      "implementation": "solana.org/token-2022-transfer@^1",
+      "inputs": { "from": "7xKX…", "to": "9aBc…", "mint": "2b1kV6…", "amount": "100000000", "memo": null },
+      "options": { "assertions": true, "verifyIntent": true }
+    }
+  ]
+}
+```
+
+1. The request names the payers, the cluster, and the priority fee once. Each intent compiles to
+   the binary intent with them, so every intent of a plan has the same payers.
+2. An intent's `options` hold only `allowUnapproved`, `assertions`, and `verifyIntent`. An intent
+   can turn off a check so that the plan fits.
 
 **Interface.**
 
@@ -257,30 +283,26 @@ mint. This record handles Token-2022 mints:
 {
   "spec": "sdp-intents@1.0",
   "kind": "plan",
-  "intent": {
-    "spec": "sdp-intents@1.0",
-    "kind": "intent",
-    "interface": "solana.org/token.transfer@1.0.0",
-    "implementation": "solana.org/token-2022-transfer@1.0.0",
-    "inputs": {
-      "from": "7xKX…",
-      "to": "9aBc…",
-      "mint": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
-      "amount": "100000000",
-      "memo": null
-    },
-    "payers": { "fee": "KoRa…", "rent": "KoRa…" },
-    "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
-    "options": { "priorityFeeLamports": "5000" }
-  },
-  "digests": { "interface": "sha256:3f9a…", "implementation": "sha256:c21e…" },
-  "builder": { "program": "T22Bld…", "deploySlot": "312004417" },
-  "outputs": {},
-  "message": "sdp-intents/1: transfer 100 of 2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo from 7xKX… to 9aBc… | guarantees: 7xKX… sends at most 100 of 2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo; nothing else leaves 7xKX…; only Token-2022, ATA, and Memo instructions run | interface: solana.org/token.transfer@1.0.0 3f9a… | builder: T22Bld…",
-  "display": "Send 100 PYUSD to 9aBc…",
+  "request": { "kind": "plan", "intents": ["…"] },
+  "intents": [
+    {
+      "message": "sdp-intents/1: transfer 100 of 2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo from 7xKX… to 9aBc… | guarantees: 7xKX… sends at most 100 of 2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo; nothing else leaves 7xKX…; only Token-2022, ATA, and Memo instructions run | interface: solana.org/token.transfer@1.0.0 3f9a… | builder: T22Bld…",
+      "display": "Send 100 PYUSD to 9aBc…",
+      "digests": { "interface": "sha256:3f9a…", "implementation": "sha256:c21e…" },
+      "builder": { "program": "T22Bld…", "deploySlot": "312004417" },
+      "outputs": "",
+      "verify": 0,
+      "span": { "start": 1, "end": 3 }
+    }
+  ],
   "transactions": [
     {
       "instructions": [
+        {
+          "programAddress": "9sgttDZ2vnzb85HWuQbx8vy6Boga32zpP5QRZ7UtbWpp",
+          "accounts": [{ "address": "Sysvar1nstructions1111111111111111111111111", "role": 0 }, "…"],
+          "data": "…"
+        },
         {
           "programAddress": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
           "accounts": [
@@ -319,15 +341,17 @@ mint. This record handles Token-2022 mints:
 1. `message` is the record's template, then `guarantees` from both sets of postconditions, then
    the ids, digests, and builder. `display` comes from the interface. `deploySlot` is for the audit
    log only.
-2. Instructions use the `EarnVaultInstruction` shape: base58 addresses, numeric `AccountRole`
+2. `verify` is the position of the intent's `verify_intent`, and `span` the positions of its built
+   instructions (4.6). `verify` is `null` when the intent turns `verifyIntent` off.
+3. Instructions use the `EarnVaultInstruction` shape: base58 addresses, numeric `AccountRole`
    values, and base64 data.
-3. `SrcA…` and `DstA…` are the ATAs of `from` and `to`. `KoRa…` holds both payer roles.
-4. Transactions are v1 (SIMD-0385): up to 4,096 bytes and 64 accounts, with the compute budget in
+4. `SrcA…` and `DstA…` are the ATAs of `from` and `to`. `KoRa…` holds both payer roles.
+5. Transactions are v1 (SIMD-0385): up to 4,096 bytes and 64 accounts, with the compute budget in
    `config` and no lookup tables. The service sets the compute unit limit and the loaded data size
    from the simulation, because both default to zero.
-5. The example leaves out the Lighthouse instructions (4.5), the builder instruction and
-   `verify_intent` (4.6), and the permanent delegate warning (4.11).
-6. The PYUSD transfer hook names no program, so the transfer has no hook accounts.
+6. The example shortens `verify_intent`, and leaves out the Lighthouse instructions (4.5) and the
+   permanent delegate warning (4.11).
+7. The PYUSD transfer hook names no program, so the transfer has no hook accounts.
 
 **Relations.**
 
@@ -345,7 +369,8 @@ erDiagram
   INTENT }o--|| INTERFACE : names
   INTENT }o--|| IMPLEMENTATION : names
   INTENT ||--|| PAYERS : names
-  PLAN ||--|| INTENT : "pins versions of"
+  PLAN ||--|{ SEGMENT : "one for each intent"
+  SEGMENT ||--|| INTENT : "pins versions of"
   PLAN ||--|{ TRANSACTION : contains
   TRANSACTION ||--|{ REQUIRED_SIGNATURE : needs
 
@@ -401,9 +426,14 @@ erDiagram
     address rent "defaults to fee"
   }
   PLAN {
+    string request
+  }
+  SEGMENT {
     string digests
     string message "from the implementation and the postconditions"
     string display "from the interface"
+    int verify "position of verify_intent"
+    string span "positions of the built instructions"
   }
   TRANSACTION {
     string instructions "plain data"
@@ -703,6 +733,12 @@ crate holds both, and starts as a copy of relay's `chain-source` (4.14).
    mint has a transfer hook. A Kamino deposit takes two: the vault, then its reserves and markets.
 5. A builder that runs out of compute or rounds fails `prepare`, with no retry.
 
+**Plans.** The planner plans the intents in order, one segment each. Each builder round and each
+segment's simulation runs the earlier segments first. So a builder, account resolution, and the
+rendered values read the state after them, as `verify_intent` does onchain. Each segment's checks
+compare the state before and after that segment. The last simulation runs the whole transaction
+and sets the budget.
+
 **Engine.** The engine never fetches. Each resolve returns the accounts whose data it needs next,
 which is one `hasOne` level, with every `read` account that is resolved. The service fetches them in
 one call with every resolved account that the cache does not hold, so the last fetch also loads the
@@ -738,7 +774,8 @@ Kamino deposit takes two. The report counts the calls for each flow (section 10)
 2. `noOtherOutflows`: no balance of a signer input goes down, except as a postcondition or the
    input's payer role allows.
 3. No delegate, close authority, or owner of a signer input's accounts changes.
-4. The fee payer loses at most the fee plus capped rent.
+4. The fee payer loses at most the fee plus capped rent. Each segment answers for the signature
+   fees that it adds.
 5. No instruction names a payer or a signer input, except as the fee payer, as the funder of a new
    account, or where the interface requires that signer.
 
@@ -781,10 +818,11 @@ policy.
 ### 4.6 Verification in the transaction
 
 The service is untrusted. By default, each transaction proves onchain that its instructions are
-what the record builds for the intent, so a signer needs only the transaction bytes.
+what the records build for its intents, so a signer needs only the transaction bytes. The
+transaction holds one segment for each intent, in order:
 
 ```
-[verify_intent] [built instructions]
+[verify_intent] [Lighthouse snapshot] [built × N] [Lighthouse assertions × M]
 ```
 
 `verify_intent` is an instruction of the registry program. Its data is two Anchor `&[u8]`
@@ -797,13 +835,37 @@ index, the interface version account, the implementation version account, every 
 record's account table in order, then for a program recipe the accounts of the last `MoreAccounts`
 round. The builder program is in the table.
 
-**Placement.** `verify_intent` is a top-level instruction. Every instruction before it is a
-ComputeBudget instruction, and every instruction after it is a built instruction. So it checks the
-whole transaction, a signer finds the intent at one place, and a transaction holds one intent.
-`verify_intent` runs first, so a builder that it calls reads the state that the simulation read,
-not the state after the built instructions. The Lighthouse snapshot will follow `verify_intent`,
-and the assertions will end the transaction. Their counts come from the postconditions, so the
-boundaries of the built instructions stay exact.
+**Spans.** The span of `verify_intent` is the N instructions after it. N comes from the record,
+never from the transaction:
+
+| Recipe | N |
+| :-- | :-- |
+| Static | The record's instruction count |
+| Program | `num_instructions` of the builder's `HashedReadyV1` (4.2) |
+| Remote | 0 |
+
+Instructions outside every span are unverified. They can come before, between, or after the
+segments, such as ComputeBudget instructions or a sponsor's fee transfer. Lighthouse is not built
+yet. Its snapshot will come before the span, and the postconditions will give the count of its
+assertions.
+
+**Placement.** `verify_intent` is a top-level instruction, and runs before its span. So a builder
+that it calls reads the state that the simulation read: the state after the instructions before
+`verify_intent` (4.4).
+
+**Signer rule.** A signer:
+
+1. Decodes the intent of each `verify_intent`, renders its message from the intent and the record,
+   and approves each one.
+2. Puts each instruction in one class: ComputeBudget, `verify_intent`, in a span, or unverified.
+3. Shows each unverified instruction as it is: the program, the accounts with their roles, and the
+   data.
+4. Checks the fee payer and its own signature.
+
+It needs no simulation and no trust in the service. A `verify_intent` that someone moves or drops
+changes no span. Its instructions then show as unverified.
+
+**Checks.**
 
 1. It checks that the registry owns both version accounts and both indexes, that they name the
    documents of the intent, that the version is approved unless the intent sets
@@ -815,32 +877,43 @@ boundaries of the built instructions stay exact.
    hold.
 3. It resolves the record's accounts with the engine over its own accounts, so one resolve
    completes or fails. Each resolved address must be the account at its place in the table.
-4. Static recipe: it builds the instructions and compares each one, byte for byte, with the
-   sysvar's instruction at its place: program, accounts, and data. Their count must be the
-   recipe's. Each role must be the account's role in the transaction, below.
-5. Program recipe: it calls the builder by CPI with the record's data, and every account readonly
-   and unsigned. The builder returns `HashedReadyV1` (4.2). It serializes the instructions after
-   itself into the instruction section, with the rent payer's address mapped back to the
-   placeholder and each account's role from the builder's roles, compares the SHA-256 with
-   `instructions_hash`, and checks that a built instruction names each builder signer as a
-   signer. The hash proves the builder's roles. Each role in the sysvar must then be the
-   account's role in the transaction.
-6. Any difference fails the transaction.
+4. It refuses a span that runs past the transaction, and a span that holds a registry instruction.
+   So no intent's instructions are inside another intent's span.
+5. Static recipe: it builds the instructions and compares each one, byte for byte, with the
+   instruction at its place in the span: program, accounts, and data.
+6. Program recipe: it calls the builder by CPI with the record's data, and every account readonly
+   and unsigned. The builder returns `HashedReadyV1` (4.2). It serializes the span into the
+   instruction section, with the rent payer's address mapped back to the placeholder and each
+   account's role from the builder's roles, compares the SHA-256 with `instructions_hash`, and
+   checks that a built instruction names each builder signer as a signer. The hash proves the
+   builder's roles.
+7. Each role in the sysvar must be the account's role in the transaction, below. Any difference
+   fails the transaction.
 
 **Roles.** The sysvar holds each account's role in the whole transaction, not in one instruction.
 An account is writable or a signer everywhere when one instruction, or the fee payer slot, makes it
-so, such as a `from` that is also the fee payer. So an account's role in the transaction is the
-union of its roles in the built instructions, and the intent's fee payer is a writable signer.
-`verify_intent` passes its own accounts readonly and every instruction after it is built, so the
-union is every reason for a role. A role that it does not explain fails.
+so, such as a `from` that is also the fee payer. So an account that only the span names must have
+the union of its roles in the span, and the intent's fee payer is a writable signer. An account
+that an instruction outside the span also names can have more, such as an account that an earlier
+intent writes. The signer sees that instruction. `verify_intent` instructions do not count,
+because they name their accounts readonly.
 
-A signer decodes the intent from `verify_intent`, renders the message from the intent and the
-record, and checks the fee payer and its own signature. It needs no simulation and no trust in the
-service.
+**A builder that returns too many instructions.**
 
-1. The intent options `assertions` and `verifyIntent` default to true. An intent can set either to
-   false to save space and compute units. Without `verifyIntent`, a signer trusts the service for
-   the instructions. Without `assertions`, the postconditions hold only in the simulation.
+| Case | Result |
+| :-- | :-- |
+| The plan breaks 4,096 bytes, 64 accounts, 64 instructions, or 1.4M compute units | `prepare` refuses. An intent can turn off `assertions` or `verifyIntent`. |
+| The count or the hash changes between `prepare` and execution | The span or the hash differs, and the transaction fails |
+| The span runs past the transaction | `verify_intent` fails with `SpanPastEnd` |
+| The span holds a registry instruction | `verify_intent` fails with `RegistryInstructionInSpan` |
+| The builder returns no instructions | `prepare` refuses |
+| The builder returns instructions that do nothing useful | The postconditions and `invokesOnly` still bound them |
+
+**Limits.**
+
+1. The intent options `assertions` and `verifyIntent` default to true. Without `verifyIntent`, a
+   signer trusts the service for the instructions. Without `assertions`, the postconditions hold
+   only in the simulation.
 2. The builder runs again at execution, on the state of that slot. If the state changed since
    `prepare`, the instructions differ and the transaction fails.
 3. The builder never sees a payer, so the rent payer can reach a built instruction only as the
@@ -849,12 +922,10 @@ service.
    input, such as a `from` that also pays the rent, fails the check.
 4. A remote recipe cannot run onchain. `verify_intent` checks the registry part and the assertions
    only, so the instructions trust the endpoint, within the postconditions.
-5. A version that is removed and published again at the same version can hold another document.
-   `verify_intent` checks ids, not digests, so it accepts the new document.
-6. Outputs still trust the builder, at execution.
-7. The builder runs at CPI depth 2, with no writes. Its limits are its heap, up to 256 KB through
+5. Outputs still trust the builder, at execution.
+6. The builder runs at CPI depth 2, with no writes. Its limits are its heap, up to 256 KB through
    the v1 heap config, and the 987 bytes for signers and outputs.
-8. The wallet in 4.7 uses the same logic inside `execute`.
+7. The wallet in 4.7 uses the same logic inside `execute`.
 
 ### 4.7 Onchain execution
 
@@ -1413,7 +1484,7 @@ from implementation id to the approved versions:
 | Command | Effect |
 | :-- | :-- |
 | `sdp-intents lint [paths]` | Checks every definition, and exits with an error on a finding. `--format github` writes GitHub annotations. |
-| `sdp-intents prepare <intent> --rpc <url>` | Plans the intent over RPC and prints the plan. Until the registry exists, it reads the documents from the definitions, and refuses an intent that keeps `assertions` or `verifyIntent`, because neither program exists yet. |
+| `sdp-intents prepare <request> --rpc <url>` | Plans the plan request over RPC and prints the plan. It reads the documents from the definitions, and refuses an intent that keeps `assertions`, because Lighthouse is not built yet. An intent that keeps `verifyIntent` needs the registry on the cluster. |
 | `sdp-intents plan --cluster <url>` | Reads the registry and prints the instructions that make it match the definitions |
 | `sdp-intents apply --cluster <url> --keypair <path>` | Sends the plan, signed by the key |
 | `sdp-intents apply --cluster <url> --squads <multisig>` | Proposes the plan to a Squads v4 multisig instead of sending it |
@@ -1461,7 +1532,7 @@ intents/
   engine/               sdp-intents-engine: binds an intent to its records, resolves accounts, and
                         builds instructions. no_std, no heap. The planner and verify_intent use it.
   planner/              sdp-intents-planner: prepare with no IO. Asks for fetches and simulations,
-                        runs the builder rounds, and returns the plan.
+                        plans each intent as a segment, and builds verify_intent.
   client/               sdp-intents-client: the planner over RPC. No service, cache, or LiteSVM.
   programs/             Anchor v2 workspace: Cargo.toml, Cargo.lock
     builder/            sdp-intents-builder: the builder library, over pinocchio, for Anchor v2
@@ -1684,7 +1755,7 @@ authorities are the main assets.
 | Threat | Where | Control |
 | :-- | :-- | :-- |
 | Spoofing | False builder, version, or name | Organization accounts, approvals, exact versions, and digests |
-| Tampering | Builder output, remote output, RPC data | Postconditions, assertions, and an independent RPC in production |
+| Tampering | Builder output, remote output, RPC data, instructions outside every span | Postconditions, assertions, an independent RPC in production, and the signer rule (4.6) |
 | Repudiation | Which code built a transaction | Digests and the builder's deploy slot in the plan and audit log |
 | Information disclosure | Inputs to a remote endpoint | Only inputs and payers go out. No credentials. |
 | Denial of service | Slow simulation, RPC, or remote | Round and compute limits, and timeouts. Fail closed. |
