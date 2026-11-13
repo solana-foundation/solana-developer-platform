@@ -38,10 +38,13 @@ struct Candidate {
     choice: VersionChoice,
 }
 
+/// Whether a record applies to the inputs. `DoesNotApply` is a failed `applies` check of the
+/// record, and `InvalidInputs` is inputs that do not compile or that the recipe cannot read.
 enum Fit {
-    Holds,
-    Fails(String),
-    /// The inputs do not compile yet, or a read failed.
+    Applies,
+    DoesNotApply(String),
+    InvalidInputs(String),
+    /// A read failed, or the documents do not load.
     Unknown(String),
 }
 
@@ -206,20 +209,20 @@ async fn fit(
     .to_string();
     let compiled = match catalog.compile_intent(&intent) {
         Ok(compiled) => compiled,
-        Err(report) => return Fit::Unknown(first_finding(&report)),
+        Err(report) => return Fit::InvalidInputs(first_finding(&report)),
     };
     let payers = Payers { fee: &request.fee_payer, rent: &request.rent_payer };
     let mut recipe = match Recipe::parse(&interface.bytes, &implementation.bytes, &compiled.bytes, payers) {
         Ok(recipe) => recipe,
-        Err(error) => return Fit::Fails(reason(interface, implementation, error)),
+        Err(error) => return failed(interface, implementation, error),
     };
     let mut accounts = AccountMap::default();
 
     for _ in 0..MAX_RESOLVE_ROUNDS {
         let missing: Vec<Address> = match recipe.resolve(&accounts) {
-            Ok(Resolution::Complete) => return Fit::Holds,
+            Ok(Resolution::Complete) => return Fit::Applies,
             Ok(Resolution::Missing(missing)) => missing.addresses().copied().collect(),
-            Err(error) => return Fit::Fails(reason(interface, implementation, error)),
+            Err(error) => return failed(interface, implementation, error),
         };
 
         match chain.accounts(&missing, Freshness::Live).await {
@@ -231,10 +234,11 @@ async fn fit(
     Fit::Unknown(format!("the recipe needs more than {MAX_RESOLVE_ROUNDS} reads"))
 }
 
-/// A failed `applies` check as its sentence. Any other error as its message.
-fn reason(interface: &Document, implementation: &Document, error: EngineError) -> String {
+/// A failed `applies` check as its sentence. Any other error is inputs that the recipe cannot
+/// read, with its message.
+fn failed(interface: &Document, implementation: &Document, error: EngineError) -> Fit {
     let EngineError::AppliesFailed { applies } = error else {
-        return error.to_string();
+        return Fit::InvalidInputs(error.to_string());
     };
 
     let sentence = Interface::parse(&interface.bytes)
@@ -247,16 +251,20 @@ fn reason(interface: &Document, implementation: &Document, error: EngineError) -
             applies_text(&implementation, check, &names).ok()
         });
 
-    sentence.map_or_else(|| error.to_string(), |sentence| format!("the check \"{sentence}\" does not hold"))
+    Fit::DoesNotApply(
+        sentence.map_or_else(|| error.to_string(), |sentence| format!("the check \"{sentence}\" does not hold")),
+    )
 }
 
-/// The implementations that fit first, then those not decided yet. Within each, a static recipe,
-/// then a builder, then a remote endpoint.
+/// The implementations that apply first, then those not decided yet, then those with invalid
+/// inputs, then those that do not apply. Within each, a static recipe, then a builder, then a
+/// remote endpoint.
 fn rank(left: &Evaluated, right: &Evaluated) -> Ordering {
     let fit = |evaluated: &Evaluated| match evaluated.fit {
-        Fit::Holds => 0,
+        Fit::Applies => 0,
         Fit::Unknown(_) => 1,
-        Fit::Fails(_) => 2,
+        Fit::InvalidInputs(_) => 2,
+        Fit::DoesNotApply(_) => 3,
     };
     let recipe = |evaluated: &Evaluated| match evaluated.recipe {
         RecipeKind::Static => 0,
@@ -270,10 +278,11 @@ fn rank(left: &Evaluated, right: &Evaluated) -> Ordering {
 
 impl Evaluated {
     fn json(&self) -> Value {
-        let (fits, reason) = match &self.fit {
-            Fit::Holds => (Some(true), None),
-            Fit::Fails(reason) => (Some(false), Some(reason)),
-            Fit::Unknown(reason) => (None, Some(reason)),
+        let (status, reason) = match &self.fit {
+            Fit::Applies => ("applies", None),
+            Fit::DoesNotApply(reason) => ("doesNotApply", Some(reason)),
+            Fit::InvalidInputs(reason) => ("invalidInputs", Some(reason)),
+            Fit::Unknown(reason) => ("unknown", Some(reason)),
         };
 
         json!({
@@ -281,7 +290,7 @@ impl Evaluated {
             "version": self.version,
             "recipe": recipe_name(self.recipe),
             "approved": self.approved,
-            "fits": fits,
+            "status": status,
             "reason": reason,
         })
     }

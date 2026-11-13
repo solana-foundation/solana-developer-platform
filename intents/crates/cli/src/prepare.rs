@@ -11,7 +11,7 @@ use serde_json::Value;
 use sdp_intents_client::{json, Client, ClientError};
 use sdp_intents_planner::{IntentDocuments, Payers, PlanError, PlanRequest};
 
-use sdp_intents_compiler::CompiledPlan;
+use sdp_intents_compiler::{CompiledPlan, PlanOutput};
 
 use crate::lint::{compile_tree, Outcome};
 use crate::output::{self, Format};
@@ -51,7 +51,12 @@ pub fn run(args: &PrepareArgs) -> Result<Outcome, String> {
     };
 
     let plan_request = plan_request(&request);
-    let prepared = Client::new(&args.rpc).prepare(&plan_request).map_err(describe)?;
+    let client = Client::new(&args.rpc);
+    let prepared = match request.output {
+        PlanOutput::Transaction => client.prepare(&plan_request),
+        PlanOutput::Instructions => client.prepare_instructions(&plan_request),
+    }
+    .map_err(describe)?;
     let request_json: Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
     let plan = serde_json::to_string_pretty(&json::plan(&prepared, request_json)).map_err(|error| error.to_string())?;
 

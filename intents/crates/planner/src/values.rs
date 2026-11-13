@@ -117,6 +117,34 @@ impl<'r, C: Chain> Values<'r, '_, C> {
             .collect()
     }
 
+    /// The accounts that the message reads: the mint of each amount, and the organization that
+    /// publishes each document.
+    pub(crate) fn message_accounts(&self) -> Result<Vec<Address>, PlanError> {
+        let publishers = [self.recipe.interface().id().publisher, self.recipe.implementation().id().publisher];
+
+        Ok(self.amount_mints()?.into_iter().chain(publishers).collect())
+    }
+
+    /// The name of the organization at `publisher`. The registry owns the account, and the
+    /// account's address derives from the name, so the name cannot belong to another organization.
+    pub(crate) fn organization(&self, publisher: &Address) -> Result<String, PlanError> {
+        let account = self.chain.account(publisher).ok_or(PlanError::Unresolved)?;
+        let not_organization = || PlanError::NotAnOrganization(*publisher);
+
+        if *account.owner != sdp_intents_registry_client::REGISTRY_PROGRAM {
+            return Err(not_organization());
+        }
+
+        let view =
+            sdp_intents_registry_client::OrganizationView::parse(account.data).map_err(|_| not_organization())?;
+        let name = view.name().map_err(|_| not_organization())?;
+
+        match sdp_intents_registry_client::organization_address(name) {
+            Ok(address) if address == *publisher => Ok(name.to_owned()),
+            _ => Err(not_organization()),
+        }
+    }
+
     pub(crate) fn decimals(&self, mint: &Address) -> Result<u8, PlanError> {
         if *mint == Address::default() {
             return Ok(SOL_DECIMALS);

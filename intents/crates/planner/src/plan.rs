@@ -11,8 +11,8 @@ use crate::{FrozenTransaction, Instruction, PlanError, RequiredSignature, Signer
 /// The plan of one or more intents: what the signers read, and the transaction they sign.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Plan {
-    /// What a signer reads and signs once for the whole transaction: the payers, the priority fee,
-    /// then each intent's record message, guarantees, documents, and onchain checks.
+    /// What a signer reads and signs once for the whole transaction: each intent's record message,
+    /// documents, and onchain checks, then the payers and the priority fee.
     pub message: String,
     /// Each intent, in the order of its segment in the transaction.
     pub intents: Vec<PlannedIntent>,
@@ -61,17 +61,17 @@ pub(crate) fn builder_program(recipe: &Recipe<'_>) -> Option<Address> {
         .flatten()
 }
 
-/// `sdp-intents/1: fee payer <address> | rent payer <address> | priority fee <lamports> lamports`,
-/// then `|| <n>: <part>` for each intent's part, in order. A signer renders the same text from the
-/// transaction, so the plan needs one off-chain signature.
+/// `sdp-intents/1`, then `|| <n>: <part>` for each intent's part, in order, then `|| fee payer
+/// <address> | rent payer <address> | priority fee <lamports> lamports`. One payer of both is
+/// `fee and rent payer <address>`. A signer renders the same text from the transaction.
 pub(crate) fn plan_message(payers: Payers<'_>, priority_fee_lamports: u64, parts: &[String]) -> String {
     let intents: String = (1usize..).zip(parts).map(|(number, part)| format!(" || {number}: {part}")).collect();
+    let payers = match payers.fee == payers.rent {
+        true => format!("fee and rent payer {}", base58(payers.fee)),
+        false => format!("fee payer {} | rent payer {}", base58(payers.fee), base58(payers.rent)),
+    };
 
-    format!(
-        "sdp-intents/1: fee payer {} | rent payer {} | priority fee {priority_fee_lamports} lamports{intents}",
-        base58(payers.fee),
-        base58(payers.rent),
-    )
+    format!("sdp-intents/1{intents} || {payers} | priority fee {priority_fee_lamports} lamports")
 }
 
 /// What the recipe built: the instructions, the new accounts a builder signs for, and the outputs.
@@ -147,27 +147,20 @@ impl<C: Chain> Values<'_, '_, C> {
             .collect()
     }
 
-    /// The intent's part of the plan message: `<record message> | guarantees: <each>; <each> |
-    /// interface: <id> | implementation: <id>`, the builder for a program recipe, then the onchain
-    /// checks. An id is the name, the version, and the first 8 bytes of the digest. The segment
-    /// adds the rent cap after its first simulation.
-    pub(crate) fn message(
-        &self,
-        guarantees: &[String],
-        digests: &Digests,
-        builder: Option<&Address>,
-    ) -> Result<String, PlanError> {
+    /// The intent's part of the plan message: `<record message> | interface: <id> | implementation:
+    /// <id> | <tier> | onchain checks: <checks>`. An id is the organization, the name, and the
+    /// version, such as `solana.org/token.transfer@1.0.0`. The registry never publishes a version
+    /// twice, so an id names one document. The segment adds the rent cap after its first simulation.
+    pub(crate) fn message(&self) -> Result<String, PlanError> {
         let interface = self.recipe.interface();
         let implementation = self.recipe.implementation();
         let record = self.render(implementation.message()?, Column::Message)?;
-        let id = |name: &[u8], version: sdp_intents_spec::wire::SemverV1, digest: &[u8; 32]| {
-            let digest: String = digest.iter().take(8).map(|byte| format!("{byte:02x}")).collect();
-            let version = format!("{}.{}.{}", version.major.get(), version.minor.get(), version.patch.get());
+        let id = |id: &sdp_intents_spec::wire::DocumentIdV1, name: &[u8]| {
+            let version = format!("{}.{}.{}", id.version.major.get(), id.version.minor.get(), id.version.patch.get());
 
-            format!("{}@{version} {digest}", String::from_utf8_lossy(name))
+            Ok::<_, PlanError>(format!("{}/{}@{version}", self.organization(&id.publisher)?, printable(name)?))
         };
 
-        let builder = builder.map(|builder| format!(" | builder: {}", base58(builder))).unwrap_or_default();
         let tier = match implementation.recipe()? {
             RecipeKind::Static | RecipeKind::Program => " | tier 1".to_owned(),
             RecipeKind::Remote => format!(" | endpoint: {} | tier 2", printable(implementation.url()?)?),
@@ -186,10 +179,9 @@ impl<C: Chain> Values<'_, '_, C> {
         let settlement = if interface.settles_later() { " | settles later, outside this transaction" } else { "" };
 
         Ok(format!(
-            "{record}{settlement} | guarantees: {} | interface: {} | implementation: {}{builder}{tier} | onchain checks: {checks}",
-            guarantees.join("; "),
-            id(interface.name()?, interface.id().version, &digests.interface),
-            id(implementation.name()?, implementation.id().version, &digests.implementation),
+            "{record}{settlement} | interface: {} | implementation: {}{tier} | onchain checks: {checks}",
+            id(interface.id(), interface.name()?)?,
+            id(implementation.id(), implementation.name()?)?,
         ))
     }
 

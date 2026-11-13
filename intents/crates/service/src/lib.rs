@@ -7,7 +7,7 @@
 //! | `GET /metrics` | | Request, RPC, and cache counters, in the Prometheus text format |
 //! | `GET /v1/registry` | | Every organization, interface, and implementation |
 //! | `POST /v1/prepare` | A plan request (`DESIGN.md`, 4.1) | The plan, and the RPC calls that it made |
-//! | `POST /v1/verify` | `{ message, expected }` | What the message proves to its signer |
+//! | `POST /v1/verify` | `{ message, expected }` or `{ transaction, expected }`, of any version | What the message proves to its signer |
 //! | `POST /v1/implementations` | `{ interface, inputs, payers, all }` | `implementationsFor` |
 //! | `GET /v1/wallets` | | The local wallets, with `--wallets` |
 //! | `POST /v1/send` | `{ message }` | Signs with the local wallets and sends, with `--wallets` |

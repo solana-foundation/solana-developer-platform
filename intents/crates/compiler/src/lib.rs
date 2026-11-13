@@ -58,5 +58,5 @@ pub use id::{format_version, parse_version, Id, IdRange};
 pub use implementation::CompiledImplementation;
 pub use intent::CompiledIntent;
 pub use interface::CompiledInterface;
-pub use plan::{CompiledPlan, PlanPayers};
+pub use plan::{CompiledPlan, PlanOutput, PlanPayers};
 pub use published::PublishedError;

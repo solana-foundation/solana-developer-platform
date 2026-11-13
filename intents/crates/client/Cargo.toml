@@ -28,6 +28,7 @@ solana-rpc-client-api = "=4.3.2"
 solana-signature = "=3.5.2"
 solana-signer = "=3.0.1"
 solana-transaction = "=4.3.0"
+wincode = "=0.6.3"
 
 [dev-dependencies]
 sdp-intents-compiler.workspace = true

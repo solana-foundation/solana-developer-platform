@@ -21,8 +21,8 @@ use crate::render::Column;
 use crate::values::Values;
 use crate::verify::{rent_cap, Snapshot, Verification};
 use crate::{
-    Account, Digests, FrozenTransaction, Instruction, IntentDocuments, PlanError, RequiredSignature, Simulation,
-    SimulationResult, Transaction,
+    Account, Digests, FixedMessage, FrozenTransaction, Instruction, IntentDocuments, PlanError, RequiredSignature,
+    Simulation, SimulationResult, Transaction,
 };
 
 /// A builder asks for accounts in at most 4 rounds.
@@ -261,7 +261,7 @@ impl<'a> SegmentPlanner<'a> {
         let observe = segment.writable_accounts();
         let values = Values { recipe: &self.recipe, chain: earlier.chain, outputs: &built.outputs };
 
-        let missing = observe.iter().chain(&values.amount_mints()?).fold(Vec::new(), |mut missing, address| {
+        let missing = observe.iter().chain(&values.message_accounts()?).fold(Vec::new(), |mut missing, address| {
             if earlier.chain.account(address).is_none() && !missing.contains(address) {
                 missing.push(*address);
             }
@@ -275,8 +275,7 @@ impl<'a> SegmentPlanner<'a> {
         }
 
         let guarantees = values.guarantees()?;
-        let builder = self.builder();
-        let message = values.message(&guarantees, &self.digests, builder.as_ref())?;
+        let message = values.message()?;
         let display = values.render(self.recipe.interface().display()?, Column::Display)?;
         let signatures = values.signatures(&segment, &built)?;
         let before: Vec<Account> = observe.iter().map(|address| snapshot_of(earlier.chain, address)).collect();
@@ -289,7 +288,14 @@ impl<'a> SegmentPlanner<'a> {
             .chain(&onchain.snapshots)
             .chain(&built.instructions)
             .chain(&onchain.checks);
-        let transaction = self.transaction(instructions);
+        let transaction = match &built.frozen {
+            Some(frozen) => frozen.transaction.clone(),
+            None => self.transaction(instructions),
+        };
+        let fixed = built
+            .frozen
+            .as_ref()
+            .map(|frozen| FixedMessage { bytes: frozen.message.clone(), lookup_tables: frozen.lookup_tables.clone() });
         transaction.check_fit()?;
 
         let checking = Checking {
@@ -305,7 +311,7 @@ impl<'a> SegmentPlanner<'a> {
         };
         self.state = State::AwaitingChecks(Box::new(checking));
 
-        Ok(SegmentStep::Simulate(Simulation { transaction, observe }))
+        Ok(SegmentStep::Simulate(Simulation { transaction, observe, fixed }))
     }
 
     /// Checks the postconditions and the payer rules, then builds the onchain checks with the rent

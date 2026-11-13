@@ -30,7 +30,8 @@
 //! }
 //! ```
 //!
-//! A builder call runs as a v1 transaction that first creates scratch, then calls the builder with
+//! A provider's signed transaction runs as its own message, of any version. Every other simulation,
+//! such as a builder call, runs as a v1 transaction. A builder call runs as a v1 transaction that first creates scratch, then calls the builder with
 //! scratch last. The simulation checks no signatures and lands nothing, so scratch needs no keypair
 //! and no one pays its rent.
 
@@ -63,8 +64,8 @@ pub use remote::{
     FrozenTransaction, InputValue, ProviderSignature, RemoteAnswer, RemoteCall, RemoteInput, RemoteOutput,
 };
 pub use sdp_intents_engine::Payers;
-pub use simulation::{ReturnData, Simulation, SimulationResult};
-pub use transaction::{Budget, RequiredSignature, SignerRole, Transaction};
+pub use simulation::{FixedMessage, ReturnData, Simulation, SimulationResult};
+pub use transaction::{Budget, RequiredSignature, SignerRole, Transaction, COMPUTE_BUDGET_PROGRAM};
 pub use verifier::{verify_transaction, VerifiedIntent, VerifiedTransaction, VerifyError, VerifyStep};
 
 /// The compiled documents of one intent.

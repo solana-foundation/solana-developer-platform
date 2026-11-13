@@ -5,12 +5,14 @@ use serde_json::{json, Value};
 
 use axum::http::StatusCode;
 use sdp_intents_chain::{CachedRpc, Freshness};
-use sdp_intents_client::{decode_message, fresh_address, json as plan_json, prepared, remote};
-use sdp_intents_compiler::IdRange;
+use sdp_intents_client::message::{read_transaction, LookupTable, WireMessage};
+use sdp_intents_client::{fresh_address, instructions_only, json as plan_json, prepared, remote};
+use sdp_intents_compiler::{IdRange, PlanOutput};
 use sdp_intents_planner::{
     verify_transaction, AccountMap, IntentDocuments, Payers, Plan, PlanRequest, Planner, RemoteAnswer, RemoteCall,
     Step, VerifiedTransaction, VerifyStep,
 };
+use sdp_intents_spec::Address;
 
 use crate::error::ServiceError;
 use crate::registry::{catalog, IntentReference, Registry};
@@ -20,22 +22,35 @@ use crate::registry::{catalog, IntentReference, Registry};
 const MAX_VERIFY_ROUNDS: usize = 8;
 
 /// A plan request as `DESIGN.md`, section 4.1, writes it. The documents come from the registry.
-/// With `tamper`, the transaction differs from the plan, as `tamper` says.
+/// With `tamper`, the transaction differs from the plan, as `tamper` says. A request for the
+/// instructions alone reads no blockhash.
 pub async fn prepare(chain: &CachedRpc, text: &str, tamper: bool) -> Result<Value, ServiceError> {
     let request: Value = serde_json::from_str(text)?;
-    let mut plan = planned(chain, text, None).await?;
+    let Planned { mut plan, output } = planned(chain, text, None).await?;
 
     if tamper {
         tamper_with(&mut plan);
     }
 
-    let recent = chain.latest_blockhash().await?;
+    let prepared = match output {
+        PlanOutput::Instructions => instructions_only(plan)?,
+        PlanOutput::Transaction => {
+            let recent = chain.latest_blockhash().await?;
 
-    Ok(plan_json::plan(&prepared(plan, recent.blockhash, recent.last_valid_block_height)?, request))
+            prepared(plan, recent.blockhash, recent.last_valid_block_height)?
+        }
+    };
+
+    Ok(plan_json::plan(&prepared, request))
+}
+
+struct Planned {
+    plan: Plan,
+    output: PlanOutput,
 }
 
 /// Plans `text` with the registry's documents. A remote call takes `answer` when it is set.
-async fn planned(chain: &CachedRpc, text: &str, answer: Option<RemoteAnswer>) -> Result<Plan, ServiceError> {
+async fn planned(chain: &CachedRpc, text: &str, answer: Option<RemoteAnswer>) -> Result<Planned, ServiceError> {
     let request: Value = serde_json::from_str(text)?;
     let references = references(&request)?;
     let documents = Registry { chain }.intent_documents(&references).await?;
@@ -56,34 +71,30 @@ async fn planned(chain: &CachedRpc, text: &str, answer: Option<RemoteAnswer>) ->
         priority_fee_lamports: compiled.priority_fee_lamports,
     };
 
-    plan(chain, &plan_request, answer).await
+    Ok(Planned { plan: plan(chain, &plan_request, answer).await?, output: compiled.output })
 }
 
-/// A body of `{ "message": base64, "expected": text }`. `expected` is the plan's message, when the
-/// caller has one. A provider's transaction also holds `presigned` and the plan's `request`, and is
-/// planned again with the transaction as the endpoint's answer.
+/// A body of `{ "message": base64, "expected": text }`, or of `{ "transaction": base64 }` with a
+/// whole transaction in wire form, whose signatures it ignores. Either is of any version.
+/// `expected` is the plan's message, when the caller has one. A provider's transaction also holds
+/// `presigned` and the plan's `request`, and is planned again with the transaction as the
+/// endpoint's answer.
 pub async fn verify(chain: &CachedRpc, body: &Value) -> Result<Value, ServiceError> {
-    let message = body
-        .get("message")
-        .and_then(Value::as_str)
-        .ok_or_else(|| ServiceError::invalid_request("`message` is the base64 of a v1 message"))?;
-    let message = base64::engine::general_purpose::STANDARD
-        .decode(message)
-        .map_err(|error| ServiceError::invalid_request(format!("`message` is not base64: {error}")))?;
+    let message = message_of(body)?;
+    let tables = lookup_tables(chain, &message.lookup_tables()).await?;
     let expected = body.get("expected").and_then(Value::as_str);
     let presigned = crate::wallets::presigned(body)?;
 
     if presigned.is_empty() {
-        return Ok(plan_json::verified(&verified(chain, &message).await?, expected));
+        return Ok(plan_json::verified(&verified(chain, &message.decode(&tables)?).await?, expected));
     }
 
     let request = body
         .get("request")
         .ok_or_else(|| ServiceError::invalid_request("a provider's transaction needs its `request`"))?;
-    let frozen = remote::frozen_from_parts(&message, presigned)?;
-    let replanned =
-        planned(chain, &request.to_string(), Some(RemoteAnswer { frozen: Some(frozen), ..RemoteAnswer::default() }))
-            .await?;
+    let frozen = remote::frozen_from_parts(&message, presigned, &tables)?;
+    let answer = RemoteAnswer { frozen: Some(frozen), ..RemoteAnswer::default() };
+    let replanned = planned(chain, &request.to_string(), Some(answer)).await?.plan;
 
     Ok(json!({
         "message": replanned.message,
@@ -92,6 +103,40 @@ pub async fn verify(chain: &CachedRpc, body: &Value) -> Result<Value, ServiceErr
         "unverified": [],
         "checkedBy": "simulation",
     }))
+}
+
+/// The message of `message`, or of the wire transaction in `transaction`.
+pub fn message_of(body: &Value) -> Result<WireMessage, ServiceError> {
+    let base64_of = |key: &str| {
+        body.get(key).and_then(Value::as_str).map(|text| {
+            base64::engine::general_purpose::STANDARD
+                .decode(text)
+                .map_err(|error| ServiceError::invalid_request(format!("`{key}` is not base64: {error}")))
+        })
+    };
+
+    match (base64_of("message"), base64_of("transaction")) {
+        (Some(message), None) => Ok(WireMessage::parse(&message?)?),
+        (None, Some(transaction)) => Ok(read_transaction(&transaction?)?.message),
+        _ => Err(ServiceError::invalid_request(
+            "the body holds `message`, the base64 of a message, or `transaction`, the base64 of a transaction",
+        )),
+    }
+}
+
+/// The lookup tables at `addresses`, read live, because a table can grow.
+async fn lookup_tables(chain: &CachedRpc, addresses: &[Address]) -> Result<Vec<LookupTable>, ServiceError> {
+    if addresses.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let fetched = chain.accounts(addresses, Freshness::Live).await?;
+
+    Ok(addresses
+        .iter()
+        .zip(&fetched)
+        .map(|(address, account)| LookupTable::read(*address, account.as_ref()))
+        .collect::<Result<Vec<_>, _>>()?)
 }
 
 /// Changes the last data byte of the first built instruction, and keeps the message. The client's
@@ -125,7 +170,7 @@ async fn plan(
             Step::Simulate(simulation) => planner.simulated(chain.simulate(&simulation).await?)?,
             Step::Call(call) => match &answer {
                 Some(answer) => planner.called(answer.clone())?,
-                None => planner.called(call_remote(&call).await?)?,
+                None => planner.called(call_remote(chain, &call).await?)?,
             },
             Step::Done(plan) => return Ok(*plan),
         }
@@ -133,7 +178,7 @@ async fn plan(
 }
 
 /// Calls a remote recipe's endpoint. The planner checks the answer as it checks any recipe.
-async fn call_remote(call: &RemoteCall) -> Result<RemoteAnswer, ServiceError> {
+async fn call_remote(chain: &CachedRpc, call: &RemoteCall) -> Result<RemoteAnswer, ServiceError> {
     let failed = |error: reqwest::Error| {
         ServiceError::new(StatusCode::BAD_GATEWAY, "remote", format!("the remote endpoint failed: {error}"))
     };
@@ -142,15 +187,20 @@ async fn call_remote(call: &RemoteCall) -> Result<RemoteAnswer, ServiceError> {
     let status = response.status().as_u16();
     let answer: Value = response.json().await.map_err(failed)?;
 
-    Ok(remote::answered(status, &answer)?)
+    let answer = remote::answered(status, &answer)?;
+    let tables = lookup_tables(chain, &answer.lookup_tables()).await?;
+
+    Ok(answer.read(&tables)?)
 }
 
-async fn verified(chain: &CachedRpc, message: &[u8]) -> Result<VerifiedTransaction, ServiceError> {
-    let transaction = decode_message(message)?;
+async fn verified(
+    chain: &CachedRpc,
+    transaction: &sdp_intents_planner::Transaction,
+) -> Result<VerifiedTransaction, ServiceError> {
     let mut accounts = AccountMap::default();
 
     for _ in 0..MAX_VERIFY_ROUNDS {
-        match verify_transaction(&transaction, &accounts)? {
+        match verify_transaction(transaction, &accounts)? {
             VerifyStep::Fetch(addresses) => {
                 let fetched = chain.accounts(&addresses, Freshness::Live).await?;
                 accounts.insert_fetched(&addresses, fetched);

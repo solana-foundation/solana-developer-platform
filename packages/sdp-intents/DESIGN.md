@@ -128,6 +128,12 @@ digests, and bytes.
 1. Each entry of `intents` is an intent without `spec` and `kind`.
 2. `payers`, `cluster`, and the total priority fee belong to the transaction, so only the request
    holds them. `rent` defaults to `fee`. `cluster` is the genesis hash.
+3. `options.output` is `transaction`, the default, or `instructions`. With `instructions`, the plan
+   holds no `transaction`, and `prepare` reads no blockhash. The caller compiles the instructions as
+   a legacy, v0, or v1 transaction. It keeps each segment whole and in order, keeps the request's
+   payers, and sets the compute budget. `verify_intent` finds its segment after itself in the
+   instructions sysvar, so the version does not matter. A provider's signed transaction (4.16) has
+   no instructions to give, so `prepare` refuses `instructions` for it.
 
 **Interface.**
 
@@ -279,7 +285,7 @@ mint. This record handles Token-2022 mints:
   "spec": "sdp-intents@1.0",
   "kind": "plan",
   "request": { "kind": "plan", "intents": ["…"] },
-  "message": "sdp-intents/1: fee payer KoRa… | rent payer KoRa… | priority fee 5000 lamports || 1: transfer 100 of 2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo from 7xKX… to 9aBc… | guarantees: 7xKX… sends at most 100 of 2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo; nothing else leaves 7xKX…; only Token-2022, ATA, and Memo instructions run | interface: token.transfer@1.0.0 3f9a… | implementation: token-2022-transfer@1.0.0 c21e… | builder: T22Bld… | onchain checks: verify_intent, assertions | rent cap 2039280 lamports",
+  "message": "sdp-intents/1 || 1: transfer 100 of 2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo from 7xKX… to 9aBc… | interface: solana.org/token.transfer@1.0.0 | implementation: solana.org/token-2022-transfer@1.0.0 | tier 1 | onchain checks: verify_intent, assertions | rent cap 2039280 lamports || fee and rent payer KoRa… | priority fee 5000 lamports",
   "intents": [
     {
       "display": "Send 100 PYUSD to 9aBc…",
@@ -290,59 +296,68 @@ mint. This record handles Token-2022 mints:
       "span": { "start": 2, "end": 4 }
     }
   ],
+  "signers": [
+    { "address": "KoRa…", "role": "payer:fee" },
+    { "address": "7xKX…", "role": "input:from" }
+  ],
+  "priorityFeeLamports": "5000",
+  "instructions": [
+    {
+      "programAddress": "9sgttDZ2vnzb85HWuQbx8vy6Boga32zpP5QRZ7UtbWpp",
+      "accounts": [{ "address": "Sysvar1nstructions1111111111111111111111111", "role": 0 }, "…"],
+      "data": "…"
+    },
+    {
+      "programAddress": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+      "accounts": [
+        { "address": "KoRa…", "role": 3 },
+        { "address": "DstA…", "role": 1 },
+        { "address": "9aBc…", "role": 0 },
+        { "address": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo", "role": 0 },
+        { "address": "11111111111111111111111111111111", "role": 0 },
+        { "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", "role": 0 }
+      ],
+      "data": "AQ=="
+    },
+    {
+      "programAddress": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "accounts": [
+        { "address": "SrcA…", "role": 1 },
+        { "address": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo", "role": 0 },
+        { "address": "DstA…", "role": 1 },
+        { "address": "7xKX…", "role": 2 }
+      ],
+      "data": "DADh9QUAAAAABg=="
+    }
+  ],
+  "computeBudget": { "unitLimit": "61000", "loadedAccountsDataSizeLimit": "131072", "heapSize": "32768" },
   "transaction": {
-    "instructions": [
-      {
-        "programAddress": "9sgttDZ2vnzb85HWuQbx8vy6Boga32zpP5QRZ7UtbWpp",
-        "accounts": [{ "address": "Sysvar1nstructions1111111111111111111111111", "role": 0 }, "…"],
-        "data": "…"
-      },
-      {
-        "programAddress": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
-        "accounts": [
-          { "address": "KoRa…", "role": 3 },
-          { "address": "DstA…", "role": 1 },
-          { "address": "9aBc…", "role": 0 },
-          { "address": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo", "role": 0 },
-          { "address": "11111111111111111111111111111111", "role": 0 },
-          { "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", "role": 0 }
-        ],
-        "data": "AQ=="
-      },
-      {
-        "programAddress": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
-        "accounts": [
-          { "address": "SrcA…", "role": 1 },
-          { "address": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo", "role": 0 },
-          { "address": "DstA…", "role": 1 },
-          { "address": "7xKX…", "role": 2 }
-        ],
-        "data": "DADh9QUAAAAABg=="
-      }
-    ],
     "version": 1,
-    "config": { "priorityFeeLamports": "5000", "computeUnitLimit": "61000", "loadedAccountsDataSizeLimit": "131072" },
-    "compiled": "gQIA…",
-    "signatures": [
-      { "address": "KoRa…", "role": "payer:fee", "status": "required" },
-      { "address": "7xKX…", "role": "input:from", "status": "required" }
-    ]
+    "messageBytes": "gQIA…",
+    "lastValidBlockHeight": "289104452",
+    "presigned": []
   }
 }
 ```
 
-1. `message` is what a signer signs once for the whole transaction, such as on a Ledger. It
-   names the payers and the priority fee, then each intent after `|| <n>:`: the record's template,
-   `guarantees` from both sets of postconditions, the ids with digests, the builder, the onchain
-   checks, and the rent cap (4.5). `display` comes from the interface. `deploySlot` is for the audit log only.
-2. `verify` is the position of the intent's `verify_intent`, and `span` the positions of its built
+1. `message` is what a signer signs once for the whole transaction, such as on a Ledger. Each
+   intent comes after `|| <n>:`: the record's template, the ids, the tier, the onchain checks, and
+   the rent cap (4.5). The payers and the priority fee come last. An id is the organization, the
+   name, and the exact version. The registry never publishes a version twice, so the id names one
+   document, and the message holds no digest. The guarantees are in the interface and the record,
+   which a UI shows. `display` comes from the interface. `deploySlot` is for the audit log only.
+2. A Ledger signs an off-chain message of at most 1,212 bytes, so `prepare` refuses a longer
+   message.
+3. `verify` is the position of the intent's `verify_intent`, and `span` the positions of its built
    instructions (4.6). `verify` is `null` when the intent turns `verifyIntent` off.
-3. Instructions use the `EarnVaultInstruction` shape: base58 addresses, numeric `AccountRole`
-   values, and base64 data.
-4. `SrcA…` and `DstA…` are the ATAs of `from` and `to`. `KoRa…` holds both payer roles.
-5. Transactions are v1 (SIMD-0385): up to 4,096 bytes and 64 accounts, with the compute budget in
-   `config` and no lookup tables. The service sets the compute unit limit and the loaded data size
-   from the simulation, because both default to zero.
+4. Instructions use the `EarnVaultInstruction` shape: base58 addresses, numeric `AccountRole`
+   values, and base64 data. They are not Solana's wire format, which lists each key once in a table
+   and names it by index. `transaction.messageBytes` is that wire format.
+5. `SrcA…` and `DstA…` are the ATAs of `from` and `to`. `KoRa…` holds both payer roles.
+6. `prepare` compiles a v1 transaction (SIMD-0385): up to 4,096 bytes and 64 accounts, with the
+   compute budget in the header and no lookup tables. It sets the compute unit limit and the loaded
+   data size from the simulation, because both default to zero. `version` is `"legacy"`, `0`, or
+   `1`, as Kit writes it. A provider's transaction keeps its own version.
 6. The example shortens `verify_intent`, and leaves out the Lighthouse instructions around the
    span (4.5) and the permanent delegate warning (4.11). The positions count the Lighthouse
    instructions.
@@ -423,7 +438,7 @@ erDiagram
     string request
     string cluster "genesis hash"
     u64 priority_fee
-    string message "payers, priority fee, then each segment's part"
+    string message "each segment's part, then the payers and the priority fee"
   }
   SEGMENT {
     string digests
@@ -433,12 +448,11 @@ erDiagram
   }
   TRANSACTION {
     string instructions "plain data"
-    string compiled "base64 message"
+    string messageBytes "base64 message, when the request asks for it"
   }
   REQUIRED_SIGNATURE {
     address address
-    string role "input, payer, or builder"
-    string status "required or signed"
+    string role "input, payer, builder, or provider"
   }
 ```
 
@@ -897,17 +911,21 @@ that it calls reads the state that the simulation read: the state after the inst
 
 **Signer rule.** A signer:
 
-1. Renders the plan message from the transaction: the payers from the `verify_intent` accounts,
-   the priority fee from the v1 config, then each intent's part from its `verify_intent` and its
-   record. It signs or approves that message once.
+1. Renders the plan message from the transaction: each intent's part from its `verify_intent`
+   and its record, then the payers from the `verify_intent` accounts and the priority fee. A v1
+   message holds the fee in its header. A legacy or v0 message holds a price for each compute
+   unit, and the fee is the price times the limit, rounded up to a lamport. The signer signs or
+   approves that message once.
 2. Puts each instruction in one class: ComputeBudget, `verify_intent`, in a span, or unverified.
 3. Shows each unverified instruction as it is: the program, the accounts with their roles, and the
    data.
 4. Checks the fee payer and its own signature.
 
 It needs no trust in the service. `verify_transaction` in the planner crate does steps 1 to 3 with
-no IO, and `Client::verify_message` answers its fetches over RPC: the version accounts, then the
-accounts that each recipe and message read. It reads each document from the registry, never from
+no IO, and `Client::verify_message` answers its fetches over RPC: the lookup tables of a v0
+message, the version accounts, then the accounts that each recipe and message read. The message
+reads each document's organization account for its name. `/v1/verify` takes a message or a whole
+transaction of any version. It reads each document from the registry, never from
 the service. A `verify_intent` that someone moves or drops changes no span. Its instructions then show as unverified. An intent that turns `verifyIntent` off
 has no onchain form. Its part of the message comes from the service, and says `onchain checks:
 none`.
@@ -1542,7 +1560,7 @@ from implementation id to the approved versions:
 | `sdp-intents apply --rpc <url> --keypair <path> --squads <multisig>` | The multisig's vault is the authority. The key writes each buffer and creates each organization, and every other step becomes a Squads vault transaction and proposal, in order. `--execute` also approves and executes each one, which only a member who meets the threshold alone can do. |
 | `sdp-intents squads-create --rpc <url> --keypair <path>` | Creates a Squads multisig whose only member is the key, with a threshold of 1, for a local run |
 | `sdp-intents prepare <request> --rpc <url>` | Plans the plan request over RPC and prints the plan. It compiles the documents from the definitions with each organization's registry address, so `verify_intent` finds them once `apply` has run. |
-| `sdp-intents verify <plan> --rpc <url>` | Renders the message from the plan's compiled transaction and the registry, as its signer does (4.6), and lists each instruction that no segment holds |
+| `sdp-intents verify <plan> --rpc <url>` | Renders the message from the plan's compiled transaction and the registry, as its signer does (4.6), and lists each instruction that no segment holds. A plan of instructions alone compiles first, as `--version legacy\|0\|1` and each `--lookup-table` say, and the command prints its `messageBytes`. |
 | `sdp-intents send <plan> --rpc <url> --keypair <path>…` | Verifies the plan, then signs its compiled transaction with each key and sends it. It refuses a plan that does not verify, unless `--allow-unverified` is set. |
 
 An authority that a file leaves out is `Address::default()` in an index, which follows the
@@ -1851,13 +1869,16 @@ account sign each mint. The provider's signatures cover the whole message, so no
    assertions, and no other intent.
 2. The provider picks the blockhash, so the plan states when it expires. A slow signer, such as a
    Ledger, can miss it.
-3. The transaction can be v0 with lookup tables. The verifier reads the tables to resolve the
-   accounts.
+3. The transaction is legacy, v0, or v1. The verifier reads the tables of a v0 transaction to
+   resolve its accounts. A simulation runs the provider's message as it is. The wire form is
+   Solana's: a legacy or v0 transaction puts its signatures before the message, and a v1
+   transaction puts them after it.
 4. The record lists each signer that the provider can sign for: a fixed address, or a fresh
    account that does not exist before the transaction. `prepare` refuses any other signature, and
    any signature of the owner, a payer, or a signer input.
 5. The fee payer must be the request's `payers.fee`. A sponsor pays only when the provider's API
-   lets the caller pick the fee payer.
+   lets the caller pick the fee payer. The priority fee is at most the request's, because a legacy
+   or v0 price for each compute unit can round the fee down.
 6. `prepare` and the signer's verifier simulate the transaction and check each postcondition, the
    payer rules, and `invokesOnly`. The signer's verifier plans the plan's request again, with the
    plan's transaction as the endpoint's answer, and compares the message. The plan holds the
@@ -1871,7 +1892,7 @@ account sign each mint. The provider's signatures cover the whole message, so no
 
 The message names the tier of each part. `prepare` refuses a tier 3 record unless the intent sets
 `assertions` and `verifyIntent` to false, so the weaker trust is the caller's explicit choice. Its
-part of the message reads `onchain checks: none | checked by: simulation`.
+part of the message reads `tier 3, checked by simulation only | onchain checks: none`.
 
 The prototype builds the instructions form. `intents/adapters/jupiter.mjs` is the Jupiter wrapper,
 and `solana.org/ondo-usdy-deposit` and `ondo-usdy-withdraw` route through it. Each pins the USDY
@@ -1882,9 +1903,10 @@ planner's simulation, as they would onchain.
 The transaction form runs against `crates/test-provider`, a local stand-in for a provider that
 signs, because Plume's API answers only a wallet that Plume approved, and its CCTP mint settles on
 another chain. The stand-in creates a new order account, signs for it, and moves the owner's USDC
-to its wallet, which `solana.org/test-provider-deposit` pins. A record states a fixed provider
+to its wallet, which `solana.org/test-provider-deposit` pins. Its `/format` switch makes it return
+legacy, v0 with a lookup table, or v1, and the e2e lands each. A record states a fixed provider
 signer, such as Plume's keeper, as an account with `"signer": true`. A Plume record waits for an
-approved wallet and a v0 decoder.
+approved wallet.
 
 ## 5. Security
 

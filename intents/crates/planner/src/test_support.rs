@@ -8,7 +8,7 @@ use sdp_intents_spec::builder::{
 use sdp_intents_spec::wire::{PodU16, PodU32};
 use sdp_intents_spec::{AccountRole, Address};
 
-use crate::{Account, IntentDocuments, Payers, PlanRequest, ReturnData, SimulationResult};
+use crate::{Account, AccountMap, IntentDocuments, Payers, PlanRequest, ReturnData, SimulationResult};
 
 pub(crate) const BUILDER: Address = Address([0x42; 32]);
 pub(crate) const SCRATCH: Address = Address([0x5c; 32]);
@@ -16,6 +16,32 @@ pub(crate) const SCRATCH: Address = Address([0x5c; 32]);
 /// `5ZWj7a1f8tWkjBESHKgrLmXshuXxqeY9SYcfbshpAqPG` pays the fee of every test plan, and the rent
 /// unless the documents name another rent payer.
 pub(crate) const PAYER: &str = "5ZWj7a1f8tWkjBESHKgrLmXshuXxqeY9SYcfbshpAqPG";
+/// The organization that publishes every test document.
+const ORGANIZATION: &str = "solana.org";
+
+fn organization_address() -> Address {
+    sdp_intents_registry_client::organization_address(ORGANIZATION).unwrap()
+}
+
+/// A chain that holds the organization account, as the registry lays it out: the discriminator,
+/// the authority, the name's hash, the name's length, and the name in 64 bytes.
+pub(crate) fn chain() -> AccountMap {
+    let name = ORGANIZATION.as_bytes();
+    let data = [
+        &sdp_intents_registry_client::ORGANIZATION_DISCRIMINATOR[..],
+        &[0; 32],
+        &sdp_intents_registry_client::name_hash(ORGANIZATION),
+        &[name.len() as u8],
+        name,
+        &vec![0; 64usize.saturating_sub(name.len())],
+    ]
+    .concat();
+    let account = Account { owner: sdp_intents_registry_client::REGISTRY_PROGRAM, lamports: 1, data };
+    let mut chain = AccountMap::default();
+    chain.insert_fetched(&[organization_address()], vec![Some(account)]);
+
+    chain
+}
 
 pub(crate) struct Compiled {
     pub(crate) interface: Vec<u8>,
@@ -31,7 +57,7 @@ impl Compiled {
     }
 
     pub(crate) fn compile(implementation: &str, intent: &str) -> Self {
-        let mut catalog = Catalog::default().with_publisher("solana.org", Address([7; 32]));
+        let mut catalog = Catalog::default().with_publisher(ORGANIZATION, organization_address());
         let interface = catalog
             .compile_interface(include_str!("../../../definitions/solana.org/interfaces/token.transfer/1.0.0.json"));
         let interface = interface.unwrap().bytes.clone();

@@ -17,6 +17,16 @@ pub struct Simulation {
     pub transaction: Transaction,
     /// The accounts whose state after the run the result must hold, in this order.
     pub observe: Vec<Address>,
+    /// The message to run in place of `transaction` when it is set. `transaction` then holds what
+    /// the message decodes to, so the caller can load its accounts.
+    pub fixed: Option<FixedMessage>,
+}
+
+/// A serialized message that the simulation runs as it is, such as a provider's signed message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FixedMessage {
+    pub bytes: Vec<u8>,
+    pub lookup_tables: Vec<Address>,
 }
 
 /// What a simulation returned. `accounts` follows the order of `Simulation::observe`, and `None`
@@ -71,6 +81,6 @@ impl Simulation {
         let instructions = earlier.iter().cloned().chain([create_scratch, call]).collect();
         let transaction = Transaction::unbudgeted(funder, instructions);
 
-        Ok(Self { transaction, observe: vec![scratch] })
+        Ok(Self { transaction, observe: vec![scratch], fixed: None })
     }
 }

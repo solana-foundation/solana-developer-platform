@@ -19,6 +19,9 @@ pub struct PlanRequest<'a> {
 }
 use crate::{FrozenTransaction, RemoteAnswer, RemoteCall, SimulationResult, Transaction};
 
+/// The longest off-chain message that a Ledger signs: one packet less the message header.
+const MAX_MESSAGE_LEN: usize = 1_212;
+
 /// What the caller does next for the planner.
 #[derive(Debug)]
 pub enum Step {
@@ -155,7 +158,7 @@ impl<'a> Planner<'a> {
     }
 
     /// The last simulation ran the whole transaction, so it measures the budget. A provider's
-    /// transaction keeps its own budget, and is the whole plan.
+    /// transaction keeps its own budget and priority fee, and is the whole plan.
     fn finish(&mut self) -> Result<Plan, PlanError> {
         let last = self.last.take().ok_or(PlanError::OutOfOrder)?;
         let frozen = self.frozen.take();
@@ -176,8 +179,15 @@ impl<'a> Planner<'a> {
             },
         };
 
+        let message =
+            plan_message(self.payers, transaction.priority_fee_lamports, &core::mem::take(&mut self.messages));
+
+        if message.len() > MAX_MESSAGE_LEN {
+            return Err(PlanError::MessageTooLong { used: message.len(), max: MAX_MESSAGE_LEN });
+        }
+
         Ok(Plan {
-            message: plan_message(self.payers, self.priority_fee_lamports, &core::mem::take(&mut self.messages)),
+            message,
             intents: core::mem::take(&mut self.intents),
             transaction,
             signatures: core::mem::take(&mut self.signatures),
@@ -270,7 +280,7 @@ mod tests {
     fn plans_a_static_transfer() {
         let documents = Compiled::spl_transfer();
         let mut planner = Planner::new(&request(&[&documents], 5_000), SCRATCH).unwrap();
-        let mut accounts = AccountMap::default();
+        let mut accounts = chain();
 
         let final_run = spl_final_simulation(&mut planner, &mut accounts);
         assert_eq!(final_run.observe.len(), 3);
@@ -278,8 +288,12 @@ mod tests {
         planner.simulated(spl_result(400_000_000, SOL - 15_000 - ATA_RENT)).unwrap();
         let Ok(Step::Done(plan)) = planner.next(&accounts) else { panic!("the plan is done") };
 
-        assert!(plan.message.starts_with(&format!("sdp-intents/1: fee payer {FEE_PAYER} | rent payer {FEE_PAYER} | priority fee 5000 lamports || 1: transfer 100 of {USDC} from {FROM} to {TO} | guarantees: {FROM} sends at most 100 of {USDC}; nothing else leaves {FROM} | interface: token.transfer@1.0.0 ")));
-        assert!(plan.message.ends_with(" | onchain checks: none | rent cap 2039280 lamports"));
+        assert_eq!(
+            plan.message,
+            format!(
+                "sdp-intents/1 || 1: transfer 100 of {USDC} from {FROM} to {TO} | interface: solana.org/token.transfer@1.0.0 | implementation: solana.org/spl-token-transfer@1.0.0 | tier 1 | onchain checks: none | rent cap 2039280 lamports || fee and rent payer {FEE_PAYER} | priority fee 5000 lamports"
+            )
+        );
         assert_eq!(plan.intents[0].display, format!("Send 100 {USDC} to 9WzD…AWWM"));
         assert_eq!(plan.transaction.budget.compute_unit_limit, 33_000);
         assert_eq!(plan.transaction.priority_fee_lamports, 5_000);
@@ -295,7 +309,7 @@ mod tests {
     fn plans_a_transfer_to_an_existing_token_account() {
         let documents = Compiled::spl_transfer();
         let mut planner = Planner::new(&request(&[&documents], 5_000), SCRATCH).unwrap();
-        let mut accounts = AccountMap::default();
+        let mut accounts = chain();
 
         let Step::Fetch(addresses) = fetch(&mut planner, &mut accounts, |_| Some(mint(TOKEN_PROGRAM))) else {
             panic!("the planner fetches the writable accounts")
@@ -317,7 +331,7 @@ mod tests {
     fn a_broken_guarantee_fails_the_plan() {
         let documents = Compiled::spl_transfer();
         let mut planner = Planner::new(&request(&[&documents], 5_000), SCRATCH).unwrap();
-        spl_final_simulation(&mut planner, &mut AccountMap::default());
+        spl_final_simulation(&mut planner, &mut chain());
 
         let failed = planner.simulated(spl_result(300_000_000, SOL - 15_000 - ATA_RENT));
 
@@ -328,7 +342,7 @@ mod tests {
     fn a_fee_payer_that_loses_more_than_the_fee_and_the_rent_fails_the_plan() {
         let documents = Compiled::spl_transfer();
         let mut planner = Planner::new(&request(&[&documents], 5_000), SCRATCH).unwrap();
-        spl_final_simulation(&mut planner, &mut AccountMap::default());
+        spl_final_simulation(&mut planner, &mut chain());
 
         let failed = planner.simulated(spl_result(400_000_000, SOL / 2));
 
@@ -347,7 +361,7 @@ mod tests {
             &include_str!("../../../fixtures/intents/spl-token-transfer.json").replace(r#""assertions": false, "#, ""),
         );
         let mut planner = Planner::new(&request(&[&documents], 5_000), SCRATCH).unwrap();
-        let mut accounts = AccountMap::default();
+        let mut accounts = chain();
 
         let guarded = spl_final_simulation(&mut planner, &mut accounts);
         let programs: Vec<_> = guarded.transaction.instructions.iter().map(|instruction| instruction.program).collect();
@@ -375,7 +389,7 @@ mod tests {
 
     fn builder_planner(documents: &Compiled) -> (Planner<'_>, AccountMap) {
         let mut planner = Planner::new(&request(&[documents], 5_000), SCRATCH).unwrap();
-        let mut accounts = AccountMap::default();
+        let mut accounts = chain();
         let step = fetch(&mut planner, &mut accounts, |_| Some(mint(TOKEN_2022_PROGRAM)));
         assert!(matches!(step, Step::Simulate(_)));
 
@@ -386,8 +400,7 @@ mod tests {
     fn a_builder_simulation_creates_scratch_first() {
         let documents = Compiled::token_2022_transfer();
         let mut planner = Planner::new(&request(&[&documents], 5_000), SCRATCH).unwrap();
-        let simulation =
-            simulation(fetch(&mut planner, &mut AccountMap::default(), |_| Some(mint(TOKEN_2022_PROGRAM))));
+        let simulation = simulation(fetch(&mut planner, &mut chain(), |_| Some(mint(TOKEN_2022_PROGRAM))));
         let [create, call] = simulation.transaction.instructions.as_slice() else { panic!("two instructions") };
 
         assert_eq!(simulation.transaction.fee_payer, account(FEE_PAYER));
@@ -505,7 +518,7 @@ mod tests {
     fn a_later_intent_runs_after_the_earlier_ones() {
         let documents = Compiled::system_transfer(SYSTEM_TRANSFER);
         let mut planner = Planner::new(&request(&[&documents, &documents], 0), SCRATCH).unwrap();
-        let mut accounts = AccountMap::default();
+        let mut accounts = chain();
 
         assert_eq!(second_segment(&mut planner, &mut accounts).transaction.instructions.len(), 2);
 
@@ -524,7 +537,7 @@ mod tests {
     fn each_segment_answers_for_its_own_changes() {
         let documents = Compiled::system_transfer(SYSTEM_TRANSFER);
         let mut planner = Planner::new(&request(&[&documents, &documents], 0), SCRATCH).unwrap();
-        second_segment(&mut planner, &mut AccountMap::default());
+        second_segment(&mut planner, &mut chain());
 
         let after = transfer_result(10 * SOL - TRANSFER_FEE, 10 * SOL - 3 * QUARTER, 10 * SOL + 3 * QUARTER);
 
@@ -535,7 +548,7 @@ mod tests {
     fn one_message_holds_every_intent() {
         let documents = Compiled::system_transfer(SYSTEM_TRANSFER);
         let mut planner = Planner::new(&request(&[&documents, &documents], 0), SCRATCH).unwrap();
-        let mut accounts = AccountMap::default();
+        let mut accounts = chain();
         second_segment(&mut planner, &mut accounts);
 
         let after = transfer_result(10 * SOL - TRANSFER_FEE, 10 * SOL - 2 * QUARTER, 10 * SOL + 2 * QUARTER);
@@ -543,9 +556,10 @@ mod tests {
         let Ok(Step::Done(plan)) = planner.next(&accounts) else { panic!("the plan is done") };
         let transfer = format!("transfer 0.25 SOL from {FROM} to {TO}");
 
-        assert!(plan.message.starts_with(&format!("sdp-intents/1: fee payer {FEE_PAYER} | rent payer {FEE_PAYER} | priority fee 0 lamports || 1: {transfer} | ")));
+        assert!(plan.message.starts_with(&format!("sdp-intents/1 || 1: {transfer} | ")));
         assert!(plan.message.contains(&format!(" || 2: {transfer} | ")));
-        assert_eq!(plan.message.matches(" || ").count(), 2);
+        assert!(plan.message.ends_with(&format!(" || fee and rent payer {FEE_PAYER} | priority fee 0 lamports")));
+        assert_eq!(plan.message.matches(" || ").count(), 3);
     }
 
     #[test]

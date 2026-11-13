@@ -11,22 +11,15 @@
 
 use core::ops::Range;
 
-use sha2::{Digest as _, Sha256};
-
 use sdp_intents_engine::{Chain, Payers, Recipe, Resolution};
 use sdp_intents_spec::wire::DocumentKind;
 use sdp_intents_spec::{Address, Intent};
 
-use crate::plan::{builder_program, plan_message, with_rent_cap};
+use crate::plan::{plan_message, with_rent_cap};
 use crate::registry::{verify_intent_discriminator, version_address, REGISTRY_PROGRAM};
 use crate::values::Values;
-use crate::{Digests, Instruction, PlanError, Transaction};
+use crate::{Instruction, PlanError, Transaction};
 
-/// `ComputeBudget111111111111111111111111111111`.
-const COMPUTE_BUDGET_PROGRAM: Address = Address([
-    3, 6, 70, 111, 229, 33, 23, 50, 255, 236, 173, 186, 114, 195, 155, 231, 188, 140, 229, 187, 197, 247, 18, 107, 44,
-    67, 155, 58, 64, 0, 0, 0,
-]);
 /// A version account holds the 8-byte discriminator, the version, and the publish slot, then the
 /// document.
 const VERSION_HEADER_LEN: usize = 8 + 6 + 8;
@@ -153,12 +146,7 @@ pub fn verify_transaction<C: Chain>(transaction: &Transaction, chain: &C) -> Res
     let in_segment = |position: &usize| verifies.iter().any(|verify| verify.segment.contains(position));
     let unverified = (0..transaction.instructions.len())
         .filter(|position| !in_segment(position))
-        .filter(|position| {
-            transaction
-                .instructions
-                .get(*position)
-                .is_some_and(|instruction| instruction.program != COMPUTE_BUDGET_PROGRAM)
-        })
+        .filter(|position| transaction.instructions.get(*position).is_some_and(|instruction| !instruction.is_budget()))
         .collect();
 
     Ok(VerifyStep::Done(Box::new(VerifiedTransaction {
@@ -259,16 +247,14 @@ fn part<C: Chain>(verify: &DecodedVerify<'_>, payers: Payers<'_>, chain: &C) -> 
     }
 
     let values = Values { recipe: &recipe, chain, outputs: verify.outputs };
-    let mints: Vec<Address> = values.amount_mints()?.into_iter().filter(|mint| chain.account(mint).is_none()).collect();
+    let missing: Vec<Address> =
+        values.message_accounts()?.into_iter().filter(|address| chain.account(address).is_none()).collect();
 
-    if !mints.is_empty() {
-        return Ok(Part::Missing(mints));
+    if !missing.is_empty() {
+        return Ok(Part::Missing(missing));
     }
 
-    let digests =
-        Digests { interface: Sha256::digest(interface).into(), implementation: Sha256::digest(implementation).into() };
-    let guarantees = values.guarantees()?;
-    let message = values.message(&guarantees, &digests, builder_program(&recipe).as_ref())?;
+    let message = values.message()?;
 
     Ok(Part::Rendered(with_rent_cap(&message, verify.rent_cap)))
 }

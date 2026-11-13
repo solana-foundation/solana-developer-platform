@@ -38,13 +38,17 @@ pub fn message(transaction: &Transaction, blockhash: Hash) -> Result<v1::Message
         .map_err(|error| ClientError::Compile(format!("{error:?}")))
 }
 
-/// A simulation as a v1 transaction with empty signatures. A simulation with `sigVerify` off does
-/// not read them, and one with `replaceRecentBlockhash` on replaces the default blockhash.
+/// A simulation as a v1 transaction with empty signatures, or as its fixed message of any version. A
+/// simulation with `sigVerify` off does not read them, and one with `replaceRecentBlockhash` on
+/// replaces the blockhash.
 pub fn simulation_transaction(simulation: &Simulation) -> Result<VersionedTransaction, ClientError> {
-    let message = message(&simulation.transaction, Hash::default())?;
-    let signatures = vec![Signature::default(); usize::from(message.header.num_required_signatures)];
+    let message = match &simulation.fixed {
+        Some(fixed) => crate::WireMessage::parse(&fixed.bytes)?.solana().clone(),
+        None => VersionedMessage::V1(message(&simulation.transaction, Hash::default())?),
+    };
+    let signatures = vec![Signature::default(); usize::from(message.header().num_required_signatures)];
 
-    Ok(VersionedTransaction { signatures, message: VersionedMessage::V1(message) })
+    Ok(VersionedTransaction { signatures, message })
 }
 
 /// Simulates at `processed`, and returns each account of `observe` in base64.
@@ -61,7 +65,7 @@ pub fn simulation_config(simulation: &Simulation) -> RpcSimulateTransactionConfi
     }
 }
 
-fn instruction(instruction: &Instruction) -> solana_instruction::Instruction {
+pub(crate) fn instruction(instruction: &Instruction) -> solana_instruction::Instruction {
     let accounts = instruction
         .accounts
         .iter()
@@ -145,6 +149,7 @@ mod tests {
                 priority_fee_lamports: 5_000,
             },
             observe: vec![scratch],
+            fixed: None,
         };
 
         let transaction = simulation_transaction(&simulation).unwrap();

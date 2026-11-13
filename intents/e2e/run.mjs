@@ -25,6 +25,7 @@ import {
   cli,
   keypair as keypairIn,
   rpcClient,
+  setLookupTable,
 } from "./surfnet.mjs";
 
 const RPC = process.argv[2] ?? "http://127.0.0.1:8899";
@@ -107,7 +108,7 @@ async function run(name, request, signers) {
   const verified = cli("verify", planPath, "--rpc", RPC);
   expect(verified.includes("The message matches the plan."), `${name}: the client's verifier proves the message`);
 
-  const compiled = plan.transaction.compiled;
+  const compiled = plan.transaction.messageBytes;
   // A provider's transaction is planned again from its request, with its signatures.
   const presigned = plan.transaction.presigned;
   const remote = await service(
@@ -128,6 +129,31 @@ async function run(name, request, signers) {
 }
 
 const plan = (payer, intents) => ({ spec: "sdp-intents@1.0", kind: "plan", payers: { fee: payer.address }, intents });
+
+/// Prepares a plan of instructions alone, then has the CLI compile it to each version, verify it,
+/// and send it. The service's verifier reads the same bytes that the CLI compiled.
+async function runEachVersion(name, request, signers, lookupTable) {
+  const planPath = `${OUT}${name}.plan.json`;
+  const plan = await service("/v1/prepare", JSON.stringify({ ...request, options: { output: "instructions" } }));
+  writeFileSync(planPath, JSON.stringify(plan, null, 2));
+  expect(plan.transaction === undefined && plan.instructions.length > 0, `${name}: the plan holds instructions alone`);
+  expect(plan.rpcCalls.getLatestBlockhash === 0, `${name}: the service read no blockhash`);
+
+  const versions = [["legacy"], ["0", "--lookup-table", lookupTable], ["1"]];
+
+  for (const [version, ...tables] of versions) {
+    const compile = ["--rpc", RPC, "--version", version, ...tables];
+    const verified = cli("verify", planPath, ...compile);
+    expect(verified.includes("The message matches the plan."), `${name} as ${version}: the client's verifier proves it`);
+
+    const message = verified.match(/^messageBytes (\S+)$/m)[1];
+    const remote = await service("/v1/verify", JSON.stringify({ message, expected: plan.message }));
+    expect(remote.matches && remote.unverified.length === 0, `${name} as ${version}: the service's verifier proves it too`);
+
+    const sent = cli("send", planPath, ...compile, ...signers.flatMap((signer) => ["--keypair", signer.path]));
+    expect(sent.includes("sent "), `${name} as ${version}: the CLI compiled it, signed it, and it landed`);
+  }
+}
 
 mkdirSync(WALLETS, { recursive: true });
 
@@ -174,7 +200,7 @@ try {
       payers: { fee: payer.address },
     }),
   );
-  const fitting = candidates.implementations.filter((candidate) => candidate.fits).map((candidate) => candidate.id);
+  const fitting = candidates.implementations.filter((candidate) => candidate.status === "applies").map((candidate) => candidate.id);
   expect(fitting.join() === "solana.org/spl-token-transfer", "implementationsFor picks spl-token-transfer for USDC");
 
   console.log("a USDC transfer and a SOL transfer in one transaction");
@@ -195,6 +221,22 @@ try {
   );
   expect((await tokenAmount(receiver.address, USDC)) === 100_000_000n, "the receiver holds 100 USDC");
   expect((await rpc("getBalance", [receiver.address])).value === 250_000_000, "the receiver holds 0.25 SOL");
+
+  console.log("a USDC transfer as instructions alone, compiled to legacy, v0 with a lookup table, and v1");
+  const senderUsdc = (await rpc("getTokenAccountsByOwner", [sender.address, { mint: USDC }, { encoding: "base64" }])).value[0].pubkey;
+  const receiverUsdc = (await rpc("getTokenAccountsByOwner", [receiver.address, { mint: USDC }, { encoding: "base64" }])).value[0].pubkey;
+  const lookupTable = keypair("lookup-table").address;
+  await setLookupTable(rpc, lookupTable, [senderUsdc, receiverUsdc, USDC, "Sysvar1nstructions1111111111111111111111111"]);
+  const receivedBefore = await tokenAmount(receiver.address, USDC);
+  const transferRequest = plan(payer, [
+    {
+      interface: "solana.org/token.transfer@^1",
+      implementation: "solana.org/spl-token-transfer@^1",
+      inputs: { from: sender.address, to: receiver.address, mint: USDC, amount: "1000000", memo: null },
+    },
+  ]);
+  await runEachVersion("transfer-instructions", transferRequest, [payer, sender], lookupTable);
+  expect((await tokenAmount(receiver.address, USDC)) - receivedBefore === 3_000_000n, "the receiver holds 1 USDC more for each version");
 
   console.log("a Jupiter Lend deposit");
   await run(
@@ -329,6 +371,28 @@ try {
   expect(provided.message.includes("tier 3, checked by simulation only | onchain checks: none"), "the message names tier 3");
   expect(provided.transaction.presigned.length === 1, "the provider signed for its order account");
   expect((await tokenAmount(PROVIDER_WALLET, USDC)) - walletBefore === 10_000_000n, "the provider's wallet received 10 USDC");
+
+  const instructionsRefused = await service(
+    "/v1/prepare",
+    JSON.stringify({ ...provided.request, options: { output: "instructions" } }),
+  ).then(
+    () => undefined,
+    (error) => error.message,
+  );
+  expect(instructionsRefused?.includes("no instructions to give") === true, "a provider's transaction has no instructions to give");
+
+  const providerUsdc = (await rpc("getTokenAccountsByOwner", [PROVIDER_WALLET, { mint: USDC }, { encoding: "base64" }])).value[0].pubkey;
+  await setLookupTable(rpc, lookupTable, [senderUsdc, providerUsdc, USDC]);
+
+  for (const [version, table] of [["legacy", null], ["0", lookupTable]]) {
+    await fetch("http://127.0.0.1:8792/format", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version, lookupTable: table }) });
+    const before = await tokenAmount(PROVIDER_WALLET, USDC);
+    const signed = await run(`provider-deposit-${version}`, provided.request, [payer, sender]);
+    expect(signed.transaction.version === (version === "legacy" ? "legacy" : 0), `the provider's ${version} transaction stays ${version}`);
+    expect((await tokenAmount(PROVIDER_WALLET, USDC)) - before === 10_000_000n, `the provider's ${version} transaction landed`);
+  }
+
+  await fetch("http://127.0.0.1:8792/format", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: "1" }) });
 
   console.log("an endpoint that adds an approval to an attacker");
   await fetch("http://127.0.0.1:8791/mode", { method: "POST", body: JSON.stringify({ malicious: true }) });

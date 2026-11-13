@@ -93,7 +93,7 @@ fn an_intent_without_verify_intent_is_not_in_the_message() {
     let verified = verify(&setup.svm, &plan.transaction).unwrap();
 
     assert_ne!(verified.message, plan.message);
-    assert_eq!(verified.message.matches(" || ").count(), 1);
+    assert_eq!(verified.message.matches(" || ").count(), 2);
     assert_eq!(verified.unverified, (5..plan.transaction.instructions.len()).collect::<Vec<_>>());
 }
 

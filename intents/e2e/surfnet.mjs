@@ -30,6 +30,27 @@ export function base58(bytes) {
   return "1".repeat(zeros === -1 ? bytes.length : zeros) + text;
 }
 
+export function fromBase58(text) {
+  let value = 0n;
+  for (const character of text) value = value * 58n + BigInt(ALPHABET.indexOf(character));
+
+  const bytes = [];
+  for (; value > 0n; value /= 256n) bytes.unshift(Number(value % 256n));
+
+  const zeros = text.length - text.replace(/^1+/, "").length;
+  return Buffer.from([...new Array(zeros).fill(0), ...bytes]);
+}
+
+/// Places an active address lookup table at `address` that holds `addresses`. Its header is the
+/// tag of a table, a deactivation slot of `u64::MAX`, and zeros to 56 bytes.
+export async function setLookupTable(rpc, address, addresses) {
+  const header = Buffer.concat([Buffer.from([1, 0, 0, 0]), Buffer.alloc(8, 0xff), Buffer.alloc(44)]);
+  const data = Buffer.concat([header, ...addresses.map(fromBase58)]);
+  const owner = "AddressLookupTab1e1111111111111111111111111";
+
+  await rpc("surfnet_setAccount", [address, { lamports: 100_000_000, owner, data: data.toString("hex") }]);
+}
+
 /// A JSON-RPC client of `url`, which throws on an error answer.
 export function rpcClient(url) {
   return async (method, params) => {

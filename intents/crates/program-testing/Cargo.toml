@@ -18,6 +18,7 @@ solana-signature = "=3.5.2"
 sdp-intents-compiler = { path = "../compiler" }
 sdp-intents-lighthouse = { path = "../lighthouse" }
 sdp-intents-planner = { path = "../planner" }
+sdp-intents-registry-client = { path = "../registry-client" }
 sdp-intents-spec.workspace = true
 
 [lints]

@@ -3096,6 +3096,7 @@ dependencies = [
  "solana-signature",
  "solana-signer",
  "solana-transaction",
+ "wincode",
 ]
 
 [[package]]

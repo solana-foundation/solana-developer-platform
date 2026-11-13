@@ -20,6 +20,23 @@ pub struct CompiledPlan<'c> {
     pub intents: Vec<CompiledIntent<'c>>,
     pub payers: PlanPayers,
     pub priority_fee_lamports: u64,
+    pub output: PlanOutput,
+}
+
+/// What `prepare` returns: a compiled v1 transaction, or the instructions alone for a caller that
+/// compiles its own transaction, of any version.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PlanOutput {
+    #[default]
+    Transaction,
+    Instructions,
+}
+
+/// The plan's options.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct PlanOptions {
+    priority_fee_lamports: u64,
+    output: PlanOutput,
 }
 
 /// `rent` defaults to `fee`.
@@ -45,7 +62,7 @@ fn compile<'c>(value: &Value, catalog: &'c Catalog, sink: &mut Sink) -> Option<C
     read_kind(&mut object, "plan", sink);
 
     let payers = object.required("payers", sink).and_then(|node| read_payers(&node, sink));
-    let priority_fee = object.field("options").map_or(Some(0), |node| read_options(&node, sink));
+    let options = object.field("options").map_or(Some(PlanOptions::default()), |node| read_options(&node, sink));
     read_cluster(&mut object, sink);
     let entries = object.required("intents", sink).and_then(|node| node.array(sink));
     let pointer = format!("{}/intents", object.pointer());
@@ -71,7 +88,8 @@ fn compile<'c>(value: &Value, catalog: &'c Catalog, sink: &mut Sink) -> Option<C
     Some(CompiledPlan {
         intents: intents.into_iter().collect::<Option<Vec<_>>>()?,
         payers: payers?,
-        priority_fee_lamports: priority_fee?,
+        priority_fee_lamports: options?.priority_fee_lamports,
+        output: options?.output,
     })
 }
 
@@ -88,17 +106,29 @@ fn read_payers(node: &Node<'_>, sink: &mut Sink) -> Option<PlanPayers> {
     Some(PlanPayers { fee, rent: rent.unwrap_or(Some(fee))? })
 }
 
-/// The plan's options hold only the total priority fee.
-fn read_options(node: &Node<'_>, sink: &mut Sink) -> Option<u64> {
+/// The total priority fee, and what `prepare` returns.
+fn read_options(node: &Node<'_>, sink: &mut Sink) -> Option<PlanOptions> {
     let mut object = node.object(sink)?;
     let priority_fee = object.field("priorityFeeLamports").map_or(Some(0), |node| {
         let bytes = encode(&node, ValueType { base: BaseType::U64, array: false }, sink)?;
 
         bytes.try_into().ok().map(u64::from_le_bytes)
     });
+    let output = object.field("output").map_or(Some(PlanOutput::Transaction), |node| match node.str(sink)? {
+        "transaction" => Some(PlanOutput::Transaction),
+        "instructions" => Some(PlanOutput::Instructions),
+        _ => {
+            sink.push(Diagnostic::new(
+                Code::InvalidValue,
+                &node.pointer,
+                "`output` is `transaction` or `instructions`",
+            ));
+            None
+        }
+    });
     object.finish(sink);
 
-    priority_fee
+    Some(PlanOptions { priority_fee_lamports: priority_fee?, output: output? })
 }
 
 fn read_cluster(object: &mut Object<'_>, sink: &mut Sink) {
@@ -124,7 +154,23 @@ mod tests {
         assert_eq!(plan.intents.len(), 2);
         assert_eq!(plan.payers.fee, plan.payers.rent);
         assert_eq!(plan.priority_fee_lamports, 5_000);
+        assert_eq!(plan.output, PlanOutput::Transaction);
         assert_eq!(plan.intents[1].implementation.id.name, "system-transfer");
+    }
+
+    #[test]
+    fn the_plan_can_ask_for_its_instructions_alone() {
+        let catalog = full_catalog();
+        let options = |output: &str| {
+            edit(
+                PLAN,
+                "\"priorityFeeLamports\": \"5000\"",
+                &format!("\"priorityFeeLamports\": \"5000\", \"output\": \"{output}\""),
+            )
+        };
+
+        assert_eq!(compile_plan(&options("instructions"), &catalog).unwrap().output, PlanOutput::Instructions);
+        assert!(compile_plan(&options("bytes"), &catalog).is_err());
     }
 
     #[test]

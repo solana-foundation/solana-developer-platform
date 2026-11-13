@@ -1,15 +1,15 @@
 //! `sdp-intents verify` and `sdp-intents send`: act as the signer of a plan that `prepare` printed.
 //! Both render the message from the compiled transaction and the registry, never from the plan, and
-//! list each instruction that no segment holds.
+//! list each instruction that no segment holds. A plan of instructions alone compiles to a
+//! transaction of `--version`, with a recent blockhash.
 
 use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
 use serde_json::Value;
 
-use sdp_intents_client::remote::frozen_from_parts;
-use sdp_intents_client::{read_keypair_file, Client, Keypair};
-use sdp_intents_planner::{ProviderSignature, VerifiedTransaction};
+use sdp_intents_client::{read_keypair_file, remote, Client, Keypair, MessageVersion};
+use sdp_intents_planner::{Budget, ProviderSignature, Transaction, VerifiedTransaction};
 use sdp_intents_spec::Address;
 
 use crate::lint::{compile_tree, Outcome};
@@ -27,6 +27,21 @@ pub struct VerifyArgs {
     /// The definitions that a provider's transaction is planned again against.
     #[arg(long, default_value = "definitions")]
     root: PathBuf,
+
+    #[command(flatten)]
+    compile: CompileArgs,
+}
+
+/// How a plan of instructions alone compiles to a transaction.
+#[derive(clap::Args)]
+pub struct CompileArgs {
+    /// The version of the transaction: `legacy`, `0`, or `1`.
+    #[arg(long, default_value = "1", value_parser = parse_version)]
+    version: MessageVersion,
+
+    /// A lookup table of a v0 transaction. Repeat it for each table.
+    #[arg(long = "lookup-table", value_parser = parse_address)]
+    lookup_tables: Vec<Address>,
 }
 
 #[derive(clap::Args)]
@@ -48,10 +63,13 @@ pub struct SendArgs {
 
     #[arg(long, default_value = "definitions")]
     root: PathBuf,
+
+    #[command(flatten)]
+    compile: CompileArgs,
 }
 
-/// A plan file: the message that the service rendered, the compiled v1 message, and, for a
-/// provider's transaction, its signatures and the request that it answers.
+/// A plan file: the message that the service rendered, the compiled message, and, for a provider's
+/// transaction, its signatures and the request that it answers.
 struct PlanFile {
     message: String,
     compiled: Vec<u8>,
@@ -60,14 +78,15 @@ struct PlanFile {
 }
 
 pub fn verify(args: &VerifyArgs) -> Result<Outcome, String> {
-    let plan = read_plan(&args.plan)?;
+    let client = Client::new(&args.rpc);
+    let plan = read_plan(&args.plan, &client, &args.compile)?;
 
-    verified(&plan, &Client::new(&args.rpc), &args.root)
+    verified(&plan, &client, &args.root)
 }
 
 pub fn send(args: &SendArgs) -> Result<Outcome, String> {
-    let plan = read_plan(&args.plan)?;
     let client = Client::new(&args.rpc);
+    let plan = read_plan(&args.plan, &client, &args.compile)?;
 
     if verified(&plan, &client, &args.root)? == Outcome::Findings && !args.allow_unverified {
         return Err("the transaction does not prove the plan. Pass --allow-unverified to send it anyway.".into());
@@ -102,7 +121,7 @@ fn verified(plan: &PlanFile, client: &Client, root: &Path) -> Result<Outcome, St
     let tree = Tree::read(root)?;
     let compiled = compile_tree(&tree);
     let compiled_request = compiled.catalog.compile_plan(&text).map_err(|report| report.render("request", &text))?;
-    let frozen = frozen_from_parts(&plan.compiled, plan.presigned.clone()).map_err(|error| error.to_string())?;
+    let frozen = client.frozen(&plan.compiled, plan.presigned.clone()).map_err(|error| error.to_string())?;
     let replanned = client.replan(&plan_request(&compiled_request), frozen).map_err(|error| error.to_string())?;
     let matches = replanned.message == plan.message;
 
@@ -127,14 +146,32 @@ fn report(plan: &PlanFile, verified: &VerifiedTransaction) -> Outcome {
     }
 }
 
-fn read_plan(path: &Path) -> Result<PlanFile, String> {
+/// The plan at `path`. A plan of instructions alone compiles here, as `compile` says, and the
+/// command prints the message so that another verifier can read the same bytes.
+fn read_plan(path: &Path, client: &Client, compile: &CompileArgs) -> Result<PlanFile, String> {
     let text = std::fs::read_to_string(path).map_err(|error| format!("cannot read `{}`: {error}", path.display()))?;
     let value: Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
     let message = value.get("message").and_then(Value::as_str).ok_or("the plan has no message")?;
-    let compiled = value
-        .pointer("/transaction/compiled")
-        .and_then(Value::as_str)
-        .ok_or("the plan has no compiled transaction")?;
+    let request = value.get("request").cloned();
+
+    let Some(compiled) = value.pointer("/transaction/messageBytes").and_then(Value::as_str) else {
+        let transaction = planned_transaction(&value)?;
+        let compiled =
+            client.compile(&transaction, compile.version, &compile.lookup_tables).map_err(|error| error.to_string())?;
+        println!("messageBytes {}", base64::engine::general_purpose::STANDARD.encode(compiled.bytes()));
+
+        return Ok(PlanFile {
+            message: message.to_owned(),
+            compiled: compiled.bytes().to_vec(),
+            presigned: Vec::new(),
+            request,
+        });
+    };
+
+    if compile.version != MessageVersion::V1 || !compile.lookup_tables.is_empty() {
+        return Err("the plan holds its transaction, so `--version` and `--lookup-table` do not apply".into());
+    }
+
     let compiled = base64::engine::general_purpose::STANDARD.decode(compiled).map_err(|error| error.to_string())?;
     let presigned = value
         .pointer("/transaction/presigned")
@@ -143,7 +180,45 @@ fn read_plan(path: &Path) -> Result<PlanFile, String> {
         .transpose()?
         .unwrap_or_default();
 
-    Ok(PlanFile { message: message.to_owned(), compiled, presigned, request: value.get("request").cloned() })
+    Ok(PlanFile { message: message.to_owned(), compiled, presigned, request })
+}
+
+/// The transaction of a plan of instructions alone: the request's fee payer, the plan's
+/// instructions, its compute budget, and its priority fee.
+fn planned_transaction(plan: &Value) -> Result<Transaction, String> {
+    let text =
+        |pointer: &str| plan.pointer(pointer).and_then(Value::as_str).ok_or(format!("the plan has no `{pointer}`"));
+    let number = |pointer: &str| text(pointer)?.parse::<u64>().map_err(|_| format!("`{pointer}` is not an integer"));
+    let limit = |pointer: &str| u32::try_from(number(pointer)?).map_err(|_| format!("`{pointer}` is too large"));
+    let instructions = plan
+        .get("instructions")
+        .and_then(Value::as_array)
+        .ok_or("the plan has no transaction and no instructions")?
+        .iter()
+        .map(remote::instruction)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+
+    Ok(Transaction {
+        fee_payer: parse_address(text("/request/payers/fee")?)?,
+        instructions,
+        budget: Budget {
+            compute_unit_limit: limit("/computeBudget/unitLimit")?,
+            loaded_accounts_data_size_limit: limit("/computeBudget/loadedAccountsDataSizeLimit")?,
+            heap_size: limit("/computeBudget/heapSize")?,
+        },
+        priority_fee_lamports: number("/priorityFeeLamports")?,
+    })
+}
+
+fn parse_version(text: &str) -> Result<MessageVersion, String> {
+    MessageVersion::parse(text).ok_or_else(|| "the version is `legacy`, `0`, or `1`".to_owned())
+}
+
+fn parse_address(text: &str) -> Result<Address, String> {
+    let bytes = bs58::decode(text).into_vec().map_err(|_| format!("`{text}` is not base58"))?;
+
+    <[u8; 32]>::try_from(bytes).map(Address).map_err(|_| format!("`{text}` is not an address"))
 }
 
 fn provider_signature(entry: &Value) -> Result<ProviderSignature, String> {

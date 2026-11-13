@@ -17,6 +17,11 @@ pub struct AccountMeta {
 }
 
 impl Instruction {
+    /// A ComputeBudget instruction, which sets the budget of a legacy or v0 transaction.
+    pub fn is_budget(&self) -> bool {
+        self.program == crate::COMPUTE_BUDGET_PROGRAM
+    }
+
     pub(crate) fn built<C: Chain>(built: &BuiltInstruction<'_, C>) -> Result<Self, EngineError> {
         let accounts = built
             .accounts()

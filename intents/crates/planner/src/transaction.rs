@@ -2,6 +2,12 @@ use sdp_intents_spec::Address;
 
 use crate::{Instruction, Limit, PlanError};
 
+/// `ComputeBudget111111111111111111111111111111`. A legacy or v0 transaction sets its budget with
+/// this program's instructions.
+pub const COMPUTE_BUDGET_PROGRAM: Address = Address([
+    3, 6, 70, 111, 229, 33, 23, 50, 255, 236, 173, 186, 114, 195, 155, 231, 188, 140, 229, 187, 197, 247, 18, 107, 44,
+    67, 155, 58, 64, 0, 0, 0,
+]);
 /// The runtime charges 5,000 lamports for each signature.
 const SIGNATURE_FEE: u64 = 5_000;
 const MAX_COMPUTE_UNITS: u32 = 1_400_000;
@@ -10,7 +16,8 @@ const MIN_HEAP_SIZE: u32 = 32 * 1024;
 const MAX_ACCOUNTS: usize = 64;
 const MAX_INSTRUCTIONS: usize = 64;
 
-/// A v1 transaction before its blockhash and its signatures. The caller compiles it.
+/// A transaction before its blockhash and its signatures. The planner builds v1 transactions. A
+/// legacy or v0 message decodes to one that holds its ComputeBudget instructions too.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Transaction {
     pub fee_payer: Address,
@@ -21,6 +28,7 @@ pub struct Transaction {
 }
 
 /// The compute budget in the v1 header. Its limits default to zero, so every transaction sets them.
+/// A legacy or v0 transaction that sets no limit decodes to zero, and the runtime default applies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Budget {
     pub compute_unit_limit: u32,

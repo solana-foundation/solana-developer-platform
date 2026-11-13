@@ -199,7 +199,7 @@ mod frozen {
             .collect();
 
         RemoteAnswer {
-            frozen: Some(FrozenTransaction { message: vec![1], transaction, signatures }),
+            frozen: Some(FrozenTransaction { message: vec![1], transaction, lookup_tables: Vec::new(), signatures }),
             ..RemoteAnswer::default()
         }
     }

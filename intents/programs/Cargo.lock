@@ -2384,6 +2384,7 @@ dependencies = [
  "sdp-intents-compiler",
  "sdp-intents-lighthouse",
  "sdp-intents-planner",
+ "sdp-intents-registry-client",
  "sdp-intents-spec",
  "solana-account",
  "solana-address 2.7.0",

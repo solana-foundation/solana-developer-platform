@@ -53,6 +53,13 @@ pub enum PlanError {
     Unavailable(&'static str),
     /// A postcondition or a payer rule does not hold in the simulation of the final transaction.
     CheckFailed(String),
+    /// A document's publisher is not an organization of the registry.
+    NotAnOrganization(sdp_intents_spec::Address),
+    /// The plan message is longer than a hardware wallet signs, with its length and the limit.
+    MessageTooLong {
+        used: usize,
+        max: usize,
+    },
     /// A signer is no payer, no signer input, and no account that a builder signs for.
     UnknownSigner(sdp_intents_spec::Address),
     /// The result of the final simulation does not hold one account for each that it observes.
@@ -138,6 +145,12 @@ impl fmt::Display for PlanError {
             ),
             Self::CheckFailed(check) => write!(f, "the simulation breaks a guarantee: {check}"),
             Self::UnknownSigner(address) => write!(f, "{} signs, and no role names it", bs58::encode(address.0).into_string()),
+            Self::NotAnOrganization(address) => {
+                write!(f, "{} is not an organization of the registry", bs58::encode(address.0).into_string())
+            }
+            Self::MessageTooLong { used, max } => {
+                write!(f, "the message is {used} bytes, and a hardware wallet signs at most {max}. Plan fewer intents.")
+            }
             Self::NoAccounts => f.write_str("the simulation returned another number of accounts than it observes"),
             Self::NoUnits => f.write_str("the simulation reports no compute units"),
             Self::BadTemplate => f.write_str("a template does not parse"),

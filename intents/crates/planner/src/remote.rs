@@ -56,9 +56,12 @@ pub struct RemoteAnswer {
 /// message, so the plan keeps the message as it is (`DESIGN.md`, 4.16).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FrozenTransaction {
-    /// The serialized v1 message, with its version byte.
+    /// The serialized message: legacy, v0, or v1.
     pub message: Vec<u8>,
+    /// What the message decodes to, with the accounts of its lookup tables.
     pub transaction: Transaction,
+    /// The lookup tables of a v0 message. A simulation loads them to run the message.
+    pub lookup_tables: Vec<Address>,
     /// The provider's signatures. The caller checks each against `message`.
     pub signatures: Vec<ProviderSignature>,
 }
@@ -132,8 +135,9 @@ impl Built {
     }
 
     /// A provider's transaction. It is the whole plan, so it has one intent and no onchain checks,
-    /// the request's fee payer and priority fee, and no signature for the owner, a payer, or a
-    /// signer input. Each other signature must be one that the record lists, or one for an account
+    /// the request's fee payer, at most the request's priority fee, and no signature for the owner,
+    /// a payer, or a signer input. A legacy or v0 transaction sets its priority fee as a price for
+    /// each compute unit, so the fee can round below the request's. Each other signature must be one that the record lists, or one for an account
     /// that the transaction creates, which `verify` checks in the simulation.
     pub(crate) fn from_frozen(
         recipe: &Recipe<'_>,
@@ -148,10 +152,12 @@ impl Built {
             return Err(PlanError::RemoteTransaction("set `verifyIntent` and `assertions` to false to accept it"));
         }
 
-        if frozen.transaction.fee_payer != *payers.fee
-            || frozen.transaction.priority_fee_lamports != priority_fee_lamports
-        {
-            return Err(PlanError::RemoteTransaction("its fee payer or priority fee is not the request's"));
+        if frozen.transaction.fee_payer != *payers.fee {
+            return Err(PlanError::RemoteTransaction("its fee payer is not the request's"));
+        }
+
+        if frozen.transaction.priority_fee_lamports > priority_fee_lamports {
+            return Err(PlanError::RemoteTransaction("its priority fee is more than the request's"));
         }
 
         let user_signers = signer_inputs(recipe)?;
@@ -165,8 +171,10 @@ impl Built {
 
         let outputs = Self::from_remote(recipe, RemoteAnswer { frozen: None, ..answer })?.outputs;
         let signers = frozen.signatures.iter().map(|signed| signed.signer).collect();
+        let instructions =
+            frozen.transaction.instructions.iter().filter(|instruction| !instruction.is_budget()).cloned();
 
-        Ok(Self { instructions: frozen.transaction.instructions.clone(), signers, outputs, frozen: Some(frozen) })
+        Ok(Self { instructions: instructions.collect(), signers, outputs, frozen: Some(frozen) })
     }
 }
 

@@ -8,13 +8,15 @@
 //! # fn run(request: &sdp_intents_planner::PlanRequest<'_>) -> Result<(), sdp_intents_client::ClientError> {
 //! let client = sdp_intents_client::Client::new("https://api.mainnet-beta.solana.com");
 //! let prepared = client.prepare(request)?;
-//! let verified = client.verify_message(&prepared.message)?;
+//! let compiled = prepared.compiled.as_ref().ok_or(sdp_intents_client::ClientError::Decode("no message".into()))?;
+//! let verified = client.verify_message(compiled.message.bytes())?;
 //! assert_eq!(verified.message, prepared.plan.message);
 //! # Ok(())
 //! # }
 //! ```
 
 pub mod json;
+pub mod message;
 pub mod remote;
 pub mod rpc;
 mod send;
@@ -27,19 +29,17 @@ use solana_commitment_config::CommitmentConfig;
 use solana_hash::Hash;
 use solana_rpc_client::rpc_client::RpcClient;
 
-use solana_message::v1::{MAX_TRANSACTION_SIZE, SIGNATURE_SIZE};
-
 use sdp_intents_planner::{
-    Account, AccountMap, FrozenTransaction, Limit, Plan, PlanError, PlanRequest, Planner, RemoteAnswer, Simulation,
+    Account, AccountMap, FrozenTransaction, Plan, PlanError, PlanRequest, Planner, RemoteAnswer, Simulation,
     SimulationResult, Step,
 };
 use sdp_intents_spec::Address;
 
-pub use send::sign_message;
+pub use message::{MessageVersion, WireMessage};
+pub use send::{sign, sign_message};
 pub use solana_hash::Hash as Blockhash;
 pub use solana_keypair::{read_keypair_file, Keypair};
 pub use solana_signer::Signer;
-pub use verify::decode_message;
 
 /// `getMultipleAccounts` takes at most 100 addresses.
 const MAX_ACCOUNTS_PER_FETCH: usize = 100;
@@ -48,12 +48,18 @@ pub struct Client {
     rpc: RpcClient,
 }
 
-/// A plan, with its transaction compiled for the signers.
+/// A plan, with its transaction compiled for the signers when the request asks for one.
 #[derive(Clone, Debug)]
 pub struct Prepared {
     pub plan: Plan,
-    /// The v1 message that the signers sign, with a recent `confirmed` blockhash.
-    pub message: Vec<u8>,
+    /// `None` when the request asks for the instructions only, and the caller compiles them.
+    pub compiled: Option<Compiled>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Compiled {
+    /// A v1 message with a recent `confirmed` blockhash, or a provider's message as it signed it.
+    pub message: WireMessage,
     /// The last block height at which the message can land. A provider's transaction has its own
     /// blockhash, whose height the plan does not know.
     pub last_valid_block_height: Option<u64>,
@@ -71,6 +77,12 @@ impl Client {
             self.rpc.get_latest_blockhash_with_commitment(CommitmentConfig::confirmed())?;
 
         prepared(plan, blockhash, last_valid_block_height)
+    }
+
+    /// The plan with no message, for a caller that compiles the instructions into its own
+    /// transaction. It reads no blockhash.
+    pub fn prepare_instructions(&self, request: &PlanRequest<'_>) -> Result<Prepared, ClientError> {
+        instructions_only(self.plan(request, None)?)
     }
 
     /// Plans `request` again with `frozen` as the endpoint's answer, as the signer of a provider's
@@ -131,29 +143,31 @@ impl Client {
 }
 
 /// The plan with its v1 message compiled at `blockhash`, or `DoesNotFit` when the signed
-/// transaction is over 4,096 bytes.
+/// transaction is over its version's limit. A provider's transaction keeps its own message.
 pub fn prepared(plan: Plan, blockhash: Hash, last_valid_block_height: u64) -> Result<Prepared, ClientError> {
-    if let Some(frozen) = &plan.frozen {
-        let message = frozen.message.clone();
-        let size = message.len().saturating_add(plan.signatures.len().saturating_mul(SIGNATURE_SIZE));
+    let compiled = match &plan.frozen {
+        Some(frozen) => Compiled { message: WireMessage::parse(&frozen.message)?, last_valid_block_height: None },
+        None => Compiled {
+            message: WireMessage::compile(&plan.transaction, blockhash, MessageVersion::V1, &[])?,
+            last_valid_block_height: Some(last_valid_block_height),
+        },
+    };
+    compiled.message.check_size()?;
 
-        if size > MAX_TRANSACTION_SIZE {
-            return Err(PlanError::DoesNotFit { limit: Limit::Bytes, used: size, max: MAX_TRANSACTION_SIZE }.into());
-        }
+    Ok(Prepared { plan, compiled: Some(compiled) })
+}
 
-        return Ok(Prepared { plan, message, last_valid_block_height: None });
+/// The plan with no message. A provider signed every byte of its message, so its plan has no
+/// instructions to give.
+pub fn instructions_only(plan: Plan) -> Result<Prepared, ClientError> {
+    if plan.frozen.is_some() {
+        return Err(PlanError::RemoteTransaction(
+            "a provider's signed transaction has no instructions to give; ask for `output: transaction`",
+        )
+        .into());
     }
 
-    let message = rpc::message(&plan.transaction, blockhash)?;
-    let signatures = usize::from(message.header.num_required_signatures);
-    let message = message.serialize();
-    let size = message.len().saturating_add(signatures.saturating_mul(SIGNATURE_SIZE));
-
-    if size > MAX_TRANSACTION_SIZE {
-        return Err(PlanError::DoesNotFit { limit: Limit::Bytes, used: size, max: MAX_TRANSACTION_SIZE }.into());
-    }
-
-    Ok(Prepared { plan, message, last_valid_block_height: Some(last_valid_block_height) })
+    Ok(Prepared { plan, compiled: None })
 }
 
 /// A scratch address that others cannot predict, so that no one can create an account there
@@ -269,6 +283,6 @@ mod tests {
         let prepared = Client::new(url).prepare(&request).unwrap();
 
         assert_eq!(prepared.plan.intents[0].span.len(), 2);
-        assert_eq!(prepared.message.first(), Some(&0x81));
+        assert_eq!(prepared.compiled.unwrap().message.version(), MessageVersion::V1);
     }
 }

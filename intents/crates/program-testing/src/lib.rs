@@ -88,7 +88,9 @@ impl Documents {
         intent: &str,
         fee_payer: &solana_address::Address,
     ) -> Result<Self, String> {
-        let mut catalog = Catalog::default().with_publisher("solana.org", Address([7; 32]));
+        let publisher =
+            sdp_intents_registry_client::organization_address(ORGANIZATION).map_err(|error| error.to_string())?;
+        let mut catalog = Catalog::default().with_publisher(ORGANIZATION, publisher);
 
         for text in interfaces {
             catalog.compile_interface(text).map_err(|report| report.render("interface.json", text))?;
@@ -176,11 +178,40 @@ pub fn verify(svm: &LiteSVM, transaction: &Transaction) -> Result<VerifiedTransa
     }
 }
 
+/// The account at `address` in `svm`. A chain that holds no registry answers for `solana.org`
+/// with the organization account that the registry would hold.
 pub fn fetch(svm: &LiteSVM, address: &Address) -> Option<Account> {
-    svm.get_account(&solana_address(address)).map(|account| Account {
+    let account = svm.get_account(&solana_address(address)).map(|account| Account {
         owner: Address(account.owner.to_bytes()),
         lamports: account.lamports,
         data: account.data,
+    });
+
+    account.or_else(|| organization(address))
+}
+
+/// The organization that publishes every test document.
+const ORGANIZATION: &str = "solana.org";
+
+/// The account of `solana.org` as the registry lays it out: the discriminator, the authority, the
+/// name's hash, the name's length, and the name in 64 bytes.
+fn organization(address: &Address) -> Option<Account> {
+    let name = ORGANIZATION.as_bytes();
+    let length = u8::try_from(name.len()).ok()?;
+    let padding = 64usize.checked_sub(name.len())?;
+
+    (sdp_intents_registry_client::organization_address(ORGANIZATION).ok()? == *address).then(|| Account {
+        owner: sdp_intents_registry_client::REGISTRY_PROGRAM,
+        lamports: 1,
+        data: [
+            &sdp_intents_registry_client::ORGANIZATION_DISCRIMINATOR[..],
+            &[0; 32],
+            &sdp_intents_registry_client::name_hash(ORGANIZATION),
+            &[length],
+            name,
+            &vec![0; padding],
+        ]
+        .concat(),
     })
 }
 

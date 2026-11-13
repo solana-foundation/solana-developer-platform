@@ -63,9 +63,8 @@ fn plans_a_builder_transfer_in_two_rounds_and_sends_it() {
     assert_eq!(plan.intents[0].builder_simulations, 2);
     assert_eq!(built(&plan).len(), 1);
     assert!(plan.message.contains(&format!(" || 1: transfer 2 SOL from {}", wallets.from.pubkey())));
-    assert!(plan
-        .message
-        .contains(&format!("| builder: {} | tier 1 | onchain checks: assertions | rent cap ", test_builder::id())));
+    assert!(plan.message.contains("@1.0.0 | tier 1 | onchain checks: assertions | rent cap "));
+    assert_eq!(plan.intents[0].builder.map(|program| program.0), Some(test_builder::id().to_bytes()));
 
     send(&mut svm, &plan, &[&wallets.fee_payer, &wallets.from]).unwrap();
 

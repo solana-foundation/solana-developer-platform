@@ -77,7 +77,7 @@ impl CachedRpc {
         }
 
         let transaction = rpc::simulation_transaction(simulation)?;
-        let loaded = self.load(&transaction, &simulation.observe).await?;
+        let loaded = self.load(simulation).await?;
         let inner = std::sync::Arc::clone(&self.inner);
         let observe = simulation.observe.clone();
 
@@ -90,13 +90,21 @@ impl CachedRpc {
         .map_err(|error| ChainError::Decode(format!("the simulation task failed: {error}")))?
     }
 
-    /// Every account that the transaction names, the observed accounts, and the clock, then the
-    /// program data of each upgradeable program among them. Each program and program data account
-    /// stays under a subscription, so a later simulation reads it from the cache.
-    async fn load(&self, transaction: &VersionedTransaction, observe: &[Address]) -> Result<Loaded, ChainError> {
-        let keys = transaction.message.static_account_keys().iter().map(|key| Address(key.to_bytes()));
+    /// Every account that the transaction names, the lookup tables of a fixed message, the observed
+    /// accounts, and the clock, then the program data of each upgradeable program among them. Each
+    /// program and program data account stays under a subscription, so a later simulation reads it
+    /// from the cache.
+    async fn load(&self, simulation: &Simulation) -> Result<Loaded, ChainError> {
+        let tables = simulation.fixed.iter().flat_map(|fixed| fixed.lookup_tables.iter().copied());
         let clock = Address(sysvar::clock::ID.to_bytes());
-        let mut addresses: Vec<Address> = keys.chain(observe.iter().copied()).chain([clock]).collect();
+        let mut addresses: Vec<Address> = simulation
+            .transaction
+            .accounts()
+            .into_iter()
+            .chain(tables)
+            .chain(simulation.observe.iter().copied())
+            .chain([clock])
+            .collect();
         addresses.sort_unstable_by_key(|address| address.0);
         addresses.dedup();
 
@@ -324,6 +332,7 @@ mod tests {
                 priority_fee_lamports: 0,
             },
             observe: vec![recipient],
+            fixed: None,
         };
 
         let result = rpc.simulate(&simulation).await.unwrap();

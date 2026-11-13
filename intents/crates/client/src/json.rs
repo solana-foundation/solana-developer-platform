@@ -10,37 +10,56 @@ use sdp_intents_spec::Address;
 use crate::Prepared;
 
 /// A plan in the shape of `DESIGN.md`, section 4.1. `request` is the plan request as JSON.
+/// `transaction` is there when the request asks for it. A provider's transaction has no
+/// `instructions` and no `computeBudget`, because the provider signed every byte of its message.
 pub fn plan(prepared: &Prepared, request: Value) -> Value {
     let plan = &prepared.plan;
     let budget = plan.transaction.budget;
-    let signatures: Vec<Value> = plan
+    let signers: Vec<Value> = plan
         .signatures
         .iter()
-        .map(|signature| json!({ "address": base58(&signature.address), "role": signature.role.as_text(), "status": "required" }))
+        .map(|signature| json!({ "address": base58(&signature.address), "role": signature.role.as_text() }))
         .collect();
 
-    json!({
-        "spec": "sdp-intents@1.0",
-        "kind": "plan",
-        "request": request,
-        "message": plan.message,
-        "intents": plan.intents.iter().map(intent_json).collect::<Vec<_>>(),
-        "transaction": {
-            "instructions": plan.transaction.instructions.iter().map(instruction).collect::<Vec<_>>(),
-            "version": 1,
-            "config": {
-                "priorityFeeLamports": plan.transaction.priority_fee_lamports.to_string(),
-                "computeUnitLimit": budget.compute_unit_limit.to_string(),
-                "loadedAccountsDataSizeLimit": budget.loaded_accounts_data_size_limit.to_string(),
-                "heapSize": budget.heap_size.to_string(),
-            },
-            "compiled": base64(&prepared.message),
-            "lastValidBlockHeight": prepared.last_valid_block_height.map(|height| height.to_string()),
+    let built = plan.frozen.is_none().then(|| {
+        [
+            ("instructions", plan.transaction.instructions.iter().map(instruction).collect::<Value>()),
+            (
+                "computeBudget",
+                json!({
+                    "unitLimit": budget.compute_unit_limit.to_string(),
+                    "loadedAccountsDataSizeLimit": budget.loaded_accounts_data_size_limit.to_string(),
+                    "heapSize": budget.heap_size.to_string(),
+                }),
+            ),
+        ]
+    });
+    let transaction = prepared.compiled.as_ref().map(|compiled| {
+        let transaction = json!({
+            "version": compiled.message.version().json(),
+            "messageBytes": base64(compiled.message.bytes()),
+            "lastValidBlockHeight": compiled.last_valid_block_height.map(|height| height.to_string()),
             "presigned": presigned(prepared),
-            "signatures": signatures,
-        },
-        "simulation": { "unitsConsumed": plan.units_consumed.to_string() },
-    })
+        });
+
+        ("transaction", transaction)
+    });
+
+    let fields = [
+        ("spec", json!("sdp-intents@1.0")),
+        ("kind", json!("plan")),
+        ("request", request),
+        ("message", json!(plan.message)),
+        ("intents", plan.intents.iter().map(intent_json).collect::<Value>()),
+        ("signers", Value::Array(signers)),
+        ("priorityFeeLamports", json!(plan.transaction.priority_fee_lamports.to_string())),
+    ]
+    .into_iter()
+    .chain(built.into_iter().flatten())
+    .chain(transaction)
+    .chain([("simulation", json!({ "unitsConsumed": plan.units_consumed.to_string() }))]);
+
+    Value::Object(fields.map(|(key, value)| (key.to_owned(), value)).collect())
 }
 
 /// `verify` and `span` are positions in the transaction's instructions.
