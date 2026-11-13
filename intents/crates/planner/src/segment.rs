@@ -1,10 +1,12 @@
 //! Plans one intent's segment of the transaction. Each simulation runs the earlier segments first,
 //! so a builder, the rendered values, and the checks read the state after them.
 //!
-//! A segment takes two simulations. The first runs the built instructions alone: the planner checks
-//! the postconditions and the payer rules against it, and reads the rent cap from it. The second
-//! runs the whole segment, with `verify_intent` and the Lighthouse instructions (`onchain.rs`). An
-//! intent that turns both checks off needs only the first.
+//! A segment takes one simulation of the whole segment: `verify_intent`, the Lighthouse instructions
+//! (`onchain.rs`), and the built instructions. Its onchain checks hold a placeholder rent cap,
+//! because only the simulation shows the rent. The planner checks the postconditions and the payer
+//! rules against it, then builds the onchain checks again with the rent that it measured. The
+//! landed transaction differs from the simulated one only in that number, and a smaller cap that
+//! the rent fits passes the same way.
 
 use sha2::{Digest as _, Sha256};
 
@@ -12,8 +14,8 @@ use sdp_intents_engine::{Chain, Payers, Recipe, Resolution};
 use sdp_intents_spec::builder::StagedResult;
 use sdp_intents_spec::{Address, RecipeKind};
 
-use crate::onchain::{OnchainChecks, OnchainInputs};
-use crate::plan::{Built, PlannedIntent};
+use crate::onchain::{OnchainChecks, OnchainInputs, PLACEHOLDER_RENT_CAP};
+use crate::plan::{builder_program, with_rent_cap, Built, PlannedIntent};
 use crate::render::Column;
 use crate::values::Values;
 use crate::verify::{rent_cap, Snapshot, Verification};
@@ -78,18 +80,14 @@ enum State {
     },
     Built(Built),
     AwaitingChecks(Box<Checking>),
-    /// The simulation of the whole segment, which `next` returns.
-    Onchain(Box<Onchain>),
-    AwaitingOnchain(Box<Onchain>),
     Planned(Box<Segment>),
     Finished,
 }
 
-/// The built instructions, simulated after the earlier segments, with what the plan needs once the
-/// simulation passes.
+/// The segment, simulated after the earlier segments, with what the plan needs once the simulation
+/// passes.
 struct Checking {
     built: Built,
-    earlier: Vec<Instruction>,
     earlier_fee: u64,
     /// The fee of the transaction up to this segment, for a simulation that reports none.
     estimated_fee: u64,
@@ -99,14 +97,6 @@ struct Checking {
     message: String,
     display: String,
     signatures: Vec<RequiredSignature>,
-}
-
-/// The whole segment, after the built instructions passed their checks.
-struct Onchain {
-    checking: Checking,
-    onchain: OnchainChecks,
-    message: String,
-    simulation: Option<Simulation>,
 }
 
 impl<'a> SegmentPlanner<'a> {
@@ -142,15 +132,9 @@ impl<'a> SegmentPlanner<'a> {
         match core::mem::replace(&mut self.state, State::Finished) {
             State::Resolving => self.resolve(earlier),
             State::Building => self.simulate_builder(earlier),
-            State::Built(built) => self.simulate_built(built, earlier),
-            State::Onchain(mut onchain) => {
-                let simulation = onchain.simulation.take().ok_or(PlanError::OutOfOrder)?;
-                self.state = State::AwaitingOnchain(onchain);
-
-                Ok(SegmentStep::Simulate(simulation))
-            }
+            State::Built(built) => self.simulate_segment(built, earlier),
             State::Planned(segment) => Ok(SegmentStep::Planned(segment)),
-            awaiting @ (State::AwaitingBuilder { .. } | State::AwaitingChecks(_) | State::AwaitingOnchain(_)) => {
+            awaiting @ (State::AwaitingBuilder { .. } | State::AwaitingChecks(_)) => {
                 self.state = awaiting;
                 Err(PlanError::OutOfOrder)
             }
@@ -162,7 +146,6 @@ impl<'a> SegmentPlanner<'a> {
         match core::mem::replace(&mut self.state, State::Finished) {
             State::AwaitingBuilder { builder } => self.builder_result(builder, result),
             State::AwaitingChecks(checking) => self.checked(*checking, result),
-            State::AwaitingOnchain(onchain) => self.verified_onchain(*onchain, result),
             other => {
                 self.state = other;
                 Err(PlanError::OutOfOrder)
@@ -179,7 +162,7 @@ impl<'a> SegmentPlanner<'a> {
         }
 
         match self.recipe.implementation().recipe()? {
-            RecipeKind::Static => self.simulate_built(Built::from_static(&self.recipe, earlier.chain)?, earlier),
+            RecipeKind::Static => self.simulate_segment(Built::from_static(&self.recipe, earlier.chain)?, earlier),
             RecipeKind::Program => self.simulate_builder(earlier),
             RecipeKind::Remote => Err(PlanError::RemoteRecipe),
         }
@@ -225,10 +208,10 @@ impl<'a> SegmentPlanner<'a> {
         Ok(())
     }
 
-    /// Renders what needs account data, then simulates the built instructions after the earlier
-    /// segments. The fee payer and the segment's writable accounts are snapshot first, because only
-    /// they can change.
-    fn simulate_built<C: Chain>(&mut self, built: Built, earlier: &Earlier<'_, C>) -> Result<SegmentStep, PlanError> {
+    /// Renders what needs account data, then simulates the segment after the earlier segments. The
+    /// fee payer and the segment's writable accounts are snapshot first, because only they can
+    /// change.
+    fn simulate_segment<C: Chain>(&mut self, built: Built, earlier: &Earlier<'_, C>) -> Result<SegmentStep, PlanError> {
         if built.instructions.is_empty() {
             return Err(PlanError::NoInstructions);
         }
@@ -256,14 +239,21 @@ impl<'a> SegmentPlanner<'a> {
         let message = values.message(&guarantees, &self.digests, builder.as_ref())?;
         let display = values.render(self.recipe.interface().display()?, Column::Display)?;
         let signatures = values.signatures(&segment, &built)?;
-        let before = observe.iter().map(|address| snapshot_of(earlier.chain, address)).collect();
+        let before: Vec<Account> = observe.iter().map(|address| snapshot_of(earlier.chain, address)).collect();
+        let onchain = self.onchain_checks(&built, &observe, &before, PLACEHOLDER_RENT_CAP)?;
 
-        let transaction = self.transaction(earlier.instructions.iter().chain(&built.instructions));
+        let instructions = earlier
+            .instructions
+            .iter()
+            .chain(&onchain.verify)
+            .chain(&onchain.snapshots)
+            .chain(&built.instructions)
+            .chain(&onchain.checks);
+        let transaction = self.transaction(instructions);
         transaction.check_fit()?;
 
         let checking = Checking {
             estimated_fee: transaction.fee(),
-            earlier: earlier.instructions.to_vec(),
             earlier_fee: earlier.fee,
             built,
             observe: observe.clone(),
@@ -279,7 +269,7 @@ impl<'a> SegmentPlanner<'a> {
     }
 
     /// Checks the postconditions and the payer rules, then builds the onchain checks with the rent
-    /// cap that the simulation gives.
+    /// cap that the simulation measures.
     fn checked(&mut self, checking: Checking, result: SimulationResult) -> Result<(), PlanError> {
         let snapshots = snapshots(&checking, &result)?;
         let fee = result.fee.unwrap_or(checking.estimated_fee);
@@ -294,49 +284,39 @@ impl<'a> SegmentPlanner<'a> {
         .check(&checking.guarantees)?;
 
         let rent_cap = rent_cap(&snapshots);
-        let message = format!("{} | rent cap {rent_cap} lamports", checking.message);
+        let message = with_rent_cap(&checking.message, rent_cap);
+        let onchain = self.onchain_checks(&checking.built, &checking.observe, &checking.before, rent_cap)?;
+
+        self.state = State::Planned(Box::new(self.segment(checking, onchain, message, result)?));
+
+        Ok(())
+    }
+
+    fn onchain_checks(
+        &self,
+        built: &Built,
+        observed: &[Address],
+        before: &[Account],
+        rent_cap: u64,
+    ) -> Result<OnchainChecks, PlanError> {
         let options = self.recipe.intent().options()?;
 
         if !options.verify_intent && !options.assertions {
-            self.state = State::Planned(Box::new(self.segment(checking, OnchainChecks::default(), message, result)?));
-            return Ok(());
+            return Ok(OnchainChecks::default());
         }
 
         let inputs = OnchainInputs {
             recipe: &self.recipe,
             intent: self.intent,
-            built: &checking.built,
+            built,
             extra_accounts: &self.extra_accounts,
-            snapshots: &snapshots,
+            observed,
+            before,
             rent_cap,
             memory_id: self.memory_id,
         };
-        let onchain = inputs.checks()?;
 
-        let instructions = checking
-            .earlier
-            .iter()
-            .chain(&onchain.verify)
-            .chain(&onchain.snapshots)
-            .chain(&checking.built.instructions)
-            .chain(&onchain.checks);
-        let transaction = self.transaction(instructions);
-        transaction.check_fit()?;
-
-        let simulation = Simulation { transaction, observe: checking.observe.clone() };
-        self.state = State::Onchain(Box::new(Onchain { checking, onchain, message, simulation: Some(simulation) }));
-
-        Ok(())
-    }
-
-    /// The postconditions held in the first simulation, so this one only has to pass.
-    fn verified_onchain(&mut self, onchain: Onchain, result: SimulationResult) -> Result<(), PlanError> {
-        snapshots(&onchain.checking, &result)?;
-
-        let segment = self.segment(onchain.checking, onchain.onchain, onchain.message, result)?;
-        self.state = State::Planned(Box::new(segment));
-
-        Ok(())
+        inputs.checks()
     }
 
     fn segment(
@@ -377,12 +357,7 @@ impl<'a> SegmentPlanner<'a> {
 
     /// The builder program of a program recipe.
     fn builder(&self) -> Option<Address> {
-        let implementation = self.recipe.implementation();
-        let call = implementation.instructions().ok()?.first()?;
-
-        (implementation.recipe().ok()? == RecipeKind::Program)
-            .then(|| self.recipe.address(call.program).copied())
-            .flatten()
+        builder_program(&self.recipe)
     }
 }
 

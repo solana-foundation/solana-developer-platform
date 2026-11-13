@@ -9,6 +9,8 @@ use sdp_intents_planner::{AccountMap, AccountMeta, Instruction, Plan, Transactio
 use sdp_intents_program_testing::{definitions, fetch, Documents};
 use sdp_intents_spec::AccountRole;
 
+use registry::SegmentLayout;
+
 use crate::fixture::{DocumentTarget, Organization};
 use crate::svm::{failure, Failure};
 
@@ -79,7 +81,7 @@ impl Published {
         documents: &Documents,
         extra_accounts: &[Address],
         builder_roles: &[u8],
-        rent_cap: u64,
+        layout: SegmentLayout,
     ) -> Result<Instruction, Failure> {
         let accounts = &self.accounts;
         let fee_payer = Address::new_from_array(documents.fee_payer.0);
@@ -97,8 +99,8 @@ impl Published {
         let data = anchor_lang::InstructionData::data(&registry::instruction::VerifyIntent {
             intent: &documents.intent,
             builder_roles,
-            rent_cap,
-            guarded_accounts: 0,
+            outputs: &[],
+            layout,
         });
 
         Ok(Instruction {
@@ -107,6 +109,17 @@ impl Published {
             data,
         })
     }
+}
+
+/// The layout of a segment of `built` instructions with no assertions. `token.transfer` has no
+/// outputs.
+pub fn unguarded(built: u8, rent_cap: u64) -> SegmentLayout {
+    SegmentLayout { rent_cap, guarded_accounts: 0, snapshots: 0, built, checks: 0 }
+}
+
+/// The number of instructions of a plan with no onchain checks, which holds only the built ones.
+pub fn built_count(plan: &Plan) -> u8 {
+    u8::try_from(plan.transaction.instructions.len()).unwrap_or(u8::MAX)
 }
 
 /// The role of each account of the plan's instructions, in order. A builder's plan holds the roles

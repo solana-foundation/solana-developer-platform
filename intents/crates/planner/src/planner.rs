@@ -314,21 +314,18 @@ mod tests {
     }
 
     /// The sender's token account is the only guarded value, so the segment snapshots its amount
-    /// and asserts the outflow around the two built instructions.
+    /// and asserts the outflow around the two built instructions, in its one simulation.
     #[test]
-    fn assertions_guard_the_segment_in_a_second_simulation() {
+    fn assertions_guard_the_segment() {
         let documents = Compiled::compile(
             include_str!("../../../definitions/solana.org/implementations/spl-token-transfer/1.0.0.json"),
             &include_str!("../../../fixtures/intents/spl-token-transfer.json").replace(r#""assertions": false, "#, ""),
         );
         let mut planner = Planner::new(&request(&[&documents], 5_000), SCRATCH).unwrap();
         let mut accounts = AccountMap::default();
-        spl_final_simulation(&mut planner, &mut accounts);
 
-        planner.simulated(spl_result(400_000_000, SOL - 15_000 - ATA_RENT)).unwrap();
-        let guarded = simulation(planner.next(&accounts).unwrap());
+        let guarded = spl_final_simulation(&mut planner, &mut accounts);
         let programs: Vec<_> = guarded.transaction.instructions.iter().map(|instruction| instruction.program).collect();
-
         assert_eq!(
             programs,
             [
@@ -339,13 +336,13 @@ mod tests {
                 LIGHTHOUSE_PROGRAM
             ]
         );
-        assert_eq!(guarded.observe.len(), 3);
 
         planner.simulated(spl_result(400_000_000, SOL - 15_000 - ATA_RENT)).unwrap();
         let Ok(Step::Done(plan)) = planner.next(&accounts) else { panic!("the plan is done") };
 
         assert_eq!(plan.intents[0].span, 1..3);
-        assert!(plan.message.contains(" | onchain checks: assertions | "));
+        assert_eq!(plan.transaction.instructions.len(), 5);
+        assert!(plan.message.contains(" | onchain checks: assertions | rent cap 2039280 lamports"));
     }
 
     fn builder_planner(documents: &Compiled) -> (Planner<'_>, AccountMap) {

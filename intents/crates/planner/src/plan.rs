@@ -44,6 +44,21 @@ pub struct Digests {
     pub implementation: [u8; 32],
 }
 
+/// An intent's part of the plan message, which ends with the rent cap of its segment.
+pub(crate) fn with_rent_cap(part: &str, rent_cap: u64) -> String {
+    format!("{part} | rent cap {rent_cap} lamports")
+}
+
+/// The builder program of a program recipe.
+pub(crate) fn builder_program(recipe: &Recipe<'_>) -> Option<Address> {
+    let implementation = recipe.implementation();
+    let call = implementation.instructions().ok()?.first()?;
+
+    (implementation.recipe().ok()? == sdp_intents_spec::RecipeKind::Program)
+        .then(|| recipe.address(call.program).copied())
+        .flatten()
+}
+
 /// `sdp-intents/1: fee payer <address> | rent payer <address> | priority fee <lamports> lamports`,
 /// then `|| <n>: <part>` for each intent's part, in order. A signer renders the same text from the
 /// transaction, so the plan needs one off-chain signature.

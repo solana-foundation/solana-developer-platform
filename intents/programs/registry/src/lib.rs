@@ -18,6 +18,7 @@ extern crate alloc;
 
 pub use error::RegistryError;
 use instructions::*;
+pub use verify::SegmentLayout;
 use verify::*;
 
 declare_id!("9sgttDZ2vnzb85HWuQbx8vy6Boga32zpP5QRZ7UtbWpp");
@@ -119,11 +120,11 @@ pub mod registry {
         ctx: &mut Context<VerifyIntent>,
         intent: &[u8],
         builder_roles: &[u8],
-        rent_cap: u64,
-        guarded_accounts: u8,
+        outputs: &[u8],
+        layout: SegmentLayout,
     ) -> Result<()> {
         let passed = ctx.remaining_accounts();
-        let args = verify::VerifyArgs { intent, builder_roles, rent_cap, guarded_accounts };
+        let args = verify::VerifyArgs { intent, builder_roles, outputs, layout };
 
         verify::verify_intent(&ctx.accounts, &passed, args)
     }

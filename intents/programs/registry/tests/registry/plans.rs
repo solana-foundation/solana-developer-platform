@@ -6,7 +6,7 @@ use anchor_v2_testing::{Keypair, Signer};
 use sdp_intents_planner::Plan;
 use sdp_intents_program_testing::{definitions, prepare, prepare_intents, Documents};
 
-use crate::intents::{builder_roles, publish_transfer, Published};
+use crate::intents::{builder_roles, publish_transfer, unguarded, Published};
 use crate::svm::{failure, funded, send_plan, svm, Failure, SOL};
 use crate::token::{associated_token_account, set_mint, set_token_account, token_amount};
 
@@ -57,7 +57,7 @@ fn the_planner_builds_the_verify_intent_of_a_client() {
     let documents = published.compile(&intent("system-transfer", &wallets, SOL), &wallets.fee_payer.pubkey()).unwrap();
 
     let plan = prepare(&svm, &documents).unwrap();
-    let by_hand = published.verify_instruction(&svm, &documents, &[], &[], NEW_WALLET_RENT).unwrap();
+    let by_hand = published.verify_instruction(&svm, &documents, &[], &[], unguarded(1, NEW_WALLET_RENT)).unwrap();
 
     assert_eq!(verify_at(&plan, 0).unwrap(), &by_hand);
     assert_eq!(plan.intents[0].span, 1..2);
@@ -101,7 +101,13 @@ fn verifies_a_builder_that_the_planner_planned() {
         ..plan.clone()
     };
     let by_hand = published
-        .verify_instruction(&svm, &documents, &[test_builder::EXTRA_ACCOUNT], &builder_roles(&built), NEW_WALLET_RENT)
+        .verify_instruction(
+            &svm,
+            &documents,
+            &[test_builder::EXTRA_ACCOUNT],
+            &builder_roles(&built),
+            unguarded(1, NEW_WALLET_RENT),
+        )
         .unwrap();
     assert_eq!(verify_at(&plan, 0).unwrap(), &by_hand);
 

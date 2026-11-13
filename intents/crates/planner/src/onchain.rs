@@ -1,6 +1,6 @@
 //! The onchain checks of a segment: `verify_intent`, and the Lighthouse snapshots and assertions
-//! around the built instructions. The planner builds them once the simulation of the built
-//! instructions passes its checks and gives the rent cap.
+//! around the built instructions. The segment's simulation runs them with a placeholder rent cap,
+//! and the planner builds them again with the rent cap that the simulation measures.
 
 use sdp_intents_engine::Recipe;
 use sdp_intents_lighthouse::{
@@ -9,9 +9,11 @@ use sdp_intents_lighthouse::{
 use sdp_intents_spec::{Address, RecipeKind};
 
 use crate::plan::Built;
-use crate::registry::VerifyIntent;
-use crate::verify::Snapshot;
-use crate::{AccountMeta, Instruction, PlanError};
+use crate::registry::{SegmentCounts, VerifyIntent};
+use crate::{Account, AccountMeta, Instruction, PlanError};
+
+/// The rent cap of the simulation, before it measures the rent. Any rent passes it.
+pub(crate) const PLACEHOLDER_RENT_CAP: u64 = u64::MAX;
 
 /// The instructions that the segment adds around its built instructions.
 #[derive(Default)]
@@ -26,8 +28,9 @@ pub(crate) struct OnchainInputs<'o, 'a> {
     pub(crate) intent: &'o [u8],
     pub(crate) built: &'o Built,
     pub(crate) extra_accounts: &'o [Address],
-    /// The accounts that the segment can change, before and after the built instructions.
-    pub(crate) snapshots: &'o [Snapshot],
+    /// The accounts that the segment can change, and each one's state before the segment.
+    pub(crate) observed: &'o [Address],
+    pub(crate) before: &'o [Account],
     pub(crate) rent_cap: u64,
     /// The segment's position in the plan, which names its Lighthouse memory.
     pub(crate) memory_id: u8,
@@ -46,7 +49,12 @@ impl OnchainInputs<'_, '_> {
         let guarded = if options.assertions { guarded_addresses(named, fee_payer) } else { Vec::new() };
 
         let assertions = if options.assertions { self.assertions(&guarded)? } else { Default::default() };
-        let verify = options.verify_intent.then(|| self.verify_instruction(&guarded)).transpose()?;
+        let counts = SegmentCounts {
+            snapshots: count(assertions.snapshots.len())?,
+            built: count(self.built.instructions.len())?,
+            checks: count(assertions.checks.len())?,
+        };
+        let verify = options.verify_intent.then(|| self.verify_instruction(&guarded, counts)).transpose()?;
 
         Ok(OnchainChecks {
             verify,
@@ -56,7 +64,7 @@ impl OnchainInputs<'_, '_> {
     }
 
     /// A builder's roles come from its instructions, and a static recipe has none.
-    fn verify_instruction(&self, guarded: &[Address]) -> Result<Instruction, PlanError> {
+    fn verify_instruction(&self, guarded: &[Address], counts: SegmentCounts) -> Result<Instruction, PlanError> {
         let builder_roles = match self.recipe.implementation().recipe()? {
             RecipeKind::Program => self.built.roles(),
             RecipeKind::Static | RecipeKind::Remote => Vec::new(),
@@ -65,8 +73,10 @@ impl OnchainInputs<'_, '_> {
             intent: self.intent,
             extra_accounts: self.extra_accounts,
             builder_roles,
+            outputs: &self.built.outputs,
             rent_cap: self.rent_cap,
             guarded,
+            counts,
         };
 
         verify.instruction(self.recipe)
@@ -76,8 +86,8 @@ impl OnchainInputs<'_, '_> {
         let accounts = guarded
             .iter()
             .map(|address| {
-                let snapshot = self.snapshots.iter().find(|snapshot| snapshot.address == *address);
-                let before = &snapshot.ok_or(PlanError::Unresolved)?.before;
+                let position = self.observed.iter().position(|observed| observed == address);
+                let before = position.and_then(|position| self.before.get(position)).ok_or(PlanError::Unresolved)?;
 
                 Ok(GuardedAccount {
                     address: *address,
@@ -98,6 +108,10 @@ impl OnchainInputs<'_, '_> {
 
         guard.assertions().map_err(PlanError::Guard)
     }
+}
+
+fn count(len: usize) -> Result<u8, PlanError> {
+    u8::try_from(len).map_err(|_| PlanError::DoesNotFit { limit: crate::Limit::Instructions, used: len, max: 255 })
 }
 
 fn lighthouse_instruction(instruction: &LighthouseInstruction) -> Instruction {

@@ -732,10 +732,11 @@ The service answers from an account cache, and simulates in LiteSVM over it. The
 5. A builder that runs out of compute or rounds fails `prepare`, with no retry.
 
 **Plans.** The planner plans the intents in order, one segment each. Each builder round and each
-segment's simulation runs the earlier segments first. A segment takes two simulations: the built
-instructions alone, which the checks of 4.5 and the rent cap read, then the whole segment with
-`verify_intent` and the assertions, which must pass. An intent that turns both onchain checks off
-takes only the first. So a builder, account resolution, and the
+segment's simulation runs the earlier segments first. A segment takes one simulation of the whole
+segment, with `verify_intent` and the assertions. Only the simulation shows the rent, so it runs
+with a placeholder rent cap that any rent passes. The planner then writes the measured cap. The
+landed transaction differs from the simulated one only in that number. The signer can simulate the
+final bytes. So a builder, account resolution, and the
 rendered values read the state after them, as `verify_intent` does onchain. Each segment's checks
 compare the state before and after that segment. The last simulation runs the whole transaction
 and sets the budget.
@@ -862,13 +863,17 @@ index, the implementation index, the interface version account, the implementati
 account, every account of the record's account table in order, for a program recipe the accounts
 of the last `MoreAccounts` round, then the guarded accounts (4.5). The builder program is in the
 table. The fee payer must be a writable signer, because only a writable signer can be the fee
-payer. After the two `&[u8]` arguments, the data holds the rent cap as a `u64` and the count of
-guarded accounts as a `u8`.
+payer.
 
-**Spans.** The segment of `verify_intent` is the instructions after it: S snapshots, N built
-instructions, then the assertions and the close. S is the run of Lighthouse instructions right
-after `verify_intent`, and `verify_intent` checks it against the snapshots that it builds. The
-postconditions give the assertions. Neither count comes from the service. N is:
+Its data is the intent, the builder's roles, and the interface's outputs, each a borsh `Vec<u8>`,
+then the layout: the rent cap as a `u64`, and as one `u8` each the count of guarded accounts, of
+snapshots, of built instructions, and of assertions with the close. A signer reads the outputs and
+the counts, so `verify_intent` refuses any that differ from what it derives (`WrongOutputs`,
+`WrongSegmentLayout`). A transaction that lands therefore holds what its data states.
+
+**Spans.** The segment of `verify_intent` is the instructions after it: the snapshots, N built
+instructions, then the assertions and the close, as the layout counts them. The postconditions
+give the snapshots and the assertions. N is:
 
 | Recipe | N |
 | :-- | :-- |
@@ -893,8 +898,10 @@ that it calls reads the state that the simulation read: the state after the inst
    data.
 4. Checks the fee payer and its own signature.
 
-It needs no simulation and no trust in the service. A `verify_intent` that someone moves or drops
-changes no span. Its instructions then show as unverified. An intent that turns `verifyIntent` off
+It needs no trust in the service. `verify_transaction` in the planner crate does steps 1 to 3 with
+no IO, and `Client::verify_message` answers its fetches over RPC: the version accounts, then the
+accounts that each recipe and message read. It reads each document from the registry, never from
+the service. A `verify_intent` that someone moves or drops changes no span. Its instructions then show as unverified. An intent that turns `verifyIntent` off
 has no onchain form. Its part of the message comes from the service, and says `onchain checks:
 none`.
 
@@ -1573,8 +1580,10 @@ intents/
     engine/             sdp-intents-engine: binds an intent to its records, resolves accounts, and
                         builds instructions. no_std, no heap. The planner and verify_intent use it.
     planner/            sdp-intents-planner: prepare with no IO. Asks for fetches and simulations,
-                        plans each intent as a segment, and builds verify_intent.
-    client/             sdp-intents-client: the planner over RPC. No service, cache, or LiteSVM.
+                        plans each intent as a segment, and builds verify_intent. Also verifies a
+                        transaction for its signer.
+    client/             sdp-intents-client: the planner and the verifier over RPC. No service,
+                        cache, or LiteSVM.
     cli/                sdp-intents: lint and prepare, later plan and apply with Squads (4.13)
     builder/            sdp-intents-builder: the builder library, over pinocchio, for Anchor v2
                         and other programs. Staged and hashed modes, require_accounts, the rent

@@ -41,6 +41,7 @@ mod segment;
 mod simulation;
 mod transaction;
 mod values;
+mod verifier;
 mod verify;
 
 #[cfg(test)]
@@ -55,6 +56,7 @@ pub use registry::REGISTRY_PROGRAM;
 pub use sdp_intents_engine::Payers;
 pub use simulation::{ReturnData, Simulation, SimulationResult};
 pub use transaction::{Budget, RequiredSignature, SignerRole, Transaction};
+pub use verifier::{verify_transaction, VerifiedIntent, VerifiedTransaction, VerifyError, VerifyStep};
 
 /// The compiled documents of one intent.
 #[derive(Clone, Copy, Debug)]

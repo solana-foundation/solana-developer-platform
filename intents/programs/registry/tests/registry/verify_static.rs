@@ -8,7 +8,7 @@ use registry::RegistryError;
 use sdp_intents_planner::Plan;
 use sdp_intents_program_testing::{definitions, prepare};
 
-use crate::intents::{around, publish_transfer, system_transfer, with_verify, Published};
+use crate::intents::{around, built_count, publish_transfer, system_transfer, unguarded, with_verify, Published};
 use crate::svm::{funded, send_plan, svm, units_consumed, Failure, SOL};
 use crate::token::{associated_token_account, set_mint, set_token_account, token_amount};
 
@@ -65,7 +65,8 @@ fn plan_and_verify(setup: &Setup, implementation: &str, mint: &Address, amount: 
         .published
         .compile(&intent(implementation, &setup.wallets, mint, amount, VERIFIED), &setup.wallets.fee_payer.pubkey())?;
     let plan = prepare(&setup.svm, &planned).map_err(|error| crate::svm::failure(format!("{error}")))?;
-    let verify = setup.published.verify_instruction(&setup.svm, &verified, &[], &[], 0)?;
+    let layout = unguarded(built_count(&plan), 0);
+    let verify = setup.published.verify_instruction(&setup.svm, &verified, &[], &[], layout)?;
 
     Ok(Verified { plan, verify })
 }
@@ -172,7 +173,8 @@ fn refuses_an_unapproved_implementation_unless_the_intent_allows_it() {
         )
         .unwrap();
     let plan = prepare(&setup.svm, &planned).unwrap();
-    let verify = setup.published.verify_instruction(&setup.svm, &verified, &[], &[], 0).unwrap();
+    let verify =
+        setup.published.verify_instruction(&setup.svm, &verified, &[], &[], unguarded(built_count(&plan), 0)).unwrap();
 
     send_plan(&mut setup.svm, &with_verify(&plan, verify), &signers).unwrap();
 }
@@ -188,7 +190,8 @@ fn refuses_an_intent_that_turns_verification_off() {
         )
         .unwrap();
     let plan = prepare(&setup.svm, &planned).unwrap();
-    let verify = setup.published.verify_instruction(&setup.svm, &planned, &[], &[], 0).unwrap();
+    let verify =
+        setup.published.verify_instruction(&setup.svm, &planned, &[], &[], unguarded(built_count(&plan), 0)).unwrap();
     let signers = [&setup.wallets.fee_payer, &setup.wallets.from];
 
     let failed = send_plan(&mut setup.svm, &with_verify(&plan, verify), &signers).unwrap_err();

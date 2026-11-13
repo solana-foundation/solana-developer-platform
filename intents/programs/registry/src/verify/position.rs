@@ -1,9 +1,10 @@
 //! Where the instructions are that `verify_intent` checks.
 //!
 //! `verify_intent` is a top-level instruction, and its segment is the instructions right after it:
-//! the Lighthouse snapshots, the built instructions, then the Lighthouse assertions. The counts come
-//! from the record, the builder, and the postconditions, never from the transaction. So a signer
-//! finds each intent's instructions from the `verify_intent` instructions alone. Instructions outside
+//! the Lighthouse snapshots, the built instructions, then the Lighthouse assertions. Its layout
+//! states each count, and the counts must be the ones that the record, the builder, and the
+//! postconditions give. So a signer finds each intent's instructions from the `verify_intent`
+//! instructions alone. Instructions outside
 //! every segment are unverified, and the signer reads them as they are.
 //!
 //! `verify_intent` runs before its segment, so a builder that it calls reads the state that the
@@ -38,18 +39,6 @@ pub fn check_top_level(sysvar: &SysvarInstructions) -> Result<()> {
 /// The position after `verify_intent`.
 pub fn first_after(sysvar: &SysvarInstructions) -> Result<usize> {
     current(sysvar).checked_add(1).ok_or(ProgramError::ArithmeticOverflow)
-}
-
-/// The Lighthouse instructions from `first` on: the snapshots of the segment. A built instruction
-/// that invokes Lighthouse first would count too, and the compare then fails.
-pub fn lighthouse_run(sysvar: &SysvarInstructions, first: usize) -> usize {
-    let lighthouse = Address::new_from_array(sdp_intents_lighthouse::LIGHTHOUSE_PROGRAM.0);
-
-    (first..sysvar.num_instructions())
-        .take_while(|position| {
-            sysvar.load_instruction_at(*position).is_ok_and(|instruction| *instruction.get_program_id() == lighthouse)
-        })
-        .count()
 }
 
 /// The positions of `len` instructions from `first`. A registry instruction among them would put

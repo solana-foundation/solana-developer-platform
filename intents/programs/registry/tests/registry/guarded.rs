@@ -7,7 +7,7 @@ use anchor_v2_testing::{Keypair, Signer};
 use registry::RegistryError;
 use sdp_intents_lighthouse::LIGHTHOUSE_PROGRAM;
 use sdp_intents_planner::Plan;
-use sdp_intents_program_testing::{definitions, prepare, prepare_intents};
+use sdp_intents_program_testing::{definitions, prepare, prepare_intents, verify};
 
 use crate::intents::{publish_transfer, spec_address, Published};
 use crate::svm::{failure, funded, send_plan, svm, units_consumed, Failure, SOL};
@@ -100,6 +100,7 @@ fn verifies_a_token_transfer_that_its_sender_pays_for() {
     let rent = setup.svm.minimum_balance_for_rent_exemption(165);
     assert_eq!(lighthouse_count(&plan), 5);
     assert!(plan.message.ends_with(&format!(" | rent cap {rent} lamports")), "{}", plan.message);
+    assert_eq!(verify(&setup.svm, &plan.transaction).unwrap().message, plan.message);
 
     let sent = send_plan(&mut setup.svm, &plan, &[&setup.from]).unwrap();
     let units = units_consumed(&sent.logs, &registry::ID).unwrap();
@@ -113,6 +114,7 @@ fn verifies_a_token_transfer_that_its_sender_pays_for() {
 fn verifies_a_builder_transfer_with_the_default_checks() {
     let mut setup = setup(TEST_BUILDER_TRANSFER).unwrap();
     let plan = plan(&setup, "test-builder-transfer", &Address::default(), 2 * SOL, &setup.fee_payer.pubkey()).unwrap();
+    assert_eq!(verify(&setup.svm, &plan.transaction).unwrap().message, plan.message);
 
     send_plan(&mut setup.svm, &plan, &[&setup.fee_payer, &setup.from]).unwrap();
 

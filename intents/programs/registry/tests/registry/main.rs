@@ -9,5 +9,6 @@ mod intents;
 mod plans;
 mod svm;
 mod token;
+mod verifier;
 mod verify_program;
 mod verify_static;

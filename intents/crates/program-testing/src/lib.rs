@@ -27,8 +27,8 @@ use solana_signature::Signature;
 
 use sdp_intents_compiler::Catalog;
 use sdp_intents_planner::{
-    Account, AccountMap, Instruction, IntentDocuments, Payers, Plan, PlanError, PlanRequest, Planner, ReturnData,
-    Simulation, SimulationResult, Step,
+    verify_transaction, Account, AccountMap, Instruction, IntentDocuments, Payers, Plan, PlanError, PlanRequest,
+    Planner, ReturnData, Simulation, SimulationResult, Step, Transaction, VerifiedTransaction, VerifyError, VerifyStep,
 };
 use sdp_intents_spec::Address;
 
@@ -149,6 +149,21 @@ pub fn prepare_intents(svm: &LiteSVM, intents: &[&Documents]) -> Result<Plan, Pl
             }
             Step::Simulate(simulation) => planner.simulated(simulate(svm, &simulation))?,
             Step::Done(plan) => return Ok(*plan),
+        }
+    }
+}
+
+/// Verifies `transaction` as a signer does, answering each fetch from `svm`.
+pub fn verify(svm: &LiteSVM, transaction: &Transaction) -> Result<VerifiedTransaction, VerifyError> {
+    let mut accounts = AccountMap::default();
+
+    loop {
+        match verify_transaction(transaction, &accounts)? {
+            VerifyStep::Fetch(addresses) => {
+                let fetched = addresses.iter().map(|address| fetch(svm, address)).collect();
+                accounts.insert_fetched(&addresses, fetched);
+            }
+            VerifyStep::Done(verified) => return Ok(*verified),
         }
     }
 }

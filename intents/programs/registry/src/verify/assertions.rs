@@ -94,7 +94,8 @@ impl SegmentAssertions<'_, '_> {
         }
 
         let first = self.sysvar.load_instruction_at(self.snapshots.start)?;
-        let address = spec_address(&first.get_instruction_account_at(3)?.key);
+        let memory = first.get_instruction_account_at(3).map_err(|_| RegistryError::WrongAssertions)?;
+        let address = spec_address(&memory.key);
         let [_, id, bump] = *first.get_instruction_data().first_chunk::<3>().ok_or(RegistryError::WrongAssertions)?;
 
         Ok(Memory { address, id, bump })

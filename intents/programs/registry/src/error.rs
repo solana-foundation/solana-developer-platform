@@ -70,4 +70,8 @@ pub enum RegistryError {
     WrongGuardedAccounts,
     #[msg("Lighthouse cannot assert the postconditions of the intent")]
     AssertionsRefused,
+    #[msg("The layout states other counts than the segment holds")]
+    WrongSegmentLayout,
+    #[msg("The outputs differ from the record's or the builder's")]
+    WrongOutputs,
 }

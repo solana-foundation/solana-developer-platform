@@ -28,10 +28,22 @@ pub(crate) struct VerifyIntent<'v> {
     pub(crate) extra_accounts: &'v [Address],
     /// The builder's role of each account of its instructions, in order. A static recipe has none.
     pub(crate) builder_roles: Vec<u8>,
+    /// The interface's outputs, in borsh, which `verify_intent` checks against the record.
+    pub(crate) outputs: &'v [u8],
     /// The most that the rent payer spends on new accounts in the segment.
     pub(crate) rent_cap: u64,
     /// The accounts that the span can change, which the assertions guard.
     pub(crate) guarded: &'v [Address],
+    pub(crate) counts: SegmentCounts,
+}
+
+/// The instructions of a segment after `verify_intent`, which `verify_intent` checks, so a signer
+/// can read the segment from the data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SegmentCounts {
+    pub(crate) snapshots: u8,
+    pub(crate) built: u8,
+    pub(crate) checks: u8,
 }
 
 impl VerifyIntent<'_> {
@@ -68,8 +80,9 @@ impl VerifyIntent<'_> {
         Ok(Instruction { program: REGISTRY_PROGRAM, accounts, data: self.data()? })
     }
 
-    /// The Anchor discriminator, then each argument in borsh: the intent and the builder roles as a
-    /// `u32` length and the bytes, the rent cap, and the count of guarded accounts.
+    /// The Anchor discriminator, then each argument in borsh: the intent, the builder roles, and the
+    /// outputs as a `u32` length and the bytes, then the layout: the rent cap, the count of guarded
+    /// accounts, and the counts of the segment.
     fn data(&self) -> Result<Vec<u8>, PlanError> {
         let length = |bytes: &[u8]| {
             u32::try_from(bytes.len()).map_err(|_| PlanError::DoesNotFit {
@@ -78,7 +91,7 @@ impl VerifyIntent<'_> {
                 max: u32::MAX as usize,
             })
         };
-        let discriminator = Sha256::digest(b"global:verify_intent");
+        let discriminator = verify_intent_discriminator();
         let guarded = u8::try_from(self.guarded.len()).map_err(|_| PlanError::DoesNotFit {
             limit: Limit::Accounts,
             used: self.guarded.len(),
@@ -86,23 +99,34 @@ impl VerifyIntent<'_> {
         })?;
 
         Ok([
-            discriminator.get(..8).unwrap_or_default(),
+            &discriminator[..],
             &length(self.intent)?.to_le_bytes(),
             self.intent,
             &length(&self.builder_roles)?.to_le_bytes(),
             &self.builder_roles,
+            &length(self.outputs)?.to_le_bytes(),
+            self.outputs,
             &self.rent_cap.to_le_bytes(),
-            &[guarded],
+            &[guarded, self.counts.snapshots, self.counts.built, self.counts.checks],
         ]
         .concat())
     }
+}
+
+/// The Anchor discriminator of `verify_intent`: the first 8 bytes of the SHA-256 of
+/// `global:verify_intent`.
+pub(crate) fn verify_intent_discriminator() -> [u8; 8] {
+    let digest: [u8; 32] = Sha256::digest(b"global:verify_intent").into();
+    let [discriminator, ..] = digest.as_chunks::<8>().0 else { return [0; 8] };
+
+    *discriminator
 }
 
 fn index_address(kind: DocumentKind, id: &DocumentIdV1) -> Result<Address, PlanError> {
     find(&[b"index", &[kind.into()], &id.publisher.0, &id.name_hash])
 }
 
-fn version_address(kind: DocumentKind, id: &DocumentIdV1) -> Result<Address, PlanError> {
+pub(crate) fn version_address(kind: DocumentKind, id: &DocumentIdV1) -> Result<Address, PlanError> {
     let seed: &[u8] = if kind == DocumentKind::Interface { b"interface" } else { b"implementation" };
     let version = &id.version;
 

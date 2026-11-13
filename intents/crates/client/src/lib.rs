@@ -5,11 +5,14 @@
 //! # fn run(request: &sdp_intents_planner::PlanRequest<'_>) -> Result<(), sdp_intents_client::ClientError> {
 //! let client = sdp_intents_client::Client::new("https://api.mainnet-beta.solana.com");
 //! let prepared = client.prepare(request)?;
+//! let verified = client.verify_message(&prepared.message)?;
+//! assert_eq!(verified.message, prepared.plan.message);
 //! # Ok(())
 //! # }
 //! ```
 
 mod rpc;
+mod verify;
 
 use core::fmt;
 use std::hash::{BuildHasher, RandomState};
@@ -126,13 +129,21 @@ pub enum ClientError {
     Rpc(Box<solana_rpc_client_api::client_error::Error>),
     /// The simulation transaction does not compile, such as one over the account limit.
     Compile(String),
-    /// The RPC answer does not decode.
+    /// The RPC answer or the message does not decode.
     Decode(String),
+    /// The transaction does not verify.
+    Verify(sdp_intents_planner::VerifyError),
 }
 
 impl From<PlanError> for ClientError {
     fn from(error: PlanError) -> Self {
         Self::Plan(error)
+    }
+}
+
+impl From<sdp_intents_planner::VerifyError> for ClientError {
+    fn from(error: sdp_intents_planner::VerifyError) -> Self {
+        Self::Verify(error)
     }
 }
 
@@ -154,7 +165,8 @@ impl fmt::Display for ClientError {
             Self::Plan(error) => write!(f, "{error}"),
             Self::Rpc(error) => write!(f, "the RPC call failed: {error}"),
             Self::Compile(error) => write!(f, "the simulation does not compile: {error}"),
-            Self::Decode(error) => write!(f, "the RPC answer does not decode: {error}"),
+            Self::Decode(error) => write!(f, "the answer does not decode: {error}"),
+            Self::Verify(error) => write!(f, "the transaction does not verify: {error}"),
         }
     }
 }
