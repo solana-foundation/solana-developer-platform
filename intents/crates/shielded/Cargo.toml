@@ -1,0 +1,23 @@
+[package]
+name = "sdp-intents-shielded"
+description = "Private spends through Helius privacy rings, for the shielded recipe kind"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+# The Zolana SDK crates come from a fork that bumps solana-address, solana-hash, and wincode to the
+# versions of this workspace's Agave 4.3 graph. The path names a sibling checkout of the fork's
+# `sdp/solana-address-2.7` branch, until the fork has a URL to pin by revision.
+[dependencies]
+spr-client = { path = "../../../../zolana/sdk-libs/client", features = ["client"] }
+spr-keypair = { path = "../../../../zolana/sdk-libs/keypair" }
+spr-program = { path = "../../../../zolana/sdk-libs/program" }
+spr-transaction = { path = "../../../../zolana/sdk-libs/transaction" }
+solana-address.workspace = true
+solana-keypair = "=3.1.2"
+solana-signer = "=3.0.1"
+
+[lints]
+workspace = true

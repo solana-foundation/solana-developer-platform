@@ -14,6 +14,7 @@ members = [
     "crates/service",
     "crates/test-provider",
     "crates/cli",
+    "crates/shielded",
 ]
 # `crates/builder` and `crates/program-testing` belong to the programs workspace, because they
 # depend on pinocchio and LiteSVM.
