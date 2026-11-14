@@ -955,11 +955,10 @@ describe("OpenAPI spec", () => {
 
   // A custody provider publishes where the channel offers it in either mode, and
   // local signing (self-hosted only) never does. Pinned so a promotion is a visible change.
-  it("publishes BYOK Fireblocks and Privy on stable, every provider but local on experimental", () => {
+  it("names only Privy as a custody provider on stable, every one but local on experimental", () => {
     const stable = createPublicOpenApiDocument({ releaseChannel: "stable" });
     const serialized = JSON.stringify(stable);
     expect(CUSTODY_PROVIDERS.filter((provider) => serialized.includes(`"${provider}"`))).toEqual([
-      "fireblocks",
       "privy",
     ]);
     // Prose too: no description names a provider stable does not offer.
@@ -967,8 +966,8 @@ describe("OpenAPI spec", () => {
       (provider) => provider !== "privy" && provider !== "fireblocks"
     ).map((provider) => CUSTODY_PROVIDER_CATALOG_BY_ID[provider].label);
     expect(unpublishedLabels.filter((label) => serialized.includes(label))).toEqual([]);
-    expect(serialized).not.toMatch(/coinbase/i);
-    expect(createPublicSurfaceManifest("stable").custodyProviders).toEqual(["fireblocks", "privy"]);
+    expect(serialized).not.toMatch(/fireblocks|coinbase/i);
+    expect(createPublicSurfaceManifest("stable").custodyProviders).toEqual(["privy"]);
 
     const paths = stable.paths;
     expect(paths).toBeDefined();
@@ -1024,7 +1023,7 @@ describe("OpenAPI spec", () => {
     expect(notConfiguredModes).toEqual(families.map(() => oneOrMoreModes));
   });
 
-  it("publishes Fireblocks transfer fields on stable after the BYOK promotion", () => {
+  it("drops a custody provider's own transfer fields where the channel does not publish it", () => {
     const transfer = (releaseChannel: "stable" | "experimental") =>
       JSON.stringify(
         getJsonSchema(
@@ -1033,7 +1032,7 @@ describe("OpenAPI spec", () => {
           ]?.get?.responses?.["200"]
         )
       );
-    expect(transfer("stable")).toContain('"fireblocks"');
+    expect(transfer("stable")).not.toMatch(/fireblocks/i);
     expect(transfer("experimental")).toContain('"fireblocks"');
     expect(transfer("experimental")).not.toContain("x-sdp-custody-provider");
   });

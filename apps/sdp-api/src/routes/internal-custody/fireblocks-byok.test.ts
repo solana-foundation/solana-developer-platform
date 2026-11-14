@@ -104,7 +104,7 @@ async function newRegistration(projectId = PROJECT_ID) {
 }
 
 beforeEach(async () => {
-  testEnv.SDP_RELEASE_CHANNEL = "stable";
+  testEnv.SDP_RELEASE_CHANNEL = "beta";
   testEnv.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
   await seedTestDatabase(env);
   await clearKVStores(env);
@@ -151,7 +151,7 @@ beforeEach(async () => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-describe("Fireblocks BYOK lifecycle on stable", () => {
+describe("Fireblocks BYOK lifecycle on beta", () => {
   it("encrypts credentials, attaches the vault with one read and replays completion", async () => {
     const fetch = providerResponse();
     const connected = await connect();

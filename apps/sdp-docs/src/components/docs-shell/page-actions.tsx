@@ -53,7 +53,7 @@ async function copyMarkdown(path: string): Promise<void> {
 /** Up, Down, Home and End move between the menu's items. */
 function moveMenuFocus(event: KeyboardEvent<HTMLElement>) {
   const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("[data-menu-item]"));
-  const index = items.findIndex((item) => item === document.activeElement);
+  const index = items.indexOf(document.activeElement as HTMLElement);
   const next = {
     ArrowDown: items[(index + 1) % items.length],
     ArrowUp: items[(index - 1 + items.length) % items.length],
