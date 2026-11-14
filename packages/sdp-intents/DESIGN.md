@@ -10,8 +10,9 @@ lists the gates for production.
 Intents fix a set of security and convenience problems, in SDP and across Solana.
 
 1. **A transaction is readable, and the transaction proves what it says.** A signer reads one
-   message, such as `transfer 100 of <mint> from A to B`. `verify_intent` and Lighthouse
-   assertions in the same transaction prove that message (4.6).
+   message for each transaction, such as `transfer 100 of <mint> from A to B`. `verify_intent` and
+   Lighthouse assertions in the same transaction prove that message, and the flow that the
+   transaction is a step of (4.6).
 2. **A protocol ABI change does not break SDP.** The instruction logic lives onchain, in a builder.
    The goal is a builder in each target program, which upgrades with the program (4.2).
 3. **Interfaces cover many protocols.** An interface such as `vault.deposit` names inputs, outputs,
@@ -27,11 +28,15 @@ Intents fix a set of security and convenience problems, in SDP and across Solana
    rebuilds the instructions onchain from the registry, and Lighthouse asserts each postcondition.
    A transaction that the implementation does not build, or that breaks a bound, fails (4.3, 4.6).
 
+9. **One request for any operation.** One transaction, several, or a privacy ring: the caller
+   sends an intent, keeps one `progress` value, and follows `next` (4.19).
+
 **How it works.** An interface declares an operation. An implementation says how one
-protocol does it, with one recipe: a builder program, static instructions as data, or an HTTP
-endpoint. An intent names an interface, an implementation, and inputs. `prepare` plans one or more intents
-into one transaction with one message. The signer verifies the message from the transaction and
-the registry, and never trusts the service.
+protocol does it, with one recipe: a builder program, static instructions as data, an HTTP
+endpoint, a shielded spend, or steps of other interfaces. An intent names an interface, an
+implementation, and inputs. `prepare` returns a flow: ordered steps, each one transaction with one
+message. Most intents are one step. The signer verifies each step's message from its transaction
+and the registry, and never trusts the service.
 
 ## 2. Problem
 
@@ -57,14 +62,15 @@ lets signing move out of SDP later.
 | R6 | A remote endpoint returns instructions, or a whole transaction that the provider signed. | 4.16 |
 | R7 | The service checks every plan against the postconditions and the payer rules, and adds them as assertions. | 4.5 |
 | R8 | A plan reads every value-bearing account live, with the fewest RPC calls (`AGENTS.md`, "RPC is a budget"). | 4.4 |
-| R9 | A wallet program can run static and program recipes onchain. | 4.7 |
+| R9 | A wallet program can run static and program recipes, and static flows, onchain. | 4.7 |
 | R10 | Each document has one canonical zero-copy binary form, within fixed limits. | 4.9 |
 | R11 | A spec change leaves published documents and messages valid. | 4.8 |
 | R12 | A registry program holds organizations, interfaces, implementations, versions, and approvals. | 4.10 |
 | R13 | By default, each transaction proves onchain that its instructions are what the implementation builds. An intent can opt out. | 4.6 |
-| R14 | `prepare` returns a v1 transaction, or the instructions alone for a caller that compiles legacy, v0, or v1. | 4.1 |
+| R14 | `prepare` returns `{ progress, next }` for every intent. A step to sign holds a v1 transaction, or the instructions alone for a caller that compiles legacy, v0, or v1. | 4.1, 4.19 |
 | R15 | The definitions live in this repository as JSON. A CLI lints them and applies them with a key or a Squads proposal. | 4.13 |
 | R16 | A playground explores the registry and plans intents from a typed form. | 4.14 |
+| R17 | Each stopping point of a flow is recoverable and discoverable by the owner. The last `progress` value alone continues a flow. A step of a static flow proves onchain that it is that flow's step. | 4.6, 4.19 |
 
 ## 4. Design
 
@@ -85,7 +91,9 @@ The examples are one chain for a PYUSD transfer. "…" shortens addresses and by
 ```
 
 An intent is the operation only, in base units. `options` can turn off an onchain check
-(`assertions`, `verifyIntent`) or set `allowUnapproved` (4.10). Both checks are on by default.
+(`assertions`, `verifyIntent`), set `allowUnapproved` (4.10), or ask for a privacy ring with
+`privacy` (4.17). Both checks are on by default. The intent never says how many transactions the
+operation takes. The matched implementation decides (4.19).
 
 **Plan request.**
 
@@ -102,8 +110,8 @@ An intent is the operation only, in base units. `options` can turn off an onchai
 
 1. `payers.rent` defaults to `fee`.
 2. `cluster` is `mainnet`, `devnet`, `testnet`, or a genesis hash. Each implementation must be for it.
-3. `output` is `transaction`, the default, or `instructions`. With `instructions`, the plan holds no
-   transaction, and `prepare` reads no blockhash. The caller compiles a legacy, v0, or v1
+3. `output` is `transaction`, the default, or `instructions`. With `instructions`, each step's plan
+   holds no transaction, and `prepare` reads no blockhash. The caller compiles a legacy, v0, or v1
    transaction. It must keep each segment whole and in order, keep the payers, and set the compute
    budget. `verify_intent` finds its segment after itself in the instructions sysvar, so the
    version does not matter. A provider's signed transaction (4.16) has no instructions, so
@@ -211,7 +219,67 @@ output trusts the recipe (4.3).
 The first instruction creates the destination ATA when it does not exist. The second is
 `transferChecked`, with the decimals read from byte 44 of the mint.
 
-**Plan.**
+**Response.** Every `prepare` returns the same shape (4.19):
+
+```json
+{ "progress": { "…": "a JSON object that the caller stores and sends back" },
+  "next": { "kind": "sign", "signs": "transaction", "plan": { "kind": "plan", "…": "the plan below" } } }
+```
+
+`start` and `continue` each run `prepare`, which plans the next step. `next` is what the caller does now. `progress` is a JSON object that the caller stores and sends
+back unchanged. Each answer replaces it whole, and the caller never edits it (4.19). An intent of one
+transaction is a flow of one step, so its first `next` is a `sign` with the plan below.
+
+**The loop.** Every caller runs the same loop, for one transaction or many:
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  [*] --> Answer: POST /v1/intents/start
+  Answer --> Sign: kind sign
+  Answer --> Wait: kind wait
+  Answer --> [*]: kind done
+  Sign --> Answer: verify, sign, POST /v1/intents/continue with signed
+  Wait --> Answer: at checkAfter, POST /v1/intents/continue
+```
+
+| `next.kind` | The caller | Then calls |
+| :-- | :-- | :-- |
+| `sign` | Renders `plan.message` from the transaction with its own verifier (4.6), shows it, and signs what `signs` names | `POST /v1/intents/continue` with `{ progress, signed: [<what it signed>] }` |
+| `wait` | Shows `for`, and waits until `checkAfter` | `POST /v1/intents/continue` with `{ progress }` |
+| `done` | Shows `message`, and drops `progress` | Nothing |
+
+```ts
+let answer = await post("/v1/intents/start", request);
+
+while (answer.next.kind !== "done") {
+  await store.save(answer.progress);             // before the caller acts on next
+  const { progress, next } = answer;
+
+  if (next.kind === "sign") {
+    await verifier.check(next.plan);             // the signer's verifier, over its own RPC
+    const signed = await wallet.sign(next);      // the transaction, a digest, or the message
+    answer = await post("/v1/intents/continue", { progress, signed: [signed] });
+  } else {
+    await sleepUntil(next.checkAfter);
+    answer = await post("/v1/intents/continue", { progress });
+  }
+}
+```
+
+| `signs` | The signer signs | `signed` holds |
+| :-- | :-- | :-- |
+| `transaction` | The plan's transaction | The signed transaction, in base64. The service records its signature and expiry, then sends it. |
+| `digest` | A ring spend's 32-byte digest (4.17) | The signature. The service or the client proves and sends the spend. |
+| `message` | The message itself, for a wallet of 4.7 | The signature. The service sends the wallet's approval, and `next` is `wait` until the wallet's threshold approves. |
+
+1. A step that needs no approval, such as a ring execute, never reaches the caller. The service
+   runs it inside the call, and answers with the state after it.
+2. A call that fails changes nothing. The caller sends the same `progress` again.
+3. A wallet that sends a transaction itself still reports it in `signed`. Otherwise the service
+   cannot hold back a second plan while the first can still land (4.19, rule 2).
+
+**Plan.** One step's transaction, with the message that it proves.
 
 ```json
 {
@@ -230,13 +298,18 @@ The first instruction creates the destination ATA when it does not exist. The se
 }
 ```
 
-1. `message` is what a signer signs once, such as on a Ledger. It names the cluster, then each
-   intent after `|| <n>:` (the implementation's template, the ids, the tier, the onchain checks, and the
-   rent cap), then the payers and the priority fee.
+1. `message` is what the signer reads, and what the transaction proves. The signer signs the
+   transaction, not the message. Only a wallet that approves intents (4.7) signs the message
+   itself, and a ring spend signs a digest (4.17). The message names the
+   cluster, then the flow when it has more than one step, then each intent after `|| <n>:` (the
+   implementation's template, the ids, the tier, the onchain checks, and the rent cap), then the
+   payers and the priority fee. The flow part is
+   `flow: <id>@<version> step <i> of <n>: <the flow's message>`.
 2. An id is `organization/name@version`. The registry never publishes a version twice, so an id
    names one document, and the message holds no digest. The guarantees are in the documents, which
    a UI shows, so the message leaves them out.
-3. A Ledger signs at most 1,212 bytes, so `prepare` refuses a longer message.
+3. A Ledger signs an offchain message of at most 1,212 bytes. A wallet of 4.7 signs the message,
+   so `prepare` refuses a longer one.
 4. `instructions` is the `EarnVaultInstruction` shape: base58 addresses, numeric `AccountRole`
    values, and base64 data. `transaction.messageBytes` is Solana's wire form.
 5. `verify` is the position of the intent's `verify_intent`, and `span` the positions of its built
@@ -244,6 +317,7 @@ The first instruction creates the destination ATA when it does not exist. The se
 6. `prepare` compiles a v1 transaction (SIMD-0385) and sets the compute unit limit and the loaded
    data size from the simulation. A provider's transaction keeps its own version.
 7. `rpcCalls` counts the requests of this plan only (4.4).
+8. A plan is never returned alone. It is the `plan` of a `next` whose `kind` is `sign`.
 
 ### 4.2 Recipes and the builder ABI
 
@@ -252,6 +326,8 @@ The first instruction creates the destination ATA when it does not exist. The se
 | `program` | A builder instruction, simulated | The preferred kind |
 | `static` | Accounts and instructions as data | A stopgap for a program with no builder, for an operation unlikely to change |
 | `remote` | An HTTP endpoint (4.16) | Offchain search, such as a swap route, or a provider that must sign |
+| `shielded` | The output notes of a privacy ring spend (4.17) | A private transfer |
+| `flow` | Steps, each an intent of another interface (4.19) | An operation that takes more than one transaction |
 
 **Preferred recipe.** A builder in the target program ships with the instruction that it builds,
 so a protocol upgrade cannot leave its implementations behind. SDP builders and static implementations fill the
@@ -375,6 +451,8 @@ such as `build_deposit_v2`.
 | Static | Data in the registry |
 | Program | Code, with its upgrade authority |
 | Remote | An operator (4.16) |
+| Shielded | The spender's client, which builds and proves the spend (4.17) |
+| Flow | Each step as its own recipe. A program or remote flow also trusts its builder or endpoint to pick useful steps (4.19). |
 
 The postconditions and the payer rules (4.5) bound the instructions of every recipe. Outputs and
 refusals trust the recipe. The message comes from the implementation, and the display from the interface.
@@ -392,7 +470,8 @@ caller answers. The client answers over RPC. The service answers from an account
 `simulateTransaction` instead. LiteSVM runs every feature, so a feature that the cluster has not
 activated can change a result.
 
-**Plans.** The planner plans each intent in order, as one segment. Each simulation runs the earlier
+**Plans.** The planner plans one step of a flow at a time, from the state at that moment (4.19).
+Within a step, it plans each intent in order, as one segment. Each simulation runs the earlier
 segments first, so a builder reads the state that `verify_intent` reads onchain. A segment's
 simulation runs with a placeholder rent cap. The planner then writes the measured cap, the only
 byte that differs from the landed transaction. The last simulation sets the budget.
@@ -456,7 +535,7 @@ Lighthouse cannot sum several accounts, so a token flow is bounded on one accoun
 **Rendering.** The message is restricted ASCII on one line. It names a token by mint address,
 because anyone can name a token "USDC", and renders an amount in decimal units for its mint. The
 display can use token symbols. The longest plan in the e2e, two Hastra intents, is about 1,000
-bytes, so a plan of three or more intents can exceed a Ledger's limit.
+bytes, so a plan of three or more intents can exceed the limit of note 3 in 4.1.
 
 ### 4.6 Verification in the transaction
 
@@ -487,6 +566,10 @@ It checks:
    are now, and compares each with its place.
 7. Each account's role in the sysvar is the union of its roles in the span, or a role that an
    instruction outside the segment explains.
+8. A step of a flow: the intent names the flow implementation, the outer intent's SHA-256, and the
+   step. `verify_intent` gets the outer intent, checks its hash, binds the flow's step from it,
+   and compares the result with the intent. A value from an earlier step's output is derived again
+   when a static recipe binds it, and taken as the step states it when a builder returned it.
 
 A span that runs past the transaction or holds a registry instruction fails. A state change between
 `prepare` and landing changes the built instructions, and the transaction fails.
@@ -505,7 +588,7 @@ to 29,000 compute units, down from 34,000 to 44,000. The whole transaction costs
 which 18,000 creates the receiver's new ATA and 15,000 is Lighthouse.
 
 **Signer.** A signer renders the message from the transaction and the registry, never from the
-service. `verify_transaction` in the planner does it with no IO, and `Client::verify_message`
+service. The flow part comes from the flow implementation and the outer intent. `verify_transaction` in the planner does it with no IO, and `Client::verify_message`
 answers over RPC: the lookup tables of a v0 message, the version and organization accounts, and the
 accounts that each recipe reads. It takes a message or a transaction of any version.
 `@sdp/intents-verifier` runs the same verifier in TypeScript, compiled to WebAssembly, against the
@@ -521,18 +604,33 @@ no onchain form, and its part says `onchain checks: none`.
    A builder that names the rent payer's own address, such as an owner who also pays the rent,
    fails the hash. `prepare` refuses it with `RentPayerInRecipe`.
 3. Outputs trust the builder.
+4. A step of a program or remote flow proves its own intent. Its flow part proves only which flow
+   picked it (4.19).
 
 ### 4.7 Onchain execution
 
-A multisig wallet with a PDA vault can run static and program recipes. The signers approve an
-intent's message, and `execute` builds the instructions, as `verify_intent` does, signs with the
-vault, and checks the postconditions. The wallet renders the message from the implementation, so no part
-comes from a builder. clear-msig (`github.com/ChewingGlass/clear-msig`) is prior art.
+A multisig wallet with a PDA vault can run static and program recipes, and static flows. Here
+the signers sign the message itself, not a transaction. They approve it once, and `execute` builds the instructions, as `verify_intent` does,
+signs with the vault, and checks the postconditions. The wallet renders the message from the
+implementation, so no part comes from a builder. clear-msig (`github.com/ChewingGlass/clear-msig`)
+is prior art.
 
-A remote recipe has no onchain form. A builder upgrade between approval and execution changes what
+For a static flow, the signers approve the flow's message, and the wallet stores the outer intent.
+Anyone then calls `execute_step`. The wallet finds the position as the planner does: it scans the
+steps from the end, checks `done` and `ready` against the accounts, builds the next step from the
+outer intent, and runs it. Exists, data, and balance conditions read accounts, so a static flow of
+those conditions needs no approval after the first. A private balance needs a viewing key, so a
+flow with one has no onchain form.
+
+A remote recipe, and a program or remote flow, has no onchain form. A builder upgrade between approval and execution changes what
 runs, within the postconditions. The wallet must not enable CPI Guard, because a PDA signs only by
 CPI. With such a wallet, a compromised SDP API can propose, and cannot move more than the
 postconditions allow.
+
+The ring program of 4.17 needs the same step: check an intent's instructions, then sign them for a
+PDA. `verify_intent` reads only top-level instructions, so the registry adds `check_intent`, which
+takes the instructions as data. The calling program invokes them after the check, because only it
+signs for its PDA.
 
 ### 4.8 Versions and compatibility
 
@@ -541,7 +639,7 @@ which resolves against the head (4.10). `prepare` pins the exact version.
 
 | Change | Interface | Implementation |
 | :-- | :-- | :-- |
-| Major | An input or output removed or retyped, or a postcondition loosened | A new builder, call, or endpoint, a changed static instruction, or a loosened postcondition |
+| Major | An input or output removed or retyped, or a postcondition loosened | A new builder, call, or endpoint, a changed static instruction or flow step, or a loosened postcondition |
 | Minor | An optional input added, or a postcondition tightened | A postcondition tightened, or an optional input handled |
 | Patch | Message wording | Message wording |
 
@@ -608,7 +706,9 @@ pub struct ImplementationDocV1 {
 
 `InterfaceDocV1` holds the id, name, display, inputs, outputs, postconditions, addresses, and a
 flag for async settlement (4.15). `IntentDocV1` holds both ids at exact versions, the option flags,
-and each input in borsh.
+and each input in borsh. A step's intent also holds the flow implementation's id, the outer
+intent's SHA-256, and the step's index. A flow implementation adds a steps table and a conditions
+table.
 
 | Code | Values |
 | :-- | :-- |
@@ -616,7 +716,7 @@ and each input in borsh.
 | Account source | `1` value, `2` static, `3` PDA, `4` ATA, `5` has one |
 | Segment source | `1` literal, `2` reference, `3` account bytes |
 | Check | `1` outflow, `2` inflow, `3` `noOtherOutflows`, `4` `noAuthorityChange`, `5` `invokesOnly`, `6` `delegates`, `7` `noDelegate` |
-| Recipe | `1` static, `2` program, `3` remote instructions, `4` remote transaction |
+| Recipe | `1` static, `2` program, `3` remote instructions, `4` remote transaction, `5` shielded, `6` flow (not built) |
 | Value type | `1` to `10` integers, `11` bool, `12` address, `13` mint, `14` string, `15` bytes, `0x80` plus a code for an array |
 
 Only a program recipe's builder call can name source `7`. The compiler is deterministic: a
@@ -630,6 +730,7 @@ decompile and compile gives the same bytes.
 | `applies` hints | 4 |
 | Programs, accounts, seeds, instructions, segments | 16, 32, 32, 12, 48 |
 | `hasOne` depth, builder rounds | 4, 4 |
+| Flow steps, conditions | 8, 16 |
 
 ### 4.10 Registry
 
@@ -704,7 +805,8 @@ pub struct VersionIndexV1 {
 | `publish` | Update authority | Checks the buffer's SHA-256, `parse`, the limits, the ids, and the cluster, then creates the version account |
 | `set_head`, `remove` | Update authority | Moves the head, or removes a version that is not the head |
 | `approve_*`, `unapprove_*`, `set_approval_policy` | Interface's approve authority | Approves implementations and versions |
-| `verify_intent` | None | Checks the transaction (4.6) |
+| `verify_intent` | None | Checks the transaction, and its flow step (4.6) |
+| `check_intent` | None | Checks an intent against instructions passed as data, for a program that signs them for a PDA (4.7) |
 
 ### 4.11 Token transfers
 
@@ -757,8 +859,9 @@ one file for each version. The repository is the source of truth, and the regist
 | `sdp-intents apply [--squads <multisig>]` | Sends those steps. With `--squads`, each step that needs an authority becomes a Squads proposal. `publish` carries the document's SHA-256, so members vote on exact bytes. While the registry gates organizations, the admin must be the keypair or the vault. |
 | `sdp-intents init-registry --admin <key>` | Creates the config, signed by the upgrade authority. It changes nothing when the config exists. |
 | `sdp-intents set-organizations-gated on\|off`, `set-registry-admin <key>` | Changes the config as the admin, or as a proposal with `--squads` |
-| `sdp-intents prepare <request>` | Plans over RPC from the definitions, with no service |
-| `sdp-intents verify <plan>`, `send <plan>` | Renders the message as the signer does, and lists unverified instructions. `send` signs and sends a plan that verifies. A plan of instructions alone compiles first, as `--version legacy\|0\|1` and `--lookup-table` say. |
+| `sdp-intents start <request>`, `continue <progress>` | Runs the loop's calls over RPC from the definitions, with no service, and prints `{ progress, next }` |
+| `sdp-intents recover <owner>` | Lists the owner's stopping points, each with its `recover` intent (4.19) |
+| `sdp-intents verify <progress>`, `send <progress>` | Renders the message of the step to sign as the signer does, and lists unverified instructions. `send` signs and sends a step that verifies. A plan of instructions alone compiles first, as `--version legacy\|0\|1` and `--lookup-table` say. |
 
 Later, a GitHub workflow runs `lint` and `plan` on each pull request, and `apply --squads` on merge.
 
@@ -798,6 +901,7 @@ service.
 | `vault.deposit`, `vault.withdraw` | `ondo-usdy-*`, through the Jupiter wrapper | remote, tier 2 |
 | `vault.deposit`, `vault.withdraw`, `vault.requestWithdrawal`, `vault.cancelRequest` | `hastra-*` | static |
 | `vault.requestDeposit` | `test-provider-deposit`, as legacy, v0 with a lookup table, and v1 | remote, tier 3 |
+| `private.transfer` | `zolana-transfer`, through Zolana on the surfnet | shielded, tier 3 |
 
 The e2e also compiles a plan of instructions alone as legacy, v0, and v1, and refuses a remote
 endpoint that adds a token approval to an attacker.
@@ -816,7 +920,8 @@ A single index or version reads only the addresses that its id and version deriv
 | `GET /v1/{interfaces\|implementations}/{organization}/{name}/versions/{version}` | | One version, with its document in the definition format |
 | `GET /v1/interfaces/{organization}/{name}/implementations` | | The interface's implementations, each with its approval |
 | `POST /v1/interfaces/{organization}/{name}/versions/{version}/matches` | `{ inputs, payers, all }` | Each implementation, with its status |
-| `POST /v1/prepare` | A plan request | The plan, with its RPC calls |
+| `POST /v1/intents/start`, `POST /v1/intents/continue` | A plan request, or `{ progress, signed? }` | `{ progress, next }`, with the RPC calls |
+| `POST /v1/intents/recover` | `{ owner }` | The owner's stopping points (4.19) |
 | `POST /v1/verify` | A message or a transaction of any version, and the plan's message | What the transaction proves |
 | `GET /v1/wallets`, `POST /v1/send` | A message or a transaction | The local wallets, and a send |
 | `GET /v1/ring`, `POST /v1/ring/shield` | An address and lamports | The local wallets' private SOL, and a deposit |
@@ -855,7 +960,8 @@ The message says "settles later, outside this transaction".
    no delegate remains. Lighthouse asserts both.
 3. An implementation pins where the money goes, such as WisdomTree's standing wallet for each fund and
    currency. A new wallet is a new version, which the approve authority approves.
-4. The plan returns the request. Earn's order tracking follows the settlement.
+4. The plan returns the request. A `flow` implementation of the synchronous interface joins the
+   request and its claim (4.19), so a caller asks for `vault.deposit` and follows `next`.
 
 Hastra's flows are static, at tier 1. A par redemption is one plan of two intents: an unstake from
 PRIME to wYLDS, then a `vault.requestWithdrawal` of that wYLDS. Hastra's program makes the owner pay
@@ -880,7 +986,7 @@ against `invokesOnly`, which a remote implementation must state.
 **Transaction** is for a provider that must sign, such as Plume. The provider's signatures cover
 the whole message, so the plan keeps it as it is:
 
-1. It is the plan's only intent, with no `verify_intent` and no assertions.
+1. It is the step's only intent, with no `verify_intent` and no assertions.
 2. It is legacy, v0, or v1. The verifier reads a v0 transaction's lookup tables, and the simulation
    runs the provider's message as it is.
 3. The provider signs only for an account that the implementation lists, or a new account. It never signs
@@ -895,7 +1001,7 @@ the whole message, so the plan keeps it as it is:
 | :-- | :-- | :-- |
 | 1 | Static, program | `verify_intent` rebuilds the instructions, and Lighthouse asserts the postconditions |
 | 2 | Remote instructions | Lighthouse asserts the postconditions, and `verify_intent` limits the programs |
-| 3 | Remote transaction | Only a simulation, by the service and by the signer |
+| 3 | Remote transaction, shielded | Only a simulation, by the service and by the signer |
 
 The message names each part's tier. `prepare` refuses a tier 3 implementation unless the intent turns both
 onchain checks off, so the weaker trust is the caller's explicit choice.
@@ -1012,18 +1118,61 @@ and shows the message; a custody policy engine recomputes it before it signs, wh
 enclave custody; or a dedicated Ledger app recomputes it on the device, as Zcash's Ledger app does
 for shielded transactions.
 
-**The client flow.** A private intent has the same three calls as a public one:
+**As a flow.** The escrow strategy is a `flow` implementation (4.19). The caller sends the public
+intent with `"options": { "privacy": { "ring": "<ring>" } }`, and an implementation with
+`"venue": "ring"` matches only such an intent. The caller names no shield or request.
 
-```ts
-const plan = await intents.prepare(intent, { privacy: { ring: "R" } });
-await intents.verify(plan);                          // recomputes h, the notes, and the digest
-const signature = await wallet.sign(plan.signing);   // a transaction or a digest
-const result = await intents.send(plan, signature);
+```json
+{
+  "id": "solana.org/ring-vault-deposit",
+  "implements": "solana.org/vault.deposit@^1",
+  "venue": "ring",
+  "recipe": {
+    "kind": "flow",
+    "steps": [
+      { "name": "shield", "intent": { "interface": "solana.org/private.shield@^1", "inputs": { "…": "…" } },
+        "done": { "privateBalance": { "owner": "{inputs.owner}", "mint": "{inputs.asset}", "min": "{inputs.amount}" } } },
+      { "name": "request", "intent": { "interface": "solana.org/ring.request@^1", "inputs": { "inner": "{steps.execute.intent}", "…": "…" } },
+        "done": { "spent": "{steps.request.plan.nullifiers}" },
+        "recover": { "interface": "solana.org/ring.refund@^1", "inputs": { "note": "{steps.request.plan.notes.0}" } } },
+      { "name": "execute", "submitter": "owner",
+        "intent": { "interface": "solana.org/ring.execute@^1",
+                    "inner": { "interface": "solana.org/vault.deposit@^1",
+                               "inputs": { "owner": "{ring.pda}", "vault": "{inputs.vault}", "asset": "{inputs.asset}", "amount": "{inputs.amount}", "minShares": "{inputs.minShares}" } } },
+        "done": { "spent": "{steps.execute.plan.nullifiers}" } },
+      { "name": "settle", "submitter": "owner", "intent": { "interface": "solana.org/ring.settle@^1", "inputs": { "…": "…" } },
+        "done": { "spent": "{steps.settle.plan.nullifiers}" } }
+    ]
+  }
+}
 ```
 
-On the confidential rail, `prepare` proves and returns a complete transaction. On the anonymous
-rail, the proof needs the signature, so `send` proves and relays, and returns a status that
-follows steps 3 and 4. `verify` recomputes everything from the plaintext notes that `prepare`
+The shield is done when the owner already holds the amount privately, so a funded user skips it.
+
+**`inner`.** `inner` is an intent of any public implementation, with the ring's PDA as its owner.
+`h` is its hash, and the request commits to `h`. The hash is known before the user signs, because
+its inputs come from the outer intent and the PDA alone. The execute step then runs in one
+transaction:
+
+1. The ring program spends the request note to a token account of its PDA, because the PDA owns
+   the note and the passed intent hashes to `h`.
+2. The ring program calls `check_intent` (4.7) with the built instructions, then invokes them as
+   the PDA.
+3. The ring program checks the inflow and deposits the shares as a note tagged `B`.
+
+If release, call, and return do not fit one transaction, execute becomes three steps. Between them
+the funds stay with the PDA, bound by `h`, and `ring.refund` recovers them.
+
+Only the owner knows the notes, so only the owner's client builds the proofs of execute and
+settle. Those steps need no approval. The service runs them inside a call to `next` when custody
+holds the viewing key, and the client runs them when it builds alone. The request stores the intent
+encrypted to the owner, so the viewing key finds an open request and the plan to finish it.
+
+**Approvals.** Zolana's default deposit sets the note's blinding from its leaf, so the request
+digest is known only after the shield lands: two approvals. Its ring deposit takes a blinding from
+the client, so the shield and the request sign together: one approval. On the anonymous rail, the
+proof needs the signature, so the service or the client proves and relays the spend after the
+signature returns in `signed`. The client recomputes `h`, the notes, and the digest from the plaintext that the step
 returns, so the service cannot change what the user signs.
 
 | Mode | SDP sees | SDP can move funds |
@@ -1038,7 +1187,7 @@ delay, and batching reduce this.
 **The prototype.** `solana.org/private.transfer` has one implementation, `zolana-transfer`, with
 a `shielded` recipe (kind 5). Each instruction of the recipe is one output note: the pool program,
 the owner as its one account, and the asset, the amount, and the note's data as segments. The
-first account is the spender. The planner resolves the notes and yields `Step::Shield`. The
+first account is the spender. The planner resolves the notes and asks its caller for the spend. The
 service builds and proves the spend with the spender's shielded keys, through the ring's indexer
 and prover, and the planner checks the transaction as it checks a provider's transaction. The
 spender pays the fee, and `verify_intent` refuses kind 5. The recipe stays tier 3 until the client
@@ -1067,23 +1216,177 @@ still lacks for it.
 | Recurring payments, subscriptions | `subscription.authorize` and `subscription.collect`, through a builder that resolves the subscriptions program's transfer-hook accounts. A cron prepares one intent for each collection. | A `delegates` postcondition with no limit, because an authorization approves `u64::MAX`. The message says "unlimited". |
 | Compliance | None. Screening is off-chain. | Nothing. A policy can refuse a `prepare`. |
 | Issuance | `token.create`, `mint`, `burn`, `freeze`, `pause`, `seize`, `setAuthority`, and list changes, through a Token-2022 builder. The new mint keypair is a `builder` signer. | Postconditions on mint supply, authority changes, freeze, and pause. |
-| Earn | The vault interfaces of 4.14. | A Veda implementation. Split swaps take several transactions. |
-| DvP | `dvp.create`, `fund`, `settle`, `cancel`, `reclaim`, one intent for each step. Settlement asserts both parties' balances, although neither party signs. | Nothing. |
+| Earn | The vault interfaces of 4.14. | A Veda implementation. A split swap is a flow (4.19). |
+| DvP | A static flow of `dvp.create`, `fund`, and `settle`, with `cancel` and `reclaim` as its `recover` intents. Settlement asserts both parties' balances, although neither party signs. | Flows. |
 | Private Channels | The L1 deposit is an intent on L1. Transfers and the withdraw burn are intents on the channel chain, a cluster with its own genesis hash. The operator's release is async settlement. | The registry and Lighthouse on the channel chain, and RPC that sends the gateway's token. |
-| Helius Rings | `shielded` implementations (4.17). | The `shielded` recipe kind. |
+| Helius Rings | `shielded` implementations, and `flow` implementations for public protocols (4.17). | Flows and `check_intent`. |
 
 Token-2022 confidential transfers fit as Rings do: the client checks the encrypted amounts before
-it signs. Their proofs usually take several transactions.
+it signs. Their proofs usually take several transactions, so each transfer is a flow.
 
 **Gaps across modules, in order.**
 
-1. **Multi-step actions** are sequences of intents, as async settlement already is. A plan stays
-   one transaction with one message.
+1. **Flows** (4.19). A plan stays one transaction with one message, and a flow orders plans.
 2. **Postconditions** on mint supply, authority changes, freeze, pause, and unlimited delegates.
    Lighthouse has these assertions, and `sdp-intents-lighthouse` builds only the deltas so far.
-3. **The `shielded` recipe kind** (4.17).
-4. **More clusters**: a registry and Lighthouse on each one, and authenticated RPC.
-5. **Schedules and policies** stay outside the model. A cron or a policy calls `prepare`.
+3. **More clusters**: a registry and Lighthouse on each one, and authenticated RPC.
+4. **Schedules and policies** stay outside the model. A cron or a policy calls `prepare`.
+
+### 4.19 Flows (design only)
+
+A transaction is atomic, so a plan proves one transaction. Some operations take several: a request
+and its claim, a deposit through a privacy ring, or a swap split across transactions. `prepare`
+therefore returns a **flow**: ordered steps under one message. Every intent gets the same shape,
+and an intent of one transaction is a flow of one step.
+
+**Steps come from a `flow` recipe.** Each step names an interface. The planner plans the step as
+an ordinary intent, with its own message, checks, and tier. Implementations of other kinds stay
+one transaction. `verify_intent` refuses a `flow` recipe and checks each step's own intent.
+
+```json
+{
+  "kind": "implementation",
+  "id": "acme.xyz/acme-vault-deposit",
+  "implements": "solana.org/vault.deposit@^1",
+  "message": "deposit {inputs.amount} of {inputs.asset} into Acme by request, then claim the shares",
+  "recipe": {
+    "kind": "flow",
+    "steps": [
+      { "name": "request",
+        "intent": { "interface": "solana.org/vault.requestDeposit@^1",
+                    "inputs": { "owner": "{inputs.owner}", "vault": "{inputs.vault}", "asset": "{inputs.asset}", "amount": "{inputs.amount}" } },
+        "done": { "account": "{steps.request.outputs.request}", "exists": true },
+        "recover": { "interface": "solana.org/vault.cancelRequest@^1", "inputs": { "owner": "{inputs.owner}", "vault": "{inputs.vault}" } } },
+      { "name": "claim",
+        "intent": { "interface": "solana.org/vault.claimDeposit@^1",
+                    "inputs": { "owner": "{inputs.owner}", "request": "{steps.request.outputs.request}", "minShares": "{inputs.minShares}" } },
+        "ready": { "account": "{steps.request.outputs.request}", "data": { "offset": "72", "type": "u8", "equals": "2" } },
+        "done": { "account": "{steps.request.outputs.request}", "exists": false } }
+    ]
+  }
+}
+```
+
+| Step field | Meaning |
+| :-- | :-- |
+| `intent` | The interface, an optional implementation, and the inputs. Without an implementation, the planner matches one with `applies`. |
+| `ready` | The step can start. Absent means at once. |
+| `done` | The step's effect is on chain. A signed step is also done when its transaction lands. |
+| `recover` | The intent that returns the owner's funds when the flow stops after this step |
+| `submitter` | For a step that needs no approval: `owner`, which needs the owner's keys, or `anyone`. The service runs it inside a call to `next`, or the client does when it keeps the keys (4.17). |
+
+A value can name an earlier step: `{steps.<name>.outputs.*}`, or `{steps.<name>.plan.*}` for facts
+that the step's plan fixed, such as a ring spend's nullifiers.
+
+| Condition | Form | Who checks it |
+| :-- | :-- | :-- |
+| Exists | `{ "account": …, "exists": true }` | Anyone |
+| Data | `{ "account": …, "data": { "offset", "type", "equals" } }` | Anyone |
+| Balance | `{ "balance": { "owner", "mint", "min" } }` | Anyone |
+| Private balance | `{ "privateBalance": { "owner", "mint", "min" } }` | The holder of the viewing key |
+| Spent | `{ "spent": "{steps.pay.plan.nullifiers}" }` | Anyone, with the nullifiers |
+| Committed | `{ "committed": "{steps.pay.plan.notes.0}" }` | Anyone, with the commitment |
+
+**Position.** The planner reads the position from the chain. It scans the steps from the last to
+the first, and the last step whose `done` holds is the position. The flow is done when its last
+step is done. Otherwise the next step plans when its `ready` holds, and the flow waits when it does
+not. A scan from the end lets a condition become false later, such as a request account that the
+claim closes.
+
+**Kinds.** A static flow has the limits of a static recipe: a fixed list, values from inputs and
+earlier steps, and the conditions above. Anything more goes to a builder or an endpoint, as for
+recipes. A static flow keeps tier 1's proofs. Each step's `verify_intent` proves the step and its
+place in the flow (4.6), and a wallet can run the whole flow onchain after one approval (4.7).
+
+| Flow | The next step comes from |
+| :-- | :-- |
+| Static | The list and its conditions |
+| Program | A builder that the planner simulates against chain state. It returns the next intent, or done. |
+| Remote | An endpoint that returns the next intent, or done |
+
+A builder or an endpoint only picks the next step. It signs nothing and moves nothing. The planner
+plans each returned intent as any other, and the step must name `recover`.
+
+**Rules.**
+
+1. **Recoverable and discoverable.** At each stopping point, the owner holds the funds, or a
+   `recover` intent that only the owner signs returns them. The owner finds each stopping point
+   from its keys and the chain alone. The planner checks each step's simulated state against this
+   rule, and refuses a flow that breaks it.
+2. **In flight.** A signed step that has not landed blocks a new plan of that step until it lands
+   or expires. A transaction expires at its `lastValidBlockHeight`, and a ring spend at its
+   `expiry_unix_ts`. Otherwise a second plan can choose other notes or accounts, and both land.
+3. **Pinned versions.** The flow pins every implementation version when its first step plans.
+   An unapproved or removed version stops the flow, and `recover` still works.
+
+**Message and approvals.** The flow's message states the outcome, the number of steps and
+approvals, the worst tier of its steps, and each stopping point:
+`privately deposit 100 USDC into Kamino USDC through ring Acme | 3 steps, 1 approval | tier 3 |
+if stopped after step 1: 100 USDC in a request note, refundable after <time>`. Each step's message
+starts with the flow part of 4.1, so a signer of step 2 sees the flow that it continues. A program
+or remote flow names its builder or endpoint instead, because its steps are not known at the
+start. A step whose bytes do not depend on an
+earlier result can be signed at the start, so the approval count follows from the steps.
+
+**`progress`.** Each response holds `progress`: a JSON record of what the chain cannot show about
+the flow. Each answer replaces it whole, and the caller never edits it. A planner reads it: the
+service, or the Rust client in its own loop. Its fields are public, so a caller can read them to
+debug or audit.
+
+```json
+{
+  "v": 1,
+  "request": { "spec": "sdp-intents@1.0", "kind": "plan", "payers": { "…": "…" }, "intents": [{ "…": "…" }] },
+  "pins": ["solana.org/ring-vault-deposit@1.0.0", "solana.org/zolana-request@1.0.0", "solana.org/kamino-deposit@1.0.0"],
+  "steps": {
+    "request": {
+      "plan": { "nullifiers": ["…"], "notes": ["…"], "outputs": { "note": "…" } },
+      "signed": [{ "signature": "5Kd…", "expires": { "unixTs": "1784143330" } }]
+    }
+  }
+}
+```
+
+| Part | Holds | For |
+| :-- | :-- | :-- |
+| `request` | The plan request | What the flow does |
+| `pins` | The exact implementation versions | Rule 3 |
+| `steps.*.plan` | The facts that each planned step fixed | Conditions that the chain cannot show alone |
+| `steps.*.signed` | Each signed transaction or digest, with its expiry | Rule 2 |
+
+The value holds no position, because the chain gives it. It holds no key, secret, or note
+plaintext. It is a few KB. No one signs it: a changed value can stall or repeat the caller's own
+flow, and every step still plans from the chain and passes the signer's verifier.
+
+**API.** The service keeps no flow state.
+
+| Route | Body | Returns |
+| :-- | :-- | :-- |
+| `POST /v1/intents/start` | A plan request | `{ progress, next }` |
+| `POST /v1/intents/continue` | `{ progress, signed? }` | `{ progress, pendingUntil?, next }` |
+| `POST /v1/intents/recover` | `{ owner }` | Each stopping point that the owner's keys find, with its `recover` intent |
+
+```json
+{ "kind": "sign", "signs": "transaction", "plan": { "…": "a plan of 4.1" } }
+{ "kind": "wait", "for": "the vault to fulfil request 7xQ…", "checkAfter": "2026-11-14T20:00:00Z" }
+{ "kind": "done", "message": "the owner holds 98.2 kUSDC shares" }
+```
+
+The loop of 4.1 handles each kind. `pendingUntil` is the latest expiry of a signed step that has
+not landed.
+
+**Continuity.** The caller keeps the last `progress` and sends it back to continue. Nothing else is
+needed, from any device or after any restart.
+
+1. A lost `progress` loses no funds. `POST /v1/intents/recover` finds each stopping point and returns its
+   `recover` intent.
+2. After a lost `progress`, the caller waits until `pendingUntil` before it starts the same operation
+   again, so that an old signed transaction cannot land beside a new one.
+3. Without `progress`, the caller can recover but cannot continue. A ring request stores the intent
+   encrypted to the owner, so the viewing key finds both the funds and the plan (4.17).
+
+The Rust client runs the same loop over RPC, with no service. `@sdp/intents` keeps `progress` in a
+store that the caller chooses: browser storage, a file, or a database.
 
 ## 5. Security
 
@@ -1118,7 +1421,7 @@ flowchart TB
   REM -->|result| SVC
   SRPC --> SVC
   REG -->|documents, simulated builders| SVC
-  SVC -->|"plan: transaction and message"| VER
+  SVC -->|"flow: the next step's transaction and message"| VER
   REG -->|documents| VRPC
   VRPC --> VER
   VER -->|"message rendered from the transaction, unverified instructions listed"| SIGN
@@ -1148,6 +1451,8 @@ transaction over any RPC.
 | Registry program | No plans | A `verify_intent` bug can pass a transaction within the assertions | No plans | An audit, and a multisig upgrade authority |
 | Registry admin | No new organizations | A stolen admin can create organizations for free names, or open creation. It cannot change an existing organization. | No new organizations | A multisig admin. The upgrade authority can replace the program. |
 | Lighthouse | The transaction fails | A bug can pass a bad transaction. It is immutable. | Every guarded transaction fails | An audit |
+| Flow builder or endpoint (4.19) | The flow stops at a stopping point | It can pick steps that waste time. Each step still plans and verifies as any intent. | The flow stops at a stopping point | `POST /v1/intents/recover` |
+| The caller's `progress` value | | A changed value stalls or repeats the caller's flow | The caller cannot continue | `POST /v1/intents/recover`, after `pendingUntil` |
 | The signer's RPC | The signer cannot verify, so it does not sign | A false document can change the message text. The chain still runs the real implementation within its real postconditions. | The signer cannot verify | A trusted RPC, or a local copy of each document, which never changes |
 
 **Where trust remains.** The intent service alone reaches none of these.
@@ -1158,6 +1463,12 @@ transaction over any RPC.
 4. Outputs, which trust the recipe.
 5. Tier 3, and an intent with the onchain checks off. Only the simulation checks them, and the
    message says `onchain checks: none`, so the signer sees the choice.
+
+**Flows.** Each step is a plan with every check above, so a flow adds no trust to a step. A flow
+adds two risks. A stop between steps can leave funds in an escrow or a request, so the
+recoverable rule makes the owner able to find and recover each stopping point alone. A signed step
+that is planned again can land twice, so the in-flight rule waits for its expiry. The `progress`
+value is caller data. A changed value can stall or repeat only that caller's flow.
 
 | STRIDE | Where | Control |
 | :-- | :-- | :-- |
@@ -1176,6 +1487,7 @@ _SDLC §13 · §15_
 | :-- | :-- | :-- |
 | Definitions, builder source, fixtures | Public | Repository |
 | Playground inputs, local test keypairs | Internal, with no value on any cluster | Developer machine, process memory |
+| The `progress` value of a private flow (4.19) | Internal: it names the amounts and the vault that the ring hides | The caller's store |
 
 | Requirement | SDLC | Today | Gap |
 | :-- | :-- | :-- | :-- |
@@ -1227,6 +1539,8 @@ Production is a separate project with its own design document.
 | The warm cache and the first-fetch prefetch | One `getMultipleAccounts` for a cold SPL transfer |
 | Every transaction version | Legacy, v0 with lookup tables, and v1 land through the CLI and the provider |
 
+The prototype serves `POST /v1/prepare`, which returns only the `plan` of a one-step flow's `sign`.
+
 Not built:
 
 1. The wallet program of 4.7.
@@ -1236,7 +1550,8 @@ Not built:
 5. A LiteSVM feature set that matches the cluster.
 6. Private intents other than the transfer, the client's check of a shielded spend, and the
    anonymous rail (4.17).
-7. The postconditions, recipe kind, and clusters that SDP's other modules need (4.18).
+7. The postconditions and clusters that SDP's other modules need (4.18).
+8. Flows (4.19): the `flow` recipe, the step conditions, the three routes, and `check_intent`.
 
 ## 11. Cost
 
