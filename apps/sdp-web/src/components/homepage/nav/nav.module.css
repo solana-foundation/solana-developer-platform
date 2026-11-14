@@ -75,12 +75,20 @@
   --brand-badge-space: 60px;
 }
 
-/* Outside the wordmark's fixed box, so the logo keeps its size. */
+/* Outside the wordmark's fixed box, so the logo keeps its size. The design system's gray badge
+   (a filled chip, semibold) drawn in the homepage's palette: the dashboard's tokens follow the
+   user's theme, which the homepage ignores. */
 .brand .brandBadge {
   position: absolute;
   top: 50%;
   left: 100%;
   margin-left: 10px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--line);
+  color: var(--ink2);
+  font: 600 12px / 1 var(--font);
+  white-space: nowrap;
   transform: translateY(-50%);
 }
 
@@ -483,6 +491,11 @@
 
 .root[data-ground="night"] .brand .onDark {
   display: block;
+}
+
+.root[data-ground="night"] .brand .brandBadge {
+  background: var(--night-line);
+  color: var(--night-ink2);
 }
 
 .root[data-ground="night"] .panel {

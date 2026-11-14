@@ -27,7 +27,7 @@ export function SdpProductLockup({
         />
       </span>
       <span className="w-min text-nav font-medium leading-none text-primary">{productName}</span>
-      {betaLabel === null ? null : <Badge variant="outline">{betaLabel}</Badge>}
+      {betaLabel === null ? null : <Badge>{betaLabel}</Badge>}
     </div>
   );
 }
