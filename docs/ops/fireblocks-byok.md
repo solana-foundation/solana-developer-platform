@@ -181,16 +181,50 @@ and exact decimal payment/net amounts match the stored intent. Missing or mismat
 stay processing for reconciliation. The existing chain-finality job checks finalization.
 Terminal provider failures record their reason. A policy block (`BLOCKED` with
 `BLOCKED_BY_POLICY`) records the custody policy refusal instead: the message a refused signature
-gets and `CUSTODY_POLICY_REFUSED`, which a replay of the key answers with 422 (HOO-2478). RAW
+gets and `CUSTODY_POLICY_REFUSED`, which a replay of the key answers with 422 (HOO-2478). Transaction
 signing answers the same block with 422 `CUSTODY_POLICY_REFUSED`; a `BLOCKED` without that
-sub-status keeps the 400 `SIGNING_BLOCKED` raw-signing hint. The transaction details page
+sub-status keeps the 400 `SIGNING_BLOCKED` signing-policy hint. The transaction details page
 refreshes every 15 seconds while pending. The five-minute local signing timeout does not apply
 to these intents.
 Existing failed RAW attempts remain failed and are never retried by this implementation.
 
-Privy and other signing operations retain solana-keychain. Fireblocks' separate Signer check
-still proposes RAW signing and simulates without broadcasting; it requires RAW enabled and a
+Privy and other signing operations retain solana-keychain. Fireblocks BYOK's separate Signer check
+proposes a sign-only program call and simulates without broadcasting; it requires program calls enabled and a
 funded SDP fee sponsor and has the keychain adapter's synchronous approval window.
+
+## Arbitrary transaction proposals and Earn
+
+On channels that run Earn (`beta` and `experimental`), Fireblocks BYOK transaction
+signers use the exact registry-backed `@solana/keychain-fireblocks@2.0.0` SDK's
+`PROGRAM_CALL` mode. The factory reads Earn's existing release-channel gate;
+promoting BYOK independently will not enable program calls on stable. Managed
+Fireblocks signers and off-chain message signing retain RAW. No new public route,
+credential option, environment variable or provider-specific Earn branch is needed.
+
+Enable program calls in a hot-wallet workspace. Configure the API user's Program
+Call policy, approvers and designated signer, including the programs and destination
+accounts each provider uses. A Transfer policy alone is insufficient. See
+[Fireblocks' program-call contract](https://developers.fireblocks.com/reference/interact-with-solana-programs).
+
+Every proposal carries the serialized legacy/v0 transaction with `signOnly: true`
+and `useDurableNonce: false`. The SDK waits for `SIGNED` and verifies the returned
+signature over the original message with the selected vault address. It rejects
+changed bytes, wrong keys, missing signatures, and an unexpected broadcast status;
+it never retries with RAW. SDP retains simulation, sponsorship, durable signed-intent
+persistence and broadcast through the existing Earn execution path. Protocol
+signatures on immutable provider transactions stay intact.
+
+These proposals are synchronous: Earn's existing 20-second workflow budget includes
+build, simulation and signing; the custody signer also has its existing bounded poll
+window. Approval after timeout never makes Fireblocks broadcast. Inspect the recorded
+movement and reuse the same idempotency key and payload when recovering. Sign-only
+proposals authorize bytes, so duplicate requests, ambiguous provider responses and
+late approvals cannot spend until SDP's existing durable submission path broadcasts.
+Provider-order withdrawals still finish only after the provider pays out.
+
+The signing RPC budget is unchanged: zero Solana RPC in the adapter, one Fireblocks
+address GET per cached signer, one proposal POST per transaction and one GET per
+approval poll. No second signer initialization, quote or provider build is added.
 
 ## Request budget
 
@@ -222,7 +256,7 @@ requests beyond the lifetime check above. There is no automatic rebuild or signi
 ## Opt-in live tests on local mainnet
 
 `scripts/fireblocks-live.mjs` exercises a running local SDP API using an SDP API key. The
-`signer` reaches Fireblocks RAW through solana-keychain; `payment` uses native TRANSFER through SDP;
+`signer` reaches Fireblocks sign-only PROGRAM_CALL through solana-keychain; `payment` uses native TRANSFER through SDP;
 the runner never receives or exports a Fireblocks private key. These commands do not run in CI.
 
 Before testing:
@@ -230,9 +264,9 @@ Before testing:
 1. Use a production SDP project, a mainnet RPC, and a Fireblocks endpoint matching the customer's
    workspace region. Complete CSR registration and connect the existing SOL vault in the
    dashboard. Enable the connection for runtime execution. Allow TRANSFER initiation and the intended one-time destination in the workspace policy.
-   Keep SOL in the source vault for network fees. RAW is only needed for the optional signer check.
+   Keep SOL in the source vault for network fees. Program calls are needed for the optional signer check.
 2. Fund the source vault with the payment asset and enough SOL for fees and any token-account
-   rent. Fund SDP's separate local fee payer only if running the optional RAW signer check.
+   rent. Fund SDP's separate local fee payer only if running the optional program-call signer check.
 3. Create a production SDP API key bound to the selected wallet. Grant `projects:read`,
    `wallets:read`, and `wallets:write`; payment testing additionally requires `payments:write`
    `payments:read`, and authorization for `payment_transfer_execute`. Keep the API key locally.
@@ -248,14 +282,14 @@ From the repository root, enter the SDP key without putting it in shell history 
 read -rs 'SDP_LIVE_API_KEY?SDP API key: '
 export SDP_LIVE_API_KEY
 node scripts/fireblocks-live.mjs preflight --config .secrets/fireblocks-mainnet/live-test.json
-# Optional: RAW signer check, unrelated to native TRANSFER payments.
+# Optional: sign-only program-call signer check, unrelated to native TRANSFER payments.
 # node scripts/fireblocks-live.mjs signer --config .secrets/fireblocks-mainnet/live-test.json
 ```
 
 `preflight` reads the project and wallet from SDP, verifies the mainnet genesis hash, and reads
 the source vault account. It does not contact Fireblocks. Only the optional signer mode
 checks the separate SDP fee payer, in the same account batch. `signer`
-additionally invokes SDP's signer check, creates a real Fireblocks RAW memo proposal, waits
+additionally invokes SDP's signer check, creates a real Fireblocks sign-only memo proposal, waits
 for approval, verifies the signature, and simulates it. It never broadcasts or moves funds.
 Have Fireblocks open and approve promptly because of the synchronous approval limit above.
 
@@ -293,6 +327,17 @@ and GCP cleanup reservations against PostgreSQL. The signing test uses the actua
 implementation with mocked Fireblocks HTTP responses and a locally generated Ed25519 signature.
 Dashboard tests cover submission, rotation, and the existing Privy lifecycle. These tests do not
 replace an approval-policy check against a real Fireblocks workspace.
+
+Provider build suites send deposit and withdrawal plans through the real Fireblocks
+adapter with mocked HTTP: Kamino and Veda use recorded chain data; Jupiter Lend uses
+its real SDK against an in-process chain; WisdomTree uses its real subscription and
+Token-2022 redemption builders; Ondo and Hastra stub their admitted Jupiter swap leg.
+Plume also covers immutable CCTP transactions with existing protocol signatures.
+The shared harness substitutes a local signing key for recorded owners and verifies
+the exact serialized proposal and signature. These are offline compatibility tests,
+not live execution evidence. Hastra, WisdomTree and Plume keep their pre-launch gates;
+Upshift and Perena remain unimplemented stubs. Hastra's absent legacy-ticket sentinel
+is now readonly, so both par and optional DEX redemption transactions can compile.
 
 ## Read-only checks on Pay
 

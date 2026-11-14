@@ -76,16 +76,23 @@ confirm **COMPLETED**; SDP should show **Confirmed**.
 ## Manage your connection
 
 <details>
-<summary>RAW signing and ownership checks</summary>
+<summary>Program calls and ownership checks</summary>
 
-Batch payments and the optional ownership check require workspace RAW signing
-and a RAW policy permitting the SDP API user with your designated signer.
-If disabled, ask your Fireblocks Customer Success Manager to enable it.
-An API Co-signer isn't required.
+On beta and experimental deployments, transaction signing uses
+[sign-only program calls](https://developers.fireblocks.com/reference/interact-with-solana-programs).
+Enable program calls for the workspace and use a hot wallet. Configure a
+**Program Call** policy permitting the SDP API user, vault, programs and
+destinations, with your required approvers and designated signer. Transfer
+policies alone do not authorize program calls.
+
+SDP sends the complete transaction for approval, verifies the returned signature,
+then handles fee sponsorship and broadcast where applicable. Fireblocks does
+not broadcast these proposals. Off-chain message signing still requires RAW.
 
 Open the wallet's **Settings → Ownership → Prove ownership** and approve promptly
 in Fireblocks. SDP simulates the signed transaction without broadcasting.
 The check requires a configured, funded SDP fee payer.
+Approval must complete within the operation's synchronous signing window.
 
 </details>
 
