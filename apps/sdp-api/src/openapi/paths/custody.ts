@@ -306,7 +306,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Check signer via simulated memo transaction",
     operationId: "checkWalletSigner",
     description:
-      "Signs a server-authored memo transaction with the named wallet, verifies the signature, and simulates the transaction. Authorize transaction signing in the custody provider's policy and complete any approval within the bounded signing window (75 seconds by default, capped at 90). Fireblocks BYOK uses a sign-only program call; timeout triggers best-effort cancellation, not confirmation that the proposal was cancelled. Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.",
+      "Signs a server-authored memo transaction with the named wallet, verifies the signature, and simulates the transaction. Authorize transaction signing in the custody provider's policy and complete any approval within the bounded signing window (75 seconds by default, capped at 90). Timeout triggers best-effort cancellation of a provider-side signing proposal, not confirmation that the proposal was cancelled. Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyAcceptedHeaders,

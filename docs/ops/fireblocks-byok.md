@@ -1,11 +1,12 @@
 # Fireblocks BYOK
 
-Fireblocks **BYOK is stable**. Its shared maturity entry publishes BYOK setup, signing,
-OpenAPI, the playground and the customer guide on stable, beta and experimental.
+Fireblocks **BYOK is in beta**. Its shared maturity entry publishes BYOK setup, signing,
+OpenAPI, the playground and the customer guide on beta and experimental channels; a stable
+deployment does not offer it yet.
 Managed Fireblocks custody remains beta, and Earn retains its own beta gate.
-Organization entitlement (`providerOverrides`) is still required: promotion does not
+Organization entitlement (`providerOverrides`) is still required: beta publication does not
 make Fireblocks the default provider or enable it for every organization. Release
-channel and Solana network are independent; a stable deployment can use devnet or mainnet.
+channel and Solana network are independent; a beta deployment can use devnet or mainnet.
 
 Fireblocks connections use the same project-scoped encrypted credential lifecycle as Privy:
 installation, credential checks, replacement, rotation, rollback, deactivation, and secret
@@ -528,15 +529,16 @@ and timestamps for RAW, PROGRAM_CALL and TRANSFER:
 ## Stable-train requirements coverage
 
 Scope reviewed against all 19 issues in **Fireblocks BYOK to stable** on 2026-11-12.
-This change implements stable sign-only proposals, cancellation safeguards and docs;
-it does not declare the entire launch gate complete.
+This change implements beta sign-only proposals, cancellation safeguards and docs;
+it keeps BYOK maturity at beta — a stable promotion is a separate, later one-line
+maturity change — and does not declare the entire launch gate complete.
 
 | Issue | Coverage in this change / remaining work |
 | --- | --- |
-| [PRO-2342](https://linear.app/solana-fndn/issue/PRO-2342) | BYOK maturity promoted to stable; managed maturity and manual organization enablement retained. Operational evidence and launch approvals remain separate. |
+| [PRO-2342](https://linear.app/solana-fndn/issue/PRO-2342) | BYOK maturity stays beta in this change; managed maturity and manual organization enablement retained. Operational evidence, launch approvals and the stable promotion remain separate. |
 | [PRO-2475](https://linear.app/solana-fndn/issue/PRO-2475) | Per-proposal external IDs, timeout/abort cancellation, safe diagnostic IDs and tests for RAW and PROGRAM_CALL. Durable proposal-row/request correlation, manual cancellation and scheduled status recovery are included; recovery never resumes or broadcasts an abandoned sign-only request. |
 | [PRO-2476](https://linear.app/solana-fndn/issue/PRO-2476) | Corrected base/default/capped signing deadlines and documented late-approval behavior. |
-| [PRO-2363](https://linear.app/solana-fndn/issue/PRO-2363) | Updated existing customer setup/rotation/teardown guide with program-call policies, approval deadlines, manual cancellation and cancellation limits; publishes in stable. Annotated workspace screenshots remain outstanding. |
+| [PRO-2363](https://linear.app/solana-fndn/issue/PRO-2363) | Updated existing customer setup/rotation/teardown guide with program-call policies, approval deadlines, manual cancellation and cancellation limits; publishes with the beta channel. Annotated workspace screenshots remain outstanding. |
 | [HOO-2478](https://linear.app/solana-fndn/issue/HOO-2478) | Existing policy-refusal normalization retained across the SDK upgrade; tests include PROGRAM_CALL and RAW. Pending/unknown/non-policy failures remain distinct. |
 | [PRO-2356](https://linear.app/solana-fndn/issue/PRO-2356) | Design and operational boundaries documented above; manual enablement remains. The issue discussion records a STRIDE-session waiver; this change does not supply an independent security sign-off. |
 | [PRO-2435](https://linear.app/solana-fndn/issue/PRO-2435) | Bounded sign-only program calls and RAW cleanup included. Durable generic async approvals, the shared native-transfer waist and recurring workflows remain separate. PRs #2863/#2864 were open when reviewed; neither is included. |
@@ -554,5 +556,5 @@ it does not declare the entire launch gate complete.
 | [PRO-2422](https://linear.app/solana-fndn/issue/PRO-2422) | Already Done; issue discussion says KYB is not required. No code change. |
 
 The existing native-transfer admission exception still needs its named review under
-[PRO-2368](https://linear.app/solana-fndn/issue/PRO-2368). Stable publication is not evidence
+[PRO-2368](https://linear.app/solana-fndn/issue/PRO-2368). Beta publication is not evidence
 that the outstanding operational or security requirements have been satisfied.

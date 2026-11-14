@@ -83,7 +83,7 @@ function testTransaction(version: 0 | "legacy" = 0, payer = publicKey) {
 }
 
 describe("Fireblocks BYOK transaction proposals", () => {
-  it.each(["stable", "beta", "experimental"])(
+  it.each(["beta", "experimental"] as const)(
     "proposes a sign-only PROGRAM_CALL in %s, waits for SIGNED and never broadcasts",
     async (channel) => {
       const transaction = testTransaction();
@@ -150,10 +150,7 @@ describe("Fireblocks BYOK transaction proposals", () => {
             signedMessages: [{ signature: { fullSig: signature.toString("hex") } }],
           })
         );
-      const adapter = createFireblocksAdapterFromCredential(
-        { ...env, SDP_RELEASE_CHANNEL: "stable" },
-        CREDENTIAL
-      );
+      const adapter = createFireblocksAdapterFromCredential(env, CREDENTIAL);
       if (!isFullSigningPort(adapter)) throw new Error("Expected signing adapter");
       const signer = await adapter.getTransactionSigner();
       if (!isTransactionPartialSigner(signer)) throw new Error("Expected partial signer");
@@ -278,7 +275,10 @@ describe("Fireblocks BYOK transaction proposals", () => {
             status,
             signedMessages: [{ signature: { fullSig: signature.toString("hex") } }],
           })
-        );
+        )
+        // The unaccepted status rejects signing, and the failure lookup then
+        // confirms the provider still records the proposal, so no failure hook.
+        .mockResolvedValueOnce(Response.json({ id: "proposal-1", status }));
       const adapter = createFireblocksAdapterFromCredential(env, CREDENTIAL);
       if (!isFullSigningPort(adapter)) throw new Error("Expected signing adapter");
       const signer = await adapter.getTransactionSigner();
@@ -287,7 +287,8 @@ describe("Fireblocks BYOK transaction proposals", () => {
         code: "SIGNER_BROADCAST_UNCONFIRMED",
         context: { providerTransactionId: "proposal-1" },
       });
-      expect(fetch).toHaveBeenCalledTimes(3);
+      expect(fetch).toHaveBeenCalledTimes(4);
+      expect(String(fetch.mock.calls[3]?.[0])).toMatch(/\/v1\/transactions\/external_tx_id\//);
     }
   );
 

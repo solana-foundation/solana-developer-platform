@@ -367,21 +367,20 @@ describe("native Fireblocks BYOK payment routes", () => {
     ).toMatchObject({ status: "processing", last_poll: expect.any(String) });
   });
 
-  it("accepts new payments in stable and reconciles a payment submitted in beta", async () => {
+  it("blocks new payments in stable but still reconciles a payment submitted in beta", async () => {
     const mock = await ready();
     const response = await send();
     expect(response.status).toBe(200);
     const transfer = (await response.json()).data.transfer;
     testEnv.SDP_RELEASE_CHANNEL = "stable";
     mock.mockClear();
+    const refused = await send("stable-new");
+    expect(refused.status).toBe(403);
+    expect(await refused.text()).toContain("custody_provider_not_in_release_channel");
+    expect(mock).not.toHaveBeenCalled();
     providerStatus = "COMPLETED";
     expect(await refresh(transfer.id)).toMatchObject({ status: "confirmed", signature: SIG });
     expect(mock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
-    mock.mockClear();
-    providerStatus = "PENDING_AUTHORIZATION";
-    const accepted = await send("stable-new");
-    expect(accepted.status).toBe(200);
-    expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 
   it.each([
