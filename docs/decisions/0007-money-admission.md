@@ -161,7 +161,7 @@ cannot guarantee that funds remain in the source vault.
 Compensating controls are tenant-scoped server-held API credentials, an Editor
 API user, Fireblocks-managed approval rules and designated signers, a durable
 external transaction ID with no automatic resubmission, exact settlement-intent
-checks, beta gating, and audit logs. These controls do not close the revocation
+checks, manual organization enablement, and audit logs. These controls do not close the revocation
 race. SDP does not claim that its API user's RSA authentication key approves or
 signs blockchain transfers, and does not change Fireblocks policies for users.
 
@@ -173,3 +173,27 @@ accepted atomic pre-sign admission requirement.
 Approval record (must be completed by the security owner): reviewer name,
 review date, PR/comment link, accepted exposure, and approval of both this
 exception and the `fireblocks-native-transfer` allowlist entry.
+
+
+### D5 reconciliation target and current evidence (2026-11-12)
+
+The independent `reconcile-fireblocks-proposals` cron visits both native and
+sign-only proposal queues every 30 seconds per environment, 100 rows per run and
+five concurrent reads. The initial polling-age target is 180 seconds for up to
+500 pending rows under normal provider/database availability. The prior native
+lane visited 50 per minute after Solana settlement (about ten minutes for 500);
+the new lane needs five scheduled visits (about 150 seconds plus the last batch).
+A PostgreSQL-backed regression proves all 500 are visited in five bounded passes.
+This is capacity evidence, not measured live p99 settlement or revocation latency.
+
+Per-run metrics report pending rows by kind, oldest unpolled age, duration, reads,
+lease skips, closed rows and failures. The companion sdp-infra dashboard and alerts
+cover polling age, row failures and absent ticks separately for stage/prod and
+sandbox/production. Query failures never fabricate an empty queue. See
+[the Fireblocks runbook](../ops/fireblocks-byok.md#scheduled-reconciliation-and-metrics)
+for metric semantics, request counts and deployment order.
+
+This pass is read-only at Fireblocks: no signing, broadcast, resubmission, new
+approval-age expiry or automatic cancellation. It neither records nor re-admits the initiating money
+principal. PRO-2468/2469/2470 remain deferred; therefore no revocation-to-cancellation
+SLO is claimed, and the security exception above remains proposed.

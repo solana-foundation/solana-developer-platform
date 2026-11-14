@@ -1,7 +1,11 @@
 import { FireblocksApiError } from "@sdp/custody/provisioning/fireblocks-http";
 import type { FireblocksTransferResult } from "@sdp/custody/provisioning/fireblocks-transfers";
 import { compareDecimalAmounts, parseDecimalAmount } from "@sdp/solana/amount";
-import { fireblocksPaymentStatus, isFireblocksPolicyRefusal } from "@sdp/types/fireblocks";
+import {
+  fireblocksPaymentStatus,
+  isFireblocksPolicyRefusal,
+  isFireblocksProposalCancellable,
+} from "@sdp/types/fireblocks";
 import { assertIsSignature } from "@solana/kit";
 import type {
   PaymentsRepository,
@@ -17,7 +21,10 @@ import {
   transferProposalIntentSchema as intentSchema,
   ProposalNotSentError,
 } from "@/services/domain/signing/admitted-proposer";
-import { createOrgTransferProposalReader } from "@/services/solana/signer";
+import {
+  createOrgTransferProposalCanceller,
+  createOrgTransferProposalReader,
+} from "@/services/solana/signer";
 import type { Env } from "@/types/env";
 
 /**
@@ -331,12 +338,12 @@ async function recordMissingTransaction(
   );
 }
 
-/** Dashboard and cron reconciliation. Neither path can POST or automatically resubmit. */
-export async function refreshFireblocksTransfer(
+/** One leased provider read. Errors escape so a worker cannot report a healthy failed poll. */
+export async function pollFireblocksTransfer(
   env: Env,
   ledger: ProposalLedger,
   row: PaymentTransferRow
-): Promise<PaymentTransferRow> {
+): Promise<{ row: PaymentTransferRow; polled: boolean }> {
   const { repo } = ledger;
   if (
     !isFireblocksTransfer(row) ||
@@ -344,7 +351,7 @@ export async function refreshFireblocksTransfer(
     !row.project_id ||
     !row.custody_wallet_id
   )
-    return row;
+    return { row, polled: false };
   const now = Date.now();
   const claimed = await repo.claimFireblocksTransferPoll({
     transferId: row.id,
@@ -353,25 +360,89 @@ export async function refreshFireblocksTransfer(
     now: new Date(now).toISOString(),
     polledBefore: new Date(now - 15_000).toISOString(),
   });
-  if (!claimed) return currentRow(repo, row);
-  try {
-    const intent = intentSchema.parse(claimed.provider_data.fireblocksTransfer);
-    const reader = await createOrgTransferProposalReader(
-      env,
-      row.organization_id,
-      row.project_id,
-      row.custody_wallet_id,
-      { ...intent, sourceAddress: row.source_address }
-    );
-    const result = await reader.read(row.id);
-    return result
+  if (!claimed) return { row: await currentRow(repo, row), polled: false };
+  const intent = intentSchema.parse(claimed.provider_data.fireblocksTransfer);
+  const reader = await createOrgTransferProposalReader(
+    env,
+    row.organization_id,
+    row.project_id,
+    row.custody_wallet_id,
+    { ...intent, sourceAddress: row.source_address }
+  );
+  const result = await reader.read(row.id);
+  return {
+    polled: true,
+    row: result
       ? await persistResult(ledger, claimed, result, true)
-      : await recordMissingTransaction(ledger, claimed, now);
+      : await recordMissingTransaction(ledger, claimed, now),
+  };
+}
+
+/** Dashboard reads preserve the last known state during provider outages. */
+export async function refreshFireblocksTransfer(
+  env: Env,
+  ledger: ProposalLedger,
+  row: PaymentTransferRow
+): Promise<PaymentTransferRow> {
+  try {
+    return (await pollFireblocksTransfer(env, ledger, row)).row;
   } catch (error) {
     getLogger().warn(
       { transferId: row.id, ...describeError(error) },
       "fireblocks_transfer_status_unavailable"
     );
-    return currentRow(repo, claimed);
+    return currentRow(ledger.repo, row);
   }
+}
+
+/** Manual cleanup uses retained credentials; disabling execution must not disable cancellation. */
+export async function cancelPendingFireblocksTransfer(
+  env: Env,
+  ledger: ProposalLedger,
+  row: PaymentTransferRow
+) {
+  if (!isFireblocksTransfer(row) || !row.project_id || !row.custody_wallet_id)
+    throw badRequest("Not a Fireblocks transfer");
+  if (row.status !== "processing") return { acknowledged: false, row };
+  const intent = intentSchema.parse(row.provider_data.fireblocksTransfer);
+  const canceller = await createOrgTransferProposalCanceller(
+    env,
+    row.organization_id,
+    row.project_id,
+    row.custody_wallet_id,
+    { ...intent, sourceAddress: row.source_address }
+  );
+  const before = await canceller.read(row.id);
+  if (!before) throw conflict("Fireblocks proposal is unavailable; cancellation is unconfirmed");
+  // Verify external ID, operation, asset and source before using the provider's transaction ID.
+  const current = await persistResult(ledger, row, before, true);
+  if (current.status !== "processing" || !isFireblocksProposalCancellable(before.status))
+    return { acknowledged: false, row: current };
+  await ledger.repo.updateTransfer({
+    transferId: row.id,
+    organizationId: row.organization_id,
+    projectId: row.project_id,
+    expectedStatus: "processing",
+    providerData: { fireblocksCancelRequestedAt: new Date().toISOString() },
+    updatedAt: new Date().toISOString(),
+  });
+  let acknowledged = false;
+  try {
+    acknowledged = await canceller.cancel(before.id);
+  } catch (error) {
+    getLogger().warn(
+      { transferId: row.id, ...describeError(error) },
+      "fireblocks_transfer_cancellation_unknown"
+    );
+  }
+  try {
+    const after = await canceller.read(row.id);
+    if (after) return { acknowledged, row: await persistResult(ledger, current, after, true) };
+  } catch (error) {
+    getLogger().warn(
+      { transferId: row.id, ...describeError(error) },
+      "fireblocks_transfer_status_unavailable"
+    );
+  }
+  return { acknowledged, row: await currentRow(ledger.repo, row) };
 }

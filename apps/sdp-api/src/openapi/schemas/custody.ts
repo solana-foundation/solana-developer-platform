@@ -1,5 +1,6 @@
 import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import { z } from "zod";
+import { CUSTODY_MODE_GATE } from "@/openapi/release-channel-values";
 import {
   connectionWalletOwnerSchema as connectionWalletOwnerSchemaBase,
   createManagedWalletSchema as createManagedWalletSchemaBase,
@@ -35,7 +36,7 @@ export const orgCustodyProviderSchema = z
 const managedWalletOwnerOpenApiSchema = managedWalletOwnerSchemaBase
   .omit({ connectionId: true })
   .extend({
-    provider: orgCustodyProviderSchema.openapi({
+    provider: orgCustodyProviderSchema.meta({ [CUSTODY_MODE_GATE]: "managed" }).openapi({
       description:
         "Provider whose Managed config owns the new wallet. A project holds one active config per provider.",
       example: "privy",

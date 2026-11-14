@@ -814,10 +814,10 @@
     "fireblocksVaultsSelected": "{count} selected",
     "fireblocksVaultLabels": "SDP uses each Fireblocks vault name as its wallet label. You can rename wallets after connecting.",
     "fireblocksTestingTitle": "Before your first signing test",
-    "fireblocksRawRequirement": "SOL and USDC payments use Fireblocks transfers. RAW signing is not required. Your Fireblocks approval and destination policies still apply.",
+    "fireblocksSigningRequirement": "SOL and USDC payments use Fireblocks transfers. Other transaction signing and signer checks use sign-only program calls, which require a hot wallet and a Program Call policy. Your Fireblocks approval and destination policies still apply.",
     "fireblocksIpRequirement": "If Fireblocks restricts API IP addresses, allow the SDP server’s public outbound IP. For local testing, use your network or VPN’s public IP.",
-    "fireblocksTestingInstructions": "Keep SOL in the source vault for network fees, including USDC payments. Send a small payment and approve it in Fireblocks. SDP tracks the payment while you approve. Signer check tests the separate RAW-signing path and is not required for these payments.",
-    "fireblocksRawGuide": "Fireblocks RAW signing requirements",
+    "fireblocksTestingInstructions": "Keep SOL in the source vault for network fees, including USDC payments. Send a small payment and approve it in Fireblocks. SDP tracks the payment while you approve. Signer check tests program-call signing without broadcasting. Approve it promptly in Fireblocks; it is not required for these payments.",
+    "fireblocksSigningGuide": "Fireblocks program-call requirements",
     "fireblocksVaultsFailed": "Could not load vaults. Check your connection and try again.",
     "fireblocksCredentialVault": "Credential verification vault — keep this vault when rotating credentials.",
     "connectionsHint": "Each connection is one {provider} app's credentials, installed in this project.",
@@ -843,6 +843,24 @@
     "dangerZoneTitle": "Danger zone",
     "walletsStillActive": "{count} wallets still active",
     "walletsStillActiveOne": "1 wallet still active",
-    "deactivateCredentialsRowBody": "Stops these credentials signing through SDP for every connection that uses them. Nothing changes at the provider."
+    "deactivateCredentialsRowBody": "Stops these credentials signing through SDP for every connection that uses them. Nothing changes at the provider.",
+    "proposals": {
+      "title": "Fireblocks approvals",
+      "signing": "Signing requests",
+      "transfers": "Transfers",
+      "cancel": "Cancel proposal",
+      "confirmTitle": "Cancel this proposal?",
+      "confirmBody": "SDP will ask Fireblocks to cancel this proposal. Cancellation can race approval or execution. Check the final status before creating a replacement.",
+      "keep": "Keep proposal",
+      "requested": "Cancellation requested. Waiting for the final Fireblocks status.",
+      "cancelled": "Fireblocks confirmed cancellation.",
+      "unconfirmed": "Cancellation is unconfirmed. Check the current Fireblocks status before retrying.",
+      "failed": "Could not confirm cancellation. Retry this request or check the proposal in Fireblocks.",
+      "loadFailed": "Could not load Fireblocks proposals.",
+      "loading": "Loading Fireblocks proposals",
+      "empty": "No proposals in this list.",
+      "previous": "Previous",
+      "next": "Next"
+    }
   }
 }

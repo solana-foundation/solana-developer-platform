@@ -38,6 +38,7 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
 import { useProjectHref } from "@/lib/use-dashboard-project";
+import { FireblocksProposals } from "./fireblocks-proposals";
 import { useWalletActivity } from "./use-wallet-activity";
 import { WalletActivityTable } from "./wallet-activity-table";
 import {
@@ -431,6 +432,9 @@ export function WalletOverviewTab({
     <RecordStack>
       <WalletStateBand wallet={wallet} />
       <BalanceBlock wallet={wallet} balancesPromise={balancesPromise} />
+      {wallet.provider === "fireblocks" && wallet.connection && wallet.canManageCustody ? (
+        <FireblocksProposals custodyWalletId={wallet.custodyWalletId} />
+      ) : null}
       <TokensBlock
         wallet={wallet}
         balancesPromise={balancesPromise}

@@ -3721,11 +3721,11 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Check signer via simulated memo transaction
 Source: https://platform.solana.com/docs/reference/api/wallets/check-wallet-signer
 
-> Signs a server-authored memo message with the named wallet, verifies the signature, and simulates the transaction.
+> Signs a server-authored memo transaction with the named wallet, verifies the signature, and simulates the transaction.
 
 `POST /v1/wallets/signer-check`
 
-Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.
+Authorize transaction signing in the custody provider's policy and complete any approval within the bounded signing window (75 seconds by default, capped at 90). Timeout triggers best-effort cancellation of a provider-side signing proposal, not confirmation that the proposal was cancelled. Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallets.execute` action.
 
@@ -48035,18 +48035,52 @@ Send a [small payment](/docs/payments/send-basic-payment), then open
 Approve the matching transaction in Fireblocks. In **Transaction history**,
 confirm **COMPLETED**; SDP should show **Confirmed**.
 
+## Cancel a pending proposal
+
+As an organization admin, open **Wallets → your Fireblocks wallet → Overview →
+Fireblocks approvals**. Choose **Signing requests** for program calls and messages,
+or **Transfers** for native payments. Select **Cancel proposal** and confirm.
+
+SDP checks the stored proposal and asks Fireblocks to cancel it. **Cancellation
+requested** is not a final outcome: approval or execution can race the request.
+Wait for the final Fireblocks status before creating a replacement. A transfer
+that already broadcast may still complete. If SDP records a cancellation before
+accepting a signing-request signature, it discards that signature.
+
+Cancellation remains available when execution through the connection is disabled,
+provided its retained credential still works. Only signing proposals created after
+this feature was installed appear in the list; earlier proposals require cleanup
+in Fireblocks. Native transfers use their existing records.
+
+SDP refreshes pending proposal status in the background even when the wallet page
+is closed. This does not resume a signing request that already timed out or extend
+its signing window. Pending approvals have no new age-based expiry.
+
 ## Manage your connection
 
-RAW signing and ownership checks
+Program calls and ownership checks
 
-Batch payments and the optional ownership check require workspace RAW signing
-and a RAW policy permitting the SDP API user with your designated signer.
-If disabled, ask your Fireblocks Customer Success Manager to enable it.
-An API Co-signer isn't required.
+Transaction signing uses
+[sign-only program calls](https://developers.fireblocks.com/reference/interact-with-solana-programs).
+Enable program calls for the workspace and use a hot wallet. Configure a
+**Program Call** policy permitting the SDP API user, vault, programs and
+destinations, with your required approvers and designated signer. Transfer
+policies alone do not authorize program calls.
+
+SDP sends the complete transaction for approval, verifies the returned signature,
+then handles fee sponsorship and broadcast where applicable. Fireblocks does
+not broadcast these proposals. Off-chain message signing still requires RAW.
 
 Open the wallet's **Settings → Ownership → Prove ownership** and approve promptly
 in Fireblocks. SDP simulates the signed transaction without broadcasting.
 The check requires a configured, funded SDP fee payer.
+Approval must complete within the operation's signing window. The shared custody
+window defaults to **75 seconds**, with a **90-second cap**; some workflows use
+shorter deadlines. This does not create a durable pending-approval job.
+
+On signing timeout, SDP attempts cancellation. A cancellation request is not proof
+of cancellation; inspect the proposal in Fireblocks before retrying. Late approvals
+can race cancellation. SDP does not broadcast signatures received after its timeout.
 
 Rotate credentials
 

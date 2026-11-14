@@ -195,7 +195,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/wallets/signer-check",
-            "description": "Signs a server-authored memo message with the named wallet, verifies the signature, and simulates the transaction. Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.",
+            "description": "Signs a server-authored memo transaction with the named wallet, verifies the signature, and simulates the transaction. Authorize transaction signing in the custody provider's policy and complete any approval within the bounded signing window (75 seconds by default, capped at 90). Timeout triggers best-effort cancellation of a provider-side signing proposal, not confirmation that the proposal was cancelled. Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"walletId\": \"privy_wallet_123\"\n}",

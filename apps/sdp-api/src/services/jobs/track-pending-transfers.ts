@@ -53,7 +53,6 @@ import {
   createSystemPaymentTransferBatchesRepository,
   createSystemTransactionalPaymentsRepository,
 } from "@/db/repositories/repository-factory";
-import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
@@ -62,22 +61,7 @@ import {
   createSystemAuditService,
   criticalOutcomeEntry,
 } from "@/services/audit.service";
-import {
-  type ProposalLedger,
-  refreshFireblocksTransfer,
-} from "@/services/payments/fireblocks-transfer";
 import type { Env } from "@/types/env";
-
-/** The ledger for jobs, which run under a system database identity. */
-function systemProposalLedger(env: Env, repo: PaymentsRepository): ProposalLedger {
-  return {
-    repo,
-    audited: (work) =>
-      createSystemAuditService(env).logSystemWithin((tx) =>
-        work(createSystemTransactionalPaymentsRepository(tx))
-      ),
-  };
-}
 
 // Allow 5 minutes before treating a signature-less "processing" transfer as stuck.
 export const STUCK_PROCESSING_AFTER_MS = 5 * 60 * 1000;
@@ -393,18 +377,6 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
   await syncProcessingTransfersOnChain(env, repo, nowIso);
   await finalizeConfirmedTransfers(repo, now, nowIso);
   await failStrandedTransferBatches(env, now);
-
-  // Human approvals have no five-minute signing timeout. This path only reads
-  // the provider; a missing/ambiguous create response can never trigger a POST.
-  const fireblocks = await repo.listTransfersByStatus({
-    environment: currentClusterScope().environment,
-    statuses: ["processing"],
-    fireblocks: true,
-    limit: 50,
-  });
-  await mapSettledWithConcurrency(fireblocks, 5, (transfer) =>
-    refreshFireblocksTransfer(env, systemProposalLedger(env, repo), transfer)
-  );
 }
 
 const STRANDED_BATCH_PAGE_SIZE = 50;
