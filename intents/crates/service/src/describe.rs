@@ -78,6 +78,7 @@ pub fn recipe_name(kind: RecipeKind) -> &'static str {
         RecipeKind::Remote => "remote",
         RecipeKind::RemoteTransaction => "remote transaction",
         RecipeKind::Shielded => "shielded",
+        RecipeKind::Flow => "flow",
     }
 }
 

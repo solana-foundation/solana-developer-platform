@@ -1,4 +1,5 @@
-//! The recipe: a static list of instructions, a builder call, a remote endpoint, or a shielded spend.
+//! The recipe: a static list of instructions, a builder call, a remote endpoint, a shielded spend, or a
+//! flow of steps.
 
 use sdp_intents_spec::wire::{AccountV1, InstructionV1, OutputBindingV1, RangeV1, SegmentV1};
 use sdp_intents_spec::{AddressSource, RecipeKind};
@@ -9,7 +10,7 @@ use crate::diagnostic::{Code, Diagnostic};
 use crate::reader::{list, Node, Object};
 use crate::suggest::closest;
 
-const KINDS: [&str; 4] = ["static", "program", "remote", "shielded"];
+const KINDS: [&str; 5] = ["static", "program", "remote", "shielded", "flow"];
 
 pub(super) struct Recipe {
     pub(super) kind: RecipeKind,
@@ -27,6 +28,7 @@ impl Build<'_, '_> {
             "program" => self.read_program(&mut object),
             "remote" => self.read_remote(&mut object),
             "shielded" => self.read_shielded(&mut object),
+            "flow" => self.read_flow(&mut object),
             _ => {
                 let diagnostic =
                     Diagnostic::new(Code::InvalidValue, &kind_node.pointer, format!("`{kind}` is not a recipe kind"));
@@ -309,6 +311,6 @@ impl Build<'_, '_> {
     }
 }
 
-fn range(first: usize, end: usize) -> Option<RangeV1> {
+pub(super) fn range(first: usize, end: usize) -> Option<RangeV1> {
     Some(RangeV1 { first: u8::try_from(first).ok()?, count: u8::try_from(end.saturating_sub(first)).ok()? })
 }

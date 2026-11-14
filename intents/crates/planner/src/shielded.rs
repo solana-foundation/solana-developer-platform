@@ -12,6 +12,16 @@ use crate::{Instruction, PlanError};
 const AMOUNT_START: usize = 32;
 const AMOUNT_END: usize = 40;
 
+/// Where a spend's amounts come from. A writable spender account marks a deposit, because the
+/// spend then takes lamports or tokens from the spender's public accounts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShieldedSource {
+    /// The spender's unspent notes.
+    Notes,
+    /// The spender's public balance: a deposit, which needs no proof and is public.
+    Public,
+}
+
 /// The spend that a shielded segment asks its caller to build.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShieldedCall {
@@ -19,6 +29,7 @@ pub struct ShieldedCall {
     pub pool: Address,
     /// The wallet whose notes the spend consumes. It signs and pays.
     pub spender: Address,
+    pub source: ShieldedSource,
     pub notes: Vec<ShieldedNote>,
     pub fee_payer: Address,
     pub priority_fee_lamports: u64,
@@ -46,10 +57,12 @@ pub(crate) fn call<C: Chain>(
         .collect::<Result<Vec<_>, _>>()?;
     let pool = instructions.first().map(|note| note.program).ok_or(PlanError::ShieldedNote)?;
     let notes = instructions.iter().map(note).collect::<Result<Vec<_>, _>>()?;
+    let spender_writable = recipe.implementation().accounts()?.first().is_some_and(|spender| spender.writable());
 
     Ok(ShieldedCall {
         pool,
         spender: *recipe.address(0).ok_or(PlanError::Unresolved)?,
+        source: if spender_writable { ShieldedSource::Public } else { ShieldedSource::Notes },
         notes,
         fee_payer: *recipe.payers().fee,
         priority_fee_lamports,

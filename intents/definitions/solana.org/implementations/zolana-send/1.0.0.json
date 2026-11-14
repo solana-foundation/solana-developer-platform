@@ -1,0 +1,42 @@
+{
+  "spec": "sdp-intents@1.1",
+  "kind": "implementation",
+  "id": "solana.org/zolana-send",
+  "version": "1.0.0",
+  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "implements": "solana.org/private.send@^1",
+  "message": "privately send {inputs.amount} of {inputs.mint} from {inputs.from} to {inputs.to}, shielding public funds first when the private balance is short",
+  "recipe": {
+    "kind": "flow",
+    "steps": [
+      {
+        "name": "shield",
+        "intent": {
+          "interface": "solana.org/private.shield@^1",
+          "implementation": "solana.org/zolana-shield@^1",
+          "inputs": { "owner": "{inputs.from}", "mint": "{inputs.mint}", "amount": "{inputs.amount}" }
+        },
+        "done": {
+          "privateBalance": { "owner": "{inputs.from}", "mint": "{inputs.mint}", "min": "{inputs.amount}" },
+          "message": "{inputs.from} holds {inputs.amount} of {inputs.mint} privately"
+        }
+      },
+      {
+        "name": "transfer",
+        "intent": {
+          "interface": "solana.org/private.transfer@^1",
+          "implementation": "solana.org/zolana-transfer@^1",
+          "inputs": { "from": "{inputs.from}", "to": "{inputs.to}", "mint": "{inputs.mint}", "amount": "{inputs.amount}" }
+        },
+        "ready": {
+          "privateBalance": { "owner": "{inputs.from}", "mint": "{inputs.mint}", "min": "{inputs.amount}" },
+          "message": "the ring's indexer shows {inputs.amount} of {inputs.mint} in the private balance of {inputs.from}"
+        },
+        "done": {
+          "spent": "{steps.transfer.plan.nullifiers}",
+          "message": "the notes that the transfer consumes are spent"
+        }
+      }
+    ]
+  }
+}

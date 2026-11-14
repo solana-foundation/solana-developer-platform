@@ -88,8 +88,12 @@ fn compile_tree() -> Tree {
         })
         .collect();
 
-    let implementations = files("implementations")
+    // A flow names other implementations, so it compiles after them.
+    let (flows, others): (Vec<SourceFile>, Vec<SourceFile>) =
+        files("implementations").into_iter().partition(|file| file.text.contains(r#""kind": "flow""#));
+    let implementations = others
         .into_iter()
+        .chain(flows)
         .map(|SourceFile { path, text }| {
             let compiled = catalog.compile_implementation(&text).unwrap();
 

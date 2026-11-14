@@ -57,13 +57,18 @@ nothing on a real cluster.
   shows unapproved implementations.
 - The interface page: the display template as the title, the inputs as a form, the postconditions
   as guarantees, and each implementation with whether its `applies` checks hold.
-- Privacy ring: for a `shielded` implementation, each wallet's private SOL and a button that
-  shields 1 SOL. `private.transfer` then sends SOL privately through Zolana.
-- Intent: the intent JSON and the `prepare` request as curl, TypeScript, and Rust.
-- Plan: the message, each instruction with its part of the segment, the compute units, and the RPC
-  calls that the service made. `Verify` runs `@sdp/intents-verifier` in the browser. It reads the
-  registry from the surfnet's RPC through the dev server's `/rpc`, never from the service. `Send`
-  lands the transaction.
+- Privacy ring: for a private interface, each wallet's private SOL and a button that shields
+  1 SOL. `private.transfer` sends SOL privately through Zolana. `private.send` is a flow: it
+  shields public SOL first when the private balance is short, then transfers.
+- Intent: the intent JSON and the `start` request as curl, TypeScript, and Rust.
+- The loop: every intent runs the same loop, for one transaction or many (`DESIGN.md`, 4.1). Each
+  call shows its curl and its answer, and `next` says what to do: sign each step, wait for its
+  condition, or nothing, because the flow is done. For a step to sign, the panel shows its message,
+  each instruction with its part of the segment, and the compute units. `Verify` runs
+  `@sdp/intents-verifier` in the browser. It reads the registry from the surfnet's RPC through the
+  dev server's `/rpc`, never from the service. `Sign and send` signs with the local wallets. The
+  next call sends `progress` back with the signatures. "Run the loop for me" makes every call
+  without a click. The calls stay in the browser's storage, so a refresh continues the flow.
 - Implementation: the selected implementation, its versions, and its document as the registry holds it.
 
 "Tamper with the plan" makes the service change one byte of a built instruction. The verifier still

@@ -1,12 +1,12 @@
 use sdp_intents_spec::wire::{AppliesV1, SemverV1};
-use sdp_intents_spec::{AppliesKind, Implementation, Interface, SpecError, ValueRef};
+use sdp_intents_spec::{AppliesKind, Implementation, Interface, RecipeKind, SpecError, ValueRef};
 use serde_json::Value;
 
 use super::json::{base58, hex, non_empty, object, sparse_object, utf8};
 use super::names::Names;
 use super::post_condition::post_condition;
 use super::{document_name, DecompileError, Organizations};
-use crate::envelope::SPEC;
+use crate::envelope::{SPEC, SPEC_FLOWS};
 use crate::id::{caret_covers, format_version};
 
 /// An implementation, with the names that its references resolve to. The steps that read the
@@ -14,6 +14,7 @@ use crate::id::{caret_covers, format_version};
 pub(super) struct Document<'d, 'n> {
     pub(super) view: Implementation<'d>,
     pub(super) names: &'n Names<'d>,
+    pub(super) organizations: &'n Organizations,
 }
 
 pub fn decompile_implementation(
@@ -36,7 +37,8 @@ pub fn decompile_implementation(
         .collect::<Result<_, _>>()?;
 
     let names = Names::new(&interface, accounts, view.addresses()?)?;
-    let document = Document { view, names: &names };
+    let document = Document { view, names: &names, organizations };
+    let spec = if view.recipe()? == RecipeKind::Flow { SPEC_FLOWS } else { SPEC };
 
     let applies: Vec<Value> =
         view.applies()?.iter().map(|applies| applies_hint(applies, &names)).collect::<Result<_, _>>()?;
@@ -48,7 +50,7 @@ pub fn decompile_implementation(
         .collect::<Result<_, _>>()?;
 
     Ok(sparse_object([
-        ("spec", Some(Value::from(SPEC))),
+        ("spec", Some(Value::from(spec))),
         ("kind", Some(Value::from("implementation"))),
         ("id", Some(Value::from(document_name(view.id(), view.name()?, organizations)?))),
         ("version", Some(Value::from(format_version(view.id().version)))),
@@ -82,7 +84,7 @@ fn implements(
     Ok(format!("{id}@^{}", caret(implements.version)))
 }
 
-fn caret(lowest: SemverV1) -> String {
+pub(super) fn caret(lowest: SemverV1) -> String {
     match (lowest.major.get(), lowest.minor.get(), lowest.patch.get()) {
         (major, 0, 0) => format!("{major}"),
         (major, minor, 0) => format!("{major}.{minor}"),

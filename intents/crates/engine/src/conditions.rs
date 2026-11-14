@@ -129,7 +129,11 @@ impl ConditionValues<'_, '_> {
 
                 addresses.get(usize::from(index)).copied().ok_or(EngineError::BadCondition)
             }
-            ValueSource::None | ValueSource::Literal | ValueSource::Bumps => Err(EngineError::BadCondition),
+            ValueSource::None
+            | ValueSource::Literal
+            | ValueSource::Bumps
+            | ValueSource::StepOutput
+            | ValueSource::StepFact => Err(EngineError::BadCondition),
         }
     }
 

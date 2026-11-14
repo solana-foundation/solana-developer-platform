@@ -268,7 +268,7 @@ fn rank(left: &Evaluated, right: &Evaluated) -> Ordering {
     };
     let recipe = |evaluated: &Evaluated| match evaluated.recipe {
         RecipeKind::Static => 0,
-        RecipeKind::Program | RecipeKind::Shielded => 1,
+        RecipeKind::Program | RecipeKind::Shielded | RecipeKind::Flow => 1,
         RecipeKind::Remote => 2,
         RecipeKind::RemoteTransaction => 3,
     };

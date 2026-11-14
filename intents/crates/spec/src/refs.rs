@@ -47,6 +47,11 @@ wire_code! {
         /// The canonical bumps that a builder derives its program addresses with, in borsh. Only
         /// a program recipe's builder call names it, at index `0`.
         Bumps = 7,
+        /// An output of an earlier step of a flow. The index packs the step and the output
+        /// (`StepValue`).
+        StepOutput = 8,
+        /// A fact that a step's plan fixed, such as the nullifiers that its spend consumes.
+        StepFact = 9,
     }
 }
 
@@ -106,7 +111,7 @@ mod tests {
         let value = ValueRef::from_bytes([3, 1]).unwrap();
 
         assert_eq!(value, ValueRef { source: ValueSource::Payer, index: 1 });
-        assert_eq!(ValueRef::from_bytes([9, 0]), Err(SpecError::BadCode));
+        assert_eq!(ValueRef::from_bytes([10, 0]), Err(SpecError::BadCode));
     }
 
     #[test]

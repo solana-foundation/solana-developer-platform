@@ -1,7 +1,7 @@
 // The service's routes, as `intents/crates/service/src/lib.rs` lists them. The dev server forwards
 // `/api` to the service. Every document comes from the service, which reads it from the registry.
 
-export type Recipe = "static" | "program" | "remote" | "remote transaction" | "shielded";
+export type Recipe = "static" | "program" | "remote" | "remote transaction" | "shielded" | "flow";
 
 /// An interface input as the form reads it. `amountMint` is the reference to the mint whose
 /// decimals an amount uses, such as `{inputs.mint}`.
@@ -151,6 +151,39 @@ export interface Plan {
   rpcCalls: Record<string, number>;
 }
 
+/// One step of a `sign`: a plan, named, with what its signer signs.
+export interface SignStep extends Omit<Plan, "request" | "rpcCalls"> {
+  name: string;
+  signs: "transaction" | "digest" | "message";
+}
+
+/// What the caller does next (`DESIGN.md`, 4.1).
+export type Next =
+  | { kind: "sign"; land: "inOrder" | "bundle"; steps: SignStep[] }
+  | {
+      kind: "wait";
+      step: string;
+      until: Record<string, unknown>;
+      message: string;
+      checkAfter: string;
+    }
+  | { kind: "done"; message: string };
+
+/// Every call of the loop answers the same shape. The caller keeps `progress` and sends it back
+/// unchanged.
+export interface Answer {
+  progress: Record<string, unknown>;
+  next: Next;
+  pendingUntil: { blockHeight: string } | null;
+  rpcCalls: Record<string, number>;
+}
+
+/// The body of `POST /v1/intents/continue`.
+export interface ContinueBody {
+  progress: Record<string, unknown>;
+  signatures?: string[];
+}
+
 export class ServiceError extends Error {
   constructor(
     readonly code: string,
@@ -215,8 +248,9 @@ export const api = {
       `/v1/interfaces/${idPath(interfaceId)}/versions/${version}/matches`,
       body
     ).then((answer) => answer.implementations),
-  prepare: (request: unknown, tamper: boolean) =>
-    post<Plan>("/v1/prepare", request, tamper ? { "x-sdp-tamper": "1" } : {}),
+  start: (request: unknown, tamper: boolean) =>
+    post<Answer>("/v1/intents/start", request, tamper ? { "x-sdp-tamper": "1" } : {}),
+  resume: (body: ContinueBody) => post<Answer>("/v1/intents/continue", body),
   send: (transaction: NonNullable<Plan["transaction"]>) =>
     post<{ signature: string }>("/v1/send", {
       message: transaction.messageBytes,

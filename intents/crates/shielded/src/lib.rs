@@ -11,8 +11,8 @@ use solana_keypair::Keypair;
 use solana_signer::Signer as _;
 use spr_client::user_registry::{register_if_absent, resolve_registered_address, StrictRegistration};
 use spr_client::{
-    ComputeBudgetConfig, ProverClient, Rpc as _, SignedPrivateTransaction, SolanaRpc, Submission, UnsignedMessage,
-    UtxoScan, ZolanaClient, ZolanaIndexer,
+    compile_message, sign_transaction, ComputeBudgetConfig, ProverClient, Rpc as _, SignedPrivateTransaction,
+    SolanaRpc, Submission, UnsignedMessage, UtxoScan, ZolanaClient, ZolanaIndexer,
 };
 use spr_keypair::{ShieldedKeypair, SigningKey};
 use spr_program::instruction::{AssetDeposit, Deposit, DepositAsset};
@@ -34,9 +34,11 @@ pub struct ShieldedWallet {
     keypair: ShieldedKeypair,
 }
 
-/// What the wallet's Solana key signs to send a shielded spend.
+/// What the wallet's Solana key signs to send a shielded spend, and the nullifiers of the notes
+/// that it consumes. A deposit consumes none.
 pub struct PreparedSpend {
     pub message: UnsignedMessage,
+    pub nullifiers: Vec<[u8; 32]>,
 }
 
 impl PreparedSpend {
@@ -44,7 +46,14 @@ impl PreparedSpend {
     pub fn message_bytes(&self) -> Vec<u8> {
         self.message.message.serialize()
     }
+
+    pub fn last_valid_block_height(&self) -> u64 {
+        self.message.last_valid_block_height
+    }
 }
+
+/// The most nullifiers that one `spent` lookup asks for.
+const NULLIFIER_PAGE: u32 = 64;
 
 #[derive(Debug)]
 pub struct ShieldedError(String);
@@ -109,9 +118,30 @@ impl Shielded {
         }
     }
 
-    /// Moves `lamports` of the wallet's public SOL into a note of its own. A deposit spends no note,
-    /// so it needs no proof, and it is public.
+    /// Moves `lamports` of the wallet's public SOL into a note of its own, and sends it.
     pub fn shield_sol(&self, wallet: &ShieldedWallet, lamports: u64) -> Result<(), ShieldedError> {
+        let prepared = self.prepare_deposit(wallet, SOL_MINT, lamports)?;
+        let transaction = sign_transaction(prepared.message.message, &[&wallet.funding])
+            .map_err(|cause| error("sign the deposit")(&cause))?;
+
+        self.client.rpc().process_transaction(transaction).map_err(|cause| error("send the deposit")(&cause))?;
+
+        Ok(())
+    }
+
+    /// A deposit of `amount` of the wallet's public `asset` into a note of its own, for its Solana
+    /// key to sign. A deposit spends no note, so it needs no proof, and it is public. Only SOL is
+    /// supported so far.
+    pub fn prepare_deposit(
+        &self,
+        wallet: &ShieldedWallet,
+        asset: Address,
+        amount: u64,
+    ) -> Result<PreparedSpend, ShieldedError> {
+        if asset != SOL_MINT {
+            return Err(ShieldedError("only SOL deposits into the ring so far".to_owned()));
+        }
+
         let recipient = resolve_registered_address(self.client.rpc(), wallet.address())
             .map_err(|cause| error("resolve the wallet's record")(&cause))?;
         let owner = recipient.address.owner_hash().map_err(|cause| error("owner hash")(&cause))?;
@@ -122,24 +152,35 @@ impl Shielded {
                 asset: DepositAsset::Sol,
                 view_tag: recipient.address.viewing_pubkey.u(),
                 owner,
-                amount: lamports,
+                amount,
                 memo: None,
             }],
         }
         .instruction()
         .map_err(|cause| error("deposit instruction")(&cause))?;
 
-        self.client
-            .rpc()
-            .create_and_send_transaction(
-                &[deposit],
-                wallet.address(),
-                &[&wallet.funding],
-                ComputeBudgetConfig::for_instruction_count(1),
-            )
-            .map_err(|cause| error("send the deposit")(&cause))?;
+        let (blockhash, last_valid_block_height) =
+            self.client.rpc().get_latest_blockhash().map_err(|cause| error("read a blockhash")(&cause))?;
+        let message =
+            compile_message(&wallet.address(), &[deposit], blockhash, ComputeBudgetConfig::for_instruction_count(1))
+                .map_err(|cause| error("deposit message")(&cause))?;
 
-        Ok(())
+        Ok(PreparedSpend { message: UnsignedMessage { message, last_valid_block_height }, nullifiers: Vec::new() })
+    }
+
+    /// Whether a transaction that the indexer holds spent any of `nullifiers`. Anyone who knows the
+    /// nullifiers can ask, and the answer names no owner.
+    pub fn spent(&self, nullifiers: &[[u8; 32]]) -> Result<bool, ShieldedError> {
+        if nullifiers.is_empty() {
+            return Ok(false);
+        }
+
+        let page = self
+            .indexer
+            .get_shielded_transactions_by_nullifiers(nullifiers.to_vec(), None, Some(NULLIFIER_PAGE), None)
+            .map_err(|cause| error("look up the nullifiers")(&cause))?;
+
+        Ok(!page.transactions.is_empty())
     }
 
     /// The wallet's private balance of `asset`, from its unspent notes.
@@ -160,6 +201,7 @@ impl Shielded {
     ) -> Result<PreparedSpend, ShieldedError> {
         let spendable = self.spendable(wallet)?;
         let inputs = select_spend(spendable.utxos(), asset, amount).map_err(|cause| error("select notes")(&cause))?;
+        let nullifiers = inputs.iter().map(|input| input.nullifier).collect();
         let recipient = resolve_registered_address(self.client.rpc(), to)
             .map_err(|cause| error("resolve the recipient's record")(&cause))?;
 
@@ -179,7 +221,7 @@ impl Shielded {
             .finish_unsigned_sync(&self.client)
             .map_err(|cause| error("prove")(&cause))?;
 
-        Ok(PreparedSpend { message })
+        Ok(PreparedSpend { message, nullifiers })
     }
 
     /// The wallet's unspent notes, decrypted from what the indexer holds for its tags.

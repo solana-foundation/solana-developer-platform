@@ -266,3 +266,47 @@
   align-items: center;
   gap: 12px;
 }
+
+.loop {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-top: 1px solid var(--border-l);
+  padding-top: 16px;
+}
+
+.loop-call,
+.loop-next,
+.loop-step {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1.5px solid var(--border-l);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.loop-next {
+  border-color: var(--emph-l);
+}
+
+.loop-step {
+  border-style: dashed;
+}
+
+.loop-call-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.loop details > summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--emph-m);
+}
+
+.loop details[open] > summary {
+  margin-bottom: 8px;
+}

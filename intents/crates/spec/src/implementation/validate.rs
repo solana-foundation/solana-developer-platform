@@ -13,6 +13,7 @@ impl Implementation<'_> {
         self.name()?;
         self.message()?;
         self.validate_recipe()?;
+        self.validate_extension()?;
 
         let counts = Counts {
             inputs: None,
@@ -46,6 +47,7 @@ impl Implementation<'_> {
             RecipeKind::Program => instruction_count == 1 && !has_url,
             RecipeKind::Remote | RecipeKind::RemoteTransaction => instruction_count == 0 && has_url,
             RecipeKind::Shielded => instruction_count > 0 && !has_url && self.shielded_outputs_fit()?,
+            RecipeKind::Flow => instruction_count == 0 && !has_url && self.accounts()?.is_empty(),
         };
 
         if !fits {
@@ -53,6 +55,16 @@ impl Implementation<'_> {
         }
 
         Ok(())
+    }
+
+    /// Only a flow has an extension area, and it needs spec 1.1.
+    fn validate_extension(&self) -> Result<(), SpecError> {
+        match (self.recipe()?, self.flow()?) {
+            (RecipeKind::Flow, Some(_)) if self.spec_minor() >= 1 => self.validate_flow(self.literals()?.len()),
+            (RecipeKind::Flow, _) => Err(SpecError::BadRecipe),
+            (_, None) if self.extension().is_empty() => Ok(()),
+            _ => Err(SpecError::BadRecipe),
+        }
     }
 
     /// Each output note names the pool as its program, one owner account, and at least the asset and

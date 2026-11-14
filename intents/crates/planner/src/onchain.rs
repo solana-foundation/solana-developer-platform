@@ -67,7 +67,7 @@ impl OnchainInputs<'_, '_> {
     fn verify_instruction(&self, guarded: &[Address], counts: SegmentCounts) -> Result<Instruction, PlanError> {
         let builder_roles = match self.recipe.implementation().recipe()? {
             RecipeKind::Program | RecipeKind::Remote => self.built.roles(),
-            RecipeKind::Static | RecipeKind::RemoteTransaction | RecipeKind::Shielded => Vec::new(),
+            RecipeKind::Static | RecipeKind::RemoteTransaction | RecipeKind::Shielded | RecipeKind::Flow => Vec::new(),
         };
         let bumps = self.recipe.bumps()?;
         let verify = VerifyIntent {

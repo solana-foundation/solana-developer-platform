@@ -83,7 +83,11 @@ impl<'r, C: Chain> Values<'r, '_, C> {
             ValueSource::Payer => Value::Address(*self.recipe.payers().rent),
             ValueSource::Account => Value::Address(*self.recipe.address(index).ok_or(PlanError::Unresolved)?),
             ValueSource::Address => Value::Address(self.static_address(index, table)?),
-            ValueSource::None | ValueSource::Literal | ValueSource::Bumps => Value::Absent,
+            ValueSource::None
+            | ValueSource::Literal
+            | ValueSource::Bumps
+            | ValueSource::StepOutput
+            | ValueSource::StepFact => Value::Absent,
         };
 
         match typed {

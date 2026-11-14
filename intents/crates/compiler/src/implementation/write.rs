@@ -1,5 +1,5 @@
-use sdp_intents_spec::wire::{DocumentIdV1, DocumentKind, ImplementationDocV1, LiteralV1};
-use sdp_intents_spec::Implementation;
+use sdp_intents_spec::wire::{DocumentIdV1, DocumentKind, FlowDocV1, ImplementationDocV1, LiteralV1};
+use sdp_intents_spec::{Implementation, RecipeKind};
 
 use super::recipe::Recipe;
 use super::Build;
@@ -43,9 +43,19 @@ impl Build<'_, '_> {
             segments: writer.table(&self.segments),
             output_bindings: writer.table(&self.output_bindings),
             literals: writer.table::<LiteralV1>(&[]),
-            pool: writer.pool(&self.pool),
             ..ImplementationDocV1::default()
         };
+
+        if recipe.kind == RecipeKind::Flow {
+            let flow = FlowDocV1 {
+                steps: writer.table(&self.steps),
+                step_inputs: writer.table(&self.step_inputs),
+                conditions: writer.table(&self.conditions),
+            };
+            writer.extension(&flow);
+        }
+
+        let fixed = ImplementationDocV1 { pool: writer.pool(&self.pool), ..fixed };
         let header = writer.header(DocumentKind::Implementation);
         let bytes = writer.finish(&ImplementationDocV1 { header, ..fixed });
         limits::check(self.sink, "", "bytes in the document", bytes.len(), limits::DOCUMENT_BYTES);

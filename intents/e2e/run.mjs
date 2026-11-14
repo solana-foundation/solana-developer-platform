@@ -95,6 +95,32 @@ async function startRing() {
   return ring;
 }
 
+/// Runs the loop of `DESIGN.md`, 4.1 from a `start` answer until done: signs each step with the
+/// service's wallets, and waits out each `wait`. Returns the last answer and what each turn asked.
+async function runFlow(first) {
+  let answer = first;
+  const kinds = [];
+
+  for (let turn = 0; turn < 20 && answer.next.kind !== "done"; turn += 1) {
+    if (answer.next.kind === "sign") {
+      kinds.push(`sign ${answer.next.steps.map((step) => step.name).join(" ")}`);
+      const signatures = [];
+
+      for (const step of answer.next.steps) {
+        const sent = await service("/v1/send", JSON.stringify({ message: step.transaction.messageBytes }));
+        signatures.push(sent.signature);
+      }
+
+      answer = await service("/v1/intents/continue", JSON.stringify({ progress: answer.progress, signatures }));
+    } else {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      answer = await service("/v1/intents/continue", JSON.stringify({ progress: answer.progress }));
+    }
+  }
+
+  return { answer, kinds };
+}
+
 /// The private SOL of the local wallet `address`, once it reaches `lamports`.
 async function ringBalanceReaches(address, lamports) {
   for (let attempt = 0; attempt < 30; attempt += 1) {
@@ -254,7 +280,7 @@ const provider = await startProvider();
 try {
   console.log("the service reads the registry");
   const listing = await service("/v1/registry");
-  expect(listing.interfaces.length === 7 && listing.implementations.length === 15, "it lists 7 interfaces and 15 implementations");
+  expect(listing.interfaces.length === 9 && listing.implementations.length === 17, "it lists 9 interfaces and 17 implementations");
 
   const transfer = await service("/v1/interfaces/solana.org/token.transfer");
   expect(transfer.head === "1.0.0", "the interface's head is 1.0.0");
@@ -511,6 +537,28 @@ try {
   await service("/v1/send", JSON.stringify({ message: shielded.transaction.messageBytes }));
   expect(await ringBalanceReaches(payer.address, 250_000_000), "the payer holds 0.25 SOL privately");
   expect(await ringBalanceReaches(sender.address, 750_000_000), "the sender keeps 0.75 SOL privately");
+
+  console.log("a flow of two steps: shield public SOL, then send it privately");
+  const send = plan(payer, [
+    {
+      interface: "solana.org/private.send@^1",
+      implementation: "solana.org/zolana-send@^1",
+      inputs: { from: payer.address, to: sender.address, mint: SOL_MINT, amount: "500000000" },
+      options: { verifyIntent: false, assertions: false },
+    },
+  ]);
+  const started = await service("/v1/intents/start", JSON.stringify(send));
+  const again = await service("/v1/intents/continue", JSON.stringify({ progress: started.progress }));
+  expect(
+    again.next.steps?.[0].transaction.messageBytes === started.next.steps?.[0].transaction.messageBytes,
+    "continue without a signature returns the same transaction",
+  );
+
+  const { answer, kinds } = await runFlow(started);
+  expect(kinds.join(", ") === "sign shield, sign transfer", `the flow asks to sign the shield, then the transfer (${kinds.join(", ")})`);
+  expect(answer.next.kind === "done", `the flow is done: ${answer.next.message}`);
+  expect(await ringBalanceReaches(sender.address, 1_250_000_000), "the sender holds 1.25 SOL privately");
+  expect(await ringBalanceReaches(payer.address, 250_000_000), "the payer keeps 0.25 SOL privately");
 
   console.log("every flow landed");
 } finally {

@@ -234,6 +234,7 @@ impl<'a> SegmentPlanner<'a> {
             RecipeKind::Program => self.simulate_builder(earlier),
             RecipeKind::Remote | RecipeKind::RemoteTransaction => self.call_remote(),
             RecipeKind::Shielded => self.call_shielded(earlier),
+            RecipeKind::Flow => Err(PlanError::FlowRecipe),
         }
     }
 

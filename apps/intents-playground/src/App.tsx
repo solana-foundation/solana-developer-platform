@@ -13,7 +13,7 @@ import {
 } from "@/api";
 import { InterfacePage } from "@/components/InterfacePage";
 import { RegistryTree } from "@/components/RegistryTree";
-import { type PlanState, SidePanel, type Tab } from "@/components/SidePanel";
+import { SidePanel, type Tab } from "@/components/SidePanel";
 import {
   type FormValues,
   type IntentOptions,
@@ -23,9 +23,7 @@ import {
   planRequest,
 } from "@/intent";
 import { MINTS, VAULTS } from "@/known";
-import { verifyPlan } from "@/verifier";
 
-const NO_PLAN: PlanState = { plan: null, error: null, verified: null, signature: null, busy: null };
 const DEFAULT_OPTIONS: IntentOptions = {
   verifyIntent: true,
   assertions: true,
@@ -51,7 +49,8 @@ export function App() {
   const [tamper, setTamper] = useState(false);
   const [malicious, setMalicious] = useState(false);
   const [output, setOutput] = useState<Output>("transaction");
-  const [planState, setPlanState] = useState(NO_PLAN);
+  const [lastSignature, setLastSignature] = useState<string | null>(null);
+  const [adapterError, setAdapterError] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([api.registry(), api.wallets()])
@@ -134,18 +133,15 @@ export function App() {
           }),
     [listed, document, values, selected, options]
   );
-  const shielded = selected?.recipe === "shielded";
-  const frozen = shielded || selected?.recipe === "remote transaction";
-  const payer = shielded ? spender(document, values) : feePayer;
+  // A shielded spend, and a flow of them, takes the spender as its fee payer.
+  const spends = selected?.recipe === "shielded" || selected?.recipe === "flow";
+  const frozen = spends || selected?.recipe === "remote transaction";
+  const payer = spends ? spender(document, values) : feePayer;
   const request = useMemo(
     () => planRequest(intent, payer, frozen ? "transaction" : output),
     [intent, payer, frozen, output]
   );
   const requestKey = JSON.stringify(request);
-
-  useEffect(() => {
-    if (requestKey !== "") setPlanState(NO_PLAN);
-  }, [requestKey]);
 
   const selectInterface = (address: string, implementation: string | null) => {
     setSelectedInterface(address);
@@ -157,37 +153,6 @@ export function App() {
     )?.address;
     if (interfaceAddress !== undefined) selectInterface(interfaceAddress, implementation.id);
     if (!implementation.approved) setShowUnapproved(true);
-  };
-
-  const prepare = () => {
-    setPlanState({ ...NO_PLAN, busy: "prepare" });
-    api
-      .prepare(request, tamper)
-      .then((plan) => setPlanState({ ...NO_PLAN, plan }))
-      .catch((error: unknown) => setPlanState({ ...NO_PLAN, error: describe(error) }));
-  };
-  const verify = () => {
-    const plan = planState.plan;
-    if (plan?.transaction === undefined) return;
-
-    setPlanState({ ...planState, busy: "verify", error: null });
-    verifyPlan(plan, plan.transaction)
-      .then((verified) => setPlanState({ ...planState, verified, busy: null, error: null }))
-      .catch((error: unknown) =>
-        setPlanState({ ...planState, busy: null, error: describe(error) })
-      );
-  };
-  const send = () => {
-    const transaction = planState.plan?.transaction;
-    if (transaction === undefined) return;
-
-    setPlanState({ ...planState, busy: "send", error: null });
-    api
-      .send(transaction)
-      .then(({ signature }) => setPlanState({ ...planState, signature, busy: null, error: null }))
-      .catch((error: unknown) =>
-        setPlanState({ ...planState, busy: null, error: describe(error) })
-      );
   };
 
   if (registry === null) {
@@ -214,8 +179,8 @@ export function App() {
               values={values}
               wallets={wallets}
               feePayer={payer}
-              feePayerFixed={shielded}
-              signature={planState.signature}
+              feePayerFixed={spends}
+              signature={lastSignature}
               candidates={candidates}
               candidatesError={candidatesError}
               selected={selected}
@@ -232,10 +197,10 @@ export function App() {
             tab={tab}
             intent={intent}
             request={request}
+            requestKey={requestKey}
             implementation={selectedImplementation}
             recipe={selected?.recipe ?? null}
             organizations={registry.organizations}
-            planState={planState}
             output={output}
             onOutput={setOutput}
             tamper={tamper}
@@ -244,20 +209,14 @@ export function App() {
               api
                 .adapterMode(on)
                 .then((ok) => ok && setMalicious(on))
-                .catch(() =>
-                  setPlanState({
-                    ...NO_PLAN,
-                    error: "The Jupiter wrapper does not answer on :8791.",
-                  })
-                );
+                .catch(() => setAdapterError("The Jupiter wrapper does not answer on :8791."));
             }}
             ready={selected !== null && payer !== ""}
             onTab={setTab}
             onTamper={setTamper}
-            onPrepare={prepare}
-            onVerify={verify}
-            onSend={send}
+            onSent={setLastSignature}
           />
+          {adapterError !== null && <div className="callout callout-red">{adapterError}</div>}
         </div>
       </div>
     </div>

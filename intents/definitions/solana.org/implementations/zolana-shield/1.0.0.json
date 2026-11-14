@@ -1,0 +1,23 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "implementation",
+  "id": "solana.org/zolana-shield",
+  "version": "1.0.0",
+  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "implements": "solana.org/private.shield@^1",
+  "message": "shield {inputs.amount} of {inputs.mint} from {inputs.owner} into the Helius default privacy ring",
+  "recipe": {
+    "kind": "shielded",
+    "pool": "ring1GaLCuJnkUMVkX2JeZLTTX17wKsV4fZmPVzXANW",
+    "accounts": [
+      { "name": "spender", "address": "{inputs.owner}", "writable": true }
+    ],
+    "notes": [
+      {
+        "owner": "spender",
+        "asset": { "value": "{inputs.mint}", "encoding": "address" },
+        "amount": { "value": "{inputs.amount}", "encoding": "u64le" }
+      }
+    ]
+  }
+}

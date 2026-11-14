@@ -129,7 +129,11 @@ impl<'r, C: Chain> Context<'r, C> {
                 self.address(value).map(|address| Bytes::borrowed(&address.0))
             }
             ValueSource::Bumps if encoding == Encoding::Borsh => Ok(Bytes::borrowed(self.addresses.builder_bumps())),
-            ValueSource::None | ValueSource::Literal | ValueSource::Bumps => Err(EngineError::BadEncoding),
+            ValueSource::None
+            | ValueSource::Literal
+            | ValueSource::Bumps
+            | ValueSource::StepOutput
+            | ValueSource::StepFact => Err(EngineError::BadEncoding),
         }
     }
 

@@ -51,6 +51,8 @@ impl Metrics {
             ("getLatestBlockhash", calls.get_latest_blockhash),
             ("getProgramAccounts", calls.get_program_accounts),
             ("sendTransaction", calls.send_transaction),
+            ("getBlockHeight", calls.get_block_height),
+            ("getSignatureStatuses", calls.get_signature_statuses),
         ];
         text.push_str("# TYPE sdp_intents_rpc_calls_total counter\n");
         rpc.iter().for_each(|(method, count)| {

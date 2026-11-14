@@ -29,10 +29,12 @@ sdp-intents-lighthouse.workspace = true
 sdp-intents-registry-client.workspace = true
 sdp-intents-shielded.workspace = true
 sdp-intents-spec.workspace = true
+serde = { version = "=1.0.229", features = ["derive"] }
 serde_json.workspace = true
 solana-address.workspace = true
 solana-keypair = "=3.1.2"
 solana-message = "=4.6.0"
+solana-signature = "=3.5.2"
 solana-signer = "=3.0.1"
 solana-transaction = "=4.3.0"
 tokio = { version = "=1.54.1", features = ["macros", "net", "rt-multi-thread", "signal"] }

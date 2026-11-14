@@ -91,12 +91,22 @@ pub fn compile_tree(tree: &Tree) -> CompiledTree<'_> {
         reports.push(with_position_findings(definition, report));
     }
 
-    for definition in tree.of_kind(Kind::Implementation) {
+    // A flow names other implementations, so it compiles after them.
+    let (flows, others): (Vec<&Definition>, Vec<&Definition>) =
+        tree.of_kind(Kind::Implementation).partition(|definition| is_flow(&definition.text));
+
+    for definition in others.into_iter().chain(flows) {
         let report = catalog.compile_implementation(&definition.text).err().unwrap_or_default();
         reports.push(with_position_findings(definition, report));
     }
 
     CompiledTree { catalog, reports: reports.into_iter().filter(|report| !report.report.is_empty()).collect() }
+}
+
+fn is_flow(text: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .is_some_and(|value| value.pointer("/recipe/kind").and_then(serde_json::Value::as_str) == Some("flow"))
 }
 
 fn with_position_findings(definition: &Definition, mut report: Report) -> FileReport<'_> {

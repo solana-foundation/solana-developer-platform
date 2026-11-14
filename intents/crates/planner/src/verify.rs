@@ -146,22 +146,25 @@ impl<'v, 'a> Verification<'v, 'a> {
         })
     }
 
-    /// The fee payer loses at most the fee and the rent of the accounts that the transaction
-    /// creates, and an instruction names a payer only where it creates an account. A payer that is
-    /// also a signer input can be named anywhere, because the interface requires that signer, and
-    /// the postconditions guard it.
+    /// The fee payer loses at most the fee, the rent of the accounts that the transaction creates,
+    /// and the SOL that an outflow postcondition lets it send, and an instruction names a payer only
+    /// where it creates an account. A payer that is also a signer input can be named anywhere,
+    /// because the interface requires that signer, and the postconditions guard it.
     fn check_payers(&self) -> Result<(), PlanError> {
         let payers = self.values.recipe.payers();
         let fee_payer = *payers.fee;
         let rent_payer = *payers.rent;
+        let fee_payer_allowance = self.payer_allowance(&fee_payer).saturating_add(self.sol_outflow(&fee_payer)?);
 
-        if self.lamport_loss(&fee_payer) > self.payer_allowance(&fee_payer) {
+        if self.lamport_loss(&fee_payer) > fee_payer_allowance {
             return Err(PlanError::CheckFailed(
                 "the fee payer loses more than the fee and the new accounts' rent".into(),
             ));
         }
 
-        if self.lamport_loss(&rent_payer) > self.payer_allowance(&rent_payer) {
+        let rent_payer_allowance = self.payer_allowance(&rent_payer).saturating_add(self.sol_outflow(&rent_payer)?);
+
+        if self.lamport_loss(&rent_payer) > rent_payer_allowance {
             return Err(PlanError::CheckFailed("the rent payer loses more than the new accounts' rent".into()));
         }
 
@@ -364,6 +367,28 @@ impl<'v, 'a> Verification<'v, 'a> {
             addresses.get(start..start.saturating_add(usize::from(programs.count))).ok_or(SpecError::BadIndex)?;
 
         Ok(self.instructions.iter().all(|instruction| allowed.contains(&instruction.program)))
+    }
+
+    /// The SOL that the outflow postconditions let `from` send, in lamports.
+    fn sol_outflow(&self, from: &Address) -> Result<u64, PlanError> {
+        let conditions = self.conditions()?;
+        let allowed = conditions
+            .iter()
+            .filter(|condition| condition.check.check == u8::from(CheckKind::Outflow))
+            .map(|condition| {
+                let [owner, mint, max] = condition.check.args.map(ValueRef::try_from);
+                let names_sol = self.values.address(owner?, condition.table)? == *from
+                    && self.values.address(mint?, condition.table)? == Address::default();
+
+                if !names_sol {
+                    return Ok(0);
+                }
+
+                Ok(u64::try_from(self.values.integer(max?)?).unwrap_or(u64::MAX))
+            })
+            .collect::<Result<Vec<u64>, PlanError>>()?;
+
+        Ok(allowed.into_iter().fold(0, u64::saturating_add))
     }
 
     fn payer_allowance(&self, address: &Address) -> u64 {

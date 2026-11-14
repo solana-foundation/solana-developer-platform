@@ -12,7 +12,9 @@
 //! | `GET /v1/{kind}/{organization}/{name}/versions/{version}` | | One version, with its document as definition JSON |
 //! | `GET /v1/interfaces/{organization}/{name}/implementations` | | The implementations of the interface |
 //! | `POST /v1/interfaces/{organization}/{name}/versions/{version}/matches` | `{ inputs, payers, all }` | `implementationsFor` |
-//! | `POST /v1/prepare` | A plan request (`DESIGN.md`, 4.1) | The plan, and the RPC calls that it made |
+//! | `POST /v1/intents/start` | A plan request (`DESIGN.md`, 4.1) | `{ progress, next, pendingUntil }`, and the RPC calls |
+//! | `POST /v1/intents/continue` | `{ progress, signatures? }` | The same, for the next step (`DESIGN.md`, 4.19) |
+//! | `POST /v1/prepare` | A plan request | The plan of a request of one step, and the RPC calls that it made |
 //! | `POST /v1/verify` | `{ message, expected }` or `{ transaction, expected }`, of any version | What the message proves to its signer |
 //! | `GET /v1/wallets` | | The local wallets, with `--wallets` |
 //! | `POST /v1/send` | `{ message }` | Signs with the local wallets and sends, with `--wallets` |
@@ -26,6 +28,7 @@ mod describe;
 mod error;
 mod flows;
 mod implementations;
+mod intents;
 mod metrics;
 mod registry;
 mod resources;
@@ -79,6 +82,8 @@ pub fn router(service: Arc<Service>) -> Router {
         .route("/v1/implementations/{organization}/{name}", get(implementation))
         .route("/v1/implementations/{organization}/{name}/versions/{version}", get(implementation_version))
         .route("/v1/prepare", post(prepare))
+        .route("/v1/intents/start", post(start))
+        .route("/v1/intents/continue", post(resume))
         .route("/v1/verify", post(verify))
         .route("/v1/wallets", get(|State(service): Shared| async move { Json(service.wallets.json()) }))
         .route("/v1/send", post(send))
@@ -182,6 +187,30 @@ async fn prepare(State(service): Shared, headers: HeaderMap, body: String) -> Re
     });
 
     observed(&service, "prepare", async { prepared }).await
+}
+
+async fn start(State(service): Shared, headers: HeaderMap, body: String) -> Response {
+    let tamper = !service.wallets.is_empty() && headers.get("x-sdp-tamper").is_some_and(|value| value == "1");
+    let counted = sdp_intents_chain::counted(intents::start(&service, &body, tamper)).await;
+
+    observed(&service, "start", async { with_calls(counted) }).await
+}
+
+async fn resume(State(service): Shared, Json(body): Json<Value>) -> Response {
+    let counted = sdp_intents_chain::counted(intents::resume(&service, &body)).await;
+
+    observed(&service, "continue", async { with_calls(counted) }).await
+}
+
+/// The answer, with the RPC calls that it made.
+fn with_calls(counted: sdp_intents_chain::Counted<Result<Value, ServiceError>>) -> Result<Value, ServiceError> {
+    counted.output.map(|mut answer| {
+        if let Some(object) = answer.as_object_mut() {
+            object.insert("rpcCalls".to_owned(), flows::calls_json(counted.calls));
+        }
+
+        answer
+    })
 }
 
 async fn verify(State(service): Shared, Json(body): Json<Value>) -> Response {

@@ -103,7 +103,7 @@ operation takes. The matched implementation decides (4.19).
   "kind": "plan",
   "payers": { "fee": "KoRa…" },
   "cluster": "mainnet",
-  "options": { "priorityFeeLamports": "5000", "output": "transaction" },
+  "options": { "priorityFeeLamports": "5000", "output": "transaction", "landing": "auto", "tipLamports": "10000" },
   "intents": [{ "interface": "…", "implementation": "…", "inputs": { … } }]
 }
 ```
@@ -116,6 +116,9 @@ operation takes. The matched implementation decides (4.19).
    budget. `verify_intent` finds its segment after itself in the instructions sysvar, so the
    version does not matter. A provider's signed transaction (4.16) has no instructions, so
    `prepare` refuses `instructions` for it.
+4. `landing` is `auto`, `bundle`, or `inOrder`, and says how several steps signed together reach
+   the chain (4.19). `tipLamports` is the most that a Jito bundle's tip pays. Without it, `prepare`
+   never bundles.
 
 **Interface.**
 
@@ -219,16 +222,18 @@ output trusts the recipe (4.3).
 The first instruction creates the destination ATA when it does not exist. The second is
 `transferChecked`, with the decimals read from byte 44 of the mint.
 
-**Response.** Every `prepare` returns the same shape (4.19):
+**Response.** Every call to `start` and `continue` returns the same shape (4.19):
 
 ```json
 { "progress": { "…": "a JSON object that the caller stores and sends back" },
-  "next": { "kind": "sign", "signs": "transaction", "plan": { "kind": "plan", "…": "the plan below" } } }
+  "next": { "kind": "sign", "land": "inOrder", "steps": [{ "signs": "transaction", "message": "…", "transaction": { "…": "…" } }] },
+  "rpcCalls": { "getMultipleAccounts": 1, "simulateTransaction": 0, "getLatestBlockhash": 1 } }
 ```
 
 `start` and `continue` each run `prepare`, which plans the next step. `next` is what the caller does now. `progress` is a JSON object that the caller stores and sends
 back unchanged. Each answer replaces it whole, and the caller never edits it (4.19). An intent of one
-transaction is a flow of one step, so its first `next` is a `sign` with the plan below.
+transaction is a flow of one step, so its first `next` is a sign of that one step. `rpcCalls` counts
+the requests of this call only (4.4).
 
 **The loop.** Every caller runs the same loop, for one transaction or many:
 
@@ -237,16 +242,19 @@ stateDiagram-v2
   direction LR
   [*] --> Answer: POST /v1/intents/start
   Answer --> Sign: kind sign
+  Answer --> Send: kind send
   Answer --> Wait: kind wait
   Answer --> [*]: kind done
-  Sign --> Answer: verify, sign, POST /v1/intents/continue with signed
+  Sign --> Answer: verify, sign, send, POST /v1/intents/continue
+  Send --> Answer: send, POST /v1/intents/continue
   Wait --> Answer: at checkAfter, POST /v1/intents/continue
 ```
 
 | `next.kind` | The caller | Then calls |
 | :-- | :-- | :-- |
-| `sign` | Renders `plan.message` from the transaction with its own verifier (4.6), shows it, and signs what `signs` names | `POST /v1/intents/continue` with `{ progress, signed: [<what it signed>] }` |
-| `wait` | Shows `for`, and waits until `checkAfter` | `POST /v1/intents/continue` with `{ progress }` |
+| `sign` | For each of `steps`: renders `message` from the transaction with its own verifier (4.6), shows it, and signs what `signs` names. Sends the signed transactions as `land` says. | `POST /v1/intents/continue` with `{ progress, signatures: [<one entry for each step, in order>] }` |
+| `send` | Sends `transactions` as they are, as `land` says. They need no signature from the caller, such as a spend that the ring proved. | `POST /v1/intents/continue` with `{ progress }` |
+| `wait` | Shows `message`. Waits until `until` holds, which it can watch itself, or until `checkAfter` | `POST /v1/intents/continue` with `{ progress }` |
 | `done` | Shows `message`, and drops `progress` | Nothing |
 
 ```ts
@@ -257,9 +265,13 @@ while (answer.next.kind !== "done") {
   const { progress, next } = answer;
 
   if (next.kind === "sign") {
-    await verifier.check(next.plan);             // the signer's verifier, over its own RPC
-    const signed = await wallet.sign(next);      // the transaction, a digest, or the message
-    answer = await post("/v1/intents/continue", { progress, signed: [signed] });
+    for (const step of next.steps) await verifier.check(step);   // over the signer's own RPC
+    const signed = await wallet.signAll(next.steps);              // one approval for all steps
+    await land(signed.transactions, next.land);                   // the caller's RPC, or a Jito bundle
+    answer = await post("/v1/intents/continue", { progress, signatures: signed.signatures });
+  } else if (next.kind === "send") {
+    await land(next.transactions, next.land);
+    answer = await post("/v1/intents/continue", { progress });
   } else {
     await sleepUntil(next.checkAfter);
     answer = await post("/v1/intents/continue", { progress });
@@ -267,34 +279,36 @@ while (answer.next.kind !== "done") {
 }
 ```
 
-| `signs` | The signer signs | `signed` holds |
+| A step's `signs` | The signer signs | Its entry in `signatures` |
 | :-- | :-- | :-- |
-| `transaction` | The plan's transaction | The signed transaction, in base64. The service records its signature and expiry, then sends it. |
-| `digest` | A ring spend's 32-byte digest (4.17) | The signature. The service or the client proves and sends the spend. |
-| `message` | The message itself, for a wallet of 4.7 | The signature. The service sends the wallet's approval, and `next` is `wait` until the wallet's threshold approves. |
+| `transaction` | `transaction` | The transaction's signature. It is optional, and only lets the service find the transaction sooner. |
+| `digest` | A ring spend's 32-byte digest (4.17) | The signature. The proof needs it, so the next answer is a `send` of the proved spend. |
+| `message` | The message itself, for a wallet of 4.7 | The signature. The next answer is a `send` of the wallet's approval, then a `wait` until the wallet's threshold approves. |
 
-1. A step that needs no approval, such as a ring execute, never reaches the caller. The service
-   runs it inside the call, and answers with the state after it.
-2. A call that fails changes nothing. The caller sends the same `progress` again.
-3. A wallet that sends a transaction itself still reports it in `signed`. Otherwise the service
-   cannot hold back a second plan while the first can still land (4.19, rule 2).
+1. The service sends nothing. The caller sends through its wallet, its own RPC, Jito, or a fee
+   payer service such as Kora.
+2. Until a step lands or expires, `continue` returns the same transaction. Signing it again gives
+   the same signature, so the step lands at most once (4.19, rule 2).
+3. A call that fails changes nothing. The caller sends the same `progress` again.
 
-**Plan.** One step's transaction, with the message that it proves.
+**Sign.** Every step that the caller can sign now, with how they land. Each step is one
+transaction with the message that it proves. The design calls a step's content a plan.
 
 ```json
 {
-  "spec": "sdp-intents@1.0",
-  "kind": "plan",
-  "request": { "…": "…" },
-  "message": "sdp-intents/1 on mainnet || 1: transfer 100 of 2b1kV6… from 7xKX… to 9aBc… | interface: solana.org/token.transfer@1.0.0 | implementation: solana.org/token-2022-transfer@1.0.0 | tier 1 | onchain checks: verify_intent, assertions | rent cap 2039280 lamports || fee and rent payer KoRa… | priority fee 5000 lamports",
-  "intents": [{ "display": "Send 100 PYUSD to 9aBc…", "digests": { "…": "…" }, "builder": { "program": "2gMF…" }, "verify": 0, "span": { "start": 2, "end": 4 } }],
-  "signers": [{ "address": "KoRa…", "role": "payer:fee" }, { "address": "7xKX…", "role": "input:from" }],
-  "priorityFeeLamports": "5000",
-  "instructions": [{ "programAddress": "…", "accounts": [{ "address": "…", "role": 1 }], "data": "…" }],
-  "computeBudget": { "unitLimit": "61000", "loadedAccountsDataSizeLimit": "131072", "heapSize": "32768" },
-  "transaction": { "version": 1, "messageBytes": "gQIA…", "lastValidBlockHeight": "289104452", "presigned": [] },
-  "simulation": { "unitsConsumed": "62646", "unitsByInstruction": ["28851", "…"] },
-  "rpcCalls": { "getMultipleAccounts": 1, "simulateTransaction": 0, "getLatestBlockhash": 1 }
+  "kind": "sign",
+  "land": "inOrder",
+  "steps": [{
+    "signs": "transaction",
+    "message": "sdp-intents/1 on mainnet || 1: transfer 100 of 2b1kV6… from 7xKX… to 9aBc… | interface: solana.org/token.transfer@1.0.0 | implementation: solana.org/token-2022-transfer@1.0.0 | tier 1 | onchain checks: verify_intent, assertions | rent cap 2039280 lamports || fee and rent payer KoRa… | priority fee 5000 lamports",
+    "intents": [{ "display": "Send 100 PYUSD to 9aBc…", "digests": { "…": "…" }, "builder": { "program": "2gMF…" }, "verify": 0, "span": { "start": 2, "end": 4 } }],
+    "signers": [{ "address": "KoRa…", "role": "payer:fee" }, { "address": "7xKX…", "role": "input:from" }],
+    "priorityFeeLamports": "5000",
+    "instructions": [{ "programAddress": "…", "accounts": [{ "address": "…", "role": 1 }], "data": "…" }],
+    "computeBudget": { "unitLimit": "61000", "loadedAccountsDataSizeLimit": "131072", "heapSize": "32768" },
+    "transaction": { "version": 1, "messageBytes": "gQIA…", "lastValidBlockHeight": "289104452", "presigned": [] },
+    "simulation": { "unitsConsumed": "62646", "unitsByInstruction": ["28851", "…"] }
+  }]
 }
 ```
 
@@ -303,7 +317,7 @@ while (answer.next.kind !== "done") {
    itself, and a ring spend signs a digest (4.17). The message names the
    cluster, then the flow when it has more than one step, then each intent after `|| <n>:` (the
    implementation's template, the ids, the tier, the onchain checks, and the rent cap), then the
-   payers and the priority fee. The flow part is
+   payers, the priority fee, and a bundle's tip. The flow part is
    `flow: <id>@<version> step <i> of <n>: <the flow's message>`.
 2. An id is `organization/name@version`. The registry never publishes a version twice, so an id
    names one document, and the message holds no digest. The guarantees are in the documents, which
@@ -316,8 +330,9 @@ while (answer.next.kind !== "done") {
    instructions (4.6).
 6. `prepare` compiles a v1 transaction (SIMD-0385) and sets the compute unit limit and the loaded
    data size from the simulation. A provider's transaction keeps its own version.
-7. `rpcCalls` counts the requests of this plan only (4.4).
-8. A plan is never returned alone. It is the `plan` of a `next` whose `kind` is `sign`.
+7. When `signs` is `digest`, the step holds `digest` in place of `transaction`. When it is
+   `message`, the step holds no transaction.
+8. `land` is `inOrder` or `bundle`, with `tipLamports` for a bundle. One step lands `inOrder`.
 
 ### 4.2 Recipes and the builder ABI
 
@@ -511,7 +526,8 @@ simulation's logs. A builtin program logs none, so its entry is `null`.
 2. `noOtherOutflows`: no balance of a signer input goes down except as a postcondition allows.
 3. No owner, delegate, or close authority of a signer input's token accounts changes, with no
    postcondition needed. `delegates` and `noDelegate` (4.15) are the only exceptions.
-4. The fee payer loses at most the fee and the rent cap.
+4. The fee payer loses at most the fee, a bundle's tip, the rent cap, and the SOL that an outflow
+   postcondition lets it send, such as a deposit that it shields.
 5. No instruction names a payer or a signer input, except as the fee payer, as the funder of a new
    account or an ATA create, or where the interface requires that signer.
 
@@ -707,8 +723,9 @@ pub struct ImplementationDocV1 {
 `InterfaceDocV1` holds the id, name, display, inputs, outputs, postconditions, addresses, and a
 flag for async settlement (4.15). `IntentDocV1` holds both ids at exact versions, the option flags,
 and each input in borsh. A step's intent also holds the flow implementation's id, the outer
-intent's SHA-256, and the step's index. A flow implementation adds a steps table and a conditions
-table.
+intent's SHA-256, and the step's index. A flow implementation is spec 1.1: its extension area
+holds `FlowDocV1`, which names a steps table, a step inputs table, and a conditions table in the
+body. A document with no extension stays at 1.0, so its bytes do not change.
 
 | Code | Values |
 | :-- | :-- |
@@ -901,7 +918,8 @@ service.
 | `vault.deposit`, `vault.withdraw` | `ondo-usdy-*`, through the Jupiter wrapper | remote, tier 2 |
 | `vault.deposit`, `vault.withdraw`, `vault.requestWithdrawal`, `vault.cancelRequest` | `hastra-*` | static |
 | `vault.requestDeposit` | `test-provider-deposit`, as legacy, v0 with a lookup table, and v1 | remote, tier 3 |
-| `private.transfer` | `zolana-transfer`, through Zolana on the surfnet | shielded, tier 3 |
+| `private.transfer`, `private.shield` | `zolana-transfer`, `zolana-shield`, through Zolana on the surfnet | shielded, tier 3 |
+| `private.send` | `zolana-send`: shield when the private balance is short, then transfer | flow |
 
 The e2e also compiles a plan of instructions alone as legacy, v0, and v1, and refuses a remote
 endpoint that adds a token approval to an attacker.
@@ -920,8 +938,8 @@ A single index or version reads only the addresses that its id and version deriv
 | `GET /v1/{interfaces\|implementations}/{organization}/{name}/versions/{version}` | | One version, with its document in the definition format |
 | `GET /v1/interfaces/{organization}/{name}/implementations` | | The interface's implementations, each with its approval |
 | `POST /v1/interfaces/{organization}/{name}/versions/{version}/matches` | `{ inputs, payers, all }` | Each implementation, with its status |
-| `POST /v1/intents/start`, `POST /v1/intents/continue` | A plan request, or `{ progress, signed? }` | `{ progress, next }`, with the RPC calls |
-| `POST /v1/intents/recover` | `{ owner }` | The owner's stopping points (4.19) |
+| `POST /v1/intents/start`, `POST /v1/intents/continue` | A plan request, or `{ progress, signatures? }` | `{ progress, next }`, with the RPC calls |
+| `POST /v1/intents/recover` | `{ owner }` | The owner's stopping points (4.19). Not built. |
 | `POST /v1/verify` | A message or a transaction of any version, and the plan's message | What the transaction proves |
 | `GET /v1/wallets`, `POST /v1/send` | A message or a transaction | The local wallets, and a send |
 | `GET /v1/ring`, `POST /v1/ring/shield` | An address and lamports | The local wallets' private SOL, and a deposit |
@@ -1164,15 +1182,15 @@ If release, call, and return do not fit one transaction, execute becomes three s
 the funds stay with the PDA, bound by `h`, and `ring.refund` recovers them.
 
 Only the owner knows the notes, so only the owner's client builds the proofs of execute and
-settle. Those steps need no approval. The service runs them inside a call to `next` when custody
-holds the viewing key, and the client runs them when it builds alone. The request stores the intent
+settle. Those steps need no approval. The service returns them as a `send` when custody holds the
+viewing key, and the client builds them when it builds alone. The request stores the intent
 encrypted to the owner, so the viewing key finds an open request and the plan to finish it.
 
 **Approvals.** Zolana's default deposit sets the note's blinding from its leaf, so the request
 digest is known only after the shield lands: two approvals. Its ring deposit takes a blinding from
 the client, so the shield and the request sign together: one approval. On the anonymous rail, the
-proof needs the signature, so the service or the client proves and relays the spend after the
-signature returns in `signed`. The client recomputes `h`, the notes, and the digest from the plaintext that the step
+proof needs the signature, so the service or the client proves the spend after the signature
+returns, and the next answer is a `send` of it. The client recomputes `h`, the notes, and the digest from the plaintext that the step
 returns, so the service cannot change what the user signs.
 
 | Mode | SDP sees | SDP can move funds |
@@ -1191,10 +1209,16 @@ first account is the spender. The planner resolves the notes and asks its caller
 service builds and proves the spend with the spender's shielded keys, through the ring's indexer
 and prover, and the planner checks the transaction as it checks a provider's transaction. The
 spender pays the fee, and `verify_intent` refuses kind 5. The recipe stays tier 3 until the client
-recomputes the notes and the digest.
+recomputes the notes and the digest. A writable spender account marks a deposit: `zolana-shield`
+moves public SOL into a note of the spender, with no proof.
 
-`just playground` runs Zolana v0.6.0-alpha on the surfnet. The playground shields SOL and
-sends it privately. The Zolana crates come from the fork `ChewingGlass/privacy-rings`, which pins
+`solana.org/private.send` has one implementation, `zolana-send`, a flow of two steps (4.19). The
+shield step is done when the sender holds the amount privately, so a funded sender skips it. The
+transfer step waits until the ring's indexer shows the deposit, and is done when its notes are
+spent, which the indexer answers from the nullifiers.
+
+`just playground` runs Zolana v0.6.0-alpha on the surfnet. The playground shields SOL, sends
+it privately, and walks the loop of `private.send` one call at a time. The Zolana crates come from the fork `ChewingGlass/privacy-rings`, which pins
 `solana-address`, `solana-hash`, and `wincode` to this workspace's versions.
 
 **Open questions for Helius.**
@@ -1260,7 +1284,8 @@ one transaction. `verify_intent` refuses a `flow` recipe and checks each step's 
       { "name": "claim",
         "intent": { "interface": "solana.org/vault.claimDeposit@^1",
                     "inputs": { "owner": "{inputs.owner}", "request": "{steps.request.outputs.request}", "minShares": "{inputs.minShares}" } },
-        "ready": { "account": "{steps.request.outputs.request}", "data": { "offset": "72", "type": "u8", "equals": "2" } },
+        "ready": { "account": "{steps.request.outputs.request}", "data": { "offset": "72", "type": "u8", "equals": "2" },
+                   "message": "the vault fulfils request {steps.request.outputs.request}" },
         "done": { "account": "{steps.request.outputs.request}", "exists": false } }
     ]
   }
@@ -1271,9 +1296,9 @@ one transaction. `verify_intent` refuses a `flow` recipe and checks each step's 
 | :-- | :-- |
 | `intent` | The interface, an optional implementation, and the inputs. Without an implementation, the planner matches one with `applies`. |
 | `ready` | The step can start. Absent means at once. |
-| `done` | The step's effect is on chain. A signed step is also done when its transaction lands. |
+| `done` | The step's effect is on chain. A step is also done when its planned transaction lands. |
 | `recover` | The intent that returns the owner's funds when the flow stops after this step |
-| `submitter` | For a step that needs no approval: `owner`, which needs the owner's keys, or `anyone`. The service runs it inside a call to `next`, or the client does when it keeps the keys (4.17). |
+| `submitter` | For a step that needs no approval: `owner`, which needs the owner's keys, or `anyone`. The service returns it as a `send`, or the client builds it when it keeps the keys (4.17). |
 
 A value can name an earlier step: `{steps.<name>.outputs.*}`, or `{steps.<name>.plan.*}` for facts
 that the step's plan fixed, such as a ring spend's nullifiers.
@@ -1286,6 +1311,10 @@ that the step's plan fixed, such as a ring spend's nullifiers.
 | Private balance | `{ "privateBalance": { "owner", "mint", "min" } }` | The holder of the viewing key |
 | Spent | `{ "spent": "{steps.pay.plan.nullifiers}" }` | Anyone, with the nullifiers |
 | Committed | `{ "committed": "{steps.pay.plan.notes.0}" }` | Anyone, with the commitment |
+| Landed | `{ "landed": ["<signature>"], "expires": { "blockHeight": "…" } }` | Anyone. Only the planner writes it, for a step in flight. |
+
+A condition can carry a `message` template, as a postcondition does. The planner renders it with
+the condition's values.
 
 **Position.** The planner reads the position from the chain. It scans the steps from the last to
 the first, and the last step whose `done` holds is the position. The flow is done when its last
@@ -1313,9 +1342,11 @@ plans each returned intent as any other, and the step must name `recover`.
    `recover` intent that only the owner signs returns them. The owner finds each stopping point
    from its keys and the chain alone. The planner checks each step's simulated state against this
    rule, and refuses a flow that breaks it.
-2. **In flight.** A signed step that has not landed blocks a new plan of that step until it lands
-   or expires. A transaction expires at its `lastValidBlockHeight`, and a ring spend at its
-   `expiry_unix_ts`. Otherwise a second plan can choose other notes or accounts, and both land.
+2. **In flight.** `progress` keeps each planned transaction until it lands or expires, and
+   `continue` returns that same transaction in the meantime. The same bytes give the same
+   signature, so a step lands at most once, whoever signs or sends it. A transaction expires at
+   its `lastValidBlockHeight`, and a ring spend at its `expiry_unix_ts`. Only then does the step
+   plan again, because a new plan can choose other notes or accounts.
 3. **Pinned versions.** The flow pins every implementation version when its first step plans.
    An unapproved or removed version stops the flow, and `recover` still works.
 
@@ -1325,8 +1356,32 @@ approvals, the worst tier of its steps, and each stopping point:
 if stopped after step 1: 100 USDC in a request note, refundable after <time>`. Each step's message
 starts with the flow part of 4.1, so a signer of step 2 sees the flow that it continues. A program
 or remote flow names its builder or endpoint instead, because its steps are not known at the
-start. A step whose bytes do not depend on an
-earlier result can be signed at the start, so the approval count follows from the steps.
+start.
+
+**Packing and landing.** A sign holds every step that the caller can sign now, so a wallet
+approves them at once and `signatures` holds one entry for each, in order.
+
+1. The planner packs a request's intents into as few transactions as fit, in order, and keeps each
+   segment whole. An intent that is a flow adds its own steps. Steps of neighboring intents share
+   a transaction when both are ready and fit.
+2. A step is ready to sign with the steps before it when its bytes do not depend on their results,
+   or when they land as a bundle. The approval count follows from this.
+3. Each transaction proves its own message.
+
+| `land` | The steps reach the chain | The planner |
+| :-- | :-- | :-- |
+| `inOrder` | The caller sends each step after the step before it lands | Plans each step on the state that the earlier steps predict. A step whose state changed fails onchain, and the loop plans it again. |
+| `bundle` | The caller sends one Jito bundle: at most 5 transactions, all or none, in order, with nothing between them | Simulates the steps in sequence, and adds the tip to the last transaction, within `tipLamports` |
+
+With `landing: auto`, the planner bundles when the steps depend on each other's state and the
+request sets `tipLamports`.
+
+A bundle does not make the steps safe. Each signed transaction is valid alone, so anyone who holds
+it can land it without the others. Every stopping point inside a bundle therefore passes the
+recoverable rule, as the steps of a flow do. A bundle makes landing reliable, and nothing more.
+
+A batch shares one blockhash, so it expires as one, and `pendingUntil` covers it. A wallet of 4.7
+needs no bundle: it runs each step only after it checks the one before.
 
 **`progress`.** Each response holds `progress`: a JSON record of what the chain cannot show about
 the flow. Each answer replaces it whole, and the caller never edits it. A planner reads it: the
@@ -1341,7 +1396,7 @@ debug or audit.
   "steps": {
     "request": {
       "plan": { "nullifiers": ["…"], "notes": ["…"], "outputs": { "note": "…" } },
-      "signed": [{ "signature": "5Kd…", "expires": { "unixTs": "1784143330" } }]
+      "planned": { "step": { "…": "the sign step, as next returned it" }, "expires": { "blockHeight": "289104452" }, "signatures": ["5Kd…"] }
     }
   }
 }
@@ -1352,7 +1407,7 @@ debug or audit.
 | `request` | The plan request | What the flow does |
 | `pins` | The exact implementation versions | Rule 3 |
 | `steps.*.plan` | The facts that each planned step fixed | Conditions that the chain cannot show alone |
-| `steps.*.signed` | Each signed transaction or digest, with its expiry | Rule 2 |
+| `steps.*.planned` | The step's sign step, its expiry, and the signatures that the caller sent, until it lands or expires | Rule 2 |
 
 The value holds no position, because the chain gives it. It holds no key, secret, or note
 plaintext. It is a few KB. No one signs it: a changed value can stall or repeat the caller's own
@@ -1363,17 +1418,26 @@ flow, and every step still plans from the chain and passes the signer's verifier
 | Route | Body | Returns |
 | :-- | :-- | :-- |
 | `POST /v1/intents/start` | A plan request | `{ progress, next }` |
-| `POST /v1/intents/continue` | `{ progress, signed? }` | `{ progress, pendingUntil?, next }` |
+| `POST /v1/intents/continue` | `{ progress, signatures? }` | `{ progress, pendingUntil?, next }` |
 | `POST /v1/intents/recover` | `{ owner }` | Each stopping point that the owner's keys find, with its `recover` intent |
 
 ```json
-{ "kind": "sign", "signs": "transaction", "plan": { "…": "a plan of 4.1" } }
-{ "kind": "wait", "for": "the vault to fulfil request 7xQ…", "checkAfter": "2026-11-14T20:00:00Z" }
+{ "kind": "sign", "land": "inOrder", "steps": [{ "signs": "transaction", "message": "…", "transaction": { "…": "…" } }] }
+{ "kind": "send", "land": "inOrder", "transactions": ["<base64 wire transaction>"] }
+{ "kind": "wait", "step": "claim",
+  "until": { "account": "7xQ…", "data": { "offset": "72", "type": "u8", "equals": "2" } },
+  "message": "the vault fulfils request 7xQ…", "checkAfter": "2026-11-14T20:00:00Z" }
 { "kind": "done", "message": "the owner holds 98.2 kUSDC shares" }
 ```
 
-The loop of 4.1 handles each kind. `pendingUntil` is the latest expiry of a signed step that has
-not landed.
+The loop of 4.1 handles each kind. A `wait` names its step, and `until` is that step's `ready`
+condition with its values bound, in the language above. A caller can watch `until` itself, such
+as with an account subscription, and call `continue` when it holds. A step in flight waits on
+`landed` when the caller sent its signatures. Without them, `continue` returns the same
+transaction to sign. A step with no `done` condition is done only when its signature lands, so
+after it expires with no signature `continue` refuses with `signatureNeeded`, because the service
+cannot tell whether it landed. `pendingUntil` is the latest block height at which a planned step
+can land.
 
 **Continuity.** The caller keeps the last `progress` and sends it back to continue. Nothing else is
 needed, from any device or after any restart.
@@ -1381,7 +1445,7 @@ needed, from any device or after any restart.
 1. A lost `progress` loses no funds. `POST /v1/intents/recover` finds each stopping point and returns its
    `recover` intent.
 2. After a lost `progress`, the caller waits until `pendingUntil` before it starts the same operation
-   again, so that an old signed transaction cannot land beside a new one.
+   again, so that an old planned transaction cannot land beside a new one.
 3. Without `progress`, the caller can recover but cannot continue. A ring request stores the intent
    encrypted to the owner, so the viewing key finds both the funds and the plan (4.17).
 
@@ -1452,6 +1516,7 @@ transaction over any RPC.
 | Registry admin | No new organizations | A stolen admin can create organizations for free names, or open creation. It cannot change an existing organization. | No new organizations | A multisig admin. The upgrade authority can replace the program. |
 | Lighthouse | The transaction fails | A bug can pass a bad transaction. It is immutable. | Every guarded transaction fails | An audit |
 | Flow builder or endpoint (4.19) | The flow stops at a stopping point | It can pick steps that waste time. Each step still plans and verifies as any intent. | The flow stops at a stopping point | `POST /v1/intents/recover` |
+| Jito block engine (4.19) | A bundle does not land, expires, and plans again | It can land part of a bundle. Each stopping point is recoverable. | `landing: inOrder` | `inOrder` |
 | The caller's `progress` value | | A changed value stalls or repeats the caller's flow | The caller cannot continue | `POST /v1/intents/recover`, after `pendingUntil` |
 | The signer's RPC | The signer cannot verify, so it does not sign | A false document can change the message text. The chain still runs the real implementation within its real postconditions. | The signer cannot verify | A trusted RPC, or a local copy of each document, which never changes |
 
@@ -1466,8 +1531,11 @@ transaction over any RPC.
 
 **Flows.** Each step is a plan with every check above, so a flow adds no trust to a step. A flow
 adds two risks. A stop between steps can leave funds in an escrow or a request, so the
-recoverable rule makes the owner able to find and recover each stopping point alone. A signed step
-that is planned again can land twice, so the in-flight rule waits for its expiry. The `progress`
+recoverable rule makes the owner able to find and recover each stopping point alone. A step that is
+planned twice can land twice, so `continue` returns the same transaction until it expires. The
+service sends nothing, so it never holds a signed transaction. A Jito bundle
+can land in part, because each of its transactions is valid alone, so its stopping points pass
+the same rule. The `progress`
 value is caller data. A changed value can stall or repeat only that caller's flow.
 
 | STRIDE | Where | Control |
@@ -1538,8 +1606,10 @@ Production is a separate project with its own design document.
 | `verify_intent` with static, program, and remote recipes | About 27,000 to 29,000 compute units for an SPL transfer |
 | The warm cache and the first-fetch prefetch | One `getMultipleAccounts` for a cold SPL transfer |
 | Every transaction version | Legacy, v0 with lookup tables, and v1 land through the CLI and the provider |
+| Flows: spec 1.1, static flows, `start` and `continue`, `progress`, the in-flight rule, and the `exists`, `privateBalance`, and `spent` conditions | `private.send` shields, waits, transfers, and is done, in the e2e and the playground |
 
-The prototype serves `POST /v1/prepare`, which returns only the `plan` of a one-step flow's `sign`.
+The prototype also serves `POST /v1/prepare`, which returns the plan of a request of one step,
+without `progress`. The service runs the loop. The Rust client does not run it yet.
 
 Not built:
 
@@ -1551,7 +1621,10 @@ Not built:
 6. Private intents other than the transfer, the client's check of a shielded spend, and the
    anonymous rail (4.17).
 7. The postconditions and clusters that SDP's other modules need (4.18).
-8. Flows (4.19): the `flow` recipe, the step conditions, the three routes, and `check_intent`.
+8. Of flows (4.19): program and remote flows, `recover`, step inputs from earlier steps'
+   outputs, the `data`, `balance`, and `committed` conditions, the recoverable check, the flow part
+   of each step's message, packing several intents into several transactions, Jito bundles,
+   `check_intent`, `execute_step`, and `verify_intent`'s check of a step's flow.
 
 ## 11. Cost
 

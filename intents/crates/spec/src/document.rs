@@ -5,7 +5,8 @@ use crate::{Address, PodU16, SpecError};
 
 pub const MAGIC: [u8; 4] = *b"SDPI";
 pub const SPEC_MAJOR: u8 = 1;
-pub const SPEC_MINOR: u8 = 0;
+/// The latest minor version that a reader knows. 1 adds the flow recipe (`DESIGN.md`, 4.19).
+pub const SPEC_MINOR: u8 = 1;
 
 wire_code! {
     pub enum DocumentKind {
@@ -104,7 +105,7 @@ mod tests {
 
     #[test]
     fn header_refuses_a_later_minor_version() {
-        let header = DocumentHeaderV1 { spec_minor: 1, ..header(DocumentKind::Implementation, 0) };
+        let header = DocumentHeaderV1 { spec_minor: 2, ..header(DocumentKind::Implementation, 0) };
 
         assert_eq!(header.check(DocumentKind::Implementation, 11), Err(SpecError::UnsupportedVersion));
     }

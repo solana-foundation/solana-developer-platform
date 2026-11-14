@@ -17,6 +17,7 @@ impl Document<'_, '_> {
             RecipeKind::Remote => self.remote_recipe("instructions"),
             RecipeKind::RemoteTransaction => self.remote_recipe("transaction"),
             RecipeKind::Shielded => self.shielded_recipe(),
+            RecipeKind::Flow => self.flow_recipe(),
         }
     }
 

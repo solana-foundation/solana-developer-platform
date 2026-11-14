@@ -2,12 +2,14 @@
 
 mod accounts;
 mod applies;
+mod flow;
 mod recipe;
 mod segments;
 mod write;
 
 use sdp_intents_spec::wire::{
-    AccountV1, AppliesV1, DocumentIdV1, InstructionV1, OutputBindingV1, PostConditionV1, SegmentV1, SemverV1,
+    AccountV1, AppliesV1, ConditionV1, DocumentIdV1, InstructionV1, OutputBindingV1, PostConditionV1, SegmentV1,
+    SemverV1, StepInputV1, StepV1,
 };
 use sdp_intents_spec::{Address, CheckKind, RecipeKind};
 use serde_json::Value;
@@ -15,7 +17,7 @@ use serde_json::Value;
 use crate::catalog::Catalog;
 use crate::diagnostic::{Code, Diagnostic, Report};
 use crate::encoding::address;
-use crate::envelope::{parse_json, read_envelope, reported, root};
+use crate::envelope::{parse_json, read_envelope, reported, root, Envelope, SPEC, SPEC_FLOWS};
 use crate::id::Id;
 use crate::limits;
 use crate::post_condition::{read_post_condition, Output};
@@ -51,6 +53,7 @@ pub(crate) fn compile_implementation(text: &str, catalog: &Catalog) -> Result<Co
 /// this module.
 struct Build<'c, 's> {
     schema: &'c Schema,
+    catalog: &'c Catalog,
     sink: &'s mut Sink,
     pool: Pool,
     addresses: AddressTable,
@@ -63,6 +66,9 @@ struct Build<'c, 's> {
     applies: Vec<AppliesV1>,
     post_conditions: Vec<PostConditionV1>,
     output_bindings: Vec<OutputBindingV1>,
+    steps: Vec<StepV1>,
+    step_inputs: Vec<StepInputV1>,
+    conditions: Vec<ConditionV1>,
 }
 
 /// A cluster's name, such as `mainnet`, or its genesis hash.
@@ -82,7 +88,7 @@ fn compile(value: &Value, catalog: &Catalog, sink: &mut Sink) -> Option<Compiled
     let cluster = object.required("cluster", sink).and_then(|cluster| read_cluster(&cluster, sink));
 
     let implements = object.required("implements", sink).and_then(|node| read_implements(&node, catalog, sink))?;
-    let mut build = Build::new(&implements.interface.schema, sink);
+    let mut build = Build::new(&implements.interface.schema, catalog, sink);
 
     if let Some(applies) = object.field("applies") {
         build.read_applies(&applies);
@@ -97,6 +103,8 @@ fn compile(value: &Value, catalog: &Catalog, sink: &mut Sink) -> Option<Compiled
     build.read_post_conditions(&mut object);
 
     let pointer = object.pointer().to_owned();
+    check_spec(envelope.as_ref(), recipe.as_ref(), &pointer, build.sink);
+
     let remote =
         recipe.as_ref().is_some_and(|recipe| matches!(recipe.kind, RecipeKind::Remote | RecipeKind::RemoteTransaction));
     let invokes_only =
@@ -132,10 +140,27 @@ fn compile(value: &Value, catalog: &Catalog, sink: &mut Sink) -> Option<Compiled
     })
 }
 
+/// A flow states spec 1.1, which adds it, and every other implementation states 1.0.
+fn check_spec(envelope: Option<&Envelope>, recipe: Option<&recipe::Recipe>, pointer: &str, sink: &mut Sink) {
+    let (Some(spec), Some(recipe)) = (envelope.and_then(|envelope| envelope.spec.as_deref()), recipe) else {
+        return;
+    };
+    let wanted = if recipe.kind == RecipeKind::Flow { SPEC_FLOWS } else { SPEC };
+
+    if spec != wanted {
+        sink.push(Diagnostic::new(
+            Code::InvalidValue,
+            &format!("{pointer}/spec"),
+            format!("this implementation states `{wanted}`"),
+        ));
+    }
+}
+
 impl<'c, 's> Build<'c, 's> {
-    fn new(schema: &'c Schema, sink: &'s mut Sink) -> Self {
+    fn new(schema: &'c Schema, catalog: &'c Catalog, sink: &'s mut Sink) -> Self {
         Self {
             schema,
+            catalog,
             sink,
             pool: Pool::default(),
             addresses: AddressTable::default(),
@@ -148,6 +173,9 @@ impl<'c, 's> Build<'c, 's> {
             applies: Vec::new(),
             post_conditions: Vec::new(),
             output_bindings: Vec::new(),
+            steps: Vec::new(),
+            step_inputs: Vec::new(),
+            conditions: Vec::new(),
         }
     }
 
@@ -181,6 +209,8 @@ impl<'c, 's> Build<'c, 's> {
             ("seeds", self.seeds.len(), limits::SEEDS),
             ("instructions", self.instructions.len(), limits::INSTRUCTIONS),
             ("segments", self.segments.len(), limits::SEGMENTS),
+            ("steps", self.steps.len(), limits::STEPS),
+            ("conditions", self.conditions.len(), limits::CONDITIONS),
         ];
 
         counts.into_iter().for_each(|(what, count, limit)| limits::check(self.sink, pointer, what, count, limit));

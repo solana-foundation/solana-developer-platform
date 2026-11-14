@@ -5,6 +5,11 @@ import { type VerifiedTransaction, Verifier } from "@sdp/intents-verifier";
 
 import type { Plan } from "@/api";
 
+/// What the verifier compares: the message that the service says the transaction proves.
+interface Planned {
+  message: string;
+}
+
 export interface Verified extends VerifiedTransaction {
   /// Whether the transaction proves the message that the plan shows.
   matches: boolean;
@@ -28,7 +33,7 @@ function verifier(): Promise<Verifier> {
   return loading;
 }
 
-export async function verifyPlan(plan: Plan, transaction: NonNullable<Plan["transaction"]>) {
+export async function verifyPlan(plan: Planned, transaction: NonNullable<Plan["transaction"]>) {
   const message = Uint8Array.from(atob(transaction.messageBytes), (character) =>
     character.charCodeAt(0)
   );

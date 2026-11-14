@@ -9,7 +9,7 @@ use crate::{
 /// references. Each accessor finds its table from the fixed part, and returns entries in place.
 #[derive(Clone, Copy)]
 pub struct Implementation<'a> {
-    body: &'a [u8],
+    bytes: &'a [u8],
     fixed: &'a ImplementationDocV1,
 }
 
@@ -35,7 +35,26 @@ impl<'a> Implementation<'a> {
             DocumentHeaderV1::LEN.checked_add(usize::from(header.body_len.get())).ok_or(SpecError::LengthMismatch)?;
         let body = bytes.get(..body_end).ok_or(SpecError::Truncated)?;
 
-        Ok(Self { body, fixed: Region::new(body).fixed(0)? })
+        Ok(Self { bytes, fixed: Region::new(body).fixed(0)? })
+    }
+
+    /// The header and the body. The view keeps the whole document, so that it stays small enough
+    /// for a program's stack frame, and finds the body from the header.
+    fn body(&self) -> &'a [u8] {
+        let end = DocumentHeaderV1::LEN.saturating_add(usize::from(self.fixed.header.body_len.get()));
+
+        self.bytes.get(..end).unwrap_or_default()
+    }
+
+    /// The fields of later minor versions, such as a flow's tables (spec 1.1).
+    pub(super) fn extension(&self) -> &'a [u8] {
+        let end = DocumentHeaderV1::LEN.saturating_add(usize::from(self.fixed.header.body_len.get()));
+
+        self.bytes.get(end..).unwrap_or_default()
+    }
+
+    pub(super) fn spec_minor(&self) -> u8 {
+        self.fixed.header.spec_minor
     }
 
     pub fn id(&self) -> &'a DocumentIdV1 {
@@ -57,7 +76,7 @@ impl<'a> Implementation<'a> {
 
     /// Bytes of the pool, such as a name, a template, or a literal.
     pub fn text(&self, range: PoolRefV1) -> Result<&'a [u8], SpecError> {
-        Region::new(self.body).pool(self.fixed.pool)?.get(range)
+        Region::new(self.body()).pool(self.fixed.pool)?.get(range)
     }
 
     pub fn name(&self) -> Result<&'a [u8], SpecError> {
@@ -116,8 +135,8 @@ impl<'a> Implementation<'a> {
         self.range(self.fixed.seeds, seeds)
     }
 
-    fn table<T: bytemuck::Pod>(&self, table: TableRefV1) -> Result<&'a [T], SpecError> {
-        Region::new(self.body).table(table)
+    pub(super) fn table<T: bytemuck::Pod>(&self, table: TableRefV1) -> Result<&'a [T], SpecError> {
+        Region::new(self.body()).table(table)
     }
 
     fn range<T: bytemuck::Pod>(&self, table: TableRefV1, range: RangeV1) -> Result<&'a [T], SpecError> {

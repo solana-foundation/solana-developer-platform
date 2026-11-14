@@ -67,7 +67,7 @@ pub use remote::{
     FrozenTransaction, InputValue, ProviderSignature, RemoteAnswer, RemoteCall, RemoteInput, RemoteOutput,
 };
 pub use sdp_intents_engine::Payers;
-pub use shielded::{ShieldedCall, ShieldedNote};
+pub use shielded::{ShieldedCall, ShieldedNote, ShieldedSource};
 pub use simulation::{FixedMessage, ReturnData, Simulation, SimulationResult};
 pub use transaction::{Budget, RequiredSignature, SignerRole, Transaction, COMPUTE_BUDGET_PROGRAM};
 pub use verifier::{verify_transaction, VerifiedIntent, VerifiedTransaction, VerifyError, VerifyStep};

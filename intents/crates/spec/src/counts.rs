@@ -30,6 +30,7 @@ impl Counts {
             ValueSource::Address => index < self.addresses,
             ValueSource::Literal => index < self.literals,
             ValueSource::Bumps => self.bumps && index == 0,
+            ValueSource::StepOutput | ValueSource::StepFact => false,
         };
 
         if !exists {

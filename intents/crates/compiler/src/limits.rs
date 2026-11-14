@@ -15,6 +15,8 @@ pub const ACCOUNTS: usize = 32;
 pub const SEEDS: usize = 32;
 pub const INSTRUCTIONS: usize = 12;
 pub const SEGMENTS: usize = 48;
+pub const STEPS: usize = 8;
+pub const CONDITIONS: usize = 16;
 
 /// Adds a finding when `count` is over `limit`. `what` names the counted things, such as
 /// `accounts`.

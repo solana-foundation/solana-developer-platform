@@ -26,28 +26,52 @@ const MAX_VERIFY_ROUNDS: usize = 8;
 /// With `tamper`, the transaction differs from the plan, as `tamper` says. A request for the
 /// instructions alone reads no blockhash.
 pub async fn prepare(service: &Service, text: &str, tamper: bool) -> Result<Value, ServiceError> {
+    Ok(prepare_step(service, text, tamper).await?.json)
+}
+
+/// A plan as JSON, and what planning it fixed.
+pub(crate) struct PreparedStep {
+    pub json: Value,
+    pub facts: StepFacts,
+}
+
+/// What a step's plan fixes, which a flow keeps in `progress` (`DESIGN.md`, 4.19).
+#[derive(Default)]
+pub(crate) struct StepFacts {
+    /// The nullifiers of the notes that the step's spends consume.
+    pub nullifiers: Vec<[u8; 32]>,
+    /// The last block height at which the step's transaction can land. A plan of instructions alone
+    /// has none.
+    pub last_valid_block_height: Option<u64>,
+}
+
+pub(crate) async fn prepare_step(service: &Service, text: &str, tamper: bool) -> Result<PreparedStep, ServiceError> {
     let request: Value = serde_json::from_str(text)?;
-    let Planned { mut plan, output } = planned(service, text, None).await?;
+    let Planned { mut plan, output, facts } = planned(service, text, None).await?;
 
     if tamper {
         tamper_with(&mut plan);
     }
 
-    let prepared = match output {
-        PlanOutput::Instructions => instructions_only(plan)?,
+    let (prepared, expiry) = match output {
+        PlanOutput::Instructions => (instructions_only(plan)?, None),
         PlanOutput::Transaction => {
             let recent = service.chain.latest_blockhash().await?;
 
-            prepared(plan, recent.blockhash, recent.last_valid_block_height)?
+            (prepared(plan, recent.blockhash, recent.last_valid_block_height)?, Some(recent.last_valid_block_height))
         }
     };
 
-    Ok(plan_json::plan(&prepared, request))
+    // A spend keeps the blockhash that its proof binds, so its own expiry wins.
+    let facts = StepFacts { last_valid_block_height: facts.last_valid_block_height.or(expiry), ..facts };
+
+    Ok(PreparedStep { json: plan_json::plan(&prepared, request), facts })
 }
 
 struct Planned {
     plan: Plan,
     output: PlanOutput,
+    facts: StepFacts,
 }
 
 /// Plans `text` with the registry's documents. A remote call takes `answer` when it is set.
@@ -72,7 +96,9 @@ async fn planned(service: &Service, text: &str, answer: Option<RemoteAnswer>) ->
         priority_fee_lamports: compiled.priority_fee_lamports,
     };
 
-    Ok(Planned { plan: plan(service, &plan_request, answer).await?, output: compiled.output })
+    let Answered { plan, facts } = plan(service, &plan_request, answer).await?;
+
+    Ok(Planned { plan, output: compiled.output, facts })
 }
 
 /// A body of `{ "message": base64, "expected": text }`, or of `{ "transaction": base64 }` with a
@@ -155,14 +181,21 @@ fn tamper_with(plan: &mut Plan) {
     }
 }
 
+/// A plan, and the facts of the spends that it holds.
+struct Answered {
+    plan: Plan,
+    facts: StepFacts,
+}
+
 async fn plan(
     service: &Service,
     request: &PlanRequest<'_>,
     answer: Option<RemoteAnswer>,
-) -> Result<Plan, ServiceError> {
+) -> Result<Answered, ServiceError> {
     let chain = &service.chain;
     let mut planner = Planner::new(request, fresh_address())?;
     let mut accounts = AccountMap::default();
+    let mut facts = StepFacts::default();
 
     loop {
         match planner.next(&accounts)? {
@@ -177,9 +210,14 @@ async fn plan(
             },
             Step::Shield(call) => match &answer {
                 Some(answer) => planner.called(answer.clone())?,
-                None => planner.called(crate::shielded::answer(service, &call).await?)?,
+                None => {
+                    let spend = crate::shielded::answer(service, &call).await?;
+                    facts.nullifiers.extend(spend.nullifiers);
+                    facts.last_valid_block_height = Some(spend.last_valid_block_height);
+                    planner.called(spend.answer)?
+                }
             },
-            Step::Done(plan) => return Ok(*plan),
+            Step::Done(plan) => return Ok(Answered { plan: *plan, facts }),
         }
     }
 }
@@ -262,5 +300,7 @@ pub fn calls_json(calls: sdp_intents_chain::RpcCalls) -> Value {
         "getMultipleAccounts": calls.get_multiple_accounts,
         "simulateTransaction": calls.simulate_transaction,
         "getLatestBlockhash": calls.get_latest_blockhash,
+        "getBlockHeight": calls.get_block_height,
+        "getSignatureStatuses": calls.get_signature_statuses,
     })
 }

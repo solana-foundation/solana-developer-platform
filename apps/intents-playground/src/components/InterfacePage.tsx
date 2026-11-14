@@ -88,7 +88,9 @@ export function InterfacePage(props: Props) {
         </div>
 
         <Implementations {...props} />
-        {props.selected?.recipe === "shielded" && <PrivacyRing signature={props.signature} />}
+        {listed.id?.startsWith("solana.org/private.") && (
+          <PrivacyRing signature={props.signature} />
+        )}
         <OnchainChecks options={props.options} onOptions={props.onOptions} />
       </div>
     </section>

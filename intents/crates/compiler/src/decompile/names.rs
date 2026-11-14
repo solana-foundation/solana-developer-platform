@@ -46,7 +46,11 @@ impl<'d> Names<'d> {
                 .ok_or(DecompileError::Spec(SpecError::BadIndex)),
             ValueSource::Bumps if index == 0 => Ok("{builder.bumps}".to_owned()),
             ValueSource::Bumps => Err(DecompileError::Spec(SpecError::BadIndex)),
-            ValueSource::Address | ValueSource::Literal | ValueSource::None => {
+            ValueSource::Address
+            | ValueSource::Literal
+            | ValueSource::None
+            | ValueSource::StepOutput
+            | ValueSource::StepFact => {
                 Err(DecompileError::Unrepresentable("an address, a literal, or nothing where a reference must be"))
             }
         }

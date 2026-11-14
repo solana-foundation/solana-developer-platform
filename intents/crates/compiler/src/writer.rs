@@ -63,13 +63,14 @@ impl AddressTable {
 pub struct Writer {
     bytes: Vec<u8>,
     fixed_len: usize,
+    extension: Vec<u8>,
 }
 
 impl Writer {
     pub fn new<Fixed: Pod>() -> Self {
         let fixed_len = core::mem::size_of::<Fixed>();
 
-        Self { bytes: vec![0; fixed_len], fixed_len }
+        Self { bytes: vec![0; fixed_len], fixed_len, extension: Vec::new() }
     }
 
     pub fn table<T: Pod>(&mut self, entries: &[T]) -> TableRefV1 {
@@ -87,14 +88,20 @@ impl Writer {
         range
     }
 
+    /// The fixed part of the extension area, which only fields of a later minor version use.
+    pub fn extension<Fixed: Pod>(&mut self, fixed: &Fixed) {
+        self.extension = bytes_of(fixed).to_vec();
+    }
+
+    /// A document with no extension stays at spec 1.0, so its bytes do not change.
     pub fn header(&self, kind: DocumentKind) -> DocumentHeaderV1 {
         DocumentHeaderV1 {
             magic: MAGIC,
             spec_major: SPEC_MAJOR,
-            spec_minor: SPEC_MINOR,
+            spec_minor: if self.extension.is_empty() { 0 } else { SPEC_MINOR },
             kind: kind.into(),
             body_len: clamp_u16(self.bytes.len().saturating_sub(DocumentHeaderV1::LEN)),
-            extension_len: PodU16::new(0),
+            extension_len: clamp_u16(self.extension.len()),
         }
     }
 
@@ -104,6 +111,7 @@ impl Writer {
             start.copy_from_slice(bytes_of(fixed));
         }
 
+        self.bytes.extend_from_slice(&self.extension);
         self.bytes
     }
 }

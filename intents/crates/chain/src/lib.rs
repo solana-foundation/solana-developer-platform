@@ -174,6 +174,29 @@ impl CachedRpc {
             .collect()
     }
 
+    /// The `confirmed` block height, against which a blockhash's `last_valid_block_height` expires.
+    pub async fn block_height(&self) -> Result<u64, ChainError> {
+        self.inner.calls.count(Counter::GetBlockHeight);
+
+        Ok(self.inner.rpc.get_block_height_with_commitment(CommitmentConfig::confirmed()).await?)
+    }
+
+    /// For each signature: `Some(true)` when it landed at `confirmed` and succeeded, `Some(false)`
+    /// when it landed and failed, and `None` when the cluster does not hold it.
+    pub async fn signature_outcomes(&self, signatures: &[Signature]) -> Result<Vec<Option<bool>>, ChainError> {
+        self.inner.calls.count(Counter::GetSignatureStatuses);
+        let statuses = self.inner.rpc.get_signature_statuses(signatures).await?.value;
+
+        Ok(statuses
+            .into_iter()
+            .map(|status| {
+                status
+                    .filter(|status| status.satisfies_commitment(CommitmentConfig::confirmed()))
+                    .map(|status| status.err.is_none())
+            })
+            .collect())
+    }
+
     /// Sends a signed transaction and waits until it is confirmed.
     pub async fn send(&self, transaction: &VersionedTransaction) -> Result<Signature, ChainError> {
         self.inner.calls.count(Counter::SendTransaction);

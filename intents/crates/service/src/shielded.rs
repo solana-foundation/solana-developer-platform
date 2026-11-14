@@ -7,20 +7,28 @@ use serde_json::{json, Value};
 
 use sdp_intents_client::message::WireMessage;
 use sdp_intents_client::remote::frozen_from_parts;
-use sdp_intents_planner::{RemoteAnswer, ShieldedCall};
-use sdp_intents_shielded::{Endpoints, Shielded, ShieldedWallet};
+use sdp_intents_planner::{RemoteAnswer, ShieldedCall, ShieldedSource};
+use sdp_intents_shielded::{Endpoints, PreparedSpend, Shielded, ShieldedWallet};
 use sdp_intents_spec::Address;
 
 use crate::error::ServiceError;
 use crate::flows::lookup_tables;
 use crate::Service;
 
-/// One private transfer: the spend that the ring's SDK builds.
+/// One spend that the ring's SDK builds: a deposit from public funds, or a private transfer.
 struct Transfer {
     seed: [u8; 32],
+    source: ShieldedSource,
     to: solana_address::Address,
     asset: solana_address::Address,
     amount: u64,
+}
+
+/// A spend for the planner, and the facts of it that a flow keeps (`DESIGN.md`, 4.19).
+pub struct Spend {
+    pub answer: RemoteAnswer,
+    pub nullifiers: Vec<[u8; 32]>,
+    pub last_valid_block_height: u64,
 }
 
 /// A local wallet as the ring's SDK reads it.
@@ -140,19 +148,43 @@ async fn blocking<T: Send + 'static>(
 
 /// Builds and proves the spend that `call` asks for. The planner checks the transaction that comes
 /// back as it checks a provider's transaction.
-pub async fn answer(service: &Service, call: &ShieldedCall) -> Result<RemoteAnswer, ServiceError> {
+pub async fn answer(service: &Service, call: &ShieldedCall) -> Result<Spend, ServiceError> {
     let endpoints = endpoints(service)?;
     let transfer = transfer(service, call)?;
 
-    let bytes = blocking(move || prepare(&endpoints, &transfer)).await?;
+    let prepared = blocking(move || prepare(&endpoints, &transfer)).await?;
 
-    let message = WireMessage::parse(&bytes)?;
+    let message = WireMessage::parse(&prepared.message_bytes())?;
     let tables = lookup_tables(&service.chain, &message.lookup_tables()).await?;
+    let frozen = frozen_from_parts(&message, Vec::new(), &tables)?;
 
-    Ok(RemoteAnswer { frozen: Some(frozen_from_parts(&message, Vec::new(), &tables)?), ..RemoteAnswer::default() })
+    Ok(Spend {
+        answer: RemoteAnswer { frozen: Some(frozen), ..RemoteAnswer::default() },
+        last_valid_block_height: prepared.last_valid_block_height(),
+        nullifiers: prepared.nullifiers,
+    })
 }
 
-/// The ring's SDK sends one note to one recipient, and the spender pays the fee.
+/// The owner's private balance of `mint`, which only a local wallet's viewing key reads.
+pub async fn private_balance(service: &Service, owner: &Address, mint: &Address) -> Result<u64, ServiceError> {
+    let endpoints = endpoints(service)?;
+    let seed = service.wallets.seed_of(owner).ok_or_else(|| {
+        ServiceError::refused("shielded", "the owner is not a local wallet, so the service has no viewing key")
+    })?;
+    let mint = solana(*mint);
+
+    blocking(move || Shielded::connect(&endpoints).balance(&ShieldedWallet::from_seed(&seed)?, mint)).await
+}
+
+/// Whether a transaction spent any of `nullifiers`.
+pub async fn spent(service: &Service, nullifiers: Vec<[u8; 32]>) -> Result<bool, ServiceError> {
+    let endpoints = endpoints(service)?;
+
+    blocking(move || Shielded::connect(&endpoints).spent(&nullifiers)).await
+}
+
+/// The ring's SDK sends one note to one recipient, and the spender pays the fee. A deposit's note is
+/// the spender's own.
 fn transfer(service: &Service, call: &ShieldedCall) -> Result<Transfer, ServiceError> {
     let [note] = call.notes.as_slice() else {
         return Err(ServiceError::refused("shielded", "a shielded spend here sends exactly one note"));
@@ -166,19 +198,25 @@ fn transfer(service: &Service, call: &ShieldedCall) -> Result<Transfer, ServiceE
         return Err(ServiceError::refused("shielded", "the spender pays the fee of its shielded spend"));
     }
 
+    if call.source == ShieldedSource::Public && note.owner != call.spender {
+        return Err(ServiceError::refused("shielded", "a deposit creates a note of the spender only"));
+    }
+
     let seed = service.wallets.seed_of(&call.spender).ok_or_else(|| {
         ServiceError::refused("shielded", "the spender is not a local wallet, so the service has no shielded keys")
     })?;
 
-    Ok(Transfer { seed, to: solana(note.owner), asset: solana(note.asset), amount: note.amount })
+    Ok(Transfer { seed, source: call.source, to: solana(note.owner), asset: solana(note.asset), amount: note.amount })
 }
 
-fn prepare(endpoints: &Endpoints, transfer: &Transfer) -> Result<Vec<u8>, sdp_intents_shielded::ShieldedError> {
+fn prepare(endpoints: &Endpoints, transfer: &Transfer) -> Result<PreparedSpend, sdp_intents_shielded::ShieldedError> {
     let wallet = ShieldedWallet::from_seed(&transfer.seed)?;
-    let prepared =
-        Shielded::connect(endpoints).prepare_transfer(&wallet, transfer.to, transfer.asset, transfer.amount)?;
+    let ring = Shielded::connect(endpoints);
 
-    Ok(prepared.message_bytes())
+    match transfer.source {
+        ShieldedSource::Public => ring.prepare_deposit(&wallet, transfer.asset, transfer.amount),
+        ShieldedSource::Notes => ring.prepare_transfer(&wallet, transfer.to, transfer.asset, transfer.amount),
+    }
 }
 
 fn solana(address: Address) -> solana_address::Address {
