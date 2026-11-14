@@ -8,13 +8,13 @@ publish.workspace = true
 rust-version.workspace = true
 
 # The Zolana SDK crates come from a fork that bumps solana-address, solana-hash, and wincode to the
-# versions of this workspace's Agave 4.3 graph. The path names a sibling checkout of the fork's
-# `sdp/solana-address-2.7` branch, until the fork has a URL to pin by revision.
+# versions of this workspace's Agave 4.3 graph. The fork's branch `sdp/solana-address-2.7` starts at
+# Zolana's v0.6.0-alpha tag, which the local Photon and prover match.
 [dependencies]
-spr-client = { path = "../../../../zolana/sdk-libs/client", features = ["client"] }
-spr-keypair = { path = "../../../../zolana/sdk-libs/keypair" }
-spr-program = { path = "../../../../zolana/sdk-libs/program" }
-spr-transaction = { path = "../../../../zolana/sdk-libs/transaction" }
+spr-client = { git = "https://github.com/ChewingGlass/privacy-rings", rev = "e97a1393d1f63a8fff8afb8b27f1f57f11ad85e5", features = ["client"] }
+spr-keypair = { git = "https://github.com/ChewingGlass/privacy-rings", rev = "e97a1393d1f63a8fff8afb8b27f1f57f11ad85e5" }
+spr-program = { git = "https://github.com/ChewingGlass/privacy-rings", rev = "e97a1393d1f63a8fff8afb8b27f1f57f11ad85e5" }
+spr-transaction = { git = "https://github.com/ChewingGlass/privacy-rings", rev = "e97a1393d1f63a8fff8afb8b27f1f57f11ad85e5" }
 solana-address.workspace = true
 solana-keypair = "=3.1.2"
 solana-signer = "=3.0.1"
