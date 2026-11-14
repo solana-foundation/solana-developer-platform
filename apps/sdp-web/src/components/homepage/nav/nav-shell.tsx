@@ -1,6 +1,5 @@
 "use client";
 
-import { Badge } from "@sdp/ui/badge";
 import { cn } from "@sdp/ui/cn";
 import Image from "next/image";
 import Link from "next/link";
@@ -69,11 +68,7 @@ export function NavShell({
               width={332}
               height={30}
             />
-            {brandBadge ? (
-              <Badge variant="outline" className={styles.brandBadge}>
-                {brandBadge}
-              </Badge>
-            ) : null}
+            {brandBadge ? <span className={styles.brandBadge}>{brandBadge}</span> : null}
           </Link>
           <NavPanels
             groups={groups}
