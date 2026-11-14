@@ -14,7 +14,7 @@ pub const VERSION: u8 = 1;
 pub struct Progress {
     pub v: u8,
     pub request: Value,
-    /// Exact ids, such as `solana.org/zolana-shield@1.0.0`, read when the flow started.
+    /// Exact ids, such as `solana.org/privacy-rings-shield@1.0.0`, read when the flow started.
     pub pins: Vec<String>,
     #[serde(default)]
     pub steps: BTreeMap<String, StepRecord>,
@@ -29,10 +29,12 @@ pub struct StepRecord {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StepFacts {
-    /// Base58, for a `spent` condition.
+    /// The accounts that the pool creates for the step's nullifiers, in base58, which a `spent`
+    /// condition reads.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub nullifiers: Vec<String>,
+    pub nullifier_accounts: Vec<String>,
 }
 
 /// A step's transaction until it lands or expires. `continue` returns the same step meanwhile, so
@@ -56,7 +58,7 @@ pub struct Expiry {
 
 impl StepFacts {
     fn is_empty(&self) -> bool {
-        self.nullifiers.is_empty()
+        self.nullifier_accounts.is_empty()
     }
 }
 
@@ -73,7 +75,7 @@ impl Progress {
         Ok(progress)
     }
 
-    /// The exact id that the flow pinned for `id`, such as `solana.org/zolana-shield`.
+    /// The exact id that the flow pinned for `id`, such as `solana.org/privacy-rings-shield`.
     pub fn pinned(&self, id: &str) -> Option<&str> {
         self.pins.iter().map(String::as_str).find(|pin| pin.split_once('@').is_some_and(|(pinned, _)| pinned == id))
     }

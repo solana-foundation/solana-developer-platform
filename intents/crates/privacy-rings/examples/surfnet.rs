@@ -1,13 +1,13 @@
 //! A private transfer on a surfnet that holds Zolana's programs, with Photon and the prover running.
 //! Alice shields 1 SOL and sends Bob 0.25 SOL privately; each wallet then reads its own balance.
 //!
-//!   cargo run -p sdp-intents-shielded --example surfnet -- <rpc> <indexer> <prover>
+//!   cargo run -p sdp-intents-privacy-rings --example surfnet -- <rpc> <indexer> <prover>
 
 use std::str::FromStr as _;
 use std::thread::sleep;
 use std::time::Duration;
 
-use sdp_intents_shielded::{Endpoints, Shielded, ShieldedWallet};
+use sdp_intents_privacy_rings::{Endpoints, Shielded, ShieldedWallet};
 use solana_address::Address;
 use solana_keypair::Keypair;
 use spr_client::{sign_transaction, Rpc as _, SolanaRpc};
@@ -42,7 +42,8 @@ fn main() -> Result<(), Failure> {
     shielded.shield_sol(&alice, SOL)?;
     println!("alice private balance: {}", balance_reaching(&shielded, &alice, SOL)?);
 
-    let prepared = shielded.prepare_transfer(&alice, bob.address(), SOL_MINT, SOL / 4)?;
+    let transfer = sdp_intents_privacy_rings::Amount { asset: SOL_MINT, amount: SOL / 4 };
+    let prepared = shielded.prepare_transfer(&alice, alice.address(), bob.address(), transfer)?;
     let transaction = sign_transaction(prepared.message.message, &[alice.funding()])?;
     let signature = shielded.client().rpc().process_transaction(transaction)?;
     shielded.client().confirm_private_transaction_sync(signature)?;

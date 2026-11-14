@@ -3751,6 +3751,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sdp-intents-privacy-rings"
+version = "0.1.0"
+dependencies = [
+ "solana-address 2.7.0",
+ "solana-keypair",
+ "solana-signer",
+ "spr-client",
+ "spr-interface",
+ "spr-keypair",
+ "spr-program",
+ "spr-transaction",
+]
+
+[[package]]
 name = "sdp-intents-registry-client"
 version = "0.1.0"
 dependencies = [
@@ -3777,8 +3791,8 @@ dependencies = [
  "sdp-intents-engine",
  "sdp-intents-lighthouse",
  "sdp-intents-planner",
+ "sdp-intents-privacy-rings",
  "sdp-intents-registry-client",
- "sdp-intents-shielded",
  "sdp-intents-spec",
  "serde",
  "serde_json",
@@ -3789,19 +3803,6 @@ dependencies = [
  "solana-signer",
  "solana-transaction",
  "tokio",
-]
-
-[[package]]
-name = "sdp-intents-shielded"
-version = "0.1.0"
-dependencies = [
- "solana-address 2.7.0",
- "solana-keypair",
- "solana-signer",
- "spr-client",
- "spr-keypair",
- "spr-program",
- "spr-transaction",
 ]
 
 [[package]]

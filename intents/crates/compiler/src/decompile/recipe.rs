@@ -1,7 +1,7 @@
 //! The recipe: a static list of instructions, a builder call, a remote endpoint, or a shielded spend.
 
 use sdp_intents_spec::wire::InstructionV1;
-use sdp_intents_spec::{AddressSource, RecipeKind, SpecError};
+use sdp_intents_spec::{AddressSource, RecipeKind, ShieldedProtocol, SpecError};
 use serde_json::{Map, Value};
 
 use super::implementation::Document;
@@ -78,8 +78,14 @@ impl Document<'_, '_> {
         let pool = instructions.first().ok_or(SpecError::BadRecipe)?;
         let notes: Vec<Value> = instructions.iter().map(|note| self.note(note)).collect::<Result<_, _>>()?;
 
+        let protocol = match self.view.shielded_protocol()? {
+            Some(ShieldedProtocol::PrivacyRings) => "privacy-rings",
+            None => return Err(SpecError::BadRecipe.into()),
+        };
+
         Ok(object([
             ("kind", Value::from("shielded")),
+            ("protocol", Value::from(protocol)),
             ("pool", Value::from(self.program(pool)?)),
             ("accounts", Value::Array(self.accounts(declared)?)),
             ("notes", Value::Array(notes)),

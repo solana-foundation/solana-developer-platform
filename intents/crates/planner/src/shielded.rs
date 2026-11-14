@@ -1,11 +1,14 @@
 //! A shielded recipe's spend (`DESIGN.md`, 4.17): whose notes it consumes and which notes it
 //! creates. Building and proving the spend needs the spender's shielded keys, the indexer, and the
-//! prover, so the caller builds it. The planner checks the transaction that comes back as it checks
-//! a provider's transaction.
+//! prover, so the caller builds it and returns its instructions. They become the segment's built
+//! instructions, which `verify_intent` limits to the pool and Lighthouse bounds by the
+//! postconditions, as for a remote recipe.
 
 use sdp_intents_engine::{Chain, Recipe};
-use sdp_intents_spec::Address;
+use sdp_intents_spec::{Address, ShieldedProtocol};
 
+use crate::plan::Built;
+use crate::remote::RemoteAnswer;
 use crate::{Instruction, PlanError};
 
 /// A note's asset is the first 32 bytes of its data, and its amount the 8 after.
@@ -25,6 +28,8 @@ pub enum ShieldedSource {
 /// The spend that a shielded segment asks its caller to build.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShieldedCall {
+    /// Which protocol's client builds the spend.
+    pub protocol: ShieldedProtocol,
     /// The privacy pool program, or the ring program that authorizes the notes.
     pub pool: Address,
     /// The wallet whose notes the spend consumes. It signs and pays.
@@ -59,7 +64,10 @@ pub(crate) fn call<C: Chain>(
     let notes = instructions.iter().map(note).collect::<Result<Vec<_>, _>>()?;
     let spender_writable = recipe.implementation().accounts()?.first().is_some_and(|spender| spender.writable());
 
+    let protocol = recipe.implementation().shielded_protocol()?.ok_or(PlanError::ShieldedSpend)?;
+
     Ok(ShieldedCall {
+        protocol,
         pool,
         spender: *recipe.address(0).ok_or(PlanError::Unresolved)?,
         source: if spender_writable { ShieldedSource::Public } else { ShieldedSource::Notes },
@@ -67,6 +75,26 @@ pub(crate) fn call<C: Chain>(
         fee_payer: *recipe.payers().fee,
         priority_fee_lamports,
     })
+}
+
+/// The caller's spend as the segment's built instructions. Each instruction calls the pool, so the
+/// spend can move nothing outside it but what the assertions allow.
+pub(crate) fn built(recipe: &Recipe<'_>, answer: RemoteAnswer) -> Result<Built, PlanError> {
+    let pool = pool(recipe)?;
+    let calls_only_the_pool = answer.instructions.iter().all(|instruction| instruction.program == pool);
+
+    if answer.frozen.is_some() || answer.instructions.is_empty() || !calls_only_the_pool {
+        return Err(PlanError::ShieldedSpend);
+    }
+
+    Built::from_remote(recipe, answer)
+}
+
+/// The pool program: the program of the recipe's first note.
+fn pool(recipe: &Recipe<'_>) -> Result<Address, PlanError> {
+    let first = recipe.implementation().instructions()?.first().ok_or(PlanError::ShieldedNote)?;
+
+    recipe.address(first.program).copied().ok_or(PlanError::Unresolved)
 }
 
 fn note(instruction: &Instruction) -> Result<ShieldedNote, PlanError> {

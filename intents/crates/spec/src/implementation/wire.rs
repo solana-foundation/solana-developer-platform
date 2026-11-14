@@ -25,14 +25,14 @@ wire_code! {
 
 impl RecipeKind {
     /// The trust tier of `DESIGN.md`, 4.16: 1 when `verify_intent` rebuilds the instructions, 2 when
-    /// only the assertions bound them, and 3 when only a simulation checks them. A shielded spend is 3
-    /// until the signer's verifier checks its notes. A flow adds no trust to its steps, each of
-    /// which has its own tier.
+    /// only the assertions bound them, and 3 when only a simulation checks them. A shielded spend is 2:
+    /// `verify_intent` limits it to the pool, and the assertions bound its public effects. A flow adds
+    /// no trust to its steps, each of which has its own tier.
     pub fn tier(self) -> u8 {
         match self {
             Self::Static | Self::Program | Self::Flow => 1,
-            Self::Remote => 2,
-            Self::RemoteTransaction | Self::Shielded => 3,
+            Self::Remote | Self::Shielded => 2,
+            Self::RemoteTransaction => 3,
         }
     }
 }

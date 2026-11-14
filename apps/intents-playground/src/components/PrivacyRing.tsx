@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { api, type RingBalance } from "@/api";
+import { api, type RingBalance, ServiceError } from "@/api";
 
 const SHIELDED_LAMPORTS = 1_000_000_000;
 const LAMPORTS_PER_SOL = 1_000_000_000;
@@ -16,6 +16,7 @@ export function PrivacyRing({ signature }: Props) {
   const [balances, setBalances] = useState<RingBalance[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [shielding, setShielding] = useState<string | null>(null);
+  const [noRing, setNoRing] = useState(false);
 
   const read = useCallback(() => {
     api
@@ -24,7 +25,10 @@ export function PrivacyRing({ signature }: Props) {
         setBalances(read);
         setError(null);
       })
-      .catch((failure: unknown) => setError(String(failure)));
+      .catch((failure: unknown) => {
+        if (failure instanceof ServiceError && failure.code === "noShielded") setNoRing(true);
+        else setError(String(failure));
+      });
   }, []);
 
   // The indexer reads a landed transaction a moment after it lands.
@@ -47,12 +51,15 @@ export function PrivacyRing({ signature }: Props) {
       .finally(() => setShielding(null));
   };
 
+  if (noRing) return null;
+
   return (
     <div className="card f-section">
       <div>
-        <div className="section-title">Privacy ring</div>
+        <div className="section-title">Solana Privacy Rings</div>
         <div className="section-sub">
-          Private SOL of each local wallet. Only the wallet's viewing key reads it.
+          Private SOL of each local wallet in the default ring. Only the wallet's viewing key reads
+          it.
         </div>
       </div>
 

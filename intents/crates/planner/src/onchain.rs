@@ -66,8 +66,8 @@ impl OnchainInputs<'_, '_> {
     /// A builder's roles come from its instructions, and a static recipe has none.
     fn verify_instruction(&self, guarded: &[Address], counts: SegmentCounts) -> Result<Instruction, PlanError> {
         let builder_roles = match self.recipe.implementation().recipe()? {
-            RecipeKind::Program | RecipeKind::Remote => self.built.roles(),
-            RecipeKind::Static | RecipeKind::RemoteTransaction | RecipeKind::Shielded | RecipeKind::Flow => Vec::new(),
+            RecipeKind::Program | RecipeKind::Remote | RecipeKind::Shielded => self.built.roles(),
+            RecipeKind::Static | RecipeKind::RemoteTransaction | RecipeKind::Flow => Vec::new(),
         };
         let bumps = self.recipe.bumps()?;
         let verify = VerifyIntent {

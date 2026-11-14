@@ -2,6 +2,11 @@
   "head": "1.0.0",
   "approveNewVersions": false,
   "approvals": {
-    "solana.org/zolana-transfer": ["1.0.0"]
+    "solana.org/privacy-rings-transfer": [
+      "1.0.0"
+    ],
+    "solana.org/privacy-rings-shield-and-transfer": [
+      "1.0.0"
+    ]
   }
 }

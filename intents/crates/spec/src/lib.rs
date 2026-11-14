@@ -52,7 +52,8 @@ mod test_support;
 pub use address::Address;
 pub use error::SpecError;
 pub use implementation::{
-    AddressSource, AppliesKind, ConditionKind, Encoding, Implementation, RecipeKind, Segment, StepValue, Submitter,
+    AddressSource, AppliesKind, ConditionKind, Encoding, Implementation, RecipeKind, Segment, ShieldedProtocol,
+    StepValue, Submitter,
 };
 pub use intent::{Intent, IntentOptions};
 pub use interface::Interface;
@@ -67,7 +68,7 @@ pub mod wire {
     pub use crate::document::{DocumentHeaderV1, DocumentIdV1, DocumentKind, SemverV1, MAGIC, SPEC_MAJOR, SPEC_MINOR};
     pub use crate::implementation::{
         AccountV1, AppliesV1, ConditionV1, DocumentRefV1, FlowDocV1, ImplementationDocV1, InstructionV1,
-        OutputBindingV1, SegmentV1, StepInputV1, StepV1, NO_CONDITION, STEP_FACT_NULLIFIERS,
+        OutputBindingV1, SegmentV1, ShieldedDocV1, StepInputV1, StepV1, NO_CONDITION, STEP_FACT_NULLIFIERS,
     };
     pub use crate::intent::IntentDocV1;
     pub use crate::interface::{InputV1, InterfaceDocV1, OutputV1, INTERFACE_SETTLES_LATER};

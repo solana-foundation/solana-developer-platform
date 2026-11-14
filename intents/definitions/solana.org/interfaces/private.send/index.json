@@ -1,7 +1,0 @@
-{
-  "head": "1.0.0",
-  "approveNewVersions": false,
-  "approvals": {
-    "solana.org/zolana-send": ["1.0.0"]
-  }
-}

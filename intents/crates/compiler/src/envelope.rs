@@ -9,8 +9,9 @@ use crate::id::{parse_version, Id};
 use crate::reader::{list, Node, Object, Sink};
 
 pub const SPEC: &str = "sdp-intents@1.0";
-/// Spec 1.1 adds the flow recipe (`DESIGN.md`, 4.19). A document that uses it states 1.1.
-pub const SPEC_FLOWS: &str = "sdp-intents@1.1";
+/// Spec 1.1 adds the flow recipe (`DESIGN.md`, 4.19) and a shielded recipe's protocol (4.17). A
+/// document that uses either states 1.1.
+pub const SPEC_1_1: &str = "sdp-intents@1.1";
 
 pub struct Envelope {
     pub spec: Option<String>,
@@ -59,7 +60,7 @@ pub fn read_kind(object: &mut Object<'_>, kind: &str, sink: &mut Sink) -> Option
     let spec = object.required("spec", sink).and_then(|spec| {
         let text = spec.str(sink)?;
 
-        if text != SPEC && text != SPEC_FLOWS {
+        if text != SPEC && text != SPEC_1_1 {
             sink.push(
                 Diagnostic::new(Code::InvalidValue, &spec.pointer, format!("expected `{SPEC}`, found `{text}`"))
                     .help("this compiler reads spec versions 1.0 and 1.1"),

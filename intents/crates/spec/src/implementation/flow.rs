@@ -124,7 +124,7 @@ impl StepValue {
 impl<'a> Implementation<'a> {
     /// The flow tables, when the recipe is a flow.
     pub fn flow(&self) -> Result<Option<&'a FlowDocV1>, SpecError> {
-        if self.extension().is_empty() {
+        if self.recipe()? != super::wire::RecipeKind::Flow {
             return Ok(None);
         }
 

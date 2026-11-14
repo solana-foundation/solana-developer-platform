@@ -1,7 +1,7 @@
 import type { Candidate, CandidateStatus, InterfaceDocument, ListedInterface, Wallet } from "@/api";
 import { InputField } from "@/components/InputField";
 import { PrivacyRing } from "@/components/PrivacyRing";
-import { type FormValues, type IntentOptions, renderTemplate } from "@/intent";
+import { type FormValues, renderTemplate } from "@/intent";
 
 interface Props {
   listed: ListedInterface;
@@ -9,17 +9,13 @@ interface Props {
   values: FormValues;
   wallets: Wallet[];
   feePayer: string;
-  /// A shielded spend's fee payer is its spender, so the form does not offer another.
-  feePayerFixed: boolean;
   signature: string | null;
   candidates: Candidate[] | null;
   candidatesError: string | null;
   selected: Candidate | null;
-  options: IntentOptions;
   onValue: (name: string, value: string) => void;
   onFeePayer: (address: string) => void;
   onSelect: (candidate: Candidate) => void;
-  onOptions: (options: IntentOptions) => void;
 }
 
 /// The interface as an endpoint: its display is the title, its inputs are the form, and its
@@ -63,7 +59,6 @@ export function InterfacePage(props: Props) {
               id="fee-payer"
               className="select"
               value={props.feePayer}
-              disabled={props.feePayerFixed}
               onChange={(event) => props.onFeePayer(event.target.value)}
             >
               {wallets.map((wallet) => (
@@ -88,10 +83,7 @@ export function InterfacePage(props: Props) {
         </div>
 
         <Implementations {...props} />
-        {listed.id?.startsWith("solana.org/private.") && (
-          <PrivacyRing signature={props.signature} />
-        )}
-        <OnchainChecks options={props.options} onOptions={props.onOptions} />
+        <PrivacyRing signature={props.signature} />
       </div>
     </section>
   );
@@ -147,48 +139,4 @@ function StatusBadge({ status }: { status: CandidateStatus }) {
   const badge = STATUS_BADGES[status];
 
   return <span className={`badge ${badge.tone}`}>{badge.label}</span>;
-}
-
-function OnchainChecks({
-  options,
-  onOptions,
-}: {
-  options: IntentOptions;
-  onOptions: (options: IntentOptions) => void;
-}) {
-  const switches: { key: "verifyIntent" | "assertions"; label: string; sub: string }[] = [
-    {
-      key: "verifyIntent",
-      label: "verify_intent",
-      sub: "The registry checks the built instructions against the intent.",
-    },
-    {
-      key: "assertions",
-      label: "Lighthouse assertions",
-      sub: "Each postcondition becomes an assertion after the segment.",
-    },
-  ];
-
-  return (
-    <div className="card f-section">
-      <div className="section-title">Onchain checks</div>
-      {switches.map((entry) => (
-        <label className="switch-row" key={entry.key}>
-          <span>
-            <span className="switch-label">{entry.label}</span>
-            <span className="section-sub">{entry.sub}</span>
-          </span>
-          <span className="toggle">
-            <input
-              type="checkbox"
-              checked={options[entry.key]}
-              onChange={(event) => onOptions({ ...options, [entry.key]: event.target.checked })}
-            />
-            <span className="toggle-track" />
-            <span className="toggle-thumb" />
-          </span>
-        </label>
-      ))}
-    </div>
-  );
 }

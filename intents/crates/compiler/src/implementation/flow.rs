@@ -48,7 +48,7 @@ impl Build<'_, '_> {
 
         steps.iter().zip(0u8..).for_each(|(step, position)| self.read_step(step, position, &names));
 
-        Some(Recipe { kind: RecipeKind::Flow, url: Vec::new() })
+        Some(Recipe { kind: RecipeKind::Flow, url: Vec::new(), protocol: None })
     }
 
     fn read_step(&mut self, node: &Node<'_>, position: u8, steps: &[String]) {

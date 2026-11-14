@@ -194,7 +194,7 @@ impl<C: Chain> Values<'_, '_, C> {
             RecipeKind::RemoteTransaction => {
                 format!(" | endpoint: {} | tier 3, checked by simulation only", printable(implementation.url()?)?)
             }
-            RecipeKind::Shielded => " | shielded | tier 3, checked by simulation only".to_owned(),
+            RecipeKind::Shielded => " | shielded | tier 2".to_owned(),
             RecipeKind::Flow => return Err(PlanError::FlowRecipe),
         };
         let options = self.recipe.intent().options()?;

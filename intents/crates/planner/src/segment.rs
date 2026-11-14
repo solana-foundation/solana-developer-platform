@@ -172,9 +172,10 @@ impl<'a> SegmentPlanner<'a> {
         match core::mem::replace(&mut self.state, State::Finished) {
             State::AwaitingRemote => {
                 let built = match self.recipe.implementation().recipe()? {
-                    RecipeKind::RemoteTransaction | RecipeKind::Shielded => {
+                    RecipeKind::RemoteTransaction => {
                         Built::from_frozen(&self.recipe, answer, self.priority_fee_lamports)?
                     }
+                    RecipeKind::Shielded => shielded::built(&self.recipe, answer)?,
                     _ => Built::from_remote(&self.recipe, answer)?,
                 };
                 self.state = State::Built(Box::new(built));
@@ -203,8 +204,16 @@ impl<'a> SegmentPlanner<'a> {
         Ok(SegmentStep::Call(remote::call(&self.recipe, self.priority_fee_lamports)?))
     }
 
-    /// A shielded spend is built by the caller, which holds the spender's keys.
+    /// A shielded spend is built by the caller, which holds the spender's keys. `verify_intent` cannot
+    /// rebuild it, so its guarantees hold onchain only when Lighthouse asserts them, as for a remote
+    /// recipe.
     fn call_shielded<C: Chain>(&mut self, earlier: &Earlier<'_, C>) -> Result<SegmentStep, PlanError> {
+        let options = self.recipe.intent().options()?;
+
+        if options.verify_intent && !options.assertions {
+            return Err(PlanError::RemoteNeedsAssertions);
+        }
+
         let call = shielded::call(&self.recipe, earlier.chain, self.priority_fee_lamports)?;
         self.state = State::AwaitingRemote;
 

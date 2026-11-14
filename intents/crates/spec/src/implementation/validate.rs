@@ -57,13 +57,22 @@ impl Implementation<'_> {
         Ok(())
     }
 
-    /// Only a flow has an extension area, and it needs spec 1.1.
+    /// A flow's tables and a shielded recipe's protocol are in the extension area, which needs spec
+    /// 1.1. Every other recipe has no extension.
     fn validate_extension(&self) -> Result<(), SpecError> {
-        match (self.recipe()?, self.flow()?) {
-            (RecipeKind::Flow, Some(_)) if self.spec_minor() >= 1 => self.validate_flow(self.literals()?.len()),
-            (RecipeKind::Flow, _) => Err(SpecError::BadRecipe),
-            (_, None) if self.extension().is_empty() => Ok(()),
-            _ => Err(SpecError::BadRecipe),
+        let needs_extension = matches!(self.recipe()?, RecipeKind::Flow | RecipeKind::Shielded);
+
+        if !needs_extension {
+            return if self.extension().is_empty() { Ok(()) } else { Err(SpecError::BadRecipe) };
+        }
+
+        if self.spec_minor() < 1 {
+            return Err(SpecError::BadRecipe);
+        }
+
+        match self.recipe()? {
+            RecipeKind::Flow => self.validate_flow(self.literals()?.len()),
+            _ => self.shielded_protocol().map(|_| ()),
         }
     }
 

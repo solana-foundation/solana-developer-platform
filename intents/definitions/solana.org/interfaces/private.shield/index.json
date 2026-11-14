@@ -2,6 +2,6 @@
   "head": "1.0.0",
   "approveNewVersions": false,
   "approvals": {
-    "solana.org/zolana-shield": ["1.0.0"]
+    "solana.org/privacy-rings-shield": ["1.0.0"]
   }
 }

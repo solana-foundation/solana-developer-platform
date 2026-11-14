@@ -67,7 +67,7 @@ async fn advance(service: &Service, mut progress: Progress, call: Advance) -> Re
         return answer(&progress, done(&steps, &progress));
     };
 
-    match in_flight(service, &steps, &progress, next, name).await? {
+    match in_flight(service, &progress, name).await? {
         Flight::Pending(step) => return answer(&progress, sign(step)),
         Flight::Landing(until) => return answer(&progress, until),
         Flight::Gone => progress.step(name).planned = None,
@@ -165,37 +165,46 @@ enum Flight {
     Pending(Value),
     /// Signed and unexpired: the caller waits until it lands or expires.
     Landing(Value),
-    /// Expired, or failed: the step plans again.
+    /// Failed, or expired with a signature that the cluster does not hold: the step plans again.
     Gone,
 }
 
-async fn in_flight(
-    service: &Service,
-    steps: &Steps,
-    progress: &Progress,
-    position: usize,
-    name: &str,
-) -> Result<Flight, ServiceError> {
+async fn in_flight(service: &Service, progress: &Progress, name: &str) -> Result<Flight, ServiceError> {
     let Some(planned) = progress.steps.get(name).and_then(|record| record.planned.as_ref()) else {
         return Ok(Flight::Idle);
     };
-    let Some(expires) = planned.expires else {
-        return Ok(Flight::Gone);
-    };
-
     if landed(service, planned).await? == Some(false) {
         return Ok(Flight::Gone);
     }
 
+    // A plan of instructions alone has no blockhash, so only the caller's signature tells whether
+    // the transaction that it compiled landed.
+    let Some(expires) = planned.expires else {
+        return match planned.signatures.is_empty() {
+            true => Err(ServiceError::refused(
+                "signatureNeeded",
+                format!("step `{name}` holds instructions that the caller compiled. Send the signature of that transaction."),
+            )),
+            false => Ok(Flight::Landing(json!({
+                "kind": "wait",
+                "step": name,
+                "until": { "landed": planned.signatures },
+                "message": format!("step `{name}` lands"),
+                "checkAfter": check_after(),
+            }))),
+        };
+    };
+
     let live = service.chain.block_height().await? <= expires.block_height;
 
+    // Only the cluster's record of the signature proves that an expired step did not land. A `done`
+    // condition that does not hold proves nothing: an indexer can lag, and a forester closes the
+    // nullifier accounts.
     match (live, planned.signatures.is_empty()) {
         (true, true) => Ok(Flight::Pending(planned.step.clone())),
         (true, false) => Ok(Flight::Landing(landing_wait(name, planned, expires))),
-        (false, _) if steps.condition(position, Which::Done).is_some() || !planned.signatures.is_empty() => {
-            Ok(Flight::Gone)
-        }
-        (false, _) => Err(ServiceError::refused(
+        (false, false) => Ok(Flight::Gone),
+        (false, true) => Err(ServiceError::refused(
             "signatureNeeded",
             format!(
                 "step `{name}` expired, and without its signature the service cannot tell whether it landed. \
@@ -230,8 +239,8 @@ async fn plan_step(
     let step = sign_step(prepared.json, name);
 
     let record = progress.step(name);
-    record.plan.nullifiers =
-        prepared.facts.nullifiers.iter().map(|nullifier| bs58::encode(nullifier).into_string()).collect();
+    record.plan.nullifier_accounts =
+        prepared.facts.nullifier_accounts.iter().map(|account| bs58::encode(account.0).into_string()).collect();
     record.planned = Some(PlannedStep {
         step: step.clone(),
         expires: prepared.facts.last_valid_block_height.map(|block_height| Expiry { block_height }),
@@ -380,7 +389,7 @@ enum IndexKind {
     Implementation,
 }
 
-/// `solana.org/zolana-shield@1.0.0`, from a range such as `solana.org/zolana-shield@^1`.
+/// `solana.org/privacy-rings-shield@1.0.0`, from a range such as `solana.org/privacy-rings-shield@^1`.
 async fn exact(service: &Service, kind: IndexKind, range: &str) -> Result<String, ServiceError> {
     let range = IdRange::parse(range).map_err(ServiceError::invalid_request)?;
     let key = match kind {

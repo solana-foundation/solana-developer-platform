@@ -58,7 +58,8 @@ nothing on a real cluster.
 - The interface page: the display template as the title, the inputs as a form, the postconditions
   as guarantees, and each implementation with whether its `applies` checks hold.
 - Privacy ring: for a private interface, each wallet's private SOL and a button that shields
-  1 SOL. `private.transfer` sends SOL privately through Zolana. `private.send` is a flow: it
+  1 SOL. `private.transfer` sends SOL privately through Zolana. Its implementation
+  `privacy-rings-shield-and-transfer` is a flow: it
   shields public SOL first when the private balance is short, then transfers.
 - Intent: the intent JSON and the `start` request as curl, TypeScript, and Rust.
 - The loop: every intent runs the same loop, for one transaction or many (`DESIGN.md`, 4.1). Each

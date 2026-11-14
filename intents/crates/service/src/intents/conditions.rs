@@ -47,16 +47,20 @@ impl Bound {
                 let mint = address(self.body.get("mint"))?;
                 let min = amount(self.body.get("min"))?;
 
-                Ok(crate::shielded::private_balance(service, &owner, &mint).await? >= min)
+                Ok(crate::privacy_rings::private_balance(service, &owner, &mint).await? >= min)
             }
+            // The pool creates an account for each nullifier that a spend consumes, so one that
+            // exists proves the spend landed. A forester closes them later, so a missing one proves
+            // nothing, and the in-flight rule never plans a spend again on it alone.
             "spent" => {
-                let nullifiers = self
+                let accounts = self
                     .body
                     .as_array()
-                    .map(|listed| listed.iter().map(|nullifier| bytes32(Some(nullifier))).collect())
+                    .map(|listed| listed.iter().map(|account| address(Some(account))).collect())
                     .unwrap_or_else(|| Ok(Vec::new()))?;
+                let fetched = service.chain.accounts(&accounts, Freshness::Live).await?;
 
-                Ok(!nullifiers.is_empty() && crate::shielded::spent(service, nullifiers).await?)
+                Ok(fetched.iter().any(Option::is_some))
             }
             other => Err(ServiceError::refused("flow", format!("the service cannot check a `{other}` condition yet"))),
         }

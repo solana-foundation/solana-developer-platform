@@ -81,9 +81,9 @@ impl Bindings<'_> {
             ("inputs", name, None, None) => self.intent()?.pointer(&format!("/inputs/{name}")).cloned(),
             ("payers", name, None, None) => self.progress.request.pointer(&format!("/payers/{name}")).cloned(),
             ("steps", step, Some("plan"), Some("nullifiers")) => {
-                let nullifiers = self.progress.steps.get(step).map(|record| record.plan.nullifiers.clone());
+                let accounts = self.progress.steps.get(step).map(|record| record.plan.nullifier_accounts.clone());
 
-                Some(json!(nullifiers.unwrap_or_default()))
+                Some(json!(accounts.unwrap_or_default()))
             }
             _ => None,
         }

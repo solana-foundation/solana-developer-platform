@@ -10,8 +10,9 @@ import type {
 import { api, recipeOf } from "@/api";
 import { Code, hexDump, Snippets } from "@/components/Code";
 import { Loop } from "@/components/Loop";
+import { OnchainChecks } from "@/components/OnchainChecks";
 import { AddressRow, Row } from "@/components/Plan";
-import type { Output } from "@/intent";
+import type { IntentOptions, Output } from "@/intent";
 import { startSnippets } from "@/snippets";
 
 export type Tab = "intent" | "implementation";
@@ -21,6 +22,8 @@ interface Props {
   intent: object;
   request: object;
   requestKey: string;
+  options: IntentOptions;
+  onOptions: (options: IntentOptions) => void;
   implementation: ListedImplementation | null;
   /// The selected implementation's recipe, as the service matched it.
   recipe: Recipe | null;
@@ -73,6 +76,7 @@ export function SidePanel(props: Props) {
 function IntentTab(props: Props) {
   return (
     <>
+      <OnchainChecks options={props.options} onOptions={props.onOptions} />
       <Code text={JSON.stringify(props.intent, null, 2)} />
       <div className="section-sub">
         The plan request holds the intent with its payers. Every intent starts the same way, for one
@@ -121,26 +125,24 @@ function PrepareControls(props: Props) {
   const remote = props.recipe === "remote";
   const shielded = props.recipe === "shielded";
   const flow = props.recipe === "flow";
-  const frozen = shielded || flow || props.recipe === "remote transaction";
+  const frozen = props.recipe === "remote transaction";
 
   return (
     <div className="side-actions">
       {flow && (
-        <div className="callout callout-amber">
+        <div className="callout callout-gray">
           This implementation is a flow: each step is its own transaction, and the loop below plans
-          one step at a time. Its steps are shielded spends, which nothing onchain checks against
-          their intents, so turn both onchain checks off.
+          one step at a time.
         </div>
       )}
       {shielded && (
         <div className="callout callout-amber">
-          The spender's shielded keys build and prove this spend, and the amounts and the recipient
-          stay hidden. Nothing onchain checks it against the intent, so turn both onchain checks
-          off. The service's simulation checks every guarantee, and the verifier proves none of
-          them.
+          The spender's client builds and proves this spend, so verify_intent cannot rebuild it. It
+          limits the spend to the pool, and the assertions bound its public effects. The notes
+          inside stay hidden, and the verifier does not check them yet.
         </div>
       )}
-      {frozen && !shielded && !flow && (
+      {frozen && (
         <div className="callout callout-amber">
           The provider signs this transaction, so nothing onchain checks it. Turn both onchain
           checks off to accept it. The service's simulation checks every guarantee, and the verifier

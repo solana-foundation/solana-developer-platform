@@ -1,10 +1,11 @@
-//! Private spends through Helius privacy rings (Zolana), for the `shielded` recipe kind
+//! Private spends through Solana Privacy Rings by Helius, for the `shielded` recipe kind
 //! (`packages/sdp-intents/DESIGN.md`, 4.17).
 //!
 //! A shielded spend consumes the wallet's notes and creates new ones. Building one needs the
 //! wallet's shielded keys, its notes from the Photon indexer, and a proof from the prover. The
-//! result is an unsigned v1 message that the wallet's Solana key signs as fee payer, which is the
-//! confidential rail: amounts and recipients are hidden, and the fee payer is public.
+//! result is an unsigned v1 message of one pool instruction, which the wallet's Solana key and the
+//! fee payer sign. This is the confidential rail: amounts and recipients are hidden, and the
+//! signers are public.
 
 use solana_address::Address;
 use solana_keypair::Keypair;
@@ -41,6 +42,22 @@ pub struct PreparedSpend {
     pub nullifiers: Vec<[u8; 32]>,
 }
 
+/// The pool creates one account for each nullifier that a spend consumes, under the tree of the
+/// spent note. A forester closes them later, so a missing one proves nothing.
+pub fn nullifier_accounts(spend: &PreparedSpend) -> Vec<Address> {
+    let keys = spend.message.message.static_account_keys();
+
+    spend
+        .nullifiers
+        .iter()
+        .filter_map(|nullifier| {
+            keys.iter()
+                .map(|tree| spr_interface::pda::nullifier_pda(tree, nullifier).0)
+                .find(|derived| keys.contains(derived))
+        })
+        .collect()
+}
+
 impl PreparedSpend {
     /// The message in its wire form, which the signers sign.
     pub fn message_bytes(&self) -> Vec<u8> {
@@ -52,8 +69,12 @@ impl PreparedSpend {
     }
 }
 
-/// The most nullifiers that one `spent` lookup asks for.
-const NULLIFIER_PAGE: u32 = 64;
+/// An amount of one asset.
+#[derive(Clone, Copy, Debug)]
+pub struct Amount {
+    pub asset: Address,
+    pub amount: u64,
+}
 
 #[derive(Debug)]
 pub struct ShieldedError(String);
@@ -71,7 +92,7 @@ fn error(context: &str) -> impl Fn(&dyn core::fmt::Display) -> ShieldedError + '
 }
 
 impl ShieldedWallet {
-    /// The Solana key and the shielded keys of one Ed25519 seed. Zolana requires both from the same
+    /// The Solana key and the shielded keys of one Ed25519 seed. Privacy Rings requires both from the same
     /// seed for an Ed25519 wallet.
     pub fn from_seed(seed: &[u8; 32]) -> Result<Self, ShieldedError> {
         let keypair = ShieldedKeypair::from_keypair(SigningKey::from_ed25519_bytes(seed))
@@ -120,7 +141,7 @@ impl Shielded {
 
     /// Moves `lamports` of the wallet's public SOL into a note of its own, and sends it.
     pub fn shield_sol(&self, wallet: &ShieldedWallet, lamports: u64) -> Result<(), ShieldedError> {
-        let prepared = self.prepare_deposit(wallet, SOL_MINT, lamports)?;
+        let prepared = self.prepare_deposit(wallet, wallet.address(), SOL_MINT, lamports)?;
         let transaction = sign_transaction(prepared.message.message, &[&wallet.funding])
             .map_err(|cause| error("sign the deposit")(&cause))?;
 
@@ -135,6 +156,7 @@ impl Shielded {
     pub fn prepare_deposit(
         &self,
         wallet: &ShieldedWallet,
+        fee_payer: Address,
         asset: Address,
         amount: u64,
     ) -> Result<PreparedSpend, ShieldedError> {
@@ -161,26 +183,10 @@ impl Shielded {
 
         let (blockhash, last_valid_block_height) =
             self.client.rpc().get_latest_blockhash().map_err(|cause| error("read a blockhash")(&cause))?;
-        let message =
-            compile_message(&wallet.address(), &[deposit], blockhash, ComputeBudgetConfig::for_instruction_count(1))
-                .map_err(|cause| error("deposit message")(&cause))?;
+        let message = compile_message(&fee_payer, &[deposit], blockhash, ComputeBudgetConfig::for_instruction_count(1))
+            .map_err(|cause| error("deposit message")(&cause))?;
 
         Ok(PreparedSpend { message: UnsignedMessage { message, last_valid_block_height }, nullifiers: Vec::new() })
-    }
-
-    /// Whether a transaction that the indexer holds spent any of `nullifiers`. Anyone who knows the
-    /// nullifiers can ask, and the answer names no owner.
-    pub fn spent(&self, nullifiers: &[[u8; 32]]) -> Result<bool, ShieldedError> {
-        if nullifiers.is_empty() {
-            return Ok(false);
-        }
-
-        let page = self
-            .indexer
-            .get_shielded_transactions_by_nullifiers(nullifiers.to_vec(), None, Some(NULLIFIER_PAGE), None)
-            .map_err(|cause| error("look up the nullifiers")(&cause))?;
-
-        Ok(!page.transactions.is_empty())
     }
 
     /// The wallet's private balance of `asset`, from its unspent notes.
@@ -191,14 +197,15 @@ impl Shielded {
     }
 
     /// A private transfer of `amount` of `asset` to the wallet registered for `to`. Returns the
-    /// unsigned message, with the proof inside, for the sender's Solana key to sign.
+    /// unsigned message, with the proof inside, for the sender's Solana key and the fee payer to sign.
     pub fn prepare_transfer(
         &self,
         wallet: &ShieldedWallet,
+        fee_payer: Address,
         to: Address,
-        asset: Address,
-        amount: u64,
+        transfer: Amount,
     ) -> Result<PreparedSpend, ShieldedError> {
+        let Amount { asset, amount } = transfer;
         let spendable = self.spendable(wallet)?;
         let inputs = select_spend(spendable.utxos(), asset, amount).map_err(|cause| error("select notes")(&cause))?;
         let nullifiers = inputs.iter().map(|input| input.nullifier).collect();
@@ -206,7 +213,7 @@ impl Shielded {
             .map_err(|cause| error("resolve the recipient's record")(&cause))?;
 
         let mut transaction =
-            ConfidentialTransaction::new(inputs, wallet.address()).map_err(|cause| error("transaction")(&cause))?;
+            ConfidentialTransaction::new(inputs, fee_payer).map_err(|cause| error("transaction")(&cause))?;
         let outputs = match asset == SOL_MINT {
             true => transaction.transfer_sol(&recipient.address, amount),
             false => transaction.transfer(&recipient.address, asset, amount),
@@ -217,7 +224,7 @@ impl Shielded {
             transaction: transaction.encrypt(&wallet.keypair).map_err(|cause| error("encrypt")(&cause))?,
             settlement_transfers: Vec::new(),
         };
-        let message = Submission::new(&signed, wallet.address(), &wallet.keypair)
+        let message = Submission::new(&signed, fee_payer, &wallet.keypair)
             .finish_unsigned_sync(&self.client)
             .map_err(|cause| error("prove")(&cause))?;
 

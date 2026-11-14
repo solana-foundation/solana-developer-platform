@@ -280,7 +280,7 @@ const provider = await startProvider();
 try {
   console.log("the service reads the registry");
   const listing = await service("/v1/registry");
-  expect(listing.interfaces.length === 9 && listing.implementations.length === 17, "it lists 9 interfaces and 17 implementations");
+  expect(listing.interfaces.length === 8 && listing.implementations.length === 17, "it lists 8 interfaces and 17 implementations");
 
   const transfer = await service("/v1/interfaces/solana.org/token.transfer");
   expect(transfer.head === "1.0.0", "the interface's head is 1.0.0");
@@ -518,33 +518,41 @@ try {
   await service("/v1/ring/shield", JSON.stringify({ address: sender.address, lamports: 1_000_000_000 }));
   expect(await ringBalanceReaches(sender.address, 1_000_000_000), "the sender shields 1 SOL");
 
-  const shielded = await service(
-    "/v1/prepare",
-    JSON.stringify(
-      plan(sender, [
-        {
-          interface: "solana.org/private.transfer@^1",
-          implementation: "solana.org/zolana-transfer@^1",
-          inputs: { from: sender.address, to: payer.address, mint: SOL_MINT, amount: "250000000" },
-          options: { verifyIntent: false, assertions: false },
-        },
-      ]),
-    ),
+  const privateTransfer = plan(sender, [
+    {
+      interface: "solana.org/private.transfer@^1",
+      implementation: "solana.org/privacy-rings-transfer@^1",
+      inputs: { from: sender.address, to: payer.address, mint: SOL_MINT, amount: "250000000" },
+    },
+  ]);
+  const transferStarted = await service("/v1/intents/start", JSON.stringify(privateTransfer));
+  const shielded = transferStarted.next.steps[0];
+  expect(
+    shielded.message.includes("| shielded | tier 2 | onchain checks: verify_intent, assertions"),
+    "the shielded spend runs with verify_intent and the assertions",
   );
-  expect(shielded.message.includes("| shielded | tier 3, checked by simulation only"), "the plan says that only the simulation checks it");
-  expect(!(await typescriptProves(shielded.transaction.messageBytes, shielded)), "the verifier does not prove a shielded spend");
+  expect(await typescriptProves(shielded.transaction.messageBytes, shielded), "the verifier proves the spend's message");
 
-  await service("/v1/send", JSON.stringify({ message: shielded.transaction.messageBytes }));
+  const unasserted = await service(
+    "/v1/intents/start",
+    JSON.stringify(plan(sender, [{ ...privateTransfer.intents[0], options: { assertions: false } }])),
+  ).then(
+    () => undefined,
+    (error) => error.message,
+  );
+  expect(unasserted?.includes("needs `assertions`") === true, "a shielded spend with verify_intent needs the assertions");
+
+  const transferred = await runFlow(transferStarted);
+  expect(transferred.answer.next.kind === "done", `the transfer is done: ${transferred.answer.next.message}`);
   expect(await ringBalanceReaches(payer.address, 250_000_000), "the payer holds 0.25 SOL privately");
   expect(await ringBalanceReaches(sender.address, 750_000_000), "the sender keeps 0.75 SOL privately");
 
   console.log("a flow of two steps: shield public SOL, then send it privately");
   const send = plan(payer, [
     {
-      interface: "solana.org/private.send@^1",
-      implementation: "solana.org/zolana-send@^1",
+      interface: "solana.org/private.transfer@^1",
+      implementation: "solana.org/privacy-rings-shield-and-transfer@^1",
       inputs: { from: payer.address, to: sender.address, mint: SOL_MINT, amount: "500000000" },
-      options: { verifyIntent: false, assertions: false },
     },
   ]);
   const started = await service("/v1/intents/start", JSON.stringify(send));

@@ -1,5 +1,5 @@
 [package]
-name = "sdp-intents-shielded"
+name = "sdp-intents-privacy-rings"
 description = "Private spends through Helius privacy rings, for the shielded recipe kind"
 version.workspace = true
 edition.workspace = true
@@ -12,6 +12,7 @@ rust-version.workspace = true
 # Zolana's v0.6.0-alpha tag, which the local Photon and prover match.
 [dependencies]
 spr-client = { git = "https://github.com/ChewingGlass/privacy-rings", rev = "e97a1393d1f63a8fff8afb8b27f1f57f11ad85e5", features = ["client"] }
+spr-interface = { git = "https://github.com/ChewingGlass/privacy-rings", rev = "e97a1393d1f63a8fff8afb8b27f1f57f11ad85e5" }
 spr-keypair = { git = "https://github.com/ChewingGlass/privacy-rings", rev = "e97a1393d1f63a8fff8afb8b27f1f57f11ad85e5" }
 spr-program = { git = "https://github.com/ChewingGlass/privacy-rings", rev = "e97a1393d1f63a8fff8afb8b27f1f57f11ad85e5" }
 spr-transaction = { git = "https://github.com/ChewingGlass/privacy-rings", rev = "e97a1393d1f63a8fff8afb8b27f1f57f11ad85e5" }

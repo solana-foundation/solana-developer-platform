@@ -36,11 +36,14 @@ pub enum PlanError {
     /// The endpoint names this output with another address than the implementation binds, or leaves out
     /// an output that the implementation does not bind.
     RemoteOutput(u8),
-    /// A remote recipe with `verify_intent` needs the assertions, because `verify_intent` cannot
-    /// rebuild its instructions.
+    /// A remote or shielded recipe with `verify_intent` needs the assertions, because
+    /// `verify_intent` cannot rebuild its instructions.
     RemoteNeedsAssertions,
     /// A shielded recipe's note is not one owner, a 32-byte asset, and an 8-byte amount.
     ShieldedNote,
+    /// The caller's shielded spend calls another program than the recipe's pool, or holds no
+    /// instruction.
+    ShieldedSpend,
     /// A flow recipe plans through its steps (`DESIGN.md`, 4.19), never as one intent.
     FlowRecipe,
     /// The provider's transaction breaks a rule of `DESIGN.md`, 4.16, which the text names.
@@ -139,9 +142,10 @@ impl fmt::Display for PlanError {
                 crate::render::base58(address)
             ),
             Self::RemoteNeedsAssertions => f.write_str(
-                "a remote recipe needs `assertions`, because verify_intent cannot rebuild its instructions. Turn both checks off to trust the endpoint.",
+                "a remote or shielded recipe needs `assertions`, because verify_intent cannot rebuild its instructions",
             ),
             Self::ShieldedNote => f.write_str("a shielded note is not one owner, a 32-byte asset, and an 8-byte amount"),
+            Self::ShieldedSpend => f.write_str("the shielded spend calls another program than the pool, or is empty"),
             Self::FlowRecipe => f.write_str("a flow recipe plans one step at a time, through `/v1/intents/start`"),
             Self::RentPayerInRecipe => f.write_str(
                 "the builder names the rent payer as one of its own accounts, which verify_intent cannot check yet. Pay the rent from another wallet.",

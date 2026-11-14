@@ -9,8 +9,8 @@ use std::time::Duration;
 use clap::Parser;
 
 use sdp_intents_chain::{CachedRpc, SimulateIn};
+use sdp_intents_privacy_rings::Endpoints;
 use sdp_intents_service::{router, Metrics, Service, Wallets};
-use sdp_intents_shielded::Endpoints;
 
 #[derive(Parser)]
 #[command(name = "sdp-intents-service", about = "The SDP intents planner behind an HTTP API")]
@@ -46,7 +46,7 @@ struct Args {
     #[arg(long, default_value = "http://127.0.0.1:3001")]
     ring_prover: String,
 
-    /// The pool tree that new notes go into. The default is the tree of Zolana's localnet snapshot.
+    /// The pool tree that new notes go into. The default is the tree of the Privacy Rings localnet snapshot.
     #[arg(long, default_value = "777pvSGe5LaBd9nCczvE2FXEauiwtfGJ5XRpjKyniGor")]
     ring_tree: String,
 }
@@ -86,7 +86,7 @@ async fn run(args: Args) -> Result<(), String> {
     // Registration ends before the service listens, so that a first private transfer finds every
     // local wallet as a recipient.
     if service.shielded.is_some() {
-        match sdp_intents_service::shielded::register_wallets(&service).await {
+        match sdp_intents_service::privacy_rings::register_wallets(&service).await {
             Ok(registration) => {
                 eprintln!("registered {} local wallets in the privacy ring", registration.registered);
                 registration.failures.iter().for_each(|failure| eprintln!("  not registered: {failure}"));

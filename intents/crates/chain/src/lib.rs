@@ -182,10 +182,11 @@ impl CachedRpc {
     }
 
     /// For each signature: `Some(true)` when it landed at `confirmed` and succeeded, `Some(false)`
-    /// when it landed and failed, and `None` when the cluster does not hold it.
+    /// when it landed and failed, and `None` when the cluster does not hold it. The lookup searches
+    /// the cluster's history, so an old transaction is not mistaken for one that never landed.
     pub async fn signature_outcomes(&self, signatures: &[Signature]) -> Result<Vec<Option<bool>>, ChainError> {
         self.inner.calls.count(Counter::GetSignatureStatuses);
-        let statuses = self.inner.rpc.get_signature_statuses(signatures).await?.value;
+        let statuses = self.inner.rpc.get_signature_statuses_with_history(signatures).await?.value;
 
         Ok(statuses
             .into_iter()

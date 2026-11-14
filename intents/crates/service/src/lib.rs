@@ -30,9 +30,9 @@ mod flows;
 mod implementations;
 mod intents;
 mod metrics;
+pub mod privacy_rings;
 mod registry;
 mod resources;
-pub mod shielded;
 mod wallets;
 pub mod warm;
 
@@ -61,7 +61,7 @@ pub struct Service {
     pub chain: CachedRpc,
     pub wallets: Wallets,
     /// The privacy ring that shielded spends of the local wallets go through.
-    pub shielded: Option<sdp_intents_shielded::Endpoints>,
+    pub shielded: Option<sdp_intents_privacy_rings::Endpoints>,
     pub metrics: Metrics,
 }
 
@@ -218,11 +218,11 @@ async fn verify(State(service): Shared, Json(body): Json<Value>) -> Response {
 }
 
 async fn ring(State(service): Shared) -> Response {
-    observed(&service, "ring", shielded::balances(&service)).await
+    observed(&service, "ring", privacy_rings::balances(&service)).await
 }
 
 async fn shield(State(service): Shared, Json(body): Json<Value>) -> Response {
-    observed(&service, "shield", shielded::shield(&service, &body)).await
+    observed(&service, "shield", privacy_rings::shield(&service, &body)).await
 }
 
 async fn send(State(service): Shared, Json(body): Json<Value>) -> Response {

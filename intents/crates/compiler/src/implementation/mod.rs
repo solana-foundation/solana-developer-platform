@@ -17,7 +17,7 @@ use serde_json::Value;
 use crate::catalog::Catalog;
 use crate::diagnostic::{Code, Diagnostic, Report};
 use crate::encoding::address;
-use crate::envelope::{parse_json, read_envelope, reported, root, Envelope, SPEC, SPEC_FLOWS};
+use crate::envelope::{parse_json, read_envelope, reported, root, Envelope, SPEC, SPEC_1_1};
 use crate::id::Id;
 use crate::limits;
 use crate::post_condition::{read_post_condition, Output};
@@ -105,15 +105,20 @@ fn compile(value: &Value, catalog: &Catalog, sink: &mut Sink) -> Option<Compiled
     let pointer = object.pointer().to_owned();
     check_spec(envelope.as_ref(), recipe.as_ref(), &pointer, build.sink);
 
-    let remote =
-        recipe.as_ref().is_some_and(|recipe| matches!(recipe.kind, RecipeKind::Remote | RecipeKind::RemoteTransaction));
+    let unbuilt = recipe.as_ref().is_some_and(|recipe| {
+        matches!(recipe.kind, RecipeKind::Remote | RecipeKind::RemoteTransaction | RecipeKind::Shielded)
+    });
     let invokes_only =
         build.post_conditions.iter().any(|condition| condition.check == u8::from(CheckKind::InvokesOnly));
 
-    if remote && !invokes_only {
+    if unbuilt && !invokes_only {
         build.sink.push(
-            Diagnostic::new(Code::MissingKey, &pointer, "a remote recipe needs an `invokesOnly` postcondition")
-                .help("list every program that the endpoint's instructions can call"),
+            Diagnostic::new(
+                Code::MissingKey,
+                &pointer,
+                "a remote or shielded recipe needs an `invokesOnly` postcondition",
+            )
+            .help("list every program that the endpoint's or the spend's instructions can call"),
         );
     }
 
@@ -140,12 +145,13 @@ fn compile(value: &Value, catalog: &Catalog, sink: &mut Sink) -> Option<Compiled
     })
 }
 
-/// A flow states spec 1.1, which adds it, and every other implementation states 1.0.
+/// A flow and a shielded recipe state spec 1.1, which adds their extension, and every other
+/// implementation states 1.0.
 fn check_spec(envelope: Option<&Envelope>, recipe: Option<&recipe::Recipe>, pointer: &str, sink: &mut Sink) {
     let (Some(spec), Some(recipe)) = (envelope.and_then(|envelope| envelope.spec.as_deref()), recipe) else {
         return;
     };
-    let wanted = if recipe.kind == RecipeKind::Flow { SPEC_FLOWS } else { SPEC };
+    let wanted = if matches!(recipe.kind, RecipeKind::Flow | RecipeKind::Shielded) { SPEC_1_1 } else { SPEC };
 
     if spec != wanted {
         sink.push(Diagnostic::new(

@@ -128,7 +128,9 @@ pub fn verify_intent(accounts: &VerifyIntent, passed: &[AccountView], args: Veri
 
             program_recipe::verify(&hashed, sysvar, payers, args.builder_roles, &Segment { built, whole: first..end })
         }
-        RecipeKind::Remote => {
+        // A shielded spend is built by the spender's client, so it is checked as a remote recipe's
+        // instructions are: only the programs of `invokesOnly`, and the assertions.
+        RecipeKind::Remote | RecipeKind::Shielded => {
             require!(options.assertions, RegistryError::RemoteNeedsAssertions);
             remote_recipe::check_outputs(&recipe, args.outputs)?;
 
@@ -144,7 +146,7 @@ pub fn verify_intent(accounts: &VerifyIntent, passed: &[AccountView], args: Veri
 
             program_recipe::check_roles(sysvar, &Segment { built, whole: first..end }, &roles)
         }
-        RecipeKind::RemoteTransaction | RecipeKind::Shielded | RecipeKind::Flow => {
+        RecipeKind::RemoteTransaction | RecipeKind::Flow => {
             Err(RegistryError::WrongRecipeKind.into())
         }
     }

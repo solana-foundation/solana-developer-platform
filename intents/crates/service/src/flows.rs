@@ -12,7 +12,7 @@ use sdp_intents_planner::{
     verify_transaction, AccountMap, IntentDocuments, Payers, Plan, PlanRequest, Planner, RemoteAnswer, RemoteCall,
     Step, VerifiedTransaction, VerifyStep,
 };
-use sdp_intents_spec::Address;
+use sdp_intents_spec::{Address, ShieldedProtocol};
 
 use crate::error::ServiceError;
 use crate::registry::{catalog, IntentReference, Registry};
@@ -38,8 +38,8 @@ pub(crate) struct PreparedStep {
 /// What a step's plan fixes, which a flow keeps in `progress` (`DESIGN.md`, 4.19).
 #[derive(Default)]
 pub(crate) struct StepFacts {
-    /// The nullifiers of the notes that the step's spends consume.
-    pub nullifiers: Vec<[u8; 32]>,
+    /// The accounts that the pool creates for the nullifiers of the notes that the step spends.
+    pub nullifier_accounts: Vec<Address>,
     /// The last block height at which the step's transaction can land. A plan of instructions alone
     /// has none.
     pub last_valid_block_height: Option<u64>,
@@ -62,8 +62,7 @@ pub(crate) async fn prepare_step(service: &Service, text: &str, tamper: bool) ->
         }
     };
 
-    // A spend keeps the blockhash that its proof binds, so its own expiry wins.
-    let facts = StepFacts { last_valid_block_height: facts.last_valid_block_height.or(expiry), ..facts };
+    let facts = StepFacts { last_valid_block_height: expiry, ..facts };
 
     Ok(PreparedStep { json: plan_json::plan(&prepared, request), facts })
 }
@@ -211,9 +210,10 @@ async fn plan(
             Step::Shield(call) => match &answer {
                 Some(answer) => planner.called(answer.clone())?,
                 None => {
-                    let spend = crate::shielded::answer(service, &call).await?;
-                    facts.nullifiers.extend(spend.nullifiers);
-                    facts.last_valid_block_height = Some(spend.last_valid_block_height);
+                    let spend = match call.protocol {
+                        ShieldedProtocol::PrivacyRings => crate::privacy_rings::answer(service, &call).await?,
+                    };
+                    facts.nullifier_accounts.extend(spend.nullifier_accounts);
                     planner.called(spend.answer)?
                 }
             },

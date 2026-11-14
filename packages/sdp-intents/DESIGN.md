@@ -341,7 +341,7 @@ transaction with the message that it proves. The design calls a step's content a
 | `program` | A builder instruction, simulated | The preferred kind |
 | `static` | Accounts and instructions as data | A stopgap for a program with no builder, for an operation unlikely to change |
 | `remote` | An HTTP endpoint (4.16) | Offchain search, such as a swap route, or a provider that must sign |
-| `shielded` | The output notes of a privacy ring spend (4.17) | A private transfer |
+| `shielded` | The output notes of a spend in a named privacy protocol (4.17) | A private transfer |
 | `flow` | Steps, each an intent of another interface (4.19) | An operation that takes more than one transaction |
 
 **Preferred recipe.** A builder in the target program ships with the instruction that it builds,
@@ -466,7 +466,7 @@ such as `build_deposit_v2`.
 | Static | Data in the registry |
 | Program | Code, with its upgrade authority |
 | Remote | An operator (4.16) |
-| Shielded | The spender's client, which builds and proves the spend (4.17) |
+| Shielded | The spender's client, which builds and proves the spend. `verify_intent` limits it to the pool, and the assertions bound its public effects (4.17). |
 | Flow | Each step as its own recipe. A program or remote flow also trusts its builder or endpoint to pick useful steps (4.19). |
 
 The postconditions and the payer rules (4.5) bound the instructions of every recipe. Outputs and
@@ -723,9 +723,10 @@ pub struct ImplementationDocV1 {
 `InterfaceDocV1` holds the id, name, display, inputs, outputs, postconditions, addresses, and a
 flag for async settlement (4.15). `IntentDocV1` holds both ids at exact versions, the option flags,
 and each input in borsh. A step's intent also holds the flow implementation's id, the outer
-intent's SHA-256, and the step's index. A flow implementation is spec 1.1: its extension area
-holds `FlowDocV1`, which names a steps table, a step inputs table, and a conditions table in the
-body. A document with no extension stays at 1.0, so its bytes do not change.
+intent's SHA-256, and the step's index. Spec 1.1 adds an extension area to two recipes. A flow's holds
+`FlowDocV1`, which names a steps table, a step inputs table, and a conditions table in the body. A
+shielded recipe's holds `ShieldedDocV1`, its protocol. A document with no extension stays at 1.0,
+so its bytes do not change.
 
 | Code | Values |
 | :-- | :-- |
@@ -918,8 +919,8 @@ service.
 | `vault.deposit`, `vault.withdraw` | `ondo-usdy-*`, through the Jupiter wrapper | remote, tier 2 |
 | `vault.deposit`, `vault.withdraw`, `vault.requestWithdrawal`, `vault.cancelRequest` | `hastra-*` | static |
 | `vault.requestDeposit` | `test-provider-deposit`, as legacy, v0 with a lookup table, and v1 | remote, tier 3 |
-| `private.transfer`, `private.shield` | `zolana-transfer`, `zolana-shield`, through Zolana on the surfnet | shielded, tier 3 |
-| `private.send` | `zolana-send`: shield when the private balance is short, then transfer | flow |
+| `private.transfer`, `private.shield` | `privacy-rings-transfer`, `privacy-rings-shield`, through Privacy Rings on the surfnet | shielded, tier 2 |
+| `private.transfer` | `privacy-rings-shield-and-transfer`: shield when the private balance is short, then transfer | flow |
 
 The e2e also compiles a plan of instructions alone as legacy, v0, and v1, and refuses a remote
 endpoint that adds a token approval to an attacker.
@@ -1018,18 +1019,18 @@ the whole message, so the plan keeps it as it is:
 | Tier | Recipes | Proves |
 | :-- | :-- | :-- |
 | 1 | Static, program | `verify_intent` rebuilds the instructions, and Lighthouse asserts the postconditions |
-| 2 | Remote instructions | Lighthouse asserts the postconditions, and `verify_intent` limits the programs |
-| 3 | Remote transaction, shielded | Only a simulation, by the service and by the signer |
+| 2 | Remote instructions, shielded | Lighthouse asserts the postconditions, and `verify_intent` limits the programs |
+| 3 | Remote transaction | Only a simulation, by the service and by the signer |
 
 The message names each part's tier. `prepare` refuses a tier 3 implementation unless the intent turns both
 onchain checks off, so the weaker trust is the caller's explicit choice.
 
 ### 4.17 Private intents through privacy rings
 
-This section shows how intents can run inside Helius Privacy Rings (Zolana,
-`github.com/helius-labs/privacy-rings`), so that a business can use Earn without showing which of
-its customers did what. It assumes no knowledge of shielded pools. Only the private transfer at
-the end of the section is built.
+This section shows how intents can run inside Solana Privacy Rings, which Helius launched on
+mainnet in November 2026. Its code is `github.com/helius-labs/privacy-rings`, which calls itself
+Zolana. A business can then use Earn without showing which of its customers did what. The section
+assumes no knowledge of shielded pools. Only the prototype at its end is built.
 
 **Notes in place of balances.** A token account holds a balance that a payment edits. A shielded
 pool holds **notes** (also called UTXOs). A note is a fixed amount of one asset with an owner,
@@ -1073,7 +1074,7 @@ order terms there, and its timelock escrow keeps an unlock time. A program trust
 notes that its own PDA owns, because anyone can write any data into a note that they create.
 
 **How privacy fits intents.** Every private action ends in one generic thing: a pool spend, made
-of input notes, output notes with their data, public legs, and a program instruction. Zolana's SDK
+of input notes, output notes with their data, public legs, and a program instruction. The Privacy Rings SDK
 turns any spend into the bytes that the user signs. What changes from one action to another is
 which output notes, with which data, go to which program. An implementation declares that in a
 `shielded` recipe, as a static recipe declares instructions today. The service fills the template
@@ -1186,7 +1187,7 @@ settle. Those steps need no approval. The service returns them as a `send` when 
 viewing key, and the client builds them when it builds alone. The request stores the intent
 encrypted to the owner, so the viewing key finds an open request and the plan to finish it.
 
-**Approvals.** Zolana's default deposit sets the note's blinding from its leaf, so the request
+**Approvals.** The pool's default deposit sets the note's blinding from its leaf, so the request
 digest is known only after the shield lands: two approvals. Its ring deposit takes a blinding from
 the client, so the shield and the request sign together: one approval. On the anonymous rail, the
 proof needs the signature, so the service or the client proves the spend after the signature
@@ -1202,23 +1203,33 @@ returns, so the service cannot change what the user signs.
 amounts and times, so a large odd amount moved soon after a shield links the two. Round amounts,
 delay, and batching reduce this.
 
-**The prototype.** `solana.org/private.transfer` has one implementation, `zolana-transfer`, with
-a `shielded` recipe (kind 5). Each instruction of the recipe is one output note: the pool program,
-the owner as its one account, and the asset, the amount, and the note's data as segments. The
-first account is the spender. The planner resolves the notes and asks its caller for the spend. The
-service builds and proves the spend with the spender's shielded keys, through the ring's indexer
-and prover, and the planner checks the transaction as it checks a provider's transaction. The
-spender pays the fee, and `verify_intent` refuses kind 5. The recipe stays tier 3 until the client
-recomputes the notes and the digest. A writable spender account marks a deposit: `zolana-shield`
-moves public SOL into a note of the spender, with no proof.
+**The prototype.** `solana.org/private.transfer` has an implementation `privacy-rings-transfer`, with
+a `shielded` recipe (kind 5) whose protocol is `privacy-rings`. The recipe names its protocol,
+because only the protocol says how the spender's client builds a spend and how a signer checks its
+notes. Each instruction of the recipe is one output note: the pool program, the owner as its one
+account, and the asset, the amount, and the note's data as segments. The first account is the
+spender. A writable spender account marks a deposit: `privacy-rings-shield` moves public SOL into
+a note of the spender, with no proof.
 
-`solana.org/private.send` has one implementation, `zolana-send`, a flow of two steps (4.19). The
+The planner resolves the notes and asks its caller for the spend. The service builds and proves
+it through the ring's indexer and prover, and returns the pool instruction. The planner puts that
+instruction in a segment of its own transaction, between `verify_intent` and the assertions. The
+proof covers the pool instruction alone, so the instructions around it leave it valid.
+`verify_intent` checks the instruction's program against the implementation's `invokesOnly`, as for
+a remote recipe, and Lighthouse asserts the public postconditions, such as the deposit's outflow.
+A shielded recipe with `verify_intent` therefore needs the assertions. The spend is tier 2. The
+notes inside are hidden, and the signer does not check them yet. Any signer can pay the fee.
+
+`solana.org/private.transfer` has a second implementation, `privacy-rings-shield-and-transfer`, a flow of
+two steps (4.19). Where the funds come from is how the transfer runs, not what the user asks for,
+so both implementations implement one interface. Its guarantee is that at most the amount leaves
+the sender's public balance, which a transfer from notes alone also keeps. The
 shield step is done when the sender holds the amount privately, so a funded sender skips it. The
 transfer step waits until the ring's indexer shows the deposit, and is done when its notes are
 spent, which the indexer answers from the nullifiers.
 
-`just playground` runs Zolana v0.6.0-alpha on the surfnet. The playground shields SOL, sends
-it privately, and walks the loop of `private.send` one call at a time. The Zolana crates come from the fork `ChewingGlass/privacy-rings`, which pins
+`just playground` runs the Privacy Rings v0.6.0-alpha release (Zolana) on the surfnet. The playground shields SOL, sends
+it privately, and walks the loop of `privacy-rings-shield-and-transfer` one call at a time. Its SDK crates come from the fork `ChewingGlass/privacy-rings`, which pins
 `solana-address`, `solana-hash`, and `wincode` to this workspace's versions.
 
 **Open questions for Helius.**
@@ -1309,7 +1320,7 @@ that the step's plan fixed, such as a ring spend's nullifiers.
 | Data | `{ "account": …, "data": { "offset", "type", "equals" } }` | Anyone |
 | Balance | `{ "balance": { "owner", "mint", "min" } }` | Anyone |
 | Private balance | `{ "privateBalance": { "owner", "mint", "min" } }` | The holder of the viewing key |
-| Spent | `{ "spent": "{steps.pay.plan.nullifiers}" }` | Anyone, with the nullifiers |
+| Spent | `{ "spent": "{steps.pay.plan.nullifiers}" }` | Anyone. The pool creates an account for each nullifier that a spend consumes, and one that exists proves the spend landed. A forester closes them later, so a missing one proves nothing. |
 | Committed | `{ "committed": "{steps.pay.plan.notes.0}" }` | Anyone, with the commitment |
 | Landed | `{ "landed": ["<signature>"], "expires": { "blockHeight": "…" } }` | Anyone. Only the planner writes it, for a step in flight. |
 
@@ -1344,9 +1355,12 @@ plans each returned intent as any other, and the step must name `recover`.
    rule, and refuses a flow that breaks it.
 2. **In flight.** `progress` keeps each planned transaction until it lands or expires, and
    `continue` returns that same transaction in the meantime. The same bytes give the same
-   signature, so a step lands at most once, whoever signs or sends it. A transaction expires at
-   its `lastValidBlockHeight`, and a ring spend at its `expiry_unix_ts`. Only then does the step
-   plan again, because a new plan can choose other notes or accounts.
+   signature, so a step lands at most once, whoever signs or sends it. After it expires, the step
+   plans again only when the cluster's record shows that its signature did not land. A `done`
+   condition that does not hold proves nothing, because an indexer can lag and a forester closes
+   nullifier accounts. With no signature, `continue` refuses with `signatureNeeded`. A plan of
+   instructions alone has no blockhash, so it needs the signature of the transaction that the
+   caller compiled.
 3. **Pinned versions.** The flow pins every implementation version when its first step plans.
    An unapproved or removed version stops the flow, and `recover` still works.
 
@@ -1392,7 +1406,7 @@ debug or audit.
 {
   "v": 1,
   "request": { "spec": "sdp-intents@1.0", "kind": "plan", "payers": { "…": "…" }, "intents": [{ "…": "…" }] },
-  "pins": ["solana.org/ring-vault-deposit@1.0.0", "solana.org/zolana-request@1.0.0", "solana.org/kamino-deposit@1.0.0"],
+  "pins": ["solana.org/ring-vault-deposit@1.0.0", "solana.org/privacy-rings-request@1.0.0", "solana.org/kamino-deposit@1.0.0"],
   "steps": {
     "request": {
       "plan": { "nullifiers": ["…"], "notes": ["…"], "outputs": { "note": "…" } },
@@ -1434,10 +1448,8 @@ The loop of 4.1 handles each kind. A `wait` names its step, and `until` is that 
 condition with its values bound, in the language above. A caller can watch `until` itself, such
 as with an account subscription, and call `continue` when it holds. A step in flight waits on
 `landed` when the caller sent its signatures. Without them, `continue` returns the same
-transaction to sign. A step with no `done` condition is done only when its signature lands, so
-after it expires with no signature `continue` refuses with `signatureNeeded`, because the service
-cannot tell whether it landed. `pendingUntil` is the latest block height at which a planned step
-can land.
+transaction to sign, until it expires (rule 2). `pendingUntil` is the latest block height at which
+a planned step can land.
 
 **Continuity.** The caller keeps the last `progress` and sends it back to continue. Nothing else is
 needed, from any device or after any restart.
@@ -1606,7 +1618,7 @@ Production is a separate project with its own design document.
 | `verify_intent` with static, program, and remote recipes | About 27,000 to 29,000 compute units for an SPL transfer |
 | The warm cache and the first-fetch prefetch | One `getMultipleAccounts` for a cold SPL transfer |
 | Every transaction version | Legacy, v0 with lookup tables, and v1 land through the CLI and the provider |
-| Flows: spec 1.1, static flows, `start` and `continue`, `progress`, the in-flight rule, and the `exists`, `privateBalance`, and `spent` conditions | `private.send` shields, waits, transfers, and is done, in the e2e and the playground |
+| Flows: spec 1.1, static flows, `start` and `continue`, `progress`, the in-flight rule, and the `exists`, `privateBalance`, and `spent` conditions | `privacy-rings-shield-and-transfer` shields, waits, transfers, and is done, in the e2e and the playground |
 
 The prototype also serves `POST /v1/prepare`, which returns the plan of a request of one step,
 without `progress`. The service runs the loop. The Rust client does not run it yet.

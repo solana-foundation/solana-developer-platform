@@ -6,7 +6,7 @@ use super::json::{base58, hex, non_empty, object, sparse_object, utf8};
 use super::names::Names;
 use super::post_condition::post_condition;
 use super::{document_name, DecompileError, Organizations};
-use crate::envelope::{SPEC, SPEC_FLOWS};
+use crate::envelope::{SPEC, SPEC_1_1};
 use crate::id::{caret_covers, format_version};
 
 /// An implementation, with the names that its references resolve to. The steps that read the
@@ -38,7 +38,7 @@ pub fn decompile_implementation(
 
     let names = Names::new(&interface, accounts, view.addresses()?)?;
     let document = Document { view, names: &names, organizations };
-    let spec = if view.recipe()? == RecipeKind::Flow { SPEC_FLOWS } else { SPEC };
+    let spec = if matches!(view.recipe()?, RecipeKind::Flow | RecipeKind::Shielded) { SPEC_1_1 } else { SPEC };
 
     let applies: Vec<Value> =
         view.applies()?.iter().map(|applies| applies_hint(applies, &names)).collect::<Result<_, _>>()?;

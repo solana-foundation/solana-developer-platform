@@ -82,7 +82,7 @@ export function App() {
 
         const form = interfaceForm(published.document);
         setDocument(form);
-        setValues(defaults(form, wallets, interfaceId));
+        setValues(defaults(form, wallets));
       })
       .catch((error: unknown) => current && setLoadError(describe(error)));
 
@@ -133,10 +133,8 @@ export function App() {
           }),
     [listed, document, values, selected, options]
   );
-  // A shielded spend, and a flow of them, takes the spender as its fee payer.
-  const spends = selected?.recipe === "shielded" || selected?.recipe === "flow";
-  const frozen = spends || selected?.recipe === "remote transaction";
-  const payer = spends ? spender(document, values) : feePayer;
+  const frozen = selected?.recipe === "remote transaction";
+  const payer = feePayer;
   const request = useMemo(
     () => planRequest(intent, payer, frozen ? "transaction" : output),
     [intent, payer, frozen, output]
@@ -179,16 +177,13 @@ export function App() {
               values={values}
               wallets={wallets}
               feePayer={payer}
-              feePayerFixed={spends}
               signature={lastSignature}
               candidates={candidates}
               candidatesError={candidatesError}
               selected={selected}
-              options={options}
               onValue={(name, value) => setValues((previous) => ({ ...previous, [name]: value }))}
               onFeePayer={setFeePayer}
               onSelect={(candidate) => setPinned(candidate.id)}
-              onOptions={setOptions}
             />
           ) : (
             <div className="pc">Select an interface.</div>
@@ -198,6 +193,8 @@ export function App() {
             intent={intent}
             request={request}
             requestKey={requestKey}
+            options={options}
+            onOptions={setOptions}
             implementation={selectedImplementation}
             recipe={selected?.recipe ?? null}
             organizations={registry.organizations}
@@ -244,24 +241,15 @@ function Loading({ error }: { error: string | null }) {
   );
 }
 
-/// The first signer input. A shielded spend consumes its notes, so it pays the fee.
-function spender(document: InterfaceDocument | null, values: FormValues): string {
-  const signer = document?.inputs.find((input) => input.signer);
-
-  return signer === undefined ? "" : (values[signer.name] ?? "");
-}
-
 function walletNamed(wallets: Wallet[], name: string): string {
   return wallets.find((wallet) => wallet.name === name)?.address ?? wallets[0]?.address ?? "";
 }
 
 /// A first intent that works: the treasury sends one unit of USDC to bob, or deposits it in a vault.
-/// A private intent sends SOL, because the wallets shield only SOL.
-function defaults(document: InterfaceDocument, wallets: Wallet[], interfaceId: string): FormValues {
-  const mint = interfaceId.startsWith("solana.org/private.") ? MINTS[0] : MINTS[1];
+function defaults(document: InterfaceDocument, wallets: Wallet[]): FormValues {
   const value = (input: Input): string => {
     if (input.optional) return "";
-    if (input.type === "mint") return mint?.address ?? "";
+    if (input.type === "mint") return MINTS[1]?.address ?? "";
     if (input.type === "address" && input.name === "vault") return VAULTS[0]?.address ?? "";
     if (input.type === "address") return walletNamed(wallets, input.signer ? "treasury" : "bob");
 

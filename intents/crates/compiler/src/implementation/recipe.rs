@@ -2,7 +2,10 @@
 //! flow of steps.
 
 use sdp_intents_spec::wire::{AccountV1, InstructionV1, OutputBindingV1, RangeV1, SegmentV1};
-use sdp_intents_spec::{AddressSource, RecipeKind};
+use sdp_intents_spec::{AddressSource, RecipeKind, ShieldedProtocol};
+
+/// The protocols that a shielded recipe can name, by their JSON names.
+const PROTOCOLS: [(&str, ShieldedProtocol); 1] = [("privacy-rings", ShieldedProtocol::PrivacyRings)];
 
 use super::accounts::Table;
 use super::Build;
@@ -15,6 +18,8 @@ const KINDS: [&str; 5] = ["static", "program", "remote", "shielded", "flow"];
 pub(super) struct Recipe {
     pub(super) kind: RecipeKind,
     pub(super) url: Vec<u8>,
+    /// Set for a shielded recipe.
+    pub(super) protocol: Option<ShieldedProtocol>,
 }
 
 impl Build<'_, '_> {
@@ -58,7 +63,7 @@ impl Build<'_, '_> {
             self.read_output_bindings(&outputs);
         }
 
-        Some(Recipe { kind: RecipeKind::Static, url: Vec::new() })
+        Some(Recipe { kind: RecipeKind::Static, url: Vec::new(), protocol: None })
     }
 
     /// `{ "url": "…", "returns": "instructions" | "transaction", "accounts": { … }, "outputs": { … } }`.
@@ -91,13 +96,14 @@ impl Build<'_, '_> {
             self.read_output_bindings(&outputs);
         }
 
-        Some(Recipe { kind: returns?, url: url? })
+        Some(Recipe { kind: returns?, url: url?, protocol: None })
     }
 
-    /// `{ "pool": "…", "accounts": [ … ], "notes": [ … ] }`. The first account is the spender, whose
-    /// notes the spend consumes. Each note is stored as an instruction of the pool, so the account
-    /// sources and segments of a static recipe apply to it.
+    /// `{ "protocol": "privacy-rings", "pool": "…", "accounts": [ … ], "notes": [ … ] }`. The first
+    /// account is the spender, whose notes the spend consumes. Each note is stored as an instruction
+    /// of the pool, so the account sources and segments of a static recipe apply to it.
     fn read_shielded(&mut self, object: &mut Object<'_>) -> Option<Recipe> {
+        let protocol = object.required("protocol", self.sink).and_then(|protocol| self.read_protocol(&protocol));
         let pool = object.required("pool", self.sink).and_then(|pool| self.read_literal_address(&pool));
 
         if let Some(accounts) = object.required("accounts", self.sink) {
@@ -119,7 +125,22 @@ impl Build<'_, '_> {
         let notes = object.required("notes", self.sink).and_then(|notes| notes.array(self.sink));
         notes?.iter().for_each(|note| self.read_note(note, pool));
 
-        Some(Recipe { kind: RecipeKind::Shielded, url: Vec::new() })
+        Some(Recipe { kind: RecipeKind::Shielded, url: Vec::new(), protocol: Some(protocol?) })
+    }
+
+    fn read_protocol(&mut self, node: &Node<'_>) -> Option<ShieldedProtocol> {
+        let name = node.str(self.sink)?;
+        let found = PROTOCOLS.iter().find(|(known, _)| *known == name).map(|(_, protocol)| *protocol);
+
+        if found.is_none() {
+            let names: Vec<&str> = PROTOCOLS.iter().map(|(known, _)| *known).collect();
+            self.sink.push(
+                Diagnostic::new(Code::InvalidValue, &node.pointer, format!("`{name}` is not a shielded protocol"))
+                    .help(format!("the protocols are {}", list(&names))),
+            );
+        }
+
+        found
     }
 
     /// `{ "owner": "recipient", "asset": { … }, "amount": { … }, "data": [ … ] }`. The asset is an
@@ -181,7 +202,7 @@ impl Build<'_, '_> {
         };
         self.instructions.push(instruction);
 
-        Some(Recipe { kind: RecipeKind::Program, url: Vec::new() })
+        Some(Recipe { kind: RecipeKind::Program, url: Vec::new(), protocol: None })
     }
 
     /// `{ "program": "…", "accounts": ["source", …], "data": [ … ] }`.

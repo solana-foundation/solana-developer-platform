@@ -310,3 +310,9 @@
 .loop details[open] > summary {
   margin-bottom: 8px;
 }
+
+.onchain-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
