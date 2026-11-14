@@ -4,18 +4,11 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import {
-  cancelFireblocksProposal,
-  listFireblocksProposals,
-} from "@/app/(session)/dashboard/[projectId]/wallets/fireblocks-proposal-actions";
+import * as actions from "@/app/(session)/dashboard/[projectId]/wallets/fireblocks-proposal-actions";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { FireblocksProposals } from "./fireblocks-proposals";
 
-vi.mock("@/app/(session)/dashboard/[projectId]/wallets/fireblocks-proposal-actions", () => ({
-  listFireblocksProposals: vi.fn(),
-  cancelFireblocksProposal: vi.fn(),
-}));
 const proposal: FireblocksProposalSummary = {
   id: "fbp_1",
   kind: "signing",
@@ -36,15 +29,19 @@ function show() {
   );
 }
 beforeEach(() => {
-  vi.mocked(listFireblocksProposals)
-    .mockReset()
-    .mockResolvedValue({ proposals: [proposal], hasMore: false });
-  vi.mocked(cancelFireblocksProposal).mockReset();
+  vi.restoreAllMocks();
+  vi.spyOn(actions, "listFireblocksProposals").mockResolvedValue({
+    proposals: [proposal],
+    hasMore: false,
+  });
 });
 afterEach(cleanup);
 
 it("asks for cancellation and reports acknowledgement without claiming it was cancelled", async () => {
-  vi.mocked(cancelFireblocksProposal).mockResolvedValue({ acknowledged: true, proposal });
+  vi.spyOn(actions, "cancelFireblocksProposal").mockResolvedValue({
+    acknowledged: true,
+    proposal,
+  });
   const user = userEvent.setup();
   show();
   await user.click(await screen.findByRole("button", { name: "Cancel proposal" }));
@@ -52,7 +49,11 @@ it("asks for cancellation and reports acknowledgement without claiming it was ca
   expect(dialog.textContent).toContain("Cancellation can race approval or execution");
   await user.click(within(dialog).getByRole("button", { name: "Cancel proposal" }));
   await waitFor(() =>
-    expect(cancelFireblocksProposal).toHaveBeenCalledWith("signing", "fbp_1", expect.any(String))
+    expect(actions.cancelFireblocksProposal).toHaveBeenCalledWith(
+      "signing",
+      "fbp_1",
+      expect.any(String)
+    )
   );
   expect(await screen.findByRole("status")).toHaveProperty(
     "textContent",
@@ -62,7 +63,8 @@ it("asks for cancellation and reports acknowledgement without claiming it was ca
 });
 
 it("keeps the idempotency key across an uncertain retry", async () => {
-  vi.mocked(cancelFireblocksProposal)
+  const cancel = vi
+    .spyOn(actions, "cancelFireblocksProposal")
     .mockRejectedValueOnce(new Error("network"))
     .mockResolvedValueOnce({
       acknowledged: true,
@@ -82,10 +84,8 @@ it("keeps the idempotency key across an uncertain retry", async () => {
   await user.click(
     within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel proposal" })
   );
-  await waitFor(() => expect(cancelFireblocksProposal).toHaveBeenCalledTimes(2));
-  expect(vi.mocked(cancelFireblocksProposal).mock.calls[0]).toEqual(
-    vi.mocked(cancelFireblocksProposal).mock.calls[1]
-  );
+  await waitFor(() => expect(cancel).toHaveBeenCalledTimes(2));
+  expect(cancel.mock.calls[0]).toEqual(cancel.mock.calls[1]);
   expect(await screen.findByRole("status")).toHaveProperty(
     "textContent",
     "Fireblocks confirmed cancellation."
@@ -94,7 +94,7 @@ it("keeps the idempotency key across an uncertain retry", async () => {
 
 it("loads native transfers and never offers cancellation for a completed proposal", async () => {
   const user = userEvent.setup();
-  vi.mocked(listFireblocksProposals).mockResolvedValue({
+  vi.spyOn(actions, "listFireblocksProposals").mockResolvedValue({
     proposals: [{ ...proposal, status: "COMPLETED", canCancel: false }],
     hasMore: false,
   });
@@ -103,6 +103,6 @@ it("loads native transfers and never offers cancellation for a completed proposa
   expect(screen.queryByRole("button", { name: "Cancel proposal" })).toBeNull();
   await user.click(screen.getByRole("button", { name: "Transfers" }));
   await waitFor(() =>
-    expect(listFireblocksProposals).toHaveBeenCalledWith("cwlt_1", "transfer", 0)
+    expect(actions.listFireblocksProposals).toHaveBeenCalledWith("cwlt_1", "transfer", 0)
   );
 });

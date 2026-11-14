@@ -131,6 +131,8 @@ describe("fireblocks adapter", () => {
           signedMessages: [{ signature: { fullSig: signatureHex } }],
         })
       )
+      .mockRejectedValueOnce(new TypeError("fireblocks is unavailable"))
+      // The refused create's lookup by external ID fails the same way, then stays silent.
       .mockRejectedValueOnce(new TypeError("fireblocks is unavailable"));
     const adapter = new KeychainFireblocksAdapter(CONFIG);
     const signer = await adapter.getTransactionSigner();
@@ -140,7 +142,7 @@ describe("fireblocks adapter", () => {
       "Fireblocks network request failed"
     );
 
-    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    expect(fetchSpy).toHaveBeenCalledTimes(5);
     const payloadHex = Buffer.from(message.content).toString("hex");
     expect(fetchSpy).toHaveBeenCalledWith(
       "https://api.fireblocks.io/v1/transactions",
@@ -376,7 +378,9 @@ it("awaits the proposal acceptance hook before delivering a valid signature", as
           { signature: { fullSig: Buffer.from(signatures[wallet.address]).toString("hex") } },
         ],
       })
-    );
+    )
+    // The refusal sends the patch looking for a transaction to reconcile; there is none.
+    .mockRejectedValueOnce(new TypeError("lookup unavailable"));
   const adapter = new KeychainFireblocksAdapter({
     ...CONFIG,
     onSigningStatus: async ({ status }) => {
@@ -385,4 +389,28 @@ it("awaits the proposal acceptance hook before delivering a valid signature", as
   });
   const signer = await adapter.getTransactionSigner();
   await expect(signer.signMessages([message])).rejects.toThrow("Proposal cancelled locally");
+});
+
+it("reports a create the provider never recorded through the failure hook", async () => {
+  const failure = vi.fn();
+  const fetch = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
+    .mockResolvedValueOnce(Response.json({ message: "refused" }, { status: 400 }))
+    .mockResolvedValueOnce(Response.json({ message: "missing" }, { status: 404 }));
+  const signer = await new KeychainFireblocksAdapter({
+    ...CONFIG,
+    createExternalTxId: () => "sdp-test-request-1",
+    onSigningFailure: failure,
+  }).getTransactionSigner();
+  await expect(signTestMessage(signer)).rejects.toThrow("Fireblocks API error: 400");
+  // One lookup by external ID confirms the provider never recorded the create.
+  expect(fetch.mock.calls[2]?.[0]).toBe(
+    "https://api.fireblocks.io/v1/transactions/external_tx_id/sdp-test-request-1"
+  );
+  expect(failure).toHaveBeenCalledExactlyOnceWith({
+    externalTxId: "sdp-test-request-1",
+    providerTransactionId: undefined,
+    cause: expect.anything(),
+  });
 });

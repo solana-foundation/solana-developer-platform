@@ -34,7 +34,7 @@ const optionalAmount = z
   .transform((value) => value ?? undefined);
 const transferResultSchema = z.object({
   id: z.string().min(1).max(256),
-  status: z.string().regex(/^[A-Z_]{1,100}$/),
+  status: z.string().regex(/^[A-Z0-9_]{1,100}$/),
   subStatus: optionalText,
   txHash: optionalText,
   externalTxId: optionalText,

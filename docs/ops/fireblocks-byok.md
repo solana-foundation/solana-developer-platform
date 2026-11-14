@@ -226,10 +226,12 @@ This is a **bounded signing operation**, not a durable asynchronous proposal API
   cannot independently broadcast, and SDP discards a signature after its local timeout.
 
 A caller deadline that does not forward an abort signal cannot interrupt the SDK early;
-its own polling limit still performs cleanup. The wallet proposal list refreshes pending provider status on demand; no scheduled
-recovery worker for these sign-only proposals is introduced here. Native TRANSFER intents retain their existing
-persisted, asynchronous approval/reconciliation flow. Durable generic asynchronous
-program-call submission is separate work.
+its own polling limit still performs cleanup. The wallet proposal list refreshes pending
+provider status on demand. The `reconcile-fireblocks-proposals` cron (every 30 seconds)
+reconciles status only for these sign-only rows — the same read-and-record path the page
+uses; it never resumes, retries or submits a signing request. Native TRANSFER intents
+retain their existing persisted, asynchronous approval/reconciliation flow. Durable
+generic asynchronous program-call submission is separate work.
 
 The Signer check uses a sign-only memo program call, verifies and simulates without
 broadcasting. It needs an allowed Program Call policy and a funded SDP fee payer;
