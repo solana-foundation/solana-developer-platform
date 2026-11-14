@@ -58,8 +58,18 @@ Publish the rule. SDP uses
 so set **Settings → General → One-time address transactions** to **Allow**.
 Complete the required approvals for both changes.
 
-**Check the policy yourself:** SDP's Editor user cannot read policies, and the
-**Pay** reminder does not detect a missing policy.
+**Check the policy yourself:** SDP checks policy presence after connection and
+hourly. The connection and wallet detail pages show the result. The Editor user
+cannot read policies, so this setup shows **Provider policy not verified**; ask an
+authorized operator to review the published policy. A read that confirms no
+matching Transfer rule — or a rule that allows transfers without your approver
+set — shows **No provider policy detected**. A workspace that prefers automated
+verification can register the connection with an API user whose role may read the
+workspace's active policy, accepting that wider permission on the credential SDP
+stores; the check only reads policies, never edits or publishes them.
+
+Neither warning blocks signing. A detected rule does not prove its approvals or limits are
+appropriate, and this check does not verify RAW signing policies.
 
 ### Fund and test
 

@@ -47,6 +47,7 @@ import { withIssuedTokenLabels } from "@/routes/payments/token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
+import { checkConnectedProviderPolicies } from "@/services/custody/provider-policy";
 import { assertCustodyProviderCanDeleteWallet } from "@/services/custody-provider-lifecycle.service";
 import {
   CustodyRuntimeTargets,
@@ -61,6 +62,7 @@ import {
 } from "@/services/helius-das.service";
 import { assertCustodyProviderAvailable } from "@/services/provider-availability.service";
 import type { CustodyWalletIdempotency } from "@/services/stores/custody-config.store";
+import { CustodyPolicyStore } from "@/services/stores/custody-policy.store";
 
 export function clearWalletCaches() {
   clearWalletBalanceCache();
@@ -313,6 +315,7 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
         idempotency,
       });
       clearWalletCaches();
+      checkConnectedProviderPolicies(c, body.connectionId);
       return created(c, { wallet } satisfies CustodyWalletResponse);
     }
 
@@ -578,9 +581,17 @@ export const getWalletById = async (c: AppContext) => {
     throw new AppError("NOT_FOUND", "Wallet not found");
   }
 
-  const walletMetadata: CustodyWalletMetadataResponse["wallet"] = {
-    ...wallet,
-  };
+  const walletMetadata: CustodyWalletMetadataResponse["wallet"] = { ...wallet };
+  if (
+    wallet.custodyConnectionId &&
+    (wallet.provider === "privy" || wallet.provider === "fireblocks")
+  ) {
+    walletMetadata.providerPolicy = await new CustodyPolicyStore(getDb(c.env)).read(
+      getAuth(c).organizationId,
+      requireProjectId(c),
+      { walletId: wallet.id }
+    );
+  }
   const includeBalanceQuery = c.req.query("includeBalance");
   const includeBalance = includeBalanceQuery?.trim().toLowerCase() !== "false";
 

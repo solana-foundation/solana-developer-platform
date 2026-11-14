@@ -580,6 +580,7 @@ describe("Custody setup by project environment", () => {
             canComplete: false,
             canReplaceCredentials: false,
             canCancel: true,
+            providerPolicy: { checkedAt: null, reason: "not_checked", status: "unknown" },
           },
         },
         meta: { requestId: expect.any(String), timestamp: expect.any(String) },

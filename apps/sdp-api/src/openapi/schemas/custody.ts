@@ -1,5 +1,10 @@
-import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
+import {
+  CUSTODY_PROVIDERS,
+  PROVIDER_POLICY_REASONS,
+  PROVIDER_POLICY_STATUSES,
+} from "@sdp/types/custody";
 import { z } from "zod";
+import { CUSTODY_MODE_GATE } from "@/openapi/release-channel-values";
 import {
   connectionWalletOwnerSchema as connectionWalletOwnerSchemaBase,
   createManagedWalletSchema as createManagedWalletSchemaBase,
@@ -275,6 +280,18 @@ export const custodyWalletByIdResponseSchema = z
   .object({
     wallet: custodyWalletBaseSchema
       .extend({
+        providerPolicy: z
+          .object({
+            status: z.enum(PROVIDER_POLICY_STATUSES),
+            reason: z.enum(PROVIDER_POLICY_REASONS),
+            checkedAt: isoDateTimeSchema.nullable(),
+          })
+          .optional()
+          .openapi({
+            [CUSTODY_MODE_GATE]: "byok",
+            description:
+              "Advisory policy presence for supported BYOK wallets. present means a provider policy attached to the wallet, or a native Transfer rule covering its vault and supported assets, was observed; it does not verify policy strength, initiators, limits or permission to sign. missing means no matching policy was found in a successful read. unknown covers denied access, provider failures, unsupported responses, unchecked wallets, replaced credentials and observations older than two hours. Checks run on connection and wallet creation, then hourly. This does not block signing. Omitted for managed custody.",
+          }),
         provider: orgCustodyProviderSchema.openapi({
           description: "Wallet custody provider.",
           example: "privy",

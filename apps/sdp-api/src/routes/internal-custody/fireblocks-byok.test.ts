@@ -11,6 +11,7 @@ import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { createCredentialSecretStore } from "@/services/credential-secret-store";
 import { eraseExpiredFireblocksCsrs } from "@/services/custody/fireblocks-registration.service";
+import { checkDueProviderPolicies } from "@/services/custody/provider-policy";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { ProviderCredentialSecretCleanupStore } from "@/services/stores/provider-credential-secret-cleanup.store";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
@@ -76,7 +77,11 @@ function request(
 function providerResponse(address = ADDRESS) {
   return vi
     .spyOn(globalThis, "fetch")
-    .mockImplementation(async () => Response.json({ addresses: [{ address }] }));
+    .mockImplementation(async (url) =>
+      String(url).endsWith("/v1/tap/active_policy")
+        ? Response.json({ policy: { rules: [] } })
+        : Response.json({ addresses: [{ address }] })
+    );
 }
 
 async function connect(projectId = PROJECT_ID) {
@@ -192,10 +197,12 @@ describe("Fireblocks BYOK lifecycle", () => {
     expect((await request(`/connections/${pendingId}/cancel`, {})).status).toBe(200);
   });
 
-  it("encrypts credentials, attaches the vault with one read and replays completion", async () => {
+  it("encrypts credentials, attaches the vault and checks its policy and replays completion", async () => {
     const fetch = providerResponse();
     const connected = await connect();
-    expect(fetch).toHaveBeenCalledTimes(1);
+    // The observation follows setup in the background; the periodic queue does the same work.
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
+    expect(fetch).toHaveBeenCalledTimes(2);
     expect(fetch).toHaveBeenCalledWith(
       `${testEnv.FIREBLOCKS_API_BASE_URL}/v1/vault/accounts/0/SOL_TEST/addresses_paginated`,
       expect.objectContaining({
@@ -203,6 +210,11 @@ describe("Fireblocks BYOK lifecycle", () => {
         headers: expect.objectContaining({ "X-API-Key": fields.apiKey }),
       })
     );
+    const detail = await request(`/connections/${connected.connectionId}`);
+    expect((await detail.json()).data.connection.providerPolicy).toMatchObject({
+      status: "missing",
+      reason: "no_policy",
+    });
     const credential = await getDb(env).queryOne<{ encrypted_secret_payload: string }>(
       "SELECT encrypted_secret_payload FROM provider_credentials WHERE id = ?",
       [connected.providerCredential.id]
@@ -230,7 +242,7 @@ describe("Fireblocks BYOK lifecycle", () => {
     ).toEqual({ encrypted_private_key: null });
     const replay = await request(`/connections/${connected.connectionId}/complete`, {});
     expect(replay.status).toBe(200);
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
     const listed = await request("/connections?provider=fireblocks");
     const serialized = JSON.stringify(await listed.json());
     expect(serialized).toContain("fireblocks");
@@ -355,6 +367,8 @@ describe("Fireblocks BYOK lifecycle", () => {
   it("resolves only the owned wallet through the keychain Fireblocks signer", async () => {
     const fetch = providerResponse();
     const connected = await connect();
+    // The observation follows setup in the background; the periodic queue does the same work.
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
     const wallet = await getDb(env).queryOne<{ id: string }>(
       "SELECT id FROM custody_wallets WHERE custody_connection_id = ?",
       [connected.connectionId]
@@ -372,7 +386,7 @@ describe("Fireblocks BYOK lifecycle", () => {
       );
       expect(signer.address).toBe(ADDRESS);
       expect(managedAdapter).not.toHaveBeenCalled();
-      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(fetch).toHaveBeenCalledTimes(3);
       await resolver.getTransactionSignerForWalletRecord(
         ORGANIZATION_ID,
         PROJECT_ID,
@@ -380,7 +394,7 @@ describe("Fireblocks BYOK lifecycle", () => {
         "payments.transfer",
         managedAdapter
       );
-      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(fetch).toHaveBeenCalledTimes(3);
       await expect(
         resolver.getTransactionSignerForWalletRecord(
           ORGANIZATION_ID,
@@ -390,7 +404,7 @@ describe("Fireblocks BYOK lifecycle", () => {
           managedAdapter
         )
       ).rejects.toThrow();
-      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(fetch).toHaveBeenCalledTimes(3);
       fetch.mockImplementation(async () =>
         Response.json({ addresses: [{ address: OTHER_ADDRESS }] })
       );
@@ -723,6 +737,7 @@ describe("Fireblocks vault discovery and selection", () => {
     return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       expect(init?.method).toBe("GET");
       const path = new URL(String(input)).pathname;
+      if (path === "/v1/tap/active_policy") return Response.json({ policy: { rules: [] } });
       if (path.endsWith("/addresses_paginated"))
         return Response.json({
           addresses: [{ address: path.includes("/7/") ? OTHER_ADDRESS : ADDRESS }],
@@ -933,7 +948,9 @@ describe("Fireblocks vault discovery and selection", () => {
     const { connectionId } = (await submitted.json()).data;
     const complete = await request(`/connections/${connectionId}/complete`, {});
     expect((await complete.json()).data.completion.status).toBe("success");
-    expect(fetch).toHaveBeenCalledTimes(4);
+    // The observation follows setup in the background; the periodic queue does the same work.
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
+    expect(fetch).toHaveBeenCalledTimes(5);
     const wallets = await getDb(env).queryMany(
       "SELECT wallet_id, public_key, label, purpose FROM custody_wallets WHERE custody_connection_id = ? ORDER BY wallet_id",
       [connectionId]
@@ -946,7 +963,7 @@ describe("Fireblocks vault discovery and selection", () => {
     expect(
       (await request("/provider-credentials", payload, PROJECT_ID, idempotencyKey)).status
     ).toBe(201);
-    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(fetch).toHaveBeenCalledTimes(5);
     expect(
       (await request("/provider-credentials", selectedPayload(["0"]), PROJECT_ID, idempotencyKey))
         .status

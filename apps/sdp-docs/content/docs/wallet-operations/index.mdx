@@ -15,3 +15,19 @@ Create a custody wallet, check its balances, and use API key grants to control w
 <CustodyProviderGuides />
 
 See the [Wallets API reference](/docs/reference/api/wallets) for request and response details.
+
+## Provider policy checks
+
+For supported BYOK wallets, the connection and wallet detail pages show
+an advisory policy state. SDP checks after connection and wallet creation, then
+hourly. A missing policy warns without blocking signing. A failed or denied read
+shows **Provider policy not verified**. Review the policy in the provider before
+sending funds.
+
+`GET /v1/wallets/{walletId}` includes `providerPolicy` for these wallets, including
+when `includeBalance=false`. It contains `status` (`present`, `missing`, or
+`unknown`), `reason`, and nullable `checkedAt`. Managed wallets omit this field.
+`present` means the provider reports a policy attached to the wallet or a native
+transfer rule covering its vault and supported assets. It does not
+verify policy strength or permission to sign. Replaced credentials and results
+older than two hours are `unknown`.

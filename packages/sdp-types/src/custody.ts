@@ -1,5 +1,23 @@
 import type { SdpEnvironment } from "./api-keys";
 
+export const PROVIDER_POLICY_STATUSES = ["present", "missing", "unknown"] as const;
+export const PROVIDER_POLICY_REASONS = [
+  "policy_detected",
+  "no_policy",
+  "access_denied",
+  "provider_unavailable",
+  "unsupported_response",
+  "not_checked",
+  "stale",
+  "credential_changed",
+] as const;
+/** Advisory presence check, never a verdict about policy strength or permission to sign. */
+export interface ProviderPolicyCheck {
+  status: (typeof PROVIDER_POLICY_STATUSES)[number];
+  reason: (typeof PROVIDER_POLICY_REASONS)[number];
+  checkedAt: string | null;
+}
+
 export const CUSTODY_PROVIDERS = [
   "local",
   "fireblocks",
@@ -745,6 +763,8 @@ export interface CustodyWalletTokenBalance {
 }
 
 export type CustodyWalletMetadata = CustodyWalletSummary & {
+  /** Returned on wallet detail reads for supported BYOK connections only. */
+  providerPolicy?: ProviderPolicyCheck;
   provider: CustodyProvider;
 };
 
