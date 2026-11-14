@@ -1,7 +1,15 @@
 diff --git a/dist/fireblocks-signer.js b/dist/fireblocks-signer.js
-index d9095c1cac80d821ceaa23edeef5af4eaba83159..1fdaefa661d4b1572520f763a9135fc20b29fef0 100644
+index d9095c1cac80d821ceaa23edeef5af4eaba83159..a057e4e27d0987dac94431a61e5bd0f9f58c2963 100644
 --- a/dist/fireblocks-signer.js
 +++ b/dist/fireblocks-signer.js
+@@ -1,6 +1,6 @@
+ import { assertIsAddress } from '@solana/addresses';
+ import { getBase16Decoder, getBase16Encoder, getBase58Encoder } from '@solana/codecs-strings';
+-import { abortableDelay, assertHttpsUrl, assertSignatureValid, createSignatureDictionary, ED25519_SIGNATURE_LENGTH, fetchSignerJson, normalizeBaseUrl, normalizeMessageBytes, signBatchSequential, signBatchStaggered, SignerErrorCode, throwSignerError, validateRequestDelayMs, } from '@solana/keychain-core';
++import { abortableDelay, assertHttpsUrl, assertSignatureValid, createSignatureDictionary, ED25519_SIGNATURE_LENGTH, fetchSignerJson, normalizeBaseUrl, normalizeMessageBytes, providerStatus, signBatchSequential, signBatchStaggered, SignerErrorCode, throwSignerError, validateRequestDelayMs, } from '@solana/keychain-core';
+ import { getBase64EncodedWireTransaction, } from '@solana/transactions';
+ import { createJwt, importFireblocksPrivateKey } from './jwt.js';
+ import { isTerminalStatus } from './types.js';
 @@ -26,6 +26,10 @@ const DEFAULT_API_BASE_URL = 'https://api.fireblocks.io';
  const DEFAULT_ASSET_ID = 'SOL';
  const DEFAULT_POLL_INTERVAL_MS = 1000;
@@ -34,7 +42,7 @@ index d9095c1cac80d821ceaa23edeef5af4eaba83159..1fdaefa661d4b1572520f763a9135fc2
      }
      /**
       * Sign a transaction with the PROGRAM_CALL operation in sign-only mode.
-@@ -237,22 +244,83 @@ class FireblocksSigner {
+@@ -237,22 +244,85 @@ class FireblocksSigner {
                  type: 'VAULT_ACCOUNT',
              },
          };
@@ -75,10 +83,12 @@ index d9095c1cac80d821ceaa23edeef5af4eaba83159..1fdaefa661d4b1572520f763a9135fc2
 +            // their original error. An aborted create may have succeeded remotely.
 +            if (!abortSignal?.aborted) {
 +                // A create the provider never recorded leaves no transaction to
-+                // reconcile; the failure hook lets persistence close the row. Anything
-+                // the provider still serves stays with polling and reconciliation.
-+                const found = await this.request('GET', `/v1/transactions/external_tx_id/${encodeURIComponent(externalTxId)}`, undefined, AbortSignal.timeout(5000)).catch(() => undefined);
-+                if (found === undefined) {
++                // reconcile; the failure hook lets persistence close the row. Only a
++                // 404 confirms that absence: a lookup that itself fails (outage,
++                // timeout, 5xx) proves nothing, and the proposal may still await
++                // approval, so it stays with polling and reconciliation.
++                const lookupError = await this.request('GET', `/v1/transactions/external_tx_id/${encodeURIComponent(externalTxId)}`, undefined, AbortSignal.timeout(5000)).then(() => undefined, (lookupCause) => lookupCause);
++                if (providerStatus(lookupError) === 404) {
 +                    try {
 +                        await this.onSigningFailure?.({ externalTxId, providerTransactionId: transactionId, cause });
 +                    }
@@ -127,7 +137,7 @@ index d9095c1cac80d821ceaa23edeef5af4eaba83159..1fdaefa661d4b1572520f763a9135fc2
              if (operation === 'PROGRAM_CALL') {
                  if (status === 'SIGNED') {
                      return this.extractSignature(txResponse, true);
-@@ -270,14 +338,13 @@ class FireblocksSigner {
+@@ -270,14 +340,13 @@ class FireblocksSigner {
              if (isTerminalStatus(status)) {
                  throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                      message: `Transaction failed with status: ${txResponse.status}`,

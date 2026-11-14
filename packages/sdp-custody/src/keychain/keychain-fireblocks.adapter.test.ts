@@ -414,3 +414,20 @@ it("reports a create the provider never recorded through the failure hook", asyn
     cause: expect.anything(),
   });
 });
+
+it("keeps a live proposal pending when the failure lookup itself fails", async () => {
+  const failure = vi.fn();
+  vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
+    .mockResolvedValueOnce(Response.json({ message: "refused" }, { status: 400 }))
+    // A lookup outage proves nothing: the proposal may still await approval,
+    // so only a 404 from the lookup may close the row through the hook.
+    .mockRejectedValueOnce(new TypeError("lookup unavailable"));
+  const signer = await new KeychainFireblocksAdapter({
+    ...CONFIG,
+    createExternalTxId: () => "sdp-test-request-1",
+    onSigningFailure: failure,
+  }).getTransactionSigner();
+  await expect(signTestMessage(signer)).rejects.toThrow("Fireblocks API error: 400");
+  expect(failure).not.toHaveBeenCalled();
+});

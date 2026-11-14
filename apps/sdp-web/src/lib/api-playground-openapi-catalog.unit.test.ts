@@ -138,7 +138,7 @@ describe("API playground release channel", () => {
         .find((endpoint) => endpoint.id === "list-wallets")
         ?.pathFields.find((field) => field.key === "provider")
         ?.options?.map((option) => option.value);
-    expect(providersIn("stable")).toEqual(["fireblocks", "privy"]);
+    expect(providersIn("stable")).toEqual(["privy"]);
     expect(providersIn("experimental")).toContain("fireblocks");
     expect(providersIn("experimental")).not.toContain("local");
   });
