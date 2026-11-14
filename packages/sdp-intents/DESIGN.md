@@ -1042,6 +1042,34 @@ delay, and batching reduce this.
 5. When does the TypeScript SDK expose the EdDSA and anonymous rails, the relayer, and ZK programs?
    SDP's pinned SDK, 0.1.6-alpha, has none of them.
 
+### 4.18 Coverage of SDP modules (design only)
+
+Each SDP module that writes to the chain fits the model. The table states how, and what the model
+still lacks for it.
+
+| Module | Interfaces and recipes | Missing |
+| :-- | :-- | :-- |
+| Recurring payments, subscriptions | `subscription.authorize` and `subscription.collect`, through a builder that resolves the subscriptions program's transfer-hook accounts. A cron prepares one intent for each collection. | A `delegates` postcondition with no limit, because an authorization approves `u64::MAX`. The message says "unlimited". |
+| Compliance | None. Screening is off-chain. | Nothing. A policy can refuse a `prepare`. |
+| Issuance | `token.create`, `mint`, `burn`, `freeze`, `pause`, `seize`, `setAuthority`, and list changes, through a Token-2022 builder. The new mint keypair is a `builder` signer. | Postconditions on mint supply, authority changes, freeze, and pause. |
+| Earn | The vault interfaces of 4.14. | A Veda implementation. Split swaps take several transactions. |
+| DvP | `dvp.create`, `fund`, `settle`, `cancel`, `reclaim`, one intent for each step. Settlement asserts both parties' balances, although neither party signs. | Nothing. |
+| Private Channels | The L1 deposit is an intent on L1. Transfers and the withdraw burn are intents on the channel chain, a cluster with its own genesis hash. The operator's release is async settlement. | The registry and Lighthouse on the channel chain, and RPC that sends the gateway's token. |
+| Helius Rings | `shielded` implementations (4.17). | The `shielded` recipe kind. |
+
+Token-2022 confidential transfers fit as Rings do: the client checks the encrypted amounts before
+it signs. Their proofs usually take several transactions.
+
+**Gaps across modules, in order.**
+
+1. **Multi-step actions** are sequences of intents, as async settlement already is. A plan stays
+   one transaction with one message.
+2. **Postconditions** on mint supply, authority changes, freeze, pause, and unlimited delegates.
+   Lighthouse has these assertions, and `sdp-intents-lighthouse` builds only the deltas so far.
+3. **The `shielded` recipe kind** (4.17).
+4. **More clusters**: a registry and Lighthouse on each one, and authenticated RPC.
+5. **Schedules and policies** stay outside the model. A cron or a policy calls `prepare`.
+
 ## 5. Security
 
 _SDLC §2 · §3.1 · §11_
@@ -1192,6 +1220,7 @@ Not built:
 4. A fix for `RentPayerInRecipe`: mark each placeholder account in the builder roles.
 5. A LiteSVM feature set that matches the cluster.
 6. Private intents through privacy rings (4.17).
+7. The postconditions, recipe kind, and clusters that SDP's other modules need (4.18).
 
 ## 11. Cost
 
