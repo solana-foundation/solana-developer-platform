@@ -899,6 +899,149 @@ the whole message, so the plan keeps it as it is:
 The message names each part's tier. `prepare` refuses a tier 3 implementation unless the intent turns both
 onchain checks off, so the weaker trust is the caller's explicit choice.
 
+### 4.17 Private intents through privacy rings (design only)
+
+Nothing in this section is built. It shows how intents can run inside Helius Privacy Rings
+(Zolana, `github.com/helius-labs/privacy-rings`), so that a business can use Earn without showing
+which of its customers did what. It assumes no knowledge of shielded pools.
+
+**Notes in place of balances.** A token account holds a balance that a payment edits. A shielded
+pool holds **notes** (also called UTXOs). A note is a fixed amount of one asset with an owner,
+like a banknote. A payment spends whole notes and creates new ones: Alice spends her 20 USDC note
+and creates a 10 USDC note for Bob and a 10 USDC change note for herself.
+
+```rust
+struct Utxo { owner, asset, amount: u64, blinding, utxo_data: Option<Vec<u8>>, ring_data, ring_program_id }
+```
+
+**What the chain stores.** The chain never stores a note. It stores:
+
+1. A **commitment**: the hash of the note, in a Merkle tree. The random `blinding` makes two
+   equal notes hash differently, so the hash shows nothing.
+2. A **ciphertext**: the note, encrypted to its owner's viewing key. The indexer serves
+   ciphertexts, and a wallet decrypts its own.
+3. A **nullifier** for each spent note: a hash of the note and the owner's secret key. The
+   program accepts each nullifier once, which stops a double spend. Nobody else can compute it, so
+   a spend does not show which note it spends.
+
+The real tokens sit in one pool vault for each mint. A spend carries a **ZK proof** that each
+spent note is in the tree, that the spender owns it, that each nullifier is correct, and that the
+amounts balance for each asset. The program checks the proof without seeing any note. A balance
+is the sum of a wallet's unspent notes, and only the wallet computes it.
+
+**What stays public.**
+
+| Step | Public | Hidden |
+| :-- | :-- | :-- |
+| Deposit (shield) | Everything: the depositor, the amount, the recipient | Nothing. It is a normal transaction with no proof, because it spends no note. |
+| Spend in a default ring | The owners | The amounts and assets (confidential) |
+| Spend in a policy ring | Only that a spend happened | The owners too (anonymous) |
+| Withdraw to a public address | The recipient and the amount | The sender, when a relayer pays the fee |
+
+A policy ring is its own program with rules, an auditor key that decrypts every ring transfer, and
+authorities that can freeze funds. SDP brings up one ring for each business.
+
+**Notes carry data.** `utxo_data` holds bytes that the pool commits into the note's hash and
+never reads. A program gives the bytes meaning in its own circuit. Helius's swap program keeps
+order terms there, and its timelock escrow keeps an unlock time. A program trusts only data in
+notes that its own PDA owns, because anyone can write any data into a note that they create.
+
+**How privacy fits intents.** Every private action ends in one generic thing: a pool spend, made
+of input notes, output notes with their data, public legs, and a program instruction. Zolana's SDK
+turns any spend into the bytes that the user signs. What changes from one action to another is
+which output notes, with which data, go to which program. An implementation declares that in a
+`shielded` recipe, as a static recipe declares instructions today. The service fills the template
+and stays generic.
+
+| Private action | Recipe shape |
+| :-- | :-- |
+| In-ring transfer, merge, ring entry or exit | One spend inside the pool |
+| Withdraw to a public address | One spend with a public leg |
+| Deposit into a public protocol, such as Kamino | The escrow strategy below |
+| A Helius ZK program, such as the swap | That program's own note layout |
+
+**The escrow strategy, for public protocols.** A public protocol needs public tokens, and it
+returns an amount that is known only when it runs. A ring spend uses about 1.4M compute units, the
+whole limit, so the public call cannot go in the same transaction. The strategy has four steps.
+A Kamino deposit of 100 USDC:
+
+1. **Shield.** The user deposits 100 USDC into the ring. This is public and needs no proof.
+2. **Request.** The user spends the 100 USDC note into a request note that the ring program's
+   PDA owns. Its `utxo_data` holds `h`, the hash of the intent; `B`, a salted hash of the user's
+   shielded identity; and `refund_after`. The user signs once, and a relayer submits. Public: a
+   spend happened. Hidden: who, how much, and what for.
+3. **Execute.** The ring program spends the request note, checks that the intent hashes to `h`,
+   and runs the Kamino implementation from the registry with its PDA as owner. It returns the
+   shares to the pool in a note that its PDA owns, tagged `B`. Public: the ring deposited 100 USDC
+   for 98 shares. Hidden: for whom.
+4. **Settle.** The user proves that they know the identity and salt behind `B`, and moves the
+   shares into a note that they own.
+
+Withdrawal runs the same steps in reverse. The user signs only in step 2: step 3 is authorized by
+`h`, and step 4 by `B`. Only the user can build the proofs for steps 3 and 4, so no keeper is
+needed and no keeper learns what anyone does. After `refund_after`, the user can take the request
+back. An interface can use the strategy only when its outflows are bounded, because the outflow
+postconditions say what to lock. The inflow postconditions say what comes back.
+
+The position is the protocol's real share token. `vault.deposit` requires a share mint, so every
+implementation of it returns an SPL token that a note can hold. A position that is not a token,
+such as a loan with borrows, needs a receipt that the ring program issues.
+
+**What the user signs.** The user signs one 32-byte digest:
+
+```
+digest = SHA-256(private_tx_hash ‖ external_data_hash)
+private_tx_hash    = Poseidon(input note hashes, output note hashes, address nullifiers, blinding)
+external_data_hash = SHA-256(instruction, expiry, public legs such as the relayer fee, messages, accounts)
+```
+
+A change to any note, amount, data field, or fee breaks the signature. Ring spends authorize in
+one of three ways:
+
+| Rail | The user signs | Fee payer |
+| :-- | :-- | :-- |
+| `ConfidentialSigner` (SDP today) | The Solana transaction | The user, who is then visible |
+| `ConfidentialEddsa` | The digest, checked inside the proof | A relayer |
+| `AnonymousRingEddsa` | The digest, for a hidden owner | A relayer |
+
+**What a Ledger shows.** A Ledger shows 32 opaque bytes, because the digest covers notes that
+only the wallet knows. Three fixes, weakest first: the app recomputes the digest from the intent
+and shows the message; a custody policy engine recomputes it before it signs, which fits SDP's
+enclave custody; or a dedicated Ledger app recomputes it on the device, as Zcash's Ledger app does
+for shielded transactions.
+
+**The client flow.** A private intent has the same three calls as a public one:
+
+```ts
+const plan = await intents.prepare(intent, { privacy: { ring: "R" } });
+await intents.verify(plan);                          // recomputes h, the notes, and the digest
+const signature = await wallet.sign(plan.signing);   // a transaction or a digest
+const result = await intents.send(plan, signature);
+```
+
+On the confidential rail, `prepare` proves and returns a complete transaction. On the anonymous
+rail, the proof needs the signature, so `send` proves and relays, and returns a status that
+follows steps 3 and 4. `verify` recomputes everything from the plaintext notes that `prepare`
+returns, so the service cannot change what the user signs.
+
+| Mode | SDP sees | SDP can move funds |
+| :-- | :-- | :-- |
+| The service builds | The user's notes and requests, through the viewing key that custody derives | No. A spend needs the user's signature. |
+| The client builds (Rust, compiled to WebAssembly) | Only the public step, as any observer does | No |
+
+**Limits.** The ring's auditor sees everything, by design. The shield and the public step show
+amounts and times, so a large odd amount moved soon after a shield links the two. Round amounts,
+delay, and batching reduce this.
+
+**Open questions for Helius.**
+
+1. Can a policy ring program also own notes through its PDA?
+2. Can `utxo_data` or the transaction's messages carry the intent hash under the user's signature?
+3. Do step 3's spend, public call, and deposit fit one transaction?
+4. Does each share mint need an SPL interface in the pool, and which Token-2022 extensions work?
+5. When does the TypeScript SDK expose the EdDSA and anonymous rails, the relayer, and ZK programs?
+   SDP's pinned SDK, 0.1.6-alpha, has none of them.
+
 ## 5. Security
 
 _SDLC §2 · §3.1 · §11_
@@ -1048,6 +1191,7 @@ Not built:
 3. Parity fixtures from SDP's builders, golden fixtures, and a compatibility corpus in CI.
 4. A fix for `RentPayerInRecipe`: mark each placeholder account in the builder roles.
 5. A LiteSVM feature set that matches the cluster.
+6. Private intents through privacy rings (4.17).
 
 ## 11. Cost
 
