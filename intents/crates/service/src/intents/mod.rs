@@ -12,10 +12,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
+use sdp_intents_client::remote;
 use sdp_intents_compiler::{format_version, IdRange};
+use sdp_intents_planner::{RemoteAnswer, ShieldedCall};
 
 use crate::error::ServiceError;
-use crate::flows::prepare_step;
+use crate::flows::{prepare_step, Prepared};
 use crate::registry::{pick, IndexKey, Registry};
 use crate::Service;
 use conditions::Bound;
@@ -31,12 +33,12 @@ pub async fn start(service: &Service, text: &str, tamper: bool) -> Result<Value,
     let unpinned = Progress { v: VERSION, request, pins: Vec::new(), steps: BTreeMap::new() };
     let pins = pins(service, &unpinned).await?;
 
-    advance(service, Progress { pins, ..unpinned }, Advance { signatures: Vec::new(), tamper }).await
+    advance(service, Progress { pins, ..unpinned }, Advance { signatures: Vec::new(), built: None, tamper }).await
 }
 
-/// A body of `{ progress, signatures? }`. `signatures` holds one entry for each step of the last
-/// `sign`, in order.
-pub async fn resume(service: &Service, body: &Value) -> Result<Value, ServiceError> {
+/// A body of `{ progress, signatures?, built? }`. `signatures` holds one entry for each step of the
+/// last `sign`, in order. `built` is the spend that the caller's wallet built for the last `build`.
+pub async fn resume(service: &Service, body: &Value, tamper: bool) -> Result<Value, ServiceError> {
     let progress = Progress::read(body.get("progress"))?;
     let signatures = body
         .get("signatures")
@@ -44,13 +46,41 @@ pub async fn resume(service: &Service, body: &Value) -> Result<Value, ServiceErr
         .map(|listed| listed.iter().filter_map(Value::as_str).map(str::to_owned).collect())
         .unwrap_or_default();
 
-    advance(service, progress, Advance { signatures, tamper: false }).await
+    let built = match body.get("built") {
+        Some(built) => Some(Built::read(service, built).await?),
+        None => None,
+    };
+
+    advance(service, progress, Advance { signatures, built, tamper }).await
 }
 
 /// What one call adds to the flow.
 struct Advance {
     signatures: Vec<String>,
+    built: Option<Built>,
     tamper: bool,
+}
+
+/// A shielded spend that the caller's wallet built: its pool instructions, which the planner checks
+/// as a remote recipe's, and the accounts that the pool creates for its nullifiers. The caller can
+/// lie only about its own flow: false nullifier accounts make a `spent` condition wrong for it.
+struct Built {
+    answer: RemoteAnswer,
+    nullifier_accounts: Vec<String>,
+}
+
+impl Built {
+    async fn read(service: &Service, built: &Value) -> Result<Self, ServiceError> {
+        let answer = remote::read_answer(built)?;
+        let tables = crate::flows::lookup_tables(&service.chain, &answer.lookup_tables()).await?;
+        let nullifier_accounts = built
+            .get("nullifierAccounts")
+            .and_then(Value::as_array)
+            .map(|listed| listed.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+            .unwrap_or_default();
+
+        Ok(Self { answer: answer.read(&tables)?, nullifier_accounts })
+    }
 }
 
 async fn advance(service: &Service, mut progress: Progress, call: Advance) -> Result<Value, ServiceError> {
@@ -83,9 +113,9 @@ async fn advance(service: &Service, mut progress: Progress, call: Advance) -> Re
     }
 
     let at = StepAt { steps: &steps, position: next, name };
-    let step = plan_step(service, &mut progress, at, call.tamper).await?;
+    let next = plan_step(service, &mut progress, at, call.built, call.tamper).await?;
 
-    answer(&progress, sign(step))
+    answer(&progress, next)
 }
 
 /// The signatures of the last `sign` belong to the first step that is planned and unsigned.
@@ -221,10 +251,12 @@ struct StepAt<'s> {
     name: &'s str,
 }
 
+/// The step's `sign`, or the `build` that the caller's wallet answers before the step can plan.
 async fn plan_step(
     service: &Service,
     progress: &mut Progress,
     StepAt { steps, position, name }: StepAt<'_>,
+    built: Option<Built>,
     tamper: bool,
 ) -> Result<Value, ServiceError> {
     let text = match steps {
@@ -235,19 +267,30 @@ async fn plan_step(
             Bindings { progress }.step_request(step)?
         }
     };
-    let prepared = prepare_step(service, &text, tamper).await?;
+    let (built, nullifier_accounts) = match built {
+        Some(Built { answer, nullifier_accounts }) => (Some(answer), nullifier_accounts),
+        None => (None, Vec::new()),
+    };
+    let prepared = match prepare_step(service, &text, tamper, built).await? {
+        Prepared::Step(prepared) => prepared,
+        Prepared::Build(spend) => return Ok(build(name, &spend)),
+    };
     let step = sign_step(prepared.json, name);
 
     let record = progress.step(name);
-    record.plan.nullifier_accounts =
-        prepared.facts.nullifier_accounts.iter().map(|account| bs58::encode(account.0).into_string()).collect();
+    record.plan.nullifier_accounts = nullifier_accounts;
     record.planned = Some(PlannedStep {
         step: step.clone(),
         expires: prepared.facts.last_valid_block_height.map(|block_height| Expiry { block_height }),
         signatures: Vec::new(),
     });
 
-    Ok(step)
+    Ok(sign(step))
+}
+
+/// Asks the caller to have its wallet build `spend`, and to call `continue` with what it built.
+fn build(name: &str, spend: &ShieldedCall) -> Value {
+    json!({ "kind": "build", "step": name, "spend": crate::shielded::spend_json(spend) })
 }
 
 /// A plan as a step of a `sign`: its own fields, without the plan's envelope, which `progress`

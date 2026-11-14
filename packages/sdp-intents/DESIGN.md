@@ -241,10 +241,12 @@ the requests of this call only (4.4).
 stateDiagram-v2
   direction LR
   [*] --> Answer: POST /v1/intents/start
+  Answer --> Build: kind build
   Answer --> Sign: kind sign
   Answer --> Send: kind send
   Answer --> Wait: kind wait
   Answer --> [*]: kind done
+  Build --> Answer: the caller's wallet builds, POST /v1/intents/continue
   Sign --> Answer: verify, sign, send, POST /v1/intents/continue
   Send --> Answer: send, POST /v1/intents/continue
   Wait --> Answer: at checkAfter, POST /v1/intents/continue
@@ -252,8 +254,9 @@ stateDiagram-v2
 
 | `next.kind` | The caller | Then calls |
 | :-- | :-- | :-- |
+| `build` | Asks its own wallet or custody to build `spend`, a shielded spend that only the spender's keys can build | `POST /v1/intents/continue` with `{ progress, built }` |
 | `sign` | For each of `steps`: renders `message` from the transaction with its own verifier (4.6), shows it, and signs what `signs` names. Sends the signed transactions as `land` says. | `POST /v1/intents/continue` with `{ progress, signatures: [<one entry for each step, in order>] }` |
-| `send` | Sends `transactions` as they are, as `land` says. They need no signature from the caller, such as a spend that the ring proved. | `POST /v1/intents/continue` with `{ progress }` |
+| `send` | Sends `transactions` as they are, as `land` says. They need no signature from the caller. Only the digest and message rails use it, which are not built. | `POST /v1/intents/continue` with `{ progress }` |
 | `wait` | Shows `message`. Waits until `until` holds, which it can watch itself, or until `checkAfter` | `POST /v1/intents/continue` with `{ progress }` |
 | `done` | Shows `message`, and drops `progress` | Nothing |
 
@@ -264,7 +267,10 @@ while (answer.next.kind !== "done") {
   await store.save(answer.progress);             // before the caller acts on next
   const { progress, next } = answer;
 
-  if (next.kind === "sign") {
+  if (next.kind === "build") {
+    const built = await wallet.build(next.spend);                 // the caller's own wallet or custody
+    answer = await post("/v1/intents/continue", { progress, built });
+  } else if (next.kind === "sign") {
     for (const step of next.steps) await verifier.check(step);   // over the signer's own RPC
     const signed = await wallet.signAll(next.steps);              // one approval for all steps
     await land(signed.transactions, next.land);                   // the caller's RPC, or a Jito bundle
@@ -285,8 +291,9 @@ while (answer.next.kind !== "done") {
 | `digest` | A ring spend's 32-byte digest (4.17) | The signature. The proof needs it, so the next answer is a `send` of the proved spend. |
 | `message` | The message itself, for a wallet of 4.7 | The signature. The next answer is a `send` of the wallet's approval, then a `wait` until the wallet's threshold approves. |
 
-1. The service sends nothing. The caller sends through its wallet, its own RPC, Jito, or a fee
-   payer service such as Kora.
+1. The service holds no key, sends nothing, and calls no wallet. The caller builds through its own
+   wallet or custody, and sends through its wallet, its own RPC, Jito, or a fee payer service such
+   as Kora.
 2. Until a step lands or expires, `continue` returns the same transaction. Signing it again gives
    the same signature, so the step lands at most once (4.19, rule 2).
 3. A call that fails changes nothing. The caller sends the same `progress` again.
@@ -925,8 +932,10 @@ service.
 The e2e also compiles a plan of instructions alone as legacy, v0, and v1, and refuses a remote
 endpoint that adds a token approval to an attacker.
 
-**Service.** `sdp-intents-service --rpc <url>` reads every document from the registry. With
-`--wallets <folder>` it also signs with local keypairs, for the playground. It serves each document
+**Service.** `sdp-intents-service --rpc <url>` reads every document from the registry. It holds no
+key. The playground's keys are in `sdp-intents-local-wallet`, which only the page and the e2e call:
+it lists the keys, builds and records Privacy Rings spends, checks and signs, and sends. With
+`--allow-tamper`, the service honors the playground's tamper switch. It serves each document
 as the definition JSON that `intents/definitions` uses, decompiled from the registry's bytes, so a
 client needs only the service and a verifier. A list reads two filtered `getProgramAccounts` calls.
 A single index or version reads only the addresses that its id and version derive.
@@ -942,8 +951,6 @@ A single index or version reads only the addresses that its id and version deriv
 | `POST /v1/intents/start`, `POST /v1/intents/continue` | A plan request, or `{ progress, signatures? }` | `{ progress, next }`, with the RPC calls |
 | `POST /v1/intents/recover` | `{ owner }` | The owner's stopping points (4.19). Not built. |
 | `POST /v1/verify` | A message or a transaction of any version, and the plan's message | What the transaction proves |
-| `GET /v1/wallets`, `POST /v1/send` | A message or a transaction | The local wallets, and a send |
-| `GET /v1/ring`, `POST /v1/ring/shield` | An address and lamports | The local wallets' private SOL, and a deposit |
 | `GET /metrics` | | Requests, RPC calls, and cache reads |
 
 **Playground.** `apps/intents-playground` explores the registry as an API explorer does: an
@@ -1149,8 +1156,7 @@ intent with `"options": { "privacy": { "ring": "<ring>" } }`, and an implementat
   "recipe": {
     "kind": "flow",
     "steps": [
-      { "name": "shield", "intent": { "interface": "solana.org/private.shield@^1", "inputs": { "…": "…" } },
-        "done": { "privateBalance": { "owner": "{inputs.owner}", "mint": "{inputs.asset}", "min": "{inputs.amount}" } } },
+      { "name": "shield", "intent": { "interface": "solana.org/private.shield@^1", "inputs": { "…": "…" } } },
       { "name": "request", "intent": { "interface": "solana.org/ring.request@^1", "inputs": { "inner": "{steps.execute.intent}", "…": "…" } },
         "done": { "spent": "{steps.request.plan.nullifiers}" },
         "recover": { "interface": "solana.org/ring.refund@^1", "inputs": { "note": "{steps.request.plan.notes.0}" } } },
@@ -1211,21 +1217,30 @@ account, and the asset, the amount, and the note's data as segments. The first a
 spender. A writable spender account marks a deposit: `privacy-rings-shield` moves public SOL into
 a note of the spender, with no proof.
 
-The planner resolves the notes and asks its caller for the spend. The service builds and proves
-it through the ring's indexer and prover, and returns the pool instruction. The planner puts that
-instruction in a segment of its own transaction, between `verify_intent` and the assertions. The
-proof covers the pool instruction alone, so the instructions around it leave it valid.
-`verify_intent` checks the instruction's program against the implementation's `invokesOnly`, as for
-a remote recipe, and Lighthouse asserts the public postconditions, such as the deposit's outflow.
-A shielded recipe with `verify_intent` therefore needs the assertions. The spend is tier 2. The
-notes inside are hidden, and the signer does not check them yet. Any signer can pay the fee.
+The planner resolves the notes and stops for the spend. Only the spender's keys can build it, and
+the service holds no key and calls no key holder, so `next` is a `build` of the spend that the
+intent requires. The caller's wallet builds and proves it through the ring's indexer and prover,
+and the caller sends the pool instruction back in `built`. The planner puts that instruction in a
+segment of its own transaction, between `verify_intent` and the assertions. The proof covers the
+pool instruction alone, so the instructions around it leave it valid. `verify_intent` checks the
+instruction's program against the implementation's `invokesOnly`, as for a remote recipe, and
+Lighthouse asserts the public postconditions, such as the deposit's outflow. A shielded recipe
+with `verify_intent` therefore needs the assertions. The spend is tier 2. Any signer can pay the
+fee.
+
+The notes are hidden onchain, so the key holder checks them. The verifier reports, for each
+shielded intent, the spend that the intent requires. The wallet records each spend that it
+builds, and signs a pool instruction only when it built that instruction with exactly those notes.
+A service that changes the instruction, or asks for other notes in its `build`, gets nothing
+signed. A browser verifier that did not build the spend sees the required spend, and cannot check
+the notes yet.
 
 `solana.org/private.transfer` has a second implementation, `privacy-rings-shield-and-transfer`, a flow of
 two steps (4.19). Where the funds come from is how the transfer runs, not what the user asks for,
 so both implementations implement one interface. Its guarantee is that at most the amount leaves
 the sender's public balance, which a transfer from notes alone also keeps. The
-shield step is done when the sender holds the amount privately, so a funded sender skips it. The
-transfer step waits until the ring's indexer shows the deposit, and is done when its notes are
+shield step is done when its deposit lands. The transfer step's wallet waits until the ring's
+indexer shows the deposit before it builds, and the step is done when its notes are
 spent, which the indexer answers from the nullifiers.
 
 `just playground` runs the Privacy Rings v0.6.0-alpha release (Zolana) on the surfnet. The playground shields SOL, sends
@@ -1319,7 +1334,7 @@ that the step's plan fixed, such as a ring spend's nullifiers.
 | Exists | `{ "account": …, "exists": true }` | Anyone |
 | Data | `{ "account": …, "data": { "offset", "type", "equals" } }` | Anyone |
 | Balance | `{ "balance": { "owner", "mint", "min" } }` | Anyone |
-| Private balance | `{ "privateBalance": { "owner", "mint", "min" } }` | The holder of the viewing key |
+| Private balance | `{ "privateBalance": { "owner", "mint", "min" } }` | The holder of the viewing key. The service holds no key, so it refuses this condition. A loop in the caller's client can check it. Not built. |
 | Spent | `{ "spent": "{steps.pay.plan.nullifiers}" }` | Anyone. The pool creates an account for each nullifier that a spend consumes, and one that exists proves the spend landed. A forester closes them later, so a missing one proves nothing. |
 | Committed | `{ "committed": "{steps.pay.plan.notes.0}" }` | Anyone, with the commitment |
 | Landed | `{ "landed": ["<signature>"], "expires": { "blockHeight": "…" } }` | Anyone. Only the planner writes it, for a step in flight. |
@@ -1436,6 +1451,7 @@ flow, and every step still plans from the chain and passes the signer's verifier
 | `POST /v1/intents/recover` | `{ owner }` | Each stopping point that the owner's keys find, with its `recover` intent |
 
 ```json
+{ "kind": "build", "step": "transfer", "spend": { "protocol": "privacy-rings", "spender": "…", "source": "notes", "feePayer": "…", "notes": [{ "owner": "…", "asset": "…", "amount": "250000000", "data": "" }] } }
 { "kind": "sign", "land": "inOrder", "steps": [{ "signs": "transaction", "message": "…", "transaction": { "…": "…" } }] }
 { "kind": "send", "land": "inOrder", "transactions": ["<base64 wire transaction>"] }
 { "kind": "wait", "step": "claim",
@@ -1529,6 +1545,7 @@ transaction over any RPC.
 | Lighthouse | The transaction fails | A bug can pass a bad transaction. It is immutable. | Every guarded transaction fails | An audit |
 | Flow builder or endpoint (4.19) | The flow stops at a stopping point | It can pick steps that waste time. Each step still plans and verifies as any intent. | The flow stops at a stopping point | `POST /v1/intents/recover` |
 | Jito block engine (4.19) | A bundle does not land, expires, and plans again | It can land part of a bundle. Each stopping point is recoverable. | `landing: inOrder` | `inOrder` |
+| The caller's wallet or custody (4.17) | No shielded step plans | It can build other notes than the intent's. The planner limits the spend to the pool, the assertions bound its public effects, and its signer refuses notes that the intent does not require. | No shielded step plans | Another wallet of the owner |
 | The caller's `progress` value | | A changed value stalls or repeats the caller's flow | The caller cannot continue | `POST /v1/intents/recover`, after `pendingUntil` |
 | The signer's RPC | The signer cannot verify, so it does not sign | A false document can change the message text. The chain still runs the real implementation within its real postconditions. | The signer cannot verify | A trusted RPC, or a local copy of each document, which never changes |
 
@@ -1540,6 +1557,12 @@ transaction over any RPC.
 4. Outputs, which trust the recipe.
 5. Tier 3, and an intent with the onchain checks off. Only the simulation checks them, and the
    message says `onchain checks: none`, so the signer sees the choice.
+
+**Keys.** The service holds no key and calls no key holder. A shielded step's spend comes from the
+caller's own wallet or custody, in `built`. The wallet signs a pool instruction only when it built
+that instruction with the notes that the transaction's intent requires. A service that forges a
+`build`, or changes the instruction it gets back, therefore gets nothing signed. The service never
+reads a private balance.
 
 **Flows.** Each step is a plan with every check above, so a flow adds no trust to a step. A flow
 adds two risks. A stop between steps can leave funds in an escrow or a request, so the
@@ -1555,7 +1578,7 @@ value is caller data. A changed value can stall or repeat only that caller's flo
 | Spoofing | A false builder, version, or name, or a squatted organization name | Organization accounts created only by the admin at launch, approvals, and immutable versions |
 | Tampering | Builder, remote, or RPC output, and instructions outside every span | `verify_intent`, the assertions, and the signer's verifier |
 | Repudiation | Which code built a transaction | Exact versions and the builder in the plan |
-| Information disclosure | Inputs to a remote endpoint | Only inputs and payers go out |
+| Information disclosure | Inputs to a remote endpoint, and private balances | Only inputs and payers go out. The service holds no viewing key and asks no wallet. |
 | Denial of service | Slow simulation, RPC, or endpoint | Round and compute limits, and timeouts |
 | Elevation of privilege | A payer or signer input in a built instruction | The builder account rule (4.2) and rule 5 (4.5) |
 
@@ -1618,7 +1641,7 @@ Production is a separate project with its own design document.
 | `verify_intent` with static, program, and remote recipes | About 27,000 to 29,000 compute units for an SPL transfer |
 | The warm cache and the first-fetch prefetch | One `getMultipleAccounts` for a cold SPL transfer |
 | Every transaction version | Legacy, v0 with lookup tables, and v1 land through the CLI and the provider |
-| Flows: spec 1.1, static flows, `start` and `continue`, `progress`, the in-flight rule, and the `exists`, `privateBalance`, and `spent` conditions | `privacy-rings-shield-and-transfer` shields, waits, transfers, and is done, in the e2e and the playground |
+| Flows: spec 1.1, static flows, `start` and `continue`, `progress`, the in-flight rule, and the `exists` and `spent` conditions | `privacy-rings-shield-and-transfer` shields, waits, transfers, and is done, in the e2e and the playground |
 
 The prototype also serves `POST /v1/prepare`, which returns the plan of a request of one step,
 without `progress`. The service runs the loop. The Rust client does not run it yet.

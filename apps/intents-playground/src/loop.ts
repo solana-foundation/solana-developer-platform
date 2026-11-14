@@ -34,9 +34,18 @@ export function saveCalls(requestKey: string, calls: Call[]) {
   }
 }
 
-/// The body that continues from `answer`, with the signatures of its `sign`, when there are some.
-export function continueBody(answer: Answer, signatures: string[]): ContinueBody {
-  return signatures.length === 0
-    ? { progress: answer.progress }
-    : { progress: answer.progress, signatures };
+/// What the caller did for the last `next`: the signatures of a `sign`, or the spend that its wallet
+/// built for a `build`.
+export interface Done {
+  signatures: string[];
+  built: Record<string, unknown> | null;
+}
+
+/// The body that continues from `answer`, with what the caller did for its `next`.
+export function continueBody(answer: Answer, done: Done): ContinueBody {
+  return {
+    progress: answer.progress,
+    ...(done.signatures.length > 0 ? { signatures: done.signatures } : {}),
+    ...(done.built !== null ? { built: done.built } : {}),
+  };
 }

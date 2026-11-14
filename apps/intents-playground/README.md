@@ -21,21 +21,23 @@ Each step runs in its own terminal, from the repository root.
    ```sh
    cd intents
    just build-programs idl fetch-zolana
-   cargo build -p sdp-intents-cli -p sdp-intents-service -p sdp-intents-test-provider
+   cargo build -p sdp-intents-cli -p sdp-intents-service -p sdp-intents-test-provider -p sdp-intents-local-wallet
    node programs/tools/deploy-surfnet.mjs
    node e2e/playground.mjs
    ```
 
-3. Start Zolana's indexer and prover, the Jupiter wrapper, the stand-in provider, and the service
-   with the playground wallets. The service signs and sends with those wallets, and builds their
-   private transfers:
+3. Start the Privacy Rings indexer and prover, the Jupiter wrapper, the stand-in provider, the
+   local wallet, and the service. The wallet holds the playground's keys: it builds Privacy Rings
+   spends when the page asks, checks each spend's notes before it signs, and sends. The service
+   holds no key and never calls the wallet:
 
    ```sh
    cd intents
    node programs/tools/zolana-services.mjs &
    node adapters/jupiter.mjs &
    ./target/debug/sdp-intents-test-provider &
-   ./target/debug/sdp-intents-service --wallets target/playground/wallets --ring-indexer http://127.0.0.1:8784
+   ./target/debug/sdp-intents-local-wallet --wallets target/playground/wallets --ring-indexer http://127.0.0.1:8784 &
+   ./target/debug/sdp-intents-service --allow-tamper
    ```
 
 4. Build the verifier module, start the playground, then open <http://localhost:5178>:
@@ -57,14 +59,14 @@ nothing on a real cluster.
   shows unapproved implementations.
 - The interface page: the display template as the title, the inputs as a form, the postconditions
   as guarantees, and each implementation with whether its `applies` checks hold.
-- Privacy ring: for a private interface, each wallet's private SOL and a button that shields
+- Solana Privacy Rings: each wallet's private SOL in the default ring, and a button that shields
   1 SOL. `private.transfer` sends SOL privately through Zolana. Its implementation
   `privacy-rings-shield-and-transfer` is a flow: it
   shields public SOL first when the private balance is short, then transfers.
 - Intent: the intent JSON and the `start` request as curl, TypeScript, and Rust.
 - The loop: every intent runs the same loop, for one transaction or many (`DESIGN.md`, 4.1). Each
-  call shows its curl and its answer, and `next` says what to do: sign each step, wait for its
-  condition, or nothing, because the flow is done. For a step to sign, the panel shows its message,
+  call shows its curl and its answer, and `next` says what to do: have the wallet build a shielded
+  spend, sign each step, wait for its condition, or nothing, because the flow is done. For a step to sign, the panel shows its message,
   each instruction with its part of the segment, and the compute units. `Verify` runs
   `@sdp/intents-verifier` in the browser. It reads the registry from the surfnet's RPC through the
   dev server's `/rpc`, never from the service. `Sign and send` signs with the local wallets. The

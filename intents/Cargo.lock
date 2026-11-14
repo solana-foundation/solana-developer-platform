@@ -3720,6 +3720,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "sdp-intents-local-wallet"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.23.1",
+ "bs58",
+ "clap",
+ "sdp-intents-client",
+ "sdp-intents-planner",
+ "sdp-intents-privacy-rings",
+ "sdp-intents-spec",
+ "serde_json",
+ "solana-address 2.7.0",
+ "solana-keypair",
+ "solana-signer",
+ "tokio",
+]
+
+[[package]]
 name = "sdp-intents-message"
 version = "0.1.0"
 dependencies = [
@@ -3791,17 +3810,11 @@ dependencies = [
  "sdp-intents-engine",
  "sdp-intents-lighthouse",
  "sdp-intents-planner",
- "sdp-intents-privacy-rings",
  "sdp-intents-registry-client",
  "sdp-intents-spec",
  "serde",
  "serde_json",
- "solana-address 2.7.0",
- "solana-keypair",
- "solana-message",
  "solana-signature",
- "solana-signer",
- "solana-transaction",
  "tokio",
 ]
 

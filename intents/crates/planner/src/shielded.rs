@@ -50,6 +50,22 @@ pub struct ShieldedNote {
     pub data: Vec<u8>,
 }
 
+/// The spend that an intent of a shielded recipe requires, as a signer checks it against the notes
+/// that it knows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShieldedSpend {
+    pub protocol: ShieldedProtocol,
+    pub spender: Address,
+    pub source: ShieldedSource,
+    pub notes: Vec<ShieldedNote>,
+}
+
+pub(crate) fn spend<C: Chain>(recipe: &Recipe<'_>, chain: &C) -> Result<ShieldedSpend, PlanError> {
+    let ShieldedCall { protocol, spender, source, notes, .. } = call(recipe, chain, 0)?;
+
+    Ok(ShieldedSpend { protocol, spender, source, notes })
+}
+
 /// The engine resolves each note as it resolves a static recipe's instruction.
 pub(crate) fn call<C: Chain>(
     recipe: &Recipe<'_>,

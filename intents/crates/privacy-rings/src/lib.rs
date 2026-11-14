@@ -42,6 +42,11 @@ pub struct PreparedSpend {
     pub nullifiers: Vec<[u8; 32]>,
 }
 
+/// The Privacy Rings pool program, which every spend calls.
+pub fn pool_program() -> Address {
+    spr_interface::pda::shielded_pool_program_id()
+}
+
 /// The pool creates one account for each nullifier that a spend consumes, under the tree of the
 /// spent note. A forester closes them later, so a missing one proves nothing.
 pub fn nullifier_accounts(spend: &PreparedSpend) -> Vec<Address> {
@@ -187,6 +192,34 @@ impl Shielded {
             .map_err(|cause| error("deposit message")(&cause))?;
 
         Ok(PreparedSpend { message: UnsignedMessage { message, last_valid_block_height }, nullifiers: Vec::new() })
+    }
+
+    /// Waits until the wallet's private balance of `amount.asset` reaches `amount.amount`, such as
+    /// after a deposit that the indexer has not read yet.
+    pub fn await_balance(
+        &self,
+        wallet: &ShieldedWallet,
+        amount: Amount,
+        timeout: std::time::Duration,
+    ) -> Result<(), ShieldedError> {
+        let deadline = std::time::Instant::now().checked_add(timeout);
+
+        loop {
+            let balance = self.balance(wallet, amount.asset)?;
+            let expired = deadline.is_none_or(|deadline| std::time::Instant::now() >= deadline);
+
+            match (balance >= amount.amount, expired) {
+                (true, _) => return Ok(()),
+                (false, true) => {
+                    return Err(ShieldedError(format!(
+                        "the private balance is {balance}, short of {}, after {} seconds",
+                        amount.amount,
+                        timeout.as_secs()
+                    )))
+                }
+                (false, false) => std::thread::sleep(std::time::Duration::from_secs(1)),
+            }
+        }
     }
 
     /// The wallet's private balance of `asset`, from its unspent notes.

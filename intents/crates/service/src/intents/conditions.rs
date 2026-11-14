@@ -42,13 +42,12 @@ impl Bound {
 
                 Ok(fetched.first().is_some_and(Option::is_some) == exists)
             }
-            "privateBalance" => {
-                let owner = address(self.body.get("owner"))?;
-                let mint = address(self.body.get("mint"))?;
-                let min = amount(self.body.get("min"))?;
-
-                Ok(crate::privacy_rings::private_balance(service, &owner, &mint).await? >= min)
-            }
+            // Only the owner's viewing key reads a private balance, and the service holds no key and
+            // asks no key holder.
+            "privateBalance" => Err(ServiceError::refused(
+                "ownerCondition",
+                "a privateBalance condition needs the owner's viewing key, which the service does not hold",
+            )),
             // The pool creates an account for each nullifier that a spend consumes, so one that
             // exists proves the spend landed. A forester closes them later, so a missing one proves
             // nothing, and the in-flight rule never plans a spend again on it alone.
@@ -77,11 +76,4 @@ fn bytes32(value: Option<&Value>) -> Result<[u8; 32], ServiceError> {
 
 fn address(value: Option<&Value>) -> Result<Address, ServiceError> {
     bytes32(value).map(Address)
-}
-
-fn amount(value: Option<&Value>) -> Result<u64, ServiceError> {
-    value
-        .and_then(Value::as_str)
-        .and_then(|text| text.parse().ok())
-        .ok_or_else(|| ServiceError::refused("flow", "a condition amount is not a decimal integer"))
 }

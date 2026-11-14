@@ -45,6 +45,9 @@ const PRIME = "3b8X44fLF9ooXaUm3hhSgjpmVs6rZZ3pPoGnGahc3Uu7";
 const WYLDS = "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih";
 const SERVICE_LISTEN = "127.0.0.1:8788";
 const SERVICE = `http://${SERVICE_LISTEN}`;
+const LOCAL_WALLET_BINARY = new URL("../target/debug/sdp-intents-local-wallet", import.meta.url).pathname;
+const WALLET_LISTEN = "127.0.0.1:8795";
+const WALLET = `http://${WALLET_LISTEN}`;
 const OUT = new URL("../target/e2e/", import.meta.url).pathname;
 const WALLETS = `${OUT}wallets/`;
 
@@ -54,14 +57,19 @@ const verifier = await Verifier.load(
 );
 const keypair = (name) => keypairIn(WALLETS, name);
 
-async function service(path, body) {
+async function call(base, path, body) {
   const init = body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body };
-  const answer = await (await fetch(`${SERVICE}${path}`, init)).json();
+  const answer = await (await fetch(`${base}${path}`, init)).json();
 
   if (answer.error) throw new Error(`${path}: ${answer.error.message}\n${JSON.stringify(answer.error.details)}`);
 
   return answer;
 }
+
+const service = (path, body) => call(SERVICE, path, body);
+
+/// The playground's wallet, which holds the keys in `WALLETS`.
+const wallet = (path, body) => call(WALLET, path, body);
 
 /// Starts `command` and waits until `url` answers.
 async function start(command, args, url) {
@@ -78,13 +86,17 @@ async function start(command, args, url) {
   throw new Error(`${command} did not start`);
 }
 
-/// The service signs with the wallets in `WALLETS`, so it starts after they exist. It registers them
-/// in the privacy ring, so it starts after the ring's services.
+/// The service holds no key and calls no wallet: the caller's wallet builds each shielded spend.
 const startService = () =>
+  start(SERVICE_BINARY, ["--rpc", RPC, "--listen", SERVICE_LISTEN, "--allow-tamper"], `${SERVICE}/health`);
+
+/// The wallet holds the keys in `WALLETS`, so it starts after they exist. It registers them in
+/// Privacy Rings, so it starts after the ring's services.
+const startWallet = () =>
   start(
-    SERVICE_BINARY,
-    ["--rpc", RPC, "--listen", SERVICE_LISTEN, "--wallets", WALLETS, "--ring-indexer", RING_INDEXER],
-    `${SERVICE}/health`,
+    LOCAL_WALLET_BINARY,
+    ["--rpc", RPC, "--listen", WALLET_LISTEN, "--wallets", WALLETS, "--ring-indexer", RING_INDEXER],
+    `${WALLET}/health`,
   );
 
 /// Zolana's Photon indexer and prover, which a shielded spend reads.
@@ -97,9 +109,9 @@ async function startRing() {
 
 /// Runs the loop of `DESIGN.md`, 4.1 from a `start` answer until done: signs each step with the
 /// service's wallets, and waits out each `wait`. Returns the last answer and what each turn asked.
-async function runFlow(first) {
-  let answer = first;
-  const kinds = [];
+async function runFlow(first, resumed) {
+  let answer = resumed ?? first;
+  const kinds = resumed === undefined ? [] : [`build ${first.next.step}`];
 
   for (let turn = 0; turn < 20 && answer.next.kind !== "done"; turn += 1) {
     if (answer.next.kind === "sign") {
@@ -107,11 +119,15 @@ async function runFlow(first) {
       const signatures = [];
 
       for (const step of answer.next.steps) {
-        const sent = await service("/v1/send", JSON.stringify({ message: step.transaction.messageBytes }));
+        const sent = await wallet("/send", JSON.stringify({ message: step.transaction.messageBytes }));
         signatures.push(sent.signature);
       }
 
       answer = await service("/v1/intents/continue", JSON.stringify({ progress: answer.progress, signatures }));
+    } else if (answer.next.kind === "build") {
+      kinds.push(`build ${answer.next.step}`);
+      const built = await wallet("/shielded/build", JSON.stringify(answer.next.spend));
+      answer = await service("/v1/intents/continue", JSON.stringify({ progress: answer.progress, built }));
     } else {
       await new Promise((resolve) => setTimeout(resolve, 1000));
       answer = await service("/v1/intents/continue", JSON.stringify({ progress: answer.progress }));
@@ -121,10 +137,23 @@ async function runFlow(first) {
   return { answer, kinds };
 }
 
+/// Whether the wallet refuses to send the first step of `answer`, with a message that holds `reason`.
+async function sendRefusal(answer, reason) {
+  const message = answer.next?.steps?.[0]?.transaction?.messageBytes;
+  if (message === undefined) throw new Error(`no step to sign: ${JSON.stringify(answer).slice(0, 400)}`);
+
+  const refused = await wallet("/send", JSON.stringify({ message })).then(
+    () => undefined,
+    (error) => error.message,
+  );
+
+  return refused?.includes(reason) === true;
+}
+
 /// The private SOL of the local wallet `address`, once it reaches `lamports`.
 async function ringBalanceReaches(address, lamports) {
   for (let attempt = 0; attempt < 30; attempt += 1) {
-    const { wallets } = await service("/v1/ring");
+    const { wallets } = await wallet("/ring");
     if (wallets.find((wallet) => wallet.address === address)?.lamports === lamports) return true;
 
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -192,7 +221,7 @@ async function run(name, request, signers) {
   }
 
   if (signers === undefined) {
-    const sent = await service("/v1/send", JSON.stringify({ message: compiled, presigned }));
+    const sent = await wallet("/send", JSON.stringify({ message: compiled, presigned }));
     expect(sent.signature !== undefined, `${name}: the service signed it, and it landed`);
   } else {
     const sent = cli("send", planPath, "--rpc", RPC, ...signers.flatMap((signer) => ["--keypair", signer.path]));
@@ -273,6 +302,7 @@ const organizationAuthority = base58(Buffer.from(organization.value.data[0], "ba
 expect(organizationAuthority === vault, "the vault is the authority of solana.org");
 
 const ring = await startRing();
+const localWallet = await startWallet();
 const child = await startService();
 const adapter = await startAdapter();
 const provider = await startProvider();
@@ -515,7 +545,7 @@ try {
   expect(assertionFailed || refused?.includes("breaks a guarantee") === true, "the service refuses it: the assertions fail");
 
   console.log("a private transfer through the privacy ring");
-  await service("/v1/ring/shield", JSON.stringify({ address: sender.address, lamports: 1_000_000_000 }));
+  await wallet("/ring/shield", JSON.stringify({ address: sender.address, lamports: 1_000_000_000 }));
   expect(await ringBalanceReaches(sender.address, 1_000_000_000), "the sender shields 1 SOL");
 
   const privateTransfer = plan(sender, [
@@ -526,7 +556,14 @@ try {
     },
   ]);
   const transferStarted = await service("/v1/intents/start", JSON.stringify(privateTransfer));
-  const shielded = transferStarted.next.steps[0];
+  expect(
+    transferStarted.next.kind === "build" && transferStarted.next.spend.notes[0].owner === payer.address,
+    "the service asks the caller's wallet to build the spend, and builds nothing itself",
+  );
+
+  const built = await wallet("/shielded/build", JSON.stringify(transferStarted.next.spend));
+  const signing = await service("/v1/intents/continue", JSON.stringify({ progress: transferStarted.progress, built }));
+  const shielded = signing.next.steps[0];
   expect(
     shielded.message.includes("| shielded | tier 2 | onchain checks: verify_intent, assertions"),
     "the shielded spend runs with verify_intent and the assertions",
@@ -542,10 +579,33 @@ try {
   );
   expect(unasserted?.includes("needs `assertions`") === true, "a shielded spend with verify_intent needs the assertions");
 
-  const transferred = await runFlow(transferStarted);
+  const transferred = await runFlow(signing);
   expect(transferred.answer.next.kind === "done", `the transfer is done: ${transferred.answer.next.message}`);
   expect(await ringBalanceReaches(payer.address, 250_000_000), "the payer holds 0.25 SOL privately");
   expect(await ringBalanceReaches(sender.address, 750_000_000), "the sender keeps 0.75 SOL privately");
+
+  console.log("a service that changes the spend after the wallet built it");
+  const tamperStart = await service("/v1/intents/start", JSON.stringify(privateTransfer));
+  const tamperBuilt = await wallet("/shielded/build", JSON.stringify(tamperStart.next.spend));
+  const tampered = await fetch(`${SERVICE}/v1/intents/continue`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-sdp-tamper": "1" },
+    body: JSON.stringify({ progress: tamperStart.progress, built: tamperBuilt }),
+  }).then((response) => response.json());
+  expect(await sendRefusal(tampered, "did not build the spend"), "the wallet refuses a spend that it did not build");
+
+  console.log("a service that asks the wallet to build other notes than the intent's");
+  const forgeStart = await service("/v1/intents/start", JSON.stringify(privateTransfer));
+  const forgedSpend = {
+    ...forgeStart.next.spend,
+    notes: forgeStart.next.spend.notes.map((note) => ({ ...note, owner: authority.address })),
+  };
+  const forgedBuilt = await wallet("/shielded/build", JSON.stringify(forgedSpend));
+  const forged = await service("/v1/intents/continue", JSON.stringify({ progress: forgeStart.progress, built: forgedBuilt }));
+  expect(
+    await sendRefusal(forged, "does not create the notes that its intent requires"),
+    "the wallet refuses to sign notes that the intent does not require",
+  );
 
   console.log("a flow of two steps: shield public SOL, then send it privately");
   const send = plan(payer, [
@@ -556,14 +616,19 @@ try {
     },
   ]);
   const started = await service("/v1/intents/start", JSON.stringify(send));
-  const again = await service("/v1/intents/continue", JSON.stringify({ progress: started.progress }));
+  const shieldBuilt = await wallet("/shielded/build", JSON.stringify(started.next.spend));
+  const shieldSigning = await service("/v1/intents/continue", JSON.stringify({ progress: started.progress, built: shieldBuilt }));
+  const again = await service("/v1/intents/continue", JSON.stringify({ progress: shieldSigning.progress }));
   expect(
-    again.next.steps?.[0].transaction.messageBytes === started.next.steps?.[0].transaction.messageBytes,
+    again.next.steps?.[0].transaction.messageBytes === shieldSigning.next.steps?.[0].transaction.messageBytes,
     "continue without a signature returns the same transaction",
   );
 
-  const { answer, kinds } = await runFlow(started);
-  expect(kinds.join(", ") === "sign shield, sign transfer", `the flow asks to sign the shield, then the transfer (${kinds.join(", ")})`);
+  const { answer, kinds } = await runFlow(started, shieldSigning);
+  expect(
+    kinds.join(", ") === "build shield, sign shield, build transfer, sign transfer",
+    `the flow asks the wallet to build and sign the shield, then the transfer (${kinds.join(", ")})`,
+  );
   expect(answer.next.kind === "done", `the flow is done: ${answer.next.message}`);
   expect(await ringBalanceReaches(sender.address, 1_250_000_000), "the sender holds 1.25 SOL privately");
   expect(await ringBalanceReaches(payer.address, 250_000_000), "the payer keeps 0.25 SOL privately");
@@ -573,5 +638,6 @@ try {
   child.kill();
   adapter.kill();
   provider.kill();
+  localWallet.kill();
   ring.kill();
 }

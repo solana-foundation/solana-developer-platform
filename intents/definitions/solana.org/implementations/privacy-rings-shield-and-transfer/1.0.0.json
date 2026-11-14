@@ -11,7 +11,7 @@
       "equals": "11111111111111111111111111111111"
     }
   ],
-  "message": "privately send {inputs.amount} of {inputs.mint} from {inputs.from} to {inputs.to}, shielding public funds first when the private balance is short",
+  "message": "privately send {inputs.amount} of {inputs.mint} from {inputs.from} to {inputs.to}, after shielding that amount of public funds",
   "recipe": {
     "kind": "flow",
     "steps": [
@@ -25,14 +25,6 @@
             "mint": "{inputs.mint}",
             "amount": "{inputs.amount}"
           }
-        },
-        "done": {
-          "privateBalance": {
-            "owner": "{inputs.from}",
-            "mint": "{inputs.mint}",
-            "min": "{inputs.amount}"
-          },
-          "message": "{inputs.from} holds {inputs.amount} of {inputs.mint} privately"
         }
       },
       {
@@ -46,14 +38,6 @@
             "mint": "{inputs.mint}",
             "amount": "{inputs.amount}"
           }
-        },
-        "ready": {
-          "privateBalance": {
-            "owner": "{inputs.from}",
-            "mint": "{inputs.mint}",
-            "min": "{inputs.amount}"
-          },
-          "message": "the ring's indexer shows {inputs.amount} of {inputs.mint} in the private balance of {inputs.from}"
         },
         "done": {
           "spent": "{steps.transfer.plan.nullifiers}",

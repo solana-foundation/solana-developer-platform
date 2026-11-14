@@ -9,10 +9,10 @@ use sdp_intents_client::message::{read_transaction, LookupTable, WireMessage};
 use sdp_intents_client::{fresh_address, instructions_only, json as plan_json, prepared, remote};
 use sdp_intents_compiler::{IdRange, PlanOutput};
 use sdp_intents_planner::{
-    verify_transaction, AccountMap, IntentDocuments, Payers, Plan, PlanRequest, Planner, RemoteAnswer, RemoteCall,
-    Step, VerifiedTransaction, VerifyStep,
+    verify_transaction, AccountMap, IntentDocuments, Payers, Plan, PlanRequest, Planner, ProviderSignature,
+    RemoteAnswer, RemoteCall, ShieldedCall, Step, VerifiedTransaction, VerifyStep,
 };
-use sdp_intents_spec::{Address, ShieldedProtocol};
+use sdp_intents_spec::Address;
 
 use crate::error::ServiceError;
 use crate::registry::{catalog, IntentReference, Registry};
@@ -26,7 +26,16 @@ const MAX_VERIFY_ROUNDS: usize = 8;
 /// With `tamper`, the transaction differs from the plan, as `tamper` says. A request for the
 /// instructions alone reads no blockhash.
 pub async fn prepare(service: &Service, text: &str, tamper: bool) -> Result<Value, ServiceError> {
-    Ok(prepare_step(service, text, tamper).await?.json)
+    match prepare_step(service, text, tamper, None).await? {
+        Prepared::Step(step) => Ok(step.json),
+        Prepared::Build(_) => Err(needs_build()),
+    }
+}
+
+/// A step's plan, or the shielded spend that the caller must build before the step can plan.
+pub(crate) enum Prepared {
+    Step(PreparedStep),
+    Build(ShieldedCall),
 }
 
 /// A plan as JSON, and what planning it fixed.
@@ -38,16 +47,24 @@ pub(crate) struct PreparedStep {
 /// What a step's plan fixes, which a flow keeps in `progress` (`DESIGN.md`, 4.19).
 #[derive(Default)]
 pub(crate) struct StepFacts {
-    /// The accounts that the pool creates for the nullifiers of the notes that the step spends.
-    pub nullifier_accounts: Vec<Address>,
     /// The last block height at which the step's transaction can land. A plan of instructions alone
     /// has none.
     pub last_valid_block_height: Option<u64>,
 }
 
-pub(crate) async fn prepare_step(service: &Service, text: &str, tamper: bool) -> Result<PreparedStep, ServiceError> {
+/// Plans one step. A shielded step plans only with `built`, the spend that the caller's wallet
+/// built, because the service holds no key and asks no key holder.
+pub(crate) async fn prepare_step(
+    service: &Service,
+    text: &str,
+    tamper: bool,
+    built: Option<RemoteAnswer>,
+) -> Result<Prepared, ServiceError> {
     let request: Value = serde_json::from_str(text)?;
-    let Planned { mut plan, output, facts } = planned(service, text, None).await?;
+    let (mut plan, output) = match planned(service, text, built).await? {
+        Planning::Planned(planned) => (planned.plan, planned.output),
+        Planning::Build(call) => return Ok(Prepared::Build(call)),
+    };
 
     if tamper {
         tamper_with(&mut plan);
@@ -62,19 +79,32 @@ pub(crate) async fn prepare_step(service: &Service, text: &str, tamper: bool) ->
         }
     };
 
-    let facts = StepFacts { last_valid_block_height: expiry, ..facts };
+    let facts = StepFacts { last_valid_block_height: expiry };
 
-    Ok(PreparedStep { json: plan_json::plan(&prepared, request), facts })
+    Ok(Prepared::Step(PreparedStep { json: plan_json::plan(&prepared, request), facts }))
 }
 
 struct Planned {
     plan: Plan,
     output: PlanOutput,
-    facts: StepFacts,
 }
 
-/// Plans `text` with the registry's documents. A remote call takes `answer` when it is set.
-async fn planned(service: &Service, text: &str, answer: Option<RemoteAnswer>) -> Result<Planned, ServiceError> {
+/// A plan, or the shielded spend that the planner waits for.
+enum Planning {
+    Planned(Box<Planned>),
+    Build(ShieldedCall),
+}
+
+fn needs_build() -> ServiceError {
+    ServiceError::refused(
+        "needsBuild",
+        "the request holds a shielded step, which the spender's wallet builds. Run it with /v1/intents/start.",
+    )
+}
+
+/// Plans `text` with the registry's documents. A remote call or a shielded spend takes `answer`
+/// when it is set.
+async fn planned(service: &Service, text: &str, answer: Option<RemoteAnswer>) -> Result<Planning, ServiceError> {
     let request: Value = serde_json::from_str(text)?;
     let references = references(&request)?;
     let documents = Registry { chain: &service.chain }.intent_documents(&references).await?;
@@ -95,9 +125,10 @@ async fn planned(service: &Service, text: &str, answer: Option<RemoteAnswer>) ->
         priority_fee_lamports: compiled.priority_fee_lamports,
     };
 
-    let Answered { plan, facts } = plan(service, &plan_request, answer).await?;
-
-    Ok(Planned { plan, output: compiled.output, facts })
+    Ok(match plan(service, &plan_request, answer).await? {
+        Answered::Plan(plan) => Planning::Planned(Box::new(Planned { plan: *plan, output: compiled.output })),
+        Answered::Build(call) => Planning::Build(call),
+    })
 }
 
 /// A body of `{ "message": base64, "expected": text }`, or of `{ "transaction": base64 }` with a
@@ -110,7 +141,7 @@ pub async fn verify(service: &Service, body: &Value) -> Result<Value, ServiceErr
     let message = message_of(body)?;
     let tables = lookup_tables(chain, &message.lookup_tables()).await?;
     let expected = body.get("expected").and_then(Value::as_str);
-    let presigned = crate::wallets::presigned(body)?;
+    let presigned = presigned(body)?;
 
     if presigned.is_empty() {
         return Ok(plan_json::verified(&verified(chain, &message.decode(&tables)?).await?, expected));
@@ -121,7 +152,10 @@ pub async fn verify(service: &Service, body: &Value) -> Result<Value, ServiceErr
         .ok_or_else(|| ServiceError::invalid_request("a provider's transaction needs its `request`"))?;
     let frozen = remote::frozen_from_parts(&message, presigned, &tables)?;
     let answer = RemoteAnswer { frozen: Some(frozen), ..RemoteAnswer::default() };
-    let replanned = planned(service, &request.to_string(), Some(answer)).await?.plan;
+    let replanned = match planned(service, &request.to_string(), Some(answer)).await? {
+        Planning::Planned(planned) => planned.plan,
+        Planning::Build(_) => return Err(needs_build()),
+    };
 
     Ok(json!({
         "message": replanned.message,
@@ -180,10 +214,10 @@ fn tamper_with(plan: &mut Plan) {
     }
 }
 
-/// A plan, and the facts of the spends that it holds.
-struct Answered {
-    plan: Plan,
-    facts: StepFacts,
+/// A plan, or the shielded spend that the planner waits for.
+enum Answered {
+    Plan(Box<Plan>),
+    Build(ShieldedCall),
 }
 
 async fn plan(
@@ -194,7 +228,6 @@ async fn plan(
     let chain = &service.chain;
     let mut planner = Planner::new(request, fresh_address())?;
     let mut accounts = AccountMap::default();
-    let mut facts = StepFacts::default();
 
     loop {
         match planner.next(&accounts)? {
@@ -209,15 +242,9 @@ async fn plan(
             },
             Step::Shield(call) => match &answer {
                 Some(answer) => planner.called(answer.clone())?,
-                None => {
-                    let spend = match call.protocol {
-                        ShieldedProtocol::PrivacyRings => crate::privacy_rings::answer(service, &call).await?,
-                    };
-                    facts.nullifier_accounts.extend(spend.nullifier_accounts);
-                    planner.called(spend.answer)?
-                }
+                None => return Ok(Answered::Build(call)),
             },
-            Step::Done(plan) => return Ok(Answered { plan: *plan, facts }),
+            Step::Done(plan) => return Ok(Answered::Plan(plan)),
         }
     }
 }
@@ -303,4 +330,24 @@ pub fn calls_json(calls: sdp_intents_chain::RpcCalls) -> Value {
         "getBlockHeight": calls.get_block_height,
         "getSignatureStatuses": calls.get_signature_statuses,
     })
+}
+
+/// The provider's signatures that a plan of a provider's transaction holds, as `presigned`.
+fn presigned(body: &Value) -> Result<Vec<ProviderSignature>, ServiceError> {
+    let listed = body.get("presigned").and_then(Value::as_array).cloned().unwrap_or_default();
+
+    listed
+        .iter()
+        .map(|entry| {
+            let decode =
+                |key: &str| entry.get(key).and_then(Value::as_str).and_then(|text| bs58::decode(text).into_vec().ok());
+            let signer = decode("address").and_then(|bytes| <[u8; 32]>::try_from(bytes).ok());
+            let signature = decode("signature").and_then(|bytes| <[u8; 64]>::try_from(bytes).ok());
+
+            match (signer, signature) {
+                (Some(signer), Some(signature)) => Ok(ProviderSignature { signer: Address(signer), signature }),
+                _ => Err(ServiceError::invalid_request("each `presigned` entry has a base58 address and signature")),
+            }
+        })
+        .collect()
 }

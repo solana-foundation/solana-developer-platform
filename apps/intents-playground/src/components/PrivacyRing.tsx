@@ -26,7 +26,7 @@ export function PrivacyRing({ signature }: Props) {
         setError(null);
       })
       .catch((failure: unknown) => {
-        if (failure instanceof ServiceError && failure.code === "noShielded") setNoRing(true);
+        if (failure instanceof ServiceError && failure.code === "noRing") setNoRing(true);
         else setError(String(failure));
       });
   }, []);

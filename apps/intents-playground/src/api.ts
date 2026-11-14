@@ -160,6 +160,7 @@ export interface SignStep extends Omit<Plan, "request" | "rpcCalls"> {
 /// What the caller does next (`DESIGN.md`, 4.1).
 export type Next =
   | { kind: "sign"; land: "inOrder" | "bundle"; steps: SignStep[] }
+  | { kind: "build"; step: string; spend: Record<string, unknown> }
   | {
       kind: "wait";
       step: string;
@@ -182,6 +183,8 @@ export interface Answer {
 export interface ContinueBody {
   progress: Record<string, unknown>;
   signatures?: string[];
+  /// The spend that the caller's wallet built for the last `build`.
+  built?: Record<string, unknown>;
 }
 
 export class ServiceError extends Error {
@@ -198,8 +201,9 @@ interface ErrorBody {
   error?: { code: string; message: string; details: unknown };
 }
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api${path}`, init);
+/// `base` is `/api` for the intents service, or `/wallet` for the local wallet, which holds the keys.
+async function call<T>(path: string, init?: RequestInit, base = "/api"): Promise<T> {
+  const response = await fetch(`${base}${path}`, init);
   const body = (await response.json()) as T & ErrorBody;
 
   if (body.error !== undefined) {
@@ -209,12 +213,21 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return body;
 }
 
-function post<T>(path: string, body: unknown, headers: Record<string, string> = {}): Promise<T> {
-  return call<T>(path, {
-    method: "POST",
-    headers: { "content-type": "application/json", ...headers },
-    body: JSON.stringify(body),
-  });
+function post<T>(
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+  base = "/api"
+): Promise<T> {
+  return call<T>(
+    path,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    },
+    base
+  );
 }
 
 function shown(index: Omit<ListedIndex, "shown">): string | null {
@@ -242,7 +255,8 @@ export const api = {
     call<Published<ImplementationDefinition>>(
       `/v1/implementations/${idPath(id)}/versions/${version}`
     ),
-  wallets: () => call<{ wallets: Wallet[] }>("/v1/wallets").then((body) => body.wallets),
+  wallets: () =>
+    call<{ wallets: Wallet[] }>("/wallets", undefined, "/wallet").then((body) => body.wallets),
   matches: (interfaceId: string, version: string, body: unknown) =>
     post<{ implementations: Candidate[] }>(
       `/v1/interfaces/${idPath(interfaceId)}/versions/${version}/matches`,
@@ -251,14 +265,20 @@ export const api = {
   start: (request: unknown, tamper: boolean) =>
     post<Answer>("/v1/intents/start", request, tamper ? { "x-sdp-tamper": "1" } : {}),
   resume: (body: ContinueBody) => post<Answer>("/v1/intents/continue", body),
+  /// The wallet builds the spend that a `build` names. Only the caller talks to its wallet.
+  build: (spend: Record<string, unknown>) =>
+    post<Record<string, unknown>>("/shielded/build", spend, {}, "/wallet"),
   send: (transaction: NonNullable<Plan["transaction"]>) =>
-    post<{ signature: string }>("/v1/send", {
-      message: transaction.messageBytes,
-      presigned: transaction.presigned,
-    }),
-  ring: () => call<{ wallets: RingBalance[] }>("/v1/ring").then((body) => body.wallets),
+    post<{ signature: string }>(
+      "/send",
+      { message: transaction.messageBytes, presigned: transaction.presigned },
+      {},
+      "/wallet"
+    ),
+  ring: () =>
+    call<{ wallets: RingBalance[] }>("/ring", undefined, "/wallet").then((body) => body.wallets),
   shield: (address: string, lamports: number) =>
-    post<{ lamports: number }>("/v1/ring/shield", { address, lamports }),
+    post<{ lamports: number }>("/ring/shield", { address, lamports }, {}, "/wallet"),
   /// The Jupiter wrapper's switch that adds an approval to an attacker.
   adapterMode: (malicious: boolean) =>
     fetch("/adapter/mode", { method: "POST", body: JSON.stringify({ malicious }) }).then(

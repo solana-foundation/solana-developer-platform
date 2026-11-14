@@ -7,7 +7,7 @@ import { type Answer, api, type Recipe, ServiceError, type SignStep } from "@/ap
 import { Code, Snippets } from "@/components/Code";
 import { Instructions, StepRows, VerifiedResult } from "@/components/Plan";
 import { explorerUrl } from "@/known";
-import { type Call, continueBody, loadCalls, saveCalls } from "@/loop";
+import { type Call, continueBody, type Done, loadCalls, saveCalls } from "@/loop";
 import { compileSnippets, continueCurl, sendSnippets, startCurl } from "@/snippets";
 import { type Verified, verifyPlan } from "@/verifier";
 
@@ -22,6 +22,8 @@ interface Props {
 
 /// What each kind of `next` asks the caller to do.
 const TODO: Record<Answer["next"]["kind"], string> = {
+  build:
+    "The step spends private funds, so only the spender's keys can build it. Ask your own wallet or custody to build `spend`, then call continue with progress and what it built. The service never calls your wallet.",
   sign: "Verify each step against your own RPC, sign it, and send it yourself. Then call continue with progress and the signatures. The playground signs with its local wallets and sends through /v1/send.",
   wait: "Nothing to sign. `until` is the condition that the step waits for. Watch it yourself, or call continue again at `checkAfter`.",
   done: "The flow is done. Drop progress.",
@@ -63,7 +65,9 @@ export function Loop(props: Props) {
           verified={loop.verified}
           onVerify={loop.verify}
           onSend={loop.send}
-          onContinue={() => loop.resume(Object.values(sent))}
+          built={loop.built}
+          onBuild={loop.build}
+          onContinue={() => loop.resume({ signatures: Object.values(sent), built: loop.built })}
         />
       )}
       {calls.length > 0 && (
@@ -81,6 +85,7 @@ function useLoop(props: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [sent, setSent] = useState<Sent>({});
   const [verified, setVerified] = useState<Record<number, Verified>>({});
+  const [built, setBuilt] = useState<Record<string, unknown> | null>(null);
   const answer = calls.at(-1)?.answer ?? null;
   const steps = answer?.next.kind === "sign" ? answer.next.steps : [];
 
@@ -92,6 +97,7 @@ function useLoop(props: Props) {
       setCalls((previous) => [...previous, made]);
       setSent({});
       setVerified({});
+      setBuilt(null);
     };
 
     setBusy(route);
@@ -102,9 +108,9 @@ function useLoop(props: Props) {
   }, []);
 
   const resume = useCallback(
-    (signatures: string[]) => {
+    (done: Done) => {
       if (answer === null) return Promise.resolve();
-      const body = continueBody(answer, signatures);
+      const body = continueBody(answer, done);
 
       return call("continue", body, api.resume(body));
     },
@@ -113,6 +119,19 @@ function useLoop(props: Props) {
 
   const verify = (index: number) =>
     verifyStep(steps[index]).then((result) => setVerified((all) => ({ ...all, [index]: result })));
+  const build = () => {
+    if (answer?.next.kind !== "build")
+      return Promise.reject(new Error("the answer asks for no build"));
+
+    setBusy("build");
+    return api
+      .build(answer.next.spend)
+      .then((made) => {
+        setBuilt(made);
+        return made;
+      })
+      .finally(() => setBusy(null));
+  };
   const send = (index: number) =>
     sendStep(steps[index]).then((signature) => {
       setSent((all) => ({ ...all, [index]: signature }));
@@ -127,6 +146,8 @@ function useLoop(props: Props) {
     busy,
     sent,
     verified,
+    built,
+    build,
     setBusy,
     resume,
     verify,
@@ -142,31 +163,38 @@ function useAutoLoop(loop: {
   busy: string | null;
   answer: Answer | null;
   steps: SignStep[];
-  resume: (signatures: string[]) => Promise<void>;
+  resume: (done: Done) => Promise<void>;
+  build: () => Promise<Record<string, unknown>>;
   setBusy: (busy: string | null) => void;
   send: (index: number) => Promise<string>;
   verify: (index: number) => Promise<void>;
 }) {
-  const { auto, busy, answer, steps, resume, setBusy, send, verify } = loop;
+  const { auto, busy, answer, steps, resume, build, setBusy, send, verify } = loop;
 
   useEffect(() => {
     if (!auto || busy !== null || answer === null) return;
 
     if (answer.next.kind === "wait") {
       const delay = Math.max(0, Date.parse(answer.next.checkAfter) - Date.now());
-      const timer = setTimeout(() => resume([]), delay);
+      const timer = setTimeout(() => resume({ signatures: [], built: null }), delay);
 
       return () => clearTimeout(timer);
     }
 
-    if (answer.next.kind === "sign") {
-      // `resume` marks the loop busy until its answer arrives, so the effect does not sign twice.
-      setBusy("auto");
-      signAll(steps.length, verify, send)
-        .then((signatures) => resume(signatures))
+    // `resume` marks the loop busy until its answer arrives, so the effect does not act twice.
+    if (answer.next.kind === "build") {
+      build()
+        .then((made) => resume({ signatures: [], built: made }))
         .catch(() => setBusy(null));
     }
-  }, [auto, busy, answer, steps.length, resume, setBusy, send, verify]);
+
+    if (answer.next.kind === "sign") {
+      setBusy("auto");
+      signAll(steps.length, verify, send)
+        .then((signatures) => resume({ signatures, built: null }))
+        .catch(() => setBusy(null));
+    }
+  }, [auto, busy, answer, steps.length, resume, build, setBusy, send, verify]);
 }
 
 async function signAll(
@@ -263,6 +291,7 @@ function CallCard({ number, call }: { number: number; call: Call }) {
 }
 
 const KIND_BADGES: Record<Answer["next"]["kind"], string> = {
+  build: "badge-amber",
   sign: "badge-amber",
   wait: "badge-gray",
   done: "badge-green",
@@ -276,13 +305,17 @@ interface NextProps {
   verified: Record<number, Verified>;
   onVerify: (index: number) => Promise<void>;
   onSend: (index: number) => Promise<string>;
+  built: Record<string, unknown> | null;
+  onBuild: () => Promise<Record<string, unknown>>;
   onContinue: () => void;
 }
 
 function NextPanel(props: NextProps) {
   const { next } = props.answer;
-  const signatures = Object.values(props.sent);
-  const body = continueBody(props.answer, signatures);
+  const body = continueBody(props.answer, {
+    signatures: Object.values(props.sent),
+    built: props.built,
+  });
 
   return (
     <div className="loop-next">
@@ -292,6 +325,7 @@ function NextPanel(props: NextProps) {
         next.steps.map((step, index) => (
           <SignStepView key={step.name} {...props} step={step} index={index} />
         ))}
+      {next.kind === "build" && <BuildView next={next} {...props} />}
       {next.kind === "wait" && <WaitView next={next} />}
       {next.kind === "done" && <div className="callout callout-green">{next.message}</div>}
       {next.kind !== "done" && (
@@ -311,6 +345,39 @@ function NextPanel(props: NextProps) {
         </>
       )}
     </div>
+  );
+}
+
+function BuildView(props: NextProps & { next: Extract<Answer["next"], { kind: "build" }> }) {
+  const instructions = (props.built?.instructions as unknown[] | undefined)?.length ?? 0;
+
+  return (
+    <>
+      <div className="section-sub">
+        Step <code>{props.next.step}</code> needs this spend. The wallet checks it against the
+        intent again when it signs.
+      </div>
+      <Code text={JSON.stringify({ spend: props.next.spend }, null, 2)} />
+      <button
+        type="button"
+        className="btn btn-sec"
+        disabled={props.busy !== null || props.built !== null}
+        onClick={() => props.onBuild()}
+      >
+        {props.busy === "build" ? "Building and proving…" : "Build with the wallet"}
+      </button>
+      {props.built !== null && (
+        <>
+          <div className="callout callout-green">
+            The wallet built the spend: {instructions} pool instruction, with its proof.
+          </div>
+          <details>
+            <summary>What the wallet built</summary>
+            <Code text={JSON.stringify(props.built, null, 2)} />
+          </details>
+        </>
+      )}
+    </>
   );
 }
 

@@ -13,10 +13,11 @@ use core::ops::Range;
 
 use sdp_intents_engine::{Chain, Payers, Recipe, Resolution};
 use sdp_intents_spec::wire::DocumentKind;
-use sdp_intents_spec::{Address, Intent};
+use sdp_intents_spec::{Address, Intent, RecipeKind};
 
 use crate::plan::{plan_message, with_rent_cap};
 use crate::registry::{verify_intent_discriminator, version_address, REGISTRY_PROGRAM};
+use crate::shielded::{self, ShieldedSpend};
 use crate::values::Values;
 use crate::{Instruction, PlanError, Transaction};
 
@@ -58,6 +59,10 @@ pub struct VerifiedIntent {
     pub built: Range<usize>,
     /// `verify_intent` and every instruction after it that the segment holds.
     pub segment: Range<usize>,
+    /// For a shielded recipe, the spend that the intent requires. `verify_intent` limits the built
+    /// instructions to the pool, and the notes inside them are hidden, so only a signer that knows
+    /// their plaintext can check them against this.
+    pub spend: Option<ShieldedSpend>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -124,10 +129,12 @@ enum Part {
     Rendered(Rendered),
 }
 
-/// An intent's part of the message, and the cluster that its implementation is for.
+/// An intent's part of the message, the cluster that its implementation is for, and the spend that
+/// a shielded recipe requires.
 struct Rendered {
     text: String,
     cluster: Address,
+    spend: Option<ShieldedSpend>,
 }
 
 /// Verifies `transaction` against `chain`, which holds the accounts that earlier steps asked for.
@@ -165,7 +172,7 @@ pub fn verify_transaction<C: Chain>(transaction: &Transaction, chain: &C) -> Res
         return Err(PlanError::ClustersDiffer.into());
     }
 
-    let texts: Vec<String> = rendered.into_iter().map(|part| part.text).collect();
+    let texts: Vec<String> = rendered.iter().map(|part| part.text.clone()).collect();
     let in_segment = |position: &usize| verifies.iter().any(|verify| verify.segment.contains(position));
     let unverified = (0..transaction.instructions.len())
         .filter(|position| !in_segment(position))
@@ -176,10 +183,12 @@ pub fn verify_transaction<C: Chain>(transaction: &Transaction, chain: &C) -> Res
         message: plan_message(cluster.as_ref(), payers, transaction.priority_fee_lamports, &texts),
         intents: verifies
             .iter()
-            .map(|verify| VerifiedIntent {
+            .zip(rendered)
+            .map(|(verify, part)| VerifiedIntent {
                 verify: verify.position,
                 built: verify.built.clone(),
                 segment: verify.segment.clone(),
+                spend: part.spend,
             })
             .collect(),
         unverified,
@@ -285,10 +294,15 @@ fn part<C: Chain>(verify: &DecodedVerify<'_>, payers: Payers<'_>, chain: &C) -> 
     }
 
     let message = values.message()?;
+    let spend = match recipe.implementation().recipe().map_err(PlanError::from)? {
+        RecipeKind::Shielded => Some(shielded::spend(&recipe, chain)?),
+        _ => None,
+    };
 
     Ok(Part::Rendered(Rendered {
         text: with_rent_cap(&message, verify.rent_cap),
         cluster: *recipe.implementation().cluster(),
+        spend,
     }))
 }
 

@@ -16,13 +16,10 @@
 //! | `POST /v1/intents/continue` | `{ progress, signatures? }` | The same, for the next step (`DESIGN.md`, 4.19) |
 //! | `POST /v1/prepare` | A plan request | The plan of a request of one step, and the RPC calls that it made |
 //! | `POST /v1/verify` | `{ message, expected }` or `{ transaction, expected }`, of any version | What the message proves to its signer |
-//! | `GET /v1/wallets` | | The local wallets, with `--wallets` |
-//! | `POST /v1/send` | `{ message }` | Signs with the local wallets and sends, with `--wallets` |
-//! | `GET /v1/ring` | | Each local wallet's private SOL balance, with `--ring-indexer` |
-//! | `POST /v1/ring/shield` | `{ address, lamports }` | Moves a local wallet's public SOL into a note, with `--ring-indexer` |
 //!
-//! With `--wallets`, `POST /v1/prepare` also takes `x-sdp-tamper: 1`, for the playground. With
-//! `--ring-indexer`, it builds the shielded spends of the local wallets.
+//! The service holds no key, sends nothing, and calls no key holder. A shielded step answers
+//! `build`, and the caller's wallet builds the spend. With `--allow-tamper`, `start`, `continue`, and
+//! `prepare` take `x-sdp-tamper: 1`, for the playground.
 
 mod describe;
 mod error;
@@ -30,10 +27,9 @@ mod flows;
 mod implementations;
 mod intents;
 mod metrics;
-pub mod privacy_rings;
 mod registry;
 mod resources;
-mod wallets;
+mod shielded;
 pub mod warm;
 
 use std::collections::HashMap;
@@ -55,13 +51,11 @@ use sdp_intents_spec::wire::DocumentKind;
 pub use crate::error::ServiceError;
 pub use crate::metrics::Metrics;
 use crate::registry::IndexKey;
-pub use crate::wallets::Wallets;
 
 pub struct Service {
     pub chain: CachedRpc,
-    pub wallets: Wallets,
-    /// The privacy ring that shielded spends of the local wallets go through.
-    pub shielded: Option<sdp_intents_privacy_rings::Endpoints>,
+    /// Whether `x-sdp-tamper: 1` changes a plan, which only the playground asks for.
+    pub allow_tamper: bool,
     pub metrics: Metrics,
 }
 
@@ -85,10 +79,6 @@ pub fn router(service: Arc<Service>) -> Router {
         .route("/v1/intents/start", post(start))
         .route("/v1/intents/continue", post(resume))
         .route("/v1/verify", post(verify))
-        .route("/v1/wallets", get(|State(service): Shared| async move { Json(service.wallets.json()) }))
-        .route("/v1/send", post(send))
-        .route("/v1/ring", get(ring))
-        .route("/v1/ring/shield", post(shield))
         .with_state(service)
 }
 
@@ -173,10 +163,10 @@ fn path_version(path: &HashMap<String, String>) -> Result<sdp_intents_spec::wire
     parse_version(path_text(path, "version")?).map_err(ServiceError::invalid_request)
 }
 
-/// `x-sdp-tamper: 1` asks for a transaction that `verify_intent` refuses. Only a service with local
-/// wallets honors it, because only the playground needs it.
+/// `x-sdp-tamper: 1` asks for a transaction that `verify_intent` refuses. Only a service started with
+/// `--allow-tamper` honors it, because only the playground needs it.
 async fn prepare(State(service): Shared, headers: HeaderMap, body: String) -> Response {
-    let tamper = !service.wallets.is_empty() && headers.get("x-sdp-tamper").is_some_and(|value| value == "1");
+    let tamper = service.allow_tamper && headers.get("x-sdp-tamper").is_some_and(|value| value == "1");
     let counted = sdp_intents_chain::counted(flows::prepare(&service, &body, tamper)).await;
     let prepared = counted.output.map(|mut plan| {
         if let Some(plan) = plan.as_object_mut() {
@@ -190,14 +180,15 @@ async fn prepare(State(service): Shared, headers: HeaderMap, body: String) -> Re
 }
 
 async fn start(State(service): Shared, headers: HeaderMap, body: String) -> Response {
-    let tamper = !service.wallets.is_empty() && headers.get("x-sdp-tamper").is_some_and(|value| value == "1");
+    let tamper = service.allow_tamper && headers.get("x-sdp-tamper").is_some_and(|value| value == "1");
     let counted = sdp_intents_chain::counted(intents::start(&service, &body, tamper)).await;
 
     observed(&service, "start", async { with_calls(counted) }).await
 }
 
-async fn resume(State(service): Shared, Json(body): Json<Value>) -> Response {
-    let counted = sdp_intents_chain::counted(intents::resume(&service, &body)).await;
+async fn resume(State(service): Shared, headers: HeaderMap, Json(body): Json<Value>) -> Response {
+    let tamper = service.allow_tamper && headers.get("x-sdp-tamper").is_some_and(|value| value == "1");
+    let counted = sdp_intents_chain::counted(intents::resume(&service, &body, tamper)).await;
 
     observed(&service, "continue", async { with_calls(counted) }).await
 }
@@ -215,18 +206,6 @@ fn with_calls(counted: sdp_intents_chain::Counted<Result<Value, ServiceError>>) 
 
 async fn verify(State(service): Shared, Json(body): Json<Value>) -> Response {
     observed(&service, "verify", flows::verify(&service, &body)).await
-}
-
-async fn ring(State(service): Shared) -> Response {
-    observed(&service, "ring", privacy_rings::balances(&service)).await
-}
-
-async fn shield(State(service): Shared, Json(body): Json<Value>) -> Response {
-    observed(&service, "shield", privacy_rings::shield(&service, &body)).await
-}
-
-async fn send(State(service): Shared, Json(body): Json<Value>) -> Response {
-    observed(&service, "send", service.wallets.send(&service.chain, &body)).await
 }
 
 /// Runs one route, and counts it by its outcome.
