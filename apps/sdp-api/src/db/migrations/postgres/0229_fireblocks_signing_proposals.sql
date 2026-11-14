@@ -11,7 +11,15 @@ CREATE TABLE fireblocks_signing_proposals (
     asset_id TEXT NOT NULL,
     operation TEXT NOT NULL CHECK (operation IN ('RAW', 'PROGRAM_CALL')),
     provider_transaction_id TEXT,
-    status TEXT NOT NULL DEFAULT 'SUBMITTING',
+    -- Mirrors FIREBLOCKS_SIGNING_PROPOSAL_STATUSES in packages/sdp-types/src/fireblocks.ts.
+    status TEXT NOT NULL DEFAULT 'SUBMITTING' CHECK (status IN (
+        'SUBMITTING',
+        'SUBMITTED', 'QUEUED', 'PENDING_AML_SCREENING', 'PENDING_AUTHORIZATION',
+        'PENDING_SIGNATURE', 'PENDING_3RD_PARTY_MANUAL_APPROVAL', 'PENDING_3RD_PARTY',
+        'PENDING_STATUS_UPDATE',
+        'SIGNED', 'BROADCASTING', 'CONFIRMING', 'COMPLETED',
+        'FAILED', 'REJECTED', 'CANCELLED', 'CANCELED', 'BLOCKED'
+    )),
     request_id TEXT,
     cancel_requested_at TEXT,
     finished_at TEXT,

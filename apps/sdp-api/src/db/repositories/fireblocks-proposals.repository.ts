@@ -115,6 +115,23 @@ export class FireblocksProposalsRepository {
     return row.cancel_requested_at === null && row.status === status;
   }
 
+  /**
+   * Close a proposal the provider never accepted: the create was refused or the lookup is
+   * gone, so there is no provider transaction to reconcile. Guarded against rows a poll
+   * already advanced to a provider transaction id.
+   */
+  async failUnaccepted(id: string): Promise<boolean> {
+    return (
+      (await this.db.queryOne<{ id: string }>(
+        `UPDATE fireblocks_signing_proposals SET status = 'FAILED',
+        finished_at = COALESCE(finished_at, sdp_iso_now()), updated_at = sdp_iso_now()
+        WHERE id = ? AND organization_id = ? AND project_id = ?
+          AND finished_at IS NULL AND provider_transaction_id IS NULL RETURNING id`,
+        [id, this.scope.organizationId, this.scope.projectId]
+      )) !== null
+    );
+  }
+
   async requestCancellation(id: string): Promise<boolean> {
     return (
       (await this.db.queryOne<{ id: string }>(

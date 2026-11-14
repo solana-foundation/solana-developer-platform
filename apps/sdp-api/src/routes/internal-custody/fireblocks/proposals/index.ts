@@ -14,6 +14,7 @@ import { conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { type AuthorizeInput, authorize, getAuthorized } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
+import { meteredQuota } from "@/middleware/metered-quota";
 import { requireAction } from "@/middleware/require-action";
 import { validateParams, validateQuery } from "@/middleware/validate";
 import type { AppContext } from "@/routes/custody/context";
@@ -39,6 +40,9 @@ import { cancelFireblocksProposalParams, listFireblocksProposalsSchema } from ".
 function scope(c: AppContext) {
   return { organizationId: getAuth(c).organizationId, projectId: requireProjectId(c) };
 }
+
+/** Proposal reads fan out to provider refreshes and cancels reach Fireblocks; one shared budget. */
+const FIREBLOCKS_PROPOSALS_QUOTA = { name: "fireblocks-proposals", actorMax: 10, orgMax: 30 };
 function proposals(c: AppContext) {
   return new FireblocksProposalsRepository(getDb(c.env), scope(c));
 }
@@ -163,6 +167,7 @@ fireblocksProposals.get(
   "/proposals",
   requireAction("wallets.configure"),
   validateQuery(listFireblocksProposalsSchema),
+  meteredQuota(FIREBLOCKS_PROPOSALS_QUOTA),
   async (c) => {
     const query = listFireblocksProposalsSchema.parse(c.req.query());
     await authorizeWallet(c, query.walletId);
@@ -197,6 +202,8 @@ fireblocksProposals.post(
   validateParams(cancelFireblocksProposalParams),
   authorize(authorizeCancellation),
   idempotent({ key: "required", serverErrors: "store" }),
+  // After idempotency: a replay answers from its record and a 429 is never stored under the key.
+  meteredQuota(FIREBLOCKS_PROPOSALS_QUOTA),
   async (c) => {
     const authorized = getAuthorized<Cancellation>(c);
     const audit = new AuditService(getDb(c.env));

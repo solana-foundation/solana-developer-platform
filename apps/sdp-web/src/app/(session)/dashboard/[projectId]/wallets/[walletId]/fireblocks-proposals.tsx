@@ -1,16 +1,26 @@
 "use client";
 
 import type { FireblocksProposalSummary } from "@sdp/types/fireblocks";
+import { isFireblocksCancellationConfirmed } from "@sdp/types/fireblocks";
 import { Button } from "@sdp/ui/button";
 import { Modal } from "@sdp/ui/modal";
 import { useState } from "react";
 import useSWR from "swr";
+import { custodyQueryKeys } from "@/app/(session)/dashboard/[projectId]/wallets/custody-query-key";
 import {
   cancelFireblocksProposal,
   listFireblocksProposals,
 } from "@/app/(session)/dashboard/[projectId]/wallets/fireblocks-proposal-actions";
 import { RecordBlock } from "@/components/refresh-record";
 import { useTranslations } from "@/i18n/provider";
+
+/** What a cancellation response reports: provider-confirmed, accepted, dropped, or never sent. */
+type CancelNoticeOutcome = "cancelled" | "requested" | "unconfirmed" | "failed";
+function cancellationOutcome(status: string, acknowledged: boolean): CancelNoticeOutcome {
+  if (isFireblocksCancellationConfirmed(status)) return "cancelled";
+  if (acknowledged) return "requested";
+  return "unconfirmed";
+}
 
 export function FireblocksProposals({ custodyWalletId }: { custodyWalletId: string }) {
   const t = useTranslations();
@@ -21,12 +31,29 @@ export function FireblocksProposals({ custodyWalletId }: { custodyWalletId: stri
     key: string;
   } | null>(null);
   const [pending, setPending] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const { data, error, isLoading, mutate } = useSWR(
-    ["fireblocks-proposals", custodyWalletId, kind, offset],
+  const [notice, setNotice] = useState<CancelNoticeOutcome | null>(null);
+  const { data, error, isLoading, isValidating, mutate } = useSWR(
+    custodyQueryKeys.fireblocksProposals({ walletId: custodyWalletId, kind, offset }),
     () => listFireblocksProposals(custodyWalletId, kind, offset),
     { refreshInterval: 15_000, revalidateOnFocus: true }
   );
+  const inFlight = pending || isValidating;
+  function noticeText(outcome: CancelNoticeOutcome): string {
+    switch (outcome) {
+      case "cancelled":
+        return t("DashboardCustody.proposals.cancelled");
+      case "requested":
+        return t("DashboardCustody.proposals.requested");
+      case "unconfirmed":
+        return t("DashboardCustody.proposals.unconfirmed");
+      case "failed":
+        return t("DashboardCustody.proposals.failed");
+      default: {
+        const exhaustive: never = outcome;
+        return exhaustive;
+      }
+    }
+  }
   async function cancel() {
     if (!selected || pending) return;
     setPending(true);
@@ -36,19 +63,11 @@ export function FireblocksProposals({ custodyWalletId }: { custodyWalletId: stri
         selected.proposal.id,
         selected.key
       );
-      setNotice(
-        t(
-          result.proposal.status === "CANCELLED" || result.proposal.status === "CANCELED"
-            ? "DashboardCustody.proposals.cancelled"
-            : result.acknowledged
-              ? "DashboardCustody.proposals.requested"
-              : "DashboardCustody.proposals.unconfirmed"
-        )
-      );
+      setNotice(cancellationOutcome(result.proposal.status, result.acknowledged));
       setSelected(null);
       await mutate().catch(() => undefined);
     } catch {
-      setNotice(t("DashboardCustody.proposals.failed"));
+      setNotice("failed");
     } finally {
       setPending(false);
     }
@@ -62,6 +81,7 @@ export function FireblocksProposals({ custodyWalletId }: { custodyWalletId: stri
             type="button"
             variant="secondary"
             aria-pressed={kind === value}
+            disabled={inFlight}
             onClick={() => {
               setKind(value);
               setOffset(0);
@@ -78,7 +98,7 @@ export function FireblocksProposals({ custodyWalletId }: { custodyWalletId: stri
       </div>
       {notice ? (
         <p role="status" className="mt-3 text-body text-secondary">
-          {notice}
+          {noticeText(notice)}
         </p>
       ) : null}
       {error ? (
@@ -130,7 +150,7 @@ export function FireblocksProposals({ custodyWalletId }: { custodyWalletId: stri
           <Button
             type="button"
             variant="secondary"
-            disabled={offset === 0}
+            disabled={inFlight || offset === 0}
             onClick={() => setOffset(Math.max(0, offset - 20))}
           >
             {t("DashboardCustody.proposals.previous")}
@@ -138,7 +158,7 @@ export function FireblocksProposals({ custodyWalletId }: { custodyWalletId: stri
           <Button
             type="button"
             variant="secondary"
-            disabled={!data?.hasMore}
+            disabled={inFlight || !data?.hasMore}
             onClick={() => setOffset(offset + 20)}
           >
             {t("DashboardCustody.proposals.next")}
@@ -160,7 +180,7 @@ export function FireblocksProposals({ custodyWalletId }: { custodyWalletId: stri
           <p className="text-body text-secondary">{t("DashboardCustody.proposals.confirmBody")}</p>
           {notice ? (
             <p role="alert" className="text-body text-critical">
-              {notice}
+              {noticeText(notice)}
             </p>
           ) : null}
           <div className="flex flex-wrap justify-end gap-3">

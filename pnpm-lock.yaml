@@ -69,7 +69,7 @@ patchedDependencies:
     hash: db80167189d4560b1efd7698da2f55f1955fe4a33fad9df8b15f0c7d3d985fdb
     path: patches/@solana__keychain-core@1.4.0.patch
   '@solana/keychain-fireblocks@2.0.0':
-    hash: dd511559fc6fd624bd528192f295eb7c98c54d1f9c622894366ab35f3532d7ac
+    hash: 28991cd0eb92585ef8795ebfb7c945c7bade0d28dc44ebe3d37d492e35dbfa71
     path: patches/@solana__keychain-fireblocks@2.0.0.patch
   brace-expansion@5.0.12:
     hash: e690b52aead08731a7349e44e5814fe2404d328124a725ff71ada448cadbbc7b
@@ -622,7 +622,7 @@ importers:
         version: 1.4.0(patch_hash=db80167189d4560b1efd7698da2f55f1955fe4a33fad9df8b15f0c7d3d985fdb)(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
       '@solana/keychain-fireblocks':
         specifier: 2.0.0
-        version: 2.0.0(patch_hash=dd511559fc6fd624bd528192f295eb7c98c54d1f9c622894366ab35f3532d7ac)(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
+        version: 2.0.0(patch_hash=28991cd0eb92585ef8795ebfb7c945c7bade0d28dc44ebe3d37d492e35dbfa71)(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
       '@solana/keychain-para':
         specifier: 1.4.0
         version: 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
@@ -6069,6 +6069,11 @@ packages:
 
   base64-js@1.5.1:
     resolution: {integrity: sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==}
+
+  baseline-browser-mapping@2.11.32:
+    resolution: {integrity: sha512-UvuxFU9P3hM29LrQdwu0cD6w6/+SFr+UlB9s/knI7+O2rK9xFxKUwSDWxGdbbqQ9/V7BJ5s0NI5nQAE4uJp3gQ==}
+    engines: {node: '>=6.0.0'}
+    hasBin: true
 
   baseline-browser-mapping@2.11.33:
     resolution: {integrity: sha512-yiVKDX+qCMRKBE084lXvq9EcwFUhKZ2nU8TK1EQQuOgPNR/lmbGxXOeDdlGUqC2Zz11Cs9rk1d/8NfgBmlkt0w==}
@@ -12090,7 +12095,7 @@ snapshots:
       '@solana/signers': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/transactions': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
 
-  '@solana/keychain-fireblocks@2.0.0(patch_hash=dd511559fc6fd624bd528192f295eb7c98c54d1f9c622894366ab35f3532d7ac)(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))':
+  '@solana/keychain-fireblocks@2.0.0(patch_hash=28991cd0eb92585ef8795ebfb7c945c7bade0d28dc44ebe3d37d492e35dbfa71)(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))':
     dependencies:
       '@solana/addresses': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/codecs-strings': 8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
@@ -14493,6 +14498,8 @@ snapshots:
 
   base64-js@1.5.1: {}
 
+  baseline-browser-mapping@2.11.32: {}
+
   baseline-browser-mapping@2.11.33: {}
 
   bcrypt-pbkdf@1.0.2:
@@ -14535,7 +14542,7 @@ snapshots:
 
   browserslist@4.29.4:
     dependencies:
-      baseline-browser-mapping: 2.11.33
+      baseline-browser-mapping: 2.11.32
       caniuse-lite: 1.0.30001819
       electron-to-chromium: 1.5.462
       node-releases: 2.0.59

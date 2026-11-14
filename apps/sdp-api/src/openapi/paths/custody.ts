@@ -15,7 +15,7 @@ import {
 import {
   cancelFireblocksProposalParams,
   listFireblocksProposalsSchema,
-} from "@/routes/internal-custody/fireblocks/schemas";
+} from "@/routes/internal-custody/fireblocks/proposals/schemas";
 import {
   errorResponses,
   jsonContent,

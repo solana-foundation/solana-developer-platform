@@ -99,6 +99,7 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
       useProgramCall: this.config.useProgramCall,
       createExternalTxId: this.config.createExternalTxId,
       onSigningCleanup: this.config.onSigningCleanup,
+      onSigningFailure: this.config.onSigningFailure,
       onSigningStatus: this.config.onSigningStatus,
     });
   }

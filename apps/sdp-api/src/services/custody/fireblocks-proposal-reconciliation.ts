@@ -1,11 +1,14 @@
+import { isFireblocksSigningFinished } from "@sdp/types/fireblocks";
 import type {
   FireblocksProposalsRepository,
   FireblocksSigningProposalRow,
 } from "@/db/repositories/fireblocks-proposals.repository";
 import { conflict } from "@/lib/errors";
-import { isFireblocksSigningFinished } from "@/services/custody/fireblocks-proposal-tracking";
 import { createOrgTransferProposalReader } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
+
+/** A create the provider never accepted is expired once it ages past a day unread. */
+export const FIREBLOCKS_UNACCEPTED_PROPOSAL_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** The recorded intent a signing proposal polls against: its original account binding. */
 export function fireblocksSigningBinding(row: FireblocksSigningProposalRow) {
@@ -35,7 +38,17 @@ export async function readFireblocksSigningProposal(
   row: FireblocksSigningProposalRow
 ) {
   const result = await (await signingReader(env, row)).read(row.id);
-  if (!result) return null;
+  if (!result) {
+    // A proposal the provider never accepted has no transaction to reconcile; once it
+    // ages out it is a permanent SUBMITTING row, so close it. Anything a poll already
+    // bound to a provider transaction id stays with the poll path.
+    if (
+      row.provider_transaction_id === null &&
+      Date.now() - Date.parse(row.created_at) >= FIREBLOCKS_UNACCEPTED_PROPOSAL_MAX_AGE_MS
+    )
+      await repo.failUnaccepted(row.id);
+    return null;
+  }
   if (
     result.externalTxId !== row.id ||
     result.operation !== row.operation ||
