@@ -20,6 +20,7 @@ use spr_transaction::instructions::transact::ConfidentialTransaction;
 use spr_transaction::{select_spend, AssetRegistry, SpendableDecryptionResult, SOL_MINT};
 
 /// The services that a shielded spend reads, and the pool tree that new notes go into.
+#[derive(Clone, Debug)]
 pub struct Endpoints {
     pub rpc: String,
     pub indexer: String,
@@ -36,6 +37,13 @@ pub struct ShieldedWallet {
 /// What the wallet's Solana key signs to send a shielded spend.
 pub struct PreparedSpend {
     pub message: UnsignedMessage,
+}
+
+impl PreparedSpend {
+    /// The message in its wire form, which the signers sign.
+    pub fn message_bytes(&self) -> Vec<u8> {
+        self.message.message.serialize()
+    }
 }
 
 #[derive(Debug)]

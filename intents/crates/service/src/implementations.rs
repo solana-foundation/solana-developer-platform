@@ -257,8 +257,8 @@ fn failed(interface: &Document, implementation: &Document, error: EngineError) -
 }
 
 /// The implementations that apply first, then those not decided yet, then those with invalid
-/// inputs, then those that do not apply. Within each, a static recipe, then a builder, then a
-/// remote endpoint.
+/// inputs, then those that do not apply. Within each, a static recipe, then a builder or a
+/// shielded spend, then a remote endpoint.
 fn rank(left: &Evaluated, right: &Evaluated) -> Ordering {
     let fit = |evaluated: &Evaluated| match evaluated.fit {
         Fit::Applies => 0,
@@ -268,7 +268,7 @@ fn rank(left: &Evaluated, right: &Evaluated) -> Ordering {
     };
     let recipe = |evaluated: &Evaluated| match evaluated.recipe {
         RecipeKind::Static => 0,
-        RecipeKind::Program => 1,
+        RecipeKind::Program | RecipeKind::Shielded => 1,
         RecipeKind::Remote => 2,
         RecipeKind::RemoteTransaction => 3,
     };

@@ -4,8 +4,8 @@
 //!
 //! ```
 //! use sdp_intents_planner::{
-//!     Account, AccountMap, Plan, PlanError, PlanRequest, Planner, RemoteAnswer, RemoteCall, Simulation, SimulationResult,
-//!     Step,
+//!     Account, AccountMap, Plan, PlanError, PlanRequest, Planner, RemoteAnswer, RemoteCall, ShieldedCall, Simulation,
+//!     SimulationResult, Step,
 //! };
 //! use sdp_intents_spec::Address;
 //!
@@ -13,6 +13,7 @@
 //!     fn get_multiple_accounts(&self, addresses: &[Address]) -> Vec<Option<Account>>;
 //!     fn simulate(&self, simulation: &Simulation) -> SimulationResult;
 //!     fn call(&self, call: &RemoteCall) -> RemoteAnswer;
+//!     fn shield(&self, call: &ShieldedCall) -> RemoteAnswer;
 //! }
 //!
 //! fn plan(rpc: &impl Rpc, request: &PlanRequest<'_>, scratch: Address) -> Result<Plan, PlanError> {
@@ -24,6 +25,7 @@
 //!             Step::Fetch(addresses) => accounts.insert_fetched(&addresses, rpc.get_multiple_accounts(&addresses)),
 //!             Step::Simulate(simulation) => planner.simulated(rpc.simulate(&simulation))?,
 //!             Step::Call(call) => planner.called(rpc.call(&call))?,
+//!             Step::Shield(call) => planner.called(rpc.shield(&call))?,
 //!             Step::Done(plan) => return Ok(*plan),
 //!         }
 //!     }
@@ -45,6 +47,7 @@ mod registry;
 mod remote;
 mod render;
 mod segment;
+mod shielded;
 mod simulation;
 mod transaction;
 mod values;
@@ -64,6 +67,7 @@ pub use remote::{
     FrozenTransaction, InputValue, ProviderSignature, RemoteAnswer, RemoteCall, RemoteInput, RemoteOutput,
 };
 pub use sdp_intents_engine::Payers;
+pub use shielded::{ShieldedCall, ShieldedNote};
 pub use simulation::{FixedMessage, ReturnData, Simulation, SimulationResult};
 pub use transaction::{Budget, RequiredSignature, SignerRole, Transaction, COMPUTE_BUDGET_PROGRAM};
 pub use verifier::{verify_transaction, VerifiedIntent, VerifiedTransaction, VerifyError, VerifyStep};

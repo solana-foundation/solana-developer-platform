@@ -46,4 +46,4 @@ wallets.forEach(({ name, address }) => console.log(`  ${name.padEnd(9)} ${addres
 console.log("\nnow run the Jupiter wrapper, the stand-in provider, and the service:");
 console.log("  node adapters/jupiter.mjs");
 console.log(`  cargo run -p sdp-intents-test-provider -- ${RPC}`);
-console.log(`  cargo run -p sdp-intents-service -- --rpc ${RPC} --wallets ${WALLETS}`);
+console.log(`  cargo run -p sdp-intents-service -- --rpc ${RPC} --wallets ${WALLETS} --ring-indexer http://127.0.0.1:8784`);

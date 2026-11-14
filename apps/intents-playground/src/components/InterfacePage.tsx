@@ -1,5 +1,6 @@
 import type { Candidate, CandidateStatus, InterfaceDocument, ListedInterface, Wallet } from "@/api";
 import { InputField } from "@/components/InputField";
+import { PrivacyRing } from "@/components/PrivacyRing";
 import { type FormValues, type IntentOptions, renderTemplate } from "@/intent";
 
 interface Props {
@@ -8,6 +9,9 @@ interface Props {
   values: FormValues;
   wallets: Wallet[];
   feePayer: string;
+  /// A shielded spend's fee payer is its spender, so the form does not offer another.
+  feePayerFixed: boolean;
+  signature: string | null;
   candidates: Candidate[] | null;
   candidatesError: string | null;
   selected: Candidate | null;
@@ -59,6 +63,7 @@ export function InterfacePage(props: Props) {
               id="fee-payer"
               className="select"
               value={props.feePayer}
+              disabled={props.feePayerFixed}
               onChange={(event) => props.onFeePayer(event.target.value)}
             >
               {wallets.map((wallet) => (
@@ -83,6 +88,7 @@ export function InterfacePage(props: Props) {
         </div>
 
         <Implementations {...props} />
+        {props.selected?.recipe === "shielded" && <PrivacyRing signature={props.signature} />}
         <OnchainChecks options={props.options} onOptions={props.onOptions} />
       </div>
     </section>

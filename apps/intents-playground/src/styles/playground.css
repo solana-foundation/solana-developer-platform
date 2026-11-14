@@ -260,3 +260,9 @@
 .header-badge {
   margin-left: 8px;
 }
+
+.ring-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}

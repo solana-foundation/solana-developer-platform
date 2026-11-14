@@ -1,0 +1,18 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "interface",
+  "id": "solana.org/private.transfer",
+  "version": "1.0.0",
+  "inputs": [
+    { "name": "from", "type": "address", "signer": true },
+    { "name": "to", "type": "address" },
+    { "name": "mint", "type": "mint" },
+    { "name": "amount", "type": "u64", "display": { "amount": { "mint": "{inputs.mint}" } } }
+  ],
+  "outputs": [],
+  "display": "Privately send {inputs.amount} {inputs.mint} to {inputs.to}",
+  "postConditions": [
+    { "noOtherOutflows": { "from": "{inputs.from}" },
+      "message": "nothing leaves the public accounts of {inputs.from}" }
+  ]
+}

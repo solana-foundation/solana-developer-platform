@@ -243,6 +243,11 @@ impl<'a> Recipe<'a> {
         Instructions::new(self.context(RecipeKind::Static, chain)?)
     }
 
+    /// The notes of a shielded recipe. Each note resolves as a static recipe's instruction does.
+    pub fn notes<'r, C: Chain>(&'r self, chain: &'r C) -> Result<Instructions<'r, C>, EngineError> {
+        Instructions::new(self.context(RecipeKind::Shielded, chain)?)
+    }
+
     /// The builder call of a program recipe: the implementation's accounts, then `extra_accounts`, which
     /// the builder asked for in earlier rounds. Every extra account is readonly, and none is a
     /// payer, so the builder can change nothing.

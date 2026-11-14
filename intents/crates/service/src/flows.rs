@@ -16,6 +16,7 @@ use sdp_intents_spec::Address;
 
 use crate::error::ServiceError;
 use crate::registry::{catalog, IntentReference, Registry};
+use crate::Service;
 
 /// Each `verify_intent` needs its two version accounts, then the accounts that its recipe and its
 /// message read. A plan of many intents asks for each kind in one call.
@@ -24,9 +25,9 @@ const MAX_VERIFY_ROUNDS: usize = 8;
 /// A plan request as `DESIGN.md`, section 4.1, writes it. The documents come from the registry.
 /// With `tamper`, the transaction differs from the plan, as `tamper` says. A request for the
 /// instructions alone reads no blockhash.
-pub async fn prepare(chain: &CachedRpc, text: &str, tamper: bool) -> Result<Value, ServiceError> {
+pub async fn prepare(service: &Service, text: &str, tamper: bool) -> Result<Value, ServiceError> {
     let request: Value = serde_json::from_str(text)?;
-    let Planned { mut plan, output } = planned(chain, text, None).await?;
+    let Planned { mut plan, output } = planned(service, text, None).await?;
 
     if tamper {
         tamper_with(&mut plan);
@@ -35,7 +36,7 @@ pub async fn prepare(chain: &CachedRpc, text: &str, tamper: bool) -> Result<Valu
     let prepared = match output {
         PlanOutput::Instructions => instructions_only(plan)?,
         PlanOutput::Transaction => {
-            let recent = chain.latest_blockhash().await?;
+            let recent = service.chain.latest_blockhash().await?;
 
             prepared(plan, recent.blockhash, recent.last_valid_block_height)?
         }
@@ -50,10 +51,10 @@ struct Planned {
 }
 
 /// Plans `text` with the registry's documents. A remote call takes `answer` when it is set.
-async fn planned(chain: &CachedRpc, text: &str, answer: Option<RemoteAnswer>) -> Result<Planned, ServiceError> {
+async fn planned(service: &Service, text: &str, answer: Option<RemoteAnswer>) -> Result<Planned, ServiceError> {
     let request: Value = serde_json::from_str(text)?;
     let references = references(&request)?;
-    let documents = Registry { chain }.intent_documents(&references).await?;
+    let documents = Registry { chain: &service.chain }.intent_documents(&references).await?;
 
     let catalog = catalog(documents.iter().flat_map(|intent| [&intent.interface, &intent.implementation]))?;
     let compiled = catalog.compile_plan(text).map_err(|report| ServiceError::compile(&report, text))?;
@@ -71,7 +72,7 @@ async fn planned(chain: &CachedRpc, text: &str, answer: Option<RemoteAnswer>) ->
         priority_fee_lamports: compiled.priority_fee_lamports,
     };
 
-    Ok(Planned { plan: plan(chain, &plan_request, answer).await?, output: compiled.output })
+    Ok(Planned { plan: plan(service, &plan_request, answer).await?, output: compiled.output })
 }
 
 /// A body of `{ "message": base64, "expected": text }`, or of `{ "transaction": base64 }` with a
@@ -79,7 +80,8 @@ async fn planned(chain: &CachedRpc, text: &str, answer: Option<RemoteAnswer>) ->
 /// `expected` is the plan's message, when the caller has one. A provider's transaction also holds
 /// `presigned` and the plan's `request`, and is planned again with the transaction as the
 /// endpoint's answer.
-pub async fn verify(chain: &CachedRpc, body: &Value) -> Result<Value, ServiceError> {
+pub async fn verify(service: &Service, body: &Value) -> Result<Value, ServiceError> {
+    let chain = &service.chain;
     let message = message_of(body)?;
     let tables = lookup_tables(chain, &message.lookup_tables()).await?;
     let expected = body.get("expected").and_then(Value::as_str);
@@ -94,7 +96,7 @@ pub async fn verify(chain: &CachedRpc, body: &Value) -> Result<Value, ServiceErr
         .ok_or_else(|| ServiceError::invalid_request("a provider's transaction needs its `request`"))?;
     let frozen = remote::frozen_from_parts(&message, presigned, &tables)?;
     let answer = RemoteAnswer { frozen: Some(frozen), ..RemoteAnswer::default() };
-    let replanned = planned(chain, &request.to_string(), Some(answer)).await?.plan;
+    let replanned = planned(service, &request.to_string(), Some(answer)).await?.plan;
 
     Ok(json!({
         "message": replanned.message,
@@ -125,7 +127,7 @@ pub fn message_of(body: &Value) -> Result<WireMessage, ServiceError> {
 }
 
 /// The lookup tables at `addresses`, read live, because a table can grow.
-async fn lookup_tables(chain: &CachedRpc, addresses: &[Address]) -> Result<Vec<LookupTable>, ServiceError> {
+pub(crate) async fn lookup_tables(chain: &CachedRpc, addresses: &[Address]) -> Result<Vec<LookupTable>, ServiceError> {
     if addresses.is_empty() {
         return Ok(Vec::new());
     }
@@ -154,10 +156,11 @@ fn tamper_with(plan: &mut Plan) {
 }
 
 async fn plan(
-    chain: &CachedRpc,
+    service: &Service,
     request: &PlanRequest<'_>,
     answer: Option<RemoteAnswer>,
 ) -> Result<Plan, ServiceError> {
+    let chain = &service.chain;
     let mut planner = Planner::new(request, fresh_address())?;
     let mut accounts = AccountMap::default();
 
@@ -171,6 +174,10 @@ async fn plan(
             Step::Call(call) => match &answer {
                 Some(answer) => planner.called(answer.clone())?,
                 None => planner.called(call_remote(chain, &call).await?)?,
+            },
+            Step::Shield(call) => match &answer {
+                Some(answer) => planner.called(answer.clone())?,
+                None => planner.called(crate::shielded::answer(service, &call).await?)?,
             },
             Step::Done(plan) => return Ok(*plan),
         }

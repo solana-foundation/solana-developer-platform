@@ -35,6 +35,9 @@ const RPC = process.argv[2] ?? "http://127.0.0.1:8899";
 const SERVICE_BINARY = new URL("../target/debug/sdp-intents-service", import.meta.url).pathname;
 const ADAPTER = new URL("../adapters/jupiter.mjs", import.meta.url).pathname;
 const PROVIDER_BINARY = new URL("../target/debug/sdp-intents-test-provider", import.meta.url).pathname;
+const RING_SERVICES = new URL("../programs/tools/zolana-services.mjs", import.meta.url).pathname;
+const RING_INDEXER = "http://127.0.0.1:8784";
+const SOL_MINT = "11111111111111111111111111111111";
 const PROVIDER_WALLET = "ProviderWa11et11111111111111111111111111111";
 const NOPAL = "GArhnnDj3GYhmQeApKVXaRv4TQFwhPcs3SNF6FXsTeXq";
 const USDY = "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6";
@@ -75,9 +78,34 @@ async function start(command, args, url) {
   throw new Error(`${command} did not start`);
 }
 
-/// The service signs with the wallets in `WALLETS`, so it starts after they exist.
+/// The service signs with the wallets in `WALLETS`, so it starts after they exist. It registers them
+/// in the privacy ring, so it starts after the ring's services.
 const startService = () =>
-  start(SERVICE_BINARY, ["--rpc", RPC, "--listen", SERVICE_LISTEN, "--wallets", WALLETS], `${SERVICE}/health`);
+  start(
+    SERVICE_BINARY,
+    ["--rpc", RPC, "--listen", SERVICE_LISTEN, "--wallets", WALLETS, "--ring-indexer", RING_INDEXER],
+    `${SERVICE}/health`,
+  );
+
+/// Zolana's Photon indexer and prover, which a shielded spend reads.
+async function startRing() {
+  const ring = await start(process.execPath, [RING_SERVICES, RPC], "http://127.0.0.1:3001");
+  await start("true", [], RING_INDEXER);
+
+  return ring;
+}
+
+/// The private SOL of the local wallet `address`, once it reaches `lamports`.
+async function ringBalanceReaches(address, lamports) {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const { wallets } = await service("/v1/ring");
+    if (wallets.find((wallet) => wallet.address === address)?.lamports === lamports) return true;
+
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  return false;
+}
 
 /// The Jupiter swap wrapper that the Ondo implementations name.
 const startAdapter = () => start(process.execPath, [ADAPTER], "http://127.0.0.1:8791/mode");
@@ -218,6 +246,7 @@ const organization = await rpc("getAccountInfo", [ORGANIZATION, { encoding: "bas
 const organizationAuthority = base58(Buffer.from(organization.value.data[0], "base64").subarray(8, 40));
 expect(organizationAuthority === vault, "the vault is the authority of solana.org");
 
+const ring = await startRing();
 const child = await startService();
 const adapter = await startAdapter();
 const provider = await startProvider();
@@ -225,7 +254,7 @@ const provider = await startProvider();
 try {
   console.log("the service reads the registry");
   const listing = await service("/v1/registry");
-  expect(listing.interfaces.length === 6 && listing.implementations.length === 14, "it lists 6 interfaces and 14 implementations");
+  expect(listing.interfaces.length === 7 && listing.implementations.length === 15, "it lists 7 interfaces and 15 implementations");
 
   const transfer = await service("/v1/interfaces/solana.org/token.transfer");
   expect(transfer.head === "1.0.0", "the interface's head is 1.0.0");
@@ -459,9 +488,34 @@ try {
   const assertionFailed = refused?.includes("Program L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95 failed") === true;
   expect(assertionFailed || refused?.includes("breaks a guarantee") === true, "the service refuses it: the assertions fail");
 
+  console.log("a private transfer through the privacy ring");
+  await service("/v1/ring/shield", JSON.stringify({ address: sender.address, lamports: 1_000_000_000 }));
+  expect(await ringBalanceReaches(sender.address, 1_000_000_000), "the sender shields 1 SOL");
+
+  const shielded = await service(
+    "/v1/prepare",
+    JSON.stringify(
+      plan(sender, [
+        {
+          interface: "solana.org/private.transfer@^1",
+          implementation: "solana.org/zolana-transfer@^1",
+          inputs: { from: sender.address, to: payer.address, mint: SOL_MINT, amount: "250000000" },
+          options: { verifyIntent: false, assertions: false },
+        },
+      ]),
+    ),
+  );
+  expect(shielded.message.includes("| shielded | tier 3, checked by simulation only"), "the plan says that only the simulation checks it");
+  expect(!(await typescriptProves(shielded.transaction.messageBytes, shielded)), "the verifier does not prove a shielded spend");
+
+  await service("/v1/send", JSON.stringify({ message: shielded.transaction.messageBytes }));
+  expect(await ringBalanceReaches(payer.address, 250_000_000), "the payer holds 0.25 SOL privately");
+  expect(await ringBalanceReaches(sender.address, 750_000_000), "the sender keeps 0.75 SOL privately");
+
   console.log("every flow landed");
 } finally {
   child.kill();
   adapter.kill();
   provider.kill();
+  ring.kill();
 }

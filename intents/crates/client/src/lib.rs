@@ -105,6 +105,15 @@ impl Client {
                     Some(answer) => planner.called(answer.clone())?,
                     None => planner.called(self.call_remote(&call)?)?,
                 },
+                Step::Shield(_) => match &answer {
+                    Some(answer) => planner.called(answer.clone())?,
+                    None => {
+                        return Err(ClientError::Remote(
+                            "a shielded spend needs the spender's shielded keys, which this client does not hold"
+                                .to_owned(),
+                        ))
+                    }
+                },
                 Step::Done(plan) => return Ok(*plan),
             }
         }

@@ -59,8 +59,8 @@ surfnet:
     surfpool start --network mainnet --no-tui --no-studio --no-deploy --airdrop-amount 0
 
 # The whole flow against a running surfnet: place the programs, publish the definitions, then plan,
-# verify, and send intents with every onchain check on.
-e2e rpc="http://127.0.0.1:8899": build-programs build-verifier
+# verify, and send intents with every onchain check on, then send one privately through the ring.
+e2e rpc="http://127.0.0.1:8899": build-programs build-verifier fetch-zolana
     cargo build -q -p sdp-intents-cli -p sdp-intents-service -p sdp-intents-test-provider
     node programs/tools/deploy-surfnet.mjs {{rpc}}
     node e2e/run.mjs {{rpc}}
@@ -71,4 +71,4 @@ playground rpc="http://127.0.0.1:8899": build-programs idl build-verifier fetch-
     cargo build -q -p sdp-intents-cli -p sdp-intents-service -p sdp-intents-test-provider
     node programs/tools/deploy-surfnet.mjs {{rpc}}
     node e2e/playground.mjs {{rpc}}
-    bash -c 'trap "kill 0" EXIT; node programs/tools/zolana-services.mjs {{rpc}} & node adapters/jupiter.mjs & ./target/debug/sdp-intents-test-provider {{rpc}} & ./target/debug/sdp-intents-service --rpc {{rpc}} --wallets target/playground/wallets'
+    bash -c 'trap "kill 0" EXIT; node programs/tools/zolana-services.mjs {{rpc}} & node adapters/jupiter.mjs & ./target/debug/sdp-intents-test-provider {{rpc}} & ./target/debug/sdp-intents-service --rpc {{rpc}} --wallets target/playground/wallets --ring-indexer http://127.0.0.1:8784'

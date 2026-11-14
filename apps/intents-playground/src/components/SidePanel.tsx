@@ -124,11 +124,20 @@ function Switch(props: {
 
 function PrepareControls(props: Props) {
   const remote = props.recipe === "remote";
-  const frozen = props.recipe === "remote transaction";
+  const shielded = props.recipe === "shielded";
+  const frozen = shielded || props.recipe === "remote transaction";
 
   return (
     <div className="side-actions">
-      {frozen && (
+      {shielded && (
+        <div className="callout callout-amber">
+          The spender's shielded keys build and prove this spend, and the amounts and the recipient
+          stay hidden. Nothing onchain checks it against the intent, so turn both onchain checks
+          off. The service's simulation checks every guarantee, and the verifier proves none of
+          them.
+        </div>
+      )}
+      {frozen && !shielded && (
         <div className="callout callout-amber">
           The provider signs this transaction, so nothing onchain checks it. Turn both onchain
           checks off to accept it. The service's simulation checks every guarantee, and the verifier
@@ -151,12 +160,14 @@ function PrepareControls(props: Props) {
           onChange={(checked) => props.onOutput(checked ? "instructions" : "transaction")}
         />
       )}
-      <Switch
-        label="Tamper with the plan"
-        sub="The service changes one built byte. verify_intent refuses it onchain."
-        checked={props.tamper}
-        onChange={props.onTamper}
-      />
+      {!shielded && (
+        <Switch
+          label="Tamper with the plan"
+          sub="The service changes one built byte. verify_intent refuses it onchain."
+          checked={props.tamper}
+          onChange={props.onTamper}
+        />
+      )}
       <button
         type="button"
         className="btn btn-pri"
@@ -177,7 +188,7 @@ function PlanResult(props: Props & { plan: Plan }) {
     <>
       <div className="section-title">Plan</div>
       <div className="callout callout-gray message">{plan.message}</div>
-      <PlanRows plan={plan} />
+      <PlanRows plan={plan} recipe={props.recipe} />
 
       {plan.instructions !== undefined && <Instructions plan={plan} />}
 
@@ -196,7 +207,7 @@ function PlanResult(props: Props & { plan: Plan }) {
   );
 }
 
-function PlanRows({ plan }: { plan: Plan }) {
+function PlanRows({ plan, recipe }: { plan: Plan; recipe: Recipe | null }) {
   const transaction = plan.transaction;
   const tiers = plan.message.match(/\| tier (\d)/g)?.map((tier) => tier.slice(-1));
 
@@ -207,7 +218,9 @@ function PlanRows({ plan }: { plan: Plan }) {
         label="Instructions"
         value={
           plan.instructions === undefined
-            ? "signed by the provider"
+            ? recipe === "shielded"
+              ? "proved by the spender"
+              : "signed by the provider"
             : String(plan.instructions.length)
         }
       />

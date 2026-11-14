@@ -15,6 +15,8 @@ pub(super) enum ProgramName {
     Address,
     /// A builder call's program account is named `program`.
     Builder,
+    /// A shielded spend's pool account is named `pool`.
+    Pool,
 }
 
 impl Document<'_, '_> {
@@ -83,6 +85,7 @@ impl Document<'_, '_> {
         let name = match naming {
             ProgramName::Address => self.names.address(address)?,
             ProgramName::Builder => "program".to_owned(),
+            ProgramName::Pool => "pool".to_owned(),
         };
 
         Ok(static_address(account) == Some(address)

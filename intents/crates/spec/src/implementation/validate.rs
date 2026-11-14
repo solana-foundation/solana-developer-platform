@@ -45,6 +45,7 @@ impl Implementation<'_> {
             RecipeKind::Static => instruction_count > 0 && !has_url,
             RecipeKind::Program => instruction_count == 1 && !has_url,
             RecipeKind::Remote | RecipeKind::RemoteTransaction => instruction_count == 0 && has_url,
+            RecipeKind::Shielded => instruction_count > 0 && !has_url && self.shielded_outputs_fit()?,
         };
 
         if !fits {
@@ -52,6 +53,17 @@ impl Implementation<'_> {
         }
 
         Ok(())
+    }
+
+    /// Each output note names the pool as its program, one owner account, and at least the asset and
+    /// the amount.
+    fn shielded_outputs_fit(&self) -> Result<bool, SpecError> {
+        let pool = self.instructions()?.first().map(|instruction| instruction.program);
+
+        Ok(!self.accounts()?.is_empty()
+            && self.instructions()?.iter().all(|instruction| {
+                Some(instruction.program) == pool && instruction.accounts.count == 1 && instruction.segments.count >= 2
+            }))
     }
 
     /// An account can name only accounts before it, so resolving the table in order never loops.

@@ -18,6 +18,7 @@ use crate::onchain::{OnchainChecks, OnchainInputs, PLACEHOLDER_RENT_CAP};
 use crate::plan::{builder_program, with_rent_cap, Built, PlannedIntent};
 use crate::remote::{self, RemoteAnswer, RemoteCall};
 use crate::render::Column;
+use crate::shielded::{self, ShieldedCall};
 use crate::values::Values;
 use crate::verify::{rent_cap, Snapshot, Verification};
 use crate::{
@@ -46,6 +47,7 @@ pub(crate) enum SegmentStep {
     Fetch(Vec<Address>),
     Simulate(Simulation),
     Call(RemoteCall),
+    Shield(ShieldedCall),
     Planned(Box<Segment>),
 }
 
@@ -170,7 +172,7 @@ impl<'a> SegmentPlanner<'a> {
         match core::mem::replace(&mut self.state, State::Finished) {
             State::AwaitingRemote => {
                 let built = match self.recipe.implementation().recipe()? {
-                    RecipeKind::RemoteTransaction => {
+                    RecipeKind::RemoteTransaction | RecipeKind::Shielded => {
                         Built::from_frozen(&self.recipe, answer, self.priority_fee_lamports)?
                     }
                     _ => Built::from_remote(&self.recipe, answer)?,
@@ -201,6 +203,14 @@ impl<'a> SegmentPlanner<'a> {
         Ok(SegmentStep::Call(remote::call(&self.recipe, self.priority_fee_lamports)?))
     }
 
+    /// A shielded spend is built by the caller, which holds the spender's keys.
+    fn call_shielded<C: Chain>(&mut self, earlier: &Earlier<'_, C>) -> Result<SegmentStep, PlanError> {
+        let call = shielded::call(&self.recipe, earlier.chain, self.priority_fee_lamports)?;
+        self.state = State::AwaitingRemote;
+
+        Ok(SegmentStep::Shield(call))
+    }
+
     /// A fetch that the recipe needs also asks for every account that the segment names and that
     /// the recipe already resolved, so that a static recipe's accounts arrive in one call.
     fn resolve<C: Chain>(&mut self, earlier: &Earlier<'_, C>) -> Result<SegmentStep, PlanError> {
@@ -223,6 +233,7 @@ impl<'a> SegmentPlanner<'a> {
             RecipeKind::Static => self.simulate_segment(Built::from_static(&self.recipe, earlier.chain)?, earlier),
             RecipeKind::Program => self.simulate_builder(earlier),
             RecipeKind::Remote | RecipeKind::RemoteTransaction => self.call_remote(),
+            RecipeKind::Shielded => self.call_shielded(earlier),
         }
     }
 

@@ -1,4 +1,4 @@
-//! The recipe: a static list of instructions, a builder call, or a remote endpoint.
+//! The recipe: a static list of instructions, a builder call, a remote endpoint, or a shielded spend.
 
 use sdp_intents_spec::wire::{AccountV1, InstructionV1, OutputBindingV1, RangeV1, SegmentV1};
 use sdp_intents_spec::{AddressSource, RecipeKind};
@@ -9,7 +9,7 @@ use crate::diagnostic::{Code, Diagnostic};
 use crate::reader::{list, Node, Object};
 use crate::suggest::closest;
 
-const KINDS: [&str; 3] = ["static", "program", "remote"];
+const KINDS: [&str; 4] = ["static", "program", "remote", "shielded"];
 
 pub(super) struct Recipe {
     pub(super) kind: RecipeKind,
@@ -26,6 +26,7 @@ impl Build<'_, '_> {
             "static" => self.read_static(&mut object),
             "program" => self.read_program(&mut object),
             "remote" => self.read_remote(&mut object),
+            "shielded" => self.read_shielded(&mut object),
             _ => {
                 let diagnostic =
                     Diagnostic::new(Code::InvalidValue, &kind_node.pointer, format!("`{kind}` is not a recipe kind"));
@@ -89,6 +90,67 @@ impl Build<'_, '_> {
         }
 
         Some(Recipe { kind: returns?, url: url? })
+    }
+
+    /// `{ "pool": "…", "accounts": [ … ], "notes": [ … ] }`. The first account is the spender, whose
+    /// notes the spend consumes. Each note is stored as an instruction of the pool, so the account
+    /// sources and segments of a static recipe apply to it.
+    fn read_shielded(&mut self, object: &mut Object<'_>) -> Option<Recipe> {
+        let pool = object.required("pool", self.sink).and_then(|pool| self.read_literal_address(&pool));
+
+        if let Some(accounts) = object.required("accounts", self.sink) {
+            self.read_accounts(&accounts, Table::Static);
+        }
+
+        if self.account_names.first().map(String::as_str) != Some("spender") {
+            self.sink.push(
+                Diagnostic::new(
+                    Code::MissingKey,
+                    &format!("{}/accounts/0", object.pointer()),
+                    "the first account is not `spender`",
+                )
+                .help("name the account whose notes the spend consumes `spender`, and list it first"),
+            );
+        }
+
+        let pool = self.program_account(pool?, "pool");
+        let notes = object.required("notes", self.sink).and_then(|notes| notes.array(self.sink));
+        notes?.iter().for_each(|note| self.read_note(note, pool));
+
+        Some(Recipe { kind: RecipeKind::Shielded, url: Vec::new() })
+    }
+
+    /// `{ "owner": "recipient", "asset": { … }, "amount": { … }, "data": [ … ] }`. The asset is an
+    /// `address` segment and the amount a `u64le` segment.
+    fn read_note(&mut self, node: &Node<'_>, pool: u8) {
+        let Some(mut object) = node.object(self.sink) else {
+            return;
+        };
+        let owner = object.required("owner", self.sink).and_then(|owner| self.account_by_name(&owner));
+        let asset = object.required("asset", self.sink);
+        let amount = object.required("amount", self.sink);
+        let data = object.field("data").and_then(|data| data.array(self.sink)).unwrap_or_default();
+        object.finish(self.sink);
+
+        let visible = self.accounts.len();
+        let nodes: Vec<Option<Node<'_>>> = [asset, amount].into_iter().chain(data.into_iter().map(Some)).collect();
+        let segments: Option<Vec<SegmentV1>> = nodes
+            .iter()
+            .map(|segment| segment.as_ref().and_then(|segment| self.read_segment(segment, visible, false)))
+            .collect();
+
+        let (Some(owner), Some(segments)) = (owner, segments) else {
+            return;
+        };
+
+        let first_account = self.instruction_accounts.len();
+        self.instruction_accounts.push(owner);
+
+        if let (Some(accounts), Some(segments)) =
+            (range(first_account, self.instruction_accounts.len()), self.push_segments(segments))
+        {
+            self.instructions.push(InstructionV1 { program: pool, accounts, segments });
+        }
     }
 
     /// The builder call is one instruction, which passes every implementation account, in order, to the

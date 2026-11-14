@@ -38,6 +38,7 @@ sdp-intents-engine = { path = "crates/engine" }
 sdp-intents-lighthouse = { path = "crates/lighthouse" }
 sdp-intents-message = { path = "crates/message" }
 sdp-intents-planner = { path = "crates/planner" }
+sdp-intents-shielded = { path = "crates/shielded" }
 sdp-intents-registry-client = { path = "crates/registry-client" }
 sdp-intents-spec = { path = "crates/spec" }
 serde_json = { version = "=1.0.154", features = ["preserve_order"] }

@@ -16,8 +16,11 @@
 //! | `POST /v1/verify` | `{ message, expected }` or `{ transaction, expected }`, of any version | What the message proves to its signer |
 //! | `GET /v1/wallets` | | The local wallets, with `--wallets` |
 //! | `POST /v1/send` | `{ message }` | Signs with the local wallets and sends, with `--wallets` |
+//! | `GET /v1/ring` | | Each local wallet's private SOL balance, with `--ring-indexer` |
+//! | `POST /v1/ring/shield` | `{ address, lamports }` | Moves a local wallet's public SOL into a note, with `--ring-indexer` |
 //!
-//! With `--wallets`, `POST /v1/prepare` also takes `x-sdp-tamper: 1`, for the playground.
+//! With `--wallets`, `POST /v1/prepare` also takes `x-sdp-tamper: 1`, for the playground. With
+//! `--ring-indexer`, it builds the shielded spends of the local wallets.
 
 mod describe;
 mod error;
@@ -26,6 +29,7 @@ mod implementations;
 mod metrics;
 mod registry;
 mod resources;
+pub mod shielded;
 mod wallets;
 pub mod warm;
 
@@ -53,6 +57,8 @@ pub use crate::wallets::Wallets;
 pub struct Service {
     pub chain: CachedRpc,
     pub wallets: Wallets,
+    /// The privacy ring that shielded spends of the local wallets go through.
+    pub shielded: Option<sdp_intents_shielded::Endpoints>,
     pub metrics: Metrics,
 }
 
@@ -76,6 +82,8 @@ pub fn router(service: Arc<Service>) -> Router {
         .route("/v1/verify", post(verify))
         .route("/v1/wallets", get(|State(service): Shared| async move { Json(service.wallets.json()) }))
         .route("/v1/send", post(send))
+        .route("/v1/ring", get(ring))
+        .route("/v1/ring/shield", post(shield))
         .with_state(service)
 }
 
@@ -164,7 +172,7 @@ fn path_version(path: &HashMap<String, String>) -> Result<sdp_intents_spec::wire
 /// wallets honors it, because only the playground needs it.
 async fn prepare(State(service): Shared, headers: HeaderMap, body: String) -> Response {
     let tamper = !service.wallets.is_empty() && headers.get("x-sdp-tamper").is_some_and(|value| value == "1");
-    let counted = sdp_intents_chain::counted(flows::prepare(&service.chain, &body, tamper)).await;
+    let counted = sdp_intents_chain::counted(flows::prepare(&service, &body, tamper)).await;
     let prepared = counted.output.map(|mut plan| {
         if let Some(plan) = plan.as_object_mut() {
             plan.insert("rpcCalls".to_owned(), flows::calls_json(counted.calls));
@@ -177,7 +185,15 @@ async fn prepare(State(service): Shared, headers: HeaderMap, body: String) -> Re
 }
 
 async fn verify(State(service): Shared, Json(body): Json<Value>) -> Response {
-    observed(&service, "verify", flows::verify(&service.chain, &body)).await
+    observed(&service, "verify", flows::verify(&service, &body)).await
+}
+
+async fn ring(State(service): Shared) -> Response {
+    observed(&service, "ring", shielded::balances(&service)).await
+}
+
+async fn shield(State(service): Shared, Json(body): Json<Value>) -> Response {
+    observed(&service, "shield", shielded::shield(&service, &body)).await
 }
 
 async fn send(State(service): Shared, Json(body): Json<Value>) -> Response {

@@ -1,4 +1,4 @@
-//! The recipe: a static list of instructions, a builder call, or a remote endpoint.
+//! The recipe: a static list of instructions, a builder call, a remote endpoint, or a shielded spend.
 
 use sdp_intents_spec::wire::InstructionV1;
 use sdp_intents_spec::{AddressSource, RecipeKind, SpecError};
@@ -16,6 +16,7 @@ impl Document<'_, '_> {
             RecipeKind::Program => self.program_recipe(),
             RecipeKind::Remote => self.remote_recipe("instructions"),
             RecipeKind::RemoteTransaction => self.remote_recipe("transaction"),
+            RecipeKind::Shielded => self.shielded_recipe(),
         }
     }
 
@@ -60,6 +61,45 @@ impl Document<'_, '_> {
             ("program", Value::from(self.program(call)?)),
             ("accounts", Value::Array(self.accounts(declared)?)),
             ("data", Value::Array(self.segments(call)?)),
+        ]))
+    }
+
+    /// The pool account is the one that the compiler adds after the stated accounts, unless a stated
+    /// account holds the pool's address. Each instruction is a note: its one account is the owner,
+    /// and its segments are the asset, the amount, and the note's data.
+    fn shielded_recipe(&self) -> Result<Value, DecompileError> {
+        let declared = (0..=self.view.accounts()?.len())
+            .find_map(|declared| {
+                self.reproduces(declared, ProgramName::Pool).map(|ok| ok.then_some(declared)).transpose()
+            })
+            .unwrap_or(Err(DecompileError::Unrepresentable("a pool that is not the first account with its address")))?;
+        let instructions = self.view.instructions()?;
+        let pool = instructions.first().ok_or(SpecError::BadRecipe)?;
+        let notes: Vec<Value> = instructions.iter().map(|note| self.note(note)).collect::<Result<_, _>>()?;
+
+        Ok(object([
+            ("kind", Value::from("shielded")),
+            ("pool", Value::from(self.program(pool)?)),
+            ("accounts", Value::Array(self.accounts(declared)?)),
+            ("notes", Value::Array(notes)),
+        ]))
+    }
+
+    fn note(&self, note: &InstructionV1) -> Result<Value, DecompileError> {
+        let [owner] = self.view.instruction_accounts(note)? else {
+            return Err(SpecError::BadRecipe.into());
+        };
+        let mut segments = self.segments(note)?.into_iter();
+        let (Some(asset), Some(amount)) = (segments.next(), segments.next()) else {
+            return Err(SpecError::BadRecipe.into());
+        };
+        let data: Vec<Value> = segments.collect();
+
+        Ok(sparse_object([
+            ("owner", Some(Value::from(self.names.account(*owner)?))),
+            ("asset", Some(asset)),
+            ("amount", Some(amount)),
+            ("data", non_empty(data)),
         ]))
     }
 

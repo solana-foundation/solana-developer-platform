@@ -83,7 +83,7 @@ export function App() {
 
         const form = interfaceForm(published.document);
         setDocument(form);
-        setValues(defaults(form, wallets));
+        setValues(defaults(form, wallets, interfaceId));
       })
       .catch((error: unknown) => current && setLoadError(describe(error)));
 
@@ -134,10 +134,12 @@ export function App() {
           }),
     [listed, document, values, selected, options]
   );
-  const frozen = selected?.recipe === "remote transaction";
+  const shielded = selected?.recipe === "shielded";
+  const frozen = shielded || selected?.recipe === "remote transaction";
+  const payer = shielded ? spender(document, values) : feePayer;
   const request = useMemo(
-    () => planRequest(intent, feePayer, frozen ? "transaction" : output),
-    [intent, feePayer, frozen, output]
+    () => planRequest(intent, payer, frozen ? "transaction" : output),
+    [intent, payer, frozen, output]
   );
   const requestKey = JSON.stringify(request);
 
@@ -211,7 +213,9 @@ export function App() {
               document={document}
               values={values}
               wallets={wallets}
-              feePayer={feePayer}
+              feePayer={payer}
+              feePayerFixed={shielded}
+              signature={planState.signature}
               candidates={candidates}
               candidatesError={candidatesError}
               selected={selected}
@@ -247,7 +251,7 @@ export function App() {
                   })
                 );
             }}
-            ready={selected !== null && feePayer !== ""}
+            ready={selected !== null && payer !== ""}
             onTab={setTab}
             onTamper={setTamper}
             onPrepare={prepare}
@@ -281,15 +285,24 @@ function Loading({ error }: { error: string | null }) {
   );
 }
 
+/// The first signer input. A shielded spend consumes its notes, so it pays the fee.
+function spender(document: InterfaceDocument | null, values: FormValues): string {
+  const signer = document?.inputs.find((input) => input.signer);
+
+  return signer === undefined ? "" : (values[signer.name] ?? "");
+}
+
 function walletNamed(wallets: Wallet[], name: string): string {
   return wallets.find((wallet) => wallet.name === name)?.address ?? wallets[0]?.address ?? "";
 }
 
 /// A first intent that works: the treasury sends one unit of USDC to bob, or deposits it in a vault.
-function defaults(document: InterfaceDocument, wallets: Wallet[]): FormValues {
+/// A private intent sends SOL, because the wallets shield only SOL.
+function defaults(document: InterfaceDocument, wallets: Wallet[], interfaceId: string): FormValues {
+  const mint = interfaceId.startsWith("solana.org/private.") ? MINTS[0] : MINTS[1];
   const value = (input: Input): string => {
     if (input.optional) return "";
-    if (input.type === "mint") return MINTS[1]?.address ?? "";
+    if (input.type === "mint") return mint?.address ?? "";
     if (input.type === "address" && input.name === "vault") return VAULTS[0]?.address ?? "";
     if (input.type === "address") return walletNamed(wallets, input.signer ? "treasury" : "bob");
 

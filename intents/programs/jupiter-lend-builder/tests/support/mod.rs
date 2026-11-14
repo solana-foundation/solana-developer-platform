@@ -215,7 +215,7 @@ fn prepare_measured(svm: &LiteSVM, documents: &Documents) -> Result<Measured, Pl
                 accounts.insert_fetched(&addresses, fetched);
             }
             // A builder implementation makes no remote call.
-            Step::Call(_) => return Err(sdp_intents_planner::PlanError::OutOfOrder),
+            Step::Call(_) | Step::Shield(_) => return Err(sdp_intents_planner::PlanError::OutOfOrder),
             Step::Simulate(simulation) => {
                 let result = simulate(svm, &simulation);
                 builder_units.extend(builder_units_in(&result.logs));

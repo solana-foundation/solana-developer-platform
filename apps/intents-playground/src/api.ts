@@ -1,7 +1,7 @@
 // The service's routes, as `intents/crates/service/src/lib.rs` lists them. The dev server forwards
 // `/api` to the service. Every document comes from the service, which reads it from the registry.
 
-export type Recipe = "static" | "program" | "remote" | "remote transaction";
+export type Recipe = "static" | "program" | "remote" | "remote transaction" | "shielded";
 
 /// An interface input as the form reads it. `amountMint` is the reference to the mint whose
 /// decimals an amount uses, such as `{inputs.mint}`.
@@ -11,6 +11,13 @@ export interface Input {
   signer: boolean;
   optional: boolean;
   amountMint: string | null;
+}
+
+/// A local wallet's private SOL, from its unspent notes in the privacy ring.
+export interface RingBalance {
+  name: string;
+  address: string;
+  lamports: number;
 }
 
 /// What the form needs of an interface, from its definition.
@@ -215,6 +222,9 @@ export const api = {
       message: transaction.messageBytes,
       presigned: transaction.presigned,
     }),
+  ring: () => call<{ wallets: RingBalance[] }>("/v1/ring").then((body) => body.wallets),
+  shield: (address: string, lamports: number) =>
+    post<{ lamports: number }>("/v1/ring/shield", { address, lamports }),
   /// The Jupiter wrapper's switch that adds an approval to an attacker.
   adapterMode: (malicious: boolean) =>
     fetch("/adapter/mode", { method: "POST", body: JSON.stringify({ malicious }) }).then(

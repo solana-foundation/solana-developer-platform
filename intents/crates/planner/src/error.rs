@@ -39,6 +39,8 @@ pub enum PlanError {
     /// A remote recipe with `verify_intent` needs the assertions, because `verify_intent` cannot
     /// rebuild its instructions.
     RemoteNeedsAssertions,
+    /// A shielded recipe's note is not one owner, a 32-byte asset, and an 8-byte amount.
+    ShieldedNote,
     /// The provider's transaction breaks a rule of `DESIGN.md`, 4.16, which the text names.
     RemoteTransaction(&'static str),
     /// A provider signed for an account that the implementation does not list and the transaction does not
@@ -137,6 +139,7 @@ impl fmt::Display for PlanError {
             Self::RemoteNeedsAssertions => f.write_str(
                 "a remote recipe needs `assertions`, because verify_intent cannot rebuild its instructions. Turn both checks off to trust the endpoint.",
             ),
+            Self::ShieldedNote => f.write_str("a shielded note is not one owner, a 32-byte asset, and an 8-byte amount"),
             Self::RentPayerInRecipe => f.write_str(
                 "the builder names the rent payer as one of its own accounts, which verify_intent cannot check yet. Pay the rent from another wallet.",
             ),

@@ -27,8 +27,10 @@ sdp-intents-engine.workspace = true
 sdp-intents-planner.workspace = true
 sdp-intents-lighthouse.workspace = true
 sdp-intents-registry-client.workspace = true
+sdp-intents-shielded.workspace = true
 sdp-intents-spec.workspace = true
 serde_json.workspace = true
+solana-address.workspace = true
 solana-keypair = "=3.1.2"
 solana-message = "=4.6.0"
 solana-signer = "=3.0.1"

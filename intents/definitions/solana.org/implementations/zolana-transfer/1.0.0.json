@@ -1,0 +1,24 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "implementation",
+  "id": "solana.org/zolana-transfer",
+  "version": "1.0.0",
+  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "implements": "solana.org/private.transfer@^1",
+  "message": "privately send {inputs.amount} of {inputs.mint} from {inputs.from} to {inputs.to}, in the Helius default privacy ring",
+  "recipe": {
+    "kind": "shielded",
+    "pool": "ring1GaLCuJnkUMVkX2JeZLTTX17wKsV4fZmPVzXANW",
+    "accounts": [
+      { "name": "spender", "address": "{inputs.from}" },
+      { "name": "recipient", "address": "{inputs.to}" }
+    ],
+    "notes": [
+      {
+        "owner": "recipient",
+        "asset": { "value": "{inputs.mint}", "encoding": "address" },
+        "amount": { "value": "{inputs.amount}", "encoding": "u64le" }
+      }
+    ]
+  }
+}

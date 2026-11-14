@@ -20,20 +20,22 @@ Each step runs in its own terminal, from the repository root.
 
    ```sh
    cd intents
-   just build-programs idl
+   just build-programs idl fetch-zolana
    cargo build -p sdp-intents-cli -p sdp-intents-service -p sdp-intents-test-provider
    node programs/tools/deploy-surfnet.mjs
    node e2e/playground.mjs
    ```
 
-3. Start the Jupiter wrapper, the stand-in provider, and the service with the playground wallets.
-   The service signs and sends with those wallets:
+3. Start Zolana's indexer and prover, the Jupiter wrapper, the stand-in provider, and the service
+   with the playground wallets. The service signs and sends with those wallets, and builds their
+   private transfers:
 
    ```sh
    cd intents
+   node programs/tools/zolana-services.mjs &
    node adapters/jupiter.mjs &
    ./target/debug/sdp-intents-test-provider &
-   ./target/debug/sdp-intents-service --wallets target/playground/wallets
+   ./target/debug/sdp-intents-service --wallets target/playground/wallets --ring-indexer http://127.0.0.1:8784
    ```
 
 4. Build the verifier module, start the playground, then open <http://localhost:5178>:
@@ -55,6 +57,8 @@ nothing on a real cluster.
   shows unapproved implementations.
 - The interface page: the display template as the title, the inputs as a form, the postconditions
   as guarantees, and each implementation with whether its `applies` checks hold.
+- Privacy ring: for a `shielded` implementation, each wallet's private SOL and a button that
+  shields 1 SOL. `private.transfer` then sends SOL privately through Zolana.
 - Intent: the intent JSON and the `prepare` request as curl, TypeScript, and Rust.
 - Plan: the message, each instruction with its part of the segment, the compute units, and the RPC
   calls that the service made. `Verify` runs `@sdp/intents-verifier` in the browser. It reads the

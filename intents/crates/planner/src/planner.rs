@@ -17,7 +17,7 @@ pub struct PlanRequest<'a> {
     pub payers: Payers<'a>,
     pub priority_fee_lamports: u64,
 }
-use crate::{FrozenTransaction, RemoteAnswer, RemoteCall, SimulationResult, Transaction};
+use crate::{FrozenTransaction, RemoteAnswer, RemoteCall, ShieldedCall, SimulationResult, Transaction};
 
 /// The longest off-chain message that a Ledger signs: one packet less the message header.
 const MAX_MESSAGE_LEN: usize = 1_212;
@@ -31,6 +31,9 @@ pub enum Step {
     Simulate(Simulation),
     /// Call a remote recipe's endpoint and pass its answer to `called`, then call `next` again.
     Call(RemoteCall),
+    /// Build and prove a shielded spend, and pass its unsigned transaction to `called` as a
+    /// provider's transaction, then call `next` again.
+    Shield(ShieldedCall),
     Done(Box<Plan>),
 }
 
@@ -117,6 +120,7 @@ impl<'a> Planner<'a> {
                 SegmentStep::Fetch(addresses) => return Ok(Step::Fetch(addresses)),
                 SegmentStep::Simulate(simulation) => return Ok(Step::Simulate(simulation)),
                 SegmentStep::Call(call) => return Ok(Step::Call(call)),
+                SegmentStep::Shield(call) => return Ok(Step::Shield(call)),
                 SegmentStep::Planned(segment) => self.add(*segment),
             }
         }

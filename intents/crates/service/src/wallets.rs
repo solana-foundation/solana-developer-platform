@@ -70,6 +70,18 @@ impl Wallets {
         self.keypairs.is_empty()
     }
 
+    pub fn named(&self) -> &[NamedKeypair] {
+        &self.keypairs
+    }
+
+    /// The Ed25519 seed of the local wallet at `address`, from which its shielded keys derive.
+    pub fn seed_of(&self, address: &sdp_intents_spec::Address) -> Option<[u8; 32]> {
+        self.keypairs
+            .iter()
+            .find(|named| named.keypair.pubkey().to_bytes() == address.0)
+            .map(|named| *named.keypair.secret_bytes())
+    }
+
     pub fn json(&self) -> Value {
         let wallets: Vec<Value> = self
             .keypairs

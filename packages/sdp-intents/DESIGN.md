@@ -819,6 +819,7 @@ A single index or version reads only the addresses that its id and version deriv
 | `POST /v1/prepare` | A plan request | The plan, with its RPC calls |
 | `POST /v1/verify` | A message or a transaction of any version, and the plan's message | What the transaction proves |
 | `GET /v1/wallets`, `POST /v1/send` | A message or a transaction | The local wallets, and a send |
+| `GET /v1/ring`, `POST /v1/ring/shield` | An address and lamports | The local wallets' private SOL, and a deposit |
 | `GET /metrics` | | Requests, RPC calls, and cache reads |
 
 **Playground.** `apps/intents-playground` explores the registry as an API explorer does: an
@@ -899,11 +900,12 @@ the whole message, so the plan keeps it as it is:
 The message names each part's tier. `prepare` refuses a tier 3 implementation unless the intent turns both
 onchain checks off, so the weaker trust is the caller's explicit choice.
 
-### 4.17 Private intents through privacy rings (design only)
+### 4.17 Private intents through privacy rings
 
-Nothing in this section is built. It shows how intents can run inside Helius Privacy Rings
-(Zolana, `github.com/helius-labs/privacy-rings`), so that a business can use Earn without showing
-which of its customers did what. It assumes no knowledge of shielded pools.
+This section shows how intents can run inside Helius Privacy Rings (Zolana,
+`github.com/helius-labs/privacy-rings`), so that a business can use Earn without showing which of
+its customers did what. It assumes no knowledge of shielded pools. Only the private transfer at
+the end of the section is built.
 
 **Notes in place of balances.** A token account holds a balance that a payment edits. A shielded
 pool holds **notes** (also called UTXOs). A note is a fixed amount of one asset with an owner,
@@ -1032,6 +1034,19 @@ returns, so the service cannot change what the user signs.
 **Limits.** The ring's auditor sees everything, by design. The shield and the public step show
 amounts and times, so a large odd amount moved soon after a shield links the two. Round amounts,
 delay, and batching reduce this.
+
+**The prototype.** `solana.org/private.transfer` has one implementation, `zolana-transfer`, with
+a `shielded` recipe (kind 5). Each instruction of the recipe is one output note: the pool program,
+the owner as its one account, and the asset, the amount, and the note's data as segments. The
+first account is the spender. The planner resolves the notes and yields `Step::Shield`. The
+service builds and proves the spend with the spender's shielded keys, through the ring's indexer
+and prover, and the planner checks the transaction as it checks a provider's transaction. The
+spender pays the fee, and `verify_intent` refuses kind 5. The recipe stays tier 3 until the client
+recomputes the notes and the digest.
+
+`just playground` runs Zolana v0.6.0-alpha on the surfnet. The playground shields SOL and
+sends it privately. The Zolana crates come from the fork `ChewingGlass/privacy-rings`, which pins
+`solana-address`, `solana-hash`, and `wincode` to this workspace's versions.
 
 **Open questions for Helius.**
 
@@ -1219,7 +1234,8 @@ Not built:
 3. Parity fixtures from SDP's builders, golden fixtures, and a compatibility corpus in CI.
 4. A fix for `RentPayerInRecipe`: mark each placeholder account in the builder roles.
 5. A LiteSVM feature set that matches the cluster.
-6. Private intents through privacy rings (4.17).
+6. Private intents other than the transfer, the client's check of a shielded spend, and the
+   anonymous rail (4.17).
 7. The postconditions, recipe kind, and clusters that SDP's other modules need (4.18).
 
 ## 11. Cost

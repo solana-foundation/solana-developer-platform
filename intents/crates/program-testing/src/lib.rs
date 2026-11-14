@@ -157,7 +157,7 @@ pub fn prepare_answering(svm: &LiteSVM, intents: &[&Documents], answers: Vec<Rem
                 accounts.insert_fetched(&addresses, fetched);
             }
             Step::Simulate(simulation) => planner.simulated(simulate(svm, &simulation))?,
-            Step::Call(_) => planner.called(answers.next().ok_or(PlanError::OutOfOrder)?)?,
+            Step::Call(_) | Step::Shield(_) => planner.called(answers.next().ok_or(PlanError::OutOfOrder)?)?,
             Step::Done(plan) => return Ok(*plan),
         }
     }

@@ -13,17 +13,22 @@ wire_code! {
         Remote = 3,
         /// An endpoint that returns a whole transaction, which the provider signed (`DESIGN.md`, 4.16).
         RemoteTransaction = 4,
+        /// A spend of a privacy ring's notes (`DESIGN.md`, 4.17). Each instruction is an output note:
+        /// its program is the pool, its one account is the note's owner, and its segments are the
+        /// asset, the amount, and the note's data. The first account is the spender.
+        Shielded = 5,
     }
 }
 
 impl RecipeKind {
     /// The trust tier of `DESIGN.md`, 4.16: 1 when `verify_intent` rebuilds the instructions, 2 when
-    /// only the assertions bound them, and 3 when only a simulation checks them.
+    /// only the assertions bound them, and 3 when only a simulation checks them. A shielded spend is 3
+    /// until the signer's verifier checks its notes.
     pub fn tier(self) -> u8 {
         match self {
             Self::Static | Self::Program => 1,
             Self::Remote => 2,
-            Self::RemoteTransaction => 3,
+            Self::RemoteTransaction | Self::Shielded => 3,
         }
     }
 }
