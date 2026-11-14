@@ -42,6 +42,15 @@ build-verifier:
 fetch-programs:
     node programs/tools/fetch-programs.mjs
 
+# Helius privacy rings: Zolana's programs, localnet accounts, Photon, and prover, checked against
+# their pinned hashes. `deploy-surfnet.mjs` places them when they are here.
+fetch-zolana:
+    node programs/tools/fetch-zolana.mjs
+
+# Zolana's Photon indexer and prover against a running surfnet. It runs in the foreground.
+zolana rpc="http://127.0.0.1:8899":
+    node programs/tools/zolana-services.mjs {{rpc}}
+
 test-programs: build-programs fetch-programs idl
     cd programs && cargo test --workspace
 
@@ -58,8 +67,8 @@ e2e rpc="http://127.0.0.1:8899": build-programs build-verifier
 
 # A surfnet for `apps/intents-playground`: place the programs, fund the playground wallets, publish
 # the definitions, then serve the API with those wallets. It runs in the foreground.
-playground rpc="http://127.0.0.1:8899": build-programs idl build-verifier
+playground rpc="http://127.0.0.1:8899": build-programs idl build-verifier fetch-zolana
     cargo build -q -p sdp-intents-cli -p sdp-intents-service -p sdp-intents-test-provider
     node programs/tools/deploy-surfnet.mjs {{rpc}}
     node e2e/playground.mjs {{rpc}}
-    bash -c 'trap "kill 0" EXIT; node adapters/jupiter.mjs & ./target/debug/sdp-intents-test-provider {{rpc}} & ./target/debug/sdp-intents-service --rpc {{rpc}} --wallets target/playground/wallets'
+    bash -c 'trap "kill 0" EXIT; node programs/tools/zolana-services.mjs {{rpc}} & node adapters/jupiter.mjs & ./target/debug/sdp-intents-test-provider {{rpc}} & ./target/debug/sdp-intents-service --rpc {{rpc}} --wallets target/playground/wallets'

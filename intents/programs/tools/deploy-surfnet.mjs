@@ -9,6 +9,8 @@
 // `surfnet_setProgramAuthority`, because only that authority creates the registry config. This is
 // for a local surfnet only.
 //
+// Zolana's programs and localnet accounts go in too, when `just fetch-zolana` has fetched them.
+//
 // The IDL that `just idl` writes to `target/idl` goes in beside its program, so that Solana
 // Explorer decodes the program's instructions.
 
@@ -58,4 +60,28 @@ for (const { name, address } of programs) {
   const idl = idlAccount(address, JSON.parse(readFileSync(idlPath, "utf8")));
   await rpc("surfnet_setAccount", [idl.address, { lamports: LAMPORTS, data: idl.data.toString("hex"), owner: address }]);
   console.log(`placed the IDL of ${name} at ${idl.address}`);
+}
+
+// Helius privacy rings: Zolana's programs and its localnet account snapshot (the protocol config,
+// the asset counter, and the pool tree), when `fetch-zolana.mjs` has fetched them. Zolana is also
+// deployed on mainnet at the same address, so the fork's program is replaced by the release that the
+// local Photon and prover match.
+const ZOLANA = new URL("../../target/zolana/", import.meta.url);
+const zolana = JSON.parse(readFileSync(new URL("./zolana-artifacts.json", import.meta.url), "utf8"));
+
+if (existsSync(ZOLANA)) {
+  for (const { asset, address } of zolana.programs) {
+    await rpc("surfnet_writeProgram", [address, readFileSync(new URL(asset, ZOLANA)).toString("hex"), 0]);
+    console.log(`placed Zolana's ${asset} at ${address}`);
+  }
+
+  for (const file of readdirSync(new URL("accounts/", ZOLANA))) {
+    const { pubkey, account } = JSON.parse(readFileSync(new URL(`accounts/${file}`, ZOLANA), "utf8"));
+    const data = Buffer.from(account.data[0], "base64").toString("hex");
+    await rpc("surfnet_setAccount", [pubkey, { lamports: account.lamports, data, owner: account.owner, executable: account.executable }]);
+  }
+
+  console.log("placed Zolana's localnet accounts");
+} else {
+  console.log("Zolana is not fetched, so the surfnet has no privacy rings. Run `just fetch-zolana`.");
 }

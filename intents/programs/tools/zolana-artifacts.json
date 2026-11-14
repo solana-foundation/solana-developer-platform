@@ -1,0 +1,38 @@
+{
+  "release": "v0.6.0-alpha",
+  "url": "https://github.com/helius-labs/zolana/releases/download",
+  "tree": "777pvSGe5LaBd9nCczvE2FXEauiwtfGJ5XRpjKyniGor",
+  "programs": [
+    {
+      "asset": "shielded_pool_program-v0.6.0-alpha.so",
+      "address": "ring1GaLCuJnkUMVkX2JeZLTTX17wKsV4fZmPVzXANW",
+      "sha256": "1fbee0c2d794e466dd5482ee4c612aca8c3bc50cced492bad7e647d97a0b08e5"
+    },
+    {
+      "asset": "spr_user_registry-v0.6.0-alpha.so",
+      "address": "regy3WAeRXMYuMYxr5iK3Bf9Arr3PcxGxyzAddbiqDQ",
+      "sha256": "a6c9694f6a2e1b9a10e3f72139bef1dbf7a49ec66261d10cf6a9960ff42eeeb6"
+    },
+    {
+      "asset": "squads_smart_account_program-v0.6.0-alpha.so",
+      "address": "SMRTzfY6DfH5ik3TKiyLFfXexV8uSG3d2UksSCYdunG",
+      "sha256": "1c95bd7be140589d2aec38a85d7ecfe70ec69639277f622c898f821ab1d636fa"
+    }
+  ],
+  "accounts": {
+    "asset": "accounts-v0.6.0-alpha.tar.gz",
+    "sha256": "0aa9300f67b383bb2e98331b8ea4a8a60c59fb1eca7f22bf101098ace8a54f40"
+  },
+  "binaries": [
+    {
+      "role": "prover",
+      "asset": "prover-linux-x64-v0.6.0-alpha",
+      "sha256": "4fb8ade9cb8828556f578436926bc5a5bec5b481bcd9c5a5df325d3595202a0a"
+    },
+    {
+      "role": "photon",
+      "asset": "photon-linux-x64-v0.6.0-alpha",
+      "sha256": "a087bee606f940ce954973efd1112c3d016fca555caad84431782247c39ab226"
+    }
+  ]
+}
