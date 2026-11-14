@@ -53,7 +53,7 @@
   },
   "dependencies": {
     "@clerk/backend": "3.26.2",
-    "@hono/node-server": "2.1.5",
+    "@hono/node-server": "2.1.6",
     "@sdp/api-catalog": "workspace:*",
     "@sdp/custody": "workspace:*",
     "@sdp/dvp": "workspace:*",
