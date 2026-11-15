@@ -95,10 +95,18 @@ export function InterfacePage(props: Props) {
 function Guarantees({ document, values, wallets, implementation }: Props) {
   const read = useImplementationVersion(implementation?.id ?? null, implementation?.shown ?? null);
   const added = (read.data?.document.postConditions ?? []).map((condition) => condition.message);
+  const message = read.data?.document.message;
 
   return (
     <div className="card f-section">
       <div className="section-title">Guarantees</div>
+      {document.settlement === "async" && (
+        <div className="callout callout-amber">
+          This is a request. It settles later, outside this transaction, so no guarantee here covers
+          what comes back.
+          {message !== undefined && <> {renderTemplate(message, values, wallets)}.</>}
+        </div>
+      )}
       <ul className="guarantees">
         {document.postConditions.map((condition) => (
           <li key={condition}>

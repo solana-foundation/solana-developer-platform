@@ -109,7 +109,13 @@ export function planRequest(intent: object, feePayer: string, output: Output) {
 /// A template with each `{inputs.x}` as the form shows the value: a wallet's name, a mint's symbol,
 /// or the text typed.
 export function renderTemplate(template: string, values: FormValues, wallets: Wallet[]): string {
-  return template.replace(/\{inputs\.(\w+)\}/g, (reference, name: string) => {
+  // An output is known only once a plan exists, so the template names it in words: the escrow mint.
+  const named = template.replace(
+    /\{outputs\.(\w+)\}/g,
+    (_, name: string) => `the ${name.replace(/([A-Z])/g, " $1").toLowerCase()}`
+  );
+
+  return named.replace(/\{inputs\.(\w+)\}/g, (reference, name: string) => {
     const value = values[name]?.trim();
 
     if (value === undefined || value === "") {

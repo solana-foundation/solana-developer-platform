@@ -986,6 +986,9 @@ The message says "settles later, outside this transaction".
 | `vault.cancelRequest` | Hastra `cancel_redeem`, Plume cancellation |
 
 1. A request bounds only what leaves the owner. It never promises an inflow that settles later.
+   Its implementation's message says who settles, by when, and how to cancel, so every signer reads
+   it. Hastra's says that its operator pays with no deadline, and that the owner can cancel until
+   then.
 2. `delegates { from, mint, to, max }` lets `to` take at most `max` from the owner's accounts of
    the mint, the one authority change that rule 3 allows. `noDelegate { from, mint }` states that
    no delegate remains. Lighthouse asserts both.
