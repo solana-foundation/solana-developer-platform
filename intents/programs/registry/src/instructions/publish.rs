@@ -108,7 +108,7 @@ impl Publish {
                 let implementation = Implementation::parse(document).map_err(|_| RegistryError::BadDocument)?;
                 crate::limits::check_implementation(&implementation)?;
                 require!(*implementation.cluster() == crate::CLUSTER, RegistryError::WrongCluster);
-                let tier = implementation.recipe().map_err(|_| RegistryError::BadDocument)?.tier();
+                let tier = implementation.tier().map_err(|_| RegistryError::BadDocument)?;
                 let policy_approves = self.check_implements(target, &implementation)?;
 
                 (*implementation.id(), policy_approves && self.keeps_tier(tier)?, tier)

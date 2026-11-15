@@ -33,7 +33,7 @@ interface Props {
 const TODO: Record<Answer["next"]["kind"], string> = {
   build:
     "The step spends private funds, so only the spender's keys can build it. Ask your own wallet or custody to build `spend`, then call continue with progress and what it built. The service never calls your wallet.",
-  sign: "Verify each step against your own RPC, sign it, and send it yourself. Then call continue with progress and the signatures. The playground signs with its local wallets and sends through /v1/send.",
+  sign: "Verify each step against your own RPC, sign it, and send it yourself. Then call continue with progress and the signatures. The playground verifies each step in the browser and signs only a step that proves its message.",
   wait: "Nothing to sign. `until` is the condition that the step waits for. Watch it yourself, or call continue again at `checkAfter`.",
   done: "The flow is done. Drop progress.",
 };
@@ -71,7 +71,9 @@ export function Loop(props: Props) {
           sent={sent}
           verified={loop.verified}
           onVerify={(index) => loop.verifyAt(answer, index)}
-          onSend={(index) => loop.sendAt(answer, index)}
+          onSend={(index, acceptUnverified) =>
+            loop.sendAt(answer, index, loop.verified[index], acceptUnverified)
+          }
           built={loop.built}
           onBuild={() => loop.buildFor(answer)}
           prover={loop.prover}
@@ -100,6 +102,13 @@ export function Loop(props: Props) {
 interface StepAt {
   index: number;
   step: SignStep | undefined;
+}
+
+/// A step to sign, with its verification. `acceptUnverified` is the caller's consent to sign
+/// instructions that no segment proves.
+interface SendRequest extends StepAt {
+  verified: Verified | undefined;
+  acceptUnverified: boolean;
 }
 
 /// A call to the service: `start` with the plan request, or `continue` with the last progress.
@@ -146,7 +155,7 @@ function useLoop(props: Props) {
     onSuccess: (result, { index }) => setVerified((all) => ({ ...all, [index]: result })),
   });
   const send = useMutation({
-    mutationFn: ({ step }: StepAt) => sendStep(step),
+    mutationFn: sendStep,
     onSuccess: (signature, { index }) => {
       setSent((all) => ({ ...all, [index]: signature }));
       props.onSent(signature);
@@ -175,9 +184,13 @@ function useLoop(props: Props) {
       from.next.kind === "build"
         ? build.mutateAsync(from.next.spend)
         : Promise.reject(new Error("the answer asks for no build")),
-    verifyAt: (from: Answer, index: number) =>
-      verify.mutateAsync(stepAt(from, index)).then(() => undefined),
-    sendAt: (from: Answer, index: number) => send.mutateAsync(stepAt(from, index)),
+    verifyAt: (from: Answer, index: number) => verify.mutateAsync(stepAt(from, index)),
+    sendAt: (
+      from: Answer,
+      index: number,
+      verified: Verified | undefined,
+      acceptUnverified: boolean
+    ) => send.mutateAsync({ ...stepAt(from, index), verified, acceptUnverified }),
     clear: () => setCalls([]),
   };
 }
@@ -241,10 +254,11 @@ async function advance(answer: Answer, loop: LoopActions): Promise<Answer> {
     return loop.resume(answer, { signatures: [], built: await loop.buildFor(answer) });
   }
 
+  // Auto mode never consents to unverified instructions, so such a step stops the loop.
   const signatures: string[] = [];
   for (const index of next.kind === "sign" ? next.steps.keys() : []) {
-    await loop.verifyAt(answer, index);
-    signatures.push(await loop.sendAt(answer, index));
+    const verified = await loop.verifyAt(answer, index);
+    signatures.push(await loop.sendAt(answer, index, verified, false));
   }
 
   return loop.resume(answer, { signatures, built: null });
@@ -257,11 +271,24 @@ function verifyStep(step: SignStep | undefined): Promise<Verified> {
   return verifyPlan(step, step.transaction);
 }
 
-function sendStep(step: SignStep | undefined): Promise<string> {
+/// Signs only a step whose verification proves its message. Instructions in no segment need the
+/// caller's consent, and the wallet checks the same list again.
+function sendStep({ step, verified, acceptUnverified }: SendRequest): Promise<string> {
   if (step?.transaction === undefined)
     return Promise.reject(new Error("the step holds no transaction"));
 
-  return api.send(step.transaction).then(({ signature }) => signature);
+  if (verified === undefined)
+    return Promise.reject(new Error("Verify the step before it is signed."));
+
+  if (!verified.matches || verified.intents.length === 0)
+    return Promise.reject(new Error("The transaction does not prove the step's message."));
+
+  if (verified.unverified.length > 0 && !acceptUnverified)
+    return Promise.reject(
+      new Error(`Instructions ${verified.unverified.join(", ")} are in no segment.`)
+    );
+
+  return api.send(step.transaction, verified.unverified).then(({ signature }) => signature);
 }
 
 function AutoSwitch({ auto, onAuto }: { auto: boolean; onAuto: (auto: boolean) => void }) {
@@ -341,8 +368,8 @@ interface NextProps {
   busy: string | null;
   sent: Sent;
   verified: Record<number, Verified>;
-  onVerify: (index: number) => Promise<void>;
-  onSend: (index: number) => Promise<string>;
+  onVerify: (index: number) => Promise<Verified>;
+  onSend: (index: number, acceptUnverified: boolean) => Promise<string>;
   built: Record<string, unknown> | null;
   onBuild: () => Promise<Record<string, unknown>>;
   prover: Prover;
@@ -489,6 +516,8 @@ function SignStepView(props: NextProps & { step: SignStep; index: number }) {
   const { step, index } = props;
   const signature = props.sent[index];
   const result = props.verified[index];
+  const proves = result?.matches === true && result.intents.length > 0;
+  const unverified = result?.unverified.length ?? 0;
 
   return (
     <div className="loop-step">
@@ -523,10 +552,12 @@ function SignStepView(props: NextProps & { step: SignStep; index: number }) {
             <button
               type="button"
               className="btn btn-pri"
-              disabled={props.busy !== null || signature !== undefined}
-              onClick={() => props.onSend(index).catch(() => undefined)}
+              disabled={props.busy !== null || signature !== undefined || !proves}
+              onClick={() => props.onSend(index, unverified > 0).catch(() => undefined)}
             >
-              Sign and send
+              {unverified > 0
+                ? `Sign with ${unverified} unverified instruction${unverified === 1 ? "" : "s"}`
+                : "Sign and send"}
             </button>
           </div>
           <details>

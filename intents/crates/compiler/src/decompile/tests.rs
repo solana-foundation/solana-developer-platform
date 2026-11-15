@@ -313,3 +313,19 @@ fn keeps_a_declared_account_that_looks_added() {
     assert_eq!(json.pointer("/recipe/accounts").and_then(Value::as_array).map(Vec::len), Some(3));
     assert_eq!(recompiled.bytes, bytes);
 }
+
+/// A flow's tier is the worst tier of its steps, and a flow outside the tiers does not parse.
+#[test]
+fn a_flow_takes_the_worst_tier_of_its_steps() {
+    let tree = compile_tree();
+    let flow = tree.implementations.iter().find(|definition| definition.path.contains("shield-and-transfer")).unwrap();
+    let implementation = sdp_intents_spec::Implementation::parse(&flow.bytes).unwrap();
+    assert_eq!(implementation.tier().unwrap(), 2);
+
+    let flow_doc = implementation.flow().unwrap().unwrap();
+    let flow_doc_start = core::ptr::from_ref(flow_doc) as usize - flow.bytes.as_ptr() as usize;
+    let mut untiered = flow.bytes.clone();
+    untiered[flow_doc_start + core::mem::offset_of!(sdp_intents_spec::wire::FlowDocV1, max_tier)] = 0;
+
+    assert!(sdp_intents_spec::Implementation::parse(&untiered).is_err());
+}

@@ -151,25 +151,27 @@ async fn position(service: &Service, steps: &Steps, progress: &Progress) -> Resu
     Ok(None)
 }
 
-/// A step is done when its `done` condition holds, or when its planned transaction landed.
+/// A step is done when its planned transaction landed, or when its `done` condition holds. Any spend
+/// of the notes creates their nullifier accounts, so a `spent` condition alone does not prove that
+/// this step landed.
 async fn step_done(
     service: &Service,
     steps: &Steps,
     progress: &Progress,
     position: usize,
 ) -> Result<bool, ServiceError> {
-    if let Some(done) = steps.condition(position, Which::Done) {
-        if Bound::new(done, &Bindings { progress })?.holds(service).await? {
+    let planned = steps.names().get(position).and_then(|name| progress.steps.get(*name)?.planned.as_ref());
+
+    if let Some(planned) = planned {
+        if landed(service, planned).await? == Some(true) {
             return Ok(true);
         }
     }
 
-    let planned = steps.names().get(position).and_then(|name| progress.steps.get(*name)?.planned.as_ref());
-
-    Ok(match planned {
-        Some(planned) => landed(service, planned).await? == Some(true),
-        None => false,
-    })
+    match steps.condition(position, Which::Done) {
+        Some(done) if !done.contains_key("spent") => Bound::new(done, &Bindings { progress })?.holds(service).await,
+        _ => Ok(false),
+    }
 }
 
 /// What the cluster says of the planned transaction's first signature, when the caller sent it.
@@ -392,61 +394,94 @@ async fn steps(service: &Service, progress: &Progress) -> Result<Steps, ServiceE
 /// that a new version cannot change a flow that has started.
 async fn pins(service: &Service, progress: &Progress) -> Result<Vec<String>, ServiceError> {
     let intents = progress.request.get("intents").and_then(Value::as_array).cloned().unwrap_or_default();
-    let mut ranges: Vec<(IndexKind, String)> = intents
+    let ranges: Vec<(IndexKind, String)> = intents
         .iter()
         .flat_map(|intent| {
             [(IndexKind::Interface, intent.get("interface")), (IndexKind::Implementation, intent.get("implementation"))]
         })
         .filter_map(|(kind, range)| Some((kind, range?.as_str()?.to_owned())))
         .collect();
+    let request_pins = exact_all(service, &ranges).await?;
+    let ids = |pins: &[Pin]| pins.iter().map(|pin| pin.id.clone()).collect::<Vec<_>>();
 
-    let mut pins = Vec::new();
-    for (kind, range) in &ranges {
-        pins.push(exact(service, *kind, range).await?);
-    }
+    let pinned = Progress { pins: ids(&request_pins), ..progress.clone() };
+    let Steps::Flow(flow) = steps(service, &pinned).await? else {
+        return Ok(ids(&request_pins));
+    };
 
-    let pinned = Progress { pins: pins.clone(), ..progress.clone() };
-    if let Steps::Flow(flow) = steps(service, &pinned).await? {
-        ranges = flow
-            .iter()
-            .flat_map(|step| {
-                [
-                    (IndexKind::Interface, Some(step.intent.interface.clone())),
-                    (IndexKind::Implementation, step.intent.implementation.clone()),
-                ]
-            })
-            .filter_map(|(kind, range)| Some((kind, range?)))
-            .collect();
+    let step_ranges: Vec<(IndexKind, String)> = flow
+        .iter()
+        .flat_map(|step| {
+            [
+                (IndexKind::Interface, Some(step.intent.interface.clone())),
+                (IndexKind::Implementation, step.intent.implementation.clone()),
+            ]
+        })
+        .filter_map(|(kind, range)| Some((kind, range?)))
+        .collect();
+    let step_pins = exact_all(service, &step_ranges).await?;
 
-        for (kind, range) in &ranges {
-            pins.push(exact(service, *kind, range).await?);
-        }
-    }
+    check_step_tiers(&request_pins, &step_pins)?;
 
-    Ok(pins)
+    Ok(ids(&request_pins).into_iter().chain(ids(&step_pins)).collect())
 }
 
-#[derive(Clone, Copy)]
+/// A flow's index entry holds the worst tier of its steps when it was published. A step version
+/// published later above that tier is refused, so the interface's approval keeps its meaning.
+fn check_step_tiers(request_pins: &[Pin], step_pins: &[Pin]) -> Result<(), ServiceError> {
+    let flow = request_pins
+        .iter()
+        .find(|pin| pin.kind == IndexKind::Implementation)
+        .ok_or_else(|| ServiceError::refused("flow", "the flow request names no implementation"))?;
+    let above = step_pins.iter().find(|pin| pin.kind == IndexKind::Implementation && pin.tier > flow.tier);
+
+    match above {
+        Some(step) => Err(ServiceError::refused(
+            "stepTier",
+            format!("{} is tier {}, above the tier {} of the flow {}", step.id, step.tier, flow.tier, flow.id),
+        )),
+        None => Ok(()),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum IndexKind {
     Interface,
     Implementation,
 }
 
-/// `solana.org/privacy-rings-shield@1.0.0`, from a range such as `solana.org/privacy-rings-shield@^1`.
-async fn exact(service: &Service, kind: IndexKind, range: &str) -> Result<String, ServiceError> {
-    let range = IdRange::parse(range).map_err(ServiceError::invalid_request)?;
-    let key = match kind {
-        IndexKind::Interface => IndexKey::interface(&range.id),
-        IndexKind::Implementation => IndexKey::implementation(&range.id),
-    };
-    let index = Registry { chain: &service.chain }
-        .indexes(vec![key])
-        .await?
-        .pop()
-        .ok_or_else(|| ServiceError::not_found("unknown", format!("no index of `{}`", range.id)))?;
-    let entry = pick(&index.view()?, &range)?;
+/// An exact version, such as `solana.org/privacy-rings-shield@1.0.0`, and its index entry's tier.
+struct Pin {
+    kind: IndexKind,
+    id: String,
+    tier: u8,
+}
 
-    Ok(format!("{}@{}", range.id, format_version(entry.version)))
+/// The version that each range, such as `solana.org/privacy-rings-shield@^1`, picks, from one read
+/// of the indexes.
+async fn exact_all(service: &Service, ranges: &[(IndexKind, String)]) -> Result<Vec<Pin>, ServiceError> {
+    let parsed = ranges
+        .iter()
+        .map(|(kind, range)| Ok((*kind, IdRange::parse(range).map_err(ServiceError::invalid_request)?)))
+        .collect::<Result<Vec<_>, ServiceError>>()?;
+    let keys = parsed
+        .iter()
+        .map(|(kind, range)| match kind {
+            IndexKind::Interface => IndexKey::interface(&range.id),
+            IndexKind::Implementation => IndexKey::implementation(&range.id),
+        })
+        .collect();
+    let indexes = Registry { chain: &service.chain }.indexes(keys).await?;
+
+    parsed
+        .into_iter()
+        .zip(indexes)
+        .map(|((kind, range), index)| {
+            let entry = pick(&index.view()?, &range)?;
+
+            Ok(Pin { kind, id: format!("{}@{}", range.id, format_version(entry.version)), tier: entry.tier })
+        })
+        .collect()
 }
 
 fn check_after() -> String {
@@ -499,5 +534,23 @@ mod tests {
     #[test]
     fn the_only_step_of_a_request_is_named() {
         assert_eq!(Steps::Single.names(), vec![ONLY_STEP]);
+    }
+
+    fn pin(kind: IndexKind, id: &str, tier: u8) -> Pin {
+        Pin { kind, id: id.to_owned(), tier }
+    }
+
+    #[test]
+    fn refuses_a_step_implementation_above_the_flows_tier() {
+        let request =
+            [pin(IndexKind::Interface, "o/token.transfer@1.0.0", 0), pin(IndexKind::Implementation, "o/flow@1.0.0", 2)];
+        let within = [
+            pin(IndexKind::Interface, "o/private.shield@1.0.0", 0),
+            pin(IndexKind::Implementation, "o/shield@1.0.0", 2),
+        ];
+        let above = [pin(IndexKind::Implementation, "o/shield@1.1.0", 3)];
+
+        assert!(check_step_tiers(&request, &within).is_ok());
+        assert_eq!(check_step_tiers(&request, &above).unwrap_err().code, "stepTier");
     }
 }

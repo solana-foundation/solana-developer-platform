@@ -133,7 +133,13 @@ enum Part {
 struct Rendered {
     text: String,
     cluster: Address,
-    spend: Option<ShieldedSpend>,
+    shielded: Option<ShieldedPart>,
+}
+
+/// The spend that a shielded recipe requires, and the pool that its built instructions call.
+struct ShieldedPart {
+    spend: ShieldedSpend,
+    pool: Address,
 }
 
 /// Verifies `transaction` against `chain`, which holds the accounts that earlier steps asked for.
@@ -171,6 +177,16 @@ pub fn verify_transaction<C: Chain>(transaction: &Transaction, chain: &C) -> Res
         return Err(PlanError::ClustersDiffer.into());
     }
 
+    verifies.iter().zip(&rendered).try_for_each(|(verify, part)| match &part.shielded {
+        Some(shielded) => {
+            let built =
+                transaction.instructions.get(verify.built.clone()).ok_or(VerifyError::BadSegment(verify.position))?;
+
+            shielded::check_built(built, &shielded.spend, shielded.pool, rent_payer).map_err(VerifyError::from)
+        }
+        None => Ok(()),
+    })?;
+
     let texts: Vec<String> = rendered.iter().map(|part| part.text.clone()).collect();
     let in_segment = |position: &usize| verifies.iter().any(|verify| verify.segment.contains(position));
     let unverified = (0..transaction.instructions.len())
@@ -187,7 +203,7 @@ pub fn verify_transaction<C: Chain>(transaction: &Transaction, chain: &C) -> Res
                 verify: verify.position,
                 built: verify.built.clone(),
                 segment: verify.segment.clone(),
-                spend: part.spend,
+                spend: part.shielded.map(|shielded| shielded.spend),
             })
             .collect(),
         unverified,
@@ -293,7 +309,7 @@ fn part<C: Chain>(verify: &DecodedVerify<'_>, payers: Payers<'_>, chain: &C) -> 
     }
 
     let message = values.message()?;
-    let spend = match recipe.implementation().recipe().map_err(PlanError::from)? {
+    let shielded = match recipe.implementation().recipe().map_err(PlanError::from)? {
         RecipeKind::Shielded => {
             let circuit = shielded::circuit_address(&recipe)?;
 
@@ -301,7 +317,7 @@ fn part<C: Chain>(verify: &DecodedVerify<'_>, payers: Payers<'_>, chain: &C) -> 
                 return Ok(Part::Missing(vec![circuit]));
             }
 
-            Some(shielded::spend(&recipe, chain)?)
+            Some(ShieldedPart { spend: shielded::spend(&recipe, chain)?, pool: shielded::pool(&recipe)? })
         }
         _ => None,
     };
@@ -309,7 +325,7 @@ fn part<C: Chain>(verify: &DecodedVerify<'_>, payers: Payers<'_>, chain: &C) -> 
     Ok(Part::Rendered(Box::new(Rendered {
         text: with_rent_cap(&message, verify.rent_cap),
         cluster: *recipe.implementation().cluster(),
-        spend,
+        shielded,
     })))
 }
 

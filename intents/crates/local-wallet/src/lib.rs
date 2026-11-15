@@ -36,7 +36,8 @@ pub struct Wallet {
     pub ring: Option<Endpoints>,
     /// The intents service's prover route, for a build that proves on the service.
     pub service_prover: String,
-    /// Each spend that the wallet built, by its pool instruction's data, which holds the proof.
+    /// Each spend that the wallet built and has not signed yet, by the fingerprint of its whole pool
+    /// instruction: program, accounts, and data.
     built: Mutex<HashMap<Vec<u8>, ShieldedSpend>>,
     /// The SPL mints that the ring takes, whose private balances `/ring` reads.
     assets: Mutex<Vec<solana_address::Address>>,
@@ -51,6 +52,14 @@ impl Wallet {
 }
 
 pub use spends::Registration;
+
+/// The program, then each account with its role, then the data. Two instructions with the same
+/// data and other accounts differ, such as a deposit from another key.
+pub(crate) fn fingerprint(instruction: &sdp_intents_planner::Instruction) -> Vec<u8> {
+    let accounts = instruction.accounts.iter().flat_map(|meta| meta.address.0.into_iter().chain([u8::from(meta.role)]));
+
+    instruction.program.0.into_iter().chain(accounts).chain(instruction.data.iter().copied()).collect()
+}
 
 pub fn router(wallet: Arc<Wallet>) -> Router {
     Router::new()

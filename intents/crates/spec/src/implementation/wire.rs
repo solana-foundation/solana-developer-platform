@@ -27,16 +27,20 @@ wire_code! {
 impl RecipeKind {
     /// The trust tier of `DESIGN.md`, 4.16: 1 when `verify_intent` rebuilds the instructions, 2 when
     /// only the assertions bound them, and 3 when only a simulation checks them. A shielded spend is 2:
-    /// `verify_intent` limits it to the pool, and the assertions bound its public effects. A flow adds
-    /// no trust to its steps, each of which has its own tier.
-    pub fn tier(self) -> u8 {
+    /// `verify_intent` limits it to the pool, and the assertions bound its public effects. A flow has
+    /// no tier of its own. `Implementation::tier` reads the worst tier of its steps.
+    pub fn fixed_tier(self) -> Option<u8> {
         match self {
-            Self::Static | Self::Program | Self::Flow => 1,
-            Self::Remote | Self::Shielded => 2,
-            Self::RemoteTransaction => 3,
+            Self::Static | Self::Program => Some(1),
+            Self::Remote | Self::Shielded => Some(2),
+            Self::RemoteTransaction => Some(3),
+            Self::Flow => None,
         }
     }
 }
+
+/// The worst trust tier.
+pub const MAX_TIER: u8 = 3;
 
 wire_code! {
     pub enum AccountSourceKind {

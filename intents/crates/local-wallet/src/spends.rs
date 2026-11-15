@@ -104,7 +104,7 @@ impl Wallet {
         let mut built =
             self.built.lock().map_err(|_| WalletError::failed("wallet", "the record of spends is poisoned"))?;
         pool.iter().for_each(|instruction| {
-            built.insert(instruction.data.clone(), spend.clone());
+            built.insert(crate::fingerprint(instruction), spend.clone());
         });
 
         Ok(json!({

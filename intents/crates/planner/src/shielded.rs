@@ -6,19 +6,15 @@
 
 use sdp_intents_engine::{Chain, Recipe};
 use sdp_intents_spec::wire::{DocumentIdV1, DocumentKind};
-use sdp_intents_spec::{Address, Circuit, ShieldedEntry, ShieldedProtocol};
+use sdp_intents_spec::{AccountRole, Address, Circuit, ShieldedEntry, ShieldedProtocol};
 
 use crate::plan::Built;
+use crate::programs::{ASSOCIATED_TOKEN_PROGRAM, TOKEN_2022_PROGRAM, TOKEN_PROGRAM};
 use crate::registry::{version_address, REGISTRY_PROGRAM, VERSION_HEADER_LEN};
 use crate::remote::RemoteAnswer;
 use crate::{Instruction, PlanError};
 use sdp_intents_registry_client::find_program_address;
 
-/// `ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL`.
-const ASSOCIATED_TOKEN_PROGRAM: Address = Address([
-    140, 151, 37, 143, 78, 36, 137, 241, 187, 61, 16, 41, 20, 142, 13, 131, 11, 90, 19, 153, 218, 255, 16, 132, 4, 142,
-    123, 216, 219, 233, 248, 89,
-]);
 const CREATE_IDEMPOTENT: u8 = 1;
 /// The System program, which also names SOL in a statement.
 const SYSTEM_PROGRAM: Address = Address([0; 32]);
@@ -155,32 +151,62 @@ pub(crate) fn call<C: Chain>(
     Ok(ShieldedCall { pool, spend, fee_payer: *payers.fee, rent_payer: *payers.rent, priority_fee_lamports })
 }
 
-/// The caller's spend as the segment's built instructions. Each instruction calls the pool, so the
-/// spend can move nothing outside it but what the assertions allow.
-///
-/// Before the pool instructions, the caller may create the associated token account of an SPL
-/// withdrawal's recipient, idempotently and paid by the rent payer, because the pool pays only into
-/// an account that exists.
+/// The caller's spend as the segment's built instructions.
 pub(crate) fn built(recipe: &Recipe<'_>, spend: &ShieldedSpend, answer: RemoteAnswer) -> Result<Built, PlanError> {
     let pool = pool(recipe)?;
-    let creates = answer.instructions.iter().take_while(|instruction| instruction.program != pool);
-    let creates_fit = creates.clone().all(|instruction| creates_withdrawal_account(instruction, spend, recipe));
-    let calls_only_the_pool =
-        answer.instructions.iter().skip(creates.count()).all(|instruction| instruction.program == pool);
 
-    if answer.frozen.is_some() || answer.instructions.is_empty() || !creates_fit || !calls_only_the_pool {
+    if answer.frozen.is_some() {
         return Err(PlanError::ShieldedSpend);
     }
+
+    check_built(&answer.instructions, spend, pool, *recipe.payers().rent)?;
 
     Built::from_remote(recipe, answer)
 }
 
-/// `CreateIdempotent` of the associated token account that an SPL withdrawal pays into, funded by
-/// the rent payer. A wrong token program derives another account, which the pool does not pay.
-fn creates_withdrawal_account(instruction: &Instruction, spend: &ShieldedSpend, recipe: &Recipe<'_>) -> bool {
+/// The built instructions of a spend: at least one pool instruction, so the spend can move nothing
+/// outside the pool but what the assertions allow. Before them, the spend may create the associated
+/// token account of each SPL withdrawal's recipient once, because the pool pays only into an account
+/// that exists. The planner and the verifier both check this.
+pub(crate) fn check_built(
+    instructions: &[Instruction],
+    spend: &ShieldedSpend,
+    pool: Address,
+    rent_payer: Address,
+) -> Result<(), PlanError> {
+    let creates: Vec<&Instruction> =
+        instructions.iter().take_while(|instruction| instruction.program != pool).collect();
+    let pool_instructions = instructions.get(creates.len()..).unwrap_or_default();
+    let created: Vec<Address> =
+        creates.iter().filter_map(|create| create.accounts.get(CREATED_ACCOUNT)).map(|meta| meta.address).collect();
+    let created_once = created
+        .iter()
+        .enumerate()
+        .all(|(position, account)| !created.iter().take(position).any(|other| other == account));
+
+    let fits = creates.iter().all(|create| creates_withdrawal_account(create, spend, rent_payer))
+        && created_once
+        && !pool_instructions.is_empty()
+        && pool_instructions.iter().all(|instruction| instruction.program == pool);
+
+    if fits {
+        Ok(())
+    } else {
+        Err(PlanError::ShieldedSpend)
+    }
+}
+
+/// The position of the account that a `CreateIdempotent` creates.
+const CREATED_ACCOUNT: usize = 1;
+
+/// `CreateIdempotent` of the associated token account that an SPL withdrawal pays into, under
+/// Token or Token-2022, funded by the rent payer. Any other token program would run in the
+/// create, and the pool pays only the account that the mint's own program derives.
+fn creates_withdrawal_account(instruction: &Instruction, spend: &ShieldedSpend, rent_payer: Address) -> bool {
     let [funder, account, owner, mint, system, token_program] = instruction.accounts.as_slice() else {
         return false;
     };
+    let roles = [funder, account, owner, mint, system, token_program].map(|meta| meta.role);
     let derived =
         find_program_address(&[&owner.address.0, &token_program.address.0, &mint.address.0], &ASSOCIATED_TOKEN_PROGRAM);
     let pays_a_withdrawal = spend
@@ -190,14 +216,25 @@ fn creates_withdrawal_account(instruction: &Instruction, spend: &ShieldedSpend, 
 
     instruction.program == ASSOCIATED_TOKEN_PROGRAM
         && instruction.data == [CREATE_IDEMPOTENT]
-        && funder.address == *recipe.payers().rent
+        && roles == CREATE_ROLES
+        && funder.address == rent_payer
         && system.address == SYSTEM_PROGRAM
+        && (token_program.address == TOKEN_PROGRAM || token_program.address == TOKEN_2022_PROGRAM)
         && derived.is_ok_and(|derived| derived == account.address)
         && pays_a_withdrawal
 }
 
+const CREATE_ROLES: [AccountRole; 6] = [
+    AccountRole::WritableSigner,
+    AccountRole::Writable,
+    AccountRole::Readonly,
+    AccountRole::Readonly,
+    AccountRole::Readonly,
+    AccountRole::Readonly,
+];
+
 /// The pool program: the program of the recipe's first note.
-fn pool(recipe: &Recipe<'_>) -> Result<Address, PlanError> {
+pub(crate) fn pool(recipe: &Recipe<'_>) -> Result<Address, PlanError> {
     let first = recipe.implementation().instructions()?.first().ok_or(PlanError::ShieldedNote)?;
 
     recipe.address(first.program).copied().ok_or(PlanError::Unresolved)
@@ -246,5 +283,78 @@ impl Entry {
         }
 
         Ok(ShieldedLeg { account: self.account, asset: self.asset, amount: self.amount })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::instruction::AccountMeta;
+
+    const POOL: Address = Address([7; 32]);
+    const RENT_PAYER: Address = Address([8; 32]);
+    const RECIPIENT: Address = Address([9; 32]);
+    const MINT: Address = Address([10; 32]);
+
+    fn spend() -> ShieldedSpend {
+        ShieldedSpend {
+            protocol: ShieldedProtocol::PrivacyRings,
+            circuit: ShieldedCircuit { id: DocumentIdV1::default(), name: String::new(), proving_keys: [0; 32] },
+            spender: Address([1; 32]),
+            notes: Vec::new(),
+            deposits: Vec::new(),
+            withdrawals: vec![ShieldedLeg { account: RECIPIENT, asset: MINT, amount: 5 }],
+        }
+    }
+
+    fn create(token_program: Address) -> Instruction {
+        let account =
+            find_program_address(&[&RECIPIENT.0, &token_program.0, &MINT.0], &ASSOCIATED_TOKEN_PROGRAM).unwrap();
+        let metas = [RENT_PAYER, account, RECIPIENT, MINT, SYSTEM_PROGRAM, token_program];
+
+        Instruction {
+            program: ASSOCIATED_TOKEN_PROGRAM,
+            accounts: metas
+                .iter()
+                .zip(CREATE_ROLES)
+                .map(|(address, role)| AccountMeta { address: *address, role })
+                .collect(),
+            data: vec![CREATE_IDEMPOTENT],
+        }
+    }
+
+    fn pool_call() -> Instruction {
+        Instruction { program: POOL, accounts: Vec::new(), data: vec![1] }
+    }
+
+    fn check(instructions: &[Instruction]) -> Result<(), PlanError> {
+        check_built(instructions, &spend(), POOL, RENT_PAYER)
+    }
+
+    #[test]
+    fn accepts_one_create_of_a_withdrawal_account_before_the_pool() {
+        assert_eq!(check(&[create(TOKEN_PROGRAM), pool_call()]), Ok(()));
+        assert_eq!(check(&[create(TOKEN_2022_PROGRAM), pool_call()]), Ok(()));
+        assert_eq!(check(&[pool_call()]), Ok(()));
+    }
+
+    #[test]
+    fn refuses_a_create_under_another_token_program() {
+        assert_eq!(check(&[create(Address([11; 32])), pool_call()]), Err(PlanError::ShieldedSpend));
+    }
+
+    #[test]
+    fn refuses_a_duplicate_create_and_a_create_with_other_roles() {
+        assert_eq!(check(&[create(TOKEN_PROGRAM), create(TOKEN_PROGRAM), pool_call()]), Err(PlanError::ShieldedSpend));
+
+        let mut signed_owner = create(TOKEN_PROGRAM);
+        signed_owner.accounts[2].role = AccountRole::ReadonlySigner;
+        assert_eq!(check(&[signed_owner, pool_call()]), Err(PlanError::ShieldedSpend));
+    }
+
+    #[test]
+    fn refuses_a_spend_without_a_pool_instruction_or_with_another_program_after_it() {
+        assert_eq!(check(&[create(TOKEN_PROGRAM)]), Err(PlanError::ShieldedSpend));
+        assert_eq!(check(&[pool_call(), create(TOKEN_PROGRAM)]), Err(PlanError::ShieldedSpend));
     }
 }

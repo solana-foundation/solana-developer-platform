@@ -69,6 +69,7 @@ struct Build<'c, 's> {
     steps: Vec<StepV1>,
     step_inputs: Vec<StepInputV1>,
     conditions: Vec<ConditionV1>,
+    flow_tier: u8,
 }
 
 /// A cluster's name, such as `mainnet`, or its genesis hash.
@@ -182,6 +183,7 @@ impl<'c, 's> Build<'c, 's> {
             steps: Vec::new(),
             step_inputs: Vec::new(),
             conditions: Vec::new(),
+            flow_tier: 0,
         }
     }
 

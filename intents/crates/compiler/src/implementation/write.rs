@@ -51,6 +51,7 @@ impl Build<'_, '_> {
                 steps: writer.table(&self.steps),
                 step_inputs: writer.table(&self.step_inputs),
                 conditions: writer.table(&self.conditions),
+                max_tier: self.flow_tier,
             };
             writer.extension(&flow);
         }

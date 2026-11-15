@@ -51,6 +51,9 @@ pub struct FlowDocV1 {
     pub steps: TableRefV1,
     pub step_inputs: TableRefV1,
     pub conditions: TableRefV1,
+    /// The worst tier of the step implementations. The service refuses a step above it, so a new
+    /// step version cannot raise the tier that the interface approved.
+    pub max_tier: u8,
 }
 
 /// An interface or an implementation that a step names. `name` holds its name, such as
@@ -130,6 +133,14 @@ impl<'a> Implementation<'a> {
         crate::region::Region::new(self.extension()).fixed(0).map(Some)
     }
 
+    /// The recipe's trust tier, and for a flow the worst tier of its steps.
+    pub fn tier(&self) -> Result<u8, SpecError> {
+        match self.recipe()?.fixed_tier() {
+            Some(tier) => Ok(tier),
+            None => self.flow()?.map(|flow| flow.max_tier).ok_or(SpecError::BadRecipe),
+        }
+    }
+
     pub fn steps(&self) -> Result<&'a [StepV1], SpecError> {
         self.flow_table(|flow| flow.steps)
     }
@@ -173,7 +184,7 @@ impl<'a> Implementation<'a> {
     pub(super) fn validate_flow(&self, literals: usize) -> Result<(), SpecError> {
         let steps = self.steps()?;
 
-        if steps.is_empty() {
+        if steps.is_empty() || !(1..=super::wire::MAX_TIER).contains(&self.tier()?) {
             return Err(SpecError::BadRecipe);
         }
 
@@ -262,7 +273,7 @@ mod tests {
 
     #[test]
     fn entry_layouts_are_pinned() {
-        assert_eq!(size_of::<FlowDocV1>(), 9);
+        assert_eq!(size_of::<FlowDocV1>(), 10);
         assert_eq!(size_of::<DocumentRefV1>(), 74);
         assert_eq!(size_of::<StepV1>(), 233);
         assert_eq!(size_of::<ConditionV1>(), 11);

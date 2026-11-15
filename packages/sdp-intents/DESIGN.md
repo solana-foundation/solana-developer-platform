@@ -811,7 +811,8 @@ pub struct VersionIndexV1 {
 3. A version of an implementation is approved when the interface's list holds the implementation and the version's
    `approved` is set. Only the interface's approve authority changes either.
 4. With `approve_new_versions`, `publish` approves a new version of an approved implementation, unless its
-   trust tier (4.16) is worse than the highest approved version's.
+   trust tier (4.16) is worse than the highest approved version's. A flow's tier is the worst tier
+   of its steps when it compiles, and the service refuses a later step version above it.
 5. A range resolves to the highest version that is not above the head. A version above the head is
    reachable only by its exact version, so a publisher can test before `set_head`.
 6. `remove` closes a version account and keeps its entry, so no one can publish that version again.
@@ -1231,8 +1232,8 @@ workspace's versions.
 2. `token.transfer`, `private.shield`, and `private.unshield` have Privacy Rings
    implementations, for SOL and SPL tokens. A mint needs its SPL interface in the pool. An SPL
    withdrawal pays the recipient's associated token account. When it is missing, the wallet creates
-   it idempotently before the spend, paid by the rent payer, and the planner accepts exactly that
-   instruction. `privacy-rings-shield-and-transfer` is a flow (4.19) that shields and then
+   it idempotently before the spend, paid by the rent payer. The planner and the verifier accept
+   only that instruction, once for each withdrawal, under Token or Token-2022. `privacy-rings-shield-and-transfer` is a flow (4.19) that shields and then
    transfers.
 3. The planner resolves the statement and stops: `next` is a `build` of the spend. The service
    holds no key and calls no key holder. The caller's wallet builds the spend, and sends the pool
@@ -1241,10 +1242,12 @@ workspace's versions.
    is tier 2.
 4. The wallet proves through its own prover, or through `/v1/intents/prover`, as the caller
    chooses. It checks the circuit's key set and each key's SHA-256, and verifies the proof.
-5. The verifier reports the statement that each shielded intent requires. The wallet signs a pool
-   instruction only when it built that instruction from exactly that statement. A service that
-   changes the instruction or asks for another statement gets nothing signed. A browser verifier
-   sees the statement, and cannot check the notes.
+5. The verifier reports the statement that each shielded intent requires. The wallet verifies every
+   transaction before it signs. It refuses a pool instruction outside the built instructions of a
+   shielded intent, and an instruction in no segment unless the caller lists it. It signs a pool
+   instruction only when it built that whole instruction, accounts and data, from exactly that
+   statement, and it signs each one once. A browser verifier sees the statement, and cannot check
+   the notes.
 
 `just playground` runs all of it, and walks the loop of `privacy-rings-shield-and-transfer` one
 call at a time.
@@ -1331,7 +1334,7 @@ that the step's plan fixed, such as a ring spend's nullifiers.
 | Data | `{ "account": …, "data": { "offset", "type", "equals" } }` | Anyone |
 | Balance | `{ "balance": { "owner", "mint", "min" } }` | Anyone |
 | Private balance | `{ "privateBalance": { "owner", "mint", "min" } }` | The holder of the viewing key. The service holds no key, so it refuses this condition. A loop in the caller's client can check it. Not built. |
-| Spent | `{ "spent": "{steps.pay.plan.nullifiers}" }` | Anyone. The pool creates an account for each nullifier that a spend consumes, and one that exists proves the spend landed. A forester closes them later, so a missing one proves nothing. |
+| Spent | `{ "spent": "{steps.pay.plan.nullifiers}" }` | Anyone. The pool creates an account for each nullifier that a spend consumes. Any spend of the notes creates it, so as a `done` condition it never marks a step done: only the step's own landed signature does. A forester closes them later, so a missing one proves nothing. |
 | Committed | `{ "committed": "{steps.pay.plan.notes.0}" }` | Anyone, with the commitment |
 | Landed | `{ "landed": ["<signature>"], "expires": { "blockHeight": "…" } }` | Anyone. Only the planner writes it, for a step in flight. |
 
@@ -1548,9 +1551,10 @@ transaction over any RPC.
    message says `onchain checks: none`, so the signer sees the choice.
 
 **Keys.** The service holds no key and calls no key holder. A shielded step's spend comes from the
-caller's own wallet or custody, in `built`. The wallet signs a pool instruction only when it built
-that instruction from the statement that the transaction's intent requires. A service that forges a
-`build`, or changes the instruction it gets back, therefore gets nothing signed. The service never
+caller's own wallet or custody, in `built`. The wallet verifies the transaction itself, and signs a
+pool instruction only when it built that whole instruction from the statement that the
+transaction's intent requires (4.17). A service that forges a `build`, or changes the instruction it
+gets back, therefore gets nothing signed. The service never
 reads a private balance. It sees a spend only when the caller asks it to prove one.
 
 **Flows.** Each step is a plan with every check above, so a flow adds no trust to a step. A flow

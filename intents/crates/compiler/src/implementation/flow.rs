@@ -144,6 +144,19 @@ impl Build<'_, '_> {
             return None;
         }
 
+        // The catalog's version stands for the range. The service refuses a later version above the
+        // flow's tier, so a step publisher cannot raise it.
+        match sdp_intents_spec::Implementation::parse(&implementation.bytes).and_then(|step| step.tier()) {
+            Ok(tier) => self.flow_tier = self.flow_tier.max(tier),
+            Err(error) => {
+                self.sink.push(Diagnostic::new(
+                    Code::Internal,
+                    &node.pointer,
+                    format!("`{}` has no tier: {error}", implementation.id),
+                ));
+            }
+        }
+
         Some(DocumentRefV1 {
             id: sdp_intents_spec::wire::DocumentIdV1 { version: lowest, ..implementation.document_id },
             name: self.pool.add(implementation.id.name.as_bytes()),

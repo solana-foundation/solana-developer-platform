@@ -19,7 +19,7 @@
       "equals": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
     }
   ],
-  "message": "request that Hastra redeem {inputs.amount} of {outputs.escrowMint} from {inputs.owner} for {inputs.asset} at par, in request {outputs.request}. Hastra's operator pays later, with no deadline, after an off-chain conversion. Until then, {inputs.owner} can cancel the request and keep the {outputs.escrowMint}",
+  "message": "request that Hastra redeem {inputs.amount} of {outputs.escrowMint} from {inputs.owner} for {inputs.asset} at par, in request {outputs.request}. Hastra's operator pays later, with no deadline. Until then, the owner can cancel the request",
   "recipe": {
     "kind": "static",
     "accounts": [

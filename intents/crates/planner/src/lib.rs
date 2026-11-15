@@ -43,6 +43,7 @@ mod instruction;
 mod onchain;
 mod plan;
 mod planner;
+mod programs;
 mod registry;
 mod remote;
 mod render;

@@ -293,10 +293,12 @@ export const api = {
   /// service's. Only the caller talks to its wallet.
   build: (spend: Record<string, unknown>, prover: Prover) =>
     post<Record<string, unknown>>("/shielded/build", { spend, prover }, {}, "/wallet"),
-  send: (transaction: NonNullable<Plan["transaction"]>) =>
+  /// `unverified` lists the instructions in no segment that the caller accepts. The wallet refuses
+  /// the transaction unless the list equals what its own verification finds.
+  send: (transaction: NonNullable<Plan["transaction"]>, unverified: number[]) =>
     post<{ signature: string }>(
       "/send",
-      { message: transaction.messageBytes, presigned: transaction.presigned },
+      { message: transaction.messageBytes, presigned: transaction.presigned, unverified },
       {},
       "/wallet"
     ),

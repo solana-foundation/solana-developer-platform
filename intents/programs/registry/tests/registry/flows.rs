@@ -451,8 +451,8 @@ fn the_approval_policy_approves_new_versions_of_an_approved_implementation() {
 }
 
 /// `system-transfer` as an endpoint's instructions, at tier 2.
-fn remote_document(organization: &Organization, version: &str) -> Result<Vec<u8>, Failure> {
-    let text = format!(
+fn remote_text(version: &str) -> String {
+    format!(
         r#"{{
   "spec": "sdp-intents@1.0", "kind": "implementation", "id": "solana.org/system-transfer", "version": "{version}",
   "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d", "implements": "solana.org/token.transfer@^1",
@@ -460,11 +460,14 @@ fn remote_document(organization: &Organization, version: &str) -> Result<Vec<u8>
   "recipe": {{ "kind": "remote", "url": "https://example.invalid", "returns": "instructions" }},
   "postConditions": [{{ "invokesOnly": ["11111111111111111111111111111111"], "message": "only System instructions run" }}]
 }}"#
-    );
+    )
+}
+
+fn remote_document(organization: &Organization, version: &str) -> Result<Vec<u8>, Failure> {
     let mut catalog = catalog(organization);
     catalog.compile_interface(definitions::TOKEN_TRANSFER).map_err(report)?;
 
-    Ok(catalog.compile_implementation(&text).map_err(report)?.bytes.clone())
+    Ok(catalog.compile_implementation(&remote_text(version)).map_err(report)?.bytes.clone())
 }
 
 /// The policy carries an approval only to a version whose tier is no worse than the highest
@@ -487,6 +490,59 @@ fn the_approval_policy_keeps_a_version_at_its_tier() {
     organization.publish(&mut svm, IMPLEMENTATION, &remote, Some(interface_index)).unwrap();
 
     let data = index_data(&svm, &implementation_index).unwrap();
+    let entries = Index::parse(&data).unwrap().versions;
+    let approved: Vec<bool> = entries.iter().map(|entry| entry.approved.get()).collect();
+    let tiers: Vec<u8> = entries.iter().map(|entry| entry.tier).collect();
+
+    assert_eq!(approved, [true, true, false]);
+    assert_eq!(tiers, [1, 1, 2]);
+}
+
+/// `token.transfer` as a flow of one step that pins `system-transfer`, which the catalog defines as
+/// the static builder or as `remote_text`'s endpoint.
+fn flow_document(organization: &Organization, version: &str, remote_step: bool) -> Result<Vec<u8>, Failure> {
+    let text = format!(
+        r#"{{
+  "spec": "sdp-intents@1.1", "kind": "implementation", "id": "solana.org/flow-transfer", "version": "{version}",
+  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d", "implements": "solana.org/token.transfer@^1",
+  "message": "transfer {{inputs.amount}} of {{inputs.mint}} in one step",
+  "recipe": {{ "kind": "flow", "steps": [{{ "name": "pay", "intent": {{
+    "interface": "solana.org/token.transfer@^1", "implementation": "solana.org/system-transfer@^1",
+    "inputs": {{ "from": "{{inputs.from}}", "to": "{{inputs.to}}", "mint": "{{inputs.mint}}", "amount": "{{inputs.amount}}" }}
+  }} }}] }}
+}}"#
+    );
+    let mut catalog = catalog(organization);
+    catalog.compile_interface(definitions::TOKEN_TRANSFER).map_err(report)?;
+    let step = if remote_step { remote_text("1.0.0") } else { definitions::SYSTEM_TRANSFER.to_owned() };
+    catalog.compile_implementation(&step).map_err(report)?;
+
+    Ok(catalog.compile_implementation(&text).map_err(report)?.bytes.clone())
+}
+
+/// A flow's tier is the worst tier of its steps, so a flow whose step became an endpoint needs its
+/// own approval.
+#[test]
+fn the_approval_policy_keeps_a_flow_at_the_tier_of_its_steps() {
+    let Implemented { mut svm, organization, interface_index, .. } = implemented().unwrap();
+    let flow_index = organization.create_implementation(&mut svm, "flow-transfer", &interface_index).unwrap();
+    let change = IndexChange {
+        authority: organization.authority.pubkey(),
+        organization: organization.address,
+        index: interface_index,
+    };
+    send(&mut svm, &[change.set_approval_policy(true)], &[&organization.authority]).unwrap();
+
+    let first = flow_document(&organization, "1.0.0", false).unwrap();
+    organization.publish(&mut svm, "flow-transfer", &first, Some(interface_index)).unwrap();
+    organization.approve(&mut svm, &organization.approval(&interface_index, &flow_index), &version(1, 0, 0)).unwrap();
+
+    let same_tier = flow_document(&organization, "1.0.1", false).unwrap();
+    organization.publish(&mut svm, "flow-transfer", &same_tier, Some(interface_index)).unwrap();
+    let remote_step = flow_document(&organization, "1.0.2", true).unwrap();
+    organization.publish(&mut svm, "flow-transfer", &remote_step, Some(interface_index)).unwrap();
+
+    let data = index_data(&svm, &flow_index).unwrap();
     let entries = Index::parse(&data).unwrap().versions;
     let approved: Vec<bool> = entries.iter().map(|entry| entry.approved.get()).collect();
     let tiers: Vec<u8> = entries.iter().map(|entry| entry.tier).collect();
