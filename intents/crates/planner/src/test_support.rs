@@ -82,6 +82,33 @@ impl Compiled {
         )
     }
 
+    /// `privacy-rings-transfer`, which names its circuit, so the catalog compiles the circuit first.
+    pub(crate) fn privacy_transfer() -> Self {
+        let mut catalog = Catalog::default().with_publisher(ORGANIZATION, organization_address());
+        catalog
+            .compile_circuit(include_str!(
+                "../../../definitions/solana.org/circuits/privacy-rings-confidential/1.0.0.json"
+            ))
+            .unwrap();
+        let interface = catalog
+            .compile_interface(include_str!("../../../definitions/solana.org/interfaces/token.transfer/1.0.0.json"));
+        let interface = interface.unwrap().bytes.clone();
+        let implementation = catalog
+            .compile_implementation(include_str!(
+                "../../../definitions/solana.org/implementations/privacy-rings-transfer/1.0.0.json"
+            ))
+            .unwrap()
+            .bytes
+            .clone();
+        let intent = SYSTEM_TRANSFER.replace("system-transfer", "privacy-rings-transfer").replace(
+            r#""options": { "assertions": false, "verifyIntent": false }"#,
+            r#""options": { "assertions": true, "verifyIntent": true }"#,
+        );
+        let intent = catalog.compile_intent(&intent).unwrap().bytes;
+
+        Self { interface, implementation, intent, payer: account(PAYER), rent_payer: account(PAYER) }
+    }
+
     /// The Token-2022 implementation, with its builder at `BUILDER`. The sender pays the rent.
     pub(crate) fn token_2022_transfer() -> Self {
         let implementation =

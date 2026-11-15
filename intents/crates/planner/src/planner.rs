@@ -84,6 +84,14 @@ impl<'a> Planner<'a> {
             return Err(PlanError::ClustersDiffer);
         }
 
+        // The caller answers a shielded spend with one `built`, which no other answered intent can share.
+        let answered = segments.iter().map(SegmentPlanner::is_answered).collect::<Result<Vec<_>, _>>()?;
+        let shielded = segments.iter().map(SegmentPlanner::is_shielded).collect::<Result<Vec<_>, _>>()?;
+
+        if shielded.contains(&true) && answered.iter().filter(|answered| **answered).count() > 1 {
+            return Err(PlanError::ShieldedNotAlone);
+        }
+
         Ok(Self {
             payers: request.payers,
             cluster,
@@ -402,6 +410,18 @@ mod tests {
         assert!(matches!(step, Step::Simulate(_)));
 
         (planner, accounts)
+    }
+
+    #[test]
+    fn refuses_a_shielded_intent_beside_another_answered_intent() {
+        let shielded = Compiled::privacy_transfer();
+        let static_transfer = Compiled::system_transfer(SYSTEM_TRANSFER);
+
+        assert!(Planner::new(&request(&[&shielded, &static_transfer], 0), SCRATCH).is_ok());
+        assert_eq!(
+            Planner::new(&request(&[&shielded, &shielded], 0), SCRATCH).err(),
+            Some(PlanError::ShieldedNotAlone)
+        );
     }
 
     #[test]

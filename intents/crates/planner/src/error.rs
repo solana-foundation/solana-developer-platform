@@ -47,6 +47,8 @@ pub enum PlanError {
     /// The circuit that a shielded recipe names is not a circuit version of its protocol in the
     /// registry.
     ShieldedCircuit,
+    /// A plan holds a shielded intent and another remote or shielded intent.
+    ShieldedNotAlone,
     /// A flow recipe plans through its steps (`DESIGN.md`, 4.19), never as one intent.
     FlowRecipe,
     /// The provider's transaction breaks a rule of `DESIGN.md`, 4.16, which the text names.
@@ -149,6 +151,9 @@ impl fmt::Display for PlanError {
             ),
             Self::ShieldedNote => f.write_str("a shielded note is not one owner, a 32-byte asset, and an 8-byte amount"),
             Self::ShieldedSpend => f.write_str("the shielded spend calls another program than the pool, or is empty"),
+            Self::ShieldedNotAlone => {
+                f.write_str("a plan with a shielded intent holds no other remote or shielded intent. Plan them apart.")
+            }
             Self::ShieldedCircuit => {
                 f.write_str("the recipe's circuit is not a published circuit of its protocol in the registry")
             }

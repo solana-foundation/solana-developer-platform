@@ -483,6 +483,18 @@ impl<'a> SegmentPlanner<'a> {
         self.recipe.implementation().cluster()
     }
 
+    /// The caller or an endpoint answers this recipe while it plans.
+    pub(crate) fn is_answered(&self) -> Result<bool, PlanError> {
+        Ok(matches!(
+            self.recipe.implementation().recipe()?,
+            RecipeKind::Remote | RecipeKind::RemoteTransaction | RecipeKind::Shielded
+        ))
+    }
+
+    pub(crate) fn is_shielded(&self) -> Result<bool, PlanError> {
+        Ok(self.recipe.implementation().recipe()? == RecipeKind::Shielded)
+    }
+
     /// The builder program of a program recipe.
     fn builder(&self) -> Option<Address> {
         builder_program(&self.recipe)

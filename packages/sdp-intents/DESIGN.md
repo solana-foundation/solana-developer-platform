@@ -1174,7 +1174,8 @@ recipients, and the nullifier secret. So the caller chooses where each spend is 
 The nullifier secret is one key for each owner. With it, a service that proved a spend can tell
 when the notes that it saw are spent later, such as the change. Notes that it never saw stay
 private. Four things never leave the host: finding notes, choosing blindings, checking the proof,
-and the signature. `/v1/intents/prover/*` forwards the prover's API to the service's prover. The
+and the signature. `/v1/intents/prover/*` forwards the prover's API to the service's prover. It runs at most four proofs
+at once and answers 503 with `Retry-After` when all four run. The
 service keeps no witness: it is Restricted data (6). A prover in an attested enclave can later move
 the trust from SDP's operators to the enclave.
 
@@ -1239,7 +1240,8 @@ workspace's versions.
    holds no key and calls no key holder. The caller's wallet builds the spend, and sends the pool
    instruction back in `built`. The planner places it between `verify_intent` and the assertions.
    `verify_intent` limits it to `invokesOnly`, and Lighthouse bounds its public effects. The spend
-   is tier 2.
+   is tier 2. A plan with a shielded intent holds no other remote or shielded intent, because one
+   `built` answers the plan.
 4. The wallet proves through its own prover, or through `/v1/intents/prover`, as the caller
    chooses. It checks the circuit's key set and each key's SHA-256, and verifies the proof.
 5. The verifier reports the statement that each shielded intent requires. The wallet verifies every

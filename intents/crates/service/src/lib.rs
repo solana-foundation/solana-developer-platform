@@ -86,7 +86,10 @@ pub fn router(service: Arc<Service>) -> Router {
         .route("/v1/intents/start", post(start))
         .route("/v1/intents/continue", post(resume))
         .route("/v1/verify", post(verify))
-        .route("/v1/intents/prover/{*path}", any(prover::forward))
+        .route(
+            "/v1/intents/prover/{*path}",
+            any(prover::forward).layer(axum::extract::DefaultBodyLimit::max(prover::BODY_LIMIT)),
+        )
         .with_state(service)
 }
 
