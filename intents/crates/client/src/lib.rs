@@ -297,6 +297,7 @@ mod tests {
                 .collect(),
             payers: Payers { fee: &plan.payers.fee, rent: &plan.payers.rent },
             priority_fee_lamports: plan.priority_fee_lamports,
+            valid_for_seconds: plan.valid_for_seconds,
         };
 
         let prepared = Client::new(url).prepare(&request).unwrap();

@@ -64,7 +64,7 @@ pub struct VerifyArgs<'a> {
     pub layout: SegmentLayout,
 }
 
-/// The rent cap, and the counts of the accounts and the instructions of the segment.
+/// The rent cap, the counts of the accounts and the instructions of the segment, and the expiry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, AnchorSerialize, AnchorDeserialize, IdlType)]
 pub struct SegmentLayout {
     /// The most that the rent payer spends on new accounts in the segment.
@@ -75,11 +75,18 @@ pub struct SegmentLayout {
     pub built: u8,
     /// The assertions and the close of memory.
     pub checks: u8,
+    /// The Unix time after which `verify_intent` refuses to run. The message shows it, so a signer
+    /// knows how long the signed transaction can land.
+    pub expires_at: u64,
 }
 
 pub fn verify_intent(accounts: &VerifyIntent, passed: &[AccountView], args: VerifyArgs<'_>) -> Result<()> {
     let sysvar = &accounts.instructions;
     position::check_top_level(sysvar)?;
+
+    let now = u64::try_from(Clock::get()?.unix_timestamp).map_err(|_| RegistryError::IntentExpired)?;
+    require!(now <= args.layout.expires_at, RegistryError::IntentExpired);
+
     let options = check_options(args.intent)?;
 
     let interface_data = version::load(accounts.interface_version.account(), DocumentKind::Interface)?;

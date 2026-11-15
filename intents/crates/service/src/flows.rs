@@ -123,6 +123,7 @@ async fn planned(service: &Service, text: &str, answer: Option<RemoteAnswer>) ->
             .collect(),
         payers: Payers { fee: &compiled.payers.fee, rent: &compiled.payers.rent },
         priority_fee_lamports: compiled.priority_fee_lamports,
+        valid_for_seconds: compiled.valid_for_seconds,
     };
 
     Ok(match plan(service, &plan_request, answer).await? {

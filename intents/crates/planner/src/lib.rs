@@ -50,6 +50,7 @@ mod render;
 mod segment;
 mod shielded;
 mod simulation;
+mod time;
 mod transaction;
 mod values;
 mod verifier;
@@ -70,6 +71,7 @@ pub use remote::{
 pub use sdp_intents_engine::Payers;
 pub use shielded::{ShieldedCall, ShieldedCircuit, ShieldedLeg, ShieldedNote, ShieldedSpend};
 pub use simulation::{FixedMessage, ReturnData, Simulation, SimulationResult};
+pub use time::utc_time;
 pub use transaction::{Budget, RequiredSignature, SignerRole, Transaction, COMPUTE_BUDGET_PROGRAM};
 pub use verifier::{verify_transaction, VerifiedIntent, VerifiedTransaction, VerifyError, VerifyStep};
 

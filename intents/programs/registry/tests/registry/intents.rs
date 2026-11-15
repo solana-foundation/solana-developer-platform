@@ -115,10 +115,15 @@ impl Published {
     }
 }
 
-/// The layout of a segment of `built` instructions with no assertions. `token.transfer` has no
-/// outputs.
-pub fn unguarded(built: u8, rent_cap: u64) -> SegmentLayout {
-    SegmentLayout { rent_cap, guarded_accounts: 0, snapshots: 0, built, checks: 0 }
+/// The layout of a segment of `built` instructions with no assertions, which expires when a plan
+/// made now does. `token.transfer` has no outputs.
+pub fn unguarded(svm: &LiteSVM, built: u8, rent_cap: u64) -> SegmentLayout {
+    let clock = Address::from_str_const("SysvarC1ock11111111111111111111111111111111");
+    let data = svm.get_account(&clock).map(|account| account.data).unwrap_or_default();
+    let now = data.get(32..40).and_then(|timestamp| timestamp.try_into().ok()).map_or(0, i64::from_le_bytes);
+    let expires_at = u64::try_from(now).unwrap_or(0).saturating_add(sdp_intents_compiler::DEFAULT_VALID_FOR_SECONDS);
+
+    SegmentLayout { rent_cap, guarded_accounts: 0, snapshots: 0, built, checks: 0, expires_at }
 }
 
 /// The number of instructions of a plan with no onchain checks, which holds only the built ones.

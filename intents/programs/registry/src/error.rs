@@ -86,4 +86,6 @@ pub enum RegistryError {
     OrganizationsGated,
     #[msg("The signer is not the upgrade authority of the registry program")]
     NotUpgradeAuthority,
+    #[msg("The intent expired: the cluster's clock is past the layout's expiry")]
+    IntentExpired,
 }

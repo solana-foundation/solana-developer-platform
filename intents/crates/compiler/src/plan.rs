@@ -21,8 +21,13 @@ pub struct CompiledPlan<'c> {
     pub intents: Vec<CompiledIntent<'c>>,
     pub payers: PlanPayers,
     pub priority_fee_lamports: u64,
+    /// How long after planning the transaction can land. `verify_intent` refuses it after that.
+    pub valid_for_seconds: u64,
     pub output: PlanOutput,
 }
+
+/// About one blockhash lifetime.
+pub const DEFAULT_VALID_FOR_SECONDS: u64 = 60;
 
 /// What `prepare` returns: a compiled v1 transaction, or the instructions alone for a caller that
 /// compiles its own transaction, of any version.
@@ -34,10 +39,17 @@ pub enum PlanOutput {
 }
 
 /// The plan's options.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct PlanOptions {
     priority_fee_lamports: u64,
+    valid_for_seconds: u64,
     output: PlanOutput,
+}
+
+impl Default for PlanOptions {
+    fn default() -> Self {
+        Self { priority_fee_lamports: 0, valid_for_seconds: DEFAULT_VALID_FOR_SECONDS, output: PlanOutput::default() }
+    }
 }
 
 /// `rent` defaults to `fee`.
@@ -94,6 +106,7 @@ fn compile<'c>(value: &Value, catalog: &'c Catalog, sink: &mut Sink) -> Option<C
         intents: intents.into_iter().collect::<Option<Vec<_>>>()?,
         payers: payers?,
         priority_fee_lamports: options?.priority_fee_lamports,
+        valid_for_seconds: options?.valid_for_seconds,
         output: options?.output,
     })
 }
@@ -111,14 +124,18 @@ fn read_payers(node: &Node<'_>, sink: &mut Sink) -> Option<PlanPayers> {
     Some(PlanPayers { fee, rent: rent.unwrap_or(Some(fee))? })
 }
 
-/// The total priority fee, and what `prepare` returns.
+/// The total priority fee, how long the transaction can land, and what `prepare` returns.
 fn read_options(node: &Node<'_>, sink: &mut Sink) -> Option<PlanOptions> {
     let mut object = node.object(sink)?;
-    let priority_fee = object.field("priorityFeeLamports").map_or(Some(0), |node| {
-        let bytes = encode(&node, ValueType { base: BaseType::U64, array: false }, sink)?;
-
-        bytes.try_into().ok().map(u64::from_le_bytes)
-    });
+    let priority_fee = object.field("priorityFeeLamports").map_or(Some(0), |node| read_u64(&node, sink));
+    let valid_for_seconds =
+        object.field("validForSeconds").map_or(Some(DEFAULT_VALID_FOR_SECONDS), |node| match read_u64(&node, sink)? {
+            0 => {
+                sink.push(Diagnostic::new(Code::InvalidValue, &node.pointer, "`validForSeconds` is at least 1"));
+                None
+            }
+            seconds => Some(seconds),
+        });
     let output = object.field("output").map_or(Some(PlanOutput::Transaction), |node| match node.str(sink)? {
         "transaction" => Some(PlanOutput::Transaction),
         "instructions" => Some(PlanOutput::Instructions),
@@ -133,7 +150,13 @@ fn read_options(node: &Node<'_>, sink: &mut Sink) -> Option<PlanOptions> {
     });
     object.finish(sink);
 
-    Some(PlanOptions { priority_fee_lamports: priority_fee?, output: output? })
+    Some(PlanOptions { priority_fee_lamports: priority_fee?, valid_for_seconds: valid_for_seconds?, output: output? })
+}
+
+fn read_u64(node: &Node<'_>, sink: &mut Sink) -> Option<u64> {
+    let bytes = encode(node, ValueType { base: BaseType::U64, array: false }, sink)?;
+
+    bytes.try_into().ok().map(u64::from_le_bytes)
 }
 
 /// Each implementation of the plan must be for the plan's cluster.

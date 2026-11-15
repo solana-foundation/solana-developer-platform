@@ -79,6 +79,7 @@ pub fn plan_request<'a>(request: &'a CompiledPlan<'_>) -> PlanRequest<'a> {
             .collect(),
         payers: Payers { fee: &request.payers.fee, rent: &request.payers.rent },
         priority_fee_lamports: request.priority_fee_lamports,
+        valid_for_seconds: request.valid_for_seconds,
     }
 }
 

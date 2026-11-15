@@ -15,7 +15,7 @@ use sdp_intents_spec::builder::StagedResult;
 use sdp_intents_spec::{Address, RecipeKind};
 
 use crate::onchain::{OnchainChecks, OnchainInputs, PLACEHOLDER_RENT_CAP};
-use crate::plan::{builder_program, with_rent_cap, Built, PlannedIntent};
+use crate::plan::{builder_program, Built, MessagePart, PlannedIntent};
 use crate::remote::{self, RemoteAnswer, RemoteCall};
 use crate::render::Column;
 use crate::shielded::{self, ShieldedCall, ShieldedSpend};
@@ -55,7 +55,7 @@ pub(crate) enum SegmentStep {
 pub(crate) struct Segment {
     pub(crate) intent: PlannedIntent,
     /// The intent's part of the plan message.
-    pub(crate) message: String,
+    pub(crate) message: MessagePart,
     pub(crate) onchain: OnchainChecks,
     pub(crate) built: Vec<Instruction>,
     pub(crate) frozen: Option<FrozenTransaction>,
@@ -78,6 +78,9 @@ pub(crate) struct SegmentPlanner<'a> {
     memory_id: u8,
     /// The account that pays a builder simulation's fee and scratch rent.
     pub(crate) funder: Address,
+    /// The Unix time after which `verify_intent` refuses to run. The planner sets it before the
+    /// segment plans.
+    pub(crate) expires_at: u64,
     scratch: Address,
     extra_accounts: Vec<Address>,
     builder_simulations: usize,
@@ -111,7 +114,7 @@ struct Checking {
     observe: Vec<Address>,
     before: Vec<Account>,
     guarantees: Vec<String>,
-    message: String,
+    message: MessagePart,
     display: String,
     signatures: Vec<RequiredSignature>,
 }
@@ -138,6 +141,7 @@ impl<'a> SegmentPlanner<'a> {
             priority_fee_lamports,
             memory_id,
             funder,
+            expires_at: 0,
             scratch,
             extra_accounts: Vec::new(),
             builder_simulations: 0,
@@ -386,7 +390,7 @@ impl<'a> SegmentPlanner<'a> {
         check_provider_signers(&self.recipe, &checking.built, &snapshots)?;
 
         let rent_cap = rent_cap(&snapshots);
-        let message = with_rent_cap(&checking.message, rent_cap);
+        let message = checking.message.clone().with_rent_cap(rent_cap);
         let onchain = self.onchain_checks(&checking.built, &checking.observe, &checking.before, rent_cap)?;
 
         self.state = State::Planned(Box::new(self.segment(checking, onchain, message, result)?));
@@ -415,6 +419,7 @@ impl<'a> SegmentPlanner<'a> {
             observed,
             before,
             rent_cap,
+            expires_at: self.expires_at,
             memory_id: self.memory_id,
         };
 
@@ -425,7 +430,7 @@ impl<'a> SegmentPlanner<'a> {
         &self,
         checking: Checking,
         onchain: OnchainChecks,
-        message: String,
+        message: MessagePart,
         result: SimulationResult,
     ) -> Result<Segment, PlanError> {
         Ok(Segment {

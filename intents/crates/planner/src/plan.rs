@@ -5,6 +5,7 @@ use sdp_intents_spec::builder::Ready;
 use sdp_intents_spec::{Address, RecipeKind, ValueRef, ValueSource};
 
 use crate::render::{base58, Column};
+use crate::time::utc_time;
 use crate::values::{Table, Values};
 use crate::{FrozenTransaction, Instruction, PlanError, RequiredSignature, SignerRole, Transaction};
 
@@ -49,11 +50,6 @@ pub struct Digests {
     pub implementation: [u8; 32],
 }
 
-/// An intent's part of the plan message, which ends with the rent cap of its segment.
-pub(crate) fn with_rent_cap(part: &str, rent_cap: u64) -> String {
-    format!("{part} | rent cap {rent_cap} lamports")
-}
-
 /// The builder program of a program recipe.
 pub(crate) fn builder_program(recipe: &Recipe<'_>) -> Option<Address> {
     let implementation = recipe.implementation();
@@ -64,27 +60,49 @@ pub(crate) fn builder_program(recipe: &Recipe<'_>) -> Option<Address> {
         .flatten()
 }
 
-/// `sdp-intents/1 on <cluster>`, then `|| <n>: <part>` for each intent's part, in order, then `||
-/// fee payer <address> | rent payer <address> | priority fee <lamports> lamports`. The cluster is
-/// its name, such as `mainnet`, or its genesis hash when it has none. A transaction that proves
-/// no intent names no cluster. One payer of both is `fee and rent payer <address>`. A signer
-/// renders the same text from the transaction.
-pub(crate) fn plan_message(
-    cluster: Option<&Address>,
-    payers: Payers<'_>,
-    priority_fee_lamports: u64,
-    parts: &[String],
-) -> String {
-    let cluster = cluster.map_or_else(String::new, |cluster| {
+/// The parts of the plan message that no intent holds.
+pub(crate) struct MessageHeader<'h> {
+    pub(crate) cluster: Option<&'h Address>,
+    pub(crate) expires_at: Option<u64>,
+    pub(crate) payers: Payers<'h>,
+    pub(crate) priority_fee_lamports: u64,
+}
+
+/// The plan message, outcome first: `<outcomes> || intents on <cluster> | expires <UTC time> |
+/// <payers> | priority fee <lamports> lamports || <details>`. With more than one intent, each
+/// outcome and each detail starts with `<number>: `, and `||` separates them.
+pub(crate) fn plan_message(header: &MessageHeader<'_>, parts: &[MessagePart]) -> String {
+    let numbered = |texts: Vec<&str>| match texts.as_slice() {
+        [one] => (*one).to_owned(),
+        _ => (1usize..).zip(texts).map(|(number, text)| format!("{number}: {text}")).collect::<Vec<_>>().join(" || "),
+    };
+    let outcomes = numbered(parts.iter().map(|part| part.outcome.as_str()).collect());
+    let details = numbered(parts.iter().map(|part| part.details.as_str()).collect());
+
+    let cluster = header.cluster.map_or_else(String::new, |cluster| {
         format!(" on {}", sdp_intents_spec::cluster::name(cluster).map_or_else(|| base58(cluster), str::to_owned))
     });
-    let intents: String = (1usize..).zip(parts).map(|(number, part)| format!(" || {number}: {part}")).collect();
-    let payers = match payers.fee == payers.rent {
-        true => format!("fee and rent payer {}", base58(payers.fee)),
-        false => format!("fee payer {} | rent payer {}", base58(payers.fee), base58(payers.rent)),
+    let expires = header.expires_at.map_or_else(String::new, |time| format!(" | expires {}", utc_time(time)));
+    let payers = match header.payers.fee == header.payers.rent {
+        true => format!("fee and rent payer {}", base58(header.payers.fee)),
+        false => format!("fee payer {} | rent payer {}", base58(header.payers.fee), base58(header.payers.rent)),
     };
+    let fee = header.priority_fee_lamports;
 
-    format!("sdp-intents/1{cluster}{intents} || {payers} | priority fee {priority_fee_lamports} lamports")
+    format!("{outcomes} || intents{cluster}{expires} | {payers} | priority fee {fee} lamports || {details}")
+}
+
+/// One intent's part of the plan message: what it does, then how it is built and checked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MessagePart {
+    pub(crate) outcome: String,
+    pub(crate) details: String,
+}
+
+impl MessagePart {
+    pub(crate) fn with_rent_cap(self, rent_cap: u64) -> Self {
+        Self { details: format!("{} | rent cap {rent_cap} lamports", self.details), ..self }
+    }
 }
 
 /// What the recipe built: the instructions, the new accounts a builder signs for, and the outputs.
@@ -174,11 +192,12 @@ impl<C: Chain> Values<'_, '_, C> {
             .collect()
     }
 
-    /// The intent's part of the plan message: `<implementation message> | interface: <id> | implementation:
-    /// <id> | <tier> | onchain checks: <checks>`. An id is the organization, the name, and the
-    /// version, such as `solana.org/token.transfer@1.0.0`. The registry never publishes a version
-    /// twice, so an id names one document. The segment adds the rent cap after its first simulation.
-    pub(crate) fn message(&self) -> Result<String, PlanError> {
+    /// The intent's part of the plan message. The outcome is the implementation's message, and the
+    /// details are `interface <id> | implementation <id> | <tier> | onchain checks: <checks>`. An id
+    /// is the organization, the name, and the version, such as `solana.org/token.transfer@1.0.0`. The
+    /// registry never publishes a version twice, so an id names one document. The segment adds the
+    /// rent cap after its first simulation.
+    pub(crate) fn message(&self) -> Result<MessagePart, PlanError> {
         let interface = self.recipe.interface();
         let implementation = self.recipe.implementation();
         let rendered = self.render(implementation.message()?, Column::Message)?;
@@ -207,11 +226,14 @@ impl<C: Chain> Values<'_, '_, C> {
 
         let settlement = if interface.settles_later() { " | settles later, outside this transaction" } else { "" };
 
-        Ok(format!(
-            "{rendered}{settlement} | interface: {} | implementation: {}{tier} | onchain checks: {checks}",
-            id(interface.id(), interface.name()?)?,
-            id(implementation.id(), implementation.name()?)?,
-        ))
+        Ok(MessagePart {
+            outcome: format!("{rendered}{settlement}"),
+            details: format!(
+                "interface {} | implementation {}{tier} | onchain checks: {checks}",
+                id(interface.id(), interface.name()?)?,
+                id(implementation.id(), implementation.name()?)?,
+            ),
+        })
     }
 
     /// Why each signer signs. A signer that is no payer, no signer input, and no builder account

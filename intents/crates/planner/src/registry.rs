@@ -35,6 +35,8 @@ pub(crate) struct VerifyIntent<'v> {
     pub(crate) builder_bumps: &'v [u8],
     /// The most that the rent payer spends on new accounts in the segment.
     pub(crate) rent_cap: u64,
+    /// The Unix time after which `verify_intent` refuses to run.
+    pub(crate) expires_at: u64,
     /// The accounts that the span can change, which the assertions guard.
     pub(crate) guarded: &'v [Address],
     pub(crate) counts: SegmentCounts,
@@ -85,7 +87,7 @@ impl VerifyIntent<'_> {
 
     /// The Anchor discriminator, then each argument in borsh: the intent, the builder roles, and the
     /// outputs as a `u32` length and the bytes, then the layout: the rent cap, the count of guarded
-    /// accounts, and the counts of the segment.
+    /// accounts, the counts of the segment, and the expiry.
     fn data(&self) -> Result<Vec<u8>, PlanError> {
         let length = |bytes: &[u8]| {
             u32::try_from(bytes.len()).map_err(|_| PlanError::DoesNotFit {
@@ -115,6 +117,7 @@ impl VerifyIntent<'_> {
             self.builder_bumps,
             &self.rent_cap.to_le_bytes(),
             &[guarded, self.counts.snapshots, self.counts.built, self.counts.checks],
+            &self.expires_at.to_le_bytes(),
         ]
         .concat())
     }

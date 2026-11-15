@@ -57,7 +57,8 @@ fn the_planner_builds_the_verify_intent_of_a_client() {
     let documents = published.compile(&intent("system-transfer", &wallets, SOL), &wallets.fee_payer.pubkey()).unwrap();
 
     let plan = prepare(&svm, &documents).unwrap();
-    let by_hand = published.verify_instruction(&svm, &documents, &[], &[], unguarded(1, NEW_WALLET_RENT)).unwrap();
+    let by_hand =
+        published.verify_instruction(&svm, &documents, &[], &[], unguarded(&svm, 1, NEW_WALLET_RENT)).unwrap();
 
     assert_eq!(verify_at(&plan, 0).unwrap(), &by_hand);
     assert_eq!(plan.intents[0].span, 1..2);
@@ -106,7 +107,7 @@ fn verifies_a_builder_that_the_planner_planned() {
             &documents,
             &[test_builder::EXTRA_ACCOUNT],
             &builder_roles(&built),
-            unguarded(1, NEW_WALLET_RENT),
+            unguarded(&svm, 1, NEW_WALLET_RENT),
         )
         .unwrap();
     assert_eq!(verify_at(&plan, 0).unwrap(), &by_hand);

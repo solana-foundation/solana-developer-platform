@@ -310,7 +310,7 @@ transaction with the message that it proves. The design calls a step's content a
   "land": "inOrder",
   "steps": [{
     "signs": "transaction",
-    "message": "sdp-intents/1 on mainnet || 1: transfer 100 of 2b1kV6… from 7xKX… to 9aBc… | interface: solana.org/token.transfer@1.0.0 | implementation: solana.org/token-2022-transfer@1.0.0 | tier 1 | onchain checks: verify_intent, assertions | rent cap 2039280 lamports || fee and rent payer KoRa… | priority fee 5000 lamports",
+    "message": "transfer 100 of 2b1kV6… from 7xKX… to 9aBc… || intents on mainnet | expires 2026-11-15T11:42:10Z | fee and rent payer KoRa… | priority fee 5000 lamports || interface solana.org/token.transfer@1.0.0 | implementation solana.org/token-2022-transfer@1.0.0 | tier 1 | onchain checks: verify_intent, assertions | rent cap 2039280 lamports",
     "intents": [{ "display": "Send 100 PYUSD to 9aBc…", "digests": { "…": "…" }, "builder": { "program": "2gMF…" }, "verify": 0, "span": { "start": 2, "end": 4 } }],
     "signers": [{ "address": "KoRa…", "role": "payer:fee" }, { "address": "7xKX…", "role": "input:from" }],
     "priorityFeeLamports": "5000",
@@ -323,23 +323,28 @@ transaction with the message that it proves. The design calls a step's content a
 ```
 
 1. `message` is what the signer reads, and what the transaction proves. The signer signs the
-   transaction, not the message, except on the rails of the table above. The message names the
-   cluster, then the flow when it has more than one step, then each intent after `|| <n>:` (the
-   implementation's template, the ids, the tier, the onchain checks, and the rent cap), then the
-   payers, the priority fee, and a bundle's tip. The flow part is
+   transaction, not the message, except on the rails of the table above. The message starts with
+   what each intent does: its implementation's template. Then come the cluster, the expiry, the
+   payers, the priority fee, and a bundle's tip. Each intent's details close it: the ids, the tier,
+   the onchain checks, and the rent cap. With more than one intent, each outcome and each detail
+   starts with `<n>: `, and `||` separates them. The flow part (design only) is
    `flow: <id>@<version> step <i> of <n>: <the flow's message>`.
-2. An id is `organization/name@version`. The registry never publishes a version twice, so an id
+2. `expires` is a UTC time, from the plan request's `validForSeconds` (default 60) after the
+   planner reads the Clock sysvar. Every `verify_intent` states it, and refuses to run when the
+   cluster's clock is past it. A plan without `verify_intent` states no expiry. A wallet can
+   therefore refuse an intent that stays valid longer than its own limit, such as five minutes.
+3. An id is `organization/name@version`. The registry never publishes a version twice, so an id
    names one document, and the message holds no digest. The guarantees are in the documents, which
    a UI shows, so the message leaves them out.
-3. A Ledger signs an offchain message of at most 1,212 bytes. A wallet of 4.7 signs the message,
+4. A Ledger signs an offchain message of at most 1,212 bytes. A wallet of 4.7 signs the message,
    so `prepare` refuses a longer one.
-4. `instructions` is the `EarnVaultInstruction` shape: base58 addresses, numeric `AccountRole`
+5. `instructions` is the `EarnVaultInstruction` shape: base58 addresses, numeric `AccountRole`
    values, and base64 data. `transaction.messageBytes` is Solana's wire form.
-5. `verify` is the position of the intent's `verify_intent`, and `span` the positions of its built
+6. `verify` is the position of the intent's `verify_intent`, and `span` the positions of its built
    instructions (4.6).
-6. `prepare` compiles a v1 transaction (SIMD-0385) and sets the compute unit limit and the loaded
+7. `prepare` compiles a v1 transaction (SIMD-0385) and sets the compute unit limit and the loaded
    data size from the simulation. A provider's transaction keeps its own version.
-7. A `digest` step holds `digest` in place of `transaction`, and a `message` step holds neither.
+8. A `digest` step holds `digest` in place of `transaction`, and a `message` step holds neither.
    `land` is `inOrder`, or `bundle` with `tipLamports`.
 
 ### 4.2 Recipes and the builder ABI
@@ -573,8 +578,9 @@ Each intent is one segment:
 all readonly, are the instructions sysvar, the payers, both indexes, both version accounts, the
 implementation's accounts, a builder's extra accounts, and the guarded accounts. Its data is the intent, the
 builder's roles, the outputs, the implementation's bumps, and the builder's bumps, each a borsh `Vec<u8>`,
-then the layout: the rent cap and the counts of guarded accounts, snapshots, built instructions,
-and checks. It refuses an output or a count that differs from what it derives.
+then the layout: the rent cap, the counts of guarded accounts, snapshots, built instructions, and
+checks, and the expiry. It refuses an output or a count that differs from what it derives, and any
+call after the expiry.
 
 It checks:
 
@@ -668,8 +674,8 @@ which resolves against the head (4.10). `prepare` pins the exact version.
 | Patch | Message wording | Message wording |
 
 **Spec version.** Each document states `"spec": "sdp-intents@major.minor"`. A minor version only
-adds, and a reader refuses a newer minor than it knows. The message prefix `sdp-intents/1` carries
-the major version. A reader rejects an unknown key or code, because an ignored check is a loosened
+adds, and a reader refuses a newer minor than it knows. The message names no spec version: the ids
+of the interface and the implementation fix it. A reader rejects an unknown key or code, because an ignored check is a loosened
 check.
 
 **Value types.** `u8` to `u128`, `i8` to `i128`, `bool`, `address`, `mint`, `string`, `bytes`, and

@@ -116,6 +116,7 @@ impl Documents {
             intents: vec![self.as_intent()],
             payers: Payers { fee: &self.fee_payer, rent: &self.fee_payer },
             priority_fee_lamports: 0,
+            valid_for_seconds: sdp_intents_compiler::DEFAULT_VALID_FOR_SECONDS,
         }
     }
 

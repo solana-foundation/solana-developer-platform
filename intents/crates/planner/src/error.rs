@@ -27,6 +27,8 @@ pub enum PlanError {
     },
     /// The builder set no return data, or another program set it.
     NoBuilderResult,
+    /// The Clock sysvar holds no Unix time, or the validity window passes the last one.
+    BadClock,
     /// The result holds no scratch account, so the staged result cannot be read.
     NoScratch,
     /// The builder asked for accounts in more than 4 rounds.
@@ -135,6 +137,7 @@ impl fmt::Display for PlanError {
             Self::Spec(error) => write!(f, "the builder result does not parse: {error}"),
             Self::Refused { code, message } => write!(f, "the builder refused: {code}: {message}"),
             Self::Simulation { error, .. } => write!(f, "the simulation failed: {error}"),
+            Self::BadClock => f.write_str("the Clock sysvar holds no Unix time, or the validity window passes the last one"),
             Self::NoBuilderResult => f.write_str("the builder returned no result"),
             Self::NoScratch => f.write_str("the simulation returned no scratch account"),
             Self::TooManyRounds => f.write_str("the builder asked for accounts in more than 4 rounds"),

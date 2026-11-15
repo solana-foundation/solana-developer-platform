@@ -23,8 +23,8 @@ fn organization_address() -> Address {
     sdp_intents_registry_client::organization_address(ORGANIZATION).unwrap()
 }
 
-/// A chain that holds the organization account, as the registry lays it out: the discriminator,
-/// the authority, the name's hash, the name's length, and the name in 64 bytes.
+/// A chain that holds the clock and the organization account, as the registry lays it out: the
+/// discriminator, the authority, the name's hash, the name's length, and the name in 64 bytes.
 pub(crate) fn chain() -> AccountMap {
     let name = ORGANIZATION.as_bytes();
     let data = [
@@ -38,9 +38,20 @@ pub(crate) fn chain() -> AccountMap {
     .concat();
     let account = Account { owner: sdp_intents_registry_client::REGISTRY_PROGRAM, lamports: 1, data };
     let mut chain = AccountMap::default();
-    chain.insert_fetched(&[organization_address()], vec![Some(account)]);
+    chain.insert_fetched(&[organization_address(), crate::programs::CLOCK_SYSVAR], vec![Some(account), Some(clock())]);
 
     chain
+}
+
+/// The Unix time of every test plan's clock: 2026-11-14T20:00:00Z.
+pub(crate) const NOW: u64 = 1_794_686_400;
+
+/// A Clock sysvar at slot 1000 and `NOW`.
+fn clock() -> Account {
+    let unix_timestamp = i64::try_from(NOW).unwrap().to_le_bytes();
+    let data = [&1_000u64.to_le_bytes()[..], &[0; 24], &unix_timestamp].concat();
+
+    Account { owner: Address([0; 32]), lamports: 1, data }
 }
 
 pub(crate) struct Compiled {
@@ -131,6 +142,7 @@ pub(crate) fn request<'a>(intents: &[&'a Compiled], priority_fee_lamports: u64) 
         intents: intents.iter().map(|compiled| compiled.documents()).collect(),
         payers: Payers { fee: &first.payer, rent: &first.rent_payer },
         priority_fee_lamports,
+        valid_for_seconds: sdp_intents_compiler::DEFAULT_VALID_FOR_SECONDS,
     }
 }
 

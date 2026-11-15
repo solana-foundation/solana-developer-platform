@@ -15,7 +15,7 @@ use sdp_intents_engine::{Chain, Payers, Recipe, Resolution};
 use sdp_intents_spec::wire::DocumentKind;
 use sdp_intents_spec::{Address, Intent, RecipeKind};
 
-use crate::plan::{plan_message, with_rent_cap};
+use crate::plan::{plan_message, MessageHeader, MessagePart};
 use crate::registry::{verify_intent_discriminator, version_address, REGISTRY_PROGRAM, VERSION_HEADER_LEN};
 use crate::shielded::{self, ShieldedSpend};
 use crate::values::Values;
@@ -79,6 +79,8 @@ pub enum VerifyError {
     WrongFeePayer(usize),
     /// The `verify_intent` instructions name different rent payers.
     PayersDiffer,
+    /// The `verify_intent` instructions name different expiries.
+    ExpiriesDiffer,
     /// The account is not the registry's version account of the document that the intent names.
     NotAVersion(Address),
 }
@@ -102,6 +104,7 @@ impl core::fmt::Display for VerifyError {
             }
             Self::WrongFeePayer(position) => write!(f, "the verify_intent at {position} names another fee payer"),
             Self::PayersDiffer => f.write_str("the verify_intent instructions name different rent payers"),
+            Self::ExpiriesDiffer => f.write_str("the verify_intent instructions name different expiries"),
             Self::NotAVersion(address) => write!(f, "{} is not the version account of its document", base58(address)),
         }
     }
@@ -118,6 +121,7 @@ struct DecodedVerify<'t> {
     /// The bumps that `verify_intent` derives the implementation's program addresses with.
     bumps: &'t [u8],
     rent_cap: u64,
+    expires_at: u64,
     segment: Range<usize>,
     built: Range<usize>,
 }
@@ -131,7 +135,7 @@ enum Part {
 /// An intent's part of the message, the cluster that its implementation is for, and the spend that
 /// a shielded recipe requires.
 struct Rendered {
-    text: String,
+    part: MessagePart,
     cluster: Address,
     shielded: Option<ShieldedPart>,
 }
@@ -149,6 +153,12 @@ pub fn verify_transaction<C: Chain>(transaction: &Transaction, chain: &C) -> Res
 
     if verifies.iter().any(|verify| account(verify, RENT_PAYER).ok() != rent_payer) {
         return Err(VerifyError::PayersDiffer);
+    }
+
+    let expires_at = verifies.first().map(|verify| verify.expires_at);
+
+    if verifies.iter().any(|verify| Some(verify.expires_at) != expires_at) {
+        return Err(VerifyError::ExpiriesDiffer);
     }
 
     let rent_payer = rent_payer.unwrap_or(transaction.fee_payer);
@@ -187,7 +197,13 @@ pub fn verify_transaction<C: Chain>(transaction: &Transaction, chain: &C) -> Res
         None => Ok(()),
     })?;
 
-    let texts: Vec<String> = rendered.iter().map(|part| part.text.clone()).collect();
+    let parts: Vec<MessagePart> = rendered.iter().map(|rendered| rendered.part.clone()).collect();
+    let header = MessageHeader {
+        cluster: cluster.as_ref(),
+        expires_at,
+        payers,
+        priority_fee_lamports: transaction.priority_fee_lamports,
+    };
     let in_segment = |position: &usize| verifies.iter().any(|verify| verify.segment.contains(position));
     let unverified = (0..transaction.instructions.len())
         .filter(|position| !in_segment(position))
@@ -195,7 +211,7 @@ pub fn verify_transaction<C: Chain>(transaction: &Transaction, chain: &C) -> Res
         .collect();
 
     Ok(VerifyStep::Done(Box::new(VerifiedTransaction {
-        message: plan_message(cluster.as_ref(), payers, transaction.priority_fee_lamports, &texts),
+        message: plan_message(&header, &parts),
         intents: verifies
             .iter()
             .zip(rendered)
@@ -245,10 +261,13 @@ fn decode<'t>(
     let outputs = data.bytes().ok_or_else(bad)?;
     let bumps = data.bytes().ok_or_else(bad)?;
     data.bytes().ok_or_else(bad)?;
-    let Some((rent_cap, &[_guarded, snapshots, built, checks])) = data.0.split_first_chunk::<8>() else {
+    let Some((rent_cap, [_guarded, snapshots, built, checks, expires_at @ ..])) = data.0.split_first_chunk::<8>()
+    else {
         return Err(bad());
     };
     let rent_cap = u64::from_le_bytes(*rent_cap);
+    let expires_at: [u8; 8] = expires_at.try_into().map_err(|_| bad())?;
+    let (snapshots, built, checks) = (*snapshots, *built, *checks);
 
     if instruction.accounts.get(FEE_PAYER).map(|meta| meta.address) != Some(transaction.fee_payer) {
         return Err(VerifyError::WrongFeePayer(position));
@@ -270,6 +289,7 @@ fn decode<'t>(
         outputs,
         bumps,
         rent_cap,
+        expires_at: u64::from_le_bytes(expires_at),
         segment: position..end,
         built: built_start..built_end,
     })
@@ -323,7 +343,7 @@ fn part<C: Chain>(verify: &DecodedVerify<'_>, payers: Payers<'_>, chain: &C) -> 
     };
 
     Ok(Part::Rendered(Box::new(Rendered {
-        text: with_rent_cap(&message, verify.rent_cap),
+        part: message.with_rent_cap(verify.rent_cap),
         cluster: *recipe.implementation().cluster(),
         shielded,
     })))

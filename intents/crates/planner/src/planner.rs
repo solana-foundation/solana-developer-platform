@@ -6,7 +6,8 @@ use sdp_intents_engine::{Chain, Payers};
 use sdp_intents_spec::Address;
 
 use crate::accounts::Overlay;
-use crate::plan::{plan_message, PlannedIntent};
+use crate::plan::{plan_message, MessageHeader, MessagePart, PlannedIntent};
+use crate::programs::{CLOCK_SYSVAR, CLOCK_UNIX_TIMESTAMP};
 use crate::segment::{Earlier, Segment, SegmentPlanner, SegmentStep};
 use crate::{AccountMap, Budget, Instruction, IntentDocuments, Plan, PlanError, RequiredSignature, Simulation};
 
@@ -16,8 +17,17 @@ pub struct PlanRequest<'a> {
     pub intents: Vec<IntentDocuments<'a>>,
     pub payers: Payers<'a>,
     pub priority_fee_lamports: u64,
+    /// How long after the planner reads the clock the transaction can still land.
+    pub valid_for_seconds: u64,
 }
 use crate::{FrozenTransaction, RemoteAnswer, RemoteCall, ShieldedCall, SimulationResult, Transaction};
+
+/// The Clock sysvar's `unix_timestamp`.
+fn clock_unix_seconds(data: &[u8]) -> Result<u64, PlanError> {
+    let timestamp = data.get(CLOCK_UNIX_TIMESTAMP..).and_then(<[u8]>::first_chunk::<8>).ok_or(PlanError::BadClock)?;
+
+    u64::try_from(i64::from_le_bytes(*timestamp)).map_err(|_| PlanError::BadClock)
+}
 
 /// The longest off-chain message that a Ledger signs: one packet less the message header.
 const MAX_MESSAGE_LEN: usize = 1_212;
@@ -45,9 +55,12 @@ pub struct Planner<'a> {
     priority_fee_lamports: u64,
     /// The genesis hash of the cluster that every implementation of the plan is for.
     cluster: Address,
+    valid_for_seconds: u64,
+    /// The Unix time after which no `verify_intent` of the plan runs, once the clock is read.
+    expires_at: Option<u64>,
 
     intents: Vec<PlannedIntent>,
-    messages: Vec<String>,
+    messages: Vec<MessagePart>,
     instructions: Vec<Instruction>,
     signatures: Vec<RequiredSignature>,
     after: AccountMap,
@@ -96,6 +109,8 @@ impl<'a> Planner<'a> {
             payers: request.payers,
             cluster,
             priority_fee_lamports: request.priority_fee_lamports,
+            valid_for_seconds: request.valid_for_seconds,
+            expires_at: None,
             segments,
             intents: Vec::new(),
             messages: Vec::new(),
@@ -115,6 +130,18 @@ impl<'a> Planner<'a> {
     }
 
     pub fn next<C: Chain>(&mut self, chain: &C) -> Result<Step, PlanError> {
+        // Every `verify_intent` of the plan names one expiry, so the clock is read once, before any
+        // segment plans.
+        if self.expires_at.is_none() {
+            let Some(clock) = chain.account(&CLOCK_SYSVAR) else {
+                return Ok(Step::Fetch(vec![CLOCK_SYSVAR]));
+            };
+            let expires_at =
+                clock_unix_seconds(clock.data)?.checked_add(self.valid_for_seconds).ok_or(PlanError::BadClock)?;
+            self.expires_at = Some(expires_at);
+            self.segments.iter_mut().for_each(|segment| segment.expires_at = expires_at);
+        }
+
         loop {
             let Some(segment) = self.segments.get_mut(self.intents.len()) else {
                 return self.finish().map(|plan| Step::Done(Box::new(plan)));
@@ -199,7 +226,17 @@ impl<'a> Planner<'a> {
         };
 
         let messages = core::mem::take(&mut self.messages);
-        let message = plan_message(Some(&self.cluster), self.payers, transaction.priority_fee_lamports, &messages);
+        let header = MessageHeader {
+            cluster: Some(&self.cluster),
+            // Only a `verify_intent` enforces the expiry, so a plan without one states none.
+            expires_at: match self.intents.iter().any(|intent| intent.verify.is_some()) {
+                true => Some(self.expires_at.ok_or(PlanError::OutOfOrder)?),
+                false => None,
+            },
+            payers: self.payers,
+            priority_fee_lamports: transaction.priority_fee_lamports,
+        };
+        let message = plan_message(&header, &messages);
 
         if message.len() > MAX_MESSAGE_LEN {
             return Err(PlanError::MessageTooLong { used: message.len(), max: MAX_MESSAGE_LEN });
@@ -315,7 +352,7 @@ mod tests {
         assert_eq!(
             plan.message,
             format!(
-                "sdp-intents/1 on mainnet || 1: transfer 100 of {USDC} from {FROM} to {TO} | interface: solana.org/token.transfer@1.0.0 | implementation: solana.org/spl-token-transfer@1.0.0 | tier 1 | onchain checks: none | rent cap 2039280 lamports || fee and rent payer {FEE_PAYER} | priority fee 5000 lamports"
+                "transfer 100 of {USDC} from {FROM} to {TO} || intents on mainnet | fee and rent payer {FEE_PAYER} | priority fee 5000 lamports || interface solana.org/token.transfer@1.0.0 | implementation solana.org/spl-token-transfer@1.0.0 | tier 1 | onchain checks: none | rent cap 2039280 lamports"
             )
         );
         assert_eq!(plan.intents[0].display, format!("Send 100 {USDC} to 9WzD…AWWM"));
@@ -597,10 +634,11 @@ mod tests {
         let Ok(Step::Done(plan)) = planner.next(&accounts) else { panic!("the plan is done") };
         let transfer = format!("transfer 0.25 SOL from {FROM} to {TO}");
 
-        assert!(plan.message.starts_with(&format!("sdp-intents/1 on mainnet || 1: {transfer} | ")));
-        assert!(plan.message.contains(&format!(" || 2: {transfer} | ")));
-        assert!(plan.message.ends_with(&format!(" || fee and rent payer {FEE_PAYER} | priority fee 0 lamports")));
-        assert_eq!(plan.message.matches(" || ").count(), 3);
+        let header = format!("intents on mainnet | fee and rent payer {FEE_PAYER} | priority fee 0 lamports");
+
+        assert!(plan.message.starts_with(&format!("1: {transfer} || 2: {transfer} || {header} || 1: interface ")));
+        assert!(plan.message.contains(" || 2: interface "));
+        assert_eq!(plan.message.matches(" || ").count(), 4);
     }
 
     #[test]

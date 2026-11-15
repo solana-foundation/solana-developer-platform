@@ -218,6 +218,10 @@ async function typescriptProves(message, plan) {
   return verified.message === plan.message && verified.unverified.length === 0;
 }
 
+function withoutExpiry(message) {
+  return message.replace(/ \| expires \S+Z/, "");
+}
+
 /// Prepares a plan request with the service and with the CLI, verifies it with each verifier, then
 /// signs and sends it. The service signs with its wallets, and the CLI with `signers`.
 async function run(name, request, signers) {
@@ -229,8 +233,13 @@ async function run(name, request, signers) {
   writeFileSync(planPath, JSON.stringify(plan, null, 2));
   console.log(`    the service's RPC calls: ${JSON.stringify(plan.rpcCalls)}`);
 
+  // Each planner reads the clock when it plans, so the two expiries can differ by a second.
   const local = JSON.parse(cli("prepare", requestPath, "--rpc", RPC));
-  expect(local.message === plan.message, `${name}: the CLI and the service plan the same message`);
+  expect(
+    withoutExpiry(local.message) === withoutExpiry(plan.message) &&
+      (!plan.message.includes("verify_intent") || / \| expires \S+Z \| /.test(plan.message)),
+    `${name}: the CLI and the service plan the same message`
+  );
 
   const verified = cli("verify", planPath, "--rpc", RPC);
   expect(verified.includes("The message matches the plan."), `${name}: the client's verifier proves the message`);
