@@ -17,7 +17,7 @@ use solana_sdk_ids::{bpf_loader, bpf_loader_deprecated, bpf_loader_upgradeable, 
 use solana_transaction::versioned::VersionedTransaction;
 
 use sdp_intents_client::rpc;
-use sdp_intents_planner::{Account, ReturnData, Simulation, SimulationResult};
+use sdp_intents_planner::{Account, AccountMap, ReturnData, Simulation, SimulationResult};
 use sdp_intents_spec::Address;
 
 use crate::cache::Freshness;
@@ -72,14 +72,17 @@ impl Simulator {
 }
 
 impl CachedRpc {
-    /// Simulates in LiteSVM when the service runs one, and on the RPC otherwise.
-    pub async fn simulate(&self, simulation: &Simulation) -> Result<SimulationResult, ChainError> {
+    /// Simulates in LiteSVM when the service runs one, and on the RPC otherwise. In LiteSVM, each
+    /// account that `known` holds starts as the planner saw it, so the planner measures what the
+    /// transaction changes from the same state that the simulation ran on. An RPC simulates on its own
+    /// state, which can be newer.
+    pub async fn simulate(&self, simulation: &Simulation, known: &AccountMap) -> Result<SimulationResult, ChainError> {
         if self.inner.simulator.is_none() {
             return self.simulate_on_rpc(simulation).await;
         }
 
         let transaction = rpc::simulation_transaction(simulation)?;
-        let loaded = self.load(simulation).await?;
+        let loaded = self.load(simulation, known).await?;
         let inner = std::sync::Arc::clone(&self.inner);
         let observe = simulation.observe.clone();
 
@@ -93,10 +96,11 @@ impl CachedRpc {
     }
 
     /// Every account that the transaction names, the lookup tables of a fixed message, the observed
-    /// accounts, and the clock, then the program data of each upgradeable program among them. Each
-    /// program and program data account stays under a subscription, so a later simulation reads it
-    /// from the cache.
-    async fn load(&self, simulation: &Simulation) -> Result<Loaded, ChainError> {
+    /// accounts, and the clock, then the program data of each upgradeable program among them. An
+    /// account that `known` holds is taken from it, and the others from the cache. Each program and
+    /// program data account stays under a subscription, so a later simulation reads it from the
+    /// cache.
+    async fn load(&self, simulation: &Simulation, known: &AccountMap) -> Result<Loaded, ChainError> {
         let tables = simulation.fixed.iter().flat_map(|fixed| fixed.lookup_tables.iter().copied());
         let clock = Address(sysvar::clock::ID.to_bytes());
         let mut addresses: Vec<Address> = simulation
@@ -112,8 +116,11 @@ impl CachedRpc {
 
         addresses.retain(|address| *address != INSTRUCTIONS_SYSVAR);
 
-        let fetched = self.accounts(&addresses, Freshness::Live).await?;
-        let mut accounts: HashMap<Address, Option<Account>> = addresses.into_iter().zip(fetched).collect();
+        let (planned, unknown): (Vec<Address>, Vec<Address>) =
+            addresses.into_iter().partition(|address| known.get(address).is_some());
+        let fetched = self.accounts(&unknown, Freshness::Live).await?;
+        let mut accounts: HashMap<Address, Option<Account>> = unknown.into_iter().zip(fetched).collect();
+        accounts.extend(planned.into_iter().map(|address| (address, known.get(&address).cloned())));
 
         let found = Programs::of(&accounts);
         let fetched = self.accounts(&found.program_data, Freshness::Live).await?;
@@ -352,7 +359,7 @@ mod tests {
             fixed: None,
         };
 
-        let result = rpc.simulate(&simulation).await.unwrap();
+        let result = rpc.simulate(&simulation, &AccountMap::default()).await.unwrap();
 
         assert_eq!(result.error, None, "{:?}", result.logs);
         assert_eq!(result.accounts.first().cloned().flatten().map(|account| account.lamports), Some(SOL));

@@ -1096,7 +1096,7 @@ fields filled:
   "kind": "shielded",
   "protocol": "privacy-rings",
   "pool": "ring1GaLCuJnkUMVkX2JeZLTTX17wKsV4fZmPVzXANW",
-  "circuit": "solana.org/privacy-rings@1.0.0",
+  "circuit": "solana.org/privacy-rings-confidential@1.0.0",
   "accounts": [{ "name": "spender", "address": "{inputs.owner}" }, { "name": "recipient", "address": "{inputs.to}" }],
   "notes": [],
   "withdrawals": [{ "to": "recipient", "asset": { "value": "{inputs.mint}", "encoding": "address" }, "amount": { "value": "{inputs.amount}", "encoding": "u64le" } }]
@@ -1125,18 +1125,19 @@ A circuit is a registry document (kind 4, spec 1.1), published and versioned as 
 ```json
 {
   "kind": "circuit",
-  "id": "solana.org/privacy-rings",
+  "id": "solana.org/privacy-rings-confidential",
   "version": "1.0.0",
   "protocol": "privacy-rings",
   "proofSystem": "groth16-bn254",
-  "provingKeys": "fe926373…",
+  "provingKeys": "affddbe0…",
   "module": "<SHA-256 of the WebAssembly prover>",
   "sources": ["https://…/proving-keys/8e234b5a589cfb79"]
 }
 ```
 
-`provingKeys` is the SHA-256 of the key set: each key's name, a zero byte, and the key's SHA-256,
-sorted by name. A recipe names the circuit at its exact version. The planner and the verifier read
+`provingKeys` is the SHA-256 of the circuit's keys: each key's name, a zero byte, and the key's
+SHA-256, sorted by name. `privacy-rings-confidential` pins only the default ring's confidential
+transfer keys, so a change to Helius's merge or forester keys leaves it valid. A recipe names the circuit at its exact version. The planner and the verifier read
 the circuit from the registry, so the spend that the host checks carries the digest. The host
 refuses a digest that its compiled table does not produce. The prover reports the SHA-256 of each
 key that it used, and the host checks it. The host verifies each proof against the pool's
@@ -1219,9 +1220,10 @@ workspace's versions.
 1. The `shielded` recipe (kind 5, spec 1.1) stores its notes, deposits, and withdrawals as
    instructions of the pool, in that order, so the account sources and segments of a static recipe
    apply to them. The extension holds the protocol, the counts, and the circuit's id.
-   `solana.org/privacy-rings@1.0.0` is the circuit that every Privacy Rings recipe names.
+   `solana.org/privacy-rings-confidential@1.0.0` is the circuit that every Privacy Rings recipe names.
 2. `private.shield`, `private.transfer`, and `private.unshield` have Privacy Rings
-   implementations, for SOL. `privacy-rings-shield-and-transfer` is a flow (4.19) that shields
+   implementations, for SOL and SPL tokens. A mint needs its SPL interface in the pool. An SPL
+   withdrawal pays the recipient's associated token account, which must exist. `privacy-rings-shield-and-transfer` is a flow (4.19) that shields
    and then transfers.
 3. The planner resolves the statement and stops: `next` is a `build` of the spend. The service
    holds no key and calls no key holder. The caller's wallet builds the spend, and sends the pool
@@ -1639,8 +1641,8 @@ Not built:
 3. Parity fixtures from SDP's builders, golden fixtures, and a compatibility corpus in CI.
 4. A fix for `RentPayerInRecipe`: mark each placeholder account in the builder roles.
 5. A LiteSVM feature set that matches the cluster.
-6. Of private intents (4.17): SPL assets, a spend that consumes notes and also deposits, policy
-   rings, `bind`, SDP's ring program, a circuit's `module` and a WebAssembly prover, an app
+6. Of private intents (4.17): an implementation whose spend deposits and also consumes notes
+   (the wallet builds and proves one, and none lands yet), policy rings, `bind`, SDP's ring program, a circuit's `module` and a WebAssembly prover, an app
    circuit's verifying key, ZK apps, the anonymous rail, the browser verifier's check of a shielded
    statement, and a check at `publish` that a recipe's circuit exists.
 7. The postconditions and clusters that SDP's other modules need (4.18).

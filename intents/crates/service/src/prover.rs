@@ -4,7 +4,7 @@
 //! service forwards it and never logs or keeps it. The caller verifies each proof against the
 //! pool's verifying key, so a false proof gets nothing signed.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::body::Bytes;
 use axum::extract::{Path, State};
@@ -34,8 +34,18 @@ impl Prover {
     }
 }
 
-/// Forwards the method, the path under the route, the query, the content type, and the body. Answers
-/// the prover's status, content type, `Retry-After`, and body.
+/// What the caller sent, to forward as it is.
+pub struct Forwarded {
+    path: String,
+    query: Option<String>,
+    method: Method,
+    content_type: Option<header::HeaderValue>,
+    body: Bytes,
+}
+
+/// Forwards the method, the path under the route, the query, the content type, and the body.
+/// Answers the prover's status, content type, `Retry-After`, and body. Counts each call as the
+/// route `prover`, by the prover's status class.
 pub async fn forward(
     State(service): Shared,
     Path(path): Path<String>,
@@ -44,36 +54,49 @@ pub async fn forward(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let Some(prover) = service.prover.as_ref() else {
-        return ServiceError::new(StatusCode::NOT_FOUND, "noProver", "the service runs no prover").into_response();
+    let started = Instant::now();
+    let forwarded = Forwarded {
+        path,
+        query: uri.query().map(str::to_owned),
+        method,
+        content_type: headers.get(header::CONTENT_TYPE).cloned(),
+        body,
     };
-    let query = uri.query().map(|query| format!("?{query}")).unwrap_or_default();
-    let mut request = prover.http.request(method, format!("{}/{path}{query}", prover.url)).body(body);
+    let relayed = relay(service.prover.as_ref(), forwarded).await;
+    let outcome = match &relayed {
+        Ok(response) if response.status().is_success() => "ok",
+        Ok(_) => "proverRefused",
+        Err(error) => error.code,
+    };
+    service.metrics.observe("prover", outcome, started.elapsed());
 
-    if let Some(content_type) = headers.get(header::CONTENT_TYPE) {
+    relayed.unwrap_or_else(IntoResponse::into_response)
+}
+
+async fn relay(prover: Option<&Prover>, forwarded: Forwarded) -> Result<Response, ServiceError> {
+    let prover =
+        prover.ok_or_else(|| ServiceError::new(StatusCode::NOT_FOUND, "noProver", "the service runs no prover"))?;
+    let unavailable = |error: reqwest::Error| {
+        ServiceError::new(StatusCode::BAD_GATEWAY, "proverUnavailable", format!("the prover: {error}"))
+    };
+    let query = forwarded.query.map(|query| format!("?{query}")).unwrap_or_default();
+    let mut request =
+        prover.http.request(forwarded.method, format!("{}/{}{query}", prover.url, forwarded.path)).body(forwarded.body);
+
+    if let Some(content_type) = forwarded.content_type {
         request = request.header(header::CONTENT_TYPE, content_type);
     }
 
-    let answer = match request.send().await {
-        Ok(answer) => answer,
-        Err(error) => {
-            return ServiceError::new(StatusCode::BAD_GATEWAY, "proverUnavailable", format!("the prover: {error}"))
-                .into_response()
-        }
-    };
+    let answer = request.send().await.map_err(unavailable)?;
     let status = answer.status();
     let kept: Vec<(header::HeaderName, header::HeaderValue)> = [header::CONTENT_TYPE, header::RETRY_AFTER]
         .into_iter()
         .filter_map(|name| answer.headers().get(&name).cloned().map(|value| (name, value)))
         .collect();
+    let bytes = answer.bytes().await.map_err(unavailable)?;
 
-    match answer.bytes().await {
-        Ok(bytes) => {
-            let mut response = (status, bytes).into_response();
-            response.headers_mut().extend(kept);
-            response
-        }
-        Err(error) => ServiceError::new(StatusCode::BAD_GATEWAY, "proverUnavailable", format!("the prover: {error}"))
-            .into_response(),
-    }
+    let mut response = (status, bytes).into_response();
+    response.headers_mut().extend(kept);
+
+    Ok(response)
 }

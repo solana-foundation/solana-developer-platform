@@ -156,16 +156,21 @@ impl<'v, 'a> Verification<'v, 'a> {
         let rent_payer = *payers.rent;
         let fee_payer_allowance = self.payer_allowance(&fee_payer).saturating_add(self.sol_outflow(&fee_payer)?);
 
-        if self.lamport_loss(&fee_payer) > fee_payer_allowance {
-            return Err(PlanError::CheckFailed(
-                "the fee payer loses more than the fee and the new accounts' rent".into(),
-            ));
+        let fee_payer_loss = self.lamport_loss(&fee_payer);
+
+        if fee_payer_loss > fee_payer_allowance {
+            return Err(PlanError::CheckFailed(format!(
+                "the fee payer loses {fee_payer_loss} lamports, more than the {fee_payer_allowance} of the fee and the new accounts' rent"
+            )));
         }
 
         let rent_payer_allowance = self.payer_allowance(&rent_payer).saturating_add(self.sol_outflow(&rent_payer)?);
+        let rent_payer_loss = self.lamport_loss(&rent_payer);
 
-        if self.lamport_loss(&rent_payer) > rent_payer_allowance {
-            return Err(PlanError::CheckFailed("the rent payer loses more than the new accounts' rent".into()));
+        if rent_payer_loss > rent_payer_allowance {
+            return Err(PlanError::CheckFailed(format!(
+                "the rent payer loses {rent_payer_loss} lamports, more than the {rent_payer_allowance} of the new accounts' rent"
+            )));
         }
 
         let signers = self.signer_inputs()?;

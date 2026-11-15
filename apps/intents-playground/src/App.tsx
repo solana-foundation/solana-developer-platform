@@ -1,19 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
-import {
-  api,
-  type Candidate,
-  type Input,
-  type InterfaceDocument,
-  interfaceForm,
-  type ListedImplementation,
-  type Registry,
-  ServiceError,
-  type Wallet,
-} from "@/api";
+import type { Input, InterfaceDocument, ListedImplementation, Wallet } from "@/api";
 import { InterfacePage } from "@/components/InterfacePage";
 import { RegistryTree } from "@/components/RegistryTree";
 import { SidePanel, type Tab } from "@/components/SidePanel";
+import { describe } from "@/errors";
 import {
   type FormValues,
   type IntentOptions,
@@ -23,6 +14,14 @@ import {
   planRequest,
 } from "@/intent";
 import { MINTS, VAULTS } from "@/known";
+import {
+  useAdapterMode,
+  useInterfaceForm,
+  useMatches,
+  useRefreshRing,
+  useRegistry,
+  useWallets,
+} from "@/queries";
 
 const DEFAULT_OPTIONS: IntentOptions = {
   verifyIntent: true,
@@ -31,98 +30,58 @@ const DEFAULT_OPTIONS: IntentOptions = {
 };
 
 export function App() {
-  const [registry, setRegistry] = useState<Registry | null>(null);
-  const [wallets, setWallets] = useState<Wallet[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const registry = useRegistry();
+  const wallets = useWallets();
+  const localWallets = wallets.data ?? [];
 
-  const [selectedInterface, setSelectedInterface] = useState<string | null>(null);
-  const [document, setDocument] = useState<InterfaceDocument | null>(null);
+  const [chosenInterface, setChosenInterface] = useState<string | null>(null);
   const [pinned, setPinned] = useState<string | null>(null);
   const [showUnapproved, setShowUnapproved] = useState(false);
-  const [values, setValues] = useState<FormValues>({});
-  const [feePayer, setFeePayer] = useState("");
+  const [edits, setEdits] = useState<Record<string, FormValues>>({});
+  const [chosenFeePayer, setChosenFeePayer] = useState<string | null>(null);
   const [options, setOptions] = useState(DEFAULT_OPTIONS);
 
-  const [candidates, setCandidates] = useState<Candidate[] | null>(null);
-  const [candidatesError, setCandidatesError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("intent");
   const [tamper, setTamper] = useState(false);
-  const [malicious, setMalicious] = useState(false);
   const [output, setOutput] = useState<Output>("transaction");
-  const [lastSignature, setLastSignature] = useState<string | null>(null);
-  const [adapterError, setAdapterError] = useState<string | null>(null);
+  const adapter = useAdapterMode();
+  const refreshRing = useRefreshRing();
 
-  useEffect(() => {
-    Promise.all([api.registry(), api.wallets()])
-      .then(([loaded, localWallets]) => {
-        setRegistry(loaded);
-        setWallets(localWallets);
-        // A builder cannot name its rent payer yet, so the treasury does not pay its own fees.
-        setFeePayer(walletNamed(localWallets, "alice"));
-        const first = loaded.interfaces.find((listed) => listed.shown !== null);
-        if (first !== undefined) setSelectedInterface(first.address);
-      })
-      .catch((error: unknown) => setLoadError(describe(error)));
-  }, []);
-
-  const listed = registry?.interfaces.find((entry) => entry.address === selectedInterface) ?? null;
+  const selectedInterface =
+    chosenInterface ??
+    registry.data?.interfaces.find((listed) => listed.shown !== null)?.address ??
+    null;
+  const listed =
+    registry.data?.interfaces.find((entry) => entry.address === selectedInterface) ?? null;
   const interfaceId = listed?.id ?? null;
-  const interfaceVersion = listed?.shown ?? null;
+  const form = useInterfaceForm(interfaceId, listed?.shown ?? null);
+  const document = form.data ?? null;
 
-  // A new interface's form starts from defaults that work, once its definition arrives.
-  useEffect(() => {
-    if (interfaceId === null || interfaceVersion === null) return;
+  // A builder cannot name its rent payer yet, so the treasury does not pay its own fees.
+  const feePayer = chosenFeePayer ?? walletNamed(localWallets, "alice");
+  // A new interface's form starts from defaults that work, and keeps what the user changed in it.
+  const values = useMemo(
+    () =>
+      document === null ? {} : { ...defaults(document, localWallets), ...edits[interfaceId ?? ""] },
+    [document, localWallets, edits, interfaceId]
+  );
 
-    let current = true;
-    setDocument(null);
-    api
-      .interfaceVersion(interfaceId, interfaceVersion)
-      .then((published) => {
-        if (!current) return;
-
-        const form = interfaceForm(published.document);
-        setDocument(form);
-        setValues(defaults(form, wallets));
-      })
-      .catch((error: unknown) => current && setLoadError(describe(error)));
-
-    return () => {
-      current = false;
-    };
-  }, [interfaceId, interfaceVersion, wallets]);
-
-  const inputsKey = document === null ? "" : JSON.stringify(intentInputs(document, values));
-
-  useEffect(() => {
-    if (interfaceId === null || interfaceVersion === null || inputsKey === "") return;
-
-    let current = true;
-    setCandidates(null);
-    setCandidatesError(null);
-    const timer = setTimeout(() => {
-      const body = {
-        inputs: JSON.parse(inputsKey),
-        payers: { fee: feePayer },
-        all: showUnapproved,
-      };
-      api
-        .matches(interfaceId, interfaceVersion, body)
-        .then((found) => current && setCandidates(found))
-        .catch((error: unknown) => current && setCandidatesError(describe(error)));
-    }, 250);
-
-    return () => {
-      current = false;
-      clearTimeout(timer);
-    };
-  }, [interfaceId, interfaceVersion, inputsKey, feePayer, showUnapproved]);
+  const matches = useMatches(
+    interfaceId,
+    listed?.shown ?? null,
+    document === null
+      ? null
+      : { inputs: intentInputs(document, values), payers: { fee: feePayer }, all: showUnapproved }
+  );
+  const candidates = matches.data ?? null;
 
   const selected =
     candidates?.find((candidate) => candidate.id === pinned) ??
     candidates?.find((candidate) => candidate.status === "applies") ??
     null;
   const selectedImplementation =
-    registry?.implementations.find((implementation) => implementation.id === selected?.id) ?? null;
+    registry.data?.implementations.find((implementation) => implementation.id === selected?.id) ??
+    null;
   const intent = useMemo(
     () =>
       listed === null || document === null
@@ -142,25 +101,27 @@ export function App() {
   const requestKey = JSON.stringify(request);
 
   const selectInterface = (address: string, implementation: string | null) => {
-    setSelectedInterface(address);
+    setChosenInterface(address);
     setPinned(implementation);
   };
   const selectImplementation = (implementation: ListedImplementation) => {
-    const interfaceAddress = registry?.interfaces.find(
+    const interfaceAddress = registry.data?.interfaces.find(
       (entry) => entry.id === implementation.interface
     )?.address;
     if (interfaceAddress !== undefined) selectInterface(interfaceAddress, implementation.id);
     if (!implementation.approved) setShowUnapproved(true);
   };
 
-  if (registry === null) {
-    return <Loading error={loadError} />;
+  if (registry.data === undefined) {
+    const failure = registry.error ?? wallets.error;
+
+    return <Loading error={failure === null ? null : describe(failure)} />;
   }
 
   return (
     <div className="app">
       <RegistryTree
-        registry={registry}
+        registry={registry.data}
         selectedInterface={selectedInterface}
         selectedImplementation={selected?.id ?? null}
         showUnapproved={showUnapproved}
@@ -175,14 +136,18 @@ export function App() {
               listed={listed}
               document={document}
               values={values}
-              wallets={wallets}
+              wallets={localWallets}
               feePayer={payer}
-              signature={lastSignature}
               candidates={candidates}
-              candidatesError={candidatesError}
+              candidatesError={matches.error === null ? null : describe(matches.error)}
               selected={selected}
-              onValue={(name, value) => setValues((previous) => ({ ...previous, [name]: value }))}
-              onFeePayer={setFeePayer}
+              onValue={(name, value) =>
+                setEdits((previous) => ({
+                  ...previous,
+                  [interfaceId ?? ""]: { ...previous[interfaceId ?? ""], [name]: value },
+                }))
+              }
+              onFeePayer={setChosenFeePayer}
               onSelect={(candidate) => setPinned(candidate.id)}
             />
           ) : (
@@ -197,23 +162,20 @@ export function App() {
             onOptions={setOptions}
             implementation={selectedImplementation}
             recipe={selected?.recipe ?? null}
-            organizations={registry.organizations}
+            organizations={registry.data.organizations}
             output={output}
             onOutput={setOutput}
             tamper={tamper}
-            malicious={malicious}
-            onMalicious={(on) => {
-              api
-                .adapterMode(on)
-                .then((ok) => ok && setMalicious(on))
-                .catch(() => setAdapterError("The Jupiter wrapper does not answer on :8791."));
-            }}
+            malicious={adapter.data === true && adapter.variables === true}
+            onMalicious={(on) => adapter.mutate(on)}
             ready={selected !== null && payer !== ""}
             onTab={setTab}
             onTamper={setTamper}
-            onSent={setLastSignature}
+            onSent={refreshRing}
           />
-          {adapterError !== null && <div className="callout callout-red">{adapterError}</div>}
+          {adapter.isError && (
+            <div className="callout callout-red">The Jupiter wrapper does not answer on :8791.</div>
+          )}
         </div>
       </div>
     </div>
@@ -257,16 +219,4 @@ function defaults(document: InterfaceDocument, wallets: Wallet[]): FormValues {
   };
 
   return Object.fromEntries(document.inputs.map((input) => [input.name, value(input)]));
-}
-
-/// A service error with its findings or its program logs.
-function describe(error: unknown): string {
-  if (!(error instanceof ServiceError)) {
-    return error instanceof Error ? error.message : String(error);
-  }
-
-  const details = error.details as { rendered?: string; logs?: string[] } | null;
-  const extra = details?.rendered ?? details?.logs?.slice(-8).join("\n");
-
-  return extra === undefined ? error.message : `${error.message}\n\n${extra}`;
 }

@@ -32,6 +32,11 @@ struct Args {
     #[arg(long, default_value = "http://127.0.0.1:3001")]
     ring_prover: String,
 
+    /// A mint whose tokens can enter the ring. The wallet creates its SPL interface at start, where
+    /// the protocol lets any signer, as the localnet does. Repeat it for each mint.
+    #[arg(long)]
+    ring_asset: Vec<String>,
+
     /// The intents service, whose prover a build can ask for instead of the wallet's own.
     #[arg(long, default_value = "http://127.0.0.1:8787")]
     service: String,
@@ -75,6 +80,17 @@ async fn run(args: Args) -> Result<(), String> {
                 done.failures.iter().for_each(|failure| eprintln!("  not registered: {failure}"));
             }
             Err(error) => eprintln!("the Privacy Rings registration failed: {}", error.message),
+        }
+
+        let assets = args.ring_asset.clone();
+        let registering = Arc::clone(&wallet);
+        let created = tokio::task::spawn_blocking(move || registering.register_assets(&assets))
+            .await
+            .map_err(|error| error.to_string())?;
+
+        match created {
+            Ok(count) => eprintln!("the ring takes {count} SPL assets"),
+            Err(error) => eprintln!("an SPL interface failed: {}", error.message),
         }
     }
 

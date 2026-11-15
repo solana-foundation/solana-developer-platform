@@ -22,6 +22,9 @@ pub struct Registration {
     pub failures: Vec<String>,
 }
 
+/// Privacy Rings names SOL by the default address.
+const SOL: solana_address::Address = solana_address::Address::new_from_array([0; 32]);
+
 /// How long a build waits for the indexer to show enough private funds.
 const BALANCE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -57,10 +60,11 @@ impl Wallet {
         let wallet = self.shielded_wallet(&spend.spender)?;
         let ring = Shielded::connect(&self.endpoints()?);
 
-        if statement.deposits.is_empty() {
-            // A deposit that just landed reaches the indexer a moment later.
-            consumed(&statement).iter().try_for_each(|value| ring.await_balance(&wallet, *value, BALANCE_WAIT))?;
-        }
+        // A deposit that just landed reaches the indexer a moment later.
+        statement
+            .consumed()?
+            .into_iter()
+            .try_for_each(|(asset, amount)| ring.await_balance(&wallet, Amount { asset, amount }, BALANCE_WAIT))?;
 
         let prover = match prove_in {
             ProveIn::Wallet => self.endpoints()?.prover,
@@ -91,18 +95,31 @@ impl Wallet {
         }))
     }
 
-    /// Each key's private SOL balance.
+    /// Each key's private balances: its SOL in lamports, and each SPL asset by mint.
     pub fn balances(&self) -> Result<Value, WalletError> {
         let ring = Shielded::connect(&self.endpoints()?);
+        let assets =
+            self.assets.lock().map_err(|_| WalletError::failed("wallet", "the list of assets is poisoned"))?.clone();
         let listed = self
             .keys
             .named()
             .iter()
             .map(|named| {
                 let wallet = ShieldedWallet::from_seed(named.keypair.secret_bytes())?;
-                let lamports = ring.balance(&wallet, solana_address::Address::default())?;
+                let balances = ring.balances(&wallet, &assets)?;
+                let lamports = balances.iter().find(|held| held.asset == SOL).map_or(0, |held| held.amount);
+                let tokens: serde_json::Map<String, Value> = balances
+                    .iter()
+                    .filter(|held| held.asset != SOL)
+                    .map(|held| (held.asset.to_string(), Value::from(held.amount.to_string())))
+                    .collect();
 
-                Ok(json!({ "name": named.name, "address": wallet.address().to_string(), "lamports": lamports }))
+                Ok(json!({
+                    "name": named.name,
+                    "address": wallet.address().to_string(),
+                    "lamports": lamports,
+                    "tokens": tokens,
+                }))
             })
             .collect::<Result<Vec<_>, WalletError>>()?;
 
@@ -125,6 +142,52 @@ impl Wallet {
         ring.shield_sol(&wallet, lamports)?;
 
         Ok(json!({ "lamports": lamports }))
+    }
+
+    /// Creates the pool's SPL interface for each mint, paid by the first key. Returns how many.
+    pub fn register_assets(&self, mints: &[String]) -> Result<usize, WalletError> {
+        let payer = self
+            .keys
+            .keypairs()
+            .first()
+            .copied()
+            .ok_or_else(|| WalletError::invalid_request("the wallet holds no key"))?;
+        let ring = Shielded::connect(&self.endpoints()?);
+
+        mints.iter().try_for_each(|mint| {
+            let mint = mint.parse().map_err(|_| WalletError::invalid_request(format!("`{mint}` is not an address")))?;
+            ring.register_asset(payer, mint)?;
+
+            self.remember_asset(mint)
+        })?;
+
+        Ok(mints.len())
+    }
+
+    /// A body of `{ "payer", "mint" }`: creates the pool's SPL interface for the mint, so that its
+    /// tokens can enter the ring. Setup for the local surfnet, where any signer may.
+    pub fn register_asset(&self, body: &Value) -> Result<Value, WalletError> {
+        let payer = address(body.get("payer"), "payer")?;
+        let mint = address(body.get("mint"), "mint")?;
+        let keypair = self.keys.keypair_of(&payer).ok_or_else(|| {
+            WalletError::refused("unknownKey", format!("the wallet holds no key for {}", base58(&payer)))
+        })?;
+
+        Shielded::connect(&self.endpoints()?).register_asset(keypair, solana(mint))?;
+        self.remember_asset(solana(mint))?;
+
+        Ok(json!({ "mint": base58(&mint) }))
+    }
+
+    fn remember_asset(&self, mint: solana_address::Address) -> Result<(), WalletError> {
+        let mut assets =
+            self.assets.lock().map_err(|_| WalletError::failed("wallet", "the list of assets is poisoned"))?;
+
+        if !assets.contains(&mint) {
+            assets.push(mint);
+        }
+
+        Ok(())
     }
 
     /// Writes each key's registry record when it has none, so that a private transfer can name any
@@ -177,12 +240,6 @@ fn statement(spend: &ShieldedSpend) -> Result<Statement, WalletError> {
         deposits: spend.deposits.iter().map(leg).collect(),
         withdrawals: spend.withdrawals.iter().map(leg).collect(),
     })
-}
-
-/// What a statement with no deposit consumes from the spender's notes, for each note and
-/// withdrawal. A wait for each one is enough, because the indexer shows notes in order.
-fn consumed(statement: &Statement) -> Vec<Amount> {
-    statement.notes.iter().map(|note| note.value).chain(statement.withdrawals.iter().map(|leg| leg.value)).collect()
 }
 
 /// `{ "protocol", "circuit", "spender", "notes", "deposits", "withdrawals", "pool", "feePayer" }`,

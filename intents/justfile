@@ -71,4 +71,4 @@ playground rpc="http://127.0.0.1:8899": build-programs idl build-verifier fetch-
     cargo build -q -p sdp-intents-cli -p sdp-intents-service -p sdp-intents-test-provider -p sdp-intents-local-wallet
     node programs/tools/deploy-surfnet.mjs {{rpc}}
     node e2e/playground.mjs {{rpc}}
-    bash -c 'trap "kill 0" EXIT; node programs/tools/zolana-services.mjs {{rpc}} & node adapters/jupiter.mjs & ./target/debug/sdp-intents-test-provider {{rpc}} & sleep 3 && ./target/debug/sdp-intents-local-wallet --rpc {{rpc}} --wallets target/playground/wallets --ring-indexer http://127.0.0.1:8784 & ./target/debug/sdp-intents-service --rpc {{rpc}} --allow-tamper --prover http://127.0.0.1:3001'
+    bash -c 'trap "kill 0" EXIT; node programs/tools/zolana-services.mjs {{rpc}} & node adapters/jupiter.mjs & ./target/debug/sdp-intents-test-provider {{rpc}} & sleep 3 && ./target/debug/sdp-intents-local-wallet --rpc {{rpc}} --wallets target/playground/wallets --ring-indexer http://127.0.0.1:8784 --ring-asset EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v & ./target/debug/sdp-intents-service --rpc {{rpc}} --allow-tamper --prover http://127.0.0.1:3001'

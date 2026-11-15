@@ -15,16 +15,21 @@ use sha2::{Digest as _, Sha256};
 use solana_address::Address;
 use solana_keypair::Keypair;
 use solana_signer::Signer as _;
+use spr_client::fetch_asset_id;
 use spr_client::prover::known_proving_keys;
 use spr_client::user_registry::{register_if_absent, resolve_registered_address, StrictRegistration};
 use spr_client::{
     compile_message, sign_transaction, ComputeBudgetConfig, ProverClient, Rpc as _, SignedPrivateTransaction,
     SolanaRpc, Submission, UnsignedMessage, UtxoScan, ZolanaClient, ZolanaIndexer,
 };
+use spr_interface::pda;
 use spr_keypair::{ShieldedKeypair, SigningKey};
-use spr_program::instruction::{AssetDeposit, Deposit, DepositAsset};
+use spr_program::instruction::{
+    AssetDeposit, CreateSplInterface, Deposit, DepositAsset, DepositSplAccounts, TransactInterfaceTransferAccounts,
+    TransactSolTransferAccounts, TransactSplDepositAccounts,
+};
 use spr_transaction::instructions::transact::ConfidentialTransaction;
-use spr_transaction::{select_spend, AssetRegistry, SpendableDecryptionResult, SOL_MINT};
+use spr_transaction::{select_spend, AssetRegistry, Mint, SpendableDecryptionResult, SOL_MINT};
 
 /// The services that a shielded spend reads, and the pool tree that new notes go into.
 #[derive(Clone, Debug)]
@@ -101,8 +106,7 @@ pub struct Leg {
     pub value: Amount,
 }
 
-/// What a spend does (`DESIGN.md`, 4.17). It consumes, for each asset, the notes that it creates
-/// plus its withdrawals, less its deposits, from the spender's notes.
+/// What a spend does (`DESIGN.md`, 4.17).
 #[derive(Clone, Debug, Default)]
 pub struct Statement {
     pub notes: Vec<NoteOut>,
@@ -110,10 +114,35 @@ pub struct Statement {
     pub withdrawals: Vec<Leg>,
 }
 
-/// The SHA-256 of the proving key set that this client holds: each key's name, a zero byte, and the
-/// key's SHA-256, sorted by name. A shielded recipe pins it as its `circuit`.
+impl Statement {
+    /// For each asset, what the spend takes from the spender's notes: the notes that it creates
+    /// plus its withdrawals, less its deposits. A deposit above that comes back as change.
+    pub fn consumed(&self) -> Result<BTreeMap<Address, u64>, ShieldedError> {
+        let created: Vec<Amount> =
+            self.notes.iter().map(|note| note.value).chain(self.withdrawals.iter().map(|leg| leg.value)).collect();
+        let deposited = totals(&self.deposits.iter().map(|leg| leg.value).collect::<Vec<_>>())?;
+
+        Ok(totals(&created)?
+            .into_iter()
+            .filter_map(|(asset, amount)| {
+                let funded = deposited.get(&asset).copied().unwrap_or_default();
+
+                amount.checked_sub(funded).filter(|left| *left > 0).map(|left| (asset, left))
+            })
+            .collect())
+    }
+}
+
+/// The proving keys of the default ring's confidential transfers, which every spend here proves
+/// with. Their names start with this.
+const CONFIDENTIAL_KEYS: &str = "transfer_confidential_";
+
+/// The SHA-256 of the confidential transfer keys that this client holds: each key's name, a zero
+/// byte, and the key's SHA-256, sorted by name. A shielded recipe's circuit pins it. Keys of other
+/// circuits, such as merges and the forester's, can change without changing it.
 pub fn proving_key_set() -> [u8; 32] {
-    let mut keys: Vec<(&str, [u8; 32])> = known_proving_keys().collect();
+    let mut keys: Vec<(&str, [u8; 32])> =
+        known_proving_keys().filter(|(name, _)| name.starts_with(CONFIDENTIAL_KEYS)).collect();
     keys.sort_unstable_by_key(|(name, _)| *name);
 
     keys.iter()
@@ -187,6 +216,31 @@ impl Shielded {
         }
     }
 
+    /// Creates the pool's SPL interface for `mint`, which holds the mint's shielded tokens, when it
+    /// has none. Only a protocol that allows it lets any signer create one, as the localnet does.
+    pub fn register_asset(&self, payer: &Keypair, mint: Address) -> Result<(), ShieldedError> {
+        if fetch_asset_id(self.client.rpc(), mint).is_ok() {
+            return Ok(());
+        }
+
+        let instruction =
+            CreateSplInterface { authority: payer.pubkey(), mint, token_program: self.token_program(mint)? }
+                .instruction();
+        let (blockhash, _) =
+            self.client.rpc().get_latest_blockhash().map_err(|cause| error("read a blockhash")(&cause))?;
+        let message =
+            compile_message(&payer.pubkey(), &[instruction], blockhash, ComputeBudgetConfig::for_instruction_count(1))
+                .map_err(|cause| error("SPL interface message")(&cause))?;
+        let transaction = sign_transaction(message, &[payer]).map_err(|cause| error("sign")(&cause))?;
+
+        self.client
+            .rpc()
+            .process_transaction(transaction)
+            .map_err(|cause| error("create the SPL interface")(&cause))?;
+
+        Ok(())
+    }
+
     /// Moves `lamports` of the wallet's public SOL into a note of its own, and sends it.
     pub fn shield_sol(&self, wallet: &ShieldedWallet, lamports: u64) -> Result<(), ShieldedError> {
         let value = Amount { asset: SOL_MINT, amount: lamports };
@@ -205,7 +259,8 @@ impl Shielded {
     }
 
     /// Builds `statement` for the wallet's Solana key to sign, and proves it through `prover` when it
-    /// spends notes. A statement that deposits uses the pool's `deposit`, which has no proof.
+    /// spends notes. A statement whose deposits fund exactly its notes uses the pool's `deposit`,
+    /// which has no proof. Every other statement is one `transact`.
     pub fn prepare(
         &self,
         wallet: &ShieldedWallet,
@@ -213,41 +268,32 @@ impl Shielded {
         statement: &Statement,
         prover: &str,
     ) -> Result<PreparedSpend, ShieldedError> {
-        match statement.deposits.is_empty() {
-            true => self.prepare_transact(wallet, fee_payer, statement, prover),
-            false => self.prepare_deposit(wallet, fee_payer, statement),
+        let deposited = totals(&statement.deposits.iter().map(|leg| leg.value).collect::<Vec<_>>())?;
+        let noted = totals(&statement.notes.iter().map(|note| note.value).collect::<Vec<_>>())?;
+
+        match !statement.deposits.is_empty() && statement.withdrawals.is_empty() && deposited == noted {
+            true => self.prepare_deposit(wallet, fee_payer, statement),
+            false => self.prepare_transact(wallet, fee_payer, statement, prover),
         }
     }
 
-    /// Each deposit must come from the wallet, and the notes must take exactly what it deposits,
-    /// because a deposit spends no note. Only SOL is supported so far.
+    /// A deposit spends no note, so it needs no proof, and it is public. The wallet deposits from its
+    /// own accounts only.
     fn prepare_deposit(
         &self,
         wallet: &ShieldedWallet,
         fee_payer: Address,
         statement: &Statement,
     ) -> Result<PreparedSpend, ShieldedError> {
-        let from_wallet = statement.deposits.iter().all(|leg| leg.account == wallet.address());
-        let sol_only = statement
-            .deposits
+        if statement.deposits.iter().any(|leg| leg.account != wallet.address()) {
+            return Err(ShieldedError("a deposit comes from the spender's own accounts".to_owned()));
+        }
+
+        let deposits = statement
+            .notes
             .iter()
-            .map(|leg| leg.value)
-            .chain(statement.notes.iter().map(|note| note.value))
-            .all(|value| value.asset == SOL_MINT);
-
-        if !statement.withdrawals.is_empty() || !from_wallet || !sol_only {
-            return Err(ShieldedError(
-                "a deposit here comes from the wallet, in SOL, and withdraws nothing".to_owned(),
-            ));
-        }
-
-        if totals(&statement.deposits.iter().map(|leg| leg.value).collect::<Vec<_>>())?
-            != totals(&statement.notes.iter().map(|note| note.value).collect::<Vec<_>>())?
-        {
-            return Err(ShieldedError("a spend that deposits and also consumes notes is not built".to_owned()));
-        }
-
-        let deposits = statement.notes.iter().map(|note| self.deposit_entry(note)).collect::<Result<Vec<_>, _>>()?;
+            .map(|note| self.deposit_entry(note, wallet.address()))
+            .collect::<Result<Vec<_>, _>>()?;
         let deposit = Deposit { tree: self.tree, depositor: wallet.address(), deposits }
             .instruction()
             .map_err(|cause| error("deposit instruction")(&cause))?;
@@ -260,18 +306,42 @@ impl Shielded {
         Ok(PreparedSpend { message: UnsignedMessage { message, last_valid_block_height }, nullifiers: Vec::new() })
     }
 
-    fn deposit_entry(&self, note: &NoteOut) -> Result<AssetDeposit, ShieldedError> {
+    fn deposit_entry(&self, note: &NoteOut, depositor: Address) -> Result<AssetDeposit, ShieldedError> {
         let recipient = resolve_registered_address(self.client.rpc(), note.owner)
             .map_err(|cause| error("resolve the owner's record")(&cause))?;
         let owner = recipient.address.owner_hash().map_err(|cause| error("owner hash")(&cause))?;
+        let asset = match note.value.asset == SOL_MINT {
+            true => DepositAsset::Sol,
+            false => {
+                let mint = note.value.asset;
+                let token_program = self.token_program(mint)?;
+                let user_token = pda::associated_token_address_with_program(&depositor, &mint, &token_program);
+
+                DepositAsset::Spl(DepositSplAccounts { mint, user_token, token_program })
+            }
+        };
 
         Ok(AssetDeposit {
-            asset: DepositAsset::Sol,
+            asset,
             view_tag: recipient.address.viewing_pubkey.u(),
             owner,
             amount: note.value.amount,
             memo: None,
         })
+    }
+
+    /// The token program that owns `mint`: Token or Token-2022.
+    fn token_program(&self, mint: Address) -> Result<Address, ShieldedError> {
+        let account = self.client.rpc().get_account(mint).map_err(|cause| error("read the mint")(&cause))?;
+
+        account.map(|account| account.owner).ok_or_else(|| ShieldedError(format!("the mint {mint} does not exist")))
+    }
+
+    /// The asset with the id that the pool registered for it. An SPL mint needs its SPL interface.
+    fn mint(&self, asset: Address) -> Result<Mint, ShieldedError> {
+        let asset_id = fetch_asset_id(self.client.rpc(), asset).map_err(|cause| error("the asset's id")(&cause))?;
+
+        Ok(Mint::new(asset, asset_id))
     }
 
     /// Waits until the wallet's private balance of `amount.asset` reaches `amount.amount`, such as
@@ -302,16 +372,30 @@ impl Shielded {
         }
     }
 
+    /// The wallet's private balance of SOL and of each of `assets` that it holds, from its unspent
+    /// notes.
+    pub fn balances(&self, wallet: &ShieldedWallet, assets: &[Address]) -> Result<Vec<Amount>, ShieldedError> {
+        let spendable = self.spendable(wallet, assets)?;
+
+        Ok(spendable
+            .balances
+            .assets
+            .iter()
+            .map(|balance| Amount { asset: balance.mint, amount: balance.amount })
+            .collect())
+    }
+
     /// The wallet's private balance of `asset`, from its unspent notes.
     pub fn balance(&self, wallet: &ShieldedWallet, asset: Address) -> Result<u64, ShieldedError> {
-        let spendable = self.spendable(wallet)?;
+        let spendable = self.spendable(wallet, &[asset])?;
 
         Ok(spendable.balances.get_balance(asset).map_or(0, |balance| balance.amount))
     }
 
-    /// One `transact`: the wallet's notes that cover the statement go in, and its notes, its
-    /// withdrawals, and the change come out. The SDK verifies the proof against the pool's verifying
-    /// key, and checks the SHA-256 of the key that the prover used.
+    /// One `transact`: the wallet's notes that cover the statement go in, then its deposits, its
+    /// notes, its withdrawals, and the change. The settlement accounts follow the order of the
+    /// deposits and withdrawals. The SDK verifies the proof against the pool's verifying key, and
+    /// checks the SHA-256 of the key that the prover used.
     fn prepare_transact(
         &self,
         wallet: &ShieldedWallet,
@@ -319,47 +403,48 @@ impl Shielded {
         statement: &Statement,
         prover: &str,
     ) -> Result<PreparedSpend, ShieldedError> {
-        let consumed: Vec<Amount> = statement
-            .notes
-            .iter()
-            .map(|note| note.value)
-            .chain(statement.withdrawals.iter().map(|leg| leg.value))
-            .collect();
-        let spendable = self.spendable(wallet)?;
-        let inputs = totals(&consumed)?
+        let consumed = statement.consumed()?;
+        let spendable = self.spendable(wallet, &consumed.keys().copied().collect::<Vec<_>>())?;
+        let inputs = consumed
             .into_iter()
             .map(|(asset, amount)| select_spend(spendable.utxos(), asset, amount))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|cause| error("select notes")(&cause))?
             .concat();
         let nullifiers = inputs.iter().map(|input| input.nullifier).collect();
-
         let mut transaction =
             ConfidentialTransaction::new(inputs, fee_payer).map_err(|cause| error("transaction")(&cause))?;
+
+        let deposits = statement
+            .deposits
+            .iter()
+            .map(|leg| self.add_deposit(&mut transaction, leg))
+            .collect::<Result<Vec<_>, _>>()?;
+
         for note in &statement.notes {
             let recipient = resolve_registered_address(self.client.rpc(), note.owner)
                 .map_err(|cause| error("resolve the owner's record")(&cause))?;
-            let added = match note.value.asset == SOL_MINT {
-                true => transaction.transfer_sol(&recipient.address, note.value.amount),
-                false => transaction.transfer(&recipient.address, note.value.asset, note.value.amount),
-            };
-            added.map_err(|cause| error("note")(&cause))?;
+            transaction
+                .transfer_with_ring(&recipient.address, self.mint(note.value.asset)?, note.value.amount, None)
+                .map_err(|cause| error("note")(&cause))?;
         }
 
-        let settlement_transfers = statement
+        let withdrawals = statement
             .withdrawals
             .iter()
-            .map(|leg| match leg.value.asset == SOL_MINT {
-                true => transaction
-                    .withdraw_to(SOL_MINT, leg.value.amount, leg.account, None)
-                    .map_err(|cause| error("withdrawal")(&cause)),
-                false => Err(ShieldedError("only SOL withdrawals so far".to_owned())),
+            .map(|leg| {
+                let token_program =
+                    (leg.value.asset != SOL_MINT).then(|| self.token_program(leg.value.asset)).transpose()?;
+
+                transaction
+                    .withdraw_to(leg.value.asset, leg.value.amount, leg.account, token_program)
+                    .map_err(|cause| error("withdrawal")(&cause))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
         let signed = SignedPrivateTransaction {
             transaction: transaction.encrypt(&wallet.keypair).map_err(|cause| error("encrypt")(&cause))?,
-            settlement_transfers,
+            settlement_transfers: deposits.into_iter().chain(withdrawals).collect(),
         };
         let message = Submission::new(&signed, fee_payer, &wallet.keypair)
             .with_prover(Arc::new(ProverClient::new(prover.to_owned())))
@@ -369,11 +454,49 @@ impl Shielded {
         Ok(PreparedSpend { message, nullifiers })
     }
 
-    /// The wallet's unspent notes, decrypted from what the indexer holds for its tags.
-    fn spendable(&self, wallet: &ShieldedWallet) -> Result<SpendableDecryptionResult, ShieldedError> {
-        let assets = AssetRegistry::default();
-        let scan = UtxoScan::new(&wallet.keypair, &assets)
-            .with_asset_discovery()
+    /// A public amount into the spend from the spender's own account, and its settlement accounts.
+    fn add_deposit(
+        &self,
+        transaction: &mut ConfidentialTransaction,
+        leg: &Leg,
+    ) -> Result<TransactInterfaceTransferAccounts, ShieldedError> {
+        let deposit = |cause: &dyn core::fmt::Display| error("deposit")(cause);
+
+        if leg.value.asset == SOL_MINT {
+            transaction.deposit_sol(leg.value.amount, leg.account).map_err(|cause| deposit(&cause))?;
+
+            return Ok(TransactInterfaceTransferAccounts::Sol(TransactSolTransferAccounts { recipient: leg.account }));
+        }
+
+        let mint = leg.value.asset;
+        let token_program = self.token_program(mint)?;
+        let user_token_account = pda::associated_token_address_with_program(&leg.account, &mint, &token_program);
+        transaction.deposit(self.mint(mint)?, leg.value.amount, user_token_account).map_err(|cause| deposit(&cause))?;
+
+        Ok(TransactInterfaceTransferAccounts::SplDeposit(TransactSplDepositAccounts {
+            mint,
+            spl_interface: pda::spl_interface(&mint),
+            token_authority: leg.account,
+            user_token_account,
+            token_program,
+        }))
+    }
+
+    /// The wallet's unspent notes of SOL and of `assets`, decrypted from what the indexer holds for
+    /// its tags. Each SPL asset's id comes from its registry account in the pool, so the scan needs
+    /// no search of the pool's accounts. A note of another asset is left out.
+    fn spendable(
+        &self,
+        wallet: &ShieldedWallet,
+        assets: &[Address],
+    ) -> Result<SpendableDecryptionResult, ShieldedError> {
+        let known = assets
+            .iter()
+            .filter(|asset| **asset != SOL_MINT)
+            .map(|asset| self.mint(*asset).map(|mint| (mint.asset_id, mint.asset)))
+            .collect::<Result<Vec<_>, _>>()?;
+        let registry = AssetRegistry::new(known).map_err(|cause| error("the assets")(&cause))?;
+        let scan = UtxoScan::new(&wallet.keypair, &registry)
             .fetch(&self.indexer)
             .map_err(|cause| error("scan the wallet's notes")(&cause))?;
 
@@ -401,7 +524,7 @@ mod tests {
 
     /// The `circuit` that `intents/definitions` pins for Privacy Rings. A new key set changes it, and
     /// each shielded implementation then needs a new version.
-    const DEFINITIONS_KEY_SET: &str = "fe926373458f17e60b017f36152e40748c3bf87ec24996176b8ba77015d03417";
+    const DEFINITIONS_KEY_SET: &str = "affddbe0260740233c15f3f9545b1f873f99035d2f6dc55233e70f3a06b90d80";
 
     #[test]
     fn the_definitions_pin_this_key_set() {

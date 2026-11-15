@@ -1,13 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
-import {
-  api,
-  type CircuitDefinition,
-  type ListedImplementation,
-  type ListedIndex,
-  type ListedInterface,
-  type Registry,
-} from "@/api";
+import type { ListedImplementation, ListedIndex, ListedInterface, Registry } from "@/api";
+import { describe } from "@/errors";
+import { useCircuitVersion } from "@/queries";
 
 interface Props {
   registry: Registry;
@@ -152,17 +147,9 @@ function ImplementationItem(props: Props & { implementation: ListedImplementatio
 /// A circuit that shielded recipes prove with. It opens to show its pinned proving keys and sources.
 function CircuitItem({ circuit }: { circuit: ListedIndex }) {
   const [open, setOpen] = useState(false);
-  const [document, setDocument] = useState<CircuitDefinition | null>(null);
   const version = circuit.head ?? circuit.versions.at(-1)?.version ?? null;
-
-  useEffect(() => {
-    if (!open || version === null || document !== null) return;
-
-    api
-      .circuitVersion(circuit.id, version)
-      .then((published) => setDocument(published.document))
-      .catch(() => setDocument(null));
-  }, [open, version, document, circuit.id]);
+  const read = useCircuitVersion(circuit.id, version, open);
+  const document = read.data?.document ?? null;
 
   return (
     <>
@@ -175,6 +162,9 @@ function CircuitItem({ circuit }: { circuit: ListedIndex }) {
         <span className="badge badge-gray">circuit</span>
         <span className="tree-version">{version ?? "no head"}</span>
       </button>
+      {open && read.error !== null && (
+        <div className="sub-nav circuit-detail error-text">{describe(read.error)}</div>
+      )}
       {open && document !== null && (
         <div className="sub-nav circuit-detail">
           <div>

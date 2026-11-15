@@ -47,12 +47,13 @@ impl Keys {
         self.named.iter().map(|named| &named.keypair).collect()
     }
 
+    pub fn keypair_of(&self, address: &Address) -> Option<&Keypair> {
+        self.named.iter().find(|named| named.keypair.pubkey().to_bytes() == address.0).map(|named| &named.keypair)
+    }
+
     /// The Ed25519 seed of the keypair at `address`, from which its shielded keys derive.
     pub fn seed_of(&self, address: &Address) -> Option<[u8; 32]> {
-        self.named
-            .iter()
-            .find(|named| named.keypair.pubkey().to_bytes() == address.0)
-            .map(|named| *named.keypair.secret_bytes())
+        self.keypair_of(address).map(|keypair| *keypair.secret_bytes())
     }
 
     pub fn json(&self) -> Value {

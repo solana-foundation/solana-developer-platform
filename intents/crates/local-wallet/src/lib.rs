@@ -6,7 +6,8 @@
 //! | `GET /wallets` | | The keys, by name |
 //! | `POST /send` | `{ message, presigned? }` | Checks each Privacy Rings spend, signs, and sends |
 //! | `POST /shielded/build` | `{ spend, prover }`: the `spend` of a `build`, and `wallet` or `service` | The spend's pool instructions and nullifier accounts, which it records |
-//! | `GET /ring`, `POST /ring/shield` | `{ address, lamports }` | Each key's private SOL, and a deposit |
+//! | `GET /ring`, `POST /ring/shield` | `{ address, lamports }` | Each key's private balances, and a deposit of SOL |
+//! | `POST /ring/asset` | `{ payer, mint }` | Creates the pool's SPL interface for a mint, on the local surfnet |
 
 mod error;
 mod keys;
@@ -37,13 +38,15 @@ pub struct Wallet {
     pub service_prover: String,
     /// Each spend that the wallet built, by its pool instruction's data, which holds the proof.
     built: Mutex<HashMap<Vec<u8>, ShieldedSpend>>,
+    /// The SPL mints that the ring takes, whose private balances `/ring` reads.
+    assets: Mutex<Vec<solana_address::Address>>,
 }
 
 type Shared = State<Arc<Wallet>>;
 
 impl Wallet {
     pub fn new(keys: Keys, client: Client, ring: Option<Endpoints>, service_prover: String) -> Self {
-        Self { keys, client, ring, service_prover, built: Mutex::new(HashMap::new()) }
+        Self { keys, client, ring, service_prover, built: Mutex::new(HashMap::new()), assets: Mutex::new(Vec::new()) }
     }
 }
 
@@ -57,6 +60,7 @@ pub fn router(wallet: Arc<Wallet>) -> Router {
         .route("/shielded/build", post(|state, body| run(state, body, |wallet, body| wallet.build(&body))))
         .route("/ring", get(|state| run(state, Json(Value::Null), |wallet, _| wallet.balances())))
         .route("/ring/shield", post(|state, body| run(state, body, |wallet, body| wallet.shield(&body))))
+        .route("/ring/asset", post(|state, body| run(state, body, |wallet, body| wallet.register_asset(&body))))
         .with_state(wallet)
 }
 

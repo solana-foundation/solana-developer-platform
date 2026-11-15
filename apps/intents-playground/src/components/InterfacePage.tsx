@@ -9,7 +9,6 @@ interface Props {
   values: FormValues;
   wallets: Wallet[];
   feePayer: string;
-  signature: string | null;
   candidates: Candidate[] | null;
   candidatesError: string | null;
   selected: Candidate | null;
@@ -83,7 +82,7 @@ export function InterfacePage(props: Props) {
         </div>
 
         <Implementations {...props} />
-        <PrivacyRing signature={props.signature} />
+        <PrivacyRing />
       </div>
     </section>
   );

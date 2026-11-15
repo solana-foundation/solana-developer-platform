@@ -176,6 +176,26 @@ const startAdapter = () => start(process.execPath, [ADAPTER], "http://127.0.0.1:
 /// The stand-in provider that the tier 3 implementation names.
 const startProvider = () => start(PROVIDER_BINARY, [RPC], "http://127.0.0.1:8792/deposit");
 
+/// The private amount of `mint` that the local wallet `address` holds, once it reaches `amount`.
+async function ringTokensReach(address, mint, amount) {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const { wallets } = await wallet("/ring");
+    if (wallets.find((wallet) => wallet.address === address)?.tokens?.[mint] === amount) return true;
+
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  return false;
+}
+
+/// How many proofs the service's prover answered, from its metrics.
+async function serviceProofs() {
+  const metrics = await fetch(`${SERVICE}/metrics`).then((response) => response.text());
+  const line = metrics.split("\n").find((text) => text.startsWith('sdp_intents_requests_total{route="prover",outcome="ok"}'));
+
+  return Number(line?.split(" ").at(-1) ?? 0);
+}
+
 async function tokenAmount(owner, mint) {
   const result = await rpc("getTokenAccountsByOwner", [owner, { mint }, { encoding: "jsonParsed" }]);
 
@@ -572,11 +592,13 @@ try {
     "the service asks the caller's wallet to build the spend, and builds nothing itself",
   );
   expect(
-    transferStarted.next.spend.circuit.name === "privacy-rings" && transferStarted.next.spend.circuit.version === "1.0.0",
+    transferStarted.next.spend.circuit.name === "privacy-rings-confidential" && transferStarted.next.spend.circuit.version === "1.0.0",
     "the spend names the circuit that the registry holds",
   );
 
+  const proofsBefore = await serviceProofs();
   const built = await build(transferStarted.next.spend, "service");
+  expect((await serviceProofs()) > proofsBefore, "the service's prover proves the spend that the caller asked it to");
   const signing = await service("/v1/intents/continue", JSON.stringify({ progress: transferStarted.progress, built }));
   const shielded = signing.next.steps[0];
   expect(
@@ -676,6 +698,47 @@ try {
   expect(unshielded.answer.next.kind === "done", `the unshield is done: ${unshielded.answer.next.message}`);
   expect((await rpc("getBalance", [authority.address])).value - before === 250_000_000, "the recipient receives 0.25 SOL");
   expect(await ringBalanceReaches(sender.address, 1_000_000_000), "the sender keeps 1 SOL privately");
+
+  console.log("an SPL token through the ring: shield, send privately, and unshield USDC");
+  await wallet("/ring/asset", JSON.stringify({ payer: sender.address, mint: USDC }));
+  await rpc("surfnet_setTokenAccount", [authority.address, USDC, { amount: 0 }, TOKEN_PROGRAM]);
+  const usdcIntent = (interfaceName, implementation, inputs) => plan(payer, [
+    { interface: `solana.org/${interfaceName}@^1`, implementation: `solana.org/${implementation}@^1`, inputs },
+  ]);
+
+  const shieldUsdc = await runFlow(await service("/v1/intents/start", JSON.stringify(
+    usdcIntent("private.shield", "privacy-rings-shield", { owner: sender.address, mint: USDC, amount: "10000000" }),
+  )));
+  expect(shieldUsdc.answer.next.kind === "done", `the USDC shield is done: ${shieldUsdc.answer.next.message}`);
+  expect(await ringTokensReach(sender.address, USDC, "10000000"), "the sender holds 10 USDC privately");
+
+  const sendUsdc = await runFlow(await service("/v1/intents/start", JSON.stringify(
+    usdcIntent("private.transfer", "privacy-rings-transfer", { from: sender.address, to: payer.address, mint: USDC, amount: "4000000" }),
+  )));
+  expect(sendUsdc.answer.next.kind === "done", `the private USDC transfer is done: ${sendUsdc.answer.next.message}`);
+  expect(await ringTokensReach(payer.address, USDC, "4000000"), "the payer holds 4 USDC privately");
+  expect(await ringTokensReach(sender.address, USDC, "6000000"), "the sender keeps 6 USDC privately");
+
+  const authorityUsdc = await tokenAmount(authority.address, USDC);
+  const unshieldUsdc = await runFlow(await service("/v1/intents/start", JSON.stringify(
+    usdcIntent("private.unshield", "privacy-rings-unshield", { owner: sender.address, to: authority.address, mint: USDC, amount: "3000000" }),
+  )));
+  expect(unshieldUsdc.answer.next.kind === "done", `the USDC unshield is done: ${unshieldUsdc.answer.next.message}`);
+  expect((await tokenAmount(authority.address, USDC)) - authorityUsdc === 3_000_000n, "the recipient receives 3 USDC");
+  expect(await ringTokensReach(sender.address, USDC, "3000000"), "the sender keeps 3 USDC privately");
+
+  console.log("a statement that deposits and spends notes in one proof");
+  const template = (await service("/v1/intents/start", JSON.stringify(
+    usdcIntent("private.transfer", "privacy-rings-transfer", { from: sender.address, to: payer.address, mint: USDC, amount: "2000000" }),
+  ))).next.spend;
+  const mixed = await build({
+    ...template,
+    deposits: [{ account: sender.address, asset: USDC, amount: "1000000" }],
+  });
+  expect(
+    mixed.instructions?.length === 1 && mixed.nullifierAccounts.length > 0,
+    "the wallet builds and proves one transact that deposits 1 USDC and spends notes for the rest",
+  );
 
   console.log("every flow landed");
 } finally {

@@ -1,18 +1,12 @@
-import { useEffect, useState } from "react";
-
-import type {
-  ImplementationDefinition,
-  ListedImplementation,
-  Published,
-  Recipe,
-  Registry,
-} from "@/api";
-import { api, recipeOf } from "@/api";
+import type { ListedImplementation, Recipe, Registry } from "@/api";
+import { recipeOf } from "@/api";
 import { Code, hexDump, Snippets } from "@/components/Code";
 import { Loop } from "@/components/Loop";
 import { OnchainChecks } from "@/components/OnchainChecks";
 import { AddressRow, Row } from "@/components/Plan";
+import { describe } from "@/errors";
 import type { IntentOptions, Output } from "@/intent";
+import { useImplementationVersion } from "@/queries";
 import { startSnippets } from "@/snippets";
 
 export type Tab = "intent" | "implementation";
@@ -85,6 +79,7 @@ function IntentTab(props: Props) {
       <Snippets snippets={startSnippets(props.request)} />
       <PrepareControls {...props} />
       <Loop
+        key={props.requestKey}
         request={props.request}
         requestKey={props.requestKey}
         recipe={props.recipe}
@@ -188,29 +183,8 @@ function ImplementationTab({
   implementation: ListedImplementation | null;
   organizations: Registry["organizations"];
 }) {
-  const [published, setPublished] = useState<Published<ImplementationDefinition> | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
-  const id = implementation?.id ?? null;
-  const version = implementation?.shown ?? null;
-
-  useEffect(() => {
-    setPublished(null);
-    setFailed(null);
-    if (id === null || version === null) return;
-
-    let current = true;
-    api
-      .implementationVersion(id, version)
-      .then((answer) => current && setPublished(answer))
-      .catch(
-        (error: unknown) =>
-          current && setFailed(error instanceof Error ? error.message : String(error))
-      );
-
-    return () => {
-      current = false;
-    };
-  }, [id, version]);
+  const read = useImplementationVersion(implementation?.id ?? null, implementation?.shown ?? null);
+  const published = read.data ?? null;
 
   if (implementation === null) {
     return <div className="section-sub">Select an implementation to see its definition.</div>;
@@ -258,7 +232,9 @@ function ImplementationTab({
           <Code text={hexDump(published.bytes)} />
         </>
       ) : (
-        <div className="section-sub">{failed ?? "Reading the version…"}</div>
+        <div className="section-sub">
+          {read.error === null ? "Reading the version…" : describe(read.error)}
+        </div>
       )}
     </>
   );

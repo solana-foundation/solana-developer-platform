@@ -36,7 +36,7 @@ Each step runs in its own terminal, from the repository root.
    node programs/tools/zolana-services.mjs &
    node adapters/jupiter.mjs &
    ./target/debug/sdp-intents-test-provider &
-   ./target/debug/sdp-intents-local-wallet --wallets target/playground/wallets --ring-indexer http://127.0.0.1:8784 &
+   ./target/debug/sdp-intents-local-wallet --wallets target/playground/wallets --ring-indexer http://127.0.0.1:8784 --ring-asset EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v &
    ./target/debug/sdp-intents-service --allow-tamper --prover http://127.0.0.1:3001
    ```
 

@@ -1,11 +1,20 @@
 // The loop of `DESIGN.md`, 4.1, one call at a time: each call shows its curl, its answer, and what
 // `next` asks the caller to do. A switch runs the loop alone.
 
-import { useCallback, useEffect, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 
-import { type Answer, api, type Prover, type Recipe, ServiceError, type SignStep } from "@/api";
+import {
+  type Answer,
+  api,
+  type ContinueBody,
+  type Prover,
+  type Recipe,
+  type SignStep,
+} from "@/api";
 import { Code, Snippets } from "@/components/Code";
 import { Instructions, StepRows, VerifiedResult } from "@/components/Plan";
+import { describe } from "@/errors";
 import { explorerUrl } from "@/known";
 import { type Call, continueBody, type Done, loadCalls, saveCalls } from "@/loop";
 import { compileSnippets, continueCurl, sendSnippets, startCurl } from "@/snippets";
@@ -34,10 +43,8 @@ type Sent = Record<number, string>;
 
 export function Loop(props: Props) {
   const loop = useLoop(props);
-  const [auto, setAuto] = useState(false);
+  const auto = useAutoRun(loop);
   const { calls, answer, busy, sent } = loop;
-
-  useAutoLoop({ ...loop, auto });
 
   return (
     <div className="loop">
@@ -48,9 +55,9 @@ export function Loop(props: Props) {
           next says.
         </div>
       </div>
-      <AutoSwitch auto={auto} onAuto={setAuto} />
+      <AutoSwitch auto={auto.on} onAuto={auto.set} />
 
-      {calls.length === 0 && <StartPanel {...props} busy={busy} onStart={loop.start} />}
+      {calls.length === 0 && <StartPanel {...props} busy={busy} onStart={auto.start} />}
       {calls.map((made, index) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: a call's position in the loop is its identity.
         <CallCard key={index} number={index + 1} call={made} />
@@ -63,13 +70,18 @@ export function Loop(props: Props) {
           busy={busy}
           sent={sent}
           verified={loop.verified}
-          onVerify={loop.verify}
-          onSend={loop.send}
+          onVerify={(index) => loop.verifyAt(answer, index)}
+          onSend={(index) => loop.sendAt(answer, index)}
           built={loop.built}
-          onBuild={loop.build}
+          onBuild={() => loop.buildFor(answer)}
           prover={loop.prover}
           onProver={loop.setProver}
-          onContinue={() => loop.resume({ signatures: Object.values(sent), built: loop.built })}
+          failure={loop.failure}
+          onContinue={() =>
+            loop
+              .resume(answer, { signatures: Object.values(sent), built: loop.built })
+              .catch(() => undefined)
+          }
         />
       )}
       {calls.length > 0 && (
@@ -81,140 +93,161 @@ export function Loop(props: Props) {
   );
 }
 
-/// The calls of the loop, kept in storage for a refresh, and the actions on the latest answer.
+// Each action's failure shows as `failure` in the next panel, or as a call of the loop, so a click
+// drops the rejection.
+
+/// One step of a `sign`, with its position.
+interface StepAt {
+  index: number;
+  step: SignStep | undefined;
+}
+
+/// A call to the service: `start` with the plan request, or `continue` with the last progress.
+interface CallRequest {
+  route: Call["route"];
+  body: unknown;
+}
+
+/// The calls of the loop, kept in storage for a refresh, and the actions on the latest answer. The
+/// parent keys the loop by its request, so each request starts from its own calls.
 function useLoop(props: Props) {
   const [calls, setCalls] = useState<Call[]>(() => loadCalls(props.requestKey));
-  const [busy, setBusy] = useState<string | null>(null);
   const [sent, setSent] = useState<Sent>({});
   const [verified, setVerified] = useState<Record<number, Verified>>({});
   const [built, setBuilt] = useState<Record<string, unknown> | null>(null);
   const [prover, setProver] = useState<Prover>("wallet");
   const answer = calls.at(-1)?.answer ?? null;
-  const steps = answer?.next.kind === "sign" ? answer.next.steps : [];
 
-  useEffect(() => setCalls(loadCalls(props.requestKey)), [props.requestKey]);
   useEffect(() => saveCalls(props.requestKey, calls), [props.requestKey, calls]);
 
-  const call = useCallback((route: Call["route"], body: unknown, request: Promise<Answer>) => {
-    const push = (made: Call) => {
-      setCalls((previous) => [...previous, made]);
-      setSent({});
-      setVerified({});
-      setBuilt(null);
-    };
-
-    setBusy(route);
-    return request
-      .then((answered) => push({ route, body, answer: answered, error: null }))
-      .catch((error: unknown) => push({ route, body, answer: null, error: describe(error) }))
-      .finally(() => setBusy(null));
-  }, []);
-
-  const resume = useCallback(
-    (done: Done) => {
-      if (answer === null) return Promise.resolve();
-      const body = continueBody(answer, done);
-
-      return call("continue", body, api.resume(body));
-    },
-    [answer, call]
-  );
-
-  const verify = (index: number) =>
-    verifyStep(steps[index]).then((result) => setVerified((all) => ({ ...all, [index]: result })));
-  const build = () => {
-    if (answer?.next.kind !== "build")
-      return Promise.reject(new Error("the answer asks for no build"));
-
-    setBusy("build");
-    return api
-      .build(answer.next.spend, prover)
-      .then((made) => {
-        setBuilt(made);
-        return made;
-      })
-      .finally(() => setBusy(null));
+  const record = (made: Call) => {
+    setCalls((previous) => [...previous, made]);
+    setSent({});
+    setVerified({});
+    setBuilt(null);
   };
-  const send = (index: number) =>
-    sendStep(steps[index]).then((signature) => {
+
+  const call = useMutation({
+    mutationFn: ({ route, body }: CallRequest) =>
+      route === "start"
+        ? api.start(body as object, props.tamper)
+        : api.resume(body as ContinueBody),
+    onSuccess: (answered, { route, body }) =>
+      record({ route, body, answer: answered, error: null }),
+    onError: (error, { route, body }) =>
+      record({ route, body, answer: null, error: describe(error) }),
+  });
+  const build = useMutation({
+    mutationFn: (spend: Record<string, unknown>) => api.build(spend, prover),
+    onSuccess: setBuilt,
+  });
+  const verify = useMutation({
+    mutationFn: ({ step }: StepAt) => verifyStep(step),
+    onSuccess: (result, { index }) => setVerified((all) => ({ ...all, [index]: result })),
+  });
+  const send = useMutation({
+    mutationFn: ({ step }: StepAt) => sendStep(step),
+    onSuccess: (signature, { index }) => {
       setSent((all) => ({ ...all, [index]: signature }));
       props.onSent(signature);
-      return signature;
-    });
+    },
+  });
+
+  const stepAt = (from: Answer, index: number): StepAt => ({
+    index,
+    step: from.next.kind === "sign" ? from.next.steps[index] : undefined,
+  });
 
   return {
     calls,
     answer,
-    steps,
-    busy,
+    busy: call.isPending ? (call.variables?.route ?? null) : build.isPending ? "build" : null,
+    failure: [build.error, verify.error, send.error].find((error) => error !== null) ?? null,
     sent,
     verified,
     built,
-    build,
     prover,
     setProver,
-    setBusy,
-    resume,
-    verify,
-    send,
-    start: () => call("start", props.request, api.start(props.request, props.tamper)),
+    start: () => call.mutateAsync({ route: "start", body: props.request }),
+    resume: (from: Answer, done: Done) =>
+      call.mutateAsync({ route: "continue", body: continueBody(from, done) }),
+    buildFor: (from: Answer) =>
+      from.next.kind === "build"
+        ? build.mutateAsync(from.next.spend)
+        : Promise.reject(new Error("the answer asks for no build")),
+    verifyAt: (from: Answer, index: number) =>
+      verify.mutateAsync(stepAt(from, index)).then(() => undefined),
+    sendAt: (from: Answer, index: number) => send.mutateAsync(stepAt(from, index)),
     clear: () => setCalls([]),
   };
 }
 
-/// In auto mode, signs and sends each step, waits until `checkAfter`, and continues, until done.
-function useAutoLoop(loop: {
-  auto: boolean;
-  busy: string | null;
-  answer: Answer | null;
-  steps: SignStep[];
-  resume: (done: Done) => Promise<void>;
-  build: () => Promise<Record<string, unknown>>;
-  setBusy: (busy: string | null) => void;
-  send: (index: number) => Promise<string>;
-  verify: (index: number) => Promise<void>;
-}) {
-  const { auto, busy, answer, steps, resume, build, setBusy, send, verify } = loop;
+type LoopActions = ReturnType<typeof useLoop>;
 
-  useEffect(() => {
-    if (!auto || busy !== null || answer === null) return;
+/// In auto mode, the loop builds, signs and sends each step, waits until `checkAfter`, and
+/// continues, until done or until the switch turns off. A failed call stops it.
+function useAutoRun(loop: LoopActions) {
+  const [on, setOn] = useState(false);
+  const enabled = useRef(false);
+  const running = useRef(false);
 
-    if (answer.next.kind === "wait") {
-      const delay = Math.max(0, Date.parse(answer.next.checkAfter) - Date.now());
-      const timer = setTimeout(() => resume({ signatures: [], built: null }), delay);
+  const run = async (from: Answer | null) => {
+    if (running.current) return;
 
-      return () => clearTimeout(timer);
+    running.current = true;
+    try {
+      let answer = from;
+      while (answer !== null && answer.next.kind !== "done" && enabled.current) {
+        answer = await advance(answer, loop);
+      }
+    } catch {
+      enabled.current = false;
+      setOn(false);
+    } finally {
+      running.current = false;
     }
+  };
 
-    // `resume` marks the loop busy until its answer arrives, so the effect does not act twice.
-    if (answer.next.kind === "build") {
-      build()
-        .then((made) => resume({ signatures: [], built: made }))
-        .catch(() => setBusy(null));
-    }
-
-    if (answer.next.kind === "sign") {
-      setBusy("auto");
-      signAll(steps.length, verify, send)
-        .then((signatures) => resume({ signatures, built: null }))
-        .catch(() => setBusy(null));
-    }
-  }, [auto, busy, answer, steps.length, resume, build, setBusy, send, verify]);
+  return {
+    on,
+    set: (next: boolean) => {
+      enabled.current = next;
+      setOn(next);
+      if (next) void run(loop.answer);
+    },
+    // A failed call is recorded as a call of the loop, so the rejection needs no handling here.
+    start: () => {
+      loop
+        .start()
+        .then((answer) => (enabled.current ? run(answer) : undefined))
+        .catch(() => undefined);
+    },
+  };
 }
 
-async function signAll(
-  count: number,
-  verify: (index: number) => Promise<void>,
-  send: (index: number) => Promise<string>
-): Promise<string[]> {
-  const signatures: string[] = [];
+/// Does what `next` asks, then continues. Returns the next answer.
+async function advance(answer: Answer, loop: LoopActions): Promise<Answer> {
+  const { next } = answer;
 
-  for (let index = 0; index < count; index += 1) {
-    await verify(index);
-    signatures.push(await send(index));
+  if (next.kind === "wait") {
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.max(0, Date.parse(next.checkAfter) - Date.now()))
+    );
+
+    return loop.resume(answer, { signatures: [], built: null });
   }
 
-  return signatures;
+  if (next.kind === "build") {
+    return loop.resume(answer, { signatures: [], built: await loop.buildFor(answer) });
+  }
+
+  const signatures: string[] = [];
+  for (const index of next.kind === "sign" ? next.steps.keys() : []) {
+    await loop.verifyAt(answer, index);
+    signatures.push(await loop.sendAt(answer, index));
+  }
+
+  return loop.resume(answer, { signatures, built: null });
 }
 
 function verifyStep(step: SignStep | undefined): Promise<Verified> {
@@ -314,6 +347,8 @@ interface NextProps {
   onBuild: () => Promise<Record<string, unknown>>;
   prover: Prover;
   onProver: (prover: Prover) => void;
+  /// The last build, verification, or send that failed.
+  failure: Error | null;
   onContinue: () => void;
 }
 
@@ -328,6 +363,9 @@ function NextPanel(props: NextProps) {
     <div className="loop-next">
       <div className="section-title">next: {next.kind}</div>
       <div className="section-sub">{TODO[next.kind]}</div>
+      {props.failure !== null && (
+        <div className="callout callout-red error-text">{describe(props.failure)}</div>
+      )}
       {next.kind === "sign" &&
         next.steps.map((step, index) => (
           <SignStepView key={step.name} {...props} step={step} index={index} />
@@ -376,7 +414,7 @@ function BuildView(props: NextProps & { next: Extract<Answer["next"], { kind: "b
         type="button"
         className="btn btn-sec"
         disabled={props.busy !== null || props.built !== null}
-        onClick={() => props.onBuild()}
+        onClick={() => props.onBuild().catch(() => undefined)}
       >
         {props.busy === "build" ? "Building and proving…" : "Build with the wallet"}
       </button>
@@ -478,7 +516,7 @@ function SignStepView(props: NextProps & { step: SignStep; index: number }) {
               type="button"
               className="btn btn-sec"
               disabled={props.busy !== null}
-              onClick={() => props.onVerify(index)}
+              onClick={() => props.onVerify(index).catch(() => undefined)}
             >
               Verify
             </button>
@@ -486,7 +524,7 @@ function SignStepView(props: NextProps & { step: SignStep; index: number }) {
               type="button"
               className="btn btn-pri"
               disabled={props.busy !== null || signature !== undefined}
-              onClick={() => props.onSend(index)}
+              onClick={() => props.onSend(index).catch(() => undefined)}
             >
               Sign and send
             </button>
@@ -499,16 +537,4 @@ function SignStepView(props: NextProps & { step: SignStep; index: number }) {
       )}
     </div>
   );
-}
-
-/// A service error with its findings or its program logs.
-export function describe(error: unknown): string {
-  if (!(error instanceof ServiceError)) {
-    return error instanceof Error ? error.message : String(error);
-  }
-
-  const details = error.details as { rendered?: string; logs?: string[] } | null;
-  const extra = details?.rendered ?? details?.logs?.slice(-8).join("\n");
-
-  return extra === undefined ? error.message : `${error.message}\n\n${extra}`;
 }

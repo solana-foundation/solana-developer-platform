@@ -235,7 +235,7 @@ async fn plan(
                 let fetched = chain.accounts(&addresses, Freshness::Live).await?;
                 accounts.insert_fetched(&addresses, fetched);
             }
-            Step::Simulate(simulation) => planner.simulated(chain.simulate(&simulation).await?)?,
+            Step::Simulate(simulation) => planner.simulated(chain.simulate(&simulation, &accounts).await?)?,
             Step::Call(call) => match &answer {
                 Some(answer) => planner.called(answer.clone())?,
                 None => planner.called(call_remote(chain, &call).await?)?,

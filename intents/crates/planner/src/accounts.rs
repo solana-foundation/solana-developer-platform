@@ -27,6 +27,10 @@ impl AccountMap {
         self.accounts
             .extend(addresses.iter().copied().zip(accounts.into_iter().map(|account| account.unwrap_or_else(missing))));
     }
+
+    pub fn get(&self, address: &Address) -> Option<&Account> {
+        self.accounts.get(address)
+    }
 }
 
 impl Chain for AccountMap {

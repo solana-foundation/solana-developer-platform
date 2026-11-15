@@ -16,11 +16,13 @@ export interface Input {
   amountMint: string | null;
 }
 
-/// A local wallet's private SOL, from its unspent notes in the privacy ring.
+/// A local wallet's private balances, from its unspent notes in the privacy ring: SOL in lamports,
+/// and each SPL asset's base units by mint.
 export interface RingBalance {
   name: string;
   address: string;
   lamports: number;
+  tokens: Record<string, string>;
 }
 
 /// What the form needs of an interface, from its definition.
