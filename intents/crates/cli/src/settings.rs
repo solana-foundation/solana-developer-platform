@@ -28,6 +28,15 @@ pub struct IndexSettings {
     pub head: Option<SemverV1>,
     pub approve_new_versions: bool,
     pub approvals: Vec<ApprovedImplementation>,
+    pub deprecated: Option<DeprecationSettings>,
+}
+
+/// `{ "replacedBy": "solana.org/other", "endOfLife": "2027-06-30" }`, both optional.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeprecationSettings {
+    pub replaced_by: Option<Id>,
+    /// Unix seconds at the start of the UTC day.
+    pub end_of_life: Option<u64>,
 }
 
 pub struct ApprovedImplementation {
@@ -69,8 +78,11 @@ pub fn read_organization(file: &OrganizationFile) -> Result<OrganizationSettings
 pub fn read_index(file: &IndexFile) -> Result<IndexSettings, Report> {
     let object = object(&file.text)?;
     let allowed: &[&str] = match file.kind {
-        Kind::Interface => &["updateAuthority", "approveAuthority", "head", "approveNewVersions", "approvals"],
-        Kind::Implementation | Kind::Circuit => &["updateAuthority", "head"],
+        Kind::Interface => {
+            &["updateAuthority", "approveAuthority", "head", "approveNewVersions", "approvals", "deprecated"]
+        }
+        Kind::Implementation => &["updateAuthority", "head", "deprecated"],
+        Kind::Circuit => &["updateAuthority", "head"],
     };
     let mut findings = unknown_keys(&object, allowed);
 
@@ -86,6 +98,7 @@ pub fn read_index(file: &IndexFile) -> Result<IndexSettings, Report> {
         }
     };
     let approvals = object.get("approvals").map(|value| approvals(value, &mut findings)).unwrap_or_default();
+    let deprecated = object.get("deprecated").and_then(|value| deprecation(value, &mut findings));
 
     let settings = IndexSettings {
         id: Id { organization: file.organization.clone(), name: file.name.clone() },
@@ -95,6 +108,7 @@ pub fn read_index(file: &IndexFile) -> Result<IndexSettings, Report> {
         head,
         approve_new_versions,
         approvals,
+        deprecated,
     };
 
     finish(findings, settings)
@@ -145,7 +159,30 @@ pub fn check_references(settings: &IndexSettings, catalog: &Catalog) -> Vec<Diag
         other_interface.into_iter().chain(missing)
     });
 
-    head.into_iter().chain(approvals).collect()
+    let replacement = settings
+        .deprecated
+        .as_ref()
+        .and_then(|deprecated| deprecated.replaced_by.as_ref())
+        .filter(|replacement| {
+            let defined = match settings.kind {
+                Kind::Interface => catalog.interfaces().any(|interface| interface.id == **replacement),
+                Kind::Implementation => {
+                    catalog.implementations().any(|implementation| implementation.id == **replacement)
+                }
+                Kind::Circuit => false,
+            };
+
+            !defined || **replacement == settings.id
+        })
+        .map(|replacement| {
+            Diagnostic::new(
+                Code::InvalidValue,
+                "/deprecated/replacedBy",
+                format!("{replacement} is not another document of the same kind in the tree"),
+            )
+        });
+
+    head.into_iter().chain(approvals).chain(replacement).collect()
 }
 
 pub fn version_text(version: &SemverV1) -> String {
@@ -220,6 +257,72 @@ fn approvals(value: &Value, findings: &mut Vec<Diagnostic>) -> Vec<ApprovedImple
         .collect()
 }
 
+fn deprecation(value: &Value, findings: &mut Vec<Diagnostic>) -> Option<DeprecationSettings> {
+    let Some(object) = value.as_object() else {
+        findings.push(Diagnostic::new(Code::WrongType, "/deprecated", "`deprecated` is an object"));
+        return None;
+    };
+    findings.extend(
+        unknown_keys(object, &["replacedBy", "endOfLife"])
+            .into_iter()
+            .map(|finding| Diagnostic { pointer: format!("/deprecated{}", finding.pointer), ..finding }),
+    );
+
+    let replaced_by = object.get("replacedBy").and_then(|value| {
+        value
+            .as_str()
+            .ok_or_else(|| "`replacedBy` is an id such as `solana.org/other`".to_owned())
+            .and_then(Id::parse)
+            .map_err(|reason| findings.push(Diagnostic::new(Code::InvalidValue, "/deprecated/replacedBy", reason)))
+            .ok()
+    });
+    let end_of_life = object.get("endOfLife").and_then(|value| {
+        value
+            .as_str()
+            .and_then(unix_day)
+            .ok_or_else(|| {
+                findings.push(Diagnostic::new(
+                    Code::InvalidValue,
+                    "/deprecated/endOfLife",
+                    "`endOfLife` is a date such as `2027-06-30`",
+                ))
+            })
+            .ok()
+    });
+
+    Some(DeprecationSettings { replaced_by, end_of_life })
+}
+
+/// The Unix seconds at the start of `2027-06-30`, by Howard Hinnant's `days_from_civil`.
+fn unix_day(text: &str) -> Option<u64> {
+    let mut parts = text.split('-');
+    let (year, month, day) = (parts.next()?, parts.next()?, parts.next()?);
+
+    if parts.next().is_some() || year.len() != 4 || month.len() != 2 || day.len() != 2 {
+        return None;
+    }
+
+    let (year, month, day): (i64, i64, i64) = (year.parse().ok()?, month.parse().ok()?, day.parse().ok()?);
+
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+
+    let year = if month <= 2 { year.checked_sub(1)? } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year.checked_sub(era.checked_mul(400)?)?;
+    let month_index = if month > 2 { month.checked_sub(3)? } else { month.checked_add(9)? };
+    let day_of_year = month_index.checked_mul(153)?.checked_add(2)?.checked_div(5)?.checked_add(day)?.checked_sub(1)?;
+    let day_of_era = year_of_era
+        .checked_mul(365)?
+        .checked_add(year_of_era / 4)?
+        .checked_sub(year_of_era / 100)?
+        .checked_add(day_of_year)?;
+    let days = era.checked_mul(146_097)?.checked_add(day_of_era)?.checked_sub(719_468)?;
+
+    u64::try_from(days.checked_mul(86_400)?).ok()
+}
+
 fn finish<T>(findings: Vec<Diagnostic>, settings: T) -> Result<T, Report> {
     match findings.is_empty() {
         true => Ok(settings),
@@ -246,6 +349,37 @@ mod tests {
 
     fn codes(report: &Report) -> Vec<Code> {
         report.codes()
+    }
+
+    #[test]
+    fn reads_a_deprecation_and_checks_its_replacement() {
+        let tree =
+            crate::tree::Tree::read(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../definitions")).unwrap();
+        let compiled = compile_tree(&tree);
+        let file = |replacement: &str| {
+            let text = format!(r#"{{ "deprecated": {{ "replacedBy": "{replacement}", "endOfLife": "2027-06-30" }} }}"#);
+            read_index(&index(Kind::Implementation, "system-transfer", &text)).ok().unwrap()
+        };
+
+        let settings = file("solana.org/spl-token-transfer");
+        assert_eq!(
+            settings.deprecated,
+            Some(DeprecationSettings {
+                replaced_by: Some(Id::parse("solana.org/spl-token-transfer").unwrap()),
+                end_of_life: Some(1_814_313_600),
+            })
+        );
+        assert!(check_references(&settings, &compiled.catalog).is_empty());
+        assert_eq!(check_references(&file("solana.org/token.transfer"), &compiled.catalog).len(), 1);
+        assert_eq!(check_references(&file("solana.org/system-transfer"), &compiled.catalog).len(), 1);
+    }
+
+    #[test]
+    fn reads_a_date_as_the_start_of_its_utc_day() {
+        assert_eq!(unix_day("1970-01-01"), Some(0));
+        assert_eq!(unix_day("2000-03-01"), Some(951_868_800));
+        assert_eq!(unix_day("2027-6-30"), None);
+        assert_eq!(unix_day("2027-13-01"), None);
     }
 
     #[test]

@@ -551,6 +551,45 @@ fn the_approval_policy_keeps_a_flow_at_the_tier_of_its_steps() {
     assert_eq!(tiers, [1, 1, 2]);
 }
 
+/// The update authority deprecates an implementation in favor of another of the same interface, and
+/// clears the mark. An interface is no replacement for an implementation.
+#[test]
+fn the_update_authority_deprecates_an_implementation_for_a_replacement() {
+    let Implemented { mut svm, organization, interface_index, implementation_index } = implemented().unwrap();
+    let replacement = organization.create_implementation(&mut svm, "flow-transfer", &interface_index).unwrap();
+    let change = IndexChange {
+        authority: organization.authority.pubkey(),
+        organization: organization.address,
+        index: implementation_index,
+    };
+    let deprecation = |svm: &LiteSVM| {
+        let data = index_data(svm, &implementation_index).unwrap();
+        sdp_intents_registry_client::IndexView::parse(&data).unwrap().deprecation()
+    };
+
+    send(&mut svm, &[change.set_deprecation(true, Some(replacement), 1_800_000_000)], &[&organization.authority])
+        .unwrap();
+    assert_eq!(
+        deprecation(&svm),
+        Some(sdp_intents_registry_client::Deprecation {
+            replaced_by: Some(sdp_intents_spec::Address(replacement.to_bytes())),
+            end_of_life: Some(1_800_000_000),
+        })
+    );
+
+    let interface_instead = change.set_deprecation(true, Some(interface_index), 0);
+    let refused = send(&mut svm, &[interface_instead], &[&organization.authority]).unwrap_err();
+    assert!(refused.is(RegistryError::WrongReplacement), "{refused}");
+
+    let stranger = funded(&mut svm, SOL).unwrap();
+    let by_stranger = IndexChange { authority: stranger.pubkey(), ..change };
+    let refused = send(&mut svm, &[by_stranger.set_deprecation(true, None, 0)], &[&stranger]).unwrap_err();
+    assert!(refused.is(RegistryError::WrongAuthority), "{refused}");
+
+    send(&mut svm, &[change.set_deprecation(false, None, 0)], &[&organization.authority]).unwrap();
+    assert_eq!(deprecation(&svm), None);
+}
+
 #[test]
 fn an_implementation_must_name_a_published_interface_version() {
     let mut svm = svm().unwrap();

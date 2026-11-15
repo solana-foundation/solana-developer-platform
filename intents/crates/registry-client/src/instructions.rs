@@ -208,6 +208,15 @@ impl IndexChange {
         instruction("set_head", &[&version.major.0, &version.minor.0, &version.patch.0], self.accounts())
     }
 
+    /// `None` clears the mark. `end_of_life` is Unix seconds, or zero for none.
+    pub fn set_deprecation(&self, deprecation: Option<&crate::Deprecation>) -> RegistryInstruction {
+        let replacement = deprecation.and_then(|deprecation| deprecation.replaced_by).unwrap_or(REGISTRY_PROGRAM);
+        let end_of_life = deprecation.and_then(|deprecation| deprecation.end_of_life).unwrap_or(0);
+        let args: [&[u8]; 2] = [&[u8::from(deprecation.is_some())], &end_of_life.to_le_bytes()];
+
+        instruction("set_deprecation", &args, [self.accounts(), vec![readonly(&replacement)]].concat())
+    }
+
     fn accounts(&self) -> Vec<Meta> {
         vec![signer(&self.authority), readonly(&self.organization), writable(&self.index)]
     }

@@ -817,6 +817,9 @@ pub struct VersionIndexV1 {
     pub head: SemverV1,
     pub version_count: PodU32,
     pub approved_count: PodU32,
+    pub deprecated: PodBool,
+    pub replaced_by: Address,
+    pub end_of_life: PodU64,
 }
 ```
 
@@ -832,8 +835,16 @@ pub struct VersionIndexV1 {
    reachable only by its exact version, so a publisher can test before `set_head`.
 6. `remove` closes a version account and keeps its entry, so no one can publish that version again.
    `publish` refuses a version that exists. An id therefore names one document forever.
-7. A stolen update authority can publish, move the head, and remove. It cannot change a published
-   version, and the approve authority can unapprove at any time.
+7. A stolen update authority can publish, move the head, remove, and deprecate. It cannot change a
+   published version, and the approve authority can unapprove at any time.
+8. `set_deprecation` marks an interface or an implementation deprecated, with the index that
+   replaces it and an end of life, both optional. The replacement is of the same kind, and an
+   implementation's is of the same interface. A deprecated document still plans, so no caller
+   breaks. The service lists the mark, ranks a deprecated implementation after the others in
+   `matches`, and warns in the first answer of a request that pins one. A protocol that publishes
+   its own implementation can therefore replace SDP's without breaking its callers. In the
+   definitions, an index file states it as
+   `"deprecated": { "replacedBy": "solana.org/other", "endOfLife": "2027-06-30" }`.
 
 | Instruction | Signer | Effect |
 | :-- | :-- | :-- |

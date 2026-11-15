@@ -54,6 +54,9 @@ struct VersionIndexV1 {
     head: SemverV1,
     version_count: PodU32,
     approved_count: PodU32,
+    deprecated: PodBool,
+    replaced_by: Address,
+    end_of_life: PodU64,
 }
 
 #[repr(C)]
@@ -114,6 +117,14 @@ pub struct IndexView<'a> {
 }
 
 /// What an index holds about one version.
+/// A publisher's notice that a document has a replacement, or an end of life, or both.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Deprecation {
+    pub replaced_by: Option<Address>,
+    /// Unix seconds.
+    pub end_of_life: Option<u64>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VersionEntry {
     pub version: SemverV1,
@@ -193,6 +204,14 @@ impl<'a> IndexView<'a> {
         &self.fixed.approve_authority
     }
 
+    /// The replacement's index and the end of life, when the publisher deprecated the document.
+    pub fn deprecation(&self) -> Option<Deprecation> {
+        self.fixed.deprecated.get().then(|| Deprecation {
+            replaced_by: (self.fixed.replaced_by != Address::default()).then_some(self.fixed.replaced_by),
+            end_of_life: (self.fixed.end_of_life.get() != 0).then(|| self.fixed.end_of_life.get()),
+        })
+    }
+
     pub fn head(&self) -> Option<SemverV1> {
         self.fixed.has_head.get().then_some(self.fixed.head)
     }
@@ -230,7 +249,7 @@ mod tests {
     fn layouts_are_pinned() {
         assert_eq!(size_of::<RegistryConfigV1>(), 33);
         assert_eq!(size_of::<OrganizationV1>(), 129);
-        assert_eq!(size_of::<VersionIndexV1>(), 177);
+        assert_eq!(size_of::<VersionIndexV1>(), 218);
         assert_eq!(size_of::<VersionEntryV1>(), 17);
     }
 }

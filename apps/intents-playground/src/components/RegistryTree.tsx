@@ -1,6 +1,12 @@
 import { useState } from "react";
 
-import type { ListedImplementation, ListedIndex, ListedInterface, Registry } from "@/api";
+import {
+  deprecationText,
+  type ListedImplementation,
+  type ListedIndex,
+  type ListedInterface,
+  type Registry,
+} from "@/api";
 import { describe } from "@/errors";
 import { useCircuitVersion } from "@/queries";
 
@@ -140,6 +146,11 @@ function ImplementationItem(props: Props & { implementation: ListedImplementatio
         {implementation.id?.split("/")[1] ?? implementation.address}
       </span>
       {!implementation.approved && <span className="badge badge-amber">unapproved</span>}
+      {implementation.deprecation !== null && (
+        <span className="badge badge-gray" title={deprecationText(implementation.deprecation)}>
+          deprecated
+        </span>
+      )}
     </button>
   );
 }

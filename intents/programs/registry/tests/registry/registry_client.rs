@@ -146,6 +146,13 @@ fn builds_the_instructions_that_anchor_builds() {
     assert_same(change.set_update_authority(&spec(&payer)), anchor_change.set_update_authority(&payer));
     assert_same(change.set_approve_authority(&spec(&payer)), anchor_change.set_approve_authority(&payer));
     assert_same(change.set_head(&version), anchor_change.set_head(&version));
+    let deprecation =
+        registry_client::Deprecation { replaced_by: Some(spec(&implementation_index)), end_of_life: Some(1_800_000_000) };
+    assert_same(
+        change.set_deprecation(Some(&deprecation)),
+        anchor_change.set_deprecation(true, Some(implementation_index), 1_800_000_000),
+    );
+    assert_same(change.set_deprecation(None), anchor_change.set_deprecation(false, None, 0));
     assert_same(
         registry_client::set_organization_authority(&spec(&organization), &spec(&authority), &spec(&payer)),
         client::set_organization_authority(&organization, &authority, &payer),

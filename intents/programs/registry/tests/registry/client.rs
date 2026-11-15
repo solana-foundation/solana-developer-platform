@@ -169,6 +169,17 @@ impl IndexChange {
 
         registry_instruction(data.data(), self.accounts())
     }
+
+    pub fn set_deprecation(&self, deprecated: bool, replacement: Option<Address>, end_of_life: u64) -> Instruction {
+        let accounts = accounts::SetDeprecation {
+            authority: self.authority,
+            organization: self.organization,
+            index: self.index,
+            replacement,
+        };
+
+        registry_instruction(instruction::SetDeprecation { deprecated, end_of_life }.data(), accounts)
+    }
 }
 
 pub fn write_buffer(writer: &Address, buffer_id: u32, document_len: u16, offset: u16, bytes: &[u8]) -> Instruction {

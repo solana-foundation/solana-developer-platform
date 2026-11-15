@@ -18,7 +18,7 @@ pub use instructions::{
     IndexChange, NewCircuit, NewImplementation, NewInterface, Publication,
 };
 pub use state::{
-    ConfigView, IndexView, OrganizationView, VersionEntry, CIRCUIT_DISCRIMINATOR, CONFIG_DISCRIMINATOR,
+    ConfigView, Deprecation, IndexView, OrganizationView, VersionEntry, CIRCUIT_DISCRIMINATOR, CONFIG_DISCRIMINATOR,
     IMPLEMENTATION_DISCRIMINATOR, INDEX_DISCRIMINATOR, INTERFACE_DISCRIMINATOR, ORGANIZATION_DISCRIMINATOR,
     VERSION_DOCUMENT_OFFSET,
 };

@@ -15,8 +15,8 @@ use sdp_intents_compiler::{
     decompile_circuit, decompile_implementation, decompile_interface, format_version, Id, Organizations,
 };
 use sdp_intents_registry_client::{
-    version_address, IndexView, OrganizationView, VersionEntry, INDEX_DISCRIMINATOR, ORGANIZATION_DISCRIMINATOR,
-    REGISTRY_PROGRAM,
+    version_address, Deprecation, IndexView, OrganizationView, VersionEntry, INDEX_DISCRIMINATOR,
+    ORGANIZATION_DISCRIMINATOR, REGISTRY_PROGRAM,
 };
 use sdp_intents_spec::wire::{DocumentKind, SemverV1};
 use sdp_intents_spec::{Address, Circuit, Implementation, Interface};
@@ -77,16 +77,24 @@ pub async fn index(chain: &CachedRpc, key: IndexKey) -> Result<Value, ServiceErr
     let kind = key.kind;
     let index = Registry { chain }.indexes(vec![key]).await?.pop().ok_or_else(|| unknown(kind, &id))?;
     let view = index.view()?;
+    let replacement: Vec<Address> =
+        view.deprecation().and_then(|deprecation| deprecation.replaced_by).into_iter().collect();
+    let deprecation = deprecation_json(view.deprecation(), &index_ids(chain, &replacement).await?);
 
-    match kind {
-        DocumentKind::Interface => return Ok(interface_summary(&id, &index.address, &view)),
-        DocumentKind::Circuit => return Ok(circuit_summary(&id, &index.address, &view)),
-        _ => {}
+    let mut summary = match kind {
+        DocumentKind::Interface => interface_summary(&id, &index.address, &view),
+        DocumentKind::Circuit => circuit_summary(&id, &index.address, &view),
+        _ => {
+            let interface = interface_of(chain, &view, &index.address).await?;
+
+            implementation_summary(&id, &index.address, &view, interface.as_ref())
+        }
+    };
+    if let Some(summary) = summary.as_object_mut() {
+        summary.insert("deprecation".to_owned(), deprecation);
     }
 
-    let interface = interface_of(chain, &view, &index.address).await?;
-
-    Ok(implementation_summary(&id, &index.address, &view, interface.as_ref()))
+    Ok(summary)
 }
 
 /// The interface that an implementation index names: its id, and whether it approves the index.
@@ -133,6 +141,9 @@ pub async fn version(chain: &CachedRpc, key: IndexKey, version: SemverV1) -> Res
         return Err(ServiceError::refused("removed", format!("{id}@{} was removed", format_version(version))));
     }
 
+    let replacement: Vec<Address> =
+        view.deprecation().and_then(|deprecation| deprecation.replaced_by).into_iter().collect();
+    let deprecation = deprecation_json(view.deprecation(), &index_ids(chain, &replacement).await?);
     let choice = VersionChoice::of(&view, &entry)?;
     let address = choice.address()?;
     let bytes = Registry { chain }.documents(&[choice]).await?.pop().ok_or_else(|| no_version(&id, version))?;
@@ -150,6 +161,7 @@ pub async fn version(chain: &CachedRpc, key: IndexKey, version: SemverV1) -> Res
         "approved": entry.approved,
         "removed": entry.removed,
         "tier": entry.tier,
+        "deprecation": deprecation,
         "document": document,
         "bytes": base64(&bytes),
     }))
@@ -247,17 +259,36 @@ impl Snapshot {
 
     /// Each index of `kind` that has a name. With `interface`, only the implementations of it.
     fn summaries(&self, kind: DocumentKind, interface: Option<&Address>) -> Vec<Value> {
+        let ids = self.ids();
+
         self.indexes
             .iter()
             .filter_map(|index| Some((index, IndexView::parse(&index.data).ok()?, index.id.as_ref()?)))
             .filter(|(_, view, _)| view.kind() == Ok(kind))
             .filter(|(_, view, _)| interface.is_none_or(|address| view.interface() == address))
-            .map(|(index, view, id)| match kind {
-                DocumentKind::Interface => interface_summary(id, &index.address, &view),
-                DocumentKind::Circuit => circuit_summary(id, &index.address, &view),
-                _ => implementation_summary(id, &index.address, &view, self.interface(&view, &index.address).as_ref()),
+            .map(|(index, view, id)| {
+                let mut summary = match kind {
+                    DocumentKind::Interface => interface_summary(id, &index.address, &view),
+                    DocumentKind::Circuit => circuit_summary(id, &index.address, &view),
+                    _ => implementation_summary(
+                        id,
+                        &index.address,
+                        &view,
+                        self.interface(&view, &index.address).as_ref(),
+                    ),
+                };
+                if let Some(summary) = summary.as_object_mut() {
+                    summary.insert("deprecation".to_owned(), deprecation_json(view.deprecation(), &ids));
+                }
+
+                summary
             })
             .collect()
+    }
+
+    /// The id of each index that has a name, by its address.
+    fn ids(&self) -> HashMap<Address, Id> {
+        self.indexes.iter().filter_map(|index| Some((index.address, index.id.clone()?))).collect()
     }
 
     fn interface(&self, implementation: &IndexView<'_>, implementation_address: &Address) -> Option<NamedInterface> {
@@ -266,6 +297,40 @@ impl Snapshot {
 
         Some(NamedInterface { id: interface.id.clone()?, approves: view.approves(implementation_address) })
     }
+}
+
+/// The id of each index at `addresses`, from a read of the registry. It reads nothing when
+/// `addresses` is empty, so a request that names no deprecated document pays nothing.
+pub async fn index_ids(chain: &CachedRpc, addresses: &[Address]) -> Result<HashMap<Address, Id>, ServiceError> {
+    if addresses.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    Ok(Snapshot::read(chain).await?.ids())
+}
+
+/// `null`, or the replacement's id and the end of life as a UTC time.
+pub fn deprecation_json(deprecation: Option<Deprecation>, ids: &HashMap<Address, Id>) -> Value {
+    let Some(deprecation) = deprecation else {
+        return Value::Null;
+    };
+    let replaced_by = deprecation.replaced_by.map(|address| match ids.get(&address) {
+        Some(id) => id.to_string(),
+        None => base58(&address),
+    });
+
+    json!({
+        "replacedBy": replaced_by,
+        "endOfLife": deprecation.end_of_life.map(sdp_intents_planner::utc_time),
+    })
+}
+
+/// What a caller of a deprecated document reads: its id, its replacement, and its end of life.
+pub fn deprecation_warning(id: &str, deprecation: &Value) -> String {
+    let replacement = deprecation["replacedBy"].as_str().map(|replacement| format!(". Use {replacement} instead"));
+    let end_of_life = deprecation["endOfLife"].as_str().map(|time| format!(". Its publisher supports it until {time}"));
+
+    format!("{id} is deprecated{}{}", replacement.unwrap_or_default(), end_of_life.unwrap_or_default())
 }
 
 /// The document of each choice, in one call. A choice that is `None` reads nothing.
@@ -386,4 +451,24 @@ fn text(bytes: &[u8]) -> String {
 
 fn base64(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_the_replacement_and_the_end_of_life_of_a_deprecated_document() {
+        let replacement = Address([3; 32]);
+        let ids = HashMap::from([(replacement, Id { organization: "solana.org".into(), name: "new-transfer".into() })]);
+        let deprecation = Deprecation { replaced_by: Some(replacement), end_of_life: Some(1_814_313_600) };
+        let json = deprecation_json(Some(deprecation), &ids);
+
+        assert_eq!(json, json!({ "replacedBy": "solana.org/new-transfer", "endOfLife": "2027-06-30T00:00:00Z" }));
+        assert_eq!(
+            deprecation_warning("solana.org/old-transfer@1.0.0", &json),
+            "solana.org/old-transfer@1.0.0 is deprecated. Use solana.org/new-transfer instead. Its publisher supports it until 2027-06-30T00:00:00Z"
+        );
+        assert_eq!(deprecation_json(None, &ids), Value::Null);
+    }
 }

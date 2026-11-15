@@ -31,9 +31,18 @@ const CHECK_AFTER: Duration = Duration::from_secs(2);
 pub async fn start(service: &Service, text: &str, tamper: bool) -> Result<Value, ServiceError> {
     let request: Value = serde_json::from_str(text)?;
     let unpinned = Progress { v: VERSION, request, pins: Vec::new(), steps: BTreeMap::new() };
-    let pins = pins(service, &unpinned).await?;
+    let pinned = pins(service, &unpinned).await?;
+    let warnings = deprecation_warnings(service, &pinned).await?;
+    let pins = pinned.into_iter().map(|pin| pin.id).collect();
 
-    advance(service, Progress { pins, ..unpinned }, Advance { signatures: Vec::new(), built: None, tamper }).await
+    let mut answered =
+        advance(service, Progress { pins, ..unpinned }, Advance { signatures: Vec::new(), built: None, tamper })
+            .await?;
+    if let Some(answered) = answered.as_object_mut() {
+        answered.insert("warnings".to_owned(), Value::from(warnings));
+    }
+
+    Ok(answered)
 }
 
 /// A body of `{ progress, signatures?, built? }`. `signatures` holds one entry for each step of the
@@ -430,7 +439,7 @@ async fn steps(service: &Service, progress: &Progress) -> Result<Steps, ServiceE
 
 /// The exact version of each interface and implementation that the request and its flow name, so
 /// that a new version cannot change a flow that has started.
-async fn pins(service: &Service, progress: &Progress) -> Result<Vec<String>, ServiceError> {
+async fn pins(service: &Service, progress: &Progress) -> Result<Vec<Pin>, ServiceError> {
     let intents = progress.request.get("intents").and_then(Value::as_array).cloned().unwrap_or_default();
     let ranges: Vec<(IndexKind, String)> = intents
         .iter()
@@ -444,7 +453,7 @@ async fn pins(service: &Service, progress: &Progress) -> Result<Vec<String>, Ser
 
     let pinned = Progress { pins: ids(&request_pins), ..progress.clone() };
     let Steps::Flow(flow) = steps(service, &pinned).await? else {
-        return Ok(ids(&request_pins));
+        return Ok(request_pins);
     };
 
     let step_ranges: Vec<(IndexKind, String)> = flow
@@ -461,7 +470,23 @@ async fn pins(service: &Service, progress: &Progress) -> Result<Vec<String>, Ser
 
     check_step_tiers(&request_pins, &step_pins)?;
 
-    Ok(ids(&request_pins).into_iter().chain(ids(&step_pins)).collect())
+    Ok(request_pins.into_iter().chain(step_pins).collect())
+}
+
+/// One warning for each deprecated document that the request pins, with its replacement.
+async fn deprecation_warnings(service: &Service, pins: &[Pin]) -> Result<Vec<String>, ServiceError> {
+    let replacements: Vec<_> = pins.iter().filter_map(|pin| pin.deprecation?.replaced_by).collect();
+    let ids = crate::resources::index_ids(&service.chain, &replacements).await?;
+
+    Ok(pins
+        .iter()
+        .filter(|pin| pin.deprecation.is_some())
+        .map(|pin| {
+            let deprecation = crate::resources::deprecation_json(pin.deprecation, &ids);
+
+            crate::resources::deprecation_warning(&pin.id, &deprecation)
+        })
+        .collect())
 }
 
 /// A flow's index entry holds the worst tier of its steps when it was published. A step version
@@ -488,11 +513,13 @@ enum IndexKind {
     Implementation,
 }
 
-/// An exact version, such as `solana.org/privacy-rings-shield@1.0.0`, and its index entry's tier.
+/// An exact version, such as `solana.org/privacy-rings-shield@1.0.0`, its index entry's tier, and
+/// the index's deprecation.
 struct Pin {
     kind: IndexKind,
     id: String,
     tier: u8,
+    deprecation: Option<sdp_intents_registry_client::Deprecation>,
 }
 
 /// The version that each range, such as `solana.org/privacy-rings-shield@^1`, picks, from one read
@@ -515,9 +542,12 @@ async fn exact_all(service: &Service, ranges: &[(IndexKind, String)]) -> Result<
         .into_iter()
         .zip(indexes)
         .map(|((kind, range), index)| {
-            let entry = pick(&index.view()?, &range)?;
+            let view = index.view()?;
+            let entry = pick(&view, &range)?;
 
-            Ok(Pin { kind, id: format!("{}@{}", range.id, format_version(entry.version)), tier: entry.tier })
+            let id = format!("{}@{}", range.id, format_version(entry.version));
+
+            Ok(Pin { kind, id, tier: entry.tier, deprecation: view.deprecation() })
         })
         .collect()
 }
@@ -565,7 +595,7 @@ mod tests {
     }
 
     fn pin(kind: IndexKind, id: &str, tier: u8) -> Pin {
-        Pin { kind, id: id.to_owned(), tier }
+        Pin { kind, id: id.to_owned(), tier, deprecation: None }
     }
 
     #[test]

@@ -1,1 +1,1 @@
-{ "head": "1.0.0" }
+{ "head": "1.0.0", "deprecated": { "endOfLife": "2027-06-30" } }

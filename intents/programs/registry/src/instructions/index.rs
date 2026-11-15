@@ -4,7 +4,7 @@ use sdp_intents_spec::wire::DocumentKind;
 use crate::error::RegistryError;
 use crate::state::index::{self, Index, VersionIndexV1};
 use crate::state::organization::OrganizationV1;
-use crate::state::wire::PodBool;
+use crate::state::wire::{PodBool, PodU64};
 use crate::state::{semver, INDEX_SEED};
 
 pub const INTERFACE_KIND_SEED: &[u8] = &[DocumentKind::Interface as u8];
@@ -187,5 +187,48 @@ impl ChangeIndex {
         require!(header.kind == u8::from(DocumentKind::Interface), RegistryError::WrongIndexKind);
 
         self.organization.require_authority(&header.approve_authority, &self.authority)
+    }
+}
+
+/// Marks a document deprecated, or clears the mark. The replacement, when there is one, is an index
+/// of the same kind, and for an implementation, of the same interface.
+#[derive(Accounts)]
+pub struct SetDeprecation {
+    pub authority: Signer,
+    pub organization: Account<OrganizationV1>,
+    #[account(mut)]
+    pub index: UncheckedAccount,
+    pub replacement: Option<UncheckedAccount>,
+}
+
+impl SetDeprecation {
+    pub fn set(&mut self, deprecated: bool, end_of_life: u64) -> Result<()> {
+        let replaced_by = match &self.replacement {
+            Some(replacement) => {
+                let own_data = index::load(self.index.account())?;
+                let other_data = index::load(replacement.account())?;
+                let own = Index::parse(&own_data)?;
+                let other = Index::parse(&other_data)?;
+                require!(
+                    other.kind()? == own.kind()? && other.header.interface == own.header.interface,
+                    RegistryError::WrongReplacement
+                );
+                require!(replacement.address() != self.index.address(), RegistryError::WrongReplacement);
+
+                *replacement.address()
+            }
+            None => Address::default(),
+        };
+
+        let mut view = *self.index.account();
+        let mut header = index::header_mut(&mut view)?;
+        require!(header.organization == *self.organization.address(), RegistryError::WrongAccount);
+        self.organization.require_authority(&header.update_authority, &self.authority)?;
+
+        header.deprecated = PodBool::from(deprecated);
+        header.replaced_by = if deprecated { replaced_by } else { Address::default() };
+        header.end_of_life = PodU64::from(if deprecated { end_of_life } else { 0 });
+
+        Ok(())
     }
 }

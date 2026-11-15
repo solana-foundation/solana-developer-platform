@@ -31,6 +31,12 @@ pub struct VersionIndexV1 {
     pub head: SemverV1,
     pub version_count: PodU32,
     pub approved_count: PodU32,
+    /// A deprecated document still plans. Readers warn its callers and name the replacement.
+    pub deprecated: PodBool,
+    /// The index of the document that replaces this one, of the same kind, or zero.
+    pub replaced_by: Address,
+    /// The Unix time after which the publisher stops supporting the document, or zero.
+    pub end_of_life: PodU64,
 }
 
 #[repr(C)]
@@ -297,9 +303,9 @@ mod tests {
 
     #[test]
     fn layouts_are_pinned() {
-        assert_eq!(core::mem::size_of::<VersionIndexV1>(), 177);
+        assert_eq!(core::mem::size_of::<VersionIndexV1>(), 218);
         assert_eq!(ENTRY_LEN, 17);
-        assert_eq!(FIXED_LEN, 185);
+        assert_eq!(FIXED_LEN, 226);
     }
 
     fn entry(minor: u16, approved: bool) -> VersionEntryV1 {

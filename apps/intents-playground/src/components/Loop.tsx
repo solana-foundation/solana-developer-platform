@@ -61,6 +61,11 @@ export function Loop(props: Props) {
         </div>
       )}
       {flow && <AutoSwitch auto={auto.on} onAuto={auto.set} />}
+      {(calls[0]?.answer?.warnings ?? []).map((warning) => (
+        <div key={warning} className="callout callout-amber">
+          {warning}
+        </div>
+      ))}
       {answer !== null && answer.steps.length > 1 && <StepsBar steps={answer.steps} />}
 
       {calls.length === 0 && <StartPanel {...props} busy={busy} onStart={auto.start} />}

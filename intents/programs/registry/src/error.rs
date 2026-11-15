@@ -88,4 +88,6 @@ pub enum RegistryError {
     NotUpgradeAuthority,
     #[msg("The intent expired: the cluster's clock is past the layout's expiry")]
     IntentExpired,
+    #[msg("The replacement is not another index of the same kind and interface")]
+    WrongReplacement,
 }

@@ -36,6 +36,7 @@ struct Candidate {
     address: Address,
     approved: bool,
     choice: VersionChoice,
+    deprecation: Option<sdp_intents_registry_client::Deprecation>,
 }
 
 /// Whether an implementation applies to the inputs. `DoesNotApply` is a failed `applies` check of the
@@ -54,6 +55,8 @@ struct Evaluated {
     recipe: RecipeKind,
     approved: bool,
     fit: Fit,
+    /// The deprecation as JSON, or `null`.
+    deprecation: Value,
 }
 
 /// A body of `{ "interface", "inputs", "payers": { "fee", "rent" }, "all" }`. `all` adds the
@@ -89,6 +92,12 @@ pub async fn implementations_for(chain: &CachedRpc, body: &Value) -> Result<Valu
             evaluate(chain, &request, &interface_document, candidate, document, organization)
         });
     let mut evaluated = future::join_all(evaluations).await.into_iter().collect::<Result<Vec<_>, _>>()?;
+    let replacements: Vec<Address> =
+        candidates.iter().filter_map(|candidate| candidate.deprecation?.replaced_by).collect();
+    let ids = crate::resources::index_ids(chain, &replacements).await?;
+    evaluated.iter_mut().zip(&candidates).for_each(|(evaluated, candidate)| {
+        evaluated.deprecation = crate::resources::deprecation_json(candidate.deprecation, &ids);
+    });
     evaluated.sort_by(rank);
 
     Ok(json!({
@@ -154,8 +163,14 @@ async fn candidates(
             let entry = released(&view).filter(|_| implements)?;
             let approved = interface_view.approves(address) && entry.approved;
 
-            (all || approved)
-                .then(|| Ok(Candidate { address: *address, approved, choice: VersionChoice::of(&view, &entry)? }))
+            (all || approved).then(|| {
+                Ok(Candidate {
+                    address: *address,
+                    approved,
+                    choice: VersionChoice::of(&view, &entry)?,
+                    deprecation: view.deprecation(),
+                })
+            })
         })
         .collect()
 }
@@ -183,7 +198,7 @@ async fn evaluate(
     let recipe = view.recipe().map_err(|error| ServiceError::refused("wrongDocument", error.to_string()))?;
     let fit = fit(chain, request, interface, &implementation, &format!("{id}@{version}")).await;
 
-    Ok(Evaluated { id, version, recipe, approved: candidate.approved, fit })
+    Ok(Evaluated { id, version, recipe, approved: candidate.approved, fit, deprecation: Value::Null })
 }
 
 /// Compiles the intent against the implementation, then resolves its accounts until every
@@ -276,7 +291,15 @@ fn rank(left: &Evaluated, right: &Evaluated) -> Ordering {
         RecipeKind::RemoteTransaction => 3,
     };
 
-    fit(left).cmp(&fit(right)).then(recipe(left).cmp(&recipe(right))).then(left.id.cmp(&right.id))
+    // A deprecated implementation follows the ones that replace it, so a caller that pins the first
+    // one moves to the replacement.
+    let deprecated = |evaluated: &Evaluated| !evaluated.deprecation.is_null();
+
+    fit(left)
+        .cmp(&fit(right))
+        .then(deprecated(left).cmp(&deprecated(right)))
+        .then(recipe(left).cmp(&recipe(right)))
+        .then(left.id.cmp(&right.id))
 }
 
 impl Evaluated {
@@ -293,6 +316,7 @@ impl Evaluated {
             "version": self.version,
             "recipe": recipe_name(self.recipe),
             "approved": self.approved,
+            "deprecation": self.deprecation,
             "status": status,
             "reason": reason,
         })

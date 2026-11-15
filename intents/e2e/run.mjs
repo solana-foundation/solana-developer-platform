@@ -536,18 +536,22 @@ try {
   console.log("a deposit request through a provider that signs its own transaction, at tier 3");
   await rpc("surfnet_setTokenAccount", [PROVIDER_WALLET, USDC, { amount: 0 }, TOKEN_PROGRAM]);
   const walletBefore = await tokenAmount(PROVIDER_WALLET, USDC);
-  const provided = await run(
-    "provider-deposit",
-    plan(payer, [
-      {
-        interface: "solana.org/vault.requestDeposit@^1",
-        implementation: "solana.org/test-provider-deposit@^1",
-        inputs: { owner: sender.address, vault: NOPAL, asset: USDC, amount: "10000000" },
-        options: { verifyIntent: false, assertions: false },
-      },
-    ]),
-    [payer, sender],
+  const providerRequest = plan(payer, [
+    {
+      interface: "solana.org/vault.requestDeposit@^1",
+      implementation: "solana.org/test-provider-deposit@^1",
+      inputs: { owner: sender.address, vault: NOPAL, asset: USDC, amount: "10000000" },
+      options: { verifyIntent: false, assertions: false },
+    },
+  ]);
+  const listed = await service("/v1/implementations/solana.org/test-provider-deposit");
+  expect(listed.deprecation?.endOfLife === "2027-06-30T00:00:00Z", "the registry lists the test provider's end of life");
+  const warned = await service("/v1/intents", JSON.stringify(providerRequest));
+  expect(
+    warned.warnings?.[0]?.startsWith("solana.org/test-provider-deposit@1.0.0 is deprecated"),
+    "starting a request with a deprecated implementation warns the caller",
   );
+  const provided = await run("provider-deposit", providerRequest, [payer, sender]);
   expect(provided.message.includes("tier 3, checked by simulation only | onchain checks: none"), "the message names tier 3");
   expect(provided.transaction.presigned.length === 1, "the provider signed for its order account");
   expect((await tokenAmount(PROVIDER_WALLET, USDC)) - walletBefore === 10_000_000n, "the provider's wallet received 10 USDC");

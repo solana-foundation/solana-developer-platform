@@ -1,10 +1,11 @@
-import type {
-  Candidate,
-  CandidateStatus,
-  InterfaceDocument,
-  ListedImplementation,
-  ListedInterface,
-  Wallet,
+import {
+  type Candidate,
+  type CandidateStatus,
+  deprecationText,
+  type InterfaceDocument,
+  type ListedImplementation,
+  type ListedInterface,
+  type Wallet,
 } from "@/api";
 import { InputField } from "@/components/InputField";
 import { PrivacyRing } from "@/components/PrivacyRing";
@@ -49,6 +50,9 @@ export function InterfacePage(props: Props) {
       </div>
 
       <div className="pc interface-body">
+        {listed.deprecation !== null && (
+          <div className="callout callout-amber">{deprecationText(listed.deprecation)}</div>
+        )}
         <div className="card f-section">
           <div className="section-title">Inputs</div>
           {document.inputs.map((input) => (
@@ -164,10 +168,16 @@ function Implementations({ candidates, candidatesError, selected, onSelect }: Pr
               <span className="candidate-badges">
                 <span className="badge badge-gray">{candidate.recipe}</span>
                 {!candidate.approved && <span className="badge badge-amber">unapproved</span>}
+                {candidate.deprecation !== null && (
+                  <span className="badge badge-gray">deprecated</span>
+                )}
                 <StatusBadge status={candidate.status} />
               </span>
             </div>
             {candidate.reason !== null && <div className="sel-card-sub">{candidate.reason}</div>}
+            {candidate.deprecation !== null && (
+              <div className="sel-card-sub">{deprecationText(candidate.deprecation)}</div>
+            )}
           </button>
         ))}
       </div>

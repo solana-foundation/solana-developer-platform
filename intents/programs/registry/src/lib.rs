@@ -100,6 +100,10 @@ pub mod registry {
         ctx.accounts.set_approval_policy(approve_new_versions)
     }
 
+    pub fn set_deprecation(ctx: &mut Context<SetDeprecation>, deprecated: bool, end_of_life: u64) -> Result<()> {
+        ctx.accounts.set(deprecated, end_of_life)
+    }
+
     pub fn write_buffer(
         ctx: &mut Context<WriteBuffer>,
         buffer_id: u32,

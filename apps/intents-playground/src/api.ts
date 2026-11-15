@@ -71,6 +71,22 @@ export interface VersionEntry {
   tier: number;
 }
 
+/// A publisher's notice that a document has a replacement, an end of life, or both.
+export interface Deprecation {
+  replacedBy: string | null;
+  /// A UTC time.
+  endOfLife: string | null;
+}
+
+/// "Deprecated. Use solana.org/x. Supported until 2027-06-30."
+export function deprecationText(deprecation: Deprecation): string {
+  const replacement = deprecation.replacedBy === null ? "" : ` Use ${deprecation.replacedBy}.`;
+  const endOfLife =
+    deprecation.endOfLife === null ? "" : ` Supported until ${deprecation.endOfLife.slice(0, 10)}.`;
+
+  return `Deprecated.${replacement}${endOfLife}`;
+}
+
 /// An index as the service lists it. `shown` is the version that the playground shows: the head,
 /// or the newest version that is not removed.
 export interface ListedIndex {
@@ -82,6 +98,7 @@ export interface ListedIndex {
   updateAuthority: string;
   versions: VersionEntry[];
   shown: string | null;
+  deprecation: Deprecation | null;
 }
 
 export interface ListedInterface extends ListedIndex {
@@ -136,6 +153,7 @@ export interface Candidate {
   version: string;
   recipe: Recipe;
   approved: boolean;
+  deprecation: Deprecation | null;
   status: CandidateStatus;
   reason: string | null;
 }
@@ -199,6 +217,8 @@ export interface Answer {
   progress: Record<string, unknown>;
   /// Each step of the request, for a wizard. A request that is not a flow has one step.
   steps: { name: string; state: "done" | "current" | "pending" }[];
+  /// The first answer warns of each deprecated document that the request pins.
+  warnings?: string[];
   next: Next;
   pendingUntil: { blockHeight: string } | null;
   rpcCalls: Record<string, number>;

@@ -326,6 +326,7 @@ mod tests {
             &semver_bytes(head.unwrap_or(semver(0, 0, 0))),
             &u32::try_from(versions.len()).unwrap().to_le_bytes(),
             &0u32.to_le_bytes(),
+            &[0; 1 + 32 + 8],
         ]
         .concat();
         let entries = versions.iter().flat_map(|(version, removed)| {
