@@ -1,4 +1,4 @@
-//! `POST /v1/intents/start` and `POST /v1/intents/continue`: the loop of `DESIGN.md`, 4.1 and 4.19.
+//! `POST /v1/intents` and `POST /v1/intents/continue`: the loop of `DESIGN.md`, 4.1 and 4.19.
 //! Each call finds the flow's position from the chain, then answers what the caller does next: sign
 //! a step, wait for a condition, or nothing, because the flow is done. The service keeps no state:
 //! everything that the chain cannot show is in `progress`, which the caller sends back.
@@ -88,34 +88,66 @@ async fn advance(service: &Service, mut progress: Progress, call: Advance) -> Re
     let names: Vec<String> = steps.names().into_iter().map(str::to_owned).collect();
     record_signatures(&mut progress, &names, call.signatures);
 
-    let next = match position(service, &steps, &progress).await? {
+    let current = match position(service, &steps, &progress).await? {
         Some(last) => last.saturating_add(1),
         None => 0,
     };
+    let list = StepList { names: &names, current };
 
-    let Some(name) = names.get(next) else {
-        return answer(&progress, done(&steps, &progress));
+    let Some(name) = names.get(current) else {
+        return answer(&progress, &list, done(&steps, &progress));
     };
 
     match in_flight(service, &progress, name).await? {
-        Flight::Pending(step) => return answer(&progress, sign(step)),
-        Flight::Landing(until) => return answer(&progress, until),
+        Flight::Pending(step) => return answer(&progress, &list, sign(step)),
+        Flight::Landing(until) => return answer(&progress, &list, until),
         Flight::Gone => progress.step(name).planned = None,
         Flight::Idle => {}
     }
 
-    if let Some(ready) = steps.condition(next, Which::Ready) {
+    if let Some(ready) = steps.condition(current, Which::Ready) {
         let bound = Bound::new(ready, &Bindings { progress: &progress })?;
 
         if !bound.holds(service).await? {
-            return answer(&progress, wait(name, &bound));
+            return answer(&progress, &list, wait(name, &bound));
         }
     }
 
-    let at = StepAt { steps: &steps, position: next, name };
+    let at = StepAt { steps: &steps, position: current, name };
     let next = plan_step(service, &mut progress, at, call.built, call.tamper).await?;
 
-    answer(&progress, next)
+    answer(&progress, &list, next)
+}
+
+/// The names of the request's steps, and the position of the first step that is not done.
+struct StepList<'n> {
+    names: &'n [String],
+    current: usize,
+}
+
+impl StepList<'_> {
+    /// Each step's name and state, so a caller can show the flow as a wizard.
+    fn json(&self) -> Value {
+        let state = |position: usize| match position.cmp(&self.current) {
+            core::cmp::Ordering::Less => "done",
+            core::cmp::Ordering::Equal => "current",
+            core::cmp::Ordering::Greater => "pending",
+        };
+
+        self.names
+            .iter()
+            .enumerate()
+            .map(|(position, name)| json!({ "name": name, "state": state(position) }))
+            .collect()
+    }
+
+    /// After the last step lands, the request is done, so the caller need not call `continue`.
+    fn then(&self) -> &'static str {
+        match self.current.saturating_add(1) >= self.names.len() {
+            true => "done",
+            false => "continue",
+        }
+    }
 }
 
 /// The signatures of the last `sign` belong to the first step that is planned and unsigned.
@@ -345,7 +377,8 @@ fn done(steps: &Steps, progress: &Progress) -> Value {
     json!({ "kind": "done", "message": message })
 }
 
-fn answer(progress: &Progress, next: Value) -> Result<Value, ServiceError> {
+/// A `sign` says whether the caller calls `continue` after its transactions land.
+fn answer(progress: &Progress, list: &StepList<'_>, mut next: Value) -> Result<Value, ServiceError> {
     let pending_until = progress
         .steps
         .values()
@@ -353,8 +386,13 @@ fn answer(progress: &Progress, next: Value) -> Result<Value, ServiceError> {
         .map(|expires| expires.block_height)
         .max();
 
+    if let Some(sign) = next.as_object_mut().filter(|next| next.get("kind").and_then(Value::as_str) == Some("sign")) {
+        sign.insert("then".to_owned(), Value::from(list.then()));
+    }
+
     Ok(json!({
         "progress": progress.json()?,
+        "steps": list.json(),
         "next": next,
         "pendingUntil": pending_until.map(|block_height| json!({ "blockHeight": block_height.to_string() })),
     }))
@@ -509,6 +547,21 @@ mod tests {
     #[test]
     fn the_only_step_of_a_request_is_named() {
         assert_eq!(Steps::Single.names(), vec![ONLY_STEP]);
+    }
+
+    #[test]
+    fn lists_each_steps_state_and_says_when_the_last_step_ends_the_request() {
+        let names = ["shield".to_owned(), "transfer".to_owned()];
+        let first = StepList { names: &names, current: 0 };
+        let last = StepList { names: &names, current: 1 };
+
+        assert_eq!(
+            first.json(),
+            json!([{ "name": "shield", "state": "current" }, { "name": "transfer", "state": "pending" }])
+        );
+        assert_eq!(first.then(), "continue");
+        assert_eq!(last.then(), "done");
+        assert_eq!(StepList { names: &names, current: 2 }.json()[1]["state"], "done");
     }
 
     fn pin(kind: IndexKind, id: &str, tier: u8) -> Pin {

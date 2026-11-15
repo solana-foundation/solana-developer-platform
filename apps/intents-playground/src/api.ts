@@ -181,7 +181,8 @@ export interface SignStep extends Omit<Plan, "request" | "rpcCalls"> {
 
 /// What the caller does next (`DESIGN.md`, 4.1).
 export type Next =
-  | { kind: "sign"; land: "inOrder" | "bundle"; steps: SignStep[] }
+  /// `then` is `done` when the request is done once these transactions land.
+  | { kind: "sign"; land: "inOrder" | "bundle"; steps: SignStep[]; then: "done" | "continue" }
   | { kind: "build"; step: string; spend: Record<string, unknown> }
   | {
       kind: "wait";
@@ -196,6 +197,8 @@ export type Next =
 /// unchanged.
 export interface Answer {
   progress: Record<string, unknown>;
+  /// Each step of the request, for a wizard. A request that is not a flow has one step.
+  steps: { name: string; state: "done" | "current" | "pending" }[];
   next: Next;
   pendingUntil: { blockHeight: string } | null;
   rpcCalls: Record<string, number>;
@@ -287,7 +290,7 @@ export const api = {
       body
     ).then((answer) => answer.implementations),
   start: (request: unknown, tamper: boolean) =>
-    post<Answer>("/v1/intents/start", request, tamper ? { "x-sdp-tamper": "1" } : {}),
+    post<Answer>("/v1/intents", request, tamper ? { "x-sdp-tamper": "1" } : {}),
   resume: (body: ContinueBody) => post<Answer>("/v1/intents/continue", body),
   /// The wallet builds the spend that a `build` names, and proves it with its own prover or the
   /// service's. Only the caller talks to its wallet.

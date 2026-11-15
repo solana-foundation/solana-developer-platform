@@ -12,7 +12,7 @@
 //! | `GET /v1/{kind}/{organization}/{name}/versions/{version}` | | One version, with its document as definition JSON |
 //! | `GET /v1/interfaces/{organization}/{name}/implementations` | | The implementations of the interface |
 //! | `POST /v1/interfaces/{organization}/{name}/versions/{version}/matches` | `{ inputs, payers, all }` | `implementationsFor` |
-//! | `POST /v1/intents/start` | A plan request (`DESIGN.md`, 4.1) | `{ progress, next, pendingUntil }`, and the RPC calls |
+//! | `POST /v1/intents` | A plan request (`DESIGN.md`, 4.1) | `{ progress, steps, next, pendingUntil }`, and the RPC calls |
 //! | `POST /v1/intents/continue` | `{ progress, signatures? }` | The same, for the next step (`DESIGN.md`, 4.19) |
 //! | `POST /v1/prepare` | A plan request | The plan of a request of one step, and the RPC calls that it made |
 //! | `POST /v1/verify` | `{ message, expected }` or `{ transaction, expected }`, of any version | What the message proves to its signer |
@@ -22,6 +22,7 @@
 //! `build`, and the caller's wallet builds the spend. With `--allow-tamper`, `start`, `continue`, and
 //! `prepare` take `x-sdp-tamper: 1`, for the playground.
 
+mod amounts;
 mod describe;
 mod error;
 mod flows;
@@ -29,7 +30,6 @@ mod implementations;
 mod intents;
 mod metrics;
 pub mod prover;
-mod amounts;
 mod registry;
 mod resources;
 mod shielded;
@@ -84,7 +84,7 @@ pub fn router(service: Arc<Service>) -> Router {
         .route("/v1/implementations/{organization}/{name}", get(implementation))
         .route("/v1/implementations/{organization}/{name}/versions/{version}", get(implementation_version))
         .route("/v1/prepare", post(prepare))
-        .route("/v1/intents/start", post(start))
+        .route("/v1/intents", post(start))
         .route("/v1/intents/continue", post(resume))
         .route("/v1/verify", post(verify))
         .route(

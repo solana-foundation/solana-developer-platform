@@ -13,13 +13,13 @@ export function startSnippets(request: object): Record<string, string> {
 
   return {
     curl: startCurl(request),
-    TypeScript: `const answer = await fetch("${SERVICE}/v1/intents/start", {\n  method: "POST",\n  headers: { "content-type": "application/json" },\n  body: JSON.stringify(${body.replace(/\n/g, "\n  ")}),\n}).then((response) => response.json());\n// Keep answer.progress, and do what answer.next says.`,
-    Rust: `let request = serde_json::json!(${body});\nlet answer: serde_json::Value = reqwest::blocking::Client::new()\n    .post("${SERVICE}/v1/intents/start")\n    .json(&request)\n    .send()?\n    .json()?;\n// Keep answer["progress"], and do what answer["next"] says.`,
+    TypeScript: `const answer = await fetch("${SERVICE}/v1/intents", {\n  method: "POST",\n  headers: { "content-type": "application/json" },\n  body: JSON.stringify(${body.replace(/\n/g, "\n  ")}),\n}).then((response) => response.json());\n// Keep answer.progress, and do what answer.next says.`,
+    Rust: `let request = serde_json::json!(${body});\nlet answer: serde_json::Value = reqwest::blocking::Client::new()\n    .post("${SERVICE}/v1/intents")\n    .json(&request)\n    .send()?\n    .json()?;\n// Keep answer["progress"], and do what answer["next"] says.`,
   };
 }
 
 export function startCurl(request: object): string {
-  return `curl -s ${SERVICE}/v1/intents/start \\\n  -H 'content-type: application/json' \\\n  -d ${shellJson(request)}`;
+  return `curl -s ${SERVICE}/v1/intents \\\n  -H 'content-type: application/json' \\\n  -d ${shellJson(request)}`;
 }
 
 export function continueCurl(body: object): string {
@@ -60,6 +60,6 @@ export function sendSnippets(compiled: string): Record<string, string> {
     TypeScript: verify.TypeScript,
     Rust: `${verify.Rust}\n\nlet signature = client.send_message(&message, &[&fee_payer, &owner])?;`,
     CLI: `# The client's verifier reads the registry over RPC, with no service.\nsdp-intents verify plan.json --rpc ${RPC}\nsdp-intents send plan.json --rpc ${RPC} --keypair <signer.json>`,
-    curl: `# Sign with the service's local wallets and send. Verify first, with one of the other snippets.\ncurl -s ${SERVICE}/v1/send \\\n  -H 'content-type: application/json' \\\n  -d ${shellJson({ message: compiled })}`,
+    curl: `# The local wallet verifies the transaction, signs it with its keys, and sends it. The service holds no key.\ncurl -s http://127.0.0.1:8794/send \\\n  -H 'content-type: application/json' \\\n  -d ${shellJson({ message: compiled })}`,
   };
 }

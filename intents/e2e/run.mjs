@@ -116,7 +116,7 @@ async function startRing() {
 /// The wallet builds `spend`, the `spend` of a `build`, and proves it in the wallet or on the service.
 const build = (spend, prover = "wallet") => wallet("/shielded/build", JSON.stringify({ spend, prover }));
 
-/// Runs the loop of `DESIGN.md`, 4.1 from a `start` answer until done: signs each step with the
+/// Runs the loop of `DESIGN.md`, 4.1 from the first answer until done: signs each step with the
 /// service's wallets, and waits out each `wait`. Returns the last answer and what each turn asked.
 async function runFlow(first, resumed) {
   let answer = resumed ?? first;
@@ -607,7 +607,7 @@ try {
       inputs: { from: sender.address, to: payer.address, mint: SOL_MINT, amount: "250000000" },
     },
   ]);
-  const transferStarted = await service("/v1/intents/start", JSON.stringify(privateTransfer));
+  const transferStarted = await service("/v1/intents", JSON.stringify(privateTransfer));
   expect(
     transferStarted.next.kind === "build" && transferStarted.next.spend.notes[0].owner === payer.address,
     "the service asks the caller's wallet to build the spend, and builds nothing itself",
@@ -629,7 +629,7 @@ try {
   expect(await typescriptProves(shielded.transaction.messageBytes, shielded), "the verifier proves the spend's message");
 
   const unasserted = await service(
-    "/v1/intents/start",
+    "/v1/intents",
     JSON.stringify(plan(sender, [{ ...privateTransfer.intents[0], options: { assertions: false } }])),
   ).then(
     () => undefined,
@@ -643,7 +643,7 @@ try {
   expect(await ringBalanceReaches(sender.address, 750_000_000), "the sender keeps 0.75 SOL privately");
 
   console.log("a service that changes the spend after the wallet built it");
-  const tamperStart = await service("/v1/intents/start", JSON.stringify(privateTransfer));
+  const tamperStart = await service("/v1/intents", JSON.stringify(privateTransfer));
   const tamperBuilt = await build(tamperStart.next.spend);
   const tampered = await fetch(`${SERVICE}/v1/intents/continue`, {
     method: "POST",
@@ -653,7 +653,7 @@ try {
   expect(await sendRefusal(tampered, "did not build the spend"), "the wallet refuses a spend that it did not build");
 
   console.log("a service that asks the wallet to build other notes than the intent's");
-  const forgeStart = await service("/v1/intents/start", JSON.stringify(privateTransfer));
+  const forgeStart = await service("/v1/intents", JSON.stringify(privateTransfer));
   const forgedSpend = {
     ...forgeStart.next.spend,
     notes: forgeStart.next.spend.notes.map((note) => ({ ...note, owner: authority.address })),
@@ -681,9 +681,14 @@ try {
       inputs: { from: payer.address, to: sender.address, mint: SOL_MINT, amount: "500000000" },
     },
   ]);
-  const started = await service("/v1/intents/start", JSON.stringify(send));
+  const started = await service("/v1/intents", JSON.stringify(send));
   const shieldBuilt = await build(started.next.spend);
   const shieldSigning = await service("/v1/intents/continue", JSON.stringify({ progress: started.progress, built: shieldBuilt }));
+  expect(
+    started.steps.map((step) => `${step.name}:${step.state}`).join(" ") === "shield:current transfer:pending",
+    "the answer lists the flow's steps and which one is current",
+  );
+  expect(shieldSigning.next.then === "continue", "the shield's sign says the caller continues after it lands");
   const again = await service("/v1/intents/continue", JSON.stringify({ progress: shieldSigning.progress }));
   expect(
     again.next.steps?.[0].transaction.messageBytes === shieldSigning.next.steps?.[0].transaction.messageBytes,
@@ -707,7 +712,7 @@ try {
       inputs: { owner: sender.address, to: authority.address, mint: SOL_MINT, amount: "250000000" },
     },
   ]);
-  const unshieldStarted = await service("/v1/intents/start", JSON.stringify(unshield));
+  const unshieldStarted = await service("/v1/intents", JSON.stringify(unshield));
   const withdrawal = unshieldStarted.next.spend?.withdrawals?.[0];
   expect(
     withdrawal?.account === authority.address && unshieldStarted.next.spend.notes.length === 0,
@@ -727,13 +732,13 @@ try {
     { interface: `solana.org/${interfaceName}@^1`, implementation: `solana.org/${implementation}@^1`, inputs },
   ]);
 
-  const shieldUsdc = await runFlow(await service("/v1/intents/start", JSON.stringify(
+  const shieldUsdc = await runFlow(await service("/v1/intents", JSON.stringify(
     usdcIntent("private.shield", "privacy-rings-shield", { owner: sender.address, mint: USDC, amount: "10000000" }),
   )));
   expect(shieldUsdc.answer.next.kind === "done", `the USDC shield is done: ${shieldUsdc.answer.next.message}`);
   expect(await ringTokensReach(sender.address, USDC, "10000000"), "the sender holds 10 USDC privately");
 
-  const sendUsdc = await runFlow(await service("/v1/intents/start", JSON.stringify(
+  const sendUsdc = await runFlow(await service("/v1/intents", JSON.stringify(
     usdcIntent("token.transfer", "privacy-rings-transfer", { from: sender.address, to: payer.address, mint: USDC, amount: "4000000" }),
   )));
   expect(sendUsdc.answer.next.kind === "done", `the private USDC transfer is done: ${sendUsdc.answer.next.message}`);
@@ -741,7 +746,7 @@ try {
   expect(await ringTokensReach(sender.address, USDC, "6000000"), "the sender keeps 6 USDC privately");
 
   const authorityUsdc = await tokenAmount(authority.address, USDC);
-  const unshieldUsdc = await runFlow(await service("/v1/intents/start", JSON.stringify(
+  const unshieldUsdc = await runFlow(await service("/v1/intents", JSON.stringify(
     usdcIntent("private.unshield", "privacy-rings-unshield", { owner: sender.address, to: authority.address, mint: USDC, amount: "3000000" }),
   )));
   expect(unshieldUsdc.answer.next.kind === "done", `the USDC unshield is done: ${unshieldUsdc.answer.next.message}`);
@@ -750,7 +755,7 @@ try {
 
   console.log("an unshield of USDC to an address that has no token account yet");
   const fresh = keypair("unshielded-recipient");
-  const toFresh = await service("/v1/intents/start", JSON.stringify(
+  const toFresh = await service("/v1/intents", JSON.stringify(
     usdcIntent("private.unshield", "privacy-rings-unshield", { owner: sender.address, to: fresh.address, mint: USDC, amount: "1000000" }),
   ));
   const freshBuilt = await build(toFresh.next.spend);
@@ -759,13 +764,18 @@ try {
     "the wallet creates the recipient's token account before the spend",
   );
 
-  const freshDone = await runFlow(await service("/v1/intents/continue", JSON.stringify({ progress: toFresh.progress, built: freshBuilt })));
+  const freshSigning = await service("/v1/intents/continue", JSON.stringify({ progress: toFresh.progress, built: freshBuilt }));
+  expect(
+    freshSigning.next.then === "done" && freshSigning.steps.length === 1,
+    "a one-step request's sign says the request is done once it lands",
+  );
+  const freshDone = await runFlow(freshSigning);
   expect(freshDone.answer.next.kind === "done", `the unshield is done: ${freshDone.answer.next.message}`);
   expect((await tokenAmount(fresh.address, USDC)) === 1_000_000n, "the new token account holds 1 USDC");
   expect(await ringTokensReach(sender.address, USDC, "2000000"), "the sender keeps 2 USDC privately");
 
   console.log("a statement that deposits and spends notes in one proof");
-  const template = (await service("/v1/intents/start", JSON.stringify(
+  const template = (await service("/v1/intents", JSON.stringify(
     usdcIntent("token.transfer", "privacy-rings-transfer", { from: sender.address, to: payer.address, mint: USDC, amount: "2000000" }),
   ))).next.spend;
   const mixed = await build({

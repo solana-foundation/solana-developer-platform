@@ -229,21 +229,24 @@ The first instruction creates the destination ATA when it does not exist. The se
 
 ```json
 { "progress": { "…": "a JSON object that the caller stores and sends back" },
-  "next": { "kind": "sign", "land": "inOrder", "steps": [{ "signs": "transaction", "message": "…", "transaction": { "…": "…" } }] },
+  "steps": [{ "name": "1", "state": "current" }],
+  "next": { "kind": "sign", "land": "inOrder", "then": "done", "steps": [{ "signs": "transaction", "message": "…", "transaction": { "…": "…" } }] },
   "rpcCalls": { "getMultipleAccounts": 1, "simulateTransaction": 0, "getLatestBlockhash": 1 } }
 ```
 
-`start` and `continue` each run `prepare`, which plans the next step. `next` is what the caller
-does now. The caller stores `progress` and sends it back unchanged, and each answer replaces it
-whole (4.19). An intent of one transaction is a flow of one step. `rpcCalls` counts the requests of
-this call only (4.4).
+`POST /v1/intents` and `continue` each run `prepare`, which plans the next step. `next` is what the
+caller does now. The caller stores `progress` and sends it back unchanged, and each answer replaces
+it whole (4.19). An intent of one transaction is a flow of one step. `steps` names each step with
+its state, `done`, `current`, or `pending`, so a UI can show the flow as a wizard. A `sign` whose
+`then` is `done` ends the request once its transactions land, so most requests are one call, a
+signature, and a send. `rpcCalls` counts the requests of this call only (4.4).
 
 **The loop.** Every caller runs the same loop, for one transaction or many:
 
 ```mermaid
 stateDiagram-v2
   direction LR
-  [*] --> Answer: POST /v1/intents/start
+  [*] --> Answer: POST /v1/intents
   Answer --> Build: kind build
   Answer --> Sign: kind sign
   Answer --> Send: kind send
@@ -258,13 +261,13 @@ stateDiagram-v2
 | `next.kind` | The caller | Then calls |
 | :-- | :-- | :-- |
 | `build` | Asks its own wallet or custody to build `spend`, a shielded statement that only the spender's keys can build (4.17) | `POST /v1/intents/continue` with `{ progress, built }` |
-| `sign` | For each of `steps`: renders `message` from the transaction with its own verifier (4.6), shows it, and signs what `signs` names. Sends the signed transactions as `land` says. | `POST /v1/intents/continue` with `{ progress, signatures: [<one entry for each step, in order>] }` |
+| `sign` | For each of `steps`: renders `message` from the transaction with its own verifier (4.6), shows it, and signs what `signs` names. Sends the signed transactions as `land` says. | Nothing when `then` is `done`. Otherwise `POST /v1/intents/continue` with `{ progress, signatures: [<one entry for each step, in order>] }` |
 | `send` | Sends `transactions` as they are, as `land` says. They need no signature from the caller. Not built: only the digest and message rails use it. | `POST /v1/intents/continue` with `{ progress }` |
 | `wait` | Shows `message`. Waits until `until` holds, which it can watch itself, or until `checkAfter` | `POST /v1/intents/continue` with `{ progress }` |
 | `done` | Shows `message`, and drops `progress` | Nothing |
 
 ```ts
-let answer = await post("/v1/intents/start", request);
+let answer = await post("/v1/intents", request);
 
 while (answer.next.kind !== "done") {
   await store.save(answer.progress);             // before the caller acts on next
@@ -277,6 +280,7 @@ while (answer.next.kind !== "done") {
     for (const step of next.steps) await verifier.check(step);   // over the signer's own RPC
     const signed = await wallet.signAll(next.steps);              // one approval for all steps
     await land(signed.transactions, next.land);                   // the caller's RPC, or a Jito bundle
+    if (next.then === "done") break;
     answer = await post("/v1/intents/continue", { progress, signatures: signed.signatures });
   } else if (next.kind === "send") {
     await land(next.transactions, next.land);
@@ -962,7 +966,7 @@ A single index or version reads only the addresses that its id and version deriv
 | `GET /v1/{interfaces\|implementations\|circuits}/{organization}/{name}/versions/{version}` | | One version, with its document in the definition format |
 | `GET /v1/interfaces/{organization}/{name}/implementations` | | The interface's implementations, each with its approval |
 | `POST /v1/interfaces/{organization}/{name}/versions/{version}/matches` | `{ inputs, payers, all }` | Each implementation, with its status |
-| `POST /v1/intents/start`, `POST /v1/intents/continue` | A plan request, or `{ progress, signatures?, built? }` | `{ progress, next }`, with the RPC calls (4.19) |
+| `POST /v1/intents`, `POST /v1/intents/continue` | A plan request, or `{ progress, signatures?, built? }` | `{ progress, steps, next }`, with the RPC calls (4.19) |
 | `POST /v1/intents/recover` | `{ owner }` | The owner's stopping points (4.19). Not built. |
 | `POST /v1/verify` | A message or a transaction of any version, and the plan's message | What the transaction proves |
 | `/v1/intents/prover/*` | The Privacy Rings prover's API | The prover's answer, from the service's prover (4.17) |

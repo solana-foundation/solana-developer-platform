@@ -160,7 +160,7 @@ impl fmt::Display for PlanError {
             Self::ShieldedCircuit => {
                 f.write_str("the recipe's circuit is not a published circuit of its protocol in the registry")
             }
-            Self::FlowRecipe => f.write_str("a flow recipe plans one step at a time, through `/v1/intents/start`"),
+            Self::FlowRecipe => f.write_str("a flow recipe plans one step at a time, through `POST /v1/intents`"),
             Self::RentPayerInRecipe => f.write_str(
                 "the builder names the rent payer as one of its own accounts, which verify_intent cannot check yet. Pay the rent from another wallet.",
             ),

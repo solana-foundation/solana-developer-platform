@@ -1,5 +1,6 @@
 // The loop of `DESIGN.md`, 4.1, one call at a time: each call shows its curl, its answer, and what
-// `next` asks the caller to do. A switch runs the loop alone.
+// `next` asks the caller to do. A switch runs the loop alone. A request of one step reads as one
+// sign: the calls stay folded, and nothing asks for `continue`.
 
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -33,7 +34,7 @@ interface Props {
 const TODO: Record<Answer["next"]["kind"], string> = {
   build:
     "The step spends private funds, so only the spender's keys can build it. Ask your own wallet or custody to build `spend`, then call continue with progress and what it built. The service never calls your wallet.",
-  sign: "Verify each step against your own RPC, sign it, and send it yourself. Then call continue with progress and the signatures. The playground verifies each step in the browser and signs only a step that proves its message.",
+  sign: "Verify each step against your own RPC, sign it, and send it yourself. When `then` is `continue`, call continue with progress and the signatures. The playground verifies each step in the browser and signs only a step that proves its message.",
   wait: "Nothing to sign. `until` is the condition that the step waits for. Watch it yourself, or call continue again at `checkAfter`.",
   done: "The flow is done. Drop progress.",
 };
@@ -46,22 +47,32 @@ export function Loop(props: Props) {
   const auto = useAutoRun(loop);
   const { calls, answer, busy, sent } = loop;
 
+  const flow = answer !== null && (answer.steps.length > 1 || answer.next.kind !== "sign");
+
   return (
     <div className="loop">
-      <div>
-        <div className="section-title">The loop</div>
-        <div className="section-sub">
-          Every call answers <code>progress</code> and <code>next</code>. Keep progress, and do what
-          next says.
+      {flow && (
+        <div>
+          <div className="section-title">The loop</div>
+          <div className="section-sub">
+            Every call answers <code>progress</code> and <code>next</code>. Keep progress, and do
+            what next says.
+          </div>
         </div>
-      </div>
-      <AutoSwitch auto={auto.on} onAuto={auto.set} />
+      )}
+      {flow && <AutoSwitch auto={auto.on} onAuto={auto.set} />}
+      {answer !== null && answer.steps.length > 1 && <StepsBar steps={answer.steps} />}
 
       {calls.length === 0 && <StartPanel {...props} busy={busy} onStart={auto.start} />}
-      {calls.map((made, index) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: a call's position in the loop is its identity.
-        <CallCard key={index} number={index + 1} call={made} />
-      ))}
+      {calls.length > 0 && (
+        <details open={flow}>
+          <summary>API calls ({calls.length})</summary>
+          {calls.map((made, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: a call's position in the loop is its identity.
+            <CallCard key={index} number={index + 1} call={made} />
+          ))}
+        </details>
+      )}
 
       {answer !== null && (
         <NextPanel
@@ -238,8 +249,9 @@ function useAutoRun(loop: LoopActions) {
   };
 }
 
-/// Does what `next` asks, then continues. Returns the next answer.
-async function advance(answer: Answer, loop: LoopActions): Promise<Answer> {
+/// Does what `next` asks, then continues. Returns the next answer, or `null` when the request is
+/// done once the signed steps land.
+async function advance(answer: Answer, loop: LoopActions): Promise<Answer | null> {
   const { next } = answer;
 
   if (next.kind === "wait") {
@@ -261,7 +273,9 @@ async function advance(answer: Answer, loop: LoopActions): Promise<Answer> {
     signatures.push(await loop.sendAt(answer, index, verified, false));
   }
 
-  return loop.resume(answer, { signatures, built: null });
+  return next.kind === "sign" && next.then === "done"
+    ? null
+    : loop.resume(answer, { signatures, built: null });
 }
 
 function verifyStep(step: SignStep | undefined): Promise<Verified> {
@@ -289,6 +303,20 @@ function sendStep({ step, verified, acceptUnverified }: SendRequest): Promise<st
     );
 
   return api.send(step.transaction, verified.unverified).then(({ signature }) => signature);
+}
+
+/// The request's steps as a wizard: done, current, and pending.
+function StepsBar({ steps }: { steps: Answer["steps"] }) {
+  return (
+    <ol className="steps-bar">
+      {steps.map((step, index) => (
+        <li key={step.name} className={`steps-bar-step ${step.state}`}>
+          <span className="steps-bar-number">{index + 1}</span>
+          {step.name}
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 function AutoSwitch({ auto, onAuto }: { auto: boolean; onAuto: (auto: boolean) => void }) {
@@ -320,7 +348,7 @@ function StartPanel(props: Props & { busy: string | null; onStart: () => void })
         disabled={!props.ready || props.busy !== null}
         onClick={props.onStart}
       >
-        {props.busy === "start" ? "Starting…" : "POST /v1/intents/start"}
+        {props.busy === "start" ? "Starting…" : "POST /v1/intents"}
       </button>
     </div>
   );
@@ -335,7 +363,7 @@ function CallCard({ number, call }: { number: number; call: Call }) {
     <div className="loop-call">
       <div className="loop-call-top">
         <span className="section-title">
-          {number}. POST /v1/intents/{call.route}
+          {number}. POST /v1/intents{call.route === "start" ? "" : "/continue"}
         </span>
         {kind !== undefined && <span className={`badge ${KIND_BADGES[kind]}`}>{kind}</span>}
         {call.error !== null && <span className="badge badge-red">error</span>}
@@ -400,7 +428,14 @@ function NextPanel(props: NextProps) {
       {next.kind === "build" && <BuildView next={next} {...props} />}
       {next.kind === "wait" && <WaitView next={next} />}
       {next.kind === "done" && <div className="callout callout-green">{next.message}</div>}
-      {next.kind !== "done" && (
+      {next.kind === "sign" && next.then === "done" && (
+        <div className="callout callout-gray">
+          {Object.keys(props.sent).length === next.steps.length
+            ? "Sent. The request is done once it lands, so it needs no continue call."
+            : "The request is done once this lands, so it needs no continue call."}
+        </div>
+      )}
+      {next.kind !== "done" && !(next.kind === "sign" && next.then === "done") && (
         <>
           <details>
             <summary>The next call</summary>

@@ -98,7 +98,7 @@ enum Planning {
 fn needs_build() -> ServiceError {
     ServiceError::refused(
         "needsBuild",
-        "the request holds a shielded step, which the spender's wallet builds. Run it with /v1/intents/start.",
+        "the request holds a shielded step, which the spender's wallet builds. Run it with POST /v1/intents.",
     )
 }
 
