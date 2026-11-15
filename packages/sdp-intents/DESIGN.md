@@ -225,7 +225,7 @@ output trusts the recipe (4.3).
 The first instruction creates the destination ATA when it does not exist. The second is
 `transferChecked`, with the decimals read from byte 44 of the mint.
 
-**Response.** Every call to `start` and `continue` returns the same shape (4.19):
+**Response.** Every call to `POST /v1/intents` and `continue` returns the same shape (4.19):
 
 ```json
 { "progress": { "…": "a JSON object that the caller stores and sends back" },
@@ -902,8 +902,8 @@ ADR 0002, "money out beats money off", becomes a registry rule: no `vault.deposi
 ### 4.13 Definitions and CLI
 
 The definitions live in `intents/definitions/<organization>/` as JSON: `organization.json`, and for
-each interface and implementation an `index.json` (authorities, head, approval policy, and approvals) and
-one file for each version. The repository is the source of truth, and the registry follows it.
+each interface and implementation an `index.json` (authorities, head, approval policy, approvals, and
+deprecation) and one file for each version. The repository is the source of truth, and the registry follows it.
 
 | Command | Effect |
 | :-- | :-- |
@@ -912,9 +912,9 @@ one file for each version. The repository is the source of truth, and the regist
 | `sdp-intents apply [--squads <multisig>]` | Sends those steps. With `--squads`, each step that needs an authority becomes a Squads proposal. `publish` carries the document's SHA-256, so members vote on exact bytes. While the registry gates organizations, the admin must be the keypair or the vault. |
 | `sdp-intents init-registry --admin <key>` | Creates the config, signed by the upgrade authority. It changes nothing when the config exists. |
 | `sdp-intents set-organizations-gated on\|off`, `set-registry-admin <key>` | Changes the config as the admin, or as a proposal with `--squads` |
-| `sdp-intents start <request>`, `continue <progress>` | Runs the loop's calls over RPC from the definitions, with no service, and prints `{ progress, next }` |
-| `sdp-intents recover <owner>` | Lists the owner's stopping points, each with its `recover` intent (4.19) |
-| `sdp-intents verify <progress>`, `send <progress>` | Renders the message of the step to sign as the signer does, and lists unverified instructions. `send` signs and sends a step that verifies. A plan of instructions alone compiles first, as `--version legacy\|0\|1` and `--lookup-table` say. |
+| `sdp-intents prepare <request> --rpc <url>` | Plans a request of one step over RPC from the definitions, with no service, and prints the plan |
+| `sdp-intents verify <plan>`, `send <plan>` | Renders the message of the plan as the signer does, and lists unverified instructions. `send` signs and sends a plan that verifies. A plan of instructions alone compiles first, as `--version legacy\|0\|1` and `--lookup-table` say. |
+| `sdp-intents start <request>`, `continue <progress>`, `recover <owner>` (design only) | Runs the loop's calls with no service, and lists an owner's stopping points with their `recover` intents (4.19) |
 
 Later, a GitHub workflow runs `lint` and `plan` on each pull request, and `apply --squads` on merge.
 
@@ -973,11 +973,11 @@ A single index or version reads only the addresses that its id and version deriv
 | :-- | :-- | :-- |
 | `GET /v1/registry` | | Every organization, interface, and implementation, in one call |
 | `GET /v1/organizations`, `/v1/interfaces`, `/v1/implementations`, `/v1/circuits` | | Every one of that kind |
-| `GET /v1/{interfaces\|implementations\|circuits}/{organization}/{name}` | | One index: its head, versions, and authorities |
+| `GET /v1/{interfaces\|implementations\|circuits}/{organization}/{name}` | | One index: its head, versions, authorities, and deprecation |
 | `GET /v1/{interfaces\|implementations\|circuits}/{organization}/{name}/versions/{version}` | | One version, with its document in the definition format |
 | `GET /v1/interfaces/{organization}/{name}/implementations` | | The interface's implementations, each with its approval |
-| `POST /v1/interfaces/{organization}/{name}/versions/{version}/matches` | `{ inputs, payers, all }` | Each implementation, with its status |
-| `POST /v1/intents`, `POST /v1/intents/continue` | A plan request, or `{ progress, signatures?, built? }` | `{ progress, steps, next }`, with the RPC calls (4.19) |
+| `POST /v1/interfaces/{organization}/{name}/versions/{version}/matches` | `{ inputs, payers, all }` | Each implementation, with its status and deprecation |
+| `POST /v1/intents`, `POST /v1/intents/continue` | A plan request, or `{ progress, signatures?, built? }` | `{ progress, steps, next }`, with the RPC calls (4.19). The first answer adds `warnings`. |
 | `POST /v1/intents/recover` | `{ owner }` | The owner's stopping points (4.19). Not built. |
 | `POST /v1/verify` | A message or a transaction of any version, and the plan's message | What the transaction proves |
 | `/v1/intents/prover/*` | The Privacy Rings prover's API | The prover's answer, from the service's prover (4.17) |
@@ -987,12 +987,14 @@ A single index or version reads only the addresses that its id and version deriv
 interface is an endpoint, an implementation is a provider, and an intent is the request. It runs against a
 local surfnet and is never deployed (`apps/intents-playground/README.md`).
 
-1. The left pane lists organizations, interfaces, and implementations, with version, recipe, and approval.
+1. The left pane lists organizations, interfaces, and implementations, with version, recipe,
+   approval, and deprecation.
 2. The center pane is the interface: a typed form, the guarantees, and each implementation's status.
-3. The Intent tab shows the intent, `prepare` snippets, the plan with each instruction's compute
-   units, `verify`, and `send`. `verify` runs `@sdp/intents-verifier` in the browser against the
-   surfnet's RPC, not on the service. A switch asks for instructions alone. Each signature and address
-   links to Solana Explorer.
+3. The Intent tab shows the intent, `POST /v1/intents` snippets, the plan with each instruction's
+   compute units, `verify`, and `send`. `verify` runs `@sdp/intents-verifier` in the browser against
+   the surfnet's RPC, not on the service, and `send` stays off until it proves the message. A
+   one-step request reads as one sign, and a flow shows its steps. A switch asks for instructions
+   alone. Each signature and address links to Solana Explorer.
 4. The Interface and Implementation tabs show each document as the service decompiles it, its
    authorities and versions, and the bytes that the registry holds.
 5. Two switches show the checks: a malicious remote endpoint, which the assertions refuse, and a
@@ -1308,8 +1310,8 @@ it signs. Their proofs usually take several transactions, so each transfer is a 
 
 ### 4.19 Flows
 
-Built: static flows, `start` and `continue`, `progress`, the in-flight rule, and the `exists` and
-`spent` conditions. The rest of this section is design (10).
+Built: static flows, `POST /v1/intents` and `continue`, `progress`, the in-flight rule, the worst
+step tier, and the `exists` and `spent` conditions. The rest of this section is design (10).
 
 A transaction is atomic, so a plan proves one transaction. Some operations take several: a request
 and its claim, a deposit through a privacy ring, or a swap split across transactions. `prepare`
@@ -1663,8 +1665,9 @@ Production is a separate project with its own design document.
 | `verify_intent` with static, program, and remote recipes | About 27,000 to 29,000 compute units for an SPL transfer |
 | The warm cache and the first-fetch prefetch | One `getMultipleAccounts` for a cold SPL transfer |
 | Every transaction version | v0 with lookup tables and v1 land through the CLI, and legacy through the provider. A guarded SPL transfer is 1,276 bytes, over legacy's 1,232. |
-| Flows: spec 1.1, static flows, `start` and `continue`, `progress`, the in-flight rule, and the `exists` and `spent` conditions | `privacy-rings-shield-and-transfer` shields, waits, transfers, and is done, in the e2e and the playground |
-| The shielded statement, circuit documents, and proofs in the wallet or the service | Shield, transfer, and unshield of SOL and USDC land with both onchain checks on, from one wallet driver |
+| Flows: spec 1.1, static flows, `POST /v1/intents` and `continue`, `progress`, the step list, `then`, the in-flight rule, the worst step tier, and the `exists` and `spent` conditions | `privacy-rings-shield-and-transfer` shields, waits, transfers, and is done, in the e2e and the playground. A one-step request needs no `continue`. |
+| The shielded statement, circuit documents, and proofs in the wallet or the service | Shield, transfer, and unshield of SOL and USDC land with both onchain checks on, from one wallet driver. The wallet verifies each transaction before it signs. |
+| The outcome-first message, its expiry, decimal amounts, and deprecation | `verify_intent` refuses an expired intent. The largest e2e message, a Hastra par redemption, is 1,133 bytes. |
 
 The prototype also serves `POST /v1/prepare`, which returns the plan of a request of one step,
 without `progress`. The service runs the loop. The Rust client does not run it yet.
@@ -1682,11 +1685,14 @@ Not built:
    anonymous rail, the browser verifier's check of a shielded statement, and a check at `publish`
    that a recipe's circuit exists.
 7. The postconditions and clusters that SDP's other modules need (4.18).
-8. Of flows (4.19): program and remote flows, `recover`, step inputs from earlier steps' outputs,
-   the `data`, `balance`, and `committed` conditions, named terminal outcomes, the recoverable
-   check, the flow part of each step's message, packing several intents into several
-   transactions, Jito bundles, `check_intent`, `execute_step`, and `verify_intent`'s check of a
-   step's flow.
+8. Of flows (4.19): program and remote flows, `recover` (its implementation is not pinned, so
+   its tier is not bounded yet), step inputs from earlier steps' outputs, the `data`, `balance`,
+   and `committed` conditions, named terminal outcomes, the recoverable check, the flow part of
+   each step's message, a check of the flow's own postconditions, which no step proves now,
+   packing several intents into several transactions, Jito bundles, `check_intent`,
+   `execute_step`, and `verify_intent`'s check of a step's flow.
+9. A limit on the spends that the local wallet records and never signs. It is a development
+   wallet, and it keeps them in memory until it restarts.
 
 ## 11. Cost
 
