@@ -9,7 +9,7 @@
   "applies": [
     { "account": "{inputs.mint}", "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" }
   ],
-  "message": "transfer {inputs.amount} of {inputs.mint} from {inputs.from} to {inputs.to}",
+  "message": "transfer {inputs.amount} of {inputs.mint} from {inputs.from} to {inputs.to}, less any transfer fee that the mint withholds",
   "recipe": {
     "kind": "program",
     "program": "2gMFoKF3p5eB2m72ccjncZH8e5agVYbHBH8A29zDMdBm",

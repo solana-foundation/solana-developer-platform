@@ -4,7 +4,7 @@
   "id": "solana.org/privacy-rings-shield-and-transfer",
   "version": "1.0.0",
   "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
-  "implements": "solana.org/private.transfer@^1",
+  "implements": "solana.org/token.transfer@^1",
   "message": "privately send {inputs.amount} of {inputs.mint} from {inputs.from} to {inputs.to}, after shielding that amount of public funds",
   "recipe": {
     "kind": "flow",
@@ -24,7 +24,7 @@
       {
         "name": "transfer",
         "intent": {
-          "interface": "solana.org/private.transfer@^1",
+          "interface": "solana.org/token.transfer@^1",
           "implementation": "solana.org/privacy-rings-transfer@^1",
           "inputs": {
             "from": "{inputs.from}",

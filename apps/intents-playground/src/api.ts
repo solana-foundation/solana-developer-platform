@@ -57,6 +57,8 @@ export interface ImplementationDefinition {
   version: string;
   cluster: string;
   recipe: { kind: "static" | "program" | "remote"; returns?: "instructions" | "transaction" };
+  /// What the implementation promises beyond the interface's guarantees.
+  postConditions?: { message: string }[];
 }
 
 export interface VersionEntry {

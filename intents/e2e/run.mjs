@@ -26,6 +26,7 @@ import {
   USDT,
   base58,
   cli,
+  cliOutcome,
   keypair as keypairIn,
   rpcClient,
   setLookupTable,
@@ -270,7 +271,15 @@ async function runEachVersion(name, request, signers, lookupTable) {
   expect(plan.transaction === undefined && plan.instructions.length > 0, `${name}: the plan holds instructions alone`);
   expect(plan.rpcCalls.getLatestBlockhash === 0, `${name}: the service read no blockhash`);
 
-  const versions = [["legacy"], ["0", "--lookup-table", lookupTable], ["1"]];
+  // A legacy message takes no lookup table, so a guarded SPL transfer with its recipient's inflow
+  // assertion does not fit one. The CLI says so.
+  const legacy = cliOutcome("verify", planPath, "--rpc", RPC, "--version", "legacy");
+  expect(
+    legacy.status !== 0 && legacy.stderr.includes("and the limit is 1232"),
+    `${name} as legacy: the CLI refuses a message that does not fit`,
+  );
+
+  const versions = [["0", "--lookup-table", lookupTable], ["1"]];
 
   for (const [version, ...tables] of versions) {
     const compile = ["--rpc", RPC, "--version", version, ...tables];
@@ -339,8 +348,8 @@ try {
   console.log("the service reads the registry");
   const listing = await service("/v1/registry");
   expect(
-    listing.interfaces.length === 9 && listing.implementations.length === 18 && listing.circuits.length === 1,
-    "it lists 9 interfaces, 18 implementations, and 1 circuit",
+    listing.interfaces.length === 8 && listing.implementations.length === 18 && listing.circuits.length === 1,
+    "it lists 8 interfaces, 18 implementations, and 1 circuit",
   );
 
   const transfer = await service("/v1/interfaces/solana.org/token.transfer");
@@ -360,7 +369,10 @@ try {
     }),
   );
   const fitting = candidates.implementations.filter((candidate) => candidate.status === "applies").map((candidate) => candidate.id);
-  expect(fitting.join() === "solana.org/spl-token-transfer", "implementationsFor picks spl-token-transfer for USDC");
+  expect(
+    fitting.sort().join() === "solana.org/privacy-rings-shield-and-transfer,solana.org/privacy-rings-transfer,solana.org/spl-token-transfer",
+    `implementationsFor lists the public and the private transfers of USDC, for the caller to pin one (${fitting.join()})`,
+  );
 
   console.log("a USDC transfer and a SOL transfer in one transaction");
   await run(
@@ -381,7 +393,7 @@ try {
   expect((await tokenAmount(receiver.address, USDC)) === 100_000_000n, "the receiver holds 100 USDC");
   expect((await rpc("getBalance", [receiver.address])).value === 250_000_000, "the receiver holds 0.25 SOL");
 
-  console.log("a USDC transfer as instructions alone, compiled to legacy, v0 with a lookup table, and v1");
+  console.log("a USDC transfer as instructions alone, compiled to v0 with a lookup table and to v1");
   const senderUsdc = (await rpc("getTokenAccountsByOwner", [sender.address, { mint: USDC }, { encoding: "base64" }])).value[0].pubkey;
   const receiverUsdc = (await rpc("getTokenAccountsByOwner", [receiver.address, { mint: USDC }, { encoding: "base64" }])).value[0].pubkey;
   const lookupTable = keypair("lookup-table").address;
@@ -395,7 +407,7 @@ try {
     },
   ]);
   await runEachVersion("transfer-instructions", transferRequest, [payer, sender], lookupTable);
-  expect((await tokenAmount(receiver.address, USDC)) - receivedBefore === 3_000_000n, "the receiver holds 1 USDC more for each version");
+  expect((await tokenAmount(receiver.address, USDC)) - receivedBefore === 2_000_000n, "the receiver holds 1 USDC more for each version");
 
   console.log("a Jupiter Lend deposit");
   await run(
@@ -581,7 +593,7 @@ try {
 
   const privateTransfer = plan(sender, [
     {
-      interface: "solana.org/private.transfer@^1",
+      interface: "solana.org/token.transfer@^1",
       implementation: "solana.org/privacy-rings-transfer@^1",
       inputs: { from: sender.address, to: payer.address, mint: SOL_MINT, amount: "250000000" },
     },
@@ -655,7 +667,7 @@ try {
   console.log("a flow of two steps: shield public SOL, then send it privately");
   const send = plan(payer, [
     {
-      interface: "solana.org/private.transfer@^1",
+      interface: "solana.org/token.transfer@^1",
       implementation: "solana.org/privacy-rings-shield-and-transfer@^1",
       inputs: { from: payer.address, to: sender.address, mint: SOL_MINT, amount: "500000000" },
     },
@@ -713,7 +725,7 @@ try {
   expect(await ringTokensReach(sender.address, USDC, "10000000"), "the sender holds 10 USDC privately");
 
   const sendUsdc = await runFlow(await service("/v1/intents/start", JSON.stringify(
-    usdcIntent("private.transfer", "privacy-rings-transfer", { from: sender.address, to: payer.address, mint: USDC, amount: "4000000" }),
+    usdcIntent("token.transfer", "privacy-rings-transfer", { from: sender.address, to: payer.address, mint: USDC, amount: "4000000" }),
   )));
   expect(sendUsdc.answer.next.kind === "done", `the private USDC transfer is done: ${sendUsdc.answer.next.message}`);
   expect(await ringTokensReach(payer.address, USDC, "4000000"), "the payer holds 4 USDC privately");
@@ -745,7 +757,7 @@ try {
 
   console.log("a statement that deposits and spends notes in one proof");
   const template = (await service("/v1/intents/start", JSON.stringify(
-    usdcIntent("private.transfer", "privacy-rings-transfer", { from: sender.address, to: payer.address, mint: USDC, amount: "2000000" }),
+    usdcIntent("token.transfer", "privacy-rings-transfer", { from: sender.address, to: payer.address, mint: USDC, amount: "2000000" }),
   ))).next.spend;
   const mixed = await build({
     ...template,

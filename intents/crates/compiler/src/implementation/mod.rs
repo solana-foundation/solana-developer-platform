@@ -376,7 +376,7 @@ mod tests {
             r#""accounts": ["source", "mint", "destination", "from"]"#,
             r#""accounts": ["sorce", "mint", "destination", "from"]"#,
         );
-        let text = edit(&text, r#""message":"#, r#""mesage":"#);
+        let text = edit(&text, r#""message": "transfer"#, r#""mesage": "transfer"#);
         let report = compile_implementation(&text, &catalog()).unwrap_err();
 
         assert!(report.codes().contains(&Code::UnknownReference));

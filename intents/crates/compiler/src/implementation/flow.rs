@@ -55,6 +55,7 @@ impl Build<'_, '_> {
         let Some(mut object) = node.object(self.sink) else {
             return;
         };
+        let pointer = object.pointer().to_owned();
         let name = object.required("name", self.sink).and_then(|name| name.str(self.sink).map(str::to_owned));
         let intent = object.required("intent", self.sink).and_then(|intent| self.read_step_intent(&intent, position));
         let ready = object.field("ready").map(|ready| self.read_condition(&ready, steps));
@@ -66,6 +67,16 @@ impl Build<'_, '_> {
         let (Some(name), Some(intent)) = (name, intent) else {
             return;
         };
+
+        // A caller pins each implementation, because implementations of one interface can promise
+        // different things, so a step pins its own too.
+        if intent.implementation.is_empty() {
+            self.sink.push(
+                Diagnostic::new(Code::MissingKey, &format!("{pointer}/intent"), "the step names no implementation")
+                    .help("pin the implementation that the step runs, such as `\"implementation\": \"solana.org/system-transfer@^1\"`"),
+            );
+        }
+
         let recover = recover.unwrap_or_default();
         let condition = |index: Option<Option<u8>>| index.flatten().unwrap_or(NO_CONDITION);
 
@@ -82,8 +93,8 @@ impl Build<'_, '_> {
         });
     }
 
-    /// `{ "interface": "…@^1", "implementation": "…@^1", "inputs": { … } }`. The implementation is
-    /// optional, and so is an optional input of the interface.
+    /// `{ "interface": "…@^1", "implementation": "…@^1", "inputs": { … } }`. A step's intent pins its
+    /// implementation. An optional input of the interface is optional.
     fn read_step_intent(&mut self, node: &Node<'_>, position: u8) -> Option<StepIntent> {
         let mut object = node.object(self.sink)?;
         let interface = object.required("interface", self.sink).and_then(|node| {

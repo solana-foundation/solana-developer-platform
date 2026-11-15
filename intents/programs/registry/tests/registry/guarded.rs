@@ -69,13 +69,14 @@ fn lamports(svm: &LiteSVM, address: &Address) -> Option<u64> {
     svm.get_account(address).map(|account| account.lamports)
 }
 
-/// The sender's lamports are the guarded value: one snapshot, one assertion, and the close.
+/// The sender's and the recipient's lamports are the guarded values: a snapshot and an assertion
+/// for each, and the close.
 #[test]
 fn verifies_a_sol_transfer_with_the_default_checks() {
     let mut setup = setup(definitions::SYSTEM_TRANSFER).unwrap();
     let plan = plan(&setup, "system-transfer", &Address::default(), 2 * SOL, &setup.fee_payer.pubkey()).unwrap();
 
-    assert_eq!(lighthouse_count(&plan), 3);
+    assert_eq!(lighthouse_count(&plan), 5);
     assert!(plan.message.contains(" | onchain checks: verify_intent, assertions | rent cap 890880 lamports"));
 
     let sent = send_plan(&mut setup.svm, &plan, &[&setup.fee_payer, &setup.from]).unwrap();
@@ -98,8 +99,9 @@ fn verifies_a_token_transfer_that_its_sender_pays_for() {
     let plan = plan(&setup, "spl-token-transfer", &mint, 100_000_000, &setup.from.pubkey()).unwrap();
 
     let rent = setup.svm.minimum_balance_for_rent_exemption(165);
-    // Rule 3 adds the sender's token account: its owner, delegate, and close authority.
-    assert_eq!(lighthouse_count(&plan), 8);
+    // Rule 3 adds the sender's token account: its owner, delegate, and close authority. The inflow
+    // adds an assertion on the recipient's new token account.
+    assert_eq!(lighthouse_count(&plan), 9);
     assert!(plan.message.contains(&format!(" | rent cap {rent} lamports || ")), "{}", plan.message);
     assert_eq!(verify(&setup.svm, &plan.transaction).unwrap().message, plan.message);
 
@@ -183,7 +185,7 @@ fn verifies_a_plan_of_two_guarded_intents() {
     let second = setup.published.compile(&intent(&setup, "system-transfer", &Address::default(), 2 * SOL), &fee_payer);
 
     let plan = prepare_intents(&setup.svm, &[&first.unwrap(), &second.unwrap()]).unwrap();
-    assert_eq!(lighthouse_count(&plan), 6);
+    assert_eq!(lighthouse_count(&plan), 10);
 
     send_plan(&mut setup.svm, &plan, &[&setup.fee_payer, &setup.from]).unwrap();
 

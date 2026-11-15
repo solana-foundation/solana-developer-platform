@@ -161,6 +161,7 @@ mod tests {
     const FROM: [u8; 32] = [1; 32];
     const PAYER: [u8; 32] = [2; 32];
     const MINT: [u8; 32] = [3; 32];
+    const TO: [u8; 32] = [6; 32];
     const TOKEN_PROGRAM: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 
     struct Documents {
@@ -189,7 +190,8 @@ mod tests {
             .clone();
         let intent = include_str!("../../../fixtures/intents/spl-token-transfer.json")
             .replace("7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", &base58(FROM))
-            .replace("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", &base58(MINT));
+            .replace("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", &base58(MINT))
+            .replace("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", &base58(TO));
 
         Documents { interface, implementation, intent: catalog.compile_intent(&intent).unwrap().bytes }
     }
@@ -214,24 +216,30 @@ mod tests {
     #[test]
     fn guards_the_sender_token_account_with_the_amount() {
         let source = token_account(FROM, 500);
+        let destination = token_account(TO, 7);
         let accounts = [
             GuardedAccount { address: Address([4; 32]), owner: token_program(), lamports: 1, data: &source },
+            GuardedAccount { address: Address([8; 32]), owner: token_program(), lamports: 1, data: &destination },
             GuardedAccount { address: Address(PAYER), owner: Address::default(), lamports: 10, data: &[] },
         ];
 
         let built = assertions(&accounts, &Address(PAYER)).unwrap();
 
-        assert_eq!(built.snapshots.len(), 1);
+        assert_eq!(built.snapshots.len(), 2);
         // The outflow, three checks of rule 3 on the owner, the delegate, and the close authority,
-        // and the payer's lamports.
-        assert_eq!(built.checks.len(), 5);
-        // One snapshot reads the owner through the close authority, bytes 32 to 165.
-        assert_eq!(built.snapshots[0].data(), [0, 0, 255, 0, 0, 32, 0, 133, 0]);
+        // the inflow to the recipient's token account, and the payer's lamports.
+        assert_eq!(built.checks.len(), 6);
+        // The source's snapshot reads the owner through the close authority, bytes 32 to 165.
+        assert!(built.snapshots.iter().any(|snapshot| snapshot.data() == [0, 0, 255, 0, 0, 32, 0, 133, 0]));
         assert_eq!(
             built.checks[0].data(),
             [&[4u8, 0, 1, 32, 64, 6][..], &(-100_000_000i128).to_le_bytes(), &[4]].concat()
         );
         assert!(built.checks.iter().any(|check| check.data() == [1, 0, 255]));
+        let gains_the_amount = |check: &LighthouseInstruction| {
+            check.data().windows(16).any(|bytes| bytes == 100_000_000i128.to_le_bytes())
+        };
+        assert!(built.checks.iter().any(gains_the_amount), "a check bounds the recipient's gain from below");
         assert!(built.checks.iter().all(|check| !check.accounts().is_empty()));
         assert_eq!(LIGHTHOUSE_PROGRAM, built.snapshots[0].accounts()[0].address);
     }
@@ -240,14 +248,16 @@ mod tests {
     #[test]
     fn a_sender_that_pays_the_rent_may_spend_the_rent_cap() {
         let source = token_account(FROM, 500);
+        let destination = token_account(TO, 7);
         let accounts = [
             GuardedAccount { address: Address(FROM), owner: Address::default(), lamports: 10, data: &[] },
             GuardedAccount { address: Address([4; 32]), owner: token_program(), lamports: 1, data: &source },
+            GuardedAccount { address: Address([8; 32]), owner: token_program(), lamports: 1, data: &destination },
         ];
 
         let built = assertions(&accounts, &Address(FROM)).unwrap();
 
-        assert_eq!(built.snapshots.len(), 2);
+        assert_eq!(built.snapshots.len(), 3);
         assert_eq!(built.checks[0].data(), [&[4u8, 0, 0, 0, 0][..], &(-2_039_280i128).to_le_bytes(), &[4]].concat());
     }
 

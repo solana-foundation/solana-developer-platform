@@ -77,7 +77,6 @@ pub struct StepInputV1 {
 pub struct StepV1 {
     pub name: PoolRefV1,
     pub interface: DocumentRefV1,
-    /// Empty when the planner matches an implementation with `applies`.
     pub implementation: DocumentRefV1,
     pub inputs: RangeV1,
     pub ready: u8,
@@ -186,7 +185,10 @@ impl<'a> Implementation<'a> {
         self.text(step.name)?;
         Submitter::try_from(step.submitter)?;
 
-        if step.interface.is_empty() || (step.recover.is_empty() && step.recover_inputs.count > 0) {
+        if step.interface.is_empty()
+            || step.implementation.is_empty()
+            || (step.recover.is_empty() && step.recover_inputs.count > 0)
+        {
             return Err(SpecError::BadRecipe);
         }
 

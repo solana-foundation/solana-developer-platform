@@ -205,9 +205,10 @@ mod tests {
     use super::*;
     use crate::test_support::*;
 
-    /// The interface's postconditions, then rule 3 for the signer input `from`.
+    /// The interface's postconditions, then the implementation's, then rule 3 for the signer input
+    /// `from`.
     #[test]
-    fn resolves_the_interface_conditions_of_a_transfer() {
+    fn resolves_the_conditions_of_a_transfer() {
         let compiled = Compiled::compile(SYSTEM_TRANSFER, INTENT_SYSTEM_TRANSFER);
         let recipe = compiled.recipe().unwrap();
 
@@ -218,6 +219,7 @@ mod tests {
             [
                 Condition::Outflow { from: address(FROM), mint: Address::default(), max: 250_000_000 },
                 Condition::NoOtherOutflows { from: address(FROM) },
+                Condition::Inflow { to: address(TO), mint: Address::default(), min: 250_000_000 },
                 Condition::NoAuthorityChange { owner: address(FROM) },
             ]
         );

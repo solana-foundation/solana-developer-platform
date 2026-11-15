@@ -1,7 +1,15 @@
-import type { Candidate, CandidateStatus, InterfaceDocument, ListedInterface, Wallet } from "@/api";
+import type {
+  Candidate,
+  CandidateStatus,
+  InterfaceDocument,
+  ListedImplementation,
+  ListedInterface,
+  Wallet,
+} from "@/api";
 import { InputField } from "@/components/InputField";
 import { PrivacyRing } from "@/components/PrivacyRing";
 import { type FormValues, renderTemplate } from "@/intent";
+import { useImplementationVersion } from "@/queries";
 
 interface Props {
   listed: ListedInterface;
@@ -10,6 +18,8 @@ interface Props {
   wallets: Wallet[];
   feePayer: string;
   candidates: Candidate[] | null;
+  /// The selected implementation's index, whose definition adds guarantees.
+  implementation: ListedImplementation | null;
   candidatesError: string | null;
   selected: Candidate | null;
   onValue: (name: string, value: string) => void;
@@ -69,17 +79,7 @@ export function InterfacePage(props: Props) {
           </div>
         </div>
 
-        <div className="card f-section">
-          <div className="section-title">Guarantees</div>
-          <ul className="guarantees">
-            {document.postConditions.map((condition) => (
-              <li key={condition}>
-                <span className="check">✓</span>
-                {renderTemplate(condition, values, wallets)}
-              </li>
-            ))}
-          </ul>
-        </div>
+        <Guarantees {...props} />
 
         <Implementations {...props} />
         {props.candidates?.some((candidate) => candidate.recipe === "shielded") === true && (
@@ -87,6 +87,44 @@ export function InterfacePage(props: Props) {
         )}
       </div>
     </section>
+  );
+}
+
+/// The interface's guarantees, which every implementation keeps, then what the selected
+/// implementation adds. An implementation can add guarantees and never remove one.
+function Guarantees({ document, values, wallets, implementation }: Props) {
+  const read = useImplementationVersion(implementation?.id ?? null, implementation?.shown ?? null);
+  const added = (read.data?.document.postConditions ?? []).map((condition) => condition.message);
+
+  return (
+    <div className="card f-section">
+      <div className="section-title">Guarantees</div>
+      <ul className="guarantees">
+        {document.postConditions.map((condition) => (
+          <li key={condition}>
+            <span className="check">✓</span>
+            {renderTemplate(condition, values, wallets)}
+          </li>
+        ))}
+      </ul>
+      {implementation !== null && (
+        <>
+          <div className="section-sub">{implementation.id} adds</div>
+          {added.length === 0 ? (
+            <div className="section-sub">nothing beyond the interface's guarantees</div>
+          ) : (
+            <ul className="guarantees">
+              {added.map((condition) => (
+                <li key={condition}>
+                  <span className="check">✓</span>
+                  {renderTemplate(condition, values, wallets)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 

@@ -65,7 +65,8 @@ fn renders_the_message_of_a_plan_of_two_intents() {
     let verified_spans: Vec<_> = verified.intents.iter().map(|intent| intent.built.clone()).collect();
     let planned_spans: Vec<_> = plan.intents.iter().map(|intent| intent.span.clone()).collect();
     assert_eq!(verified_spans, planned_spans);
-    assert_eq!(verified.intents.iter().map(|intent| intent.verify).collect::<Vec<_>>(), [0, 5]);
+    // Each SOL transfer's segment: `verify_intent`, two snapshots, the transfer, and two checks.
+    assert_eq!(verified.intents.iter().map(|intent| intent.verify).collect::<Vec<_>>(), [0, 7]);
     assert_eq!(verified.intents.last().map(|intent| intent.segment.end), Some(plan.transaction.instructions.len()));
     assert!(verified.unverified.is_empty());
 }
@@ -94,7 +95,7 @@ fn an_intent_without_verify_intent_is_not_in_the_message() {
 
     assert_ne!(verified.message, plan.message);
     assert_eq!(verified.message.matches(" || ").count(), 2);
-    assert_eq!(verified.unverified, (5..plan.transaction.instructions.len()).collect::<Vec<_>>());
+    assert_eq!(verified.unverified, (7..plan.transaction.instructions.len()).collect::<Vec<_>>());
 }
 
 /// The documents come from the registry's version accounts, so an account in their place that is

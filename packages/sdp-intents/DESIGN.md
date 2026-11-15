@@ -90,10 +90,13 @@ The examples are one chain for a PYUSD transfer. "…" shortens addresses and by
 }
 ```
 
-An intent is the operation only, in base units. `options` can turn off an onchain check
-(`assertions`, `verifyIntent`), set `allowUnapproved` (4.10), or ask for a privacy ring with
-`privacy` (4.17). Both checks are on by default. The intent never says how many transactions the
-operation takes. The matched implementation decides (4.19).
+An intent is the operation only, in base units. It always pins its implementation: the
+implementations of one interface can promise different things, such as a public transfer that
+promises the recipient's balance and a private one that cannot. `implementationsFor` (4.2) lists
+the ones that apply, and a caller can take the first. `options` can turn off an onchain check
+(`assertions`, `verifyIntent`) or set `allowUnapproved` (4.10). Both checks are on by default. The
+intent never says how many transactions the operation takes. The pinned implementation decides
+(4.19).
 
 **Plan request.**
 
@@ -926,8 +929,8 @@ service.
 | `vault.deposit`, `vault.withdraw` | `ondo-usdy-*`, through the Jupiter wrapper | remote, tier 2 |
 | `vault.deposit`, `vault.withdraw`, `vault.requestWithdrawal`, `vault.cancelRequest` | `hastra-*` | static |
 | `vault.requestDeposit` | `test-provider-deposit`, as legacy, v0 with a lookup table, and v1 | remote, tier 3 |
-| `private.transfer`, `private.shield`, `private.unshield` | `privacy-rings-transfer`, `privacy-rings-shield`, `privacy-rings-unshield`, through Privacy Rings on the surfnet | shielded, tier 2 |
-| `private.transfer` | `privacy-rings-shield-and-transfer`: shield when the private balance is short, then transfer | flow |
+| `token.transfer`, `private.shield`, `private.unshield` | `privacy-rings-transfer`, `privacy-rings-shield`, `privacy-rings-unshield`, through Privacy Rings on the surfnet | shielded, tier 2 |
+| `token.transfer` | `privacy-rings-shield-and-transfer`: shield, then transfer privately | flow |
 
 The e2e also compiles a plan of instructions alone as legacy, v0, and v1, and refuses a remote
 endpoint that adds a token approval to an attacker.
@@ -1223,7 +1226,7 @@ workspace's versions.
    instructions of the pool, in that order, so the account sources and segments of a static recipe
    apply to them. The extension holds the protocol, the counts, and the circuit's id.
    `solana.org/privacy-rings-confidential@1.0.0` is the circuit that every Privacy Rings recipe names.
-2. `private.shield`, `private.transfer`, and `private.unshield` have Privacy Rings
+2. `token.transfer`, `private.shield`, and `private.unshield` have Privacy Rings
    implementations, for SOL and SPL tokens. A mint needs its SPL interface in the pool. An SPL
    withdrawal pays the recipient's associated token account. When it is missing, the wallet creates
    it idempotently before the spend, paid by the rent payer, and the planner accepts exactly that
@@ -1308,7 +1311,7 @@ one transaction. `verify_intent` refuses a `flow` recipe and checks each step's 
 
 | Step field | Meaning |
 | :-- | :-- |
-| `intent` | The interface, an optional implementation, and the inputs. Without an implementation, the planner matches one with `applies`. |
+| `intent` | The interface, the pinned implementation, and the inputs. A step pins its implementation as any intent does (4.1). |
 | `ready` | The step can start. Absent means at once. |
 | `done` | The step's effect is on chain. A step is also done when its planned transaction lands. |
 | `recover` | The intent that returns the owner's funds when the flow stops after this step |
@@ -1409,10 +1412,10 @@ debug or audit.
 {
   "v": 1,
   "request": { "spec": "sdp-intents@1.0", "kind": "plan", "payers": { "…": "…" }, "intents": [{ "…": "…" }] },
-  "pins": ["solana.org/ring-vault-deposit@1.0.0", "solana.org/privacy-rings-request@1.0.0", "solana.org/kamino-deposit@1.0.0"],
+  "pins": ["solana.org/privacy-rings-shield-and-transfer@1.0.0", "solana.org/privacy-rings-shield@1.0.0", "solana.org/privacy-rings-transfer@1.0.0"],
   "steps": {
-    "request": {
-      "plan": { "nullifiers": ["…"], "notes": ["…"], "outputs": { "note": "…" } },
+    "transfer": {
+      "plan": { "nullifierAccounts": ["…"] },
       "planned": { "step": { "…": "the sign step, as next returned it" }, "expires": { "blockHeight": "289104452" }, "signatures": ["5Kd…"] }
     }
   }
@@ -1439,7 +1442,7 @@ flow, and every step still plans from the chain and passes the signer's verifier
 | `POST /v1/intents/recover` | `{ owner }` | Each stopping point that the owner's keys find, with its `recover` intent |
 
 ```json
-{ "kind": "build", "step": "transfer", "spend": { "protocol": "privacy-rings", "spender": "…", "source": "notes", "feePayer": "…", "notes": [{ "owner": "…", "asset": "…", "amount": "250000000", "data": "" }] } }
+{ "kind": "build", "step": "transfer", "spend": { "protocol": "privacy-rings", "circuit": { "…": "…" }, "spender": "…", "notes": [{ "owner": "…", "asset": "…", "amount": "250000000", "data": "" }], "deposits": [], "withdrawals": [], "pool": "…", "feePayer": "…", "rentPayer": "…" } }
 { "kind": "sign", "land": "inOrder", "steps": [{ "signs": "transaction", "message": "…", "transaction": { "…": "…" } }] }
 { "kind": "send", "land": "inOrder", "transactions": ["<base64 wire transaction>"] }
 { "kind": "wait", "step": "claim",

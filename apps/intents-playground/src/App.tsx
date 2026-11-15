@@ -139,6 +139,7 @@ export function App() {
               wallets={localWallets}
               feePayer={payer}
               candidates={candidates}
+              implementation={selectedImplementation}
               candidatesError={matches.error === null ? null : describe(matches.error)}
               selected={selected}
               onValue={(name, value) =>

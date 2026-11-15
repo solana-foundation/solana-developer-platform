@@ -1,7 +1,7 @@
 // What the e2e run and the playground setup share: the surfnet's RPC, keypair files, the CLI, and
 // the mainnet addresses that the flows use.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
@@ -87,4 +87,11 @@ export function keypair(folder, name, { keep = false } = {}) {
 
 export function cli(...args) {
   return execFileSync(CLI, args, { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
+}
+
+/// The CLI's exit status and both outputs, for a command that is expected to fail.
+export function cliOutcome(...args) {
+  const run = spawnSync(CLI, args, { cwd: ROOT, encoding: "utf8" });
+
+  return { status: run.status, stdout: run.stdout, stderr: run.stderr };
 }

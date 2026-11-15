@@ -86,5 +86,9 @@
         ]
       }
     ]
-  }
+  },
+  "postConditions": [
+    { "inflow": { "to": "{inputs.to}", "mint": "{inputs.mint}", "min": "{inputs.amount}" },
+      "message": "{inputs.to} receives at least {inputs.amount} of {inputs.mint}" }
+  ]
 }
