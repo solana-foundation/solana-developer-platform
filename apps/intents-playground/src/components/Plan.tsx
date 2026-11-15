@@ -35,7 +35,7 @@ export function AddressRow({
 
 export function StepRows({ step, recipe }: { step: SignStep; recipe: Recipe | null }) {
   const transaction = step.transaction;
-  const tiers = step.message.match(/\| tier (\d)/g)?.map((tier) => tier.slice(-1));
+  const checks = step.message.match(/(not checked onchain|checked onchain: [a-z ]+)/g);
   const instructions =
     step.instructions === undefined
       ? recipe === "shielded" || recipe === "flow"
@@ -52,7 +52,7 @@ export function StepRows({ step, recipe }: { step: SignStep; recipe: Recipe | nu
         label="Signers"
         value={step.signers.map((signer) => shortAddress(signer.address)).join(", ")}
       />
-      <Row label="Tier" value={tiers?.join(", ") ?? "1"} />
+      <Row label="Onchain" value={checks?.join("; ") ?? "not checked onchain"} />
       {transaction !== undefined && (
         <Row label="Transaction version" value={String(transaction.version)} />
       )}

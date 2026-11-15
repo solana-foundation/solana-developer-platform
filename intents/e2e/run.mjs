@@ -460,7 +460,10 @@ try {
     ]),
     [payer, sender],
   );
-  expect(deposit.message.includes("| endpoint: http://127.0.0.1:8791/jupiter | tier 2 |"), "the message names the endpoint and tier 2");
+  expect(
+    deposit.message.includes("| built by http://127.0.0.1:8791/jupiter, checked onchain: programs and guarantees"),
+    "the message names who built the instructions and what the chain checks",
+  );
   const usdyGained = (await tokenAmount(sender.address, USDY)) - usdyBefore;
   expect(usdyGained >= 80_000_000n, `the sender holds ${usdyGained} more USDY, at least 80 USDY`);
 
@@ -512,7 +515,7 @@ try {
     ),
     [payer, sender],
   );
-  expect(requested.message.includes("| settles later, outside this transaction |"), "the message says the request settles later");
+  expect(requested.message.includes(" | settles later ||"), "the message says the request settles later");
   const wylds = await rpc("getTokenAccountsByOwner", [sender.address, { mint: WYLDS }, { encoding: "jsonParsed" }]);
   const delegated = wylds.value[0].account.data.parsed.info;
   expect(delegated.delegatedAmount?.amount === "50000000", `Hastra may take 50 wYLDS (${delegated.delegate})`);
@@ -552,7 +555,7 @@ try {
     "starting a request with a deprecated implementation warns the caller",
   );
   const provided = await run("provider-deposit", providerRequest, [payer, sender]);
-  expect(provided.message.includes("tier 3, checked by simulation only | onchain checks: none"), "the message names tier 3");
+  expect(provided.message.includes(", not checked onchain, only simulated"), "the message says nothing onchain checks it");
   expect(provided.transaction.presigned.length === 1, "the provider signed for its order account");
   expect((await tokenAmount(PROVIDER_WALLET, USDC)) - walletBefore === 10_000_000n, "the provider's wallet received 10 USDC");
 
@@ -627,7 +630,7 @@ try {
   const signing = await service("/v1/intents/continue", JSON.stringify({ progress: transferStarted.progress, built }));
   const shielded = signing.next.steps[0];
   expect(
-    shielded.message.includes("| shielded | tier 2 | onchain checks: verify_intent, assertions"),
+    shielded.message.includes("| a private spend, checked onchain: programs and guarantees"),
     "the shielded spend runs with verify_intent and the assertions",
   );
   expect(await typescriptProves(shielded.transaction.messageBytes, shielded), "the verifier proves the spend's message");

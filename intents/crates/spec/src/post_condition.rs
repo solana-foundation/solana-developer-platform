@@ -15,6 +15,8 @@ wire_code! {
         Delegates = 6,
         /// The owner's token accounts of a mint have no delegate.
         NoDelegate = 7,
+        /// `from` sends none of the mint: an outflow bounded at zero. `args` are `from` and `mint`.
+        NoOutflow = 8,
     }
 }
 

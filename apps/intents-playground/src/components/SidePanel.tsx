@@ -221,7 +221,7 @@ function ImplementationTab({
           <Row
             key={entry.version}
             label={`Version ${entry.version}`}
-            value={`tier ${entry.tier}, ${entry.removed ? "removed" : entry.approved ? "approved" : "not approved"}`}
+            value={`${CHECKED[entry.tier] ?? "unknown checks"}, ${entry.removed ? "removed" : entry.approved ? "approved" : "not approved"}`}
           />
         ))}
       </div>
@@ -245,3 +245,10 @@ function ImplementationTab({
     </>
   );
 }
+
+/// What the chain checks of an implementation, by the registry's trust tier.
+const CHECKED: Record<number, string> = {
+  1: "instructions rebuilt onchain",
+  2: "guarantees checked onchain",
+  3: "only simulated",
+};

@@ -38,6 +38,10 @@
   },
   "postConditions": [
     {
+      "noOutflow": { "from": "{inputs.from}", "mint": "{inputs.mint}" },
+      "message": "{inputs.from} sends none of {inputs.mint} from its public balance"
+    },
+    {
       "invokesOnly": [
         "ring1GaLCuJnkUMVkX2JeZLTTX17wKsV4fZmPVzXANW"
       ],

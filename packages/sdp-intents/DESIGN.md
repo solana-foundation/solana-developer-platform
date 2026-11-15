@@ -314,7 +314,7 @@ transaction with the message that it proves. The design calls a step's content a
   "land": "inOrder",
   "steps": [{
     "signs": "transaction",
-    "message": "transfer 100 of 2b1kV6… from 7xKX… to 9aBc… || intents on mainnet | expires 2026-11-15T11:42:10Z | fee and rent payer KoRa… | priority fee 5000 lamports || interface solana.org/token.transfer@1.0.0 | implementation solana.org/token-2022-transfer@1.0.0 | tier 1 | onchain checks: verify_intent, assertions | rent cap 2039280 lamports",
+    "message": "transfer 100 of 2b1kV6… from 7xKX… to 9aBc… || intents on mainnet | expires 2026-11-15T11:42:10Z | paid by KoRa… | priority fee 0.000005 SOL || solana.org/token-2022-transfer@1.0.0 for token.transfer@1.0.0 | checked onchain: instructions and guarantees | rent up to 0.00203928 SOL",
     "intents": [{ "display": "Send 100 PYUSD to 9aBc…", "digests": { "…": "…" }, "builder": { "program": "2gMF…" }, "verify": 0, "span": { "start": 2, "end": 4 } }],
     "signers": [{ "address": "KoRa…", "role": "payer:fee" }, { "address": "7xKX…", "role": "input:from" }],
     "priorityFeeLamports": "5000",
@@ -329,8 +329,14 @@ transaction with the message that it proves. The design calls a step's content a
 1. `message` is what the signer reads, and what the transaction proves. The signer signs the
    transaction, not the message, except on the rails of the table above. The message starts with
    what each intent does: its implementation's template. Then come the cluster, the expiry, the
-   payers, the priority fee, and a bundle's tip. Each intent's details close it: the ids, the tier,
-   the onchain checks, and the rent cap. With more than one intent, each outcome and each detail
+   payers, the priority fee when it is not zero, and a bundle's tip. Each intent's details close
+   it: the implementation's id, the interface's id without an organization that the two share, who
+   built the instructions when the registry did not, what the chain checks, and the most rent the
+   rent payer spends, in SOL. The checks read `checked onchain: instructions and guarantees` when
+   `verify_intent` rebuilds the instructions and the assertions hold the guarantees, `programs` in
+   place of `instructions` when an endpoint or the spender built them, and `not checked onchain,
+   only simulated` with both checks off. The message never says "tier", because a signer reads it
+   without knowing the system. With more than one intent, each outcome and each detail
    starts with `<n>: `, and `||` separates them. The flow part (design only) is
    `flow: <id>@<version> step <i> of <n>: <the flow's message>`.
 2. `expires` is a UTC time, from the plan request's `validForSeconds` (default 60) after the
@@ -628,7 +634,7 @@ accounts that each recipe reads. It takes a message or a transaction of any vers
 `@sdp/intents-verifier` runs the same verifier in TypeScript, compiled to WebAssembly, against the
 signer's own RPC. It takes a message. A legacy or v0 fee is the unit price times the limit, rounded
 up. Each instruction outside every span shows as unverified. An intent with `verifyIntent` off has
-no onchain form, and its part says `onchain checks: none`.
+no onchain form, and its part says `not checked onchain, only simulated`.
 
 **Limits.**
 
@@ -756,7 +762,7 @@ so its bytes do not change.
 | `ValueRefV1` source | `0` none, `1` input, `2` output, `3` payer (`0` fee, `1` rent), `4` account, `5` address, `6` literal, `7` builder bumps |
 | Account source | `1` value, `2` static, `3` PDA, `4` ATA, `5` has one |
 | Segment source | `1` literal, `2` reference, `3` account bytes |
-| Check | `1` outflow, `2` inflow, `3` `noOtherOutflows`, `4` `noAuthorityChange`, `5` `invokesOnly`, `6` `delegates`, `7` `noDelegate` |
+| Check | `1` outflow, `2` inflow, `3` `noOtherOutflows`, `4` `noAuthorityChange`, `5` `invokesOnly`, `6` `delegates`, `7` `noDelegate`, `8` `noOutflow` (an outflow bounded at zero) |
 | Recipe | `1` static, `2` program, `3` remote instructions, `4` remote transaction, `5` shielded, `6` flow (not built) |
 | Value type | `1` to `10` integers, `11` bool, `12` address, `13` mint, `14` string, `15` bytes, `0x80` plus a code for an array |
 
@@ -1065,8 +1071,9 @@ the whole message, so the plan keeps it as it is:
 | 2 | Remote instructions, shielded | Lighthouse asserts the postconditions, and `verify_intent` limits the programs |
 | 3 | Remote transaction | Only a simulation, by the service and by the signer |
 
-The message names each part's tier. `prepare` refuses a tier 3 implementation unless the intent turns both
-onchain checks off, so the weaker trust is the caller's explicit choice.
+The message states each part's trust in words: who built the instructions, and what the chain
+checks (4.1). `prepare` refuses a tier 3 implementation unless the intent turns both onchain checks
+off, so the weaker trust is the caller's explicit choice.
 
 ### 4.17 Private intents through privacy rings
 
@@ -1391,6 +1398,25 @@ place in the flow (4.6), and a wallet can run the whole flow onchain after one a
 A builder or an endpoint only picks the next step. It signs nothing and moves nothing. The planner
 plans each returned intent as any other, and the step must name `recover`.
 
+**Guarantees.** A flow's guarantees, its interface's and its own, must follow from its steps'.
+Each step's transaction enforces the step's guarantees onchain, so a flow guarantee that the steps
+imply holds at every point where the flow can stop. The compiler refuses a flow whose steps do
+not imply it, and the service checks the exact versions that a request pins again before the flow
+starts. The check runs on the binary documents (`check_flow_guarantees` in `spec`):
+
+1. An outflow bound holds when the steps' bounds on the same account and mint add up to at most
+   the flow's. A bound that names a flow input takes one step's whole bound, and the others must
+   be zero. A step with no bound on the mint contributes zero only when it states
+   `noOtherOutflows` for the account.
+2. `noOtherOutflows`, `noAuthorityChange`, and `noDelegate` hold when every step states them, and
+   `noOtherOutflows` also needs each step's other outflows to fall under one of the flow's.
+3. A recovery counts as a step, because it can run after any step. Each one pins its
+   implementation, and its tier counts in the flow's worst tier.
+4. A flow cannot state an inflow: a flow that stops after its first step has not received it.
+
+`privacy-rings-shield-and-transfer` passes because the shield sends at most the amount and the
+private transfer states `noOutflow`: it sends none of the mint from the sender's public balance.
+
 **Rules.**
 
 1. **Recoverable and discoverable.** At each stopping point, the owner holds the funds, or a
@@ -1409,9 +1435,10 @@ plans each returned intent as any other, and the step must name `recover`.
    An unapproved or removed version stops the flow, and `recover` still works.
 
 **Message and approvals.** The flow's message states the outcome, the number of steps and
-approvals, the worst tier of its steps, and each stopping point:
-`deposit 100 USDC into Acme by request, then claim the shares | 2 steps, 2 approvals | tier 1 |
-if stopped after step 1: cancel the request to get the 100 USDC back`. Each step's message
+approvals, what the chain checks of its weakest step, and each stopping point:
+`deposit 100 USDC into Acme by request, then claim the shares | 2 steps, 2 approvals | checked
+onchain: instructions and guarantees | if stopped after step 1: cancel the request to get the 100
+USDC back`. Each step's message
 starts with the flow part of 4.1, so a signer of step 2 sees the flow that it continues. A program
 or remote flow names its builder or endpoint instead, because its steps are not known at the
 start.
@@ -1578,7 +1605,7 @@ transaction over any RPC.
 3. The code of `verify_intent` and Lighthouse.
 4. Outputs, which trust the recipe.
 5. Tier 3, and an intent with the onchain checks off. Only the simulation checks them, and the
-   message says `onchain checks: none`, so the signer sees the choice.
+   message says `not checked onchain, only simulated`, so the signer sees the choice.
 
 **Keys.** The service holds no key and calls no key holder. A shielded step's spend comes from the
 caller's own wallet or custody, in `built`. The wallet verifies the transaction itself, and signs a
@@ -1685,12 +1712,12 @@ Not built:
    anonymous rail, the browser verifier's check of a shielded statement, and a check at `publish`
    that a recipe's circuit exists.
 7. The postconditions and clusters that SDP's other modules need (4.18).
-8. Of flows (4.19): program and remote flows, `recover` (its implementation is not pinned, so
-   its tier is not bounded yet), step inputs from earlier steps' outputs, the `data`, `balance`,
-   and `committed` conditions, named terminal outcomes, the recoverable check, the flow part of
-   each step's message, a check of the flow's own postconditions, which no step proves now,
-   packing several intents into several transactions, Jito bundles, `check_intent`,
-   `execute_step`, and `verify_intent`'s check of a step's flow.
+8. Of flows (4.19): program and remote flows, running `recover`, step inputs from earlier steps'
+   outputs, the `data`, `balance`, and `committed` conditions, named terminal outcomes, the
+   recoverable check, the flow part of each step's message, the signer's check that each step it
+   signs is a step of the flow that it started, packing several intents into several
+   transactions, Jito bundles, `check_intent`, `execute_step`, and `verify_intent`'s check of a
+   step's flow.
 9. A limit on the spends that the local wallet records and never signs. It is a development
    wallet, and it keeps them in memory until it restarts.
 

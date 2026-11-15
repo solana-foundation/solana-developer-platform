@@ -5,6 +5,7 @@
 
 mod conditions;
 mod flow;
+mod guarantees;
 mod progress;
 
 use std::collections::BTreeMap;
@@ -496,10 +497,12 @@ async fn pins(service: &Service, progress: &Progress) -> Result<Vec<Pin>, Servic
 
     let step_ranges: Vec<(IndexKind, String)> = flow
         .iter()
-        .flat_map(|step| {
+        .flat_map(|step| [Some(&step.intent), step.recover.as_ref()])
+        .flatten()
+        .flat_map(|intent| {
             [
-                (IndexKind::Interface, Some(step.intent.interface.clone())),
-                (IndexKind::Implementation, step.intent.implementation.clone()),
+                (IndexKind::Interface, Some(intent.interface.clone())),
+                (IndexKind::Implementation, intent.implementation.clone()),
             ]
         })
         .filter_map(|(kind, range)| Some((kind, range?)))
@@ -507,6 +510,7 @@ async fn pins(service: &Service, progress: &Progress) -> Result<Vec<Pin>, Servic
     let step_pins = exact_all(service, &step_ranges).await?;
 
     check_step_tiers(&request_pins, &step_pins)?;
+    guarantees::check_pinned(service, &request_pins, &step_pins).await?;
 
     Ok(request_pins.into_iter().chain(step_pins).collect())
 }

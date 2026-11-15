@@ -108,6 +108,7 @@ impl ConditionValues<'_, '_> {
                 max: self.integer(third?)?,
             },
             CheckKind::NoDelegate => Condition::NoDelegate { from: address(first)?, mint: address(second)? },
+            CheckKind::NoOutflow => Condition::Outflow { from: address(first)?, mint: address(second)?, max: 0 },
         })
     }
 

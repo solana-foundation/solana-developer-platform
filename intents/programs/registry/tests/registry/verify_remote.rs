@@ -85,7 +85,7 @@ fn lands_an_endpoints_transfer_and_names_its_tier() {
     send_plan(&mut setup.svm, &plan, &[&setup.fee_payer, &setup.from]).unwrap();
 
     assert_eq!(setup.svm.get_balance(&setup.to.pubkey()), Some(SOL));
-    assert!(plan.message.contains(" | endpoint: https://example.invalid/transfer | tier 2 | "), "{}", plan.message);
+    assert!(plan.message.contains(" | built by https://example.invalid/transfer, checked onchain: "), "{}", plan.message);
 }
 
 /// The planner refuses an answer that cannot meet a postcondition: here no changed account can
@@ -221,7 +221,7 @@ mod frozen {
         assert_eq!(plan.transaction.instructions, [transfer]);
         assert_eq!(plan.frozen.map(|frozen| frozen.message), Some(vec![1]));
         assert!(
-            plan.message.contains("| tier 3, checked by simulation only | onchain checks: none"),
+            plan.message.contains("| built and signed by https://example.invalid/transfer, not checked onchain, only simulated"),
             "{}",
             plan.message
         );

@@ -2,7 +2,7 @@ use core::ops::Range;
 
 use sdp_intents_engine::{Chain, Payers, Recipe};
 use sdp_intents_spec::builder::Ready;
-use sdp_intents_spec::{Address, RecipeKind, ValueRef, ValueSource};
+use sdp_intents_spec::{Address, Implementation, IntentOptions, RecipeKind, ValueRef, ValueSource};
 
 use crate::render::{base58, Column};
 use crate::time::utc_time;
@@ -50,6 +50,30 @@ pub struct Digests {
     pub implementation: [u8; 32],
 }
 
+/// Who built the instructions, when the registry did not, and what the chain checks, in words a
+/// signer reads without knowing the system: `checked onchain: instructions and guarantees` when
+/// `verify_intent` rebuilds the instructions and the assertions hold the guarantees. When a
+/// builder outside the registry builds them, `verify_intent` limits them to their programs.
+fn checks_text(implementation: Implementation<'_>, options: IntentOptions) -> Result<String, PlanError> {
+    let url = || printable(implementation.url()?);
+    let (built_by, rebuilt) = match implementation.recipe()? {
+        RecipeKind::Static | RecipeKind::Program => (String::new(), true),
+        RecipeKind::Remote => (format!("built by {}, ", url()?), false),
+        RecipeKind::RemoteTransaction => (format!("built and signed by {}, ", url()?), false),
+        RecipeKind::Shielded => ("a private spend, ".to_owned(), false),
+        RecipeKind::Flow => return Err(PlanError::FlowRecipe),
+    };
+    let instructions = if rebuilt { "instructions" } else { "programs" };
+    let checked = match (options.verify_intent, options.assertions) {
+        (true, true) => format!("checked onchain: {instructions} and guarantees"),
+        (true, false) => format!("checked onchain: {instructions}"),
+        (false, true) => "checked onchain: guarantees".to_owned(),
+        (false, false) => "not checked onchain, only simulated".to_owned(),
+    };
+
+    Ok(format!("{built_by}{checked}"))
+}
+
 /// The builder program of a program recipe.
 pub(crate) fn builder_program(recipe: &Recipe<'_>) -> Option<Address> {
     let implementation = recipe.implementation();
@@ -69,7 +93,7 @@ pub(crate) struct MessageHeader<'h> {
 }
 
 /// The plan message, outcome first: `<outcomes> || intents on <cluster> | expires <UTC time> |
-/// <payers> | priority fee <lamports> lamports || <details>`. With more than one intent, each
+/// paid by <payer> | priority fee <SOL> SOL || <details>`. A zero priority fee is left out. With more than one intent, each
 /// outcome and each detail starts with `<number>: `, and `||` separates them.
 pub(crate) fn plan_message(header: &MessageHeader<'_>, parts: &[MessagePart]) -> String {
     let numbered = |texts: Vec<&str>| match texts.as_slice() {
@@ -84,12 +108,20 @@ pub(crate) fn plan_message(header: &MessageHeader<'_>, parts: &[MessagePart]) ->
     });
     let expires = header.expires_at.map_or_else(String::new, |time| format!(" | expires {}", utc_time(time)));
     let payers = match header.payers.fee == header.payers.rent {
-        true => format!("fee and rent payer {}", base58(header.payers.fee)),
-        false => format!("fee payer {} | rent payer {}", base58(header.payers.fee), base58(header.payers.rent)),
+        true => format!("paid by {}", base58(header.payers.fee)),
+        false => format!("fee paid by {} | rent paid by {}", base58(header.payers.fee), base58(header.payers.rent)),
     };
-    let fee = header.priority_fee_lamports;
+    let priority_fee = match header.priority_fee_lamports {
+        0 => String::new(),
+        lamports => format!(" | priority fee {} SOL", sol(lamports)),
+    };
 
-    format!("{outcomes} || intents{cluster}{expires} | {payers} | priority fee {fee} lamports || {details}")
+    format!("{outcomes} || intents{cluster}{expires} | {payers}{priority_fee} || {details}")
+}
+
+/// Lamports as SOL, such as `0.00148844`.
+fn sol(lamports: u64) -> String {
+    crate::render::with_decimals(lamports.to_string(), Some(9))
 }
 
 /// One intent's part of the plan message: what it does, then how it is built and checked.
@@ -100,8 +132,12 @@ pub(crate) struct MessagePart {
 }
 
 impl MessagePart {
+    /// The most that the rent payer spends, in SOL. A segment that creates no account states none.
     pub(crate) fn with_rent_cap(self, rent_cap: u64) -> Self {
-        Self { details: format!("{} | rent cap {rent_cap} lamports", self.details), ..self }
+        match rent_cap {
+            0 => self,
+            _ => Self { details: format!("{} | rent up to {} SOL", self.details, sol(rent_cap)), ..self },
+        }
     }
 }
 
@@ -192,46 +228,35 @@ impl<C: Chain> Values<'_, '_, C> {
             .collect()
     }
 
-    /// The intent's part of the plan message. The outcome is the implementation's message, and the
-    /// details are `interface <id> | implementation <id> | <tier> | onchain checks: <checks>`. An id
-    /// is the organization, the name, and the version, such as `solana.org/token.transfer@1.0.0`. The
-    /// registry never publishes a version twice, so an id names one document. The segment adds the
-    /// rent cap after its first simulation.
+    /// The intent's part of the plan message. The outcome is the implementation's message. The
+    /// details are `<implementation id> for <interface id> | <who built it, and what the chain
+    /// checks>`. An id is the organization, the name, and the version, such as
+    /// `solana.org/token.transfer@1.0.0`, and the interface leaves out an organization that it shares
+    /// with the implementation. The segment adds the rent after its first simulation.
     pub(crate) fn message(&self) -> Result<MessagePart, PlanError> {
         let interface = self.recipe.interface();
         let implementation = self.recipe.implementation();
         let rendered = self.render(implementation.message()?, Column::Message)?;
-        let id = |id: &sdp_intents_spec::wire::DocumentIdV1, name: &[u8]| {
-            let version = format!("{}.{}.{}", id.version.major.get(), id.version.minor.get(), id.version.patch.get());
-
-            Ok::<_, PlanError>(format!("{}/{}@{version}", self.organization(&id.publisher)?, printable(name)?))
+        let version = |id: &sdp_intents_spec::wire::DocumentIdV1| {
+            format!("{}.{}.{}", id.version.major.get(), id.version.minor.get(), id.version.patch.get())
+        };
+        let organization = self.organization(&implementation.id().publisher)?;
+        let interface_organization = match interface.id().publisher == implementation.id().publisher {
+            true => String::new(),
+            false => format!("{}/", self.organization(&interface.id().publisher)?),
         };
 
-        let tier = match implementation.recipe()? {
-            RecipeKind::Static | RecipeKind::Program => " | tier 1".to_owned(),
-            RecipeKind::Remote => format!(" | endpoint: {} | tier 2", printable(implementation.url()?)?),
-            RecipeKind::RemoteTransaction => {
-                format!(" | endpoint: {} | tier 3, checked by simulation only", printable(implementation.url()?)?)
-            }
-            RecipeKind::Shielded => " | shielded | tier 2".to_owned(),
-            RecipeKind::Flow => return Err(PlanError::FlowRecipe),
-        };
-        let options = self.recipe.intent().options()?;
-        let checks = match (options.verify_intent, options.assertions) {
-            (true, true) => "verify_intent, assertions",
-            (true, false) => "verify_intent",
-            (false, true) => "assertions",
-            (false, false) => "none",
-        };
-
-        let settlement = if interface.settles_later() { " | settles later, outside this transaction" } else { "" };
+        let checks = checks_text(*implementation, self.recipe.intent().options()?)?;
+        let settlement = if interface.settles_later() { " | settles later" } else { "" };
 
         Ok(MessagePart {
             outcome: format!("{rendered}{settlement}"),
             details: format!(
-                "interface {} | implementation {}{tier} | onchain checks: {checks}",
-                id(interface.id(), interface.name()?)?,
-                id(implementation.id(), implementation.name()?)?,
+                "{organization}/{}@{} for {interface_organization}{}@{} | {checks}",
+                printable(implementation.name()?)?,
+                version(implementation.id()),
+                printable(interface.name()?)?,
+                version(interface.id()),
             ),
         })
     }

@@ -1,5 +1,8 @@
 use sdp_intents_spec::wire::{DocumentIdV1, DocumentKind, FlowDocV1, ImplementationDocV1, LiteralV1};
-use sdp_intents_spec::{Implementation, RecipeKind};
+use sdp_intents_spec::{
+    check_flow_guarantees, FlowDocuments, GuaranteeError, Implementation, Interface, RecipeKind, SpecError,
+    StepDocuments,
+};
 
 use super::recipe::Recipe;
 use super::Build;
@@ -46,6 +49,8 @@ impl Build<'_, '_> {
             ..ImplementationDocV1::default()
         };
 
+        let recipe_kind = recipe.kind;
+
         if recipe.kind == RecipeKind::Flow {
             let flow = FlowDocV1 {
                 steps: writer.table(&self.steps),
@@ -65,14 +70,74 @@ impl Build<'_, '_> {
         let bytes = writer.finish(&ImplementationDocV1 { header, ..fixed });
         limits::check(self.sink, "", "bytes in the document", bytes.len(), limits::DOCUMENT_BYTES);
 
-        if let Err(error) = Implementation::parse(&bytes) {
-            self.sink.push(Diagnostic::new(
+        match Implementation::parse(&bytes) {
+            Ok(compiled) if recipe_kind == RecipeKind::Flow => self.check_flow_guarantees(compiled, implements),
+            Ok(_) => {}
+            Err(error) => self.sink.push(Diagnostic::new(
                 Code::Internal,
                 "",
                 format!("the compiled implementation does not parse: {error}"),
-            ));
+            )),
         }
 
         self.sink.is_empty().then_some(bytes)
     }
+
+    /// A flow's guarantees must follow from its steps', at the versions that the catalog holds.
+    /// The service checks the versions that a request pins again before it starts.
+    fn check_flow_guarantees(&mut self, flow: Implementation<'_>, implements: &InterfaceMatch<'_>) {
+        let Ok(interface) = Interface::parse(&implements.interface.bytes) else { return };
+        let flow_documents = FlowDocuments { interface, flow };
+
+        match flow_step_documents(flow, &self.step_documents).map(|steps| check_flow_guarantees(flow_documents, &steps))
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(GuaranteeError::Unproved { condition })) => self.sink.push(
+                Diagnostic::new(
+                    Code::InvalidValue,
+                    "/recipe/steps",
+                    format!("the steps do not guarantee `{}`", guarantee_text(flow_documents, condition)),
+                )
+                .help("each step's guarantees must bound the flow's: their outflows add up to at most the flow's"),
+            ),
+            Ok(Err(GuaranteeError::Inflow { .. })) => self.sink.push(Diagnostic::new(
+                Code::InvalidValue,
+                "/postConditions",
+                "a flow cannot guarantee an inflow, because a flow that stops after a step has not received it",
+            )),
+            Ok(Err(error)) => self.sink.push(Diagnostic::new(Code::Internal, "/recipe/steps", format!("{error:?}"))),
+            Err(error) => self.sink.push(Diagnostic::new(Code::Internal, "/recipe/steps", error.to_string())),
+        }
+    }
+}
+
+/// Each step's and each recovery's documents, with the inputs that the flow binds to them.
+fn flow_step_documents<'a>(
+    flow: Implementation<'a>,
+    compiled: &'a [super::flow::StepCompiled<'_>],
+) -> Result<Vec<StepDocuments<'a>>, SpecError> {
+    let mut documents = compiled.iter();
+    let mut next = |inputs| {
+        let step = documents.next().ok_or(SpecError::BadIndex)?;
+
+        Ok::<_, SpecError>(StepDocuments {
+            interface: Interface::parse(&step.interface.bytes)?,
+            implementation: Implementation::parse(&step.implementation.bytes)?,
+            inputs,
+        })
+    };
+
+    flow.steps()?.iter().try_fold(Vec::new(), |mut steps, step| {
+        steps.push(next(flow.step_inputs(step)?)?);
+
+        if !step.recover.is_empty() {
+            steps.push(next(flow.recover_inputs(step)?)?);
+        }
+
+        Ok(steps)
+    })
+}
+
+fn guarantee_text(flow: FlowDocuments<'_>, condition: usize) -> String {
+    String::from_utf8_lossy(flow.guarantee_message(condition).unwrap_or_default()).into_owned()
 }

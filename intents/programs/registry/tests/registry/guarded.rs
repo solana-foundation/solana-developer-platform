@@ -77,7 +77,7 @@ fn verifies_a_sol_transfer_with_the_default_checks() {
     let plan = plan(&setup, "system-transfer", &Address::default(), 2 * SOL, &setup.fee_payer.pubkey()).unwrap();
 
     assert_eq!(lighthouse_count(&plan), 5);
-    assert!(plan.message.contains(" | onchain checks: verify_intent, assertions | rent cap 890880 lamports"));
+    assert!(plan.message.ends_with(" | checked onchain: instructions and guarantees | rent up to 0.00089088 SOL"));
 
     let sent = send_plan(&mut setup.svm, &plan, &[&setup.fee_payer, &setup.from]).unwrap();
     let units = units_consumed(&sent.logs, &registry::ID).unwrap();
@@ -102,7 +102,9 @@ fn verifies_a_token_transfer_that_its_sender_pays_for() {
     // Rule 3 adds the sender's token account: its owner, delegate, and close authority. The inflow
     // adds an assertion on the recipient's new token account.
     assert_eq!(lighthouse_count(&plan), 9);
-    assert!(plan.message.ends_with(&format!(" | rent cap {rent} lamports")), "{}", plan.message);
+    let rent_sol = format!("0.{rent:09}");
+    let rent_sol = rent_sol.trim_end_matches('0');
+    assert!(plan.message.ends_with(&format!(" | rent up to {rent_sol} SOL")), "{}", plan.message);
     assert_eq!(verify(&setup.svm, &plan.transaction).unwrap().message, plan.message);
 
     let sent = send_plan(&mut setup.svm, &plan, &[&setup.from]).unwrap();

@@ -2423,6 +2423,7 @@ dependencies = [
  "sdp-intents-lighthouse",
  "sdp-intents-registry-client",
  "sdp-intents-spec",
+ "serde_json",
  "sha2 0.11.1",
 ]
 

@@ -3,6 +3,7 @@
 
 mod account;
 mod flow;
+mod guarantees;
 mod payload;
 mod segment;
 mod shielded;
@@ -15,6 +16,7 @@ pub use flow::{
     ConditionKind, ConditionV1, DocumentRefV1, FlowDocV1, StepInputV1, StepV1, StepValue, Submitter, NO_CONDITION,
     STEP_FACT_NULLIFIERS,
 };
+pub use guarantees::{check_flow_guarantees, FlowDocuments, GuaranteeError, StepDocuments};
 pub use segment::Segment;
 pub use shielded::{ShieldedDocV1, ShieldedEntry, ShieldedProtocol};
 pub use view::Implementation;

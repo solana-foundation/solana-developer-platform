@@ -12,7 +12,7 @@
     { "value": "{inputs.vault}", "equals": "GArhnnDj3GYhmQeApKVXaRv4TQFwhPcs3SNF6FXsTeXq" },
     { "value": "{inputs.asset}", "equals": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" }
   ],
-  "message": "request that the test provider mint {outputs.shareMint} for {inputs.amount} of {inputs.asset} from {inputs.owner}. The provider mints later, with no deadline, and nothing in this transaction makes it mint",
+  "message": "request that the test provider mint {outputs.shareMint} for {inputs.amount} of {inputs.asset} from {inputs.owner}. The provider mints with no deadline, and nothing here makes it mint",
   "recipe": {
     "kind": "remote",
     "url": "http://127.0.0.1:8792/deposit",

@@ -245,6 +245,7 @@ impl<'v, 'a> Verification<'v, 'a> {
                 Ok(self.delegates(&address(first)?, &address(second)?, Some(&to), max))
             }
             CheckKind::NoDelegate => Ok(self.delegates(&address(first)?, &address(second)?, None, 0)),
+            CheckKind::NoOutflow => Ok(self.outflow(&address(first)?, &address(second)?) == 0),
         }
     }
 
@@ -366,15 +367,18 @@ impl<'v, 'a> Verification<'v, 'a> {
         let conditions = self.conditions()?;
         let bounds = conditions
             .iter()
-            .filter(|condition| condition.check.check == u8::from(CheckKind::Outflow))
+            .filter(|condition| {
+                [u8::from(CheckKind::Outflow), u8::from(CheckKind::NoOutflow)].contains(&condition.check.check)
+            })
             .map(|condition| {
                 let [owner, mint, max] = condition.check.args.map(ValueRef::try_from);
                 let names_sol = self.values.address(owner?, condition.table)? == *from
                     && self.values.address(mint?, condition.table)? == Address::default();
 
-                match names_sol {
-                    true => Ok(Some(u64::try_from(self.values.integer(max?)?).unwrap_or(u64::MAX))),
-                    false => Ok(None),
+                match (names_sol, condition.check.check == u8::from(CheckKind::NoOutflow)) {
+                    (false, _) => Ok(None),
+                    (true, true) => Ok(Some(0)),
+                    (true, false) => Ok(Some(u64::try_from(self.values.integer(max?)?).unwrap_or(u64::MAX))),
                 }
             })
             .collect::<Result<Vec<Option<u64>>, PlanError>>()?;

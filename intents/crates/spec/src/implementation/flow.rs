@@ -86,6 +86,8 @@ pub struct StepV1 {
     pub done: u8,
     /// Empty when the step leaves nothing to recover.
     pub recover: DocumentRefV1,
+    /// The implementation that recovers, pinned as a step's is. Empty exactly when `recover` is.
+    pub recover_implementation: DocumentRefV1,
     pub recover_inputs: RangeV1,
     pub submitter: u8,
 }
@@ -199,11 +201,12 @@ impl<'a> Implementation<'a> {
         if step.interface.is_empty()
             || step.implementation.is_empty()
             || (step.recover.is_empty() && step.recover_inputs.count > 0)
+            || step.recover.is_empty() != step.recover_implementation.is_empty()
         {
             return Err(SpecError::BadRecipe);
         }
 
-        [step.interface, step.implementation, step.recover]
+        [step.interface, step.implementation, step.recover, step.recover_implementation]
             .iter()
             .try_for_each(|document| self.text(document.name).map(|_| ()))?;
 
@@ -275,7 +278,7 @@ mod tests {
     fn entry_layouts_are_pinned() {
         assert_eq!(size_of::<FlowDocV1>(), 10);
         assert_eq!(size_of::<DocumentRefV1>(), 74);
-        assert_eq!(size_of::<StepV1>(), 233);
+        assert_eq!(size_of::<StepV1>(), 307);
         assert_eq!(size_of::<ConditionV1>(), 11);
         assert_eq!(size_of::<StepInputV1>(), 6);
     }

@@ -120,7 +120,7 @@ fn shortened(text: &str) -> String {
 }
 
 /// `100000000` with 6 decimals is `100`, and `1500000` is `1.5`.
-fn with_decimals(digits: String, decimals: Option<u8>) -> String {
+pub(crate) fn with_decimals(digits: String, decimals: Option<u8>) -> String {
     let Some(decimals) = decimals.map(usize::from).filter(|decimals| *decimals > 0) else {
         return digits;
     };

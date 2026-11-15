@@ -20,7 +20,7 @@ impl Document<'_, '_> {
     fn step(&self, step: &StepV1, names: &[&str]) -> Result<Value, DecompileError> {
         let intent = self.step_intent(&step.interface, &step.implementation, self.view.step_inputs(step)?)?;
         let recover = (!step.recover.is_empty())
-            .then(|| self.step_intent(&step.recover, &DocumentRefV1::default(), self.view.recover_inputs(step)?))
+            .then(|| self.step_intent(&step.recover, &step.recover_implementation, self.view.recover_inputs(step)?))
             .transpose()?;
         let submitter = match Submitter::try_from(step.submitter)? {
             Submitter::Signer => None,

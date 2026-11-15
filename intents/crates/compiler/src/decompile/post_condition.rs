@@ -24,7 +24,7 @@ struct CheckForm {
 
 /// The keys of each check, in the order that the definitions write them. `crate::post_condition`
 /// reads the same keys.
-const FORMS: [CheckForm; 7] = [
+const FORMS: [CheckForm; 8] = [
     CheckForm {
         kind: CheckKind::Outflow,
         key: "outflow",
@@ -48,6 +48,7 @@ const FORMS: [CheckForm; 7] = [
         key: "noDelegate",
         args: &[("from", Slot::Arg(0)), ("mint", Slot::Arg(1))],
     },
+    CheckForm { kind: CheckKind::NoOutflow, key: "noOutflow", args: &[("from", Slot::Arg(0)), ("mint", Slot::Arg(1))] },
 ];
 
 /// `message` is the compiled template that `condition.message` names.

@@ -32,7 +32,7 @@ enum Want {
     Amount,
 }
 
-impl Build<'_, '_> {
+impl<'c> Build<'c, '_> {
     /// `{ "steps": [ … ] }`. Every step's name is known before any step reads, so a condition can
     /// name its own step's plan.
     pub(super) fn read_flow(&mut self, object: &mut Object<'_>) -> Option<Recipe> {
@@ -82,10 +82,15 @@ impl Build<'_, '_> {
         };
 
         // A caller pins each implementation, because implementations of one interface can promise
-        // different things, so a step pins its own too.
-        if intent.implementation.is_empty() {
+        // different things, so a step and its recovery pin their own too.
+        let unpinned = [("intent", Some(&intent)), ("recover", recover.as_ref())]
+            .into_iter()
+            .filter_map(|(key, intent)| Some((key, intent?)))
+            .filter(|(_, intent)| intent.implementation.is_empty());
+
+        for (key, _) in unpinned {
             self.sink.push(
-                Diagnostic::new(Code::MissingKey, &format!("{pointer}/intent"), "the step names no implementation")
+                Diagnostic::new(Code::MissingKey, &format!("{pointer}/{key}"), "the step names no implementation")
                     .help("pin the implementation that the step runs, such as `\"implementation\": \"solana.org/system-transfer@^1\"`"),
             );
         }
@@ -101,6 +106,7 @@ impl Build<'_, '_> {
             ready: condition(ready),
             done: condition(done),
             recover: recover.interface,
+            recover_implementation: recover.implementation,
             recover_inputs: recover.inputs,
             submitter: submitter.flatten().unwrap_or(Submitter::Signer).into(),
         });
@@ -121,7 +127,12 @@ impl Build<'_, '_> {
 
         let (interface, lowest) = interface?;
         let implementation = match implementation {
-            Some(node) => self.read_pinned_implementation(&node, interface)?,
+            Some(node) => {
+                let pinned = self.read_pinned_implementation(&node, interface)?;
+                self.step_documents.push(StepCompiled { interface, implementation: pinned.compiled });
+
+                pinned.reference
+            }
             None => DocumentRefV1::default(),
         };
         let inputs = self.read_step_inputs(&inputs?, &interface.schema.inputs, position)?;
@@ -140,7 +151,7 @@ impl Build<'_, '_> {
         &mut self,
         node: &Node<'_>,
         interface: &crate::interface::CompiledInterface,
-    ) -> Option<DocumentRefV1> {
+    ) -> Option<Pinned<'c>> {
         let lowest = reported(IdRange::parse(node.str(self.sink)?), node, self.sink)?.lowest;
         let implementation = read_implementation(node, self.catalog, self.sink)?;
         let implements = implementation.implements;
@@ -170,9 +181,12 @@ impl Build<'_, '_> {
             }
         }
 
-        Some(DocumentRefV1 {
-            id: sdp_intents_spec::wire::DocumentIdV1 { version: lowest, ..implementation.document_id },
-            name: self.pool.add(implementation.id.name.as_bytes()),
+        Some(Pinned {
+            reference: DocumentRefV1 {
+                id: sdp_intents_spec::wire::DocumentIdV1 { version: lowest, ..implementation.document_id },
+                name: self.pool.add(implementation.id.name.as_bytes()),
+            },
+            compiled: implementation,
         })
     }
 
@@ -405,6 +419,19 @@ impl Build<'_, '_> {
 }
 
 /// A step's interface, its pinned implementation, and its input values.
+/// A pinned implementation, as the step names it and as the catalog compiled it.
+struct Pinned<'c> {
+    reference: DocumentRefV1,
+    compiled: &'c crate::CompiledImplementation,
+}
+
+/// The documents that a step or a recovery pins, in the order the flow reads them, so the compiled
+/// flow can prove its guarantees from them.
+pub(super) struct StepCompiled<'c> {
+    pub(super) interface: &'c crate::interface::CompiledInterface,
+    pub(super) implementation: &'c crate::CompiledImplementation,
+}
+
 #[derive(Default)]
 struct StepIntent {
     interface: DocumentRefV1,

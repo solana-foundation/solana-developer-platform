@@ -18,6 +18,10 @@ pub struct FlowStep {
     pub ready: Option<Map<String, Value>>,
     #[serde(default)]
     pub done: Option<Map<String, Value>>,
+    /// What recovers the funds when the flow stops after this step. The service does not run it
+    /// yet, and pins it as it pins the step.
+    #[serde(default)]
+    pub recover: Option<StepIntent>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

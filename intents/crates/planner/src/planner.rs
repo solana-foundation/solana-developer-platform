@@ -352,7 +352,7 @@ mod tests {
         assert_eq!(
             plan.message,
             format!(
-                "transfer 100 of {USDC} from {FROM} to {TO} || intents on mainnet | fee and rent payer {FEE_PAYER} | priority fee 5000 lamports || interface solana.org/token.transfer@1.0.0 | implementation solana.org/spl-token-transfer@1.0.0 | tier 1 | onchain checks: none | rent cap 2039280 lamports"
+                "transfer 100 of {USDC} from {FROM} to {TO} || intents on mainnet | paid by {FEE_PAYER} | priority fee 0.000005 SOL || solana.org/spl-token-transfer@1.0.0 for token.transfer@1.0.0 | not checked onchain, only simulated | rent up to 0.00203928 SOL"
             )
         );
         assert_eq!(plan.intents[0].display, format!("Send 100 {USDC} to 9WzD…AWWM"));
@@ -437,7 +437,7 @@ mod tests {
 
         assert_eq!(plan.intents[0].span, 1..3);
         assert_eq!(plan.transaction.instructions.len(), 9);
-        assert!(plan.message.contains(" | onchain checks: assertions | rent cap 2039280 lamports"));
+        assert!(plan.message.ends_with(" | checked onchain: guarantees | rent up to 0.00203928 SOL"));
     }
 
     fn builder_planner(documents: &Compiled) -> (Planner<'_>, AccountMap) {
@@ -634,10 +634,11 @@ mod tests {
         let Ok(Step::Done(plan)) = planner.next(&accounts) else { panic!("the plan is done") };
         let transfer = format!("transfer 0.25 SOL from {FROM} to {TO}");
 
-        let header = format!("intents on mainnet | fee and rent payer {FEE_PAYER} | priority fee 0 lamports");
+        let header = format!("intents on mainnet | paid by {FEE_PAYER}");
+        let details = "solana.org/system-transfer@1.0.0 for token.transfer@1.0.0 | not checked onchain, only simulated";
 
-        assert!(plan.message.starts_with(&format!("1: {transfer} || 2: {transfer} || {header} || 1: interface ")));
-        assert!(plan.message.contains(" || 2: interface "));
+        assert!(plan.message.starts_with(&format!("1: {transfer} || 2: {transfer} || {header} || 1: {details}")));
+        assert!(plan.message.contains(&format!(" || 2: {details}")));
         assert_eq!(plan.message.matches(" || ").count(), 4);
     }
 

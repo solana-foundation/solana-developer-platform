@@ -330,9 +330,9 @@ fn a_flow_takes_the_worst_tier_of_its_steps() {
     assert!(sdp_intents_spec::Implementation::parse(&untiered).is_err());
 }
 
-/// `progress` names a step by its name, so a flow refuses two steps of one name.
-#[test]
-fn a_flow_refuses_two_steps_of_one_name() {
+/// Every circuit, interface, and implementation but the flows, with `edit` applied to each
+/// implementation's text, and the text of the shield-and-transfer flow.
+fn catalog_and_flow(edit: impl Fn(&str) -> String) -> (Catalog, String) {
     let mut catalog = publishers();
     for file in files("circuits") {
         catalog.compile_circuit(&file.text).unwrap();
@@ -346,11 +346,61 @@ fn a_flow_refuses_two_steps_of_one_name() {
         files("implementations").into_iter().partition(|file| file.text.contains(r#""kind": "flow""#));
 
     for file in &others {
-        catalog.compile_implementation(&file.text).unwrap();
+        catalog.compile_implementation(&edit(&file.text)).unwrap();
     }
 
-    let flow = flows.iter().find(|file| file.path.contains("shield-and-transfer")).unwrap();
-    let renamed = flow.text.replace(r#""name": "transfer""#, r#""name": "shield""#);
+    let flow = flows.into_iter().find(|file| file.path.contains("shield-and-transfer")).unwrap();
+
+    (catalog, flow.text)
+}
+
+fn codes(report: &crate::diagnostic::Report) -> Vec<crate::diagnostic::Code> {
+    report.diagnostics.iter().map(|finding| finding.code).collect()
+}
+
+/// The shield sends at most the amount publicly, and the private transfer none of it, so together
+/// they keep the transfer's guarantee that the sender sends at most the amount.
+#[test]
+fn a_flow_compiles_only_when_its_steps_prove_its_guarantees() {
+    let (mut catalog, flow) = catalog_and_flow(str::to_owned);
+    assert!(catalog.compile_implementation(&flow).is_ok());
+
+    let unbounded = |text: &str| {
+        text.replace(
+            r#""noOutflow": { "from": "{inputs.from}", "mint": "{inputs.mint}" },"#,
+            r#""noOtherOutflows": { "from": "{inputs.from}" },"#,
+        )
+    };
+    let (mut catalog, flow) = catalog_and_flow(unbounded);
+    let report = catalog.compile_implementation(&flow).unwrap_err();
+
+    assert!(report.diagnostics.iter().any(|finding| finding.message.contains("the steps do not guarantee")));
+}
+
+/// A flow that stops after its first step has received nothing, so it cannot promise an inflow.
+#[test]
+fn a_flow_cannot_guarantee_an_inflow() {
+    let (mut catalog, flow) = catalog_and_flow(str::to_owned);
+    let inflow = flow.replacen(
+        r#""recipe": {"#,
+        r#""postConditions": [{ "inflow": { "to": "{inputs.to}", "mint": "{inputs.mint}", "min": "{inputs.amount}" }, "message": "the recipient receives the amount" }],
+  "recipe": {"#,
+        1,
+    );
+    let report = catalog.compile_implementation(&inflow).unwrap_err();
+
+    assert!(
+        report.diagnostics.iter().any(|finding| finding.message.contains("cannot guarantee an inflow")),
+        "{:?}",
+        codes(&report)
+    );
+}
+
+/// `progress` names a step by its name, so a flow refuses two steps of one name.
+#[test]
+fn a_flow_refuses_two_steps_of_one_name() {
+    let (mut catalog, flow) = catalog_and_flow(str::to_owned);
+    let renamed = flow.replace(r#""name": "transfer""#, r#""name": "shield""#);
     let report = catalog.compile_implementation(&renamed).unwrap_err();
 
     assert!(report.diagnostics.iter().any(|finding| finding.code == crate::diagnostic::Code::DuplicateName));

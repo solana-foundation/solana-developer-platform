@@ -26,7 +26,7 @@ struct Check {
     args: &'static [(&'static str, Want)],
 }
 
-const CHECKS: [Check; 7] = [
+const CHECKS: [Check; 8] = [
     Check {
         key: "outflow",
         kind: CheckKind::Outflow,
@@ -46,6 +46,7 @@ const CHECKS: [Check; 7] = [
         args: &[("from", Want::Address), ("mint", Want::Mint), ("max", Want::Amount), ("to", Want::Address)],
     },
     Check { key: "noDelegate", kind: CheckKind::NoDelegate, args: &[("from", Want::Address), ("mint", Want::Mint)] },
+    Check { key: "noOutflow", kind: CheckKind::NoOutflow, args: &[("from", Want::Address), ("mint", Want::Mint)] },
 ];
 
 /// Where post conditions write their text and their program addresses.
