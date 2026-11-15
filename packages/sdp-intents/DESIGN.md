@@ -233,10 +233,10 @@ The first instruction creates the destination ATA when it does not exist. The se
   "rpcCalls": { "getMultipleAccounts": 1, "simulateTransaction": 0, "getLatestBlockhash": 1 } }
 ```
 
-`start` and `continue` each run `prepare`, which plans the next step. `next` is what the caller does now. `progress` is a JSON object that the caller stores and sends
-back unchanged. Each answer replaces it whole, and the caller never edits it (4.19). An intent of one
-transaction is a flow of one step, so its first `next` is a sign of that one step. `rpcCalls` counts
-the requests of this call only (4.4).
+`start` and `continue` each run `prepare`, which plans the next step. `next` is what the caller
+does now. The caller stores `progress` and sends it back unchanged, and each answer replaces it
+whole (4.19). An intent of one transaction is a flow of one step. `rpcCalls` counts the requests of
+this call only (4.4).
 
 **The loop.** Every caller runs the same loop, for one transaction or many:
 
@@ -257,9 +257,9 @@ stateDiagram-v2
 
 | `next.kind` | The caller | Then calls |
 | :-- | :-- | :-- |
-| `build` | Asks its own wallet or custody to build `spend`, a shielded spend that only the spender's keys can build | `POST /v1/intents/continue` with `{ progress, built }` |
+| `build` | Asks its own wallet or custody to build `spend`, a shielded statement that only the spender's keys can build (4.17) | `POST /v1/intents/continue` with `{ progress, built }` |
 | `sign` | For each of `steps`: renders `message` from the transaction with its own verifier (4.6), shows it, and signs what `signs` names. Sends the signed transactions as `land` says. | `POST /v1/intents/continue` with `{ progress, signatures: [<one entry for each step, in order>] }` |
-| `send` | Sends `transactions` as they are, as `land` says. They need no signature from the caller. Only the digest and message rails use it, which are not built. | `POST /v1/intents/continue` with `{ progress }` |
+| `send` | Sends `transactions` as they are, as `land` says. They need no signature from the caller. Not built: only the digest and message rails use it. | `POST /v1/intents/continue` with `{ progress }` |
 | `wait` | Shows `message`. Waits until `until` holds, which it can watch itself, or until `checkAfter` | `POST /v1/intents/continue` with `{ progress }` |
 | `done` | Shows `message`, and drops `progress` | Nothing |
 
@@ -291,8 +291,8 @@ while (answer.next.kind !== "done") {
 | A step's `signs` | The signer signs | Its entry in `signatures` |
 | :-- | :-- | :-- |
 | `transaction` | `transaction` | The transaction's signature. It is optional, and only lets the service find the transaction sooner. |
-| `digest` | A ring spend's 32-byte digest (4.17) | The signature. The proof needs it, so the next answer is a `send` of the proved spend. |
-| `message` | The message itself, for a wallet of 4.7 | The signature. The next answer is a `send` of the wallet's approval, then a `wait` until the wallet's threshold approves. |
+| `digest` | A ring spend's 32-byte digest, on the anonymous rail (4.17). Not built. | The signature. The proof needs it, so the next answer is a `send` of the proved spend. |
+| `message` | The message itself, for a wallet of 4.7. Not built. | The signature. The next answer is a `send` of the wallet's approval, then a `wait` until the wallet's threshold approves. |
 
 1. The service holds no key, sends nothing, and calls no wallet. The caller builds through its own
    wallet or custody, and sends through its wallet, its own RPC, Jito, or a fee payer service such
@@ -323,8 +323,7 @@ transaction with the message that it proves. The design calls a step's content a
 ```
 
 1. `message` is what the signer reads, and what the transaction proves. The signer signs the
-   transaction, not the message. Only a wallet that approves intents (4.7) signs the message
-   itself, and a ring spend signs a digest (4.17). The message names the
+   transaction, not the message, except on the rails of the table above. The message names the
    cluster, then the flow when it has more than one step, then each intent after `|| <n>:` (the
    implementation's template, the ids, the tier, the onchain checks, and the rent cap), then the
    payers, the priority fee, and a bundle's tip. The flow part is
@@ -340,9 +339,8 @@ transaction with the message that it proves. The design calls a step's content a
    instructions (4.6).
 6. `prepare` compiles a v1 transaction (SIMD-0385) and sets the compute unit limit and the loaded
    data size from the simulation. A provider's transaction keeps its own version.
-7. When `signs` is `digest`, the step holds `digest` in place of `transaction`. When it is
-   `message`, the step holds no transaction.
-8. `land` is `inOrder` or `bundle`, with `tipLamports` for a bundle. One step lands `inOrder`.
+7. A `digest` step holds `digest` in place of `transaction`, and a `message` step holds neither.
+   `land` is `inOrder`, or `bundle` with `tipLamports`.
 
 ### 4.2 Recipes and the builder ABI
 
@@ -952,7 +950,7 @@ A single index or version reads only the addresses that its id and version deriv
 | `GET /v1/{interfaces\|implementations\|circuits}/{organization}/{name}/versions/{version}` | | One version, with its document in the definition format |
 | `GET /v1/interfaces/{organization}/{name}/implementations` | | The interface's implementations, each with its approval |
 | `POST /v1/interfaces/{organization}/{name}/versions/{version}/matches` | `{ inputs, payers, all }` | Each implementation, with its status |
-| `POST /v1/intents/start`, `POST /v1/intents/continue` | A plan request, or `{ progress, signatures? }` | `{ progress, next }`, with the RPC calls |
+| `POST /v1/intents/start`, `POST /v1/intents/continue` | A plan request, or `{ progress, signatures?, built? }` | `{ progress, next }`, with the RPC calls (4.19) |
 | `POST /v1/intents/recover` | `{ owner }` | The owner's stopping points (4.19). Not built. |
 | `POST /v1/verify` | A message or a transaction of any version, and the plan's message | What the transaction proves |
 | `/v1/intents/prover/*` | The Privacy Rings prover's API | The prover's answer, from the service's prover (4.17) |
@@ -976,8 +974,8 @@ local surfnet and is never deployed (`apps/intents-playground/README.md`).
 ### 4.15 Async settlement
 
 Some providers take the money now and settle later: an order at the next NAV strike, a cross-chain
-mint, or a redemption that an operator pays. An interface with `"settlement": "async"` is a request.
-The message says "settles later, outside this transaction".
+mint, or a redemption that an operator pays. An interface with `"settlement": "async"` is a request,
+and the plan's message says that it settles later, outside the transaction.
 
 | Interface | Providers |
 | :-- | :-- |
@@ -994,8 +992,9 @@ The message says "settles later, outside this transaction".
    no delegate remains. Lighthouse asserts both.
 3. An implementation pins where the money goes, such as WisdomTree's standing wallet for each fund and
    currency. A new wallet is a new version, which the approve authority approves.
-4. The plan returns the request. A `flow` implementation of the synchronous interface joins the
-   request and its claim (4.19), so a caller asks for `vault.deposit` and follows `next`.
+4. The plan returns the request. When a provider has a claim step, a `flow` implementation of
+   `vault.deposit` can join the request and its claim (4.19). A provider that pays on its own stays
+   a request: a flow cannot yet end in named outcomes, such as settled or cancelled.
 
 Hastra's flows are static, at tier 1. A par redemption is one plan of two intents: an unstake from
 PRIME to wYLDS, then a `vault.requestWithdrawal` of that wYLDS. Hastra's program makes the owner pay
@@ -1122,11 +1121,11 @@ proof.
 | Merkle proofs, non-inclusion proofs, policy answers | Anyone, the service included | A wrong one fails the proof onchain and loses nothing |
 | A recipient's registry record, a ring's config and rule table | The host, from the chain | A substituted record sends the funds to another owner |
 
-**Circuits.** Helius holds every circuit today. The pool program compiles in a verifying key for
-each circuit family and shape (inputs, outputs, public slots). The proving keys are on Helius's CDN,
-pinned by `proving-keys.lock`, and Helius's Go prover (gnark) proves. A proving key is about 370
-bytes for each constraint: 9 MB for a transfer of one note, 31 MB for four, and 480 MB for 49 notes
-in an anonymous ring. A proof of one note takes 46 ms natively.
+**Circuits.** Helius holds every circuit today: the pool program compiles in a verifying key for
+each family and shape, the proving keys are on Helius's CDN under `proving-keys.lock`, and Helius's
+Go prover (gnark) proves. A proving key is about 370 bytes for each constraint, from 9 MB for a
+transfer of one note to 480 MB for 49 notes in an anonymous ring. A proof of one note takes 46 ms
+natively.
 
 A circuit is a registry document (kind 4, spec 1.1), published and versioned as an interface is:
 
@@ -1145,19 +1144,19 @@ A circuit is a registry document (kind 4, spec 1.1), published and versioned as 
 
 `provingKeys` is the SHA-256 of the circuit's keys: each key's name, a zero byte, and the key's
 SHA-256, sorted by name. `privacy-rings-confidential` pins only the default ring's confidential
-transfer keys, so a change to Helius's merge or forester keys leaves it valid. A recipe names the circuit at its exact version. The planner and the verifier read
-the circuit from the registry, so the spend that the host checks carries the digest. The host
+transfer keys, so a change to Helius's merge or forester keys leaves it valid. A recipe names the
+circuit at its exact version. The planner and the verifier read the circuit from the registry, so
+the spend that the host checks carries the digest. The host
 refuses a digest that its compiled table does not produce. The prover reports the SHA-256 of each
 key that it used, and the host checks it. The host verifies each proof against the pool's
 verifying key before it signs.
 
-Only hashes are onchain. An account holds at most 10 MB and rent is about 7 SOL for each MB, and a
-wrong proving key only makes proofs that fail. The pool program holds the pool's verifying keys. An
-app circuit adds its own verifying key to its document, under 1 KB. Later, the host fetches the
-`module` and the keys from any source and checks them by hash. The module runs with no network or
-storage, and gets only the inputs that its implementation maps, never the signing key or the
-viewing key. The host verifies each proof and then re-randomizes it, so the published proof carries
-none of the module's randomness. Helius's SDK for ZK programs (arkworks) already runs in
+Only hashes are onchain, because an account holds at most 10 MB and a wrong proving key only makes
+proofs that fail. An app circuit adds its verifying key to its document, under 1 KB. Later, the
+host fetches the `module` and the keys from any source and checks them by hash. The module runs
+with no network or storage and gets only the inputs that its implementation maps, never the
+signing or viewing key. The host verifies each proof and re-randomizes it, so the published proof
+carries none of the module's randomness. Helius's ZK-program SDK (arkworks) already runs in
 WebAssembly. Whether the pool's gnark circuits do is not checked.
 
 **Where the proof runs.** The prover sees the whole witness: the spent notes, the amounts, the
@@ -1204,7 +1203,7 @@ compliance needs one, because the auditor reads every note. The size of a proof,
 the legs in one transaction is not measured.
 
 **ZK apps (design only).** In Privacy Rings, a ZK app's program checks its own proof, which shares
-`private_tx_hash` with the pool's spend. Adding one is a `CircuitV1` and an implementation. The
+`private_tx_hash` with the pool's spend. Adding one is a circuit document and an implementation. The
 implementation maps gathered data to the circuit's inputs, and the circuit's outputs to note data.
 An amount that the circuit computes is a bound in the statement. The host still signs only the
 pool's spend, after its statement check, so an app's circuit cannot move more than the statement
@@ -1233,8 +1232,8 @@ workspace's versions.
    implementations, for SOL and SPL tokens. A mint needs its SPL interface in the pool. An SPL
    withdrawal pays the recipient's associated token account. When it is missing, the wallet creates
    it idempotently before the spend, paid by the rent payer, and the planner accepts exactly that
-   instruction. `privacy-rings-shield-and-transfer` is a flow (4.19) that shields
-   and then transfers.
+   instruction. `privacy-rings-shield-and-transfer` is a flow (4.19) that shields and then
+   transfers.
 3. The planner resolves the statement and stops: `next` is a `build` of the spend. The service
    holds no key and calls no key holder. The caller's wallet builds the spend, and sends the pool
    instruction back in `built`. The planner places it between `verify_intent` and the assertions.
@@ -1276,7 +1275,10 @@ it signs. Their proofs usually take several transactions, so each transfer is a 
 3. **More clusters**: a registry and Lighthouse on each one, and authenticated RPC.
 4. **Schedules and policies** stay outside the model. A cron or a policy calls `prepare`.
 
-### 4.19 Flows (design only)
+### 4.19 Flows
+
+Built: static flows, `start` and `continue`, `progress`, the in-flight rule, and the `exists` and
+`spent` conditions. The rest of this section is design (10).
 
 A transaction is atomic, so a plan proves one transaction. Some operations take several: a request
 and its claim, a deposit through a privacy ring, or a swap split across transactions. `prepare`
@@ -1375,21 +1377,17 @@ plans each returned intent as any other, and the step must name `recover`.
 
 **Message and approvals.** The flow's message states the outcome, the number of steps and
 approvals, the worst tier of its steps, and each stopping point:
-`privately deposit 100 USDC into Kamino USDC through ring Acme | 3 steps, 1 approval | tier 3 |
-if stopped after step 1: 100 USDC in a request note, refundable after <time>`. Each step's message
+`deposit 100 USDC into Acme by request, then claim the shares | 2 steps, 2 approvals | tier 1 |
+if stopped after step 1: cancel the request to get the 100 USDC back`. Each step's message
 starts with the flow part of 4.1, so a signer of step 2 sees the flow that it continues. A program
 or remote flow names its builder or endpoint instead, because its steps are not known at the
 start.
 
-**Packing and landing.** A sign holds every step that the caller can sign now, so a wallet
-approves them at once and `signatures` holds one entry for each, in order.
-
-1. The planner packs a request's intents into as few transactions as fit, in order, and keeps each
-   segment whole. An intent that is a flow adds its own steps. Steps of neighboring intents share
-   a transaction when both are ready and fit.
-2. A step is ready to sign with the steps before it when its bytes do not depend on their results,
-   or when they land as a bundle. The approval count follows from this.
-3. Each transaction proves its own message.
+**Packing and landing.** A sign holds every step that the caller can sign now, so one approval
+covers them, and `signatures` holds one entry for each, in order. The planner packs a request's
+intents into as few transactions as fit, in order, and keeps each segment whole. A step joins the
+steps before it when its bytes do not depend on their results, or when they land as a bundle. Each
+transaction proves its own message.
 
 | `land` | The steps reach the chain | The planner |
 | :-- | :-- | :-- |
@@ -1399,12 +1397,10 @@ approves them at once and `signatures` holds one entry for each, in order.
 With `landing: auto`, the planner bundles when the steps depend on each other's state and the
 request sets `tipLamports`.
 
-A bundle does not make the steps safe. Each signed transaction is valid alone, so anyone who holds
-it can land it without the others. Every stopping point inside a bundle therefore passes the
-recoverable rule, as the steps of a flow do. A bundle makes landing reliable, and nothing more.
-
-A batch shares one blockhash, so it expires as one, and `pendingUntil` covers it. A wallet of 4.7
-needs no bundle: it runs each step only after it checks the one before.
+A bundle makes landing reliable. Each signed transaction in it is still valid alone, so every
+stopping point inside a bundle passes the recoverable rule too. A batch shares one blockhash, so it
+expires as one. A wallet of 4.7 needs no bundle, because it checks each step before it runs the
+next.
 
 **`progress`.** Each response holds `progress`: a JSON record of what the chain cannot show about
 the flow. Each answer replaces it whole, and the caller never edits it. A planner reads it: the
@@ -1436,13 +1432,7 @@ The value holds no position, because the chain gives it. It holds no key, secret
 plaintext. It is a few KB. No one signs it: a changed value can stall or repeat the caller's own
 flow, and every step still plans from the chain and passes the signer's verifier.
 
-**API.** The service keeps no flow state.
-
-| Route | Body | Returns |
-| :-- | :-- | :-- |
-| `POST /v1/intents/start` | A plan request | `{ progress, next }` |
-| `POST /v1/intents/continue` | `{ progress, signatures? }` | `{ progress, pendingUntil?, next }` |
-| `POST /v1/intents/recover` | `{ owner }` | Each stopping point that the owner's keys find, with its `recover` intent |
+**API.** The service keeps no flow state. The routes are in 4.14. Each `next`:
 
 ```json
 { "kind": "build", "step": "transfer", "spend": { "protocol": "privacy-rings", "circuit": { "…": "…" }, "spender": "…", "notes": [{ "owner": "…", "asset": "…", "amount": "250000000", "data": "" }], "deposits": [], "withdrawals": [], "pool": "…", "feePayer": "…", "rentPayer": "…" } }
@@ -1454,12 +1444,10 @@ flow, and every step still plans from the chain and passes the signer's verifier
 { "kind": "done", "message": "the owner holds 98.2 kUSDC shares" }
 ```
 
-The loop of 4.1 handles each kind. A `wait` names its step, and `until` is that step's `ready`
-condition with its values bound, in the language above. A caller can watch `until` itself, such
-as with an account subscription, and call `continue` when it holds. A step in flight waits on
-`landed` when the caller sent its signatures. Without them, `continue` returns the same
-transaction to sign, until it expires (rule 2). `pendingUntil` is the latest block height at which
-a planned step can land.
+A `wait`'s `until` is its step's `ready` condition with the values bound, which a caller can watch
+itself and then call `continue`. A step in flight waits on `landed` when the caller sent its
+signatures, and otherwise `continue` returns the same transaction to sign (rule 2). `pendingUntil`
+is the latest block height at which a planned step can land.
 
 **Continuity.** The caller keeps the last `progress` and sends it back to continue. Nothing else is
 needed, from any device or after any restart.
@@ -1491,11 +1479,13 @@ flowchart TB
     SVC[Intent service]
     REM[Remote endpoints and adapters]
     SRPC[The service's RPC]
+    PRV["The service's prover, when the caller asks: sees the spend"]
   end
   subgraph Signer["Signer side"]
     VER[Client verifier]
     SIGN[Signer]
     VRPC[The signer's RPC]
+    WAL["The caller's wallet or custody: keys, notes, proofs"]
   end
   subgraph Chain["On-chain, in the same transaction"]
     REG[Registry: interfaces and implementations]
@@ -1508,6 +1498,9 @@ flowchart TB
   SRPC --> SVC
   REG -->|documents, simulated builders| SVC
   SVC -->|"flow: the next step's transaction and message"| VER
+  SVC -->|"build: a shielded statement, through the caller"| WAL
+  WAL -->|"built spend, through the caller"| SVC
+  WAL -.->|witness| PRV
   REG -->|documents| VRPC
   VRPC --> VER
   VER -->|"message rendered from the transaction, unverified instructions listed"| SIGN
@@ -1637,9 +1630,9 @@ Production is a separate project with its own design document.
 | The registry, the service, the CLI, the playground, and four builders | Every flow of 4.14 lands on a mainnet fork |
 | `verify_intent` with static, program, and remote recipes | About 27,000 to 29,000 compute units for an SPL transfer |
 | The warm cache and the first-fetch prefetch | One `getMultipleAccounts` for a cold SPL transfer |
-| Every transaction version | Legacy, v0 with lookup tables, and v1 land through the CLI and the provider |
+| Every transaction version | v0 with lookup tables and v1 land through the CLI, and legacy through the provider. A guarded SPL transfer is 1,276 bytes, over legacy's 1,232. |
 | Flows: spec 1.1, static flows, `start` and `continue`, `progress`, the in-flight rule, and the `exists` and `spent` conditions | `privacy-rings-shield-and-transfer` shields, waits, transfers, and is done, in the e2e and the playground |
-| The shielded statement, the circuit pin, and proofs in the wallet or the service | Shield, transfer, and unshield land with both onchain checks on, from one wallet driver |
+| The shielded statement, circuit documents, and proofs in the wallet or the service | Shield, transfer, and unshield of SOL and USDC land with both onchain checks on, from one wallet driver |
 
 The prototype also serves `POST /v1/prepare`, which returns the plan of a request of one step,
 without `progress`. The service runs the loop. The Rust client does not run it yet.
@@ -1651,15 +1644,17 @@ Not built:
 3. Parity fixtures from SDP's builders, golden fixtures, and a compatibility corpus in CI.
 4. A fix for `RentPayerInRecipe`: mark each placeholder account in the builder roles.
 5. A LiteSVM feature set that matches the cluster.
-6. Of private intents (4.17): an implementation whose spend deposits and also consumes notes
-   (the wallet builds and proves one, and none lands yet), policy rings, `bind`, SDP's ring program, a circuit's `module` and a WebAssembly prover, an app
-   circuit's verifying key, ZK apps, the anonymous rail, the browser verifier's check of a shielded
-   statement, and a check at `publish` that a recipe's circuit exists.
+6. Of private intents (4.17): an implementation whose spend deposits and also consumes notes (the
+   wallet builds and proves one, and none lands yet), policy rings, `bind`, SDP's ring program, a
+   circuit's `module` and a WebAssembly prover, an app circuit's verifying key, ZK apps, the
+   anonymous rail, the browser verifier's check of a shielded statement, and a check at `publish`
+   that a recipe's circuit exists.
 7. The postconditions and clusters that SDP's other modules need (4.18).
-8. Of flows (4.19): program and remote flows, `recover`, step inputs from earlier steps'
-   outputs, the `data`, `balance`, and `committed` conditions, the recoverable check, the flow part
-   of each step's message, packing several intents into several transactions, Jito bundles,
-   `check_intent`, `execute_step`, and `verify_intent`'s check of a step's flow.
+8. Of flows (4.19): program and remote flows, `recover`, step inputs from earlier steps' outputs,
+   the `data`, `balance`, and `committed` conditions, named terminal outcomes, the recoverable
+   check, the flow part of each step's message, packing several intents into several
+   transactions, Jito bundles, `check_intent`, `execute_step`, and `verify_intent`'s check of a
+   step's flow.
 
 ## 11. Cost
 
