@@ -18,7 +18,7 @@ use crate::onchain::{OnchainChecks, OnchainInputs, PLACEHOLDER_RENT_CAP};
 use crate::plan::{builder_program, with_rent_cap, Built, PlannedIntent};
 use crate::remote::{self, RemoteAnswer, RemoteCall};
 use crate::render::Column;
-use crate::shielded::{self, ShieldedCall};
+use crate::shielded::{self, ShieldedCall, ShieldedSpend};
 use crate::values::Values;
 use crate::verify::{rent_cap, Snapshot, Verification};
 use crate::{
@@ -93,6 +93,8 @@ enum State {
     },
     /// The remote endpoint has no answer yet.
     AwaitingRemote,
+    /// The caller has not built the spend of this statement yet.
+    AwaitingSpend(Box<ShieldedSpend>),
     Built(Box<Built>),
     AwaitingChecks(Box<Checking>),
     Planned(Box<Segment>),
@@ -149,7 +151,10 @@ impl<'a> SegmentPlanner<'a> {
             State::Building => self.simulate_builder(earlier),
             State::Built(built) => self.simulate_segment(*built, earlier),
             State::Planned(segment) => Ok(SegmentStep::Planned(segment)),
-            awaiting @ (State::AwaitingBuilder { .. } | State::AwaitingChecks(_) | State::AwaitingRemote) => {
+            awaiting @ (State::AwaitingBuilder { .. }
+            | State::AwaitingChecks(_)
+            | State::AwaitingRemote
+            | State::AwaitingSpend(_)) => {
                 self.state = awaiting;
                 Err(PlanError::OutOfOrder)
             }
@@ -175,10 +180,13 @@ impl<'a> SegmentPlanner<'a> {
                     RecipeKind::RemoteTransaction => {
                         Built::from_frozen(&self.recipe, answer, self.priority_fee_lamports)?
                     }
-                    RecipeKind::Shielded => shielded::built(&self.recipe, answer)?,
                     _ => Built::from_remote(&self.recipe, answer)?,
                 };
                 self.state = State::Built(Box::new(built));
+                Ok(())
+            }
+            State::AwaitingSpend(spend) => {
+                self.state = State::Built(Box::new(shielded::built(&self.recipe, &spend, answer)?));
                 Ok(())
             }
             other => {
@@ -223,7 +231,7 @@ impl<'a> SegmentPlanner<'a> {
         }
 
         let call = shielded::call(&self.recipe, earlier.chain, self.priority_fee_lamports)?;
-        self.state = State::AwaitingRemote;
+        self.state = State::AwaitingSpend(Box::new(call.spend.clone()));
 
         Ok(SegmentStep::Shield(call))
     }

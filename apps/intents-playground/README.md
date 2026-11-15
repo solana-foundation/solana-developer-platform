@@ -59,8 +59,8 @@ nothing on a real cluster.
   shows unapproved implementations.
 - The interface page: the display template as the title, the inputs as a form, the postconditions
   as guarantees, and each implementation with whether its `applies` checks hold.
-- Solana Privacy Rings: each wallet's private SOL in the default ring, and a button that shields
-  1 SOL. `private.shield`, `private.transfer`, and `private.unshield` move SOL into, inside, and
+- Solana Privacy Rings, on an interface with a shielded implementation: each wallet's private
+  balances in the default ring, and a button that shields 1 SOL. `private.shield`, `private.transfer`, and `private.unshield` move SOL into, inside, and
   out of the ring. Each implementation states its spend: the notes it creates, and what it deposits
   and withdraws. `privacy-rings-shield-and-transfer` is a flow: it shields public SOL first when
   the private balance is short, then transfers. The tree lists the circuit that each spend proves
@@ -74,6 +74,7 @@ nothing on a real cluster.
   dev server's `/rpc`, never from the service. `Sign and send` signs with the local wallets. The
   next call sends `progress` back with the signatures. "Run the loop for me" makes every call
   without a click. The calls stay in the browser's storage, so a refresh continues the flow.
+- Interface: the selected interface, its authorities and versions, and its document as the registry holds it.
 - Implementation: the selected implementation, its versions, and its document as the registry holds it.
 
 "Tamper with the plan" makes the service change one byte of a built instruction. The verifier still

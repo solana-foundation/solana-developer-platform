@@ -29,14 +29,21 @@ export function useWallets() {
   return useQuery({ queryKey: ["wallets"], queryFn: api.wallets });
 }
 
-/// The form of one interface version, from its definition.
+/// One published interface version, with its definition and the registry's bytes.
+export function useInterfaceVersion(id: string | null, version: string | null) {
+  return useQuery({
+    queryKey: ["interface", id, version],
+    queryFn: () => api.interfaceVersion(id ?? "", version ?? ""),
+    enabled: id !== null && version !== null,
+  });
+}
+
+/// The form of one interface version, from the same read as `useInterfaceVersion`.
 export function useInterfaceForm(id: string | null, version: string | null) {
   return useQuery({
     queryKey: ["interface", id, version],
-    queryFn: () =>
-      api
-        .interfaceVersion(id ?? "", version ?? "")
-        .then((published) => interfaceForm(published.document)),
+    queryFn: () => api.interfaceVersion(id ?? "", version ?? ""),
+    select: (published) => interfaceForm(published.document),
     enabled: id !== null && version !== null,
   });
 }

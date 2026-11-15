@@ -1,6 +1,7 @@
-import type { ListedImplementation, Recipe, Registry } from "@/api";
+import type { ListedImplementation, ListedInterface, Recipe, Registry } from "@/api";
 import { recipeOf } from "@/api";
 import { Code, hexDump, Snippets } from "@/components/Code";
+import { InterfaceTab } from "@/components/InterfaceTab";
 import { Loop } from "@/components/Loop";
 import { OnchainChecks } from "@/components/OnchainChecks";
 import { AddressRow, Row } from "@/components/Plan";
@@ -9,7 +10,7 @@ import type { IntentOptions, Output } from "@/intent";
 import { useImplementationVersion } from "@/queries";
 import { startSnippets } from "@/snippets";
 
-export type Tab = "intent" | "implementation";
+export type Tab = "intent" | "interface" | "implementation";
 
 interface Props {
   tab: Tab;
@@ -18,6 +19,7 @@ interface Props {
   requestKey: string;
   options: IntentOptions;
   onOptions: (options: IntentOptions) => void;
+  listed: ListedInterface | null;
   implementation: ListedImplementation | null;
   /// The selected implementation's recipe, as the service matched it.
   recipe: Recipe | null;
@@ -35,6 +37,7 @@ interface Props {
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "intent", label: "Intent" },
+  { key: "interface", label: "Interface" },
   { key: "implementation", label: "Implementation" },
 ];
 
@@ -56,6 +59,9 @@ export function SidePanel(props: Props) {
 
       <div className="side-body">
         {props.tab === "intent" && <IntentTab {...props} />}
+        {props.tab === "interface" && (
+          <InterfaceTab listed={props.listed} organizations={props.organizations} />
+        )}
         {props.tab === "implementation" && (
           <ImplementationTab
             implementation={props.implementation}

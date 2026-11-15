@@ -6,12 +6,13 @@ use serde_json::{json, Value};
 
 use sdp_intents_client::json::{base58, instruction as instruction_json};
 use sdp_intents_client::message::WireMessage;
-use sdp_intents_planner::{ShieldedCircuit, ShieldedLeg, ShieldedNote, ShieldedSpend};
+use sdp_intents_planner::{AccountMeta, Instruction, ShieldedCircuit, ShieldedLeg, ShieldedNote, ShieldedSpend};
 use sdp_intents_privacy_rings::{
     nullifier_accounts, proving_key_set, Amount, Leg, NoteOut, PreparedSpend, Shielded, ShieldedWallet, Statement,
+    TokenAccount,
 };
 use sdp_intents_spec::wire::{DocumentIdV1, PodU16, SemverV1};
-use sdp_intents_spec::{Address, ShieldedProtocol};
+use sdp_intents_spec::{AccountRole, Address, ShieldedProtocol};
 
 use crate::error::WalletError;
 use crate::Wallet;
@@ -35,19 +36,27 @@ pub enum ProveIn {
     Service,
 }
 
-/// What a build request asks for: the statement, who pays the fee, and where to prove.
+/// What a build request asks for: the statement, who pays the fee and the rent, and where to prove.
 struct BuildRequest {
     spend: ShieldedSpend,
     fee_payer: Address,
+    rent_payer: Address,
     prove_in: ProveIn,
 }
+
+/// `ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL`, and its `CreateIdempotent`.
+const ASSOCIATED_TOKEN_PROGRAM: Address = Address([
+    140, 151, 37, 143, 78, 36, 137, 241, 187, 61, 16, 41, 20, 142, 13, 131, 11, 90, 19, 153, 218, 255, 16, 132, 4, 142,
+    123, 216, 219, 233, 248, 89,
+]);
+const CREATE_IDEMPOTENT: u8 = 1;
 
 impl Wallet {
     /// The `spend` of a `build`, and `prover`: `wallet` or `service`. Builds and proves the
     /// statement with the spender's keys, records it, and answers its pool instructions and its
     /// nullifier accounts.
     pub fn build(&self, body: &Value) -> Result<Value, WalletError> {
-        let BuildRequest { spend, fee_payer, prove_in } = read_build(body)?;
+        let BuildRequest { spend, fee_payer, rent_payer, prove_in } = read_build(body)?;
 
         if spend.circuit.proving_keys != proving_key_set() {
             return Err(WalletError::refused(
@@ -70,26 +79,37 @@ impl Wallet {
             ProveIn::Wallet => self.endpoints()?.prover,
             ProveIn::Service => self.service_prover.clone(),
         };
+        let creates: Vec<Instruction> = ring
+            .missing_token_accounts(&statement)?
+            .into_iter()
+            .map(|account| create_token_account(&account, rent_payer))
+            .collect();
         let prepared = ring.prepare(&wallet, solana(fee_payer), &statement, &prover)?;
 
-        self.answer(&prepared, spend)
+        self.answer(&prepared, spend, creates)
     }
 
-    fn answer(&self, prepared: &PreparedSpend, spend: ShieldedSpend) -> Result<Value, WalletError> {
+    /// The pool instruction, after `creates`: the recipient token accounts that the pool pays into.
+    fn answer(
+        &self,
+        prepared: &PreparedSpend,
+        spend: ShieldedSpend,
+        creates: Vec<Instruction>,
+    ) -> Result<Value, WalletError> {
         let message = WireMessage::parse(&prepared.message_bytes())?;
-        let instructions: Vec<_> =
+        let pool: Vec<Instruction> =
             self.client.decode(&message)?.instructions.into_iter().filter(|built| !built.is_budget()).collect();
         let accounts: Vec<String> = nullifier_accounts(prepared).iter().map(|account| account.to_string()).collect();
 
         let mut built =
             self.built.lock().map_err(|_| WalletError::failed("wallet", "the record of spends is poisoned"))?;
-        instructions.iter().for_each(|pool| {
-            built.insert(pool.data.clone(), spend.clone());
+        pool.iter().for_each(|instruction| {
+            built.insert(instruction.data.clone(), spend.clone());
         });
 
         Ok(json!({
             "kind": "instructions",
-            "instructions": instructions.iter().map(instruction_json).collect::<Vec<_>>(),
+            "instructions": creates.iter().chain(&pool).map(instruction_json).collect::<Vec<_>>(),
             "outputs": {},
             "nullifierAccounts": accounts,
         }))
@@ -242,7 +262,8 @@ fn statement(spend: &ShieldedSpend) -> Result<Statement, WalletError> {
     })
 }
 
-/// `{ "protocol", "circuit", "spender", "notes", "deposits", "withdrawals", "pool", "feePayer" }`,
+/// `{ "protocol", "circuit", "spender", "notes", "deposits", "withdrawals", "pool", "feePayer",
+/// "rentPayer" }`,
 /// the `spend` of a `build`, and `prover`.
 fn read_build(body: &Value) -> Result<BuildRequest, WalletError> {
     let spend = body.get("spend").ok_or_else(|| WalletError::invalid_request("`spend` is the spend of a `build`"))?;
@@ -269,6 +290,7 @@ fn read_build(body: &Value) -> Result<BuildRequest, WalletError> {
             withdrawals: list("withdrawals").iter().map(read_leg).collect::<Result<_, _>>()?,
         },
         fee_payer: address(spend.get("feePayer"), "feePayer")?,
+        rent_payer: address(spend.get("rentPayer"), "rentPayer")?,
         prove_in,
     })
 }
@@ -361,4 +383,22 @@ fn address(value: Option<&Value>, name: &str) -> Result<Address, WalletError> {
 
 fn solana(address: Address) -> solana_address::Address {
     solana_address::Address::new_from_array(address.0)
+}
+
+/// `CreateIdempotent` of `account`, funded by the rent payer.
+fn create_token_account(account: &TokenAccount, rent_payer: Address) -> Instruction {
+    let meta = |address: solana_address::Address, role| AccountMeta { address: Address(address.to_bytes()), role };
+
+    Instruction {
+        program: ASSOCIATED_TOKEN_PROGRAM,
+        accounts: vec![
+            AccountMeta { address: rent_payer, role: AccountRole::WritableSigner },
+            meta(account.address, AccountRole::Writable),
+            meta(account.owner, AccountRole::Readonly),
+            meta(account.mint, AccountRole::Readonly),
+            AccountMeta { address: Address::default(), role: AccountRole::Readonly },
+            meta(account.token_program, AccountRole::Readonly),
+        ],
+        data: vec![CREATE_IDEMPOTENT],
+    }
 }

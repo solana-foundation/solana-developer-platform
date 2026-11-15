@@ -106,6 +106,15 @@ pub struct Leg {
     pub value: Amount,
 }
 
+/// An associated token account, with what derives it.
+#[derive(Clone, Copy, Debug)]
+pub struct TokenAccount {
+    pub address: Address,
+    pub owner: Address,
+    pub mint: Address,
+    pub token_program: Address,
+}
+
 /// What a spend does (`DESIGN.md`, 4.17).
 #[derive(Clone, Debug, Default)]
 pub struct Statement {
@@ -271,7 +280,11 @@ impl Shielded {
         let deposited = totals(&statement.deposits.iter().map(|leg| leg.value).collect::<Vec<_>>())?;
         let noted = totals(&statement.notes.iter().map(|note| note.value).collect::<Vec<_>>())?;
 
-        match !statement.deposits.is_empty() && statement.withdrawals.is_empty() && deposited == noted {
+        // The pool's `deposit` names each note's owner in the clear, so it shields only to the
+        // depositor. A note for anyone else goes through `transact`, which hides its owner.
+        let to_depositor = statement.notes.iter().all(|note| note.owner == wallet.address());
+
+        match !statement.deposits.is_empty() && statement.withdrawals.is_empty() && deposited == noted && to_depositor {
             true => self.prepare_deposit(wallet, fee_payer, statement),
             false => self.prepare_transact(wallet, fee_payer, statement, prover),
         }
@@ -328,6 +341,28 @@ impl Shielded {
             amount: note.value.amount,
             memo: None,
         })
+    }
+
+    /// The associated token account of each SPL withdrawal's recipient that does not exist yet. The
+    /// pool pays only into an account that exists, so the caller creates these first.
+    pub fn missing_token_accounts(&self, statement: &Statement) -> Result<Vec<TokenAccount>, ShieldedError> {
+        let spl = statement.withdrawals.iter().filter(|leg| leg.value.asset != SOL_MINT);
+
+        spl.map(|leg| {
+            let token_program = self.token_program(leg.value.asset)?;
+            let address = pda::associated_token_address_with_program(&leg.account, &leg.value.asset, &token_program);
+            let exists =
+                self.client.rpc().get_account(address).map_err(|cause| error("read the token account")(&cause))?;
+
+            Ok(exists.is_none().then_some(TokenAccount {
+                address,
+                owner: leg.account,
+                mint: leg.value.asset,
+                token_program,
+            }))
+        })
+        .filter_map(Result::transpose)
+        .collect()
     }
 
     /// The token program that owns `mint`: Token or Token-2022.

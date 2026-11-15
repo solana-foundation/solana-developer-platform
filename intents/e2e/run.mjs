@@ -727,6 +727,22 @@ try {
   expect((await tokenAmount(authority.address, USDC)) - authorityUsdc === 3_000_000n, "the recipient receives 3 USDC");
   expect(await ringTokensReach(sender.address, USDC, "3000000"), "the sender keeps 3 USDC privately");
 
+  console.log("an unshield of USDC to an address that has no token account yet");
+  const fresh = keypair("unshielded-recipient");
+  const toFresh = await service("/v1/intents/start", JSON.stringify(
+    usdcIntent("private.unshield", "privacy-rings-unshield", { owner: sender.address, to: fresh.address, mint: USDC, amount: "1000000" }),
+  ));
+  const freshBuilt = await build(toFresh.next.spend);
+  expect(
+    freshBuilt.instructions?.[0]?.programAddress === "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+    "the wallet creates the recipient's token account before the spend",
+  );
+
+  const freshDone = await runFlow(await service("/v1/intents/continue", JSON.stringify({ progress: toFresh.progress, built: freshBuilt })));
+  expect(freshDone.answer.next.kind === "done", `the unshield is done: ${freshDone.answer.next.message}`);
+  expect((await tokenAmount(fresh.address, USDC)) === 1_000_000n, "the new token account holds 1 USDC");
+  expect(await ringTokensReach(sender.address, USDC, "2000000"), "the sender keeps 2 USDC privately");
+
   console.log("a statement that deposits and spends notes in one proof");
   const template = (await service("/v1/intents/start", JSON.stringify(
     usdcIntent("private.transfer", "privacy-rings-transfer", { from: sender.address, to: payer.address, mint: USDC, amount: "2000000" }),

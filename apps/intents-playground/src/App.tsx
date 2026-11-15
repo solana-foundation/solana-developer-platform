@@ -160,6 +160,7 @@ export function App() {
             requestKey={requestKey}
             options={options}
             onOptions={setOptions}
+            listed={listed}
             implementation={selectedImplementation}
             recipe={selected?.recipe ?? null}
             organizations={registry.data.organizations}

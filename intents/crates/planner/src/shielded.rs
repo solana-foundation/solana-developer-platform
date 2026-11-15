@@ -12,6 +12,17 @@ use crate::plan::Built;
 use crate::registry::{version_address, REGISTRY_PROGRAM, VERSION_HEADER_LEN};
 use crate::remote::RemoteAnswer;
 use crate::{Instruction, PlanError};
+use sdp_intents_registry_client::find_program_address;
+
+/// `ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL`.
+const ASSOCIATED_TOKEN_PROGRAM: Address = Address([
+    140, 151, 37, 143, 78, 36, 137, 241, 187, 61, 16, 41, 20, 142, 13, 131, 11, 90, 19, 153, 218, 255, 16, 132, 4, 142,
+    123, 216, 219, 233, 248, 89,
+]);
+const CREATE_IDEMPOTENT: u8 = 1;
+/// The System program, which also names SOL in a statement.
+const SYSTEM_PROGRAM: Address = Address([0; 32]);
+const SOL: Address = SYSTEM_PROGRAM;
 
 /// An entry's asset is the first 32 bytes of its data, and its amount the 8 after.
 const AMOUNT_START: usize = 32;
@@ -24,6 +35,8 @@ pub struct ShieldedCall {
     pub pool: Address,
     pub spend: ShieldedSpend,
     pub fee_payer: Address,
+    /// Funds the token account that an SPL withdrawal creates for its recipient.
+    pub rent_payer: Address,
     pub priority_fee_lamports: u64,
 }
 
@@ -137,20 +150,50 @@ pub(crate) fn call<C: Chain>(
         }
     }
 
-    Ok(ShieldedCall { pool, spend, fee_payer: *recipe.payers().fee, priority_fee_lamports })
+    let payers = recipe.payers();
+
+    Ok(ShieldedCall { pool, spend, fee_payer: *payers.fee, rent_payer: *payers.rent, priority_fee_lamports })
 }
 
 /// The caller's spend as the segment's built instructions. Each instruction calls the pool, so the
 /// spend can move nothing outside it but what the assertions allow.
-pub(crate) fn built(recipe: &Recipe<'_>, answer: RemoteAnswer) -> Result<Built, PlanError> {
+///
+/// Before the pool instructions, the caller may create the associated token account of an SPL
+/// withdrawal's recipient, idempotently and paid by the rent payer, because the pool pays only into
+/// an account that exists.
+pub(crate) fn built(recipe: &Recipe<'_>, spend: &ShieldedSpend, answer: RemoteAnswer) -> Result<Built, PlanError> {
     let pool = pool(recipe)?;
-    let calls_only_the_pool = answer.instructions.iter().all(|instruction| instruction.program == pool);
+    let creates = answer.instructions.iter().take_while(|instruction| instruction.program != pool);
+    let creates_fit = creates.clone().all(|instruction| creates_withdrawal_account(instruction, spend, recipe));
+    let calls_only_the_pool =
+        answer.instructions.iter().skip(creates.count()).all(|instruction| instruction.program == pool);
 
-    if answer.frozen.is_some() || answer.instructions.is_empty() || !calls_only_the_pool {
+    if answer.frozen.is_some() || answer.instructions.is_empty() || !creates_fit || !calls_only_the_pool {
         return Err(PlanError::ShieldedSpend);
     }
 
     Built::from_remote(recipe, answer)
+}
+
+/// `CreateIdempotent` of the associated token account that an SPL withdrawal pays into, funded by
+/// the rent payer. A wrong token program derives another account, which the pool does not pay.
+fn creates_withdrawal_account(instruction: &Instruction, spend: &ShieldedSpend, recipe: &Recipe<'_>) -> bool {
+    let [funder, account, owner, mint, system, token_program] = instruction.accounts.as_slice() else {
+        return false;
+    };
+    let derived =
+        find_program_address(&[&owner.address.0, &token_program.address.0, &mint.address.0], &ASSOCIATED_TOKEN_PROGRAM);
+    let pays_a_withdrawal = spend
+        .withdrawals
+        .iter()
+        .any(|leg| leg.account == owner.address && leg.asset == mint.address && leg.asset != SOL);
+
+    instruction.program == ASSOCIATED_TOKEN_PROGRAM
+        && instruction.data == [CREATE_IDEMPOTENT]
+        && funder.address == *recipe.payers().rent
+        && system.address == SYSTEM_PROGRAM
+        && derived.is_ok_and(|derived| derived == account.address)
+        && pays_a_withdrawal
 }
 
 /// The pool program: the program of the recipe's first note.

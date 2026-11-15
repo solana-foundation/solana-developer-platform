@@ -82,7 +82,9 @@ export function InterfacePage(props: Props) {
         </div>
 
         <Implementations {...props} />
-        <PrivacyRing />
+        {props.candidates?.some((candidate) => candidate.recipe === "shielded") === true && (
+          <PrivacyRing />
+        )}
       </div>
     </section>
   );

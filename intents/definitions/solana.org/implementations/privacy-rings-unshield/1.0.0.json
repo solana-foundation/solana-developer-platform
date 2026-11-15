@@ -39,9 +39,10 @@
   "postConditions": [
     {
       "invokesOnly": [
-        "ring1GaLCuJnkUMVkX2JeZLTTX17wKsV4fZmPVzXANW"
+        "ring1GaLCuJnkUMVkX2JeZLTTX17wKsV4fZmPVzXANW",
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
       ],
-      "message": "only the privacy ring's pool runs"
+      "message": "only the privacy ring's pool runs, after the recipient's token account is created when it is missing"
     }
   ]
 }

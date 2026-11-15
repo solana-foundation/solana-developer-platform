@@ -965,8 +965,8 @@ local surfnet and is never deployed (`apps/intents-playground/README.md`).
    units, `verify`, and `send`. `verify` runs `@sdp/intents-verifier` in the browser against the
    surfnet's RPC, not on the service. A switch asks for instructions alone. Each signature and address
    links to Solana Explorer.
-4. The Implementation tab shows the implementation as the service decompiles it, the cluster, and the
-   bytes that the registry holds.
+4. The Interface and Implementation tabs show each document as the service decompiles it, its
+   authorities and versions, and the bytes that the registry holds.
 5. Two switches show the checks: a malicious remote endpoint, which the assertions refuse, and a
    tampered plan, which `verify_intent` refuses onchain.
 
@@ -1103,8 +1103,10 @@ fields filled:
 }
 ```
 
-A spend that consumes no note and only deposits uses the pool's `deposit`, which has no proof.
-Every other spend is one `transact` with a proof.
+A spend whose deposits fund exactly its notes, all owned by the depositor, uses the pool's
+`deposit`, which has no proof. That instruction names each owner in the clear, so a deposit for
+anyone else is a `transact`, which hides the owner. Every other spend is one `transact` with a
+proof.
 
 **What the client gathers.**
 
@@ -1223,7 +1225,9 @@ workspace's versions.
    `solana.org/privacy-rings-confidential@1.0.0` is the circuit that every Privacy Rings recipe names.
 2. `private.shield`, `private.transfer`, and `private.unshield` have Privacy Rings
    implementations, for SOL and SPL tokens. A mint needs its SPL interface in the pool. An SPL
-   withdrawal pays the recipient's associated token account, which must exist. `privacy-rings-shield-and-transfer` is a flow (4.19) that shields
+   withdrawal pays the recipient's associated token account. When it is missing, the wallet creates
+   it idempotently before the spend, paid by the rent payer, and the planner accepts exactly that
+   instruction. `privacy-rings-shield-and-transfer` is a flow (4.19) that shields
    and then transfers.
 3. The planner resolves the statement and stops: `next` is a `build` of the spend. The service
    holds no key and calls no key holder. The caller's wallet builds the spend, and sends the pool
