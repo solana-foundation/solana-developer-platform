@@ -27,9 +27,9 @@ use solana_signature::Signature;
 
 use sdp_intents_compiler::Catalog;
 use sdp_intents_planner::{
-    verify_transaction, Account, AccountMap, Instruction, IntentDocuments, Payers, Plan, PlanError, PlanRequest,
-    Planner, RemoteAnswer, ReturnData, Simulation, SimulationResult, Step, Transaction, VerifiedTransaction,
-    VerifyError, VerifyStep,
+    verify_transaction, Account, AccountMap, FlowStep, Instruction, IntentDocuments, Payers, Plan, PlanError,
+    PlanRequest, Planner, RemoteAnswer, ReturnData, Simulation, SimulationResult, Step, Transaction,
+    VerifiedTransaction, VerifyError, VerifyStep,
 };
 use sdp_intents_spec::Address;
 
@@ -52,9 +52,8 @@ pub mod definitions {
 pub fn fixture_program(crate_dir: &str, file: &str) -> Result<Vec<u8>, String> {
     let path = std::path::Path::new(crate_dir).join("fixtures").join(file);
 
-    std::fs::read(&path).map_err(|error| {
-        format!("cannot read {}: {error}. Run `just fetch-programs` in intents.", path.display())
-    })
+    std::fs::read(&path)
+        .map_err(|error| format!("cannot read {}: {error}. Run `just fetch-programs` in intents.", path.display()))
 }
 
 /// A scratch address for the planner. LiteSVM holds no account there.
@@ -145,11 +144,21 @@ pub fn prepare_intents(svm: &LiteSVM, intents: &[&Documents]) -> Result<Plan, Pl
 
 /// [`prepare_intents`] for remote recipes: each call to an endpoint takes the next of `answers`.
 pub fn prepare_answering(svm: &LiteSVM, intents: &[&Documents], answers: Vec<RemoteAnswer>) -> Result<Plan, PlanError> {
-    let mut answers = answers.into_iter();
     let first = intents.first().ok_or(PlanError::NoIntents)?;
     let request =
         PlanRequest { intents: intents.iter().map(|documents| documents.as_intent()).collect(), ..first.request() };
-    let mut planner = Planner::new(&request, SCRATCH)?;
+
+    prepare_request(svm, &request, answers)
+}
+
+/// [`prepare`] for a step of `flow`.
+pub fn prepare_flow_step(svm: &LiteSVM, step: &Documents, flow: FlowStep<'_>) -> Result<Plan, PlanError> {
+    prepare_request(svm, &PlanRequest { flow: Some(flow), ..step.request() }, Vec::new())
+}
+
+fn prepare_request(svm: &LiteSVM, request: &PlanRequest<'_>, answers: Vec<RemoteAnswer>) -> Result<Plan, PlanError> {
+    let mut answers = answers.into_iter();
+    let mut planner = Planner::new(request, SCRATCH)?;
     let mut accounts = AccountMap::default();
 
     loop {

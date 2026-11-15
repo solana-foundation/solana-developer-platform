@@ -500,7 +500,16 @@ fn the_approval_policy_keeps_a_version_at_its_tier() {
 
 /// `token.transfer` as a flow of one step that pins `system-transfer`, which the catalog defines as
 /// the static builder or as `remote_text`'s endpoint.
-fn flow_document(organization: &Organization, version: &str, remote_step: bool) -> Result<Vec<u8>, Failure> {
+pub fn flow_document(organization: &Organization, version: &str, remote_step: bool) -> Result<Vec<u8>, Failure> {
+    Ok(flow_catalog(organization, version, remote_step)?.1)
+}
+
+/// The catalog that holds the flow, with the flow's bytes.
+pub fn flow_catalog(
+    organization: &Organization,
+    version: &str,
+    remote_step: bool,
+) -> Result<(sdp_intents_compiler::Catalog, Vec<u8>), Failure> {
     let text = format!(
         r#"{{
   "spec": "sdp-intents@1.1", "kind": "implementation", "id": "solana.org/flow-transfer", "version": "{version}",
@@ -517,7 +526,9 @@ fn flow_document(organization: &Organization, version: &str, remote_step: bool) 
     let step = if remote_step { remote_text("1.0.0") } else { definitions::SYSTEM_TRANSFER.to_owned() };
     catalog.compile_implementation(&step).map_err(report)?;
 
-    Ok(catalog.compile_implementation(&text).map_err(report)?.bytes.clone())
+    let bytes = catalog.compile_implementation(&text).map_err(report)?.bytes.clone();
+
+    Ok((catalog, bytes))
 }
 
 /// A flow's tier is the worst tier of its steps, so a flow whose step became an endpoint needs its

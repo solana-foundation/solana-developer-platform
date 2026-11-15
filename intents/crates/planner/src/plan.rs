@@ -97,7 +97,8 @@ pub(crate) struct MessageHeader<'h> {
 
 /// The plan message, outcome first: `<outcomes> || intents on <cluster> | expires <UTC time> |
 /// paid by <payer> | priority fee <SOL> SOL || <details>`. A zero priority fee is left out. A flow's
-/// step starts `step <i> of <n>: <outcome> || flow <id>: <the flow's outcome>`. With more than one intent, each
+/// step starts `step <i> of <n>: <outcome> || flow <id>: <the flow's outcome> | <n> approvals`,
+/// then each stopping point. With more than one intent, each
 /// outcome and each detail starts with `<number>: `, and `||` separates them.
 pub(crate) fn plan_message(header: &MessageHeader<'_>, parts: &[MessagePart]) -> String {
     let numbered = |texts: Vec<&str>| match texts.as_slice() {
@@ -106,13 +107,9 @@ pub(crate) fn plan_message(header: &MessageHeader<'_>, parts: &[MessagePart]) ->
     };
     let outcomes = numbered(parts.iter().map(|part| part.outcome.as_str()).collect());
     let outcomes = match header.flow {
-        Some(flow) => format!(
-            "step {} of {}: {outcomes} || flow {}: {}",
-            u16::from(flow.step).saturating_add(1),
-            flow.steps,
-            flow.id,
-            flow.outcome
-        ),
+        Some(flow) => {
+            format!("step {} of {}: {outcomes} || {}", u16::from(flow.step).saturating_add(1), flow.steps, flow.text())
+        }
         None => outcomes,
     };
     let details = numbered(parts.iter().map(|part| part.details.as_str()).collect());
@@ -243,35 +240,25 @@ impl<C: Chain> Values<'_, '_, C> {
     }
 
     /// The intent's part of the plan message. The outcome is the implementation's message. The
-    /// details are `<implementation id> for <interface id> | <who built it, and what the chain
-    /// checks>`. An id is the organization, the name, and the version, such as
-    /// `solana.org/token.transfer@1.0.0`, and the interface leaves out an organization that it shares
-    /// with the implementation. The segment adds the rent after its first simulation.
+    /// details are `<implementation id> | <who built it, and what the chain checks>`. An id is the
+    /// organization, the name, and the version, such as `solana.org/spl-token-transfer@1.0.0`. The
+    /// implementation names its one interface and that interface's major version, and a later
+    /// minor version only tightens the guarantees, so the message leaves the interface out. The
+    /// segment adds the rent after its first simulation.
     pub(crate) fn message(&self) -> Result<MessagePart, PlanError> {
         let interface = self.recipe.interface();
         let implementation = self.recipe.implementation();
         let rendered = self.render(implementation.message()?, Column::Message)?;
-        let version = |id: &sdp_intents_spec::wire::DocumentIdV1| {
-            format!("{}.{}.{}", id.version.major.get(), id.version.minor.get(), id.version.patch.get())
-        };
-        let organization = self.organization(&implementation.id().publisher)?;
-        let interface_organization = match interface.id().publisher == implementation.id().publisher {
-            true => String::new(),
-            false => format!("{}/", self.organization(&interface.id().publisher)?),
-        };
+        let id = implementation.id();
+        let version = format!("{}.{}.{}", id.version.major.get(), id.version.minor.get(), id.version.patch.get());
+        let organization = self.organization(&id.publisher)?;
 
         let checks = checks_text(*implementation, self.recipe.intent().options()?)?;
         let settlement = if interface.settles_later() { " | settles later" } else { "" };
 
         Ok(MessagePart {
             outcome: format!("{rendered}{settlement}"),
-            details: format!(
-                "{organization}/{}@{} for {interface_organization}{}@{} | {checks}",
-                printable(implementation.name()?)?,
-                version(implementation.id()),
-                printable(interface.name()?)?,
-                version(interface.id()),
-            ),
+            details: format!("{organization}/{}@{version} | {checks}", printable(implementation.name()?)?),
         })
     }
 

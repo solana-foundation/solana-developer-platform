@@ -706,7 +706,8 @@ try {
   const shieldMessage = shieldSigning.next.steps[0].message;
   expect(
     shieldMessage.startsWith("step 1 of 2: ") &&
-      shieldMessage.includes(" || flow solana.org/privacy-rings-shield-and-transfer@1.0.0: privately send "),
+      shieldMessage.includes(" || flow solana.org/privacy-rings-shield-and-transfer@1.0.0: privately send ") &&
+      shieldMessage.includes(" | 2 approvals || intents on "),
     `the shield's message names its place in the flow: ${shieldMessage.slice(0, 160)}`,
   );
   expect(

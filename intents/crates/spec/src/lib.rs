@@ -54,8 +54,9 @@ pub use address::Address;
 pub use circuit::{Circuit, ProofSystem};
 pub use error::SpecError;
 pub use implementation::{
-    check_flow_guarantees, AddressSource, AppliesKind, ConditionKind, Encoding, FlowDocuments, GuaranteeError,
-    Implementation, RecipeKind, Segment, ShieldedEntry, ShieldedProtocol, StepDocuments, StepValue, Submitter,
+    check_flow_guarantees, check_step_binding, AddressSource, AppliesKind, BindingError, ConditionKind, Encoding,
+    FlowDocuments, GuaranteeError, Implementation, RecipeKind, Segment, ShieldedEntry, ShieldedProtocol, StepBinding,
+    StepDocuments, StepValue, Submitter,
 };
 pub use intent::{Intent, IntentOptions};
 pub use interface::Interface;

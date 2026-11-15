@@ -174,3 +174,40 @@ fn verify_intent_refuses_an_expired_intent() {
     let failed = send_plan(&mut setup.svm, &plan, &signers).unwrap_err();
     assert!(failed.is(RegistryError::IntentExpired), "{failed}");
 }
+
+/// A flow's step names the flow in its message, and `verify_intent` refuses the step when its
+/// flow context names a step that the flow does not have.
+#[test]
+fn verify_intent_checks_a_step_against_its_flow() {
+    let mut setup = setup().unwrap();
+    let organization = &setup.published.organization;
+    let interface_index = setup.published.accounts.interface_index;
+    organization.create_implementation(&mut setup.svm, "flow-transfer", &interface_index).unwrap();
+    let (catalog, flow) = crate::flows::flow_catalog(organization, "1.0.0", false).unwrap();
+    organization.publish(&mut setup.svm, "flow-transfer", &flow, Some(interface_index)).unwrap();
+
+    let flow_text = intent(&setup, SOL, "{}").replace("solana.org/system-transfer@^1", "solana.org/flow-transfer@^1");
+    let flow_intent = catalog.compile_intent(&flow_text).unwrap().bytes;
+    let step = setup.published.compile(&intent(&setup, SOL, "{}"), &setup.fee_payer.pubkey()).unwrap();
+    let context = sdp_intents_planner::FlowStep {
+        interface: &step.interface,
+        implementation: &flow,
+        intent: &flow_intent,
+        step: 0,
+    };
+    let plan = sdp_intents_program_testing::prepare_flow_step(&setup.svm, &step, context).unwrap();
+    assert!(plan.message.starts_with("step 1 of 1: transfer 1 SOL from "), "{}", plan.message);
+    assert!(plan.message.contains(" || flow solana.org/flow-transfer@1.0.0: transfer 1 of "), "{}", plan.message);
+    assert!(plan.message.contains(" | 1 approval || intents on "), "{}", plan.message);
+    assert_eq!(verify(&setup.svm, &plan.transaction).unwrap().message, plan.message);
+
+    let signers = [&setup.fee_payer, &setup.from];
+    let mut another_step = plan.clone();
+    let data = &mut another_step.transaction.instructions[plan.intents[0].verify.unwrap()].data;
+    let step_position = data.len() - flow_intent.len() - 1;
+    data[step_position] = 1;
+    let failed = send_plan(&mut setup.svm, &another_step, &signers).unwrap_err();
+    assert!(failed.is(RegistryError::NotTheFlowStep), "{failed}");
+
+    send_plan(&mut setup.svm, &plan, &signers).unwrap();
+}

@@ -131,13 +131,13 @@ impl<'r, C: Chain> Values<'r, '_, C> {
         mints.map(|mint| self.address(mint, Table::Interface)).collect()
     }
 
-    /// The organization that publishes each document.
-    pub(crate) fn publishers(&self) -> [Address; 2] {
-        [self.recipe.interface().id().publisher, self.recipe.implementation().id().publisher]
+    /// The organization that publishes the implementation, which the message names.
+    pub(crate) fn publishers(&self) -> [Address; 1] {
+        [self.recipe.implementation().id().publisher]
     }
 
     /// The accounts that the message reads: the mint of each amount, and the organization that
-    /// publishes each document.
+    /// publishes the implementation.
     pub(crate) fn message_accounts(&self) -> Result<Vec<Address>, PlanError> {
         Ok(self.amount_mints()?.into_iter().chain(self.publishers()).collect())
     }

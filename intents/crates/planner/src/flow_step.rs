@@ -3,8 +3,8 @@
 //! checks that the step is the one that the flow names, with the inputs that the flow binds.
 
 use sdp_intents_engine::{Chain, Payers, Recipe};
-use sdp_intents_spec::wire::{DocumentIdV1, DocumentKind, StepInputV1};
-use sdp_intents_spec::{Address, Implementation, Intent, RecipeKind, ValueRef, ValueSource};
+use sdp_intents_spec::wire::DocumentKind;
+use sdp_intents_spec::{check_step_binding, Address, BindingError, Implementation, Intent, StepBinding, Submitter};
 
 use crate::registry::version_address;
 use crate::render::Column;
@@ -21,13 +21,41 @@ pub struct FlowStep<'a> {
     pub step: u8,
 }
 
-/// What the message says of the flow: `step <i> of <n>`, and the flow's id and outcome.
+/// What the message says of the flow: `step <i> of <n>`, the flow's id and outcome, how many
+/// steps its signer approves, and how it recovers when it stops after a step.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FlowPart {
     pub(crate) step: u8,
     pub(crate) steps: usize,
     pub(crate) id: String,
     pub(crate) outcome: String,
+    pub(crate) approvals: usize,
+    pub(crate) stops: Vec<StoppingPoint>,
+}
+
+/// A step after which the flow can stop, and the implementation that recovers it, as the flow
+/// names it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct StoppingPoint {
+    pub(crate) after: usize,
+    pub(crate) recover: String,
+}
+
+impl FlowPart {
+    /// `flow <id>: <outcome> | <n> approvals | if it stops after step <i>: recover with <id>`.
+    pub(crate) fn text(&self) -> String {
+        let approvals = match self.approvals {
+            1 => " | 1 approval".to_owned(),
+            count => format!(" | {count} approvals"),
+        };
+        let stops: String = self
+            .stops
+            .iter()
+            .map(|stop| format!(" | if it stops after step {}: recover with {}", stop.after, stop.recover))
+            .collect();
+
+        format!("flow {}: {}{approvals}{stops}", self.id, self.outcome)
+    }
 }
 
 /// The flow part, or the accounts that rendering it still needs.
@@ -51,54 +79,19 @@ impl FlowStep<'_> {
         ])
     }
 
-    /// The step is the flow's step at its position: the same interface and implementation, at a
-    /// version that the flow accepts, and each input as the flow binds it.
+    /// The step is the flow's step at its position, with the inputs that the flow binds.
     pub(crate) fn check_binding(&self, step: &Intent<'_>, payers: Payers<'_>) -> Result<(), PlanError> {
-        let flow = Implementation::parse(self.implementation)?;
-        let outer = Intent::parse(self.intent)?;
-        let wrong = || PlanError::NotTheFlowStep(self.step);
+        let binding = StepBinding {
+            flow: Implementation::parse(self.implementation)?,
+            flow_intent: Intent::parse(self.intent)?,
+            step: self.step,
+            fee_payer: payers.fee,
+            rent_payer: payers.rent,
+        };
 
-        if flow.recipe()? != RecipeKind::Flow || outer.implementation() != flow.id() {
-            return Err(wrong());
-        }
-
-        let named = flow.steps()?.get(usize::from(self.step)).ok_or_else(wrong)?;
-        let pinned =
-            accepts(&named.interface.id, step.interface()) && accepts(&named.implementation.id, step.implementation());
-        let bound = flow.step_inputs(named)?.iter().zip(0u8..).try_fold(true, |bound, (input, index)| {
-            Ok::<_, PlanError>(bound && self.binds(&flow, &outer, input, step.input(index)?, payers)?)
-        })?;
-
-        match pinned && bound {
-            true => Ok(()),
-            false => Err(wrong()),
-        }
-    }
-
-    /// The flow input, payer, or literal that the flow binds to a step input equals what the step's
-    /// intent holds. A value that only a plan knows cannot be checked, so it never binds.
-    fn binds(
-        &self,
-        flow: &Implementation<'_>,
-        outer: &Intent<'_>,
-        input: &StepInputV1,
-        held: &[u8],
-        payers: Payers<'_>,
-    ) -> Result<bool, PlanError> {
-        let value = ValueRef::try_from(input.value)?;
-
-        Ok(match value.source {
-            ValueSource::Input => outer.input(value.index)? == held,
-            ValueSource::Payer if value.index == 0 => held == payers.fee.0,
-            ValueSource::Payer => held == payers.rent.0,
-            ValueSource::Literal => {
-                let literal =
-                    flow.literals()?.get(usize::from(value.index)).ok_or(PlanError::NotTheFlowStep(self.step))?;
-
-                flow.text(literal.bytes)? == held
-            }
-            ValueSource::None => held == [0],
-            _ => false,
+        check_step_binding(&binding, step).map_err(|error| match error {
+            BindingError::Spec(error) => PlanError::Spec(error),
+            BindingError::NotTheStep => PlanError::NotTheFlowStep(self.step),
         })
     }
 
@@ -106,8 +99,18 @@ impl FlowStep<'_> {
     pub(crate) fn render<C: Chain>(&self, payers: Payers<'_>, chain: &C) -> Result<FlowRender, PlanError> {
         let recipe = Recipe::parse(self.interface, self.implementation, self.intent, payers)?;
         let values = Values { recipe: &recipe, chain, outputs: &[] };
-        let missing: Vec<Address> =
-            values.message_accounts()?.into_iter().filter(|address| chain.account(address).is_none()).collect();
+        let recover_publishers = recipe
+            .implementation()
+            .steps()?
+            .iter()
+            .filter(|step| !step.recover_implementation.is_empty())
+            .map(|step| step.recover_implementation.id.publisher);
+        let missing: Vec<Address> = values
+            .message_accounts()?
+            .into_iter()
+            .chain(recover_publishers)
+            .filter(|address| chain.account(address).is_none())
+            .collect();
 
         if !missing.is_empty() {
             return Ok(FlowRender::Missing(missing));
@@ -116,29 +119,37 @@ impl FlowStep<'_> {
         let implementation = recipe.implementation();
         let id = implementation.id();
         let version = format!("{}.{}.{}", id.version.major.get(), id.version.minor.get(), id.version.patch.get());
+        let steps = implementation.steps()?;
+        let approvals = steps.iter().filter(|step| step.submitter == u8::from(Submitter::Signer)).count();
+        let stops = (1usize..)
+            .zip(steps)
+            .filter(|(_, step)| !step.recover_implementation.is_empty())
+            .map(|(after, step)| {
+                let recover = &step.recover_implementation;
+                let id = format!(
+                    "{}/{}@^{}",
+                    values.organization(&recover.id.publisher)?,
+                    crate::plan::printable(implementation.text(recover.name)?)?,
+                    recover.id.version.major.get()
+                );
+
+                Ok(StoppingPoint { after, recover: id })
+            })
+            .collect::<Result<Vec<_>, PlanError>>()?;
 
         Ok(FlowRender::Rendered(FlowPart {
             step: self.step,
-            steps: implementation.steps()?.len(),
+            steps: steps.len(),
             id: format!(
                 "{}/{}@{version}",
                 values.organization(&id.publisher)?,
                 crate::plan::printable(implementation.name()?)?
             ),
             outcome: values.render(implementation.message()?, Column::Message)?,
+            approvals,
+            stops,
         }))
     }
-}
-
-/// `named` holds the lowest version that the flow accepts. A later minor or patch of the same major
-/// version is accepted, as a caret range is.
-fn accepts(named: &DocumentIdV1, held: &DocumentIdV1) -> bool {
-    let version = |id: &DocumentIdV1| (id.version.major.get(), id.version.minor.get(), id.version.patch.get());
-
-    named.publisher == held.publisher
-        && named.name_hash == held.name_hash
-        && named.version.major.get() == held.version.major.get()
-        && version(held) >= version(named)
 }
 
 #[cfg(test)]

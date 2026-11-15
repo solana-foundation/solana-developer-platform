@@ -76,11 +76,20 @@ impl VerifyIntent<'_> {
             .map(|account| recipe.address(account).copied().ok_or(PlanError::Unresolved))
             .collect::<Result<Vec<_>, _>>()?;
 
+        let flow_version = match self.flow.split_first() {
+            Some((_, flow_intent)) => {
+                let flow_intent = sdp_intents_spec::Intent::parse(flow_intent)?;
+
+                Some(version_address(DocumentKind::Implementation, flow_intent.implementation())?)
+            }
+            None => None,
+        };
         let accounts = registry
             .into_iter()
             .chain(table)
             .chain(self.extra_accounts.iter().copied())
             .chain(self.guarded.iter().copied())
+            .chain(flow_version)
             .map(|address| AccountMeta { address, role: AccountRole::Readonly })
             .collect();
 

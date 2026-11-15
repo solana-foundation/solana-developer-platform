@@ -90,4 +90,6 @@ pub enum RegistryError {
     IntentExpired,
     #[msg("The replacement is not another index of the same kind and interface")]
     WrongReplacement,
+    #[msg("The intent is not the flow's step at its position, with the inputs that the flow binds")]
+    NotTheFlowStep,
 }

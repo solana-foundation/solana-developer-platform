@@ -4,7 +4,8 @@
 //!
 //! The accounts are the instructions sysvar, the fee payer, the rent payer, the two indexes, the
 //! two version accounts, every account of the implementation's account table in order, for a program
-//! recipe the accounts of the builder's last `MoreAccounts` round, then the guarded accounts.
+//! recipe the accounts of the builder's last `MoreAccounts` round, then the guarded accounts, and
+//! for a flow's step, last, the flow's implementation version.
 //!
 //! The data is the intent in binary form, the builder's role of each account of its instructions
 //! for a program recipe, the interface's outputs, the bump of each program address of the implementation,
@@ -62,9 +63,9 @@ pub struct VerifyArgs<'a> {
     /// builder as `{builder.bumps}`. The builder refuses any bump that is not canonical.
     pub builder_bumps: &'a [u8],
     pub layout: SegmentLayout,
-    /// A flow step's position, then the flow's intent, or empty. The signer's verifier checks that
-    /// the segment is that step of that flow. `verify_intent` carries it so that the signature
-    /// covers it, and checks only that the intent reads.
+    /// A flow step's position, then the flow's intent, or empty. When it is set, the flow's
+    /// implementation version is the last account, and `verify_intent` checks that the segment is
+    /// that step of that flow.
     pub flow: &'a [u8],
 }
 
@@ -92,7 +93,6 @@ pub fn verify_intent(accounts: &VerifyIntent, passed: &[AccountView], args: Veri
     require!(now <= args.layout.expires_at, RegistryError::IntentExpired);
 
     let options = check_options(args.intent)?;
-    check_flow(args.flow)?;
 
     let interface_data = version::load(accounts.interface_version.account(), DocumentKind::Interface)?;
     let implementation_data = version::load(accounts.implementation_version.account(), DocumentKind::Implementation)?;
@@ -109,8 +109,15 @@ pub fn verify_intent(accounts: &VerifyIntent, passed: &[AccountView], args: Veri
     registry::check_indexes(accounts, &recipe)?;
 
     let layout = args.layout;
-    let implementation_len = passed.len().checked_sub(usize::from(layout.guarded_accounts));
-    let (implementation, guarded) = passed.split_at(implementation_len.ok_or(RegistryError::WrongGuardedAccounts)?);
+    let flow_accounts = usize::from(!args.flow.is_empty());
+    let implementation_len = passed
+        .len()
+        .checked_sub(usize::from(layout.guarded_accounts))
+        .and_then(|len| len.checked_sub(flow_accounts))
+        .ok_or(RegistryError::WrongGuardedAccounts)?;
+    let (implementation, rest) = passed.split_at(implementation_len);
+    let (guarded, flow_version) = rest.split_at(usize::from(layout.guarded_accounts));
+    check_flow(args.flow, flow_version.first(), args.intent, payers)?;
     let chain = PassedAccounts::borrow(implementation)?;
     resolve(&mut recipe, &chain)?;
 
@@ -236,13 +243,25 @@ fn check_options(intent: &[u8]) -> Result<IntentOptions> {
     Ok(options)
 }
 
-/// A flow context is a step's position and an intent that reads. The signer's verifier checks the
-/// rest: that the flow names this step, with the inputs that it binds.
-fn check_flow(flow: &[u8]) -> Result<()> {
-    match flow.split_first() {
-        None => Ok(()),
-        Some((_, intent)) => Intent::parse(intent).map(|_| ()).map_err(|error| refused(error.into())),
-    }
+/// A flow context is a step's position and the flow's intent. The flow's implementation version
+/// is the last account, and the flow must name this intent as its step at that position, with the
+/// inputs that it binds. A version account that the registry owns holds the document of its id, so
+/// matching the flow intent's id is enough.
+fn check_flow(flow: &[u8], version_account: Option<&AccountView>, intent: &[u8], payers: Payers<'_>) -> Result<()> {
+    let Some((&step, flow_intent)) = flow.split_first() else { return Ok(()) };
+    let account = version_account.ok_or(RegistryError::WrongAccount)?;
+    let data = version::load(account, DocumentKind::Implementation)?;
+    let binding = sdp_intents_spec::StepBinding {
+        flow: sdp_intents_spec::Implementation::parse_published(version::document(&data)?)
+            .map_err(|error| refused(error.into()))?,
+        flow_intent: Intent::parse(flow_intent).map_err(|error| refused(error.into()))?,
+        step,
+        fee_payer: payers.fee,
+        rent_payer: payers.rent,
+    };
+    let step_intent = Intent::parse(intent).map_err(|error| refused(error.into()))?;
+
+    sdp_intents_spec::check_step_binding(&binding, &step_intent).map_err(|_| RegistryError::NotTheFlowStep.into())
 }
 
 /// One `resolve` completes, because every account is in the instruction. Each resolved address

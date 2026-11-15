@@ -2,6 +2,7 @@
 //! `account` and `segment`. `view` finds tables in a document without copying them.
 
 mod account;
+mod binding;
 mod flow;
 mod guarantees;
 mod payload;
@@ -12,6 +13,7 @@ mod view;
 mod wire;
 
 pub use account::AddressSource;
+pub use binding::{check_step_binding, BindingError, StepBinding};
 pub use flow::{
     ConditionKind, ConditionV1, DocumentRefV1, FlowDocV1, StepInputV1, StepV1, StepValue, Submitter, NO_CONDITION,
     STEP_FACT_NULLIFIERS,
