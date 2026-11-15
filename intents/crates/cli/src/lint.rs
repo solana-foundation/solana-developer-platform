@@ -86,6 +86,11 @@ pub fn compile_tree(tree: &Tree) -> CompiledTree<'_> {
 
     let mut reports = Vec::new();
 
+    for definition in tree.of_kind(Kind::Circuit) {
+        let report = catalog.compile_circuit(&definition.text).err().unwrap_or_default();
+        reports.push(with_position_findings(definition, report));
+    }
+
     for definition in tree.of_kind(Kind::Interface) {
         let report = catalog.compile_interface(&definition.text).err().unwrap_or_default();
         reports.push(with_position_findings(definition, report));

@@ -11,13 +11,15 @@ use base64::Engine as _;
 use serde_json::{json, Value};
 
 use sdp_intents_chain::{CachedRpc, Freshness, ProgramAccount};
-use sdp_intents_compiler::{decompile_implementation, decompile_interface, format_version, Id, Organizations};
+use sdp_intents_compiler::{
+    decompile_circuit, decompile_implementation, decompile_interface, format_version, Id, Organizations,
+};
 use sdp_intents_registry_client::{
     version_address, IndexView, OrganizationView, VersionEntry, INDEX_DISCRIMINATOR, ORGANIZATION_DISCRIMINATOR,
     REGISTRY_PROGRAM,
 };
 use sdp_intents_spec::wire::{DocumentKind, SemverV1};
-use sdp_intents_spec::{Address, Implementation, Interface};
+use sdp_intents_spec::{Address, Circuit, Implementation, Interface};
 
 use crate::describe::base58;
 use crate::error::ServiceError;
@@ -43,6 +45,7 @@ pub async fn registry(chain: &CachedRpc) -> Result<Value, ServiceError> {
         "organizations": snapshot.organizations(),
         "interfaces": snapshot.summaries(DocumentKind::Interface, None),
         "implementations": snapshot.summaries(DocumentKind::Implementation, None),
+        "circuits": snapshot.summaries(DocumentKind::Circuit, None),
     }))
 }
 
@@ -75,8 +78,10 @@ pub async fn index(chain: &CachedRpc, key: IndexKey) -> Result<Value, ServiceErr
     let index = Registry { chain }.indexes(vec![key]).await?.pop().ok_or_else(|| unknown(kind, &id))?;
     let view = index.view()?;
 
-    if kind == DocumentKind::Interface {
-        return Ok(interface_summary(&id, &index.address, &view));
+    match kind {
+        DocumentKind::Interface => return Ok(interface_summary(&id, &index.address, &view)),
+        DocumentKind::Circuit => return Ok(circuit_summary(&id, &index.address, &view)),
+        _ => {}
     }
 
     let interface = interface_of(chain, &view, &index.address).await?;
@@ -133,6 +138,7 @@ pub async fn version(chain: &CachedRpc, key: IndexKey, version: SemverV1) -> Res
     let bytes = Registry { chain }.documents(&[choice]).await?.pop().ok_or_else(|| no_version(&id, version))?;
     let document = match kind {
         DocumentKind::Interface => interface_document(&bytes, &id, &view)?,
+        DocumentKind::Circuit => circuit_document(&bytes, &id, &view)?,
         _ => implementation_document(chain, &bytes, &id, &view).await?,
     };
 
@@ -147,6 +153,12 @@ pub async fn version(chain: &CachedRpc, key: IndexKey, version: SemverV1) -> Res
         "document": document,
         "bytes": base64(&bytes),
     }))
+}
+
+fn circuit_document(bytes: &[u8], id: &Id, view: &IndexView<'_>) -> Result<Value, ServiceError> {
+    let organizations = Organizations::from([(*view.organization(), id.organization.clone())]);
+
+    decompile_circuit(bytes, &organizations).map_err(|error| ServiceError::refused("badDocument", error.to_string()))
 }
 
 fn interface_document(bytes: &[u8], id: &Id, view: &IndexView<'_>) -> Result<Value, ServiceError> {
@@ -170,7 +182,8 @@ async fn implementation_document(
         version_address(DocumentKind::Interface, &implements.publisher, &implements.name_hash, &implements.version)
             .map_err(|error| ServiceError::invalid_request(error.to_string()))?;
 
-    let reads = [interface_address, implements.publisher];
+    let circuit_publisher = implementation.shielded().ok().flatten().map(|doc| doc.circuit.id.publisher);
+    let reads: Vec<Address> = [interface_address, implements.publisher].into_iter().chain(circuit_publisher).collect();
     let mut accounts = chain.accounts(&reads, Freshness::Published).await?.into_iter();
     let interface_choice = VersionChoice {
         kind: DocumentKind::Interface,
@@ -180,10 +193,12 @@ async fn implementation_document(
     };
     let interface = interface_choice.document(accounts.next().flatten())?;
     let publisher = accounts.next().flatten().and_then(|account| organization_name(&account.data));
+    let circuit_organization = accounts.next().flatten().and_then(|account| organization_name(&account.data));
 
     let organizations: Organizations = [(*view.organization(), id.organization.clone())]
         .into_iter()
         .chain(publisher.map(|name| (implements.publisher, name)))
+        .chain(circuit_publisher.zip(circuit_organization))
         .collect();
 
     decompile_implementation(bytes, &interface, &organizations)
@@ -239,6 +254,7 @@ impl Snapshot {
             .filter(|(_, view, _)| interface.is_none_or(|address| view.interface() == address))
             .map(|(index, view, id)| match kind {
                 DocumentKind::Interface => interface_summary(id, &index.address, &view),
+                DocumentKind::Circuit => circuit_summary(id, &index.address, &view),
                 _ => implementation_summary(id, &index.address, &view, self.interface(&view, &index.address).as_ref()),
             })
             .collect()
@@ -274,6 +290,18 @@ fn interface_summary(id: &Id, address: &Address, view: &IndexView<'_>) -> Value 
     })
 }
 
+fn circuit_summary(id: &Id, address: &Address, view: &IndexView<'_>) -> Value {
+    json!({
+        "id": id.to_string(),
+        "organization": id.organization,
+        "name": id.name,
+        "address": base58(address),
+        "head": view.head().map(format_version),
+        "versions": view.versions().map(version_json).collect::<Vec<_>>(),
+        "updateAuthority": base58(view.update_authority()),
+    })
+}
+
 fn implementation_summary(
     id: &Id,
     address: &Address,
@@ -299,9 +327,10 @@ fn shown(view: &IndexView<'_>) -> Option<VersionEntry> {
 }
 
 fn document_name(document: &[u8]) -> Option<String> {
-    let name = match Interface::parse(document) {
-        Ok(interface) => interface.name().ok(),
-        Err(_) => Implementation::parse(document).ok()?.name().ok(),
+    let name = match (Interface::parse(document), Implementation::parse(document)) {
+        (Ok(interface), _) => interface.name().ok(),
+        (_, Ok(implementation)) => implementation.name().ok(),
+        _ => Circuit::parse(document).ok()?.name().ok(),
     };
 
     name.map(text)
@@ -330,16 +359,17 @@ fn version_json(entry: VersionEntry) -> Value {
 }
 
 fn list_key(kind: DocumentKind) -> &'static str {
-    if kind == DocumentKind::Interface {
-        "interfaces"
-    } else {
-        "implementations"
+    match kind {
+        DocumentKind::Interface => "interfaces",
+        DocumentKind::Circuit => "circuits",
+        _ => "implementations",
     }
 }
 
 fn unknown(kind: DocumentKind, id: &Id) -> ServiceError {
     let (code, noun) = match kind {
         DocumentKind::Interface => ("unknownInterface", "interface"),
+        DocumentKind::Circuit => ("unknownCircuit", "circuit"),
         _ => ("unknownImplementation", "implementation"),
     };
 

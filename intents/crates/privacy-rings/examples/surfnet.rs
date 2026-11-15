@@ -7,7 +7,7 @@ use std::str::FromStr as _;
 use std::thread::sleep;
 use std::time::Duration;
 
-use sdp_intents_privacy_rings::{Endpoints, Shielded, ShieldedWallet};
+use sdp_intents_privacy_rings::{Amount, Endpoints, NoteOut, Shielded, ShieldedWallet, Statement};
 use solana_address::Address;
 use solana_keypair::Keypair;
 use spr_client::{sign_transaction, Rpc as _, SolanaRpc};
@@ -42,8 +42,11 @@ fn main() -> Result<(), Failure> {
     shielded.shield_sol(&alice, SOL)?;
     println!("alice private balance: {}", balance_reaching(&shielded, &alice, SOL)?);
 
-    let transfer = sdp_intents_privacy_rings::Amount { asset: SOL_MINT, amount: SOL / 4 };
-    let prepared = shielded.prepare_transfer(&alice, alice.address(), bob.address(), transfer)?;
+    let statement = Statement {
+        notes: vec![NoteOut { owner: bob.address(), value: Amount { asset: SOL_MINT, amount: SOL / 4 } }],
+        ..Statement::default()
+    };
+    let prepared = shielded.prepare(&alice, alice.address(), &statement, &endpoints.prover)?;
     let transaction = sign_transaction(prepared.message.message, &[alice.funding()])?;
     let signature = shielded.client().rpc().process_transaction(transaction)?;
     shielded.client().confirm_private_transaction_sync(signature)?;

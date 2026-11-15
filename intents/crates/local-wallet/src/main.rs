@@ -28,8 +28,13 @@ struct Args {
     #[arg(long)]
     ring_indexer: Option<String>,
 
+    /// The wallet's own Privacy Rings prover.
     #[arg(long, default_value = "http://127.0.0.1:3001")]
     ring_prover: String,
+
+    /// The intents service, whose prover a build can ask for instead of the wallet's own.
+    #[arg(long, default_value = "http://127.0.0.1:8787")]
+    service: String,
 
     /// The pool tree that new notes go into. The default is the tree of the Privacy Rings localnet
     /// snapshot.
@@ -56,7 +61,8 @@ async fn run(args: Args) -> Result<(), String> {
         }
         None => None,
     };
-    let wallet = Arc::new(Wallet::new(Keys::load(&args.wallets)?, Client::new(&args.rpc), ring));
+    let service_prover = format!("{}/v1/intents/prover", args.service.trim_end_matches('/'));
+    let wallet = Arc::new(Wallet::new(Keys::load(&args.wallets)?, Client::new(&args.rpc), ring, service_prover));
 
     if wallet.ring.is_some() {
         let registering = Arc::clone(&wallet);

@@ -80,6 +80,14 @@ pub mod registry {
         ctx.accounts.create(name_hash, update_authority)
     }
 
+    pub fn create_circuit(
+        ctx: &mut Context<CreateCircuit>,
+        name_hash: [u8; 32],
+        update_authority: Address,
+    ) -> Result<()> {
+        ctx.accounts.create(name_hash, update_authority)
+    }
+
     pub fn set_update_authority(ctx: &mut Context<ChangeIndex>, new_authority: Address) -> Result<()> {
         ctx.accounts.set_update_authority(new_authority)
     }

@@ -4,7 +4,7 @@
 use anchor_lang::prelude::*;
 use pinocchio::account::Ref;
 use sdp_intents_spec::wire::{DocumentIdV1, DocumentKind};
-use sdp_intents_spec::{Implementation, Interface};
+use sdp_intents_spec::{Circuit, Implementation, Interface};
 
 use crate::error::RegistryError;
 use crate::state::owned_data;
@@ -22,15 +22,23 @@ pub struct ImplementationV1 {
     pub publish_slot: PodU64,
 }
 
-/// The discriminator and the fixed part, which both kinds share.
+#[account]
+pub struct CircuitV1 {
+    pub version: SemverV1,
+    pub publish_slot: PodU64,
+}
+
+/// The discriminator and the fixed part, which every kind shares.
 pub const FIXED_LEN: usize = 8 + core::mem::size_of::<InterfaceV1>();
 
 const _: () = assert!(core::mem::size_of::<InterfaceV1>() == core::mem::size_of::<ImplementationV1>());
+const _: () = assert!(core::mem::size_of::<InterfaceV1>() == core::mem::size_of::<CircuitV1>());
 
 pub fn discriminator(kind: DocumentKind) -> Result<&'static [u8]> {
     match kind {
         DocumentKind::Interface => Ok(InterfaceV1::DISCRIMINATOR),
         DocumentKind::Implementation => Ok(ImplementationV1::DISCRIMINATOR),
+        DocumentKind::Circuit => Ok(CircuitV1::DISCRIMINATOR),
         DocumentKind::Intent => Err(RegistryError::WrongIndexKind.into()),
     }
 }
@@ -39,6 +47,7 @@ pub fn seed(kind: DocumentKind) -> Result<&'static [u8]> {
     match kind {
         DocumentKind::Interface => Ok(crate::state::INTERFACE_SEED),
         DocumentKind::Implementation => Ok(crate::state::IMPLEMENTATION_SEED),
+        DocumentKind::Circuit => Ok(crate::state::CIRCUIT_SEED),
         DocumentKind::Intent => Err(RegistryError::WrongIndexKind.into()),
     }
 }
@@ -57,6 +66,7 @@ pub fn document_id(kind: DocumentKind, document: &[u8]) -> Result<&DocumentIdV1>
     let id = match kind {
         DocumentKind::Interface => Interface::parse(document).map(|interface| interface.id()),
         DocumentKind::Implementation => Implementation::parse(document).map(|implementation| implementation.id()),
+        DocumentKind::Circuit => Circuit::parse(document).map(|circuit| circuit.id()),
         DocumentKind::Intent => return Err(RegistryError::WrongIndexKind.into()),
     };
 

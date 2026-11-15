@@ -13,13 +13,14 @@ pub use addresses::{
     program_data_address, version_address, UPGRADEABLE_LOADER,
 };
 pub use instructions::{
-    create_implementation, create_interface, create_organization, initialize_config, set_organization_authority,
-    set_organizations_gated, set_registry_admin, write_buffer, Approval, IndexAuthorities, IndexChange,
-    NewImplementation, NewInterface, Publication,
+    create_circuit, create_implementation, create_interface, create_organization, initialize_config,
+    set_organization_authority, set_organizations_gated, set_registry_admin, write_buffer, Approval, IndexAuthorities,
+    IndexChange, NewCircuit, NewImplementation, NewInterface, Publication,
 };
 pub use state::{
-    ConfigView, IndexView, OrganizationView, VersionEntry, CONFIG_DISCRIMINATOR, IMPLEMENTATION_DISCRIMINATOR,
-    INDEX_DISCRIMINATOR, INTERFACE_DISCRIMINATOR, ORGANIZATION_DISCRIMINATOR, VERSION_DOCUMENT_OFFSET,
+    ConfigView, IndexView, OrganizationView, VersionEntry, CIRCUIT_DISCRIMINATOR, CONFIG_DISCRIMINATOR,
+    IMPLEMENTATION_DISCRIMINATOR, INDEX_DISCRIMINATOR, INTERFACE_DISCRIMINATOR, ORGANIZATION_DISCRIMINATOR,
+    VERSION_DOCUMENT_OFFSET,
 };
 
 /// `9sgttDZ2vnzb85HWuQbx8vy6Boga32zpP5QRZ7UtbWpp`.

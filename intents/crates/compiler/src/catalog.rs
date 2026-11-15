@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use sdp_intents_spec::Address;
 use serde_json::Value;
 
+use crate::circuit::{compile_circuit, CompiledCircuit};
 use crate::diagnostic::Report;
 use crate::implementation::{compile_implementation, CompiledImplementation};
 use crate::intent::{compile_intent, CompiledIntent};
@@ -10,8 +11,8 @@ use crate::interface::{compile_interface, CompiledInterface};
 use crate::plan::{compile_plan, CompiledPlan};
 
 /// The documents that a file can name from outside itself: the address of each organization, the
-/// interfaces, and the implementations. Compile the interfaces first, then the implementations that
-/// name them, then the intents that name both. The catalog keeps each document that compiles.
+/// circuits, the interfaces, and the implementations. Compile the circuits and the interfaces first,
+/// then the implementations that name them, then the intents. The catalog keeps each document that compiles.
 ///
 /// The registry derives an organization's address from its name, and the caller supplies it.
 #[derive(Debug, Default)]
@@ -20,6 +21,8 @@ pub struct Catalog {
     interfaces: HashMap<String, CompiledInterface>,
     failed_interfaces: Vec<String>,
     implementations: HashMap<String, CompiledImplementation>,
+    /// Keyed by `{id}@{version}`, because a recipe names a circuit at its exact version.
+    circuits: HashMap<String, CompiledCircuit>,
 }
 
 impl Catalog {
@@ -38,6 +41,34 @@ impl Catalog {
                 Err(report)
             }
         }
+    }
+
+    pub fn compile_circuit(&mut self, text: &str) -> Result<&CompiledCircuit, Report> {
+        let circuit = compile_circuit(text, self)?;
+
+        Ok(self.insert_compiled_circuit(circuit))
+    }
+
+    /// Every circuit that compiled, in no order.
+    pub fn circuits(&self) -> impl Iterator<Item = &CompiledCircuit> {
+        self.circuits.values()
+    }
+
+    pub(crate) fn insert_compiled_circuit(&mut self, circuit: CompiledCircuit) -> &CompiledCircuit {
+        let key = format!("{}@{}", circuit.id, crate::id::format_version(circuit.version));
+
+        self.circuits.entry(key).insert_entry(circuit).into_mut()
+    }
+
+    /// The circuit `id` at exactly `version`, such as `solana.org/privacy-rings-transact@1.0.0`.
+    pub(crate) fn circuit(&self, pinned: &str) -> Option<&CompiledCircuit> {
+        self.circuits.get(pinned)
+    }
+
+    pub(crate) fn circuit_ids(&self) -> Vec<&str> {
+        let mut ids: Vec<&str> = self.circuits.keys().map(String::as_str).collect();
+        ids.sort_unstable();
+        ids
     }
 
     pub fn compile_implementation(&mut self, text: &str) -> Result<&CompiledImplementation, Report> {

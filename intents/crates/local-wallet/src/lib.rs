@@ -5,7 +5,7 @@
 //! | :-- | :-- | :-- |
 //! | `GET /wallets` | | The keys, by name |
 //! | `POST /send` | `{ message, presigned? }` | Checks each Privacy Rings spend, signs, and sends |
-//! | `POST /shielded/build` | The `spend` of a `build` | The spend's pool instructions and nullifier accounts, which it records |
+//! | `POST /shielded/build` | `{ spend, prover }`: the `spend` of a `build`, and `wallet` or `service` | The spend's pool instructions and nullifier accounts, which it records |
 //! | `GET /ring`, `POST /ring/shield` | `{ address, lamports }` | Each key's private SOL, and a deposit |
 
 mod error;
@@ -33,6 +33,8 @@ pub struct Wallet {
     pub keys: Keys,
     pub client: Client,
     pub ring: Option<Endpoints>,
+    /// The intents service's prover route, for a build that proves on the service.
+    pub service_prover: String,
     /// Each spend that the wallet built, by its pool instruction's data, which holds the proof.
     built: Mutex<HashMap<Vec<u8>, ShieldedSpend>>,
 }
@@ -40,8 +42,8 @@ pub struct Wallet {
 type Shared = State<Arc<Wallet>>;
 
 impl Wallet {
-    pub fn new(keys: Keys, client: Client, ring: Option<Endpoints>) -> Self {
-        Self { keys, client, ring, built: Mutex::new(HashMap::new()) }
+    pub fn new(keys: Keys, client: Client, ring: Option<Endpoints>, service_prover: String) -> Self {
+        Self { keys, client, ring, service_prover, built: Mutex::new(HashMap::new()) }
     }
 }
 

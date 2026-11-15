@@ -1,0 +1,53 @@
+{
+  "spec": "sdp-intents@1.1",
+  "kind": "implementation",
+  "id": "solana.org/privacy-rings-unshield",
+  "version": "1.0.0",
+  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "implements": "solana.org/private.unshield@^1",
+  "applies": [
+    {
+      "value": "{inputs.mint}",
+      "equals": "11111111111111111111111111111111"
+    }
+  ],
+  "message": "unshield {inputs.amount} of {inputs.mint} from the private balance of {inputs.owner} to {inputs.to}, in Solana Privacy Rings' default ring",
+  "recipe": {
+    "kind": "shielded",
+    "protocol": "privacy-rings",
+    "pool": "ring1GaLCuJnkUMVkX2JeZLTTX17wKsV4fZmPVzXANW",
+    "circuit": "solana.org/privacy-rings@1.0.0",
+    "accounts": [
+      {
+        "name": "spender",
+        "address": "{inputs.owner}"
+      },
+      {
+        "name": "recipient",
+        "address": "{inputs.to}"
+      }
+    ],
+    "notes": [],
+    "withdrawals": [
+      {
+        "to": "recipient",
+        "asset": {
+          "value": "{inputs.mint}",
+          "encoding": "address"
+        },
+        "amount": {
+          "value": "{inputs.amount}",
+          "encoding": "u64le"
+        }
+      }
+    ]
+  },
+  "postConditions": [
+    {
+      "invokesOnly": [
+        "ring1GaLCuJnkUMVkX2JeZLTTX17wKsV4fZmPVzXANW"
+      ],
+      "message": "only the privacy ring's pool runs"
+    }
+  ]
+}

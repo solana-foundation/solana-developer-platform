@@ -1,0 +1,10 @@
+{
+  "spec": "sdp-intents@1.1",
+  "kind": "circuit",
+  "id": "solana.org/privacy-rings",
+  "version": "1.0.0",
+  "protocol": "privacy-rings",
+  "proofSystem": "groth16-bn254",
+  "provingKeys": "fe926373458f17e60b017f36152e40748c3bf87ec24996176b8ba77015d03417",
+  "sources": ["https://d3gbdb0egjwcw9.cloudfront.net/proving-keys/8e234b5a589cfb79"]
+}

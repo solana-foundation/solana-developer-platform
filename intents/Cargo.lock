@@ -3730,6 +3730,7 @@ dependencies = [
  "sdp-intents-client",
  "sdp-intents-planner",
  "sdp-intents-privacy-rings",
+ "sdp-intents-registry-client",
  "sdp-intents-spec",
  "serde_json",
  "solana-address 2.7.0",
@@ -3773,6 +3774,7 @@ dependencies = [
 name = "sdp-intents-privacy-rings"
 version = "0.1.0"
 dependencies = [
+ "sha2 0.11.1",
  "solana-address 2.7.0",
  "solana-keypair",
  "solana-signer",

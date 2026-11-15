@@ -214,6 +214,14 @@ impl<'a> SegmentPlanner<'a> {
             return Err(PlanError::RemoteNeedsAssertions);
         }
 
+        let circuit = shielded::circuit_address(&self.recipe)?;
+
+        if earlier.chain.account(&circuit).is_none() {
+            self.state = State::Resolving;
+
+            return Ok(SegmentStep::Fetch(vec![circuit]));
+        }
+
         let call = shielded::call(&self.recipe, earlier.chain, self.priority_fee_lamports)?;
         self.state = State::AwaitingRemote;
 

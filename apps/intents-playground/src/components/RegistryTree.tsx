@@ -1,4 +1,13 @@
-import type { ListedImplementation, ListedInterface, Registry } from "@/api";
+import { useEffect, useState } from "react";
+
+import {
+  api,
+  type CircuitDefinition,
+  type ListedImplementation,
+  type ListedIndex,
+  type ListedInterface,
+  type Registry,
+} from "@/api";
 
 interface Props {
   registry: Registry;
@@ -61,6 +70,11 @@ export function RegistryTree(props: Props) {
                     {...props}
                   />
                 ))}
+                {(registry.circuits ?? [])
+                  .filter((circuit) => circuit.organization === organization.name)
+                  .map((circuit) => (
+                    <CircuitItem key={circuit.address} circuit={circuit} />
+                  ))}
               </div>
             );
           })}
@@ -132,5 +146,48 @@ function ImplementationItem(props: Props & { implementation: ListedImplementatio
       </span>
       {!implementation.approved && <span className="badge badge-amber">unapproved</span>}
     </button>
+  );
+}
+
+/// A circuit that shielded recipes prove with. It opens to show its pinned proving keys and sources.
+function CircuitItem({ circuit }: { circuit: ListedIndex }) {
+  const [open, setOpen] = useState(false);
+  const [document, setDocument] = useState<CircuitDefinition | null>(null);
+  const version = circuit.head ?? circuit.versions.at(-1)?.version ?? null;
+
+  useEffect(() => {
+    if (!open || version === null || document !== null) return;
+
+    api
+      .circuitVersion(circuit.id, version)
+      .then((published) => setDocument(published.document))
+      .catch(() => setDocument(null));
+  }, [open, version, document, circuit.id]);
+
+  return (
+    <>
+      <button
+        type="button"
+        className={`nav-item tree-item ${open ? "open" : ""}`}
+        onClick={() => setOpen(!open)}
+      >
+        <span className="tree-name">{circuit.name}</span>
+        <span className="badge badge-gray">circuit</span>
+        <span className="tree-version">{version ?? "no head"}</span>
+      </button>
+      {open && document !== null && (
+        <div className="sub-nav circuit-detail">
+          <div>
+            {document.protocol} · {document.proofSystem}
+          </div>
+          <div title={document.provingKeys}>proving keys {document.provingKeys.slice(0, 12)}…</div>
+          {document.sources.map((source) => (
+            <div key={source} className="circuit-source" title={source}>
+              {source}
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }

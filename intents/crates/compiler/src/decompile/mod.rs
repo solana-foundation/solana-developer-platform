@@ -20,6 +20,7 @@
 //!   text, and before an address object.
 
 mod accounts;
+mod circuit;
 mod error;
 mod flow;
 mod implementation;
@@ -38,6 +39,7 @@ use std::collections::HashMap;
 use sdp_intents_spec::wire::DocumentIdV1;
 use sdp_intents_spec::Address;
 
+pub use circuit::decompile_circuit;
 pub use error::DecompileError;
 pub use implementation::decompile_implementation;
 pub use interface::decompile_interface;

@@ -44,6 +44,9 @@ pub enum PlanError {
     /// The caller's shielded spend calls another program than the recipe's pool, or holds no
     /// instruction.
     ShieldedSpend,
+    /// The circuit that a shielded recipe names is not a circuit version of its protocol in the
+    /// registry.
+    ShieldedCircuit,
     /// A flow recipe plans through its steps (`DESIGN.md`, 4.19), never as one intent.
     FlowRecipe,
     /// The provider's transaction breaks a rule of `DESIGN.md`, 4.16, which the text names.
@@ -146,6 +149,9 @@ impl fmt::Display for PlanError {
             ),
             Self::ShieldedNote => f.write_str("a shielded note is not one owner, a 32-byte asset, and an 8-byte amount"),
             Self::ShieldedSpend => f.write_str("the shielded spend calls another program than the pool, or is empty"),
+            Self::ShieldedCircuit => {
+                f.write_str("the recipe's circuit is not a published circuit of its protocol in the registry")
+            }
             Self::FlowRecipe => f.write_str("a flow recipe plans one step at a time, through `/v1/intents/start`"),
             Self::RentPayerInRecipe => f.write_str(
                 "the builder names the rent payer as one of its own accounts, which verify_intent cannot check yet. Pay the rent from another wallet.",

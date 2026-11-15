@@ -35,6 +35,11 @@ struct Args {
     /// Honors `x-sdp-tamper: 1`, which the playground uses to show `verify_intent` refusing a plan.
     #[arg(long)]
     allow_tamper: bool,
+
+    /// A Privacy Rings prover, which `/v1/intents/prover` forwards to for a caller that does not
+    /// prove in its own host.
+    #[arg(long)]
+    prover: Option<String>,
 }
 
 #[tokio::main]
@@ -55,6 +60,7 @@ async fn run(args: Args) -> Result<(), String> {
         chain: CachedRpc::new(&args.rpc, &ws, Duration::from_millis(args.max_age_ms), simulate_in),
         allow_tamper: args.allow_tamper,
         metrics: Metrics::default(),
+        prover: args.prover.as_deref().map(sdp_intents_service::prover::Prover::new).transpose()?,
     };
 
     let service = Arc::new(service);

@@ -30,6 +30,7 @@
 
 mod address;
 pub mod builder;
+mod circuit;
 pub mod cluster;
 mod code;
 mod counts;
@@ -50,10 +51,11 @@ mod value_type;
 mod test_support;
 
 pub use address::Address;
+pub use circuit::{Circuit, ProofSystem};
 pub use error::SpecError;
 pub use implementation::{
-    AddressSource, AppliesKind, ConditionKind, Encoding, Implementation, RecipeKind, Segment, ShieldedProtocol,
-    StepValue, Submitter,
+    AddressSource, AppliesKind, ConditionKind, Encoding, Implementation, RecipeKind, Segment, ShieldedEntry,
+    ShieldedProtocol, StepValue, Submitter,
 };
 pub use intent::{Intent, IntentOptions};
 pub use interface::Interface;
@@ -65,6 +67,7 @@ pub use value_type::{BaseType, ValueType};
 /// The stored layout of each document: the fixed parts, the entry types, and the integers they
 /// hold. A view returns these entries in place. A writer, such as the compiler, lays them out.
 pub mod wire {
+    pub use crate::circuit::CircuitDocV1;
     pub use crate::document::{DocumentHeaderV1, DocumentIdV1, DocumentKind, SemverV1, MAGIC, SPEC_MAJOR, SPEC_MINOR};
     pub use crate::implementation::{
         AccountV1, AppliesV1, ConditionV1, DocumentRefV1, FlowDocV1, ImplementationDocV1, InstructionV1,

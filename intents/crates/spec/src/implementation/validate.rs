@@ -3,6 +3,7 @@
 
 use super::account::AddressSource;
 use super::segment::Segment;
+use super::shielded::ShieldedEntry;
 use super::view::Implementation;
 use super::wire::{AccountV1, AppliesKind, AppliesV1, InstructionV1, RecipeKind, SegmentV1, MAX_DISCRIMINATOR};
 use crate::counts::{check_index, Counts};
@@ -72,19 +73,38 @@ impl Implementation<'_> {
 
         match self.recipe()? {
             RecipeKind::Flow => self.validate_flow(self.literals()?.len()),
-            _ => self.shielded_protocol().map(|_| ()),
+            _ => {
+                self.shielded_protocol()?;
+                let circuit = self.shielded()?.ok_or(SpecError::BadRecipe)?.circuit;
+
+                if circuit.is_empty() {
+                    return Err(SpecError::BadRecipe);
+                }
+
+                self.text(circuit.name).map(|_| ())
+            }
         }
     }
 
-    /// Each output note names the pool as its program, one owner account, and at least the asset and
-    /// the amount.
+    /// Each entry names the pool as its program and one account. A note has at least the asset and
+    /// the amount, and a deposit or a withdrawal has exactly those two.
     fn shielded_outputs_fit(&self) -> Result<bool, SpecError> {
-        let pool = self.instructions()?.first().map(|instruction| instruction.program);
+        let instructions = self.instructions()?;
+        let pool = instructions.first().map(|instruction| instruction.program);
+        let entries_fit = instructions.iter().enumerate().try_fold(true, |fit, (index, instruction)| {
+            let segments = instruction.segments.count;
+            let segments_fit = match self.shielded_entry(index)? {
+                Some(ShieldedEntry::Note) => segments >= 2,
+                Some(ShieldedEntry::Deposit | ShieldedEntry::Withdrawal) => segments == 2,
+                None => false,
+            };
 
-        Ok(!self.accounts()?.is_empty()
-            && self.instructions()?.iter().all(|instruction| {
-                Some(instruction.program) == pool && instruction.accounts.count == 1 && instruction.segments.count >= 2
-            }))
+            Ok::<_, SpecError>(
+                fit && Some(instruction.program) == pool && instruction.accounts.count == 1 && segments_fit,
+            )
+        })?;
+
+        Ok(!self.accounts()?.is_empty() && entries_fit)
     }
 
     /// An account can name only accounts before it, so resolving the table in order never loops.

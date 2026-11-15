@@ -65,8 +65,8 @@ impl Wallet {
 
             if recorded != required {
                 return Err(WalletError::refused(
-                    "wrongNotes",
-                    format!("the spend at instruction {position} does not create the notes that its intent requires"),
+                    "wrongStatement",
+                    format!("the spend at instruction {position} does not do what its intent requires"),
                 ));
             }
 

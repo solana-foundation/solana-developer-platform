@@ -16,7 +16,8 @@ use crate::state::{compare_versions, owned_data, owned_data_mut};
 
 #[account]
 pub struct VersionIndexV1 {
-    /// `DocumentKind::Interface` or `DocumentKind::Implementation`. It is a seed.
+    /// `DocumentKind::Interface`, `DocumentKind::Implementation`, or `DocumentKind::Circuit`. It is a
+    /// seed.
     pub kind: u8,
     pub organization: Address,
     pub name_hash: [u8; 32],

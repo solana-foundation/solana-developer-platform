@@ -15,6 +15,20 @@ export interface VerifiedIntent {
   built: Range;
   /// `verify_intent` and every instruction after it that the segment holds.
   segment: Range;
+  /// The statement that a shielded intent requires, read from the registry. `null` for another
+  /// recipe. Only the wallet that built the spend can check the notes against it.
+  spend: ShieldedStatement | null;
+}
+
+/// What a shielded spend does (`DESIGN.md`, 4.17). Addresses are base58, amounts are decimal
+/// strings, and note data is hexadecimal.
+export interface ShieldedStatement {
+  protocol: string;
+  circuit: { publisher: string; name: string; version: string; provingKeys: string };
+  spender: string;
+  notes: { owner: string; asset: string; amount: string; data: string }[];
+  deposits: { account: string; asset: string; amount: string }[];
+  withdrawals: { account: string; asset: string; amount: string }[];
 }
 
 export interface VerifiedTransaction {

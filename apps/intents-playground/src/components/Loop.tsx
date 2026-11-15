@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { type Answer, api, type Recipe, ServiceError, type SignStep } from "@/api";
+import { type Answer, api, type Prover, type Recipe, ServiceError, type SignStep } from "@/api";
 import { Code, Snippets } from "@/components/Code";
 import { Instructions, StepRows, VerifiedResult } from "@/components/Plan";
 import { explorerUrl } from "@/known";
@@ -67,6 +67,8 @@ export function Loop(props: Props) {
           onSend={loop.send}
           built={loop.built}
           onBuild={loop.build}
+          prover={loop.prover}
+          onProver={loop.setProver}
           onContinue={() => loop.resume({ signatures: Object.values(sent), built: loop.built })}
         />
       )}
@@ -86,6 +88,7 @@ function useLoop(props: Props) {
   const [sent, setSent] = useState<Sent>({});
   const [verified, setVerified] = useState<Record<number, Verified>>({});
   const [built, setBuilt] = useState<Record<string, unknown> | null>(null);
+  const [prover, setProver] = useState<Prover>("wallet");
   const answer = calls.at(-1)?.answer ?? null;
   const steps = answer?.next.kind === "sign" ? answer.next.steps : [];
 
@@ -125,7 +128,7 @@ function useLoop(props: Props) {
 
     setBusy("build");
     return api
-      .build(answer.next.spend)
+      .build(answer.next.spend, prover)
       .then((made) => {
         setBuilt(made);
         return made;
@@ -148,6 +151,8 @@ function useLoop(props: Props) {
     verified,
     built,
     build,
+    prover,
+    setProver,
     setBusy,
     resume,
     verify,
@@ -307,6 +312,8 @@ interface NextProps {
   onSend: (index: number) => Promise<string>;
   built: Record<string, unknown> | null;
   onBuild: () => Promise<Record<string, unknown>>;
+  prover: Prover;
+  onProver: (prover: Prover) => void;
   onContinue: () => void;
 }
 
@@ -357,7 +364,14 @@ function BuildView(props: NextProps & { next: Extract<Answer["next"], { kind: "b
         Step <code>{props.next.step}</code> needs this spend. The wallet checks it against the
         intent again when it signs.
       </div>
-      <Code text={JSON.stringify({ spend: props.next.spend }, null, 2)} />
+      <ProverChoice
+        prover={props.prover}
+        onProver={props.onProver}
+        disabled={props.built !== null}
+      />
+      <Code
+        text={`POST /wallet/shielded/build\n${JSON.stringify({ spend: props.next.spend, prover: props.prover }, null, 2)}`}
+      />
       <button
         type="button"
         className="btn btn-sec"
@@ -378,6 +392,46 @@ function BuildView(props: NextProps & { next: Extract<Answer["next"], { kind: "b
         </>
       )}
     </>
+  );
+}
+
+/// Where the wallet proves the spend. The service's prover sees the witness, so it learns the spend.
+function ProverChoice(props: {
+  prover: Prover;
+  onProver: (prover: Prover) => void;
+  disabled: boolean;
+}) {
+  const choices: { value: Prover; label: string; sub: string }[] = [
+    { value: "wallet", label: "Prove in the wallet", sub: "Nobody else sees the spend." },
+    {
+      value: "service",
+      label: "Prove on the service",
+      sub: "The service's prover sees the notes, the amounts, and the recipient. It cannot spend: the wallet still signs.",
+    },
+  ];
+
+  return (
+    <div className="prover-choice" role="radiogroup" aria-label="Where to prove">
+      {choices.map((choice) => (
+        <label
+          key={choice.value}
+          className={`prover-option${props.prover === choice.value ? " selected" : ""}`}
+        >
+          <input
+            type="radio"
+            name="prover"
+            value={choice.value}
+            checked={props.prover === choice.value}
+            disabled={props.disabled}
+            onChange={() => props.onProver(choice.value)}
+          />
+          <span>
+            <span className="prover-label">{choice.label}</span>
+            <span className="prover-sub">{choice.sub}</span>
+          </span>
+        </label>
+      ))}
+    </div>
   );
 }
 

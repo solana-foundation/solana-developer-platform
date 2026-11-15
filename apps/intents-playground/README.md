@@ -28,8 +28,8 @@ Each step runs in its own terminal, from the repository root.
 
 3. Start the Privacy Rings indexer and prover, the Jupiter wrapper, the stand-in provider, the
    local wallet, and the service. The wallet holds the playground's keys: it builds Privacy Rings
-   spends when the page asks, checks each spend's notes before it signs, and sends. The service
-   holds no key and never calls the wallet:
+   spends when the page asks, checks each spend's statement before it signs, and sends. The service
+   holds no key and never calls the wallet. It runs a prover for a build that asks it to prove:
 
    ```sh
    cd intents
@@ -37,7 +37,7 @@ Each step runs in its own terminal, from the repository root.
    node adapters/jupiter.mjs &
    ./target/debug/sdp-intents-test-provider &
    ./target/debug/sdp-intents-local-wallet --wallets target/playground/wallets --ring-indexer http://127.0.0.1:8784 &
-   ./target/debug/sdp-intents-service --allow-tamper
+   ./target/debug/sdp-intents-service --allow-tamper --prover http://127.0.0.1:3001
    ```
 
 4. Build the verifier module, start the playground, then open <http://localhost:5178>:
@@ -60,13 +60,15 @@ nothing on a real cluster.
 - The interface page: the display template as the title, the inputs as a form, the postconditions
   as guarantees, and each implementation with whether its `applies` checks hold.
 - Solana Privacy Rings: each wallet's private SOL in the default ring, and a button that shields
-  1 SOL. `private.transfer` sends SOL privately through Zolana. Its implementation
-  `privacy-rings-shield-and-transfer` is a flow: it
-  shields public SOL first when the private balance is short, then transfers.
+  1 SOL. `private.shield`, `private.transfer`, and `private.unshield` move SOL into, inside, and
+  out of the ring. Each implementation states its spend: the notes it creates, and what it deposits
+  and withdraws. `privacy-rings-shield-and-transfer` is a flow: it shields public SOL first when
+  the private balance is short, then transfers. The tree lists the circuit that each spend proves
+  with.
 - Intent: the intent JSON and the `start` request as curl, TypeScript, and Rust.
 - The loop: every intent runs the same loop, for one transaction or many (`DESIGN.md`, 4.1). Each
   call shows its curl and its answer, and `next` says what to do: have the wallet build a shielded
-  spend, sign each step, wait for its condition, or nothing, because the flow is done. For a step to sign, the panel shows its message,
+  spend, proved in the wallet or on the service, sign each step, wait for its condition, or nothing, because the flow is done. For a step to sign, the panel shows its message,
   each instruction with its part of the segment, and the compute units. `Verify` runs
   `@sdp/intents-verifier` in the browser. It reads the registry from the surfnet's RPC through the
   dev server's `/rpc`, never from the service. `Sign and send` signs with the local wallets. The

@@ -1,13 +1,14 @@
 //! The recipe: a static list of instructions, a builder call, a remote endpoint, or a shielded spend.
 
-use sdp_intents_spec::wire::InstructionV1;
-use sdp_intents_spec::{AddressSource, RecipeKind, ShieldedProtocol, SpecError};
+use sdp_intents_spec::wire::{DocumentRefV1, InstructionV1};
+use sdp_intents_spec::{AddressSource, RecipeKind, ShieldedEntry, ShieldedProtocol, SpecError};
 use serde_json::{Map, Value};
 
 use super::implementation::Document;
 use super::json::{non_empty, object, sparse_object, utf8, LiteralPlace};
 use super::programs::ProgramName;
-use super::DecompileError;
+use super::{document_name, DecompileError};
+use crate::id::format_version;
 
 impl Document<'_, '_> {
     pub(super) fn recipe(&self) -> Result<Value, DecompileError> {
@@ -66,8 +67,9 @@ impl Document<'_, '_> {
     }
 
     /// The pool account is the one that the compiler adds after the stated accounts, unless a stated
-    /// account holds the pool's address. Each instruction is a note: its one account is the owner,
-    /// and its segments are the asset, the amount, and the note's data.
+    /// account holds the pool's address. Each instruction is a note, a deposit, or a withdrawal: its
+    /// one account is the owner or the public account, and its segments are the asset, the amount,
+    /// and a note's data.
     fn shielded_recipe(&self) -> Result<Value, DecompileError> {
         let declared = (0..=self.view.accounts()?.len())
             .find_map(|declared| {
@@ -76,38 +78,55 @@ impl Document<'_, '_> {
             .unwrap_or(Err(DecompileError::Unrepresentable("a pool that is not the first account with its address")))?;
         let instructions = self.view.instructions()?;
         let pool = instructions.first().ok_or(SpecError::BadRecipe)?;
-        let notes: Vec<Value> = instructions.iter().map(|note| self.note(note)).collect::<Result<_, _>>()?;
-
-        let protocol = match self.view.shielded_protocol()? {
-            Some(ShieldedProtocol::PrivacyRings) => "privacy-rings",
-            None => return Err(SpecError::BadRecipe.into()),
+        let doc = self.view.shielded()?.ok_or(SpecError::BadRecipe)?;
+        let entries = instructions
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| {
+                Ok((self.view.shielded_entry(index)?.ok_or(SpecError::BadRecipe)?, self.shielded_entry(entry)?))
+            })
+            .collect::<Result<Vec<_>, DecompileError>>()?;
+        let list = |wanted: ShieldedEntry, account: &str| -> Vec<Value> {
+            entries
+                .iter()
+                .filter(|(entry, _)| *entry == wanted)
+                .map(|(_, fields)| fields.with_account(account))
+                .collect()
         };
 
-        Ok(object([
-            ("kind", Value::from("shielded")),
-            ("protocol", Value::from(protocol)),
-            ("pool", Value::from(self.program(pool)?)),
-            ("accounts", Value::Array(self.accounts(declared)?)),
-            ("notes", Value::Array(notes)),
+        let protocol = match ShieldedProtocol::try_from(doc.protocol)? {
+            ShieldedProtocol::PrivacyRings => "privacy-rings",
+        };
+
+        Ok(sparse_object([
+            ("kind", Some(Value::from("shielded"))),
+            ("protocol", Some(Value::from(protocol))),
+            ("pool", Some(Value::from(self.program(pool)?))),
+            ("circuit", Some(Value::from(self.circuit(&doc.circuit)?))),
+            ("accounts", Some(Value::Array(self.accounts(declared)?))),
+            ("notes", Some(Value::Array(list(ShieldedEntry::Note, "owner")))),
+            ("deposits", non_empty(list(ShieldedEntry::Deposit, "from"))),
+            ("withdrawals", non_empty(list(ShieldedEntry::Withdrawal, "to"))),
         ]))
     }
 
-    fn note(&self, note: &InstructionV1) -> Result<Value, DecompileError> {
-        let [owner] = self.view.instruction_accounts(note)? else {
+    /// `solana.org/privacy-rings-transact@1.0.0`.
+    fn circuit(&self, circuit: &DocumentRefV1) -> Result<String, DecompileError> {
+        let id = document_name(&circuit.id, self.view.text(circuit.name)?, self.organizations)?;
+
+        Ok(format!("{id}@{}", format_version(circuit.id.version)))
+    }
+
+    fn shielded_entry(&self, entry: &InstructionV1) -> Result<EntryFields, DecompileError> {
+        let [account] = self.view.instruction_accounts(entry)? else {
             return Err(SpecError::BadRecipe.into());
         };
-        let mut segments = self.segments(note)?.into_iter();
+        let mut segments = self.segments(entry)?.into_iter();
         let (Some(asset), Some(amount)) = (segments.next(), segments.next()) else {
             return Err(SpecError::BadRecipe.into());
         };
-        let data: Vec<Value> = segments.collect();
 
-        Ok(sparse_object([
-            ("owner", Some(Value::from(self.names.account(*owner)?))),
-            ("asset", Some(asset)),
-            ("amount", Some(amount)),
-            ("data", non_empty(data)),
-        ]))
+        Ok(EntryFields { account: self.names.account(*account)?.to_owned(), asset, amount, data: segments.collect() })
     }
 
     fn remote_recipe(&self, returns: &str) -> Result<Value, DecompileError> {
@@ -172,5 +191,24 @@ impl Document<'_, '_> {
         }
 
         Ok((!bindings.is_empty()).then_some(Value::Object(bindings)))
+    }
+}
+
+/// The fields of a shielded entry, before its account key is known.
+struct EntryFields {
+    account: String,
+    asset: Value,
+    amount: Value,
+    data: Vec<Value>,
+}
+
+impl EntryFields {
+    fn with_account(&self, key: &str) -> Value {
+        sparse_object([
+            (key, Some(Value::from(self.account.as_str()))),
+            ("asset", Some(self.asset.clone())),
+            ("amount", Some(self.amount.clone())),
+            ("data", non_empty(self.data.clone())),
+        ])
     }
 }

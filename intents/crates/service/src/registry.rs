@@ -9,7 +9,7 @@ use sdp_intents_compiler::diagnostic::Report;
 use sdp_intents_compiler::{format_version, Catalog, Id, IdRange};
 use sdp_intents_planner::Account;
 use sdp_intents_registry_client::{
-    index_address, name_hash, organization_address, version_address, IndexView, VersionEntry,
+    index_address, name_hash, organization_address, version_address, IndexView, VersionEntry, CIRCUIT_DISCRIMINATOR,
     IMPLEMENTATION_DISCRIMINATOR, INTERFACE_DISCRIMINATOR, REGISTRY_PROGRAM, VERSION_DOCUMENT_OFFSET,
 };
 use sdp_intents_spec::wire::{DocumentKind, SemverV1};
@@ -74,6 +74,10 @@ impl IndexKey {
         Self { kind: DocumentKind::Implementation, id: id.clone() }
     }
 
+    pub fn circuit(id: &Id) -> Self {
+        Self { kind: DocumentKind::Circuit, id: id.clone() }
+    }
+
     pub fn organization(&self) -> Result<Address, ServiceError> {
         organization_address(&self.id.organization).map_err(|error| ServiceError::invalid_request(error.to_string()))
     }
@@ -86,6 +90,7 @@ impl IndexKey {
     fn kind_text(&self) -> &'static str {
         match self.kind {
             DocumentKind::Interface => "interface",
+            DocumentKind::Circuit => "circuit",
             _ => "implementation",
         }
     }
@@ -111,8 +116,11 @@ impl VersionChoice {
 
     /// The document of the version account, which the registry must own.
     pub fn document(&self, account: Option<Account>) -> Result<Vec<u8>, ServiceError> {
-        let discriminator =
-            if self.kind == DocumentKind::Interface { INTERFACE_DISCRIMINATOR } else { IMPLEMENTATION_DISCRIMINATOR };
+        let discriminator = match self.kind {
+            DocumentKind::Interface => INTERFACE_DISCRIMINATOR,
+            DocumentKind::Circuit => CIRCUIT_DISCRIMINATOR,
+            _ => IMPLEMENTATION_DISCRIMINATOR,
+        };
 
         account
             .filter(|account| account.owner == REGISTRY_PROGRAM && account.data.starts_with(&discriminator))

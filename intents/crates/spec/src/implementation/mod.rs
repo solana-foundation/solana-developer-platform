@@ -16,7 +16,7 @@ pub use flow::{
     STEP_FACT_NULLIFIERS,
 };
 pub use segment::Segment;
-pub use shielded::{ShieldedDocV1, ShieldedProtocol};
+pub use shielded::{ShieldedDocV1, ShieldedEntry, ShieldedProtocol};
 pub use view::Implementation;
 pub use wire::{
     AccountV1, AppliesKind, AppliesV1, Encoding, ImplementationDocV1, InstructionV1, OutputBindingV1, RecipeKind,

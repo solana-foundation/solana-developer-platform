@@ -1,4 +1,4 @@
-use sdp_intents_spec::wire::{DocumentIdV1, DocumentKind, FlowDocV1, ImplementationDocV1, LiteralV1, ShieldedDocV1};
+use sdp_intents_spec::wire::{DocumentIdV1, DocumentKind, FlowDocV1, ImplementationDocV1, LiteralV1};
 use sdp_intents_spec::{Implementation, RecipeKind};
 
 use super::recipe::Recipe;
@@ -55,8 +55,8 @@ impl Build<'_, '_> {
             writer.extension(&flow);
         }
 
-        if let Some(protocol) = recipe.protocol {
-            writer.extension(&ShieldedDocV1 { protocol: protocol.into() });
+        if let Some(shielded) = recipe.shielded {
+            writer.extension(&shielded);
         }
 
         let fixed = ImplementationDocV1 { pool: writer.pool(&self.pool), ..fixed };

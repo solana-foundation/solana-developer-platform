@@ -1,0 +1,20 @@
+{
+  "spec": "sdp-intents@1.0",
+  "kind": "interface",
+  "id": "solana.org/private.unshield",
+  "version": "1.0.0",
+  "inputs": [
+    { "name": "owner", "type": "address", "signer": true },
+    { "name": "to", "type": "address" },
+    { "name": "mint", "type": "mint" },
+    { "name": "amount", "type": "u64", "display": { "amount": { "mint": "{inputs.mint}" } } }
+  ],
+  "outputs": [],
+  "display": "Unshield {inputs.amount} {inputs.mint} from a privacy ring to {inputs.to}",
+  "postConditions": [
+    { "inflow": { "to": "{inputs.to}", "mint": "{inputs.mint}", "min": "{inputs.amount}" },
+      "message": "{inputs.to} receives at least {inputs.amount} of {inputs.mint}" },
+    { "noOtherOutflows": { "from": "{inputs.owner}" },
+      "message": "nothing leaves the public accounts of {inputs.owner}" }
+  ]
+}

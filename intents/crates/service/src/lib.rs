@@ -7,7 +7,7 @@
 //! | `GET /metrics` | | Request, RPC, and cache counters, in the Prometheus text format |
 //! | `GET /v1/registry` | | Every organization, interface, and implementation, without documents |
 //! | `GET /v1/organizations` | | Every organization |
-//! | `GET /v1/interfaces`, `GET /v1/implementations` | | Every index of that kind |
+//! | `GET /v1/interfaces`, `GET /v1/implementations`, `GET /v1/circuits` | | Every index of that kind |
 //! | `GET /v1/{kind}/{organization}/{name}` | | One index: its head, versions, and authorities |
 //! | `GET /v1/{kind}/{organization}/{name}/versions/{version}` | | One version, with its document as definition JSON |
 //! | `GET /v1/interfaces/{organization}/{name}/implementations` | | The implementations of the interface |
@@ -16,6 +16,7 @@
 //! | `POST /v1/intents/continue` | `{ progress, signatures? }` | The same, for the next step (`DESIGN.md`, 4.19) |
 //! | `POST /v1/prepare` | A plan request | The plan of a request of one step, and the RPC calls that it made |
 //! | `POST /v1/verify` | `{ message, expected }` or `{ transaction, expected }`, of any version | What the message proves to its signer |
+//! | `/v1/intents/prover/*` | The Privacy Rings prover's API | The answer of the service's prover (`--prover`) |
 //!
 //! The service holds no key, sends nothing, and calls no key holder. A shielded step answers
 //! `build`, and the caller's wallet builds the spend. With `--allow-tamper`, `start`, `continue`, and
@@ -27,6 +28,7 @@ mod flows;
 mod implementations;
 mod intents;
 mod metrics;
+pub mod prover;
 mod registry;
 mod resources;
 mod shielded;
@@ -40,7 +42,7 @@ use std::time::Instant;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{any, get, post};
 use axum::{Json, Router};
 use serde_json::Value;
 
@@ -57,6 +59,8 @@ pub struct Service {
     /// Whether `x-sdp-tamper: 1` changes a plan, which only the playground asks for.
     pub allow_tamper: bool,
     pub metrics: Metrics,
+    /// The prover that `/v1/intents/prover` forwards to, when the service runs one.
+    pub prover: Option<prover::Prover>,
 }
 
 type Shared = State<Arc<Service>>;
@@ -73,12 +77,16 @@ pub fn router(service: Arc<Service>) -> Router {
         .route("/v1/interfaces/{organization}/{name}/versions/{version}/matches", post(matches))
         .route("/v1/interfaces/{organization}/{name}/implementations", get(implementations_of))
         .route("/v1/implementations", get(implementations))
+        .route("/v1/circuits", get(circuits))
+        .route("/v1/circuits/{organization}/{name}", get(circuit))
+        .route("/v1/circuits/{organization}/{name}/versions/{version}", get(circuit_version))
         .route("/v1/implementations/{organization}/{name}", get(implementation))
         .route("/v1/implementations/{organization}/{name}/versions/{version}", get(implementation_version))
         .route("/v1/prepare", post(prepare))
         .route("/v1/intents/start", post(start))
         .route("/v1/intents/continue", post(resume))
         .route("/v1/verify", post(verify))
+        .route("/v1/intents/prover/{*path}", any(prover::forward))
         .with_state(service)
 }
 
@@ -96,6 +104,23 @@ async fn interfaces(State(service): Shared) -> Response {
 
 async fn implementations(State(service): Shared) -> Response {
     observed(&service, "implementations", resources::kind_list(&service.chain, DocumentKind::Implementation)).await
+}
+
+async fn circuits(State(service): Shared) -> Response {
+    observed(&service, "circuits", resources::kind_list(&service.chain, DocumentKind::Circuit)).await
+}
+
+async fn circuit(State(service): Shared, Path(path): Path<HashMap<String, String>>) -> Response {
+    let read = async { resources::index(&service.chain, IndexKey::circuit(&path_id(&path)?)).await };
+
+    observed(&service, "circuit", read).await
+}
+
+async fn circuit_version(State(service): Shared, Path(path): Path<HashMap<String, String>>) -> Response {
+    let read =
+        async { resources::version(&service.chain, IndexKey::circuit(&path_id(&path)?), path_version(&path)?).await };
+
+    observed(&service, "circuitVersion", read).await
 }
 
 async fn interface(State(service): Shared, Path(path): Path<HashMap<String, String>>) -> Response {

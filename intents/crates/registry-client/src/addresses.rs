@@ -46,7 +46,12 @@ pub fn version_address(
     name_hash: &[u8; 32],
     version: &SemverV1,
 ) -> Result<Address, RegistryError> {
-    let seed: &[u8] = if kind == DocumentKind::Interface { b"interface" } else { b"implementation" };
+    let seed: &[u8] = match kind {
+        DocumentKind::Interface => b"interface",
+        DocumentKind::Implementation => b"implementation",
+        DocumentKind::Circuit => b"circuit",
+        DocumentKind::Intent => return Err(RegistryError::NoAddress),
+    };
 
     find(&[seed, &organization.0, name_hash, &version.major.0, &version.minor.0, &version.patch.0])
 }

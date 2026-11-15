@@ -139,7 +139,8 @@ function PrepareControls(props: Props) {
         <div className="callout callout-amber">
           The spender's client builds and proves this spend, so verify_intent cannot rebuild it. It
           limits the spend to the pool, and the assertions bound its public effects. The notes
-          inside stay hidden, and the verifier does not check them yet.
+          inside stay hidden. The verifier reports the statement, and the wallet signs only a spend
+          that it built from that statement.
         </div>
       )}
       {frozen && (

@@ -9,8 +9,8 @@ use crate::id::{parse_version, Id};
 use crate::reader::{list, Node, Object, Sink};
 
 pub const SPEC: &str = "sdp-intents@1.0";
-/// Spec 1.1 adds the flow recipe (`DESIGN.md`, 4.19) and a shielded recipe's protocol (4.17). A
-/// document that uses either states 1.1.
+/// Spec 1.1 adds the flow recipe (`DESIGN.md`, 4.19), the shielded recipe's extension, and the
+/// circuit document (4.17). A document that uses any of them states 1.1.
 pub const SPEC_1_1: &str = "sdp-intents@1.1";
 
 pub struct Envelope {

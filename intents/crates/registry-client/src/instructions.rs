@@ -136,6 +136,28 @@ pub fn create_implementation(
     instruction("create_implementation", &[name_hash, &update_authority.0], accounts)
 }
 
+/// The accounts that the index of a circuit is created with.
+pub struct NewCircuit<'n> {
+    pub payer: &'n Address,
+    pub authority: &'n Address,
+    pub organization: &'n Address,
+    pub index: &'n Address,
+}
+
+/// Creates the index of a circuit, with `update_authority`. `Address::default()` follows the
+/// organization authority.
+pub fn create_circuit(new: &NewCircuit<'_>, name_hash: &[u8; 32], update_authority: &Address) -> RegistryInstruction {
+    let accounts = vec![
+        writable_signer(new.payer),
+        readonly(new.organization),
+        signer(new.authority),
+        writable(new.index),
+        readonly(&SYSTEM_PROGRAM),
+    ];
+
+    instruction("create_circuit", &[name_hash, &update_authority.0], accounts)
+}
+
 /// Writes `bytes` at `offset` of the buffer `buffer_id` of `writer`, which holds a document of
 /// `document_len` bytes.
 pub fn write_buffer(

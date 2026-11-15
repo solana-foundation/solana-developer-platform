@@ -35,7 +35,7 @@ pub async fn prepare(service: &Service, text: &str, tamper: bool) -> Result<Valu
 /// A step's plan, or the shielded spend that the caller must build before the step can plan.
 pub(crate) enum Prepared {
     Step(PreparedStep),
-    Build(ShieldedCall),
+    Build(Box<ShieldedCall>),
 }
 
 /// A plan as JSON, and what planning it fixed.
@@ -92,7 +92,7 @@ struct Planned {
 /// A plan, or the shielded spend that the planner waits for.
 enum Planning {
     Planned(Box<Planned>),
-    Build(ShieldedCall),
+    Build(Box<ShieldedCall>),
 }
 
 fn needs_build() -> ServiceError {
@@ -217,7 +217,7 @@ fn tamper_with(plan: &mut Plan) {
 /// A plan, or the shielded spend that the planner waits for.
 enum Answered {
     Plan(Box<Plan>),
-    Build(ShieldedCall),
+    Build(Box<ShieldedCall>),
 }
 
 async fn plan(
@@ -242,7 +242,7 @@ async fn plan(
             },
             Step::Shield(call) => match &answer {
                 Some(answer) => planner.called(answer.clone())?,
-                None => return Ok(Answered::Build(call)),
+                None => return Ok(Answered::Build(Box::new(call))),
             },
             Step::Done(plan) => return Ok(Answered::Plan(plan)),
         }

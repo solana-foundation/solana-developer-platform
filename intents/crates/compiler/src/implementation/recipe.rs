@@ -1,7 +1,9 @@
 //! The recipe: a static list of instructions, a builder call, a remote endpoint, a shielded spend, or a
 //! flow of steps.
 
-use sdp_intents_spec::wire::{AccountV1, InstructionV1, OutputBindingV1, RangeV1, SegmentV1};
+use sdp_intents_spec::wire::{
+    AccountV1, DocumentRefV1, InstructionV1, OutputBindingV1, RangeV1, SegmentV1, ShieldedDocV1,
+};
 use sdp_intents_spec::{AddressSource, RecipeKind, ShieldedProtocol};
 
 /// The protocols that a shielded recipe can name, by their JSON names.
@@ -19,7 +21,7 @@ pub(super) struct Recipe {
     pub(super) kind: RecipeKind,
     pub(super) url: Vec<u8>,
     /// Set for a shielded recipe.
-    pub(super) protocol: Option<ShieldedProtocol>,
+    pub(super) shielded: Option<ShieldedDocV1>,
 }
 
 impl Build<'_, '_> {
@@ -63,7 +65,7 @@ impl Build<'_, '_> {
             self.read_output_bindings(&outputs);
         }
 
-        Some(Recipe { kind: RecipeKind::Static, url: Vec::new(), protocol: None })
+        Some(Recipe { kind: RecipeKind::Static, url: Vec::new(), shielded: None })
     }
 
     /// `{ "url": "…", "returns": "instructions" | "transaction", "accounts": { … }, "outputs": { … } }`.
@@ -96,15 +98,16 @@ impl Build<'_, '_> {
             self.read_output_bindings(&outputs);
         }
 
-        Some(Recipe { kind: returns?, url: url?, protocol: None })
+        Some(Recipe { kind: returns?, url: url?, shielded: None })
     }
 
-    /// `{ "protocol": "privacy-rings", "pool": "…", "accounts": [ … ], "notes": [ … ] }`. The first
-    /// account is the spender, whose notes the spend consumes. Each note is stored as an instruction
-    /// of the pool, so the account sources and segments of a static recipe apply to it.
+    /// `{ "protocol", "pool", "circuit", "accounts", "notes", "deposits", "withdrawals" }`. The first
+    /// account is the spender, whose notes the spend consumes. Each entry is stored as an instruction
+    /// of the pool, notes first, so the account sources and segments of a static recipe apply to it.
     fn read_shielded(&mut self, object: &mut Object<'_>) -> Option<Recipe> {
         let protocol = object.required("protocol", self.sink).and_then(|protocol| self.read_protocol(&protocol));
         let pool = object.required("pool", self.sink).and_then(|pool| self.read_literal_address(&pool));
+        let circuit = object.required("circuit", self.sink);
 
         if let Some(accounts) = object.required("accounts", self.sink) {
             self.read_accounts(&accounts, Table::Static);
@@ -122,10 +125,64 @@ impl Build<'_, '_> {
         }
 
         let pool = self.program_account(pool?, "pool");
-        let notes = object.required("notes", self.sink).and_then(|notes| notes.array(self.sink));
-        notes?.iter().for_each(|note| self.read_note(note, pool));
+        let entries = [ShieldedList::NOTES, ShieldedList::DEPOSITS, ShieldedList::WITHDRAWALS]
+            .map(|list| self.read_shielded_list(object, list, pool));
 
-        Some(Recipe { kind: RecipeKind::Shielded, url: Vec::new(), protocol: Some(protocol?) })
+        if entries.iter().all(|count| *count == 0) {
+            self.sink.push(
+                Diagnostic::new(Code::MissingKey, object.pointer(), "the spend creates no note and moves nothing")
+                    .help("list at least one of `notes`, `deposits`, and `withdrawals`"),
+            );
+        }
+
+        let protocol = protocol?;
+        let circuit = circuit.and_then(|circuit| self.read_circuit(&circuit, protocol));
+        let [_, deposits, withdrawals] = entries.map(|count| u8::try_from(count).ok());
+        let doc = ShieldedDocV1 {
+            protocol: protocol.into(),
+            deposits: deposits?,
+            withdrawals: withdrawals?,
+            circuit: circuit?,
+        };
+
+        Some(Recipe { kind: RecipeKind::Shielded, url: Vec::new(), shielded: Some(doc) })
+    }
+
+    /// The entries of one list, each stored as an instruction of the pool. Returns how many it read.
+    fn read_shielded_list(&mut self, object: &mut Object<'_>, list: ShieldedList, pool: u8) -> usize {
+        let entries = object.field(list.key).and_then(|entries| entries.array(self.sink)).unwrap_or_default();
+        entries.iter().for_each(|entry| self.read_shielded_entry(entry, list, pool));
+
+        entries.len()
+    }
+
+    /// `solana.org/privacy-rings-transact@1.0.0`: a circuit of the recipe's protocol, at its exact
+    /// version.
+    fn read_circuit(&mut self, node: &Node<'_>, protocol: ShieldedProtocol) -> Option<DocumentRefV1> {
+        let pinned = node.str(self.sink)?;
+        let Some(circuit) = self.catalog.circuit(pinned) else {
+            self.sink.push(
+                Diagnostic::new(Code::UnknownReference, &node.pointer, format!("no circuit `{pinned}` is defined"))
+                    .help(format!(
+                        "name a circuit at its exact version. The defined circuits are {}",
+                        list(&self.catalog.circuit_ids())
+                    )),
+            );
+
+            return None;
+        };
+
+        if circuit.protocol != protocol {
+            self.sink.push(Diagnostic::new(
+                Code::InvalidValue,
+                &node.pointer,
+                format!("`{pinned}` is a circuit of another protocol than the recipe's"),
+            ));
+
+            return None;
+        }
+
+        Some(DocumentRefV1 { id: circuit.document_id, name: self.pool.add(circuit.id.name.as_bytes()) })
     }
 
     fn read_protocol(&mut self, node: &Node<'_>) -> Option<ShieldedProtocol> {
@@ -143,17 +200,33 @@ impl Build<'_, '_> {
         found
     }
 
-    /// `{ "owner": "recipient", "asset": { … }, "amount": { … }, "data": [ … ] }`. The asset is an
-    /// `address` segment and the amount a `u64le` segment.
-    fn read_note(&mut self, node: &Node<'_>, pool: u8) {
+    /// `{ "owner": "recipient", "asset": { … }, "amount": { … }, "data": [ … ] }` for a note, and the
+    /// same with `from` or `to` and no data for a deposit or a withdrawal. The asset is an `address`
+    /// segment and the amount a `u64le` segment.
+    fn read_shielded_entry(&mut self, node: &Node<'_>, list: ShieldedList, pool: u8) {
         let Some(mut object) = node.object(self.sink) else {
             return;
         };
-        let owner = object.required("owner", self.sink).and_then(|owner| self.account_by_name(&owner));
+        let pointer = object.pointer().to_owned();
+        let account = object.required(list.account, self.sink).and_then(|account| self.account_by_name(&account));
         let asset = object.required("asset", self.sink);
         let amount = object.required("amount", self.sink);
-        let data = object.field("data").and_then(|data| data.array(self.sink)).unwrap_or_default();
+        let data = match list.has_data {
+            true => object.field("data").and_then(|data| data.array(self.sink)).unwrap_or_default(),
+            false => Vec::new(),
+        };
         object.finish(self.sink);
+
+        if list.key == ShieldedList::DEPOSITS.key && account.is_some_and(|account| account != 0) {
+            self.sink.push(
+                Diagnostic::new(
+                    Code::InvalidValue,
+                    &format!("{pointer}/from"),
+                    "a deposit comes from another account than the spender",
+                )
+                .help("the spender signs the spend, so a deposit comes `from` the `spender`"),
+            );
+        }
 
         let visible = self.accounts.len();
         let nodes: Vec<Option<Node<'_>>> = [asset, amount].into_iter().chain(data.into_iter().map(Some)).collect();
@@ -162,12 +235,12 @@ impl Build<'_, '_> {
             .map(|segment| segment.as_ref().and_then(|segment| self.read_segment(segment, visible, false)))
             .collect();
 
-        let (Some(owner), Some(segments)) = (owner, segments) else {
+        let (Some(account), Some(segments)) = (account, segments) else {
             return;
         };
 
         let first_account = self.instruction_accounts.len();
-        self.instruction_accounts.push(owner);
+        self.instruction_accounts.push(account);
 
         if let (Some(accounts), Some(segments)) =
             (range(first_account, self.instruction_accounts.len()), self.push_segments(segments))
@@ -202,7 +275,7 @@ impl Build<'_, '_> {
         };
         self.instructions.push(instruction);
 
-        Some(Recipe { kind: RecipeKind::Program, url: Vec::new(), protocol: None })
+        Some(Recipe { kind: RecipeKind::Program, url: Vec::new(), shielded: None })
     }
 
     /// `{ "program": "…", "accounts": ["source", …], "data": [ … ] }`.
@@ -334,4 +407,18 @@ impl Build<'_, '_> {
 
 pub(super) fn range(first: usize, end: usize) -> Option<RangeV1> {
     Some(RangeV1 { first: u8::try_from(first).ok()?, count: u8::try_from(end.saturating_sub(first)).ok()? })
+}
+
+/// One list of a shielded recipe: its key, the key of its account, and whether its entries carry data.
+#[derive(Clone, Copy)]
+struct ShieldedList {
+    key: &'static str,
+    account: &'static str,
+    has_data: bool,
+}
+
+impl ShieldedList {
+    const NOTES: Self = Self { key: "notes", account: "owner", has_data: true };
+    const DEPOSITS: Self = Self { key: "deposits", account: "from", has_data: false };
+    const WITHDRAWALS: Self = Self { key: "withdrawals", account: "to", has_data: false };
 }

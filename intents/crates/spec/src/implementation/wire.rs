@@ -13,9 +13,10 @@ wire_code! {
         Remote = 3,
         /// An endpoint that returns a whole transaction, which the provider signed (`DESIGN.md`, 4.16).
         RemoteTransaction = 4,
-        /// A spend of a privacy ring's notes (`DESIGN.md`, 4.17). Each instruction is an output note:
-        /// its program is the pool, its one account is the note's owner, and its segments are the
-        /// asset, the amount, and the note's data. The first account is the spender.
+        /// A spend in a privacy pool (`DESIGN.md`, 4.17). Each instruction is a note, a deposit, or a
+        /// withdrawal: its program is the pool, its one account is the owner or the public account,
+        /// and its segments are the asset, the amount, and a note's data. The first account is the
+        /// spender.
         Shielded = 5,
         /// Steps that each name an interface (`DESIGN.md`, 4.19). Its tables are in the extension
         /// area, from spec 1.1.

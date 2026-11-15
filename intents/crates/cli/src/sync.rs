@@ -15,10 +15,10 @@ use std::collections::HashMap;
 
 use sha2::{Digest as _, Sha256};
 
-use sdp_intents_compiler::{Catalog, CompiledImplementation, CompiledInterface, Id};
+use sdp_intents_compiler::{Catalog, CompiledCircuit, CompiledImplementation, CompiledInterface, Id};
 use sdp_intents_planner::Account;
 use sdp_intents_registry_client::{
-    self as registry, Approval, IndexAuthorities, IndexChange, IndexView, NewImplementation, NewInterface,
+    self as registry, Approval, IndexAuthorities, IndexChange, IndexView, NewCircuit, NewImplementation, NewInterface,
     OrganizationView, Publication, RegistryInstruction, VERSION_DOCUMENT_OFFSET,
 };
 use sdp_intents_spec::wire::{DocumentKind, SemverV1};
@@ -89,7 +89,10 @@ impl Sync<'_> {
         let implementations = sorted_implementations(catalog)
             .into_iter()
             .map(|implementation| place(DocumentKind::Implementation, &implementation.id, &implementation.version));
-        let places = interfaces.chain(implementations).collect::<Result<Vec<_>, _>>()?;
+        let circuits = sorted_circuits(catalog)
+            .into_iter()
+            .map(|circuit| place(DocumentKind::Circuit, &circuit.id, &circuit.version));
+        let places = circuits.chain(interfaces).chain(implementations).collect::<Result<Vec<_>, _>>()?;
 
         let config = registry::config_address().map_err(|error| error.to_string())?;
 
@@ -106,11 +109,14 @@ impl Sync<'_> {
     }
 
     pub fn steps(&self) -> Result<Vec<Step>, String> {
+        let circuits = sorted_circuits(self.catalog);
         let interfaces = sorted_interfaces(self.catalog);
         let implementations = sorted_implementations(self.catalog);
-        let names = organization_names(&interfaces, &implementations);
+        let names = organization_names(&circuits, &interfaces, &implementations);
 
         let created = names.iter().filter_map(|name| self.create_organization(name)).collect::<Result<Vec<_>, _>>()?;
+        let circuit_steps = all(circuits.iter().map(|circuit| self.circuit_steps(circuit)))?;
+        let circuit_tails = all(circuits.iter().map(|circuit| self.index_tail(Kind::Circuit, &circuit.id)))?;
         let interface_steps = all(interfaces.iter().map(|interface| self.interface_steps(interface)))?;
         let policies = all(interfaces.iter().map(|interface| self.policy_step(&interface.id)))?;
         let indexes = all(implementations.iter().map(|implementation| self.implementation_index_step(implementation)))?;
@@ -127,6 +133,8 @@ impl Sync<'_> {
 
         let groups = [
             created,
+            circuit_steps,
+            circuit_tails,
             interface_steps,
             policies,
             indexes,
@@ -244,6 +252,25 @@ impl Sync<'_> {
             at,
             interface_index: None,
         };
+
+        Ok(index.into_iter().chain(self.publish_step(&document)?).collect())
+    }
+
+    fn circuit_steps(&self, circuit: &CompiledCircuit) -> Result<Vec<Step>, String> {
+        let at = place(DocumentKind::Circuit, &circuit.id, &circuit.version)?;
+        let index = (!self.exists(&at.index)).then(|| {
+            let new = NewCircuit {
+                payer: &self.authority,
+                authority: &self.authority,
+                organization: &at.organization,
+                index: &at.index,
+            };
+            let instruction = registry::create_circuit(&new, &circuit.id.name_hash(), &Address::default());
+
+            step(format!("create the circuit index {}", circuit.id), vec![instruction])
+        });
+        let document =
+            Document { id: &circuit.id, version: &circuit.version, bytes: &circuit.bytes, at, interface_index: None };
 
         Ok(index.into_iter().chain(self.publish_step(&document)?).collect())
     }
@@ -455,10 +482,15 @@ fn step(description: String, instructions: Vec<RegistryInstruction>) -> Step {
     Step { description, transactions: vec![StepTransaction { signer: StepSigner::Authority, instructions }] }
 }
 
-fn organization_names(interfaces: &[&CompiledInterface], implementations: &[&CompiledImplementation]) -> Vec<String> {
-    let mut names: Vec<String> = interfaces
+fn organization_names(
+    circuits: &[&CompiledCircuit],
+    interfaces: &[&CompiledInterface],
+    implementations: &[&CompiledImplementation],
+) -> Vec<String> {
+    let mut names: Vec<String> = circuits
         .iter()
-        .map(|interface| interface.id.organization.clone())
+        .map(|circuit| circuit.id.organization.clone())
+        .chain(interfaces.iter().map(|interface| interface.id.organization.clone()))
         .chain(implementations.iter().map(|implementation| implementation.id.organization.clone()))
         .collect();
     names.sort_unstable();
@@ -471,6 +503,7 @@ fn document_kind(kind: Kind) -> DocumentKind {
     match kind {
         Kind::Interface => DocumentKind::Interface,
         Kind::Implementation => DocumentKind::Implementation,
+        Kind::Circuit => DocumentKind::Circuit,
     }
 }
 
@@ -496,6 +529,13 @@ fn implemented_index(implementation: &CompiledImplementation) -> Result<Address,
 
     registry::index_address(DocumentKind::Interface, &implements.publisher, &implements.name_hash)
         .map_err(|error| error.to_string())
+}
+
+fn sorted_circuits(catalog: &Catalog) -> Vec<&CompiledCircuit> {
+    let mut circuits: Vec<_> = catalog.circuits().collect();
+    circuits.sort_by_key(|circuit| (circuit.id.to_string(), version_text(&circuit.version)));
+
+    circuits
 }
 
 fn sorted_interfaces(catalog: &Catalog) -> Vec<&CompiledInterface> {

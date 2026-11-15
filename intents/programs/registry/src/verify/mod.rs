@@ -146,9 +146,7 @@ pub fn verify_intent(accounts: &VerifyIntent, passed: &[AccountView], args: Veri
 
             program_recipe::check_roles(sysvar, &Segment { built, whole: first..end }, &roles)
         }
-        RecipeKind::RemoteTransaction | RecipeKind::Flow => {
-            Err(RegistryError::WrongRecipeKind.into())
-        }
+        RecipeKind::RemoteTransaction | RecipeKind::Flow => Err(RegistryError::WrongRecipeKind.into()),
     }
 }
 

@@ -10,6 +10,8 @@ use sdp_intents_spec::{AccountRole, Address};
 use crate::{AccountMeta, Instruction, Limit, PlanError};
 
 pub use sdp_intents_registry_client::REGISTRY_PROGRAM;
+/// The discriminator and the fixed part of a version account, which the document follows.
+pub(crate) const VERSION_HEADER_LEN: usize = 8 + 6 + 8;
 /// `Sysvar1nstructions1111111111111111111111111`.
 const INSTRUCTIONS_SYSVAR: Address = Address([
     6, 167, 213, 23, 24, 123, 209, 102, 53, 218, 212, 4, 85, 253, 194, 192, 193, 36, 198, 143, 33, 86, 117, 165, 219,

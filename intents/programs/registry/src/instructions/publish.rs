@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use sdp_intents_spec::wire::{DocumentIdV1, DocumentKind};
-use sdp_intents_spec::{Implementation, Interface};
+use sdp_intents_spec::{Circuit, Implementation, Interface};
 
 use crate::error::RegistryError;
 use crate::state::buffer::{self, BufferV1, MAX_DOCUMENT_LEN};
@@ -113,6 +113,9 @@ impl Publish {
 
                 (*implementation.id(), policy_approves && self.keeps_tier(tier)?, tier)
             }
+            DocumentKind::Circuit => {
+                (*Circuit::parse(document).map_err(|_| RegistryError::BadDocument)?.id(), false, 0)
+            }
             DocumentKind::Intent => return Err(RegistryError::WrongIndexKind.into()),
         };
 
@@ -193,7 +196,7 @@ impl Publish {
             &signer_seeds,
         )?;
 
-        // Both kinds share the layout of `InterfaceV1`. The discriminator names the kind.
+        // Every kind shares the layout of `InterfaceV1`. The discriminator names the kind.
         let header = InterfaceV1 { version: *version, publish_slot: PodU64::from(publish_slot) };
         let discriminator = version::discriminator(target.kind)?;
         let mut view = *self.version.account();

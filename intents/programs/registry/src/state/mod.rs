@@ -23,6 +23,7 @@ pub const ORGANIZATION_SEED: &[u8] = b"org";
 pub const INDEX_SEED: &[u8] = b"index";
 pub const INTERFACE_SEED: &[u8] = b"interface";
 pub const IMPLEMENTATION_SEED: &[u8] = b"implementation";
+pub const CIRCUIT_SEED: &[u8] = b"circuit";
 pub const BUFFER_SEED: &[u8] = b"buffer";
 
 /// The data of an account that the registry owns and that starts with `discriminator`.

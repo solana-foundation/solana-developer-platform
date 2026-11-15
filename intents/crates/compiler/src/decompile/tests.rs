@@ -8,7 +8,7 @@ use sdp_intents_spec::{Address, SpecError};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use super::{decompile_implementation, decompile_interface, DecompileError, Organizations};
+use super::{decompile_circuit, decompile_implementation, decompile_interface, DecompileError, Organizations};
 use crate::Catalog;
 
 const DEFINITIONS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../definitions");
@@ -22,6 +22,7 @@ struct Definition {
 }
 
 struct Tree {
+    circuits: Vec<Definition>,
     interfaces: Vec<Definition>,
     implementations: Vec<Definition>,
 }
@@ -79,6 +80,14 @@ fn files(folder: &str) -> Vec<SourceFile> {
 
 fn compile_tree() -> Tree {
     let mut catalog = publishers();
+    let circuits = files("circuits")
+        .into_iter()
+        .map(|SourceFile { path, text }| {
+            let bytes = catalog.compile_circuit(&text).unwrap().bytes.clone();
+
+            Definition { path, text, bytes, implements: None }
+        })
+        .collect();
     let interfaces = files("interfaces")
         .into_iter()
         .map(|SourceFile { path, text }| {
@@ -101,7 +110,7 @@ fn compile_tree() -> Tree {
         })
         .collect();
 
-    Tree { interfaces, implementations }
+    Tree { circuits, interfaces, implementations }
 }
 
 struct Decompiled<'t> {
@@ -126,6 +135,10 @@ impl Tree {
 
     fn decompiled(&self) -> Vec<Decompiled<'_>> {
         let organizations = organizations();
+        let circuits = self.circuits.iter().map(|definition| Decompiled {
+            definition,
+            json: decompile_circuit(&definition.bytes, &organizations).unwrap(),
+        });
         let interfaces = self.interfaces.iter().map(|definition| Decompiled {
             definition,
             json: decompile_interface(&definition.bytes, &organizations).unwrap(),
@@ -140,7 +153,7 @@ impl Tree {
             }
         });
 
-        interfaces.chain(implementations).collect()
+        circuits.chain(interfaces).chain(implementations).collect()
     }
 }
 
@@ -149,13 +162,14 @@ fn every_definition_compiles_back_to_its_bytes() {
     let tree = compile_tree();
     let mut catalog = publishers();
 
-    assert!(!tree.interfaces.is_empty() && !tree.implementations.is_empty());
+    assert!(!tree.circuits.is_empty() && !tree.interfaces.is_empty() && !tree.implementations.is_empty());
 
     for Decompiled { definition, json } in tree.decompiled() {
         let text = serde_json::to_string_pretty(&json).unwrap();
-        let compiled = match definition.implements {
-            None => catalog.compile_interface(&text).map(|compiled| compiled.bytes.clone()),
-            Some(_) => catalog.compile_implementation(&text).map(|compiled| compiled.bytes.clone()),
+        let compiled = match (json.get("kind").and_then(Value::as_str), definition.implements) {
+            (Some("circuit"), _) => catalog.compile_circuit(&text).map(|compiled| compiled.bytes.clone()),
+            (_, None) => catalog.compile_interface(&text).map(|compiled| compiled.bytes.clone()),
+            (_, Some(_)) => catalog.compile_implementation(&text).map(|compiled| compiled.bytes.clone()),
         };
 
         let bytes = compiled.unwrap_or_else(|report| panic!("{}", report.render(&definition.path, &text)));

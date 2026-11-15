@@ -70,7 +70,7 @@ pub fn read_index(file: &IndexFile) -> Result<IndexSettings, Report> {
     let object = object(&file.text)?;
     let allowed: &[&str] = match file.kind {
         Kind::Interface => &["updateAuthority", "approveAuthority", "head", "approveNewVersions", "approvals"],
-        Kind::Implementation => &["updateAuthority", "head"],
+        Kind::Implementation | Kind::Circuit => &["updateAuthority", "head"],
     };
     let mut findings = unknown_keys(&object, allowed);
 
@@ -108,6 +108,7 @@ pub fn check_references(settings: &IndexSettings, catalog: &Catalog) -> Vec<Diag
         Kind::Implementation => catalog
             .implementations()
             .any(|implementation| implementation.id == *id && implementation.version == *version),
+        Kind::Circuit => catalog.circuits().any(|circuit| circuit.id == *id && circuit.version == *version),
     };
 
     let head = settings.head.filter(|head| !in_tree(settings.kind, &settings.id, head)).map(|head| {

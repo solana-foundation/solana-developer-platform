@@ -9,6 +9,7 @@ use crate::state::{semver, INDEX_SEED};
 
 pub const INTERFACE_KIND_SEED: &[u8] = &[DocumentKind::Interface as u8];
 pub const IMPLEMENTATION_KIND_SEED: &[u8] = &[DocumentKind::Implementation as u8];
+pub const CIRCUIT_KIND_SEED: &[u8] = &[DocumentKind::Circuit as u8];
 
 #[derive(Accounts)]
 // Anchor's exit hook binds the argument and does not read it. The underscore keeps that from a
@@ -76,6 +77,40 @@ impl CreateImplementation {
         index.name_hash = name_hash;
         index.update_authority = update_authority;
         index.interface = *self.interface_index.address();
+
+        Ok(())
+    }
+}
+
+/// A circuit that shielded recipes name at an exact version (`DESIGN.md`, 4.17). Nothing approves a
+/// circuit: a recipe pins one version, which never changes.
+#[derive(Accounts)]
+// Anchor's exit hook binds the argument and does not read it. The underscore keeps that from a
+// warning.
+#[instruction(_name_hash: [u8; 32])]
+pub struct CreateCircuit {
+    #[account(mut)]
+    pub payer: Signer,
+    pub organization: Account<OrganizationV1>,
+    #[account(address = organization.authority @ RegistryError::WrongAuthority)]
+    pub authority: Signer,
+    #[account(
+        init,
+        payer = payer,
+        seeds = [INDEX_SEED, CIRCUIT_KIND_SEED, organization.address().as_ref(), _name_hash.as_ref()],
+        bump
+    )]
+    pub index: Account<VersionIndexV1>,
+    pub system_program: Program<System>,
+}
+
+impl CreateCircuit {
+    pub fn create(&mut self, name_hash: [u8; 32], update_authority: Address) -> Result<()> {
+        let index = &mut *self.index;
+        index.kind = DocumentKind::Circuit.into();
+        index.organization = *self.organization.address();
+        index.name_hash = name_hash;
+        index.update_authority = update_authority;
 
         Ok(())
     }

@@ -16,14 +16,13 @@ use sdp_intents_spec::wire::DocumentKind;
 use sdp_intents_spec::{Address, Intent, RecipeKind};
 
 use crate::plan::{plan_message, with_rent_cap};
-use crate::registry::{verify_intent_discriminator, version_address, REGISTRY_PROGRAM};
+use crate::registry::{verify_intent_discriminator, version_address, REGISTRY_PROGRAM, VERSION_HEADER_LEN};
 use crate::shielded::{self, ShieldedSpend};
 use crate::values::Values;
 use crate::{Instruction, PlanError, Transaction};
 
 /// A version account holds the 8-byte discriminator, the version, and the publish slot, then the
 /// document.
-const VERSION_HEADER_LEN: usize = 8 + 6 + 8;
 /// `verify_intent` names the fee payer, the rent payer, the two indexes, then the interface version
 /// and the implementation version, after the sysvar.
 const FEE_PAYER: usize = 1;
@@ -126,7 +125,7 @@ struct DecodedVerify<'t> {
 /// The accounts that a segment's message still needs, or the message.
 enum Part {
     Missing(Vec<Address>),
-    Rendered(Rendered),
+    Rendered(Box<Rendered>),
 }
 
 /// An intent's part of the message, the cluster that its implementation is for, and the spend that
@@ -164,7 +163,7 @@ pub fn verify_transaction<C: Chain>(transaction: &Transaction, chain: &C) -> Res
 
     let rendered: Vec<Rendered> = parts
         .into_iter()
-        .filter_map(|part| if let Part::Rendered(rendered) = part { Some(rendered) } else { None })
+        .filter_map(|part| if let Part::Rendered(rendered) = part { Some(*rendered) } else { None })
         .collect();
     let cluster = rendered.first().map(|part| part.cluster);
 
@@ -295,15 +294,23 @@ fn part<C: Chain>(verify: &DecodedVerify<'_>, payers: Payers<'_>, chain: &C) -> 
 
     let message = values.message()?;
     let spend = match recipe.implementation().recipe().map_err(PlanError::from)? {
-        RecipeKind::Shielded => Some(shielded::spend(&recipe, chain)?),
+        RecipeKind::Shielded => {
+            let circuit = shielded::circuit_address(&recipe)?;
+
+            if chain.account(&circuit).is_none() {
+                return Ok(Part::Missing(vec![circuit]));
+            }
+
+            Some(shielded::spend(&recipe, chain)?)
+        }
         _ => None,
     };
 
-    Ok(Part::Rendered(Rendered {
+    Ok(Part::Rendered(Box::new(Rendered {
         text: with_rent_cap(&message, verify.rent_cap),
         cluster: *recipe.implementation().cluster(),
         spend,
-    }))
+    })))
 }
 
 /// The document in a version account that the registry owns at the address of `id`.

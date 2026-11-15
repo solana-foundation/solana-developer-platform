@@ -311,6 +311,54 @@
   margin-bottom: 8px;
 }
 
+.circuit-detail {
+  font-size: 12px;
+  color: var(--emph-m);
+  gap: 2px;
+}
+
+.circuit-source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prover-choice {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.prover-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1.5px solid var(--border-l);
+  border-radius: 8px;
+  padding: 10px;
+  cursor: pointer;
+}
+
+.prover-option.selected {
+  border-color: var(--emph-l);
+}
+
+.prover-option > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.prover-label {
+  font-size: 13px;
+  color: var(--emph-xh);
+}
+
+.prover-sub {
+  font-size: 12px;
+  color: var(--emph-m);
+}
+
 .onchain-checks {
   display: flex;
   flex-direction: column;

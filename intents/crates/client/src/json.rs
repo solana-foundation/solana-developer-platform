@@ -4,8 +4,10 @@
 use base64::Engine as _;
 use serde_json::{json, Value};
 
-use sdp_intents_planner::{Instruction, Plan, PlannedIntent, VerifiedIntent, VerifiedTransaction};
-use sdp_intents_spec::Address;
+use sdp_intents_planner::{
+    Instruction, Plan, PlannedIntent, ShieldedLeg, ShieldedSpend, VerifiedIntent, VerifiedTransaction,
+};
+use sdp_intents_spec::{Address, ShieldedProtocol};
 
 use crate::Prepared;
 
@@ -129,6 +131,7 @@ pub fn verified(verified: &VerifiedTransaction, expected: Option<&str>) -> Value
             "verify": intent.verify,
             "built": { "start": intent.built.start, "end": intent.built.end },
             "segment": { "start": intent.segment.start, "end": intent.segment.end },
+            "spend": intent.spend.as_ref().map(spend),
         })
     };
 
@@ -138,4 +141,52 @@ pub fn verified(verified: &VerifiedTransaction, expected: Option<&str>) -> Value
         "intents": verified.intents.iter().map(intent).collect::<Vec<_>>(),
         "unverified": verified.unverified,
     })
+}
+
+/// A shielded statement (`DESIGN.md`, 4.17): the protocol, the circuit pin, the spender, the notes
+/// that the spend creates, and its public deposits and withdrawals.
+pub fn spend(spend: &ShieldedSpend) -> Value {
+    let protocol = match spend.protocol {
+        ShieldedProtocol::PrivacyRings => "privacy-rings",
+    };
+    let notes: Vec<Value> = spend
+        .notes
+        .iter()
+        .map(|note| {
+            json!({
+                "owner": base58(&note.owner),
+                "asset": base58(&note.asset),
+                "amount": note.amount.to_string(),
+                "data": hex(&note.data),
+            })
+        })
+        .collect();
+    let legs = |legs: &[ShieldedLeg]| -> Vec<Value> {
+        legs.iter()
+            .map(|leg| json!({ "account": base58(&leg.account), "asset": base58(&leg.asset), "amount": leg.amount.to_string() }))
+            .collect()
+    };
+
+    json!({
+        "protocol": protocol,
+        "circuit": {
+            "publisher": base58(&spend.circuit.id.publisher),
+            "name": spend.circuit.name,
+            "version": format!(
+                "{}.{}.{}",
+                spend.circuit.id.version.major.get(),
+                spend.circuit.id.version.minor.get(),
+                spend.circuit.id.version.patch.get()
+            ),
+            "provingKeys": hex(&spend.circuit.proving_keys),
+        },
+        "spender": base58(&spend.spender),
+        "notes": notes,
+        "deposits": legs(&spend.deposits),
+        "withdrawals": legs(&spend.withdrawals),
+    })
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }

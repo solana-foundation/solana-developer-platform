@@ -16,6 +16,7 @@
     "kind": "shielded",
     "protocol": "privacy-rings",
     "pool": "ring1GaLCuJnkUMVkX2JeZLTTX17wKsV4fZmPVzXANW",
+    "circuit": "solana.org/privacy-rings@1.0.0",
     "accounts": [
       {
         "name": "spender",
@@ -26,6 +27,19 @@
     "notes": [
       {
         "owner": "spender",
+        "asset": {
+          "value": "{inputs.mint}",
+          "encoding": "address"
+        },
+        "amount": {
+          "value": "{inputs.amount}",
+          "encoding": "u64le"
+        }
+      }
+    ],
+    "deposits": [
+      {
+        "from": "spender",
         "asset": {
           "value": "{inputs.mint}",
           "encoding": "address"

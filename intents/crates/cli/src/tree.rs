@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 pub enum Kind {
     Interface,
     Implementation,
+    Circuit,
 }
 
 impl Kind {
@@ -13,6 +14,7 @@ impl Kind {
         match folder {
             "interfaces" => Some(Self::Interface),
             "implementations" => Some(Self::Implementation),
+            "circuits" => Some(Self::Circuit),
             _ => None,
         }
     }
@@ -21,6 +23,7 @@ impl Kind {
         match self {
             Self::Interface => "interfaces",
             Self::Implementation => "implementations",
+            Self::Circuit => "circuits",
         }
     }
 }
@@ -234,7 +237,9 @@ mod tests {
         let tree = Tree::read(&root).unwrap();
         let interfaces = version_files(&root, "interfaces");
 
-        assert_eq!(tree.definitions.len(), interfaces + version_files(&root, "implementations"));
+        let others = version_files(&root, "implementations") + version_files(&root, "circuits");
+
+        assert_eq!(tree.definitions.len(), interfaces + others);
         assert_eq!(tree.of_kind(Kind::Interface).count(), interfaces);
         assert_eq!(tree.organizations(), ["solana.org"]);
         assert!(tree.strays.is_empty());

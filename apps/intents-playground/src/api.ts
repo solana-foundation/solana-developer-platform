@@ -1,6 +1,9 @@
 // The service's routes, as `intents/crates/service/src/lib.rs` lists them. The dev server forwards
 // `/api` to the service. Every document comes from the service, which reads it from the registry.
 
+/// Where a build proves its spend. The service's prover sees the spend; it cannot sign it.
+export type Prover = "wallet" | "service";
+
 export type Recipe = "static" | "program" | "remote" | "remote transaction" | "shielded" | "flow";
 
 /// An interface input as the form reads it. `amountMint` is the reference to the mint whose
@@ -64,7 +67,7 @@ export interface VersionEntry {
 
 /// An index as the service lists it. `shown` is the version that the playground shows: the head,
 /// or the newest version that is not removed.
-interface ListedIndex {
+export interface ListedIndex {
   id: string;
   organization: string;
   name: string;
@@ -90,6 +93,19 @@ export interface Registry {
   organizations: { name: string; address: string; authority: string }[];
   interfaces: ListedInterface[];
   implementations: ListedImplementation[];
+  circuits: ListedIndex[];
+}
+
+/// What a shielded recipe proves with: its proving keys and prover module by SHA-256, and where to
+/// fetch them (`DESIGN.md`, 4.17).
+export interface CircuitDefinition {
+  id: string;
+  version: string;
+  protocol: string;
+  proofSystem: string;
+  provingKeys: string;
+  module?: string;
+  sources: string[];
 }
 
 /// One published version, with its document decompiled from the registry's bytes.
@@ -249,6 +265,8 @@ export const api = {
         shown: shown(listed),
       })),
     })),
+  circuitVersion: (id: string, version: string) =>
+    call<Published<CircuitDefinition>>(`/v1/circuits/${idPath(id)}/versions/${version}`),
   interfaceVersion: (id: string, version: string) =>
     call<Published<InterfaceDefinition>>(`/v1/interfaces/${idPath(id)}/versions/${version}`),
   implementationVersion: (id: string, version: string) =>
@@ -265,9 +283,10 @@ export const api = {
   start: (request: unknown, tamper: boolean) =>
     post<Answer>("/v1/intents/start", request, tamper ? { "x-sdp-tamper": "1" } : {}),
   resume: (body: ContinueBody) => post<Answer>("/v1/intents/continue", body),
-  /// The wallet builds the spend that a `build` names. Only the caller talks to its wallet.
-  build: (spend: Record<string, unknown>) =>
-    post<Record<string, unknown>>("/shielded/build", spend, {}, "/wallet"),
+  /// The wallet builds the spend that a `build` names, and proves it with its own prover or the
+  /// service's. Only the caller talks to its wallet.
+  build: (spend: Record<string, unknown>, prover: Prover) =>
+    post<Record<string, unknown>>("/shielded/build", { spend, prover }, {}, "/wallet"),
   send: (transaction: NonNullable<Plan["transaction"]>) =>
     post<{ signature: string }>(
       "/send",

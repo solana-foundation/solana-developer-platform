@@ -16,6 +16,7 @@
     "kind": "shielded",
     "protocol": "privacy-rings",
     "pool": "ring1GaLCuJnkUMVkX2JeZLTTX17wKsV4fZmPVzXANW",
+    "circuit": "solana.org/privacy-rings@1.0.0",
     "accounts": [
       {
         "name": "spender",

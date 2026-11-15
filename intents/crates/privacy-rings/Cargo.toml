@@ -16,6 +16,7 @@ spr-interface = { git = "https://github.com/ChewingGlass/privacy-rings", rev = "
 spr-keypair = { git = "https://github.com/ChewingGlass/privacy-rings", rev = "e97a1393d1f63a8fff8afb8b27f1f57f11ad85e5" }
 spr-program = { git = "https://github.com/ChewingGlass/privacy-rings", rev = "e97a1393d1f63a8fff8afb8b27f1f57f11ad85e5" }
 spr-transaction = { git = "https://github.com/ChewingGlass/privacy-rings", rev = "e97a1393d1f63a8fff8afb8b27f1f57f11ad85e5" }
+sha2.workspace = true
 solana-address.workspace = true
 solana-keypair = "=3.1.2"
 solana-signer = "=3.0.1"

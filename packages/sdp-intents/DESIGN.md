@@ -348,7 +348,7 @@ transaction with the message that it proves. The design calls a step's content a
 | `program` | A builder instruction, simulated | The preferred kind |
 | `static` | Accounts and instructions as data | A stopgap for a program with no builder, for an operation unlikely to change |
 | `remote` | An HTTP endpoint (4.16) | Offchain search, such as a swap route, or a provider that must sign |
-| `shielded` | The output notes of a spend in a named privacy protocol (4.17) | A private transfer |
+| `shielded` | The statement of a spend in a named privacy protocol: its notes, deposits, and withdrawals (4.17) | A private transfer |
 | `flow` | Steps, each an intent of another interface (4.19) | An operation that takes more than one transaction |
 
 **Preferred recipe.** A builder in the target program ships with the instruction that it builds,
@@ -824,7 +824,7 @@ pub struct VersionIndexV1 {
 | `set_registry_admin`, `set_organizations_gated` | Admin | Moves the admin, or gates or opens organization creation |
 | `create_organization` | The admin while gated, otherwise any key | Creates an organization with an authority that need not sign |
 | `set_organization_authority` | Organization authority | Changes it |
-| `create_interface`, `create_implementation` | Organization authority | Creates an index |
+| `create_interface`, `create_implementation`, `create_circuit` | Organization authority | Creates an index. A circuit index has no approvals (4.17). |
 | `set_update_authority`, `set_approve_authority` | That authority | Changes it |
 | `write_buffer`, `close_buffer` | Any key, the buffer's writer | Uploads a document in parts |
 | `publish` | Update authority | Checks the buffer's SHA-256, `parse`, the limits, the ids, and the cluster, then creates the version account |
@@ -926,7 +926,7 @@ service.
 | `vault.deposit`, `vault.withdraw` | `ondo-usdy-*`, through the Jupiter wrapper | remote, tier 2 |
 | `vault.deposit`, `vault.withdraw`, `vault.requestWithdrawal`, `vault.cancelRequest` | `hastra-*` | static |
 | `vault.requestDeposit` | `test-provider-deposit`, as legacy, v0 with a lookup table, and v1 | remote, tier 3 |
-| `private.transfer`, `private.shield` | `privacy-rings-transfer`, `privacy-rings-shield`, through Privacy Rings on the surfnet | shielded, tier 2 |
+| `private.transfer`, `private.shield`, `private.unshield` | `privacy-rings-transfer`, `privacy-rings-shield`, `privacy-rings-unshield`, through Privacy Rings on the surfnet | shielded, tier 2 |
 | `private.transfer` | `privacy-rings-shield-and-transfer`: shield when the private balance is short, then transfer | flow |
 
 The e2e also compiles a plan of instructions alone as legacy, v0, and v1, and refuses a remote
@@ -934,7 +934,8 @@ endpoint that adds a token approval to an attacker.
 
 **Service.** `sdp-intents-service --rpc <url>` reads every document from the registry. It holds no
 key. The playground's keys are in `sdp-intents-local-wallet`, which only the page and the e2e call:
-it lists the keys, builds and records Privacy Rings spends, checks and signs, and sends. With
+it lists the keys, builds and records Privacy Rings spends, checks and signs, and sends. It proves
+through its own prover or through the service's, as each build asks. With
 `--allow-tamper`, the service honors the playground's tamper switch. It serves each document
 as the definition JSON that `intents/definitions` uses, decompiled from the registry's bytes, so a
 client needs only the service and a verifier. A list reads two filtered `getProgramAccounts` calls.
@@ -943,14 +944,15 @@ A single index or version reads only the addresses that its id and version deriv
 | Route | Body | Returns |
 | :-- | :-- | :-- |
 | `GET /v1/registry` | | Every organization, interface, and implementation, in one call |
-| `GET /v1/organizations`, `/v1/interfaces`, `/v1/implementations` | | Every one of that kind |
-| `GET /v1/{interfaces\|implementations}/{organization}/{name}` | | One index: its head, versions, and authorities |
-| `GET /v1/{interfaces\|implementations}/{organization}/{name}/versions/{version}` | | One version, with its document in the definition format |
+| `GET /v1/organizations`, `/v1/interfaces`, `/v1/implementations`, `/v1/circuits` | | Every one of that kind |
+| `GET /v1/{interfaces\|implementations\|circuits}/{organization}/{name}` | | One index: its head, versions, and authorities |
+| `GET /v1/{interfaces\|implementations\|circuits}/{organization}/{name}/versions/{version}` | | One version, with its document in the definition format |
 | `GET /v1/interfaces/{organization}/{name}/implementations` | | The interface's implementations, each with its approval |
 | `POST /v1/interfaces/{organization}/{name}/versions/{version}/matches` | `{ inputs, payers, all }` | Each implementation, with its status |
 | `POST /v1/intents/start`, `POST /v1/intents/continue` | A plan request, or `{ progress, signatures? }` | `{ progress, next }`, with the RPC calls |
 | `POST /v1/intents/recover` | `{ owner }` | The owner's stopping points (4.19). Not built. |
 | `POST /v1/verify` | A message or a transaction of any version, and the plan's message | What the transaction proves |
+| `/v1/intents/prover/*` | The Privacy Rings prover's API | The prover's answer, from the service's prover (4.17) |
 | `GET /metrics` | | Requests, RPC calls, and cache reads |
 
 **Playground.** `apps/intents-playground` explores the registry as an API explorer does: an
@@ -1034,227 +1036,207 @@ onchain checks off, so the weaker trust is the caller's explicit choice.
 
 ### 4.17 Private intents through privacy rings
 
-This section shows how intents can run inside Solana Privacy Rings, which Helius launched on
-mainnet in November 2026. Its code is `github.com/helius-labs/privacy-rings`, which calls itself
-Zolana. A business can then use Earn without showing which of its customers did what. The section
-assumes no knowledge of shielded pools. Only the prototype at its end is built.
+Intents can run inside Solana Privacy Rings, which Helius launched on mainnet in November 2026.
+Its code is `github.com/helius-labs/privacy-rings`, which calls itself Zolana. The prototype at the
+end of this section is built. The rest is design.
 
-**Notes in place of balances.** A token account holds a balance that a payment edits. A shielded
-pool holds **notes** (also called UTXOs). A note is a fixed amount of one asset with an owner,
-like a banknote. A payment spends whole notes and creates new ones: Alice spends her 20 USDC note
-and creates a 10 USDC note for Bob and a 10 USDC change note for herself.
+**Notes in place of balances.** A shielded pool holds **notes** (UTXOs), not balances. A note is a
+fixed amount of one asset with an owner. A payment spends whole notes and creates new ones: Alice
+spends her 20 USDC note and creates a 10 USDC note for Bob and a 10 USDC change note for herself.
 
 ```rust
 struct Utxo { owner, asset, amount: u64, blinding, utxo_data: Option<Vec<u8>>, ring_data, ring_program_id }
 ```
 
-**What the chain stores.** The chain never stores a note. It stores:
-
-1. A **commitment**: the hash of the note, in a Merkle tree. The random `blinding` makes two
-   equal notes hash differently, so the hash shows nothing.
-2. A **ciphertext**: the note, encrypted to its owner's viewing key. The indexer serves
-   ciphertexts, and a wallet decrypts its own.
-3. A **nullifier** for each spent note: a hash of the note and the owner's secret key. The
-   program accepts each nullifier once, which stops a double spend. Nobody else can compute it, so
-   a spend does not show which note it spends.
-
-The real tokens sit in one pool vault for each mint. A spend carries a **ZK proof** that each
-spent note is in the tree, that the spender owns it, that each nullifier is correct, and that the
-amounts balance for each asset. The program checks the proof without seeing any note. A balance
-is the sum of a wallet's unspent notes, and only the wallet computes it.
-
-**What stays public.**
+The chain stores each note's **commitment** in a Merkle tree, the note **encrypted** to its owner's
+viewing key, and a **nullifier** for each spent note, which the program accepts once. A spend
+carries a **ZK proof** that each spent note is in the tree, that its nullifier is correct, and that
+the amounts balance for each asset. The tokens sit in one pool vault for each mint.
 
 | Step | Public | Hidden |
 | :-- | :-- | :-- |
-| Deposit (shield) | Everything: the depositor, the amount, the recipient | Nothing. It is a normal transaction with no proof, because it spends no note. |
-| Spend in a default ring | The owners | The amounts and assets (confidential) |
-| Spend in a policy ring | Only that a spend happened | The owners too (anonymous) |
+| Deposit (shield) | The depositor, the amount, the recipient | Nothing. It has no proof, because it spends no note. |
+| Spend in the default ring | The owners | The amounts and assets |
+| Spend in a policy ring | That a spend happened | The owners too |
 | Withdraw to a public address | The recipient and the amount | The sender, when a relayer pays the fee |
 
-A policy ring is its own program with rules, an auditor key that decrypts every ring transfer, and
-authorities that can freeze funds. SDP brings up one ring for each business.
+A policy ring is its own program, which checks its rules and calls the pool by CPI. A note's
+`utxo_data` holds bytes that the pool commits and never reads, and a program gives them meaning.
 
-**Notes carry data.** `utxo_data` holds bytes that the pool commits into the note's hash and
-never reads. A program gives the bytes meaning in its own circuit. Helius's swap program keeps
-order terms there, and its timelock escrow keeps an unlock time. A program trusts only data in
-notes that its own PDA owns, because anyone can write any data into a note that they create.
+**The rule.** A new private feature is JSON. It also changes SDP's ring program when it needs
+public behavior of its own. The client changes only when the protocol changes what the owner signs,
+or when a proof uses a new proof system.
 
-**How privacy fits intents.** Every private action ends in one generic thing: a pool spend, made
-of input notes, output notes with their data, public legs, and a program instruction. The Privacy Rings SDK
-turns any spend into the bytes that the user signs. What changes from one action to another is
-which output notes, with which data, go to which program. An implementation declares that in a
-`shielded` recipe, as a static recipe declares instructions today. The service fills the template
-and stays generic.
-
-| Private action | Recipe shape |
-| :-- | :-- |
-| In-ring transfer, merge, ring entry or exit | One spend inside the pool |
-| Withdraw to a public address | One spend with a public leg |
-| Deposit into a public protocol, such as Kamino | The escrow strategy below |
-| A Helius ZK program, such as the swap | That program's own note layout |
-
-**The escrow strategy, for public protocols.** A public protocol needs public tokens, and it
-returns an amount that is known only when it runs. A ring spend uses about 1.4M compute units, the
-whole limit, so the public call cannot go in the same transaction. The strategy has four steps.
-A Kamino deposit of 100 USDC:
-
-1. **Shield.** The user deposits 100 USDC into the ring. This is public and needs no proof.
-2. **Request.** The user spends the 100 USDC note into a request note that the ring program's
-   PDA owns. Its `utxo_data` holds `h`, the hash of the intent; `B`, a salted hash of the user's
-   shielded identity; and `refund_after`. The user signs once, and a relayer submits. Public: a
-   spend happened. Hidden: who, how much, and what for.
-3. **Execute.** The ring program spends the request note, checks that the intent hashes to `h`,
-   and runs the Kamino implementation from the registry with its PDA as owner. It returns the
-   shares to the pool in a note that its PDA owns, tagged `B`. Public: the ring deposited 100 USDC
-   for 98 shares. Hidden: for whom.
-4. **Settle.** The user proves that they know the identity and salt behind `B`, and moves the
-   shares into a note that they own.
-
-Withdrawal runs the same steps in reverse. The user signs only in step 2: step 3 is authorized by
-`h`, and step 4 by `B`. Only the user can build the proofs for steps 3 and 4, so no keeper is
-needed and no keeper learns what anyone does. After `refund_after`, the user can take the request
-back. An interface can use the strategy only when its outflows are bounded, because the outflow
-postconditions say what to lock. The inflow postconditions say what comes back.
-
-The position is the protocol's real share token. `vault.deposit` requires a share mint, so every
-implementation of it returns an SPL token that a note can hold. A position that is not a token,
-such as a loan with borrows, needs a receipt that the ring program issues.
-
-**What the user signs.** The user signs one 32-byte digest:
-
-```
-digest = SHA-256(private_tx_hash ‖ external_data_hash)
-private_tx_hash    = Poseidon(input note hashes, output note hashes, address nullifiers, blinding)
-external_data_hash = SHA-256(instruction, expiry, public legs such as the relayer fee, messages, accounts)
-```
-
-A change to any note, amount, data field, or fee breaks the signature. Ring spends authorize in
-one of three ways:
-
-| Rail | The user signs | Fee payer |
+| Part | Holds | Changes when |
 | :-- | :-- | :-- |
-| `ConfidentialSigner` (SDP today) | The Solana transaction | The user, who is then visible |
-| `ConfidentialEddsa` | The digest, checked inside the proof | A relayer |
-| `AnonymousRingEddsa` | The digest, for a hidden owner | A relayer |
+| Host: the client's wallet or custody | The keys, gathering, the statement check, the protocol's signing rules, the signature, and a verifier for each proof system | The protocol changes what the owner signs, or a proof uses a new proof system |
+| Circuits | A prover for each circuit, its proving keys, and its verifying key, pinned by hash | Never in place. A new circuit is a new pin. |
+| JSON | The statement of each spend | Every new feature |
 
-**What a Ledger shows.** A Ledger shows 32 opaque bytes, because the digest covers notes that
-only the wallet knows. Three fixes, weakest first: the app recomputes the digest from the intent
-and shows the message; a custody policy engine recomputes it before it signs, which fits SDP's
-enclave custody; or a dedicated Ledger app recomputes it on the device, as Zcash's Ledger app does
-for shielded transactions.
+The signing rules stay in the host because the host must compute what it signs, as a hardware
+wallet parses a transaction before it signs.
 
-**As a flow.** The escrow strategy is a `flow` implementation (4.19). The caller sends the public
-intent with `"options": { "privacy": { "ring": "<ring>" } }`, and an implementation with
-`"venue": "ring"` matches only such an intent. The caller names no shield or request.
+**The statement.** A `shielded` recipe states what a spend does, not how to build it:
+
+| Field | Holds |
+| :-- | :-- |
+| `notes` | The notes that the spend creates: owner, asset, amount, and data |
+| `deposits` | Public amounts that the spend takes from an account into the pool |
+| `withdrawals` | Public amounts that the spend pays from the pool to an account |
+| `circuit` | The circuit document that the spender proves with, at its exact version |
+| `ring`, `bind` | The policy ring program, and the digest of its action. Design only. |
+
+What the spend consumes follows from conservation. For each asset, it is the notes created plus
+the withdrawals, less the deposits. The spender's client picks notes that cover it and returns the
+change to the spender. A shield, a transfer, and an unshield are one statement with different
+fields filled:
 
 ```json
 {
-  "id": "solana.org/ring-vault-deposit",
-  "implements": "solana.org/vault.deposit@^1",
-  "venue": "ring",
-  "recipe": {
-    "kind": "flow",
-    "steps": [
-      { "name": "shield", "intent": { "interface": "solana.org/private.shield@^1", "inputs": { "…": "…" } } },
-      { "name": "request", "intent": { "interface": "solana.org/ring.request@^1", "inputs": { "inner": "{steps.execute.intent}", "…": "…" } },
-        "done": { "spent": "{steps.request.plan.nullifiers}" },
-        "recover": { "interface": "solana.org/ring.refund@^1", "inputs": { "note": "{steps.request.plan.notes.0}" } } },
-      { "name": "execute", "submitter": "owner",
-        "intent": { "interface": "solana.org/ring.execute@^1",
-                    "inner": { "interface": "solana.org/vault.deposit@^1",
-                               "inputs": { "owner": "{ring.pda}", "vault": "{inputs.vault}", "asset": "{inputs.asset}", "amount": "{inputs.amount}", "minShares": "{inputs.minShares}" } } },
-        "done": { "spent": "{steps.execute.plan.nullifiers}" } },
-      { "name": "settle", "submitter": "owner", "intent": { "interface": "solana.org/ring.settle@^1", "inputs": { "…": "…" } },
-        "done": { "spent": "{steps.settle.plan.nullifiers}" } }
-    ]
-  }
+  "kind": "shielded",
+  "protocol": "privacy-rings",
+  "pool": "ring1GaLCuJnkUMVkX2JeZLTTX17wKsV4fZmPVzXANW",
+  "circuit": "solana.org/privacy-rings@1.0.0",
+  "accounts": [{ "name": "spender", "address": "{inputs.owner}" }, { "name": "recipient", "address": "{inputs.to}" }],
+  "notes": [],
+  "withdrawals": [{ "to": "recipient", "asset": { "value": "{inputs.mint}", "encoding": "address" }, "amount": { "value": "{inputs.amount}", "encoding": "u64le" } }]
 }
 ```
 
-The shield is done when the owner already holds the amount privately, so a funded user skips it.
+A spend that consumes no note and only deposits uses the pool's `deposit`, which has no proof.
+Every other spend is one `transact` with a proof.
 
-**`inner`.** `inner` is an intent of any public implementation, with the ring's PDA as its owner.
-`h` is its hash, and the request commits to `h`. The hash is known before the user signs, because
-its inputs come from the outer intent and the PDA alone. The execute step then runs in one
-transaction:
+**What the client gathers.**
 
-1. The ring program spends the request note to a token account of its PDA, because the PDA owns
-   the note and the passed intent hashes to `h`.
-2. The ring program calls `check_intent` (4.7) with the built instructions, then invokes them as
-   the PDA.
-3. The ring program checks the inflow and deposits the shares as a note tagged `B`.
-
-If release, call, and return do not fit one transaction, execute becomes three steps. Between them
-the funds stay with the PDA, bound by `h`, and `ring.refund` recovers them.
-
-Only the owner knows the notes, so only the owner's client builds the proofs of execute and
-settle. Those steps need no approval. The service returns them as a `send` when custody holds the
-viewing key, and the client builds them when it builds alone. The request stores the intent
-encrypted to the owner, so the viewing key finds an open request and the plan to finish it.
-
-**Approvals.** The pool's default deposit sets the note's blinding from its leaf, so the request
-digest is known only after the shield lands: two approvals. Its ring deposit takes a blinding from
-the client, so the shield and the request sign together: one approval. On the anonymous rail, the
-proof needs the signature, so the service or the client proves the spend after the signature
-returns, and the next answer is a `send` of it. The client recomputes `h`, the notes, and the digest from the plaintext that the step
-returns, so the service cannot change what the user signs.
-
-| Mode | SDP sees | SDP can move funds |
+| Data | Who fetches it | Why |
 | :-- | :-- | :-- |
-| The service builds | The user's notes and requests, through the viewing key that custody derives | No. A spend needs the user's signature. |
-| The client builds (Rust, compiled to WebAssembly) | Only the public step, as any observer does | No |
+| The spender's notes and balance | The host only | Finding them needs the viewing key |
+| Merkle proofs, non-inclusion proofs, policy answers | Anyone, the service included | A wrong one fails the proof onchain and loses nothing |
+| A recipient's registry record, a ring's config and rule table | The host, from the chain | A substituted record sends the funds to another owner |
 
-**Limits.** The ring's auditor sees everything, by design. The shield and the public step show
-amounts and times, so a large odd amount moved soon after a shield links the two. Round amounts,
-delay, and batching reduce this.
+**Circuits.** Helius holds every circuit today. The pool program compiles in a verifying key for
+each circuit family and shape (inputs, outputs, public slots). The proving keys are on Helius's CDN,
+pinned by `proving-keys.lock`, and Helius's Go prover (gnark) proves. A proving key is about 370
+bytes for each constraint: 9 MB for a transfer of one note, 31 MB for four, and 480 MB for 49 notes
+in an anonymous ring. A proof of one note takes 46 ms natively.
 
-**The prototype.** `solana.org/private.transfer` has an implementation `privacy-rings-transfer`, with
-a `shielded` recipe (kind 5) whose protocol is `privacy-rings`. The recipe names its protocol,
-because only the protocol says how the spender's client builds a spend and how a signer checks its
-notes. Each instruction of the recipe is one output note: the pool program, the owner as its one
-account, and the asset, the amount, and the note's data as segments. The first account is the
-spender. A writable spender account marks a deposit: `privacy-rings-shield` moves public SOL into
-a note of the spender, with no proof.
+A circuit is a registry document (kind 4, spec 1.1), published and versioned as an interface is:
 
-The planner resolves the notes and stops for the spend. Only the spender's keys can build it, and
-the service holds no key and calls no key holder, so `next` is a `build` of the spend that the
-intent requires. The caller's wallet builds and proves it through the ring's indexer and prover,
-and the caller sends the pool instruction back in `built`. The planner puts that instruction in a
-segment of its own transaction, between `verify_intent` and the assertions. The proof covers the
-pool instruction alone, so the instructions around it leave it valid. `verify_intent` checks the
-instruction's program against the implementation's `invokesOnly`, as for a remote recipe, and
-Lighthouse asserts the public postconditions, such as the deposit's outflow. A shielded recipe
-with `verify_intent` therefore needs the assertions. The spend is tier 2. Any signer can pay the
-fee.
+```json
+{
+  "kind": "circuit",
+  "id": "solana.org/privacy-rings",
+  "version": "1.0.0",
+  "protocol": "privacy-rings",
+  "proofSystem": "groth16-bn254",
+  "provingKeys": "fe926373…",
+  "module": "<SHA-256 of the WebAssembly prover>",
+  "sources": ["https://…/proving-keys/8e234b5a589cfb79"]
+}
+```
 
-The notes are hidden onchain, so the key holder checks them. The verifier reports, for each
-shielded intent, the spend that the intent requires. The wallet records each spend that it
-builds, and signs a pool instruction only when it built that instruction with exactly those notes.
-A service that changes the instruction, or asks for other notes in its `build`, gets nothing
-signed. A browser verifier that did not build the spend sees the required spend, and cannot check
-the notes yet.
+`provingKeys` is the SHA-256 of the key set: each key's name, a zero byte, and the key's SHA-256,
+sorted by name. A recipe names the circuit at its exact version. The planner and the verifier read
+the circuit from the registry, so the spend that the host checks carries the digest. The host
+refuses a digest that its compiled table does not produce. The prover reports the SHA-256 of each
+key that it used, and the host checks it. The host verifies each proof against the pool's
+verifying key before it signs.
 
-`solana.org/private.transfer` has a second implementation, `privacy-rings-shield-and-transfer`, a flow of
-two steps (4.19). Where the funds come from is how the transfer runs, not what the user asks for,
-so both implementations implement one interface. Its guarantee is that at most the amount leaves
-the sender's public balance, which a transfer from notes alone also keeps. The
-shield step is done when its deposit lands. The transfer step's wallet waits until the ring's
-indexer shows the deposit before it builds, and the step is done when its notes are
-spent, which the indexer answers from the nullifiers.
+Only hashes are onchain. An account holds at most 10 MB and rent is about 7 SOL for each MB, and a
+wrong proving key only makes proofs that fail. The pool program holds the pool's verifying keys. An
+app circuit adds its own verifying key to its document, under 1 KB. Later, the host fetches the
+`module` and the keys from any source and checks them by hash. The module runs with no network or
+storage, and gets only the inputs that its implementation maps, never the signing key or the
+viewing key. The host verifies each proof and then re-randomizes it, so the published proof carries
+none of the module's randomness. Helius's SDK for ZK programs (arkworks) already runs in
+WebAssembly. Whether the pool's gnark circuits do is not checked.
 
-`just playground` runs the Privacy Rings v0.6.0-alpha release (Zolana) on the surfnet. The playground shields SOL, sends
-it privately, and walks the loop of `privacy-rings-shield-and-transfer` one call at a time. Its SDK crates come from the fork `ChewingGlass/privacy-rings`, which pins
-`solana-address`, `solana-hash`, and `wincode` to this workspace's versions.
+**Where the proof runs.** The prover sees the whole witness: the spent notes, the amounts, the
+recipients, and the nullifier secret. So the caller chooses where each spend is proved.
 
-**Open questions for Helius.**
+| | The host proves | The service proves |
+| :-- | :-- | :-- |
+| Proving keys | Fetched from a mirror, the service's included, and checked by hash | Cached on the service |
+| Who sees the witness | Nobody | The service |
+| Who signs | The host | The host |
+| SDP can move funds | No | No |
+| SDP can see the spend | No | Yes |
 
-1. Can a policy ring program also own notes through its PDA?
-2. Can `utxo_data` or the transaction's messages carry the intent hash under the user's signature?
-3. Do step 3's spend, public call, and deposit fit one transaction?
-4. Does each share mint need an SPL interface in the pool, and which Token-2022 extensions work?
-5. When does the TypeScript SDK expose the EdDSA and anonymous rails, the relayer, and ZK programs?
-   SDP's pinned SDK, 0.1.6-alpha, has none of them.
+The nullifier secret is one key for each owner. With it, a service that proved a spend can tell
+when the notes that it saw are spent later, such as the change. Notes that it never saw stay
+private. Four things never leave the host: finding notes, choosing blindings, checking the proof,
+and the signature. `/v1/intents/prover/*` forwards the prover's API to the service's prover. The
+service keeps no witness: it is Restricted data (6). A prover in an attested enclave can later move
+the trust from SDP's operators to the enclave.
+
+**SDP's ring program (design only).** One envelope runs every action:
+
+```
+execute { action: u16, args: bytes, spend: SppTransact }
+```
+
+The program requires `spend.ring_data_hash` to equal the hash of the action, its arguments, and its
+accounts. The owner's signature covers that hash, so the program runs only the action that the owner
+signed. The program then calls the pool's `ring_transact` and runs the action as its PDA. The
+action `inner` runs any registry implementation as the PDA, with `check_intent` (4.7). A new public
+protocol therefore needs no program change. A private Kamino deposit is one transaction:
+
+1. The spend pays the USDC out of the owner's notes to the program's token account.
+2. The program runs the Kamino deposit implementation as its PDA.
+3. The same spend takes `minShares` back into a note of the owner, from a share buffer that the
+   deposit refills. A receipt with no lower bound goes to a note that the PDA owns, tagged with a
+   salted hash of the owner, and the owner claims it in a second step.
+
+One PDA acts for every owner, so the program holds every owner's position and is Critical. Four
+facts bound it. Protocol governance must activate the ring, unless the protocol sets
+`ring_activation_is_permissionless`. `ring_authority_transact` lets a ring authority spend notes
+with no owner signature, and stays off, which is its default. The ring sets no auditor key unless
+compliance needs one, because the auditor reads every note. The size of a proof, a Kamino call, and
+the legs in one transaction is not measured.
+
+**ZK apps (design only).** In Privacy Rings, a ZK app's program checks its own proof, which shares
+`private_tx_hash` with the pool's spend. Adding one is a `CircuitV1` and an implementation. The
+implementation maps gathered data to the circuit's inputs, and the circuit's outputs to note data.
+An amount that the circuit computes is a bound in the statement. The host still signs only the
+pool's spend, after its statement check, so an app's circuit cannot move more than the statement
+allows.
+
+**What the user signs.** The owner signs `SHA-256(private_tx_hash ‖ external_data_hash)`, over
+every note, amount, leg, and fee. On the `ConfidentialSigner` rail that the prototype uses, the
+Solana signature of the owner's transaction is that signature, so the owner is visible.
+`ConfidentialEddsa` and `AnonymousRingEddsa` check the digest inside the proof, and a relayer pays.
+A Ledger shows the digest as 32 opaque bytes. A custody policy engine, or a Ledger app as Zcash
+has, recomputes it from the intent before it signs.
+
+**Limits.** Deposits and public legs show amounts and times, so a large odd amount soon after a
+shield links the two. The indexer learns which owner tags a wallet asks for, and which notes it is
+about to spend.
+
+**The prototype.** It runs Privacy Rings v0.6.0-alpha on the surfnet, from the fork
+`ChewingGlass/privacy-rings`, which pins `solana-address`, `solana-hash`, and `wincode` to this
+workspace's versions.
+
+1. The `shielded` recipe (kind 5, spec 1.1) stores its notes, deposits, and withdrawals as
+   instructions of the pool, in that order, so the account sources and segments of a static recipe
+   apply to them. The extension holds the protocol, the counts, and the circuit's id.
+   `solana.org/privacy-rings@1.0.0` is the circuit that every Privacy Rings recipe names.
+2. `private.shield`, `private.transfer`, and `private.unshield` have Privacy Rings
+   implementations, for SOL. `privacy-rings-shield-and-transfer` is a flow (4.19) that shields
+   and then transfers.
+3. The planner resolves the statement and stops: `next` is a `build` of the spend. The service
+   holds no key and calls no key holder. The caller's wallet builds the spend, and sends the pool
+   instruction back in `built`. The planner places it between `verify_intent` and the assertions.
+   `verify_intent` limits it to `invokesOnly`, and Lighthouse bounds its public effects. The spend
+   is tier 2.
+4. The wallet proves through its own prover, or through `/v1/intents/prover`, as the caller
+   chooses. It checks the circuit's key set and each key's SHA-256, and verifies the proof.
+5. The verifier reports the statement that each shielded intent requires. The wallet signs a pool
+   instruction only when it built that instruction from exactly that statement. A service that
+   changes the instruction or asks for another statement gets nothing signed. A browser verifier
+   sees the statement, and cannot check the notes.
+
+`just playground` runs all of it, and walks the loop of `privacy-rings-shield-and-transfer` one
+call at a time.
 
 ### 4.18 Coverage of SDP modules (design only)
 
@@ -1269,7 +1251,7 @@ still lacks for it.
 | Earn | The vault interfaces of 4.14. | A Veda implementation. A split swap is a flow (4.19). |
 | DvP | A static flow of `dvp.create`, `fund`, and `settle`, with `cancel` and `reclaim` as its `recover` intents. Settlement asserts both parties' balances, although neither party signs. | Flows. |
 | Private Channels | The L1 deposit is an intent on L1. Transfers and the withdraw burn are intents on the channel chain, a cluster with its own genesis hash. The operator's release is async settlement. | The registry and Lighthouse on the channel chain, and RPC that sends the gateway's token. |
-| Helius Rings | `shielded` implementations, and `flow` implementations for public protocols (4.17). | Flows and `check_intent`. |
+| Helius Rings | `shielded` implementations, and SDP's ring program for public protocols (4.17). | The ring program and `check_intent`. |
 
 Token-2022 confidential transfers fit as Rings do: the client checks the encrypted amounts before
 it signs. Their proofs usually take several transactions, so each transfer is a flow.
@@ -1474,8 +1456,8 @@ needed, from any device or after any restart.
    `recover` intent.
 2. After a lost `progress`, the caller waits until `pendingUntil` before it starts the same operation
    again, so that an old planned transaction cannot land beside a new one.
-3. Without `progress`, the caller can recover but cannot continue. A ring request stores the intent
-   encrypted to the owner, so the viewing key finds both the funds and the plan (4.17).
+3. Without `progress`, the caller can recover but cannot continue. The viewing key finds the
+   owner's notes again, and a receipt that waits for a claim (4.17).
 
 The Rust client runs the same loop over RPC, with no service. `@sdp/intents` keeps `progress` in a
 store that the caller chooses: browser storage, a file, or a database.
@@ -1545,7 +1527,9 @@ transaction over any RPC.
 | Lighthouse | The transaction fails | A bug can pass a bad transaction. It is immutable. | Every guarded transaction fails | An audit |
 | Flow builder or endpoint (4.19) | The flow stops at a stopping point | It can pick steps that waste time. Each step still plans and verifies as any intent. | The flow stops at a stopping point | `POST /v1/intents/recover` |
 | Jito block engine (4.19) | A bundle does not land, expires, and plans again | It can land part of a bundle. Each stopping point is recoverable. | `landing: inOrder` | `inOrder` |
-| The caller's wallet or custody (4.17) | No shielded step plans | It can build other notes than the intent's. The planner limits the spend to the pool, the assertions bound its public effects, and its signer refuses notes that the intent does not require. | No shielded step plans | Another wallet of the owner |
+| The caller's wallet or custody (4.17) | No shielded step plans | It can build another statement than the intent's. The planner limits the spend to the pool, the assertions bound its public effects, and its signer refuses a statement that the intent does not require. | No shielded step plans | Another wallet of the owner |
+| The prover, the host's or the service's (4.17) | No spend is proved | A false proof fails the host's check against the pool's verifying key. The service's prover sees the spend. | No spend is proved | The other prover |
+| Privacy Rings: the pool program, its circuits, and its proving keys (4.17) | No shielded step lands | A changed key set fails the circuit pin. A forged setup can mint, which is trust in Helius's setup and upgrade authority. | No shielded step lands | None. Public intents still run. |
 | The caller's `progress` value | | A changed value stalls or repeats the caller's flow | The caller cannot continue | `POST /v1/intents/recover`, after `pendingUntil` |
 | The signer's RPC | The signer cannot verify, so it does not sign | A false document can change the message text. The chain still runs the real implementation within its real postconditions. | The signer cannot verify | A trusted RPC, or a local copy of each document, which never changes |
 
@@ -1560,12 +1544,12 @@ transaction over any RPC.
 
 **Keys.** The service holds no key and calls no key holder. A shielded step's spend comes from the
 caller's own wallet or custody, in `built`. The wallet signs a pool instruction only when it built
-that instruction with the notes that the transaction's intent requires. A service that forges a
+that instruction from the statement that the transaction's intent requires. A service that forges a
 `build`, or changes the instruction it gets back, therefore gets nothing signed. The service never
-reads a private balance.
+reads a private balance. It sees a spend only when the caller asks it to prove one.
 
 **Flows.** Each step is a plan with every check above, so a flow adds no trust to a step. A flow
-adds two risks. A stop between steps can leave funds in an escrow or a request, so the
+adds two risks. A stop between steps can leave funds with SDP's ring program, so the
 recoverable rule makes the owner able to find and recover each stopping point alone. A step that is
 planned twice can land twice, so `continue` returns the same transaction until it expires. The
 service sends nothing, so it never holds a signed transaction. A Jito bundle
@@ -1578,7 +1562,7 @@ value is caller data. A changed value can stall or repeat only that caller's flo
 | Spoofing | A false builder, version, or name, or a squatted organization name | Organization accounts created only by the admin at launch, approvals, and immutable versions |
 | Tampering | Builder, remote, or RPC output, and instructions outside every span | `verify_intent`, the assertions, and the signer's verifier |
 | Repudiation | Which code built a transaction | Exact versions and the builder in the plan |
-| Information disclosure | Inputs to a remote endpoint, and private balances | Only inputs and payers go out. The service holds no viewing key and asks no wallet. |
+| Information disclosure | Inputs to a remote endpoint, private balances, and the witness of a spend that the service proves | Only inputs and payers go out. The service holds no viewing key and asks no wallet. It keeps no witness, and the caller can prove in its own host. |
 | Denial of service | Slow simulation, RPC, or endpoint | Round and compute limits, and timeouts |
 | Elevation of privilege | A payer or signer input in a built instruction | The builder account rule (4.2) and rule 5 (4.5) |
 
@@ -1591,11 +1575,12 @@ _SDLC §13 · §15_
 | Definitions, builder source, fixtures | Public | Repository |
 | Playground inputs, local test keypairs | Internal, with no value on any cluster | Developer machine, process memory |
 | The `progress` value of a private flow (4.19) | Internal: it names the amounts and the vault that the ring hides | The caller's store |
+| The witness of a spend that the service proves (4.17) | Restricted: it holds the spent notes and the owner's nullifier secret | Service memory for one request. Never logged or stored. |
 
 | Requirement | SDLC | Today | Gap |
 | :-- | :-- | :-- | :-- |
-| Encryption at rest | §13 | Not applicable. No Restricted data. | None |
-| Hardware-backed access | §13 | Not applicable. No Restricted data. | None |
+| Encryption at rest | §13 | Not applicable. The only Restricted data, a witness, is never at rest. | None |
+| Hardware-backed access | §13 | Not applicable. A witness lives only in the memory of one request. | An attested prover enclave before production (4.17) |
 | Rotation | §6.4 | Not applicable. No credentials. | None |
 | Inventory with owner and last rotation | §6.5 | Not applicable. Local program keypairs only. | None |
 | Named human owner | §4 | Noah Prince | None |
@@ -1642,6 +1627,7 @@ Production is a separate project with its own design document.
 | The warm cache and the first-fetch prefetch | One `getMultipleAccounts` for a cold SPL transfer |
 | Every transaction version | Legacy, v0 with lookup tables, and v1 land through the CLI and the provider |
 | Flows: spec 1.1, static flows, `start` and `continue`, `progress`, the in-flight rule, and the `exists` and `spent` conditions | `privacy-rings-shield-and-transfer` shields, waits, transfers, and is done, in the e2e and the playground |
+| The shielded statement, the circuit pin, and proofs in the wallet or the service | Shield, transfer, and unshield land with both onchain checks on, from one wallet driver |
 
 The prototype also serves `POST /v1/prepare`, which returns the plan of a request of one step,
 without `progress`. The service runs the loop. The Rust client does not run it yet.
@@ -1653,8 +1639,10 @@ Not built:
 3. Parity fixtures from SDP's builders, golden fixtures, and a compatibility corpus in CI.
 4. A fix for `RentPayerInRecipe`: mark each placeholder account in the builder roles.
 5. A LiteSVM feature set that matches the cluster.
-6. Private intents other than the transfer, the client's check of a shielded spend, and the
-   anonymous rail (4.17).
+6. Of private intents (4.17): SPL assets, a spend that consumes notes and also deposits, policy
+   rings, `bind`, SDP's ring program, a circuit's `module` and a WebAssembly prover, an app
+   circuit's verifying key, ZK apps, the anonymous rail, the browser verifier's check of a shielded
+   statement, and a check at `publish` that a recipe's circuit exists.
 7. The postconditions and clusters that SDP's other modules need (4.18).
 8. Of flows (4.19): program and remote flows, `recover`, step inputs from earlier steps'
    outputs, the `data`, `balance`, and `committed` conditions, the recoverable check, the flow part

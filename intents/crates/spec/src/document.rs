@@ -5,7 +5,8 @@ use crate::{Address, PodU16, SpecError};
 
 pub const MAGIC: [u8; 4] = *b"SDPI";
 pub const SPEC_MAJOR: u8 = 1;
-/// The latest minor version that a reader knows. 1 adds the flow recipe (`DESIGN.md`, 4.19).
+/// The latest minor version that a reader knows. 1 adds the flow recipe (`DESIGN.md`, 4.19), the
+/// shielded recipe's extension, and the circuit document (4.17).
 pub const SPEC_MINOR: u8 = 1;
 
 wire_code! {
@@ -13,6 +14,8 @@ wire_code! {
         Interface = 1,
         Implementation = 2,
         Intent = 3,
+        /// What a shielded recipe proves with (`DESIGN.md`, 4.17). Spec 1.1 adds it.
+        Circuit = 4,
     }
 }
 
