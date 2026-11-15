@@ -69,14 +69,13 @@ pub(crate) struct Fetched {
 }
 
 impl State {
+    /// A subscription keeps an account that exists fresh. An absent account is fresh only within
+    /// `max_age`, because the notification of its creation can arrive after the transaction lands.
     fn cached(&self, address: &Address, freshness: Freshness, max_age: Duration) -> Option<Option<Account>> {
         let entry = self.entries.get(address)?;
+        let followed = self.subscribed.contains(address) || self.pinned.contains(address);
         let fresh = match freshness {
-            Freshness::Live => {
-                self.subscribed.contains(address)
-                    || self.pinned.contains(address) && entry.account.is_some()
-                    || entry.stored.elapsed() < max_age
-            }
+            Freshness::Live => followed && entry.account.is_some() || entry.stored.elapsed() < max_age,
             Freshness::Published => entry.account.is_some(),
         };
 
@@ -342,5 +341,18 @@ mod tests {
         state.store(address, account(1), 8);
 
         assert_eq!(state.cached(&address, Freshness::Published, Duration::ZERO), Some(account(2)));
+    }
+
+    #[test]
+    fn a_subscription_keeps_an_account_fresh_only_while_it_exists() {
+        let mut state = State::default();
+        let (exists, absent) = (Address([1; 32]), Address([2; 32]));
+        state.store(exists, Some(Account { owner: Address::default(), lamports: 1, data: Vec::new() }), 1);
+        state.store(absent, None, 1);
+        state.subscribed.extend([exists, absent]);
+
+        assert!(state.cached(&exists, Freshness::Live, Duration::ZERO).is_some());
+        assert_eq!(state.cached(&absent, Freshness::Live, Duration::ZERO), None);
+        assert_eq!(state.cached(&absent, Freshness::Live, Duration::from_secs(60)), Some(None));
     }
 }
