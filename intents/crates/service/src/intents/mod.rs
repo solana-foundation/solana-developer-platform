@@ -30,6 +30,8 @@ const CHECK_AFTER: Duration = Duration::from_secs(2);
 /// With `tamper`, the first step's transaction differs from its plan, as `flows::prepare` says.
 pub async fn start(service: &Service, text: &str, tamper: bool) -> Result<Value, ServiceError> {
     let request: Value = serde_json::from_str(text)?;
+    crate::flows::check_request(service, &request).await?;
+
     let unpinned = Progress { v: VERSION, request, pins: Vec::new(), steps: BTreeMap::new() };
     let pinned = pins(service, &unpinned).await?;
     let warnings = deprecation_warnings(service, &pinned).await?;
@@ -49,11 +51,7 @@ pub async fn start(service: &Service, text: &str, tamper: bool) -> Result<Value,
 /// last `sign`, in order. `built` is the spend that the caller's wallet built for the last `build`.
 pub async fn resume(service: &Service, body: &Value, tamper: bool) -> Result<Value, ServiceError> {
     let progress = Progress::read(body.get("progress"))?;
-    let signatures = body
-        .get("signatures")
-        .and_then(Value::as_array)
-        .map(|listed| listed.iter().filter_map(Value::as_str).map(str::to_owned).collect())
-        .unwrap_or_default();
+    let signatures = strings(body.get("signatures"), "signatures")?;
 
     let built = match body.get("built") {
         Some(built) => Some(Built::read(service, built).await?),
@@ -82,13 +80,23 @@ impl Built {
     async fn read(service: &Service, built: &Value) -> Result<Self, ServiceError> {
         let answer = remote::read_answer(built)?;
         let tables = crate::flows::lookup_tables(&service.chain, &answer.lookup_tables()).await?;
-        let nullifier_accounts = built
-            .get("nullifierAccounts")
-            .and_then(Value::as_array)
-            .map(|listed| listed.iter().filter_map(Value::as_str).map(str::to_owned).collect())
-            .unwrap_or_default();
+        let nullifier_accounts = strings(built.get("nullifierAccounts"), "nullifierAccounts")?;
 
         Ok(Self { answer: answer.read(&tables)?, nullifier_accounts })
+    }
+}
+
+/// A list of strings, or none when the key is absent. Any other value is refused, so a malformed
+/// entry is never dropped.
+fn strings(listed: Option<&Value>, key: &str) -> Result<Vec<String>, ServiceError> {
+    let refused = || ServiceError::invalid_request(format!("`{key}` is a list of strings"));
+
+    match listed {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(items)) => {
+            items.iter().map(|item| item.as_str().map(str::to_owned).ok_or_else(refused)).collect()
+        }
+        Some(_) => Err(refused()),
     }
 }
 
@@ -97,7 +105,8 @@ async fn advance(service: &Service, mut progress: Progress, call: Advance) -> Re
     let names: Vec<String> = steps.names().into_iter().map(str::to_owned).collect();
     record_signatures(&mut progress, &names, call.signatures);
 
-    let current = match position(service, &steps, &progress).await? {
+    let outcomes = Outcomes::read(service, &progress).await?;
+    let current = match position(service, &steps, &progress, &outcomes).await? {
         Some(last) => last.saturating_add(1),
         None => 0,
     };
@@ -107,7 +116,7 @@ async fn advance(service: &Service, mut progress: Progress, call: Advance) -> Re
         return answer(&progress, &list, done(&steps, &progress));
     };
 
-    match in_flight(service, &progress, name).await? {
+    match in_flight(service, &progress, name, &outcomes).await? {
         Flight::Pending(step) => return answer(&progress, &list, sign(step)),
         Flight::Landing(until) => return answer(&progress, &list, until),
         Flight::Gone => progress.step(name).planned = None,
@@ -180,11 +189,16 @@ fn record_signatures(progress: &mut Progress, names: &[String], signatures: Vec<
 
 /// The last step that is done, scanning from the end, so that a condition can turn false again,
 /// such as a balance that a later step spends.
-async fn position(service: &Service, steps: &Steps, progress: &Progress) -> Result<Option<usize>, ServiceError> {
+async fn position(
+    service: &Service,
+    steps: &Steps,
+    progress: &Progress,
+    outcomes: &Outcomes,
+) -> Result<Option<usize>, ServiceError> {
     let names = steps.names();
 
     for position in (0..names.len()).rev() {
-        if step_done(service, steps, progress, position).await? {
+        if step_done(service, steps, progress, position, outcomes).await? {
             return Ok(Some(position));
         }
     }
@@ -200,13 +214,12 @@ async fn step_done(
     steps: &Steps,
     progress: &Progress,
     position: usize,
+    outcomes: &Outcomes,
 ) -> Result<bool, ServiceError> {
-    let planned = steps.names().get(position).and_then(|name| progress.steps.get(*name)?.planned.as_ref());
+    let landed = steps.names().get(position).and_then(|name| outcomes.of(name)) == Some(true);
 
-    if let Some(planned) = planned {
-        if landed(service, planned).await? == Some(true) {
-            return Ok(true);
-        }
+    if landed {
+        return Ok(true);
     }
 
     match steps.condition(position, Which::Done) {
@@ -215,19 +228,39 @@ async fn step_done(
     }
 }
 
-/// What the cluster says of the planned transaction's first signature, when the caller sent it.
-async fn landed(service: &Service, planned: &PlannedStep) -> Result<Option<bool>, ServiceError> {
-    let signatures = planned
-        .signatures
-        .iter()
-        .map(|text| text.parse().map_err(|_| ServiceError::invalid_request(format!("`{text}` is not a signature"))))
-        .collect::<Result<Vec<solana_signature::Signature>, _>>()?;
+/// What the cluster says of each planned step's first signature, from one status read.
+struct Outcomes(BTreeMap<String, bool>);
 
-    if signatures.is_empty() {
-        return Ok(None);
+impl Outcomes {
+    async fn read(service: &Service, progress: &Progress) -> Result<Self, ServiceError> {
+        let sent: Vec<(&String, solana_signature::Signature)> = progress
+            .steps
+            .iter()
+            .filter_map(|(name, record)| Some((name, record.planned.as_ref()?.signatures.first()?)))
+            .map(|(name, text)| {
+                let signature =
+                    text.parse().map_err(|_| ServiceError::invalid_request(format!("`{text}` is not a signature")))?;
+
+                Ok((name, signature))
+            })
+            .collect::<Result<_, ServiceError>>()?;
+
+        if sent.is_empty() {
+            return Ok(Self(BTreeMap::new()));
+        }
+
+        let signatures: Vec<_> = sent.iter().map(|(_, signature)| *signature).collect();
+        let outcomes = service.chain.signature_outcomes(&signatures).await?;
+
+        Ok(Self(
+            sent.iter().zip(outcomes).filter_map(|((name, _), outcome)| Some(((*name).clone(), outcome?))).collect(),
+        ))
     }
 
-    Ok(service.chain.signature_outcomes(&signatures).await?.first().copied().flatten())
+    /// Whether the step's transaction landed, failed, or is unknown to the cluster.
+    fn of(&self, name: &str) -> Option<bool> {
+        self.0.get(name).copied()
+    }
 }
 
 /// The state of a step's planned transaction.
@@ -242,11 +275,16 @@ enum Flight {
     Gone,
 }
 
-async fn in_flight(service: &Service, progress: &Progress, name: &str) -> Result<Flight, ServiceError> {
+async fn in_flight(
+    service: &Service,
+    progress: &Progress,
+    name: &str,
+    outcomes: &Outcomes,
+) -> Result<Flight, ServiceError> {
     let Some(planned) = progress.steps.get(name).and_then(|record| record.planned.as_ref()) else {
         return Ok(Flight::Idle);
     };
-    if landed(service, planned).await? == Some(false) {
+    if outcomes.of(name) == Some(false) {
         return Ok(Flight::Gone);
     }
 
@@ -577,6 +615,14 @@ mod tests {
     #[test]
     fn the_only_step_of_a_request_is_named() {
         assert_eq!(Steps::Single.names(), vec![ONLY_STEP]);
+    }
+
+    #[test]
+    fn reads_a_list_of_strings_and_refuses_any_other_entry() {
+        assert_eq!(strings(Some(&json!(["a", "b"])), "signatures").unwrap(), ["a", "b"]);
+        assert_eq!(strings(None, "signatures").unwrap(), Vec::<String>::new());
+        assert!(strings(Some(&json!(["a", 1])), "signatures").is_err());
+        assert!(strings(Some(&json!("a")), "signatures").is_err());
     }
 
     #[test]

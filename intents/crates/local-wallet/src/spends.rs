@@ -6,7 +6,9 @@ use serde_json::{json, Value};
 
 use sdp_intents_client::json::{base58, instruction as instruction_json};
 use sdp_intents_client::message::WireMessage;
-use sdp_intents_planner::{AccountMeta, Instruction, ShieldedCircuit, ShieldedLeg, ShieldedNote, ShieldedSpend};
+use sdp_intents_planner::{
+    AccountMeta, Instruction, ShieldedCircuit, ShieldedLeg, ShieldedNote, ShieldedSpend, ASSOCIATED_TOKEN_PROGRAM,
+};
 use sdp_intents_privacy_rings::{
     nullifier_accounts, proving_key_set, Amount, Leg, NoteOut, PreparedSpend, Shielded, ShieldedWallet, Statement,
     TokenAccount,
@@ -44,11 +46,7 @@ struct BuildRequest {
     prove_in: ProveIn,
 }
 
-/// `ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL`, and its `CreateIdempotent`.
-const ASSOCIATED_TOKEN_PROGRAM: Address = Address([
-    140, 151, 37, 143, 78, 36, 137, 241, 187, 61, 16, 41, 20, 142, 13, 131, 11, 90, 19, 153, 218, 255, 16, 132, 4, 142,
-    123, 216, 219, 233, 248, 89,
-]);
+/// The associated token program's `CreateIdempotent`.
 const CREATE_IDEMPOTENT: u8 = 1;
 
 impl Wallet {

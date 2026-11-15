@@ -46,6 +46,19 @@ impl Build<'_, '_> {
             self.sink.push(Diagnostic::new(Code::MissingKey, object.pointer(), "a flow has at least one step"));
         }
 
+        // `progress` and conditions name a step by its name, so two steps cannot share one.
+        names
+            .iter()
+            .enumerate()
+            .filter(|(position, name)| names.iter().take(*position).any(|earlier| earlier == *name))
+            .for_each(|(position, name)| {
+                self.sink.push(Diagnostic::new(
+                    Code::DuplicateName,
+                    &format!("{}/steps/{position}/name", object.pointer()),
+                    format!("another step is named `{name}`"),
+                ));
+            });
+
         steps.iter().zip(0u8..).for_each(|(step, position)| self.read_step(step, position, &names));
 
         Some(Recipe { kind: RecipeKind::Flow, url: Vec::new(), shielded: None })

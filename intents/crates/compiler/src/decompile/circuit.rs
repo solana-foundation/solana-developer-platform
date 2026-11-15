@@ -1,9 +1,10 @@
 use sdp_intents_spec::Circuit;
 use serde_json::Value;
 
+use super::json::hex;
 use super::json::{sparse_object, utf8};
 use super::{document_name, DecompileError, Organizations};
-use crate::circuit::{hex, PROOF_SYSTEMS, PROTOCOLS};
+use crate::circuit::{PROOF_SYSTEMS, PROTOCOLS};
 use crate::envelope::SPEC_1_1;
 use crate::id::format_version;
 

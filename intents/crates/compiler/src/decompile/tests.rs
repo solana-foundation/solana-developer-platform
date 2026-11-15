@@ -329,3 +329,29 @@ fn a_flow_takes_the_worst_tier_of_its_steps() {
 
     assert!(sdp_intents_spec::Implementation::parse(&untiered).is_err());
 }
+
+/// `progress` names a step by its name, so a flow refuses two steps of one name.
+#[test]
+fn a_flow_refuses_two_steps_of_one_name() {
+    let mut catalog = publishers();
+    for file in files("circuits") {
+        catalog.compile_circuit(&file.text).unwrap();
+    }
+
+    for file in files("interfaces") {
+        catalog.compile_interface(&file.text).unwrap();
+    }
+
+    let (flows, others): (Vec<SourceFile>, Vec<SourceFile>) =
+        files("implementations").into_iter().partition(|file| file.text.contains(r#""kind": "flow""#));
+
+    for file in &others {
+        catalog.compile_implementation(&file.text).unwrap();
+    }
+
+    let flow = flows.iter().find(|file| file.path.contains("shield-and-transfer")).unwrap();
+    let renamed = flow.text.replace(r#""name": "transfer""#, r#""name": "shield""#);
+    let report = catalog.compile_implementation(&renamed).unwrap_err();
+
+    assert!(report.diagnostics.iter().any(|finding| finding.code == crate::diagnostic::Code::DuplicateName));
+}

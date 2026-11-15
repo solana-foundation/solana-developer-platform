@@ -136,7 +136,3 @@ fn digest(node: &Node<'_>, sink: &mut Sink) -> Option<[u8; 32]> {
 
     digest
 }
-
-pub(crate) fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}

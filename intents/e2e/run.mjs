@@ -685,6 +685,13 @@ try {
       inputs: { from: payer.address, to: sender.address, mint: SOL_MINT, amount: "500000000" },
     },
   ]);
+  const withMemo = structuredClone(send);
+  withMemo.intents[0].inputs.memo = "invoice 7";
+  const memoRefused = await service("/v1/intents", JSON.stringify(withMemo)).then(
+    () => undefined,
+    (error) => error.message,
+  );
+  expect(memoRefused?.includes("refuses the intent"), `a flow refuses a memo that no step carries: ${memoRefused}`);
   const started = await service("/v1/intents", JSON.stringify(send));
   const shieldBuilt = await build(started.next.spend);
   const shieldSigning = await service("/v1/intents/continue", JSON.stringify({ progress: started.progress, built: shieldBuilt }));

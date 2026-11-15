@@ -51,7 +51,8 @@ impl Wallet {
     }
 
     fn forget(&self, spent: &[Vec<u8>]) -> Result<(), WalletError> {
-        let mut built = self.built.lock().map_err(|_| WalletError::failed("wallet", "the record of spends is poisoned"))?;
+        let mut built =
+            self.built.lock().map_err(|_| WalletError::failed("wallet", "the record of spends is poisoned"))?;
         spent.iter().for_each(|key| {
             built.remove(key);
         });
@@ -140,22 +141,7 @@ fn accepted_unverified(body: &Value) -> Result<Vec<usize>, WalletError> {
 
 /// The provider's signatures that a plan of a provider's transaction holds, as `presigned`.
 fn presigned(body: &Value) -> Result<Vec<ProviderSignature>, WalletError> {
-    let listed = body.get("presigned").and_then(Value::as_array).cloned().unwrap_or_default();
-
-    listed
-        .iter()
-        .map(|entry| {
-            let decode =
-                |key: &str| entry.get(key).and_then(Value::as_str).and_then(|text| bs58::decode(text).into_vec().ok());
-            let signer = decode("address").and_then(|bytes| <[u8; 32]>::try_from(bytes).ok());
-            let signature = decode("signature").and_then(|bytes| <[u8; 64]>::try_from(bytes).ok());
-
-            match (signer, signature) {
-                (Some(signer), Some(signature)) => Ok(ProviderSignature { signer: Address(signer), signature }),
-                _ => Err(WalletError::invalid_request("each `presigned` entry has a base58 address and signature")),
-            }
-        })
-        .collect()
+    sdp_intents_planner::json::presigned_from_json(body.get("presigned")).map_err(WalletError::invalid_request)
 }
 
 #[cfg(test)]
@@ -250,7 +236,10 @@ mod tests {
         let instructions = [transfer(), pool_instruction(SPENDER), transfer()];
         let built = built_with(&instructions[1], spend(5));
 
-        assert_eq!(reviewed(&verified(Vec::new(), None), &instructions, &[], &built), Err("unverifiedSpend".to_owned()));
+        assert_eq!(
+            reviewed(&verified(Vec::new(), None), &instructions, &[], &built),
+            Err("unverifiedSpend".to_owned())
+        );
     }
 
     /// The same data with another signer is another instruction, such as a deposit from another key.

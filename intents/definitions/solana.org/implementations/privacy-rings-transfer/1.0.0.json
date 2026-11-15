@@ -5,6 +5,7 @@
   "version": "1.0.0",
   "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
   "implements": "solana.org/token.transfer@^1",
+  "applies": [{ "value": "{inputs.memo}", "present": false }],
   "message": "privately send {inputs.amount} of {inputs.mint} from the private balance of {inputs.from} to {inputs.to}, in Solana Privacy Rings' default ring",
   "recipe": {
     "kind": "shielded",

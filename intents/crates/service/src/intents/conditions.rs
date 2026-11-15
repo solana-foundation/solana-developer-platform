@@ -49,14 +49,16 @@ impl Bound {
                 "a privateBalance condition needs the owner's viewing key, which the service does not hold",
             )),
             // The pool creates an account for each nullifier that a spend consumes, so one that
-            // exists proves the spend landed. A forester closes them later, so a missing one proves
-            // nothing, and the in-flight rule never plans a spend again on it alone.
+            // exists proves that some spend of the notes landed. A forester closes them later, so a
+            // missing one proves nothing, and the in-flight rule never plans a spend again on it alone.
             "spent" => {
                 let accounts = self
                     .body
                     .as_array()
-                    .map(|listed| listed.iter().map(|account| address(Some(account))).collect())
-                    .unwrap_or_else(|| Ok(Vec::new()))?;
+                    .ok_or_else(|| ServiceError::refused("flow", "`spent` names a list of nullifier accounts"))?
+                    .iter()
+                    .map(|account| address(Some(account)))
+                    .collect::<Result<Vec<_>, _>>()?;
                 let fetched = service.chain.accounts(&accounts, Freshness::Live).await?;
 
                 Ok(fetched.iter().any(Option::is_some))

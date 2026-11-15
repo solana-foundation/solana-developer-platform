@@ -7,10 +7,9 @@ use sdp_intents_spec::wire::{
 use sdp_intents_spec::{AddressSource, RecipeKind, ShieldedProtocol};
 
 /// The protocols that a shielded recipe can name, by their JSON names.
-const PROTOCOLS: [(&str, ShieldedProtocol); 1] = [("privacy-rings", ShieldedProtocol::PrivacyRings)];
-
 use super::accounts::Table;
 use super::Build;
+use crate::circuit::PROTOCOLS;
 use crate::diagnostic::{Code, Diagnostic};
 use crate::reader::{list, Node, Object};
 use crate::suggest::closest;

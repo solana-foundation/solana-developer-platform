@@ -81,9 +81,7 @@ impl Bindings<'_> {
             ("inputs", name, None, None) => self.intent()?.pointer(&format!("/inputs/{name}")).cloned(),
             ("payers", name, None, None) => self.progress.request.pointer(&format!("/payers/{name}")).cloned(),
             ("steps", step, Some("plan"), Some("nullifiers")) => {
-                let accounts = self.progress.steps.get(step).map(|record| record.plan.nullifier_accounts.clone());
-
-                Some(json!(accounts.unwrap_or_default()))
+                Some(json!(self.progress.steps.get(step)?.plan.nullifier_accounts))
             }
             _ => None,
         }
@@ -95,6 +93,9 @@ impl Bindings<'_> {
             Value::String(text) if text.starts_with('{') && text.ends_with('}') => self
                 .value(text)
                 .ok_or_else(|| ServiceError::refused("flow", format!("`{text}` names no value of the flow"))),
+            Value::Array(items) => {
+                Ok(Value::Array(items.iter().map(|item| self.bind(item)).collect::<Result<_, _>>()?))
+            }
             Value::Object(map) => {
                 Ok(Value::Object(map.iter().map(|(key, item)| Ok((key.clone(), self.bind(item)?))).collect::<Result<
                     _,

@@ -60,20 +60,27 @@ nothing on a real cluster.
 - The interface page: the display template as the title, the inputs as a form, the postconditions
   as guarantees, and each implementation with whether its `applies` checks hold.
 - Solana Privacy Rings, on an interface with a shielded implementation: each wallet's private
-  balances in the default ring, and a button that shields 1 SOL. `private.shield`, `private.transfer`, and `private.unshield` move SOL into, inside, and
-  out of the ring. Each implementation states its spend: the notes it creates, and what it deposits
-  and withdraws. `privacy-rings-shield-and-transfer` is a flow: it shields public SOL first when
-  the private balance is short, then transfers. The tree lists the circuit that each spend proves
+  balances in the default ring, and a button that shields 1 SOL. `private.shield`, the
+  `privacy-rings-transfer` implementation of `token.transfer`, and `private.unshield` move SOL and
+  SPL tokens into, inside, and out of the ring. Each implementation states its spend: the notes it
+  creates, and what it deposits and withdraws. `privacy-rings-shield-and-transfer` is a flow: it
+  shields public funds, then transfers them. The tree lists the circuit that each spend proves
   with.
-- Intent: the intent JSON and the `start` request as curl, TypeScript, and Rust.
+- Intent: the intent JSON and the `POST /v1/intents` request as curl, TypeScript, and Rust. An
+  amount is a decimal, which the service converts with the mint's decimals.
 - The loop: every intent runs the same loop, for one transaction or many (`DESIGN.md`, 4.1). Each
   call shows its curl and its answer, and `next` says what to do: have the wallet build a shielded
   spend, proved in the wallet or on the service, sign each step, wait for its condition, or nothing, because the flow is done. For a step to sign, the panel shows its message,
   each instruction with its part of the segment, and the compute units. `Verify` runs
   `@sdp/intents-verifier` in the browser. It reads the registry from the surfnet's RPC through the
-  dev server's `/rpc`, never from the service. `Sign and send` signs with the local wallets. The
-  next call sends `progress` back with the signatures. "Run the loop for me" makes every call
-  without a click. The calls stay in the browser's storage, so a refresh continues the flow.
+  dev server's `/rpc`, never from the service. `Sign and send` stays off until the verifier proves
+  the step's message, and signs with the local wallets. A request of one step ends there: its sign
+  says `then: done`, so the calls stay folded and nothing asks for `continue`. A flow shows its
+  steps as a bar, and the next call sends `progress` back with the signatures. "Run the loop for
+  me" makes every call without a click. The calls stay in the browser's storage, so a refresh
+  continues the flow.
+- Deprecation: a deprecated interface or implementation shows a badge in the tree and on its
+  candidate, with its replacement and end of life, and the first answer lists the warnings.
 - Interface: the selected interface, its authorities and versions, and its document as the registry holds it.
 - Implementation: the selected implementation, its versions, and its document as the registry holds it.
 

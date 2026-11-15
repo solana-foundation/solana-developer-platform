@@ -124,6 +124,12 @@ impl Sync<'_> {
         let versions =
             all(implementations.iter().map(|implementation| self.implementation_version_step(implementation)))?;
         let version_approvals = all(interfaces.iter().map(|interface| self.version_approval_steps(&interface.id)))?;
+        let deprecations =
+            all(interfaces.iter().map(|interface| self.deprecation_step(Kind::Interface, &interface.id)).chain(
+                implementations
+                    .iter()
+                    .map(|implementation| self.deprecation_step(Kind::Implementation, &implementation.id)),
+            ))?;
         let interface_tails = all(interfaces.iter().map(|interface| self.index_tail(Kind::Interface, &interface.id)))?;
         let implementation_tails = all(implementations
             .iter()
@@ -141,6 +147,7 @@ impl Sync<'_> {
             approvals,
             versions,
             version_approvals,
+            deprecations,
             interface_tails,
             implementation_tails,
             moved,
@@ -412,7 +419,7 @@ impl Sync<'_> {
         Ok(steps)
     }
 
-    /// The head, the deprecation, then the authorities, that the index file states.
+    /// The head, then the authorities, that the index file states.
     fn index_tail(&self, kind: Kind, id: &Id) -> Result<Vec<Step>, String> {
         let Some(settings) = self.index_settings(kind, id) else { return Ok(Vec::new()) };
         let index = index_of(document_kind(kind), id)?;
@@ -424,28 +431,6 @@ impl Sync<'_> {
             .head
             .filter(|head| current_head != Some(*head))
             .map(|head| step(format!("set the head of {id} to {}", version_text(&head)), vec![change.set_head(&head)]));
-
-        let deprecation = settings
-            .deprecated
-            .as_ref()
-            .map(|deprecated| {
-                let replaced_by = deprecated
-                    .replaced_by
-                    .as_ref()
-                    .map(|replacement| index_of(document_kind(kind), replacement))
-                    .transpose()?;
-
-                Ok::<_, String>(Deprecation { replaced_by, end_of_life: deprecated.end_of_life })
-            })
-            .transpose()?;
-        let deprecation_step = (view.as_ref().and_then(IndexView::deprecation) != deprecation).then(|| {
-            let description = match deprecation {
-                Some(_) => format!("deprecate {id}"),
-                None => format!("clear the deprecation of {id}"),
-            };
-
-            step(description, vec![change.set_deprecation(deprecation.as_ref())])
-        });
 
         let update = view.as_ref().map_or(Address::default(), |view| *view.update_authority());
         let update_step = (update != settings.update_authority).then(|| {
@@ -461,7 +446,39 @@ impl Sync<'_> {
             step(description, vec![change.set_approve_authority(&settings.approve_authority)])
         });
 
-        Ok(head.into_iter().chain(deprecation_step).chain(update_step).chain(approve_step).collect())
+        Ok(head.into_iter().chain(update_step).chain(approve_step).collect())
+    }
+
+    /// The deprecation that the index file states, when the index holds another. Every
+    /// replacement exists by now, and no authority has moved yet.
+    fn deprecation_step(&self, kind: Kind, id: &Id) -> Result<Option<Step>, String> {
+        let Some(settings) = self.index_settings(kind, id) else { return Ok(None) };
+        let index = index_of(document_kind(kind), id)?;
+        let view = self.index(&index)?;
+        let change = self.change(id, index);
+
+        let deprecation = settings
+            .deprecated
+            .as_ref()
+            .map(|deprecated| {
+                let replaced_by = deprecated
+                    .replaced_by
+                    .as_ref()
+                    .map(|replacement| index_of(document_kind(kind), replacement))
+                    .transpose()?;
+
+                Ok::<_, String>(Deprecation { replaced_by, end_of_life: deprecated.end_of_life })
+            })
+            .transpose()?;
+
+        Ok((view.as_ref().and_then(IndexView::deprecation) != deprecation).then(|| {
+            let description = match deprecation {
+                Some(_) => format!("deprecate {id}"),
+                None => format!("clear the deprecation of {id}"),
+            };
+
+            step(description, vec![change.set_deprecation(deprecation.as_ref())])
+        }))
     }
 
     fn approval(&self, interface: &Id, interface_index: &Address, implementation: &Id) -> Result<Approval, String> {

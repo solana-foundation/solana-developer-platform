@@ -56,7 +56,10 @@ export interface ImplementationDefinition {
   id: string;
   version: string;
   cluster: string;
-  recipe: { kind: "static" | "program" | "remote"; returns?: "instructions" | "transaction" };
+  recipe: {
+    kind: "static" | "program" | "remote" | "shielded" | "flow";
+    returns?: "instructions" | "transaction";
+  };
   /// What the signer reads. A request's message says who settles it, by when, and how to cancel it.
   message: string;
   /// What the implementation promises beyond the interface's guarantees.

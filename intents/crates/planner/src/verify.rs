@@ -360,10 +360,11 @@ impl<'v, 'a> Verification<'v, 'a> {
         Ok(self.instructions.iter().all(|instruction| allowed.contains(&instruction.program)))
     }
 
-    /// The SOL that the outflow postconditions let `from` send, in lamports.
+    /// The SOL that the outflow postconditions let `from` send, in lamports. Every postcondition
+    /// holds at once, so the tightest bound applies. A bound above `u64::MAX` bounds nothing.
     fn sol_outflow(&self, from: &Address) -> Result<u64, PlanError> {
         let conditions = self.conditions()?;
-        let allowed = conditions
+        let bounds = conditions
             .iter()
             .filter(|condition| condition.check.check == u8::from(CheckKind::Outflow))
             .map(|condition| {
@@ -371,15 +372,14 @@ impl<'v, 'a> Verification<'v, 'a> {
                 let names_sol = self.values.address(owner?, condition.table)? == *from
                     && self.values.address(mint?, condition.table)? == Address::default();
 
-                if !names_sol {
-                    return Ok(0);
+                match names_sol {
+                    true => Ok(Some(u64::try_from(self.values.integer(max?)?).unwrap_or(u64::MAX))),
+                    false => Ok(None),
                 }
-
-                Ok(u64::try_from(self.values.integer(max?)?).unwrap_or(u64::MAX))
             })
-            .collect::<Result<Vec<u64>, PlanError>>()?;
+            .collect::<Result<Vec<Option<u64>>, PlanError>>()?;
 
-        Ok(allowed.into_iter().fold(0, u64::saturating_add))
+        Ok(bounds.into_iter().flatten().min().unwrap_or(0))
     }
 
     fn payer_allowance(&self, address: &Address) -> u64 {

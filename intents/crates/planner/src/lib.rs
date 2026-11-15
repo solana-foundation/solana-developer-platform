@@ -40,6 +40,7 @@
 mod accounts;
 mod error;
 mod instruction;
+pub mod json;
 mod onchain;
 mod plan;
 mod planner;
@@ -64,6 +65,7 @@ pub use error::{Limit, PlanError};
 pub use instruction::{AccountMeta, Instruction};
 pub use plan::{Digests, Plan, PlannedIntent};
 pub use planner::{PlanRequest, Planner, Step};
+pub use programs::{ASSOCIATED_TOKEN_PROGRAM, TOKEN_2022_PROGRAM, TOKEN_PROGRAM};
 pub use registry::REGISTRY_PROGRAM;
 pub use remote::{
     FrozenTransaction, InputValue, ProviderSignature, RemoteAnswer, RemoteCall, RemoteInput, RemoteOutput,
