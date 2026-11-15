@@ -219,7 +219,7 @@ export type Next =
 export interface Answer {
   progress: Record<string, unknown>;
   /// Each step of the request, for a wizard. A request that is not a flow has one step.
-  steps: { name: string; state: "done" | "current" | "pending" }[];
+  steps: { name: string; state: "done" | "current" | "pending" | "stopped" }[];
   /// The first answer warns of each deprecated document that the request pins.
   warnings?: string[];
   next: Next;
@@ -233,6 +233,8 @@ export interface ContinueBody {
   signatures?: string[];
   /// The spend that the caller's wallet built for the last `build`.
   built?: Record<string, unknown>;
+  /// Stops the flow. The service then plans the recovery of the last step that landed.
+  stop?: boolean;
 }
 
 export class ServiceError extends Error {

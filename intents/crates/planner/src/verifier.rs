@@ -263,7 +263,7 @@ fn resolve_flow<C: Chain>(
         return Err(VerifyError::FlowsDiffer);
     }
 
-    let Some((&step, intent)) = first.flow.split_first() else { return Ok(FlowResolved::None) };
+    let Some(intent) = first.flow.get(1..) else { return Ok(FlowResolved::None) };
 
     if verifies.len() != 1 {
         return Err(VerifyError::FlowsDiffer);
@@ -277,17 +277,12 @@ fn resolve_flow<C: Chain>(
     else {
         return Ok(FlowResolved::Missing(vec![interface_address, implementation_address]));
     };
-    let flow = FlowStep {
-        interface: document(&interface_address, &interface, DocumentKind::Interface, outer.interface())?,
-        implementation: document(
-            &implementation_address,
-            &implementation,
-            DocumentKind::Implementation,
-            outer.implementation(),
-        )?,
-        intent,
-        step,
-    };
+    let flow = FlowStep::of_data(
+        document(&interface_address, &interface, DocumentKind::Interface, outer.interface())?,
+        document(&implementation_address, &implementation, DocumentKind::Implementation, outer.implementation())?,
+        first.flow,
+    )
+    .ok_or_else(bad)?;
 
     flow.check_binding(&Intent::parse(first.intent).map_err(|_| bad())?, payers)?;
 

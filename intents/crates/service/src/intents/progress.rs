@@ -18,6 +18,12 @@ pub struct Progress {
     pub pins: Vec<String>,
     #[serde(default)]
     pub steps: BTreeMap<String, StepRecord>,
+    /// The caller asked to stop the flow. It stops once no planned step can still land.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub stopping: bool,
+    /// How many steps had landed when the flow stopped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

@@ -707,7 +707,7 @@ try {
   expect(
     shieldMessage.startsWith("step 1 of 2: ") &&
       shieldMessage.includes(" || flow solana.org/privacy-rings-shield-and-transfer@1.0.0: privately send ") &&
-      shieldMessage.includes(" | 2 approvals || intents on "),
+      shieldMessage.includes(" | 2 approvals | if it stops after step 1: recover with solana.org/privacy-rings-unshield@^1 || intents on "),
     `the shield's message names its place in the flow: ${shieldMessage.slice(0, 160)}`,
   );
   expect(
@@ -749,6 +749,61 @@ try {
   expect(unshielded.answer.next.kind === "done", `the unshield is done: ${unshielded.answer.next.message}`);
   expect((await rpc("getBalance", [authority.address])).value - before === 250_000_000, "the recipient receives 0.25 SOL");
   expect(await ringBalanceReaches(sender.address, 1_000_000_000), "the sender keeps 1 SOL privately");
+
+  console.log("a flow stopped after its first step: its recovery unshields what the shield moved");
+  const stopRequest = plan(payer, [
+    {
+      interface: "solana.org/token.transfer@^1",
+      implementation: "solana.org/privacy-rings-shield-and-transfer@^1",
+      inputs: { from: sender.address, to: payer.address, mint: SOL_MINT, amount: "100000000" },
+    },
+  ]);
+  const stopStarted = await service("/v1/intents", JSON.stringify(stopRequest));
+  const stopShieldSigning = await service(
+    "/v1/intents/continue",
+    JSON.stringify({ progress: stopStarted.progress, built: await build(stopStarted.next.spend) }),
+  );
+  expect(
+    stopShieldSigning.next.steps[0].message.includes(" | if it stops after step 1: recover with solana.org/privacy-rings-unshield@^1"),
+    "the shield's message names its recovery",
+  );
+  const shieldSent = await wallet("/send", JSON.stringify({ message: stopShieldSigning.next.steps[0].transaction.messageBytes }));
+  expect(await ringBalanceReaches(sender.address, 1_100_000_000), "the shield lands");
+
+  let stopAnswer = await service(
+    "/v1/intents/continue",
+    JSON.stringify({ progress: stopShieldSigning.progress, signatures: [shieldSent.signature], stop: true }),
+  );
+  for (let turn = 0; turn < 20 && stopAnswer.next.kind === "wait"; turn += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    stopAnswer = await service("/v1/intents/continue", JSON.stringify({ progress: stopAnswer.progress }));
+  }
+  expect(
+    stopAnswer.next.kind === "build" && stopAnswer.next.step === "shield.recover",
+    `stopping asks the wallet to build the shield's recovery (${stopAnswer.next.kind})`,
+  );
+  expect(
+    stopAnswer.steps.map((step) => `${step.name}:${step.state}`).join(" ") === "shield:done transfer:stopped",
+    "the answer shows the shield done and the transfer stopped",
+  );
+
+  const recoverySigning = await service(
+    "/v1/intents/continue",
+    JSON.stringify({ progress: stopAnswer.progress, built: await build(stopAnswer.next.spend) }),
+  );
+  const recovery = recoverySigning.next.steps[0];
+  expect(
+    recovery.message.startsWith("recover after step 1 of 2: unshield 0.1 of ") && recoverySigning.next.then === "done",
+    `the recovery's message names its place in the flow: ${recovery.message.slice(0, 120)}`,
+  );
+  expect(await typescriptProves(recovery.transaction.messageBytes, recovery), "the verifier proves the recovery's place in the flow");
+
+  const stoppedFlow = await runFlow(recoverySigning);
+  expect(
+    stoppedFlow.answer.next.kind === "done" && stoppedFlow.answer.next.message.includes("its recovery landed"),
+    `the stopped flow is done: ${stoppedFlow.answer.next.message}`,
+  );
+  expect(await ringBalanceReaches(sender.address, 1_000_000_000), "the sender holds 1 SOL privately again");
 
   console.log("an SPL token through the ring: shield, send privately, and unshield USDC");
   await wallet("/ring/asset", JSON.stringify({ payer: sender.address, mint: USDC }));

@@ -129,6 +129,8 @@ pub async fn check_request(service: &Service, request: &Value) -> Result<(), Ser
 pub(crate) struct FlowRequest<'r> {
     pub(crate) request: &'r Value,
     pub(crate) step: u8,
+    /// The plan is the recovery that the step names.
+    pub(crate) recovery: bool,
 }
 
 /// Plans `text` with the registry's documents. A remote call or a shielded spend takes `answer`
@@ -156,8 +158,10 @@ async fn planned(
         Some(flow) => Some(crate::amounts::in_base_units(&service.chain, &catalog, flow.request).await?.to_string()),
         None => None,
     };
-    let flow_compiled =
-        flow_text.as_deref().map(|text| catalog.compile_plan(text).map_err(|report| ServiceError::compile(&report, text))).transpose()?;
+    let flow_compiled = flow_text
+        .as_deref()
+        .map(|text| catalog.compile_plan(text).map_err(|report| ServiceError::compile(&report, text)))
+        .transpose()?;
     let flow_step = match (flow, &flow_compiled, flow_documents.as_slice()) {
         (Some(flow), Some(compiled), [documents]) => match compiled.intents.as_slice() {
             [intent] => Some(FlowStep {
@@ -165,6 +169,7 @@ async fn planned(
                 implementation: &documents.implementation.bytes,
                 intent: &intent.bytes,
                 step: flow.step,
+                recovery: flow.recovery,
             }),
             _ => return Err(ServiceError::refused("flow", "a flow request holds one intent")),
         },

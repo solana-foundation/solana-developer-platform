@@ -194,6 +194,7 @@ fn verify_intent_checks_a_step_against_its_flow() {
         implementation: &flow,
         intent: &flow_intent,
         step: 0,
+        recovery: false,
     };
     let plan = sdp_intents_program_testing::prepare_flow_step(&setup.svm, &step, context).unwrap();
     assert!(plan.message.starts_with("step 1 of 1: transfer 1 SOL from "), "{}", plan.message);

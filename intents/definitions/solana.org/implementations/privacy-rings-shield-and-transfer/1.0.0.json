@@ -20,6 +20,16 @@
             "mint": "{inputs.mint}",
             "amount": "{inputs.amount}"
           }
+        },
+        "recover": {
+          "interface": "solana.org/private.unshield@^1",
+          "implementation": "solana.org/privacy-rings-unshield@^1",
+          "inputs": {
+            "owner": "{inputs.from}",
+            "to": "{inputs.from}",
+            "mint": "{inputs.mint}",
+            "amount": "{inputs.amount}"
+          }
         }
       },
       {

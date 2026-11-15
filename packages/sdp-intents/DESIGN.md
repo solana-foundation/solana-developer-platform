@@ -341,7 +341,8 @@ transaction with the message that it proves. The design calls a step's content a
    starts with `<n>: `, and `||` separates them. A flow's step starts
    `step <i> of <n>: <the step's outcome> || flow <id>: <the flow's outcome> | <n> approvals`, then
    `| if it stops after step <i>: recover with <id>` for each step that names a recovery, so its
-   signer sees the whole operation that the step belongs to.
+   signer sees the whole operation that the step belongs to. A recovery starts
+   `recover after step <i> of <n>`.
 2. `expires` is a UTC time, from the plan request's `validForSeconds` (default 60) after the
    planner reads the Clock sysvar. Every `verify_intent` states it, and refuses to run when the
    cluster's clock is past it. A plan without `verify_intent` states no expiry. A wallet can
@@ -991,7 +992,7 @@ A single index or version reads only the addresses that its id and version deriv
 | `GET /v1/{interfaces\|implementations\|circuits}/{organization}/{name}/versions/{version}` | | One version, with its document in the definition format |
 | `GET /v1/interfaces/{organization}/{name}/implementations` | | The interface's implementations, each with its approval |
 | `POST /v1/interfaces/{organization}/{name}/versions/{version}/matches` | `{ inputs, payers, all }` | Each implementation, with its status and deprecation |
-| `POST /v1/intents`, `POST /v1/intents/continue` | A plan request, or `{ progress, signatures?, built? }` | `{ progress, steps, next }`, with the RPC calls (4.19). The first answer adds `warnings`. |
+| `POST /v1/intents`, `POST /v1/intents/continue` | A plan request, or `{ progress, signatures?, built?, stop? }` | `{ progress, steps, next }`, with the RPC calls (4.19). The first answer adds `warnings`. |
 | `POST /v1/intents/recover` | `{ owner }` | The owner's stopping points (4.19). Not built. |
 | `POST /v1/verify` | A message or a transaction of any version, and the plan's message | What the transaction proves |
 | `/v1/intents/prover/*` | The Privacy Rings prover's API | The prover's answer, from the service's prover (4.17) |
@@ -1406,6 +1407,15 @@ place in the flow (4.6), and a wallet can run the whole flow onchain after one a
 A builder or an endpoint only picks the next step. It signs nothing and moves nothing. The planner
 plans each returned intent as any other, and the step must name `recover`.
 
+**Stopping.** `continue` with `stop: true` stops the flow. It stops once no planned step after
+the landed ones can still land, so a step and its recovery never both land: until then the answer
+is a `wait`. The service then plans the recovery that the last landed step names, as a `sign` with
+`then: "done"`, or a `build` when the recovery is a shielded spend. Its message starts
+`recover after step <i> of <n>`, and its `verify_intent` marks the flow context as a recovery, so
+`verify_intent` and the verifier check it against the step's `recover`. `progress` keeps the stop,
+and the steps after it show as `stopped`. A step that names no recovery leaves the funds where it
+put them. `privacy-rings-shield-and-transfer` recovers its shield with an unshield to the sender.
+
 **Guarantees.** A flow's guarantees, its interface's and its own, must follow from its steps'.
 Each step's transaction enforces the step's guarantees onchain, so a flow guarantee that the steps
 imply holds at every point where the flow can stop. The compiler refuses a flow whose steps do
@@ -1722,8 +1732,8 @@ Not built:
    anonymous rail, the browser verifier's check of a shielded statement, and a check at `publish`
    that a recipe's circuit exists.
 7. The postconditions and clusters that SDP's other modules need (4.18).
-8. Of flows (4.19): program and remote flows, running `recover`, step inputs from earlier steps'
-   outputs, the `data`, `balance`, and `committed` conditions, named terminal outcomes, the
+8. Of flows (4.19): program and remote flows, `POST /v1/intents/recover`, which finds an owner's
+   stopping points with no `progress`, step inputs from earlier steps' outputs, the `data`, `balance`, and `committed` conditions, named terminal outcomes, the
    recoverable check, packing several intents into several transactions, Jito bundles,
    `check_intent`, and `execute_step`.
 9. A limit on the spends that the local wallet records and never signs. It is a development

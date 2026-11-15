@@ -13,7 +13,7 @@ mod view;
 mod wire;
 
 pub use account::AddressSource;
-pub use binding::{check_step_binding, BindingError, StepBinding};
+pub use binding::{check_step_binding, BindingError, StepBinding, RECOVERY_BIT};
 pub use flow::{
     ConditionKind, ConditionV1, DocumentRefV1, FlowDocV1, StepInputV1, StepV1, StepValue, Submitter, NO_CONDITION,
     STEP_FACT_NULLIFIERS,

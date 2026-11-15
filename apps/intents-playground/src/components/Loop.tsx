@@ -95,9 +95,9 @@ export function Loop(props: Props) {
           prover={loop.prover}
           onProver={loop.setProver}
           failure={loop.failure}
-          onContinue={() =>
+          onContinue={(stop) =>
             loop
-              .resume(answer, { signatures: Object.values(sent), built: loop.built })
+              .resume(answer, { signatures: Object.values(sent), built: loop.built, stop })
               .catch(() => undefined)
           }
         />
@@ -409,7 +409,8 @@ interface NextProps {
   onProver: (prover: Prover) => void;
   /// The last build, verification, or send that failed.
   failure: Error | null;
-  onContinue: () => void;
+  /// `true` stops the flow, and the service plans the recovery of the last step that landed.
+  onContinue: (stop: boolean) => void;
 }
 
 function NextPanel(props: NextProps) {
@@ -446,14 +447,27 @@ function NextPanel(props: NextProps) {
             <summary>The next call</summary>
             <Code text={continueCurl(body)} />
           </details>
-          <button
-            type="button"
-            className="btn btn-pri"
-            disabled={props.busy !== null}
-            onClick={props.onContinue}
-          >
-            {props.busy === "continue" ? "Calling…" : "POST /v1/intents/continue"}
-          </button>
+          <div className="side-actions row">
+            <button
+              type="button"
+              className="btn btn-pri"
+              disabled={props.busy !== null}
+              onClick={() => props.onContinue(false)}
+            >
+              {props.busy === "continue" ? "Calling…" : "POST /v1/intents/continue"}
+            </button>
+            {props.answer.steps.length > 1 &&
+              !props.answer.steps.some((step) => step.state === "stopped") && (
+                <button
+                  type="button"
+                  className="btn btn-sec"
+                  disabled={props.busy !== null}
+                  onClick={() => props.onContinue(true)}
+                >
+                  Stop and recover
+                </button>
+              )}
+          </div>
         </>
       )}
     </div>

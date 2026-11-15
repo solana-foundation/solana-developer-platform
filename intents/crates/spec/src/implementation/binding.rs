@@ -7,7 +7,11 @@ use crate::{Address, Intent, RecipeKind, SpecError, ValueRef, ValueSource};
 
 use super::view::Implementation;
 
-/// A step of a flow, as a step's `verify_intent` states it.
+/// The first byte of a flow context: the step's position from zero in the low seven bits, and this
+/// bit when the plan is the recovery after that step.
+pub const RECOVERY_BIT: u8 = 0x80;
+
+/// A step of a flow, or the recovery after it, as its `verify_intent` states it.
 #[derive(Clone, Copy)]
 pub struct StepBinding<'a> {
     pub flow: Implementation<'a>,
@@ -15,6 +19,8 @@ pub struct StepBinding<'a> {
     pub flow_intent: Intent<'a>,
     /// The step's position, from zero.
     pub step: u8,
+    /// The plan is the recovery that the step names, not the step.
+    pub recovery: bool,
     pub fee_payer: &'a Address,
     pub rent_payer: &'a Address,
 }
@@ -32,7 +38,7 @@ impl From<SpecError> for BindingError {
     }
 }
 
-/// `step` is the flow's step at `binding.step`.
+/// `step` is the flow's step at `binding.step`, or the recovery that the step names.
 pub fn check_step_binding(binding: &StepBinding<'_>, step: &Intent<'_>) -> Result<(), BindingError> {
     let flow = binding.flow;
     let outer = binding.flow_intent;
@@ -45,9 +51,12 @@ pub fn check_step_binding(binding: &StepBinding<'_>, step: &Intent<'_>) -> Resul
     }
 
     let named = flow.steps()?.get(usize::from(binding.step)).ok_or(BindingError::NotTheStep)?;
-    let pinned =
-        accepts(&named.interface.id, step.interface()) && accepts(&named.implementation.id, step.implementation());
-    let inputs = flow.step_inputs(named)?;
+    let (interface, implementation, inputs) = match binding.recovery {
+        false => (&named.interface, &named.implementation, flow.step_inputs(named)?),
+        true if named.recover.is_empty() => return Err(BindingError::NotTheStep),
+        true => (&named.recover, &named.recover_implementation, flow.recover_inputs(named)?),
+    };
+    let pinned = accepts(&interface.id, step.interface()) && accepts(&implementation.id, step.implementation());
 
     if !pinned || inputs.len() != step.inputs()?.len() {
         return Err(BindingError::NotTheStep);

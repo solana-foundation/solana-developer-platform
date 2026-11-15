@@ -7,6 +7,7 @@ mod conditions;
 mod flow;
 mod guarantees;
 mod progress;
+mod stop;
 
 use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -33,14 +34,18 @@ pub async fn start(service: &Service, text: &str, tamper: bool) -> Result<Value,
     let request: Value = serde_json::from_str(text)?;
     crate::flows::check_request(service, &request).await?;
 
-    let unpinned = Progress { v: VERSION, request, pins: Vec::new(), steps: BTreeMap::new() };
+    let unpinned =
+        Progress { v: VERSION, request, pins: Vec::new(), steps: BTreeMap::new(), stopping: false, stopped: None };
     let pinned = pins(service, &unpinned).await?;
     let warnings = deprecation_warnings(service, &pinned).await?;
     let pins = pinned.into_iter().map(|pin| pin.id).collect();
 
-    let mut answered =
-        advance(service, Progress { pins, ..unpinned }, Advance { signatures: Vec::new(), built: None, tamper })
-            .await?;
+    let mut answered = advance(
+        service,
+        Progress { pins, ..unpinned },
+        Advance { signatures: Vec::new(), built: None, tamper, stop: false },
+    )
+    .await?;
     if let Some(answered) = answered.as_object_mut() {
         answered.insert("warnings".to_owned(), Value::from(warnings));
     }
@@ -59,7 +64,9 @@ pub async fn resume(service: &Service, body: &Value, tamper: bool) -> Result<Val
         None => None,
     };
 
-    advance(service, progress, Advance { signatures, built, tamper }).await
+    let stop = body.get("stop").and_then(Value::as_bool).unwrap_or(false);
+
+    advance(service, progress, Advance { signatures, built, tamper, stop }).await
 }
 
 /// What one call adds to the flow.
@@ -67,6 +74,8 @@ struct Advance {
     signatures: Vec<String>,
     built: Option<Built>,
     tamper: bool,
+    /// The caller stops the flow, and the service plans the recovery of the last step that landed.
+    stop: bool,
 }
 
 /// A shielded spend that the caller's wallet built: its pool instructions, which the planner checks
@@ -104,14 +113,22 @@ fn strings(listed: Option<&Value>, key: &str) -> Result<Vec<String>, ServiceErro
 async fn advance(service: &Service, mut progress: Progress, call: Advance) -> Result<Value, ServiceError> {
     let steps = steps(service, &progress).await?;
     let names: Vec<String> = steps.names().into_iter().map(str::to_owned).collect();
-    record_signatures(&mut progress, &names, call.signatures);
+    let recording: Vec<String> =
+        names.iter().cloned().chain(names.iter().map(|name| stop::recovery_name(name))).collect();
+    record_signatures(&mut progress, &recording, call.signatures);
 
     let outcomes = Outcomes::read(service, &progress).await?;
     let current = match position(service, &steps, &progress, &outcomes).await? {
         Some(last) => last.saturating_add(1),
         None => 0,
     };
-    let list = StepList { names: &names, current };
+    let list = StepList { names: &names, current, stopped: progress.stopping || call.stop };
+
+    if list.stopped {
+        let at = stop::Stopping { steps: &steps, names: &names, current, outcomes: &outcomes };
+
+        return stop::advance(service, progress, at, call.built, call.tamper).await;
+    }
 
     let Some(name) = names.get(current) else {
         return answer(&progress, &list, done(&steps, &progress));
@@ -132,8 +149,8 @@ async fn advance(service: &Service, mut progress: Progress, call: Advance) -> Re
         }
     }
 
-    let at = StepAt { steps: &steps, position: current, name };
-    let next = plan_step(service, &mut progress, at, call.built, call.tamper).await?;
+    let target = plan_target(&steps, &progress, current, name)?;
+    let next = plan_intent(service, &mut progress, target, call.built, call.tamper).await?;
 
     answer(&progress, &list, next)
 }
@@ -142,6 +159,8 @@ async fn advance(service: &Service, mut progress: Progress, call: Advance) -> Re
 struct StepList<'n> {
     names: &'n [String],
     current: usize,
+    /// The caller stopped the flow, so no step at or after `current` runs.
+    stopped: bool,
 }
 
 impl StepList<'_> {
@@ -149,6 +168,7 @@ impl StepList<'_> {
     fn json(&self) -> Value {
         let state = |position: usize| match position.cmp(&self.current) {
             core::cmp::Ordering::Less => "done",
+            _ if self.stopped => "stopped",
             core::cmp::Ordering::Equal => "current",
             core::cmp::Ordering::Greater => "pending",
         };
@@ -160,9 +180,10 @@ impl StepList<'_> {
             .collect()
     }
 
-    /// After the last step lands, the request is done, so the caller need not call `continue`.
+    /// After the last step lands, or a stopped flow's recovery, the request is done, so the caller
+    /// need not call `continue`.
     fn then(&self) -> &'static str {
-        match self.current.saturating_add(1) >= self.names.len() {
+        match self.stopped || self.current.saturating_add(1) >= self.names.len() {
             true => "done",
             false => "continue",
         }
@@ -326,32 +347,49 @@ async fn in_flight(
     }
 }
 
-/// One step of the request, by its position and its name.
-struct StepAt<'s> {
-    steps: &'s Steps,
-    position: usize,
-    name: &'s str,
+/// What one plan of a request is: its plan request, and for a flow, the flow's own request and
+/// the plan's place in it.
+struct PlanTarget<'n> {
+    text: String,
+    outer: Option<Value>,
+    position: u8,
+    recovery: bool,
+    name: &'n str,
 }
 
-/// The step's `sign`, or the `build` that the caller's wallet answers before the step can plan.
-async fn plan_step(
-    service: &Service,
-    progress: &mut Progress,
-    StepAt { steps, position, name }: StepAt<'_>,
-    built: Option<Built>,
-    tamper: bool,
-) -> Result<Value, ServiceError> {
+/// The step at `position`, as a plan request.
+fn plan_target<'n>(
+    steps: &Steps,
+    progress: &Progress,
+    position: usize,
+    name: &'n str,
+) -> Result<PlanTarget<'n>, ServiceError> {
+    let position_byte =
+        u8::try_from(position).map_err(|_| ServiceError::refused("flow", "a flow holds at most 127 steps"))?;
     let (text, outer) = match steps {
         Steps::Single => (progress.request.to_string(), None),
         Steps::Flow(flow) => {
             let step: &FlowStep = flow.get(position).ok_or_else(|| ServiceError::refused("flow", "no such step"))?;
             let bindings = Bindings { progress };
 
-            (bindings.step_request(step)?, Some(bindings.pinned_request()))
+            (bindings.intent_request(&step.intent)?, Some(bindings.pinned_request()))
         }
     };
-    let step_position = u8::try_from(position).map_err(|_| ServiceError::refused("flow", "a flow holds at most 255 steps"))?;
-    let flow = outer.as_ref().map(|request| crate::flows::FlowRequest { request, step: step_position });
+
+    Ok(PlanTarget { text, outer, position: position_byte, recovery: false, name })
+}
+
+/// The `sign` of a step or a recovery, or the `build` that the caller's wallet answers before it
+/// can plan.
+async fn plan_intent(
+    service: &Service,
+    progress: &mut Progress,
+    target: PlanTarget<'_>,
+    built: Option<Built>,
+    tamper: bool,
+) -> Result<Value, ServiceError> {
+    let PlanTarget { text, outer, position, recovery, name } = target;
+    let flow = outer.as_ref().map(|request| crate::flows::FlowRequest { request, step: position, recovery });
     let (built, nullifier_accounts) = match built {
         Some(Built { answer, nullifier_accounts }) => (Some(answer), nullifier_accounts),
         None => (None, Vec::new()),
@@ -635,8 +673,8 @@ mod tests {
     #[test]
     fn lists_each_steps_state_and_says_when_the_last_step_ends_the_request() {
         let names = ["shield".to_owned(), "transfer".to_owned()];
-        let first = StepList { names: &names, current: 0 };
-        let last = StepList { names: &names, current: 1 };
+        let first = StepList { names: &names, current: 0, stopped: false };
+        let last = StepList { names: &names, current: 1, stopped: false };
 
         assert_eq!(
             first.json(),
@@ -644,7 +682,11 @@ mod tests {
         );
         assert_eq!(first.then(), "continue");
         assert_eq!(last.then(), "done");
-        assert_eq!(StepList { names: &names, current: 2 }.json()[1]["state"], "done");
+        assert_eq!(StepList { names: &names, current: 2, stopped: false }.json()[1]["state"], "done");
+
+        let stopped = StepList { names: &names, current: 1, stopped: true };
+        assert_eq!(stopped.json(), json!([{ "name": "shield", "state": "done" }, { "name": "transfer", "state": "stopped" }]));
+        assert_eq!(stopped.then(), "done");
     }
 
     fn pin(kind: IndexKind, id: &str, tier: u8) -> Pin {

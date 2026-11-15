@@ -4,7 +4,9 @@
 
 use sdp_intents_engine::{Chain, Payers, Recipe};
 use sdp_intents_spec::wire::DocumentKind;
-use sdp_intents_spec::{check_step_binding, Address, BindingError, Implementation, Intent, StepBinding, Submitter};
+use sdp_intents_spec::{
+    check_step_binding, Address, BindingError, Implementation, Intent, StepBinding, Submitter, RECOVERY_BIT,
+};
 
 use crate::registry::version_address;
 use crate::render::Column;
@@ -19,6 +21,8 @@ pub struct FlowStep<'a> {
     pub implementation: &'a [u8],
     pub intent: &'a [u8],
     pub step: u8,
+    /// The plan is the recovery that the step names.
+    pub recovery: bool,
 }
 
 /// What the message says of the flow: `step <i> of <n>`, the flow's id and outcome, how many
@@ -26,6 +30,7 @@ pub struct FlowStep<'a> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FlowPart {
     pub(crate) step: u8,
+    pub(crate) recovery: bool,
     pub(crate) steps: usize,
     pub(crate) id: String,
     pub(crate) outcome: String,
@@ -64,10 +69,26 @@ pub(crate) enum FlowRender {
     Rendered(FlowPart),
 }
 
-impl FlowStep<'_> {
-    /// `verify_intent` carries the step's position, then the flow's intent.
+impl<'a> FlowStep<'a> {
+    /// `verify_intent` carries the step's position, marked when the plan is its recovery, then the
+    /// flow's intent.
     pub(crate) fn data(&self) -> Vec<u8> {
-        [&[self.step][..], self.intent].concat()
+        let position = if self.recovery { self.step | RECOVERY_BIT } else { self.step };
+
+        [&[position][..], self.intent].concat()
+    }
+
+    /// The flow context that `verify_intent` carries, read back.
+    pub(crate) fn of_data(interface: &'a [u8], implementation: &'a [u8], data: &'a [u8]) -> Option<Self> {
+        let (&position, intent) = data.split_first()?;
+
+        Some(Self {
+            interface,
+            implementation,
+            intent,
+            step: position & !RECOVERY_BIT,
+            recovery: position & RECOVERY_BIT != 0,
+        })
     }
 
     /// The version accounts of the flow's interface and implementation, which the flow's intent
@@ -85,6 +106,7 @@ impl FlowStep<'_> {
             flow: Implementation::parse(self.implementation)?,
             flow_intent: Intent::parse(self.intent)?,
             step: self.step,
+            recovery: self.recovery,
             fee_payer: payers.fee,
             rent_payer: payers.rent,
         };
@@ -139,6 +161,7 @@ impl FlowStep<'_> {
 
         Ok(FlowRender::Rendered(FlowPart {
             step: self.step,
+            recovery: self.recovery,
             steps: steps.len(),
             id: format!(
                 "{}/{}@{version}",
@@ -171,10 +194,15 @@ mod tests {
     fn catalog() -> Catalog {
         let mut catalog = Catalog::default().with_publisher("solana.org", organization_address());
         catalog.compile_circuit(&read("circuits/privacy-rings-confidential/1.0.0.json")).unwrap();
-        for interface in ["token.transfer", "private.shield"] {
+        for interface in ["token.transfer", "private.shield", "private.unshield"] {
             catalog.compile_interface(&read(&format!("interfaces/{interface}/1.0.0.json"))).unwrap();
         }
-        for implementation in ["privacy-rings-shield", "privacy-rings-transfer", "privacy-rings-shield-and-transfer"] {
+        for implementation in [
+            "privacy-rings-shield",
+            "privacy-rings-transfer",
+            "privacy-rings-unshield",
+            "privacy-rings-shield-and-transfer",
+        ] {
             catalog.compile_implementation(&read(&format!("implementations/{implementation}/1.0.0.json"))).unwrap();
         }
 
@@ -191,7 +219,7 @@ mod tests {
     }
 
     #[test]
-    fn a_step_binds_to_its_flow_only_with_the_inputs_that_the_flow_binds() {
+    fn a_step_and_its_recovery_bind_to_the_flow_only_as_the_flow_binds_them() {
         let catalog = catalog();
         let flow_intent = intent(
             &catalog,
@@ -215,22 +243,23 @@ mod tests {
         let implementation_bytes = catalog_bytes(&catalog, "privacy-rings-shield-and-transfer");
         let payer = account(PAYER);
         let payers = Payers { fee: &payer, rent: &payer };
-        let step = |position| FlowStep {
+        let step = |position, recovery| FlowStep {
             interface: &interface_bytes,
             implementation: &implementation_bytes,
             intent: &flow_intent,
             step: position,
+            recovery,
         };
 
         let matching = shield("5");
         let other_amount = shield("6");
-        assert_eq!(step(0).check_binding(&Intent::parse(&matching).unwrap(), payers), Ok(()));
+        assert_eq!(step(0, false).check_binding(&Intent::parse(&matching).unwrap(), payers), Ok(()));
         assert_eq!(
-            step(0).check_binding(&Intent::parse(&other_amount).unwrap(), payers),
+            step(0, false).check_binding(&Intent::parse(&other_amount).unwrap(), payers),
             Err(PlanError::NotTheFlowStep(0))
         );
         assert_eq!(
-            step(1).check_binding(&Intent::parse(&matching).unwrap(), payers),
+            step(1, false).check_binding(&Intent::parse(&matching).unwrap(), payers),
             Err(PlanError::NotTheFlowStep(1))
         );
     }

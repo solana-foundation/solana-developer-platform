@@ -98,7 +98,7 @@ pub(crate) struct MessageHeader<'h> {
 /// The plan message, outcome first: `<outcomes> || intents on <cluster> | expires <UTC time> |
 /// paid by <payer> | priority fee <SOL> SOL || <details>`. A zero priority fee is left out. A flow's
 /// step starts `step <i> of <n>: <outcome> || flow <id>: <the flow's outcome> | <n> approvals`,
-/// then each stopping point. With more than one intent, each
+/// then each stopping point, and its recovery starts `recover after step <i> of <n>: …`. With more than one intent, each
 /// outcome and each detail starts with `<number>: `, and `||` separates them.
 pub(crate) fn plan_message(header: &MessageHeader<'_>, parts: &[MessagePart]) -> String {
     let numbered = |texts: Vec<&str>| match texts.as_slice() {
@@ -108,7 +108,10 @@ pub(crate) fn plan_message(header: &MessageHeader<'_>, parts: &[MessagePart]) ->
     let outcomes = numbered(parts.iter().map(|part| part.outcome.as_str()).collect());
     let outcomes = match header.flow {
         Some(flow) => {
-            format!("step {} of {}: {outcomes} || {}", u16::from(flow.step).saturating_add(1), flow.steps, flow.text())
+            let position = u16::from(flow.step).saturating_add(1);
+            let place = if flow.recovery { "recover after step" } else { "step" };
+
+            format!("{place} {position} of {}: {outcomes} || {}", flow.steps, flow.text())
         }
         None => outcomes,
     };

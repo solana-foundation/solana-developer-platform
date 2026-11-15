@@ -56,7 +56,7 @@ pub use error::SpecError;
 pub use implementation::{
     check_flow_guarantees, check_step_binding, AddressSource, AppliesKind, BindingError, ConditionKind, Encoding,
     FlowDocuments, GuaranteeError, Implementation, RecipeKind, Segment, ShieldedEntry, ShieldedProtocol, StepBinding,
-    StepDocuments, StepValue, Submitter,
+    StepDocuments, StepValue, Submitter, RECOVERY_BIT,
 };
 pub use intent::{Intent, IntentOptions};
 pub use interface::Interface;

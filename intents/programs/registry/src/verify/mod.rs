@@ -248,14 +248,15 @@ fn check_options(intent: &[u8]) -> Result<IntentOptions> {
 /// inputs that it binds. A version account that the registry owns holds the document of its id, so
 /// matching the flow intent's id is enough.
 fn check_flow(flow: &[u8], version_account: Option<&AccountView>, intent: &[u8], payers: Payers<'_>) -> Result<()> {
-    let Some((&step, flow_intent)) = flow.split_first() else { return Ok(()) };
+    let Some((&position, flow_intent)) = flow.split_first() else { return Ok(()) };
     let account = version_account.ok_or(RegistryError::WrongAccount)?;
     let data = version::load(account, DocumentKind::Implementation)?;
     let binding = sdp_intents_spec::StepBinding {
         flow: sdp_intents_spec::Implementation::parse_published(version::document(&data)?)
             .map_err(|error| refused(error.into()))?,
         flow_intent: Intent::parse(flow_intent).map_err(|error| refused(error.into()))?,
-        step,
+        step: position & !sdp_intents_spec::RECOVERY_BIT,
+        recovery: position & sdp_intents_spec::RECOVERY_BIT != 0,
         fee_payer: payers.fee,
         rent_payer: payers.rent,
     };

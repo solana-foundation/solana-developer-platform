@@ -46,6 +46,13 @@ impl Steps {
         }
     }
 
+    /// The recovery that the step at `position` names.
+    pub fn recovery(&self, position: usize) -> Option<&StepIntent> {
+        let Self::Flow(steps) = self else { return None };
+
+        steps.get(position)?.recover.as_ref()
+    }
+
     pub fn condition(&self, position: usize, which: Which) -> Option<&Map<String, Value>> {
         let Self::Flow(steps) = self else {
             return None;
@@ -151,18 +158,19 @@ impl Bindings<'_> {
         request
     }
 
-    /// The plan request of one step: the outer request with the step's intent, at the pinned
-    /// versions, and the outer intent's options.
-    pub fn step_request(&self, step: &FlowStep) -> Result<String, ServiceError> {
+    /// The plan request of one step, or of a step's recovery: the outer request with that intent,
+    /// at the pinned versions, and the outer intent's options.
+    pub fn intent_request(&self, intent: &StepIntent) -> Result<String, ServiceError> {
         let range = |range: &str| -> String {
             let id = range.split_once('@').map_or(range, |(id, _)| id);
 
             self.progress.pinned(id).map_or_else(|| range.to_owned(), str::to_owned)
         };
-        let inputs = self.bind(&Value::Object(step.intent.inputs.clone()))?;
-        let mut intent = json!({ "interface": range(&step.intent.interface), "inputs": inputs });
+        let inputs = self.bind(&Value::Object(intent.inputs.clone()))?;
+        let implementation = intent.implementation.as_deref();
+        let mut intent = json!({ "interface": range(&intent.interface), "inputs": inputs });
 
-        if let (Some(implementation), Some(object)) = (&step.intent.implementation, intent.as_object_mut()) {
+        if let (Some(implementation), Some(object)) = (implementation, intent.as_object_mut()) {
             object.insert("implementation".to_owned(), Value::from(range(implementation)));
         }
 

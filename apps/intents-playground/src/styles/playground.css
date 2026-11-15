@@ -404,3 +404,8 @@
   background: var(--t8);
   font-size: 12px;
 }
+
+.steps-bar-step.stopped {
+  color: var(--emph-l);
+  text-decoration: line-through;
+}

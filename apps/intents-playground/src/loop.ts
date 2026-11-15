@@ -39,6 +39,7 @@ export function saveCalls(requestKey: string, calls: Call[]) {
 export interface Done {
   signatures: string[];
   built: Record<string, unknown> | null;
+  stop?: boolean;
 }
 
 /// The body that continues from `answer`, with what the caller did for its `next`.
@@ -47,5 +48,6 @@ export function continueBody(answer: Answer, done: Done): ContinueBody {
     progress: answer.progress,
     ...(done.signatures.length > 0 ? { signatures: done.signatures } : {}),
     ...(done.built !== null ? { built: done.built } : {}),
+    ...(done.stop === true ? { stop: true } : {}),
   };
 }
