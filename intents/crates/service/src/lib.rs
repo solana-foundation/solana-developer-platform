@@ -29,6 +29,7 @@ mod implementations;
 mod intents;
 mod metrics;
 pub mod prover;
+mod amounts;
 mod registry;
 mod resources;
 mod shielded;

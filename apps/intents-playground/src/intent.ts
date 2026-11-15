@@ -1,9 +1,9 @@
 // The intent form's state, and the intent and plan request that it writes (`DESIGN.md`, 4.1).
 
-import type { Input, InterfaceDocument, ListedInterface, Wallet } from "@/api";
+import type { InterfaceDocument, ListedInterface, Wallet } from "@/api";
 import { MINTS, shortAddress, VAULTS } from "@/known";
 
-/// What the person typed into each input, by input name. An amount is in decimal units.
+/// What the person typed into each input, by input name. An amount is a decimal.
 export type FormValues = Record<string, string>;
 
 export interface IntentOptions {
@@ -12,52 +12,25 @@ export interface IntentOptions {
   allowUnapproved: boolean;
 }
 
-/// `{inputs.mint}` names the input `mint`.
-function referencedInput(reference: string | null): string | null {
-  return reference?.match(/^\{inputs\.(\w+)\}$/)?.[1] ?? null;
+/// An amount as a decimal, which the service converts to the base units of its mint.
+export interface DecimalAmount {
+  decimal: string;
 }
 
-/// The decimals of an amount's mint, when the form knows the mint.
-export function amountDecimals(input: Input, values: FormValues): number | null {
-  const mintInput = referencedInput(input.amountMint);
-  const mint = mintInput === null ? undefined : values[mintInput];
-
-  return MINTS.find((known) => known.address === mint)?.decimals ?? null;
-}
-
-/// `1.5` with 6 decimals is `1500000`. A malformed amount is `null`.
-export function toBaseUnits(text: string, decimals: number): string | null {
-  const match = text.trim().match(/^(\d*)(?:\.(\d*))?$/);
-  const whole = match?.[1] ?? "";
-  const fraction = match?.[2] ?? "";
-
-  if (match === null || (whole === "" && fraction === "") || fraction.length > decimals) {
-    return null;
-  }
-
-  const units =
-    BigInt(whole || "0") * 10n ** BigInt(decimals) + BigInt(fraction.padEnd(decimals, "0") || "0");
-
-  return units.toString();
-}
-
-/// The inputs as an intent writes them. A required input that is empty is left out, so that the
-/// service names it.
+/// The inputs as an intent writes them. An amount is a decimal. A required input that is empty is
+/// left out, so that the service names it.
 export function intentInputs(
   document: InterfaceDocument,
   values: FormValues
-): Record<string, string | null> {
-  const entries = document.inputs.flatMap((input): [string, string | null][] => {
+): Record<string, string | DecimalAmount | null> {
+  const entries = document.inputs.flatMap((input): [string, string | DecimalAmount | null][] => {
     const text = (values[input.name] ?? "").trim();
 
     if (text === "") {
       return input.optional ? [[input.name, null]] : [];
     }
 
-    const decimals = input.amountMint === null ? null : amountDecimals(input, values);
-    const value = decimals === null ? text : toBaseUnits(text, decimals);
-
-    return value === null ? [] : [[input.name, value]];
+    return [[input.name, input.amountMint === null ? text : { decimal: text }]];
   });
 
   return Object.fromEntries(entries);

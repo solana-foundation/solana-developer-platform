@@ -680,6 +680,11 @@ check.
 
 **Value types.** `u8` to `u128`, `i8` to `i128`, `bool`, `address`, `mint`, `string`, `bytes`, and
 arrays of them. In JSON an integer is a string, an address is base58, and an absent value is `null`.
+An input whose display names a mint is an amount. It takes base units as a string, such as
+`"1626367"`, or a decimal as `{ "decimal": "1.626367" }`. The object form is explicit, so a decimal
+is never read as base units. Before the request compiles, the service reads each mint's decimals
+and writes the amount in base units. It refuses more fractional digits than the mint has. The
+documents and `verify_intent` see only base units, and the message shows the amount as a decimal.
 
 ### 4.9 Binary form and limits
 

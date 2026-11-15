@@ -205,8 +205,11 @@ async fn fit(
         "interface": request.interface_text,
         "implementation": reference,
         "inputs": request.inputs,
-    })
-    .to_string();
+    });
+    let intent = match crate::amounts::in_base_units(chain, &catalog, &intent).await {
+        Ok(intent) => intent.to_string(),
+        Err(error) => return Fit::InvalidInputs(error.message),
+    };
     let compiled = match catalog.compile_intent(&intent) {
         Ok(compiled) => compiled,
         Err(report) => return Fit::InvalidInputs(first_finding(&report)),

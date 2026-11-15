@@ -11,7 +11,10 @@ use serde_json::Value;
 use sdp_intents_client::{json, Client, ClientError};
 use sdp_intents_planner::{IntentDocuments, Payers, PlanError, PlanRequest};
 
-use sdp_intents_compiler::{CompiledPlan, PlanOutput};
+use sdp_intents_compiler::diagnostic::Report;
+use sdp_intents_compiler::{
+    decimal_mints, mint_decimals, with_base_units, Catalog, CompiledPlan, MintAccount, MintDecimals, PlanOutput,
+};
 
 use crate::lint::{compile_tree, Outcome};
 use crate::output::{self, Format};
@@ -42,6 +45,14 @@ pub fn run(args: &PrepareArgs) -> Result<Outcome, String> {
 
     let text = std::fs::read_to_string(&args.request)
         .map_err(|error| format!("cannot read `{}`: {error}", args.request.display()))?;
+    let client = Client::new(&args.rpc);
+    let text = match in_base_units(&client, &compiled.catalog, &text)? {
+        BaseUnits::Rewritten(text) => text,
+        BaseUnits::Findings(report) => {
+            eprint!("{}", report.render(&args.request.display().to_string(), &text));
+            return Ok(Outcome::Findings);
+        }
+    };
     let request = match compiled.catalog.compile_plan(&text) {
         Ok(request) => request,
         Err(report) => {
@@ -51,7 +62,6 @@ pub fn run(args: &PrepareArgs) -> Result<Outcome, String> {
     };
 
     let plan_request = plan_request(&request);
-    let client = Client::new(&args.rpc);
     let prepared = match request.output {
         PlanOutput::Transaction => client.prepare(&plan_request),
         PlanOutput::Instructions => client.prepare_instructions(&plan_request),
@@ -63,6 +73,39 @@ pub fn run(args: &PrepareArgs) -> Result<Outcome, String> {
     println!("{plan}");
 
     Ok(Outcome::Clean)
+}
+
+/// A request in base units, or what is wrong with its decimal amounts.
+pub enum BaseUnits {
+    Rewritten(String),
+    Findings(Report),
+}
+
+/// `text` with each `{ "decimal": … }` amount in the base units of its mint, from one read of the
+/// mints.
+pub fn in_base_units(client: &Client, catalog: &Catalog, text: &str) -> Result<BaseUnits, String> {
+    let request: Value = serde_json::from_str(text).map_err(|error| error.to_string())?;
+    let mints = decimal_mints(&request, catalog);
+    let accounts = match mints.is_empty() {
+        true => Vec::new(),
+        false => client.accounts(&mints).map_err(|error| error.to_string())?,
+    };
+    let decimals = mints
+        .iter()
+        .zip(&accounts)
+        .map(|(mint, account)| {
+            let account = account.as_ref().map(|account| MintAccount { owner: &account.owner, data: &account.data });
+
+            mint_decimals(mint, account)
+                .map(|decimals| MintDecimals { mint: *mint, decimals })
+                .ok_or_else(|| format!("{} is not a mint", bs58::encode(mint.0).into_string()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(match with_base_units(&request, catalog, &decimals) {
+        Ok(rewritten) => BaseUnits::Rewritten(rewritten.to_string()),
+        Err(report) => BaseUnits::Findings(report),
+    })
 }
 
 /// The planner's request for a compiled plan request.

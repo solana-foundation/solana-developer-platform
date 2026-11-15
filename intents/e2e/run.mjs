@@ -383,19 +383,19 @@ try {
     `implementationsFor lists the public and the private transfers of USDC, for the caller to pin one (${fitting.join()})`,
   );
 
-  console.log("a USDC transfer and a SOL transfer in one transaction");
+  console.log("a USDC transfer and a SOL transfer in one transaction, with the USDC as a decimal");
   await run(
     "transfers",
     plan(payer, [
       {
         interface: "solana.org/token.transfer@^1",
         implementation: "solana.org/spl-token-transfer@^1",
-        inputs: { from: sender.address, to: receiver.address, mint: USDC, amount: "100000000", memo: null },
+        inputs: { from: sender.address, to: receiver.address, mint: USDC, amount: { decimal: "100" }, memo: null },
       },
       {
         interface: "solana.org/token.transfer@^1",
         implementation: "solana.org/system-transfer@^1",
-        inputs: { from: sender.address, to: receiver.address, mint: SYSTEM, amount: "250000000" },
+        inputs: { from: sender.address, to: receiver.address, mint: SYSTEM, amount: { decimal: "0.25" } },
       },
     ]),
   );

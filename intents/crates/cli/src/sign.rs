@@ -120,6 +120,10 @@ fn verified(plan: &PlanFile, client: &Client, root: &Path) -> Result<Outcome, St
     let text = serde_json::to_string(request).map_err(|error| error.to_string())?;
     let tree = Tree::read(root)?;
     let compiled = compile_tree(&tree);
+    let text = match crate::prepare::in_base_units(client, &compiled.catalog, &text)? {
+        crate::prepare::BaseUnits::Rewritten(text) => text,
+        crate::prepare::BaseUnits::Findings(report) => return Err(report.render("request", &text)),
+    };
     let compiled_request = compiled.catalog.compile_plan(&text).map_err(|report| report.render("request", &text))?;
     let frozen = client.frozen(&plan.compiled, plan.presigned.clone()).map_err(|error| error.to_string())?;
     let replanned = client.replan(&plan_request(&compiled_request), frozen).map_err(|error| error.to_string())?;

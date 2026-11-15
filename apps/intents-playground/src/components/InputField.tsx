@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import type { Input, Wallet } from "@/api";
-import { amountDecimals, type FormValues } from "@/intent";
+import type { FormValues } from "@/intent";
 import { MINTS, VAULTS } from "@/known";
 
 interface Props {
@@ -38,9 +38,6 @@ export function InputField({ input, values, wallets, onChange }: Props) {
   const typed = value !== "" && !offered.some((choice) => choice.value === value);
   const [custom, setCustom] = useState(typed);
   const showText = custom || typed;
-  const decimals = input.amountMint === null ? null : amountDecimals(input, values);
-  const unit =
-    input.amountMint === null ? null : decimals === null ? "base units" : "decimal units";
 
   return (
     <div className="f-col">
@@ -92,7 +89,11 @@ export function InputField({ input, values, wallets, onChange }: Props) {
         />
       )}
 
-      {unit !== null && <div className="input-hint">In {unit}.</div>}
+      {input.amountMint !== null && (
+        <div className="input-hint">
+          A decimal, such as 1.5. The service reads the mint's decimals.
+        </div>
+      )}
     </div>
   );
 }

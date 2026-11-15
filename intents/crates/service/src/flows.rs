@@ -110,7 +110,8 @@ async fn planned(service: &Service, text: &str, answer: Option<RemoteAnswer>) ->
     let documents = Registry { chain: &service.chain }.intent_documents(&references).await?;
 
     let catalog = catalog(documents.iter().flat_map(|intent| [&intent.interface, &intent.implementation]))?;
-    let compiled = catalog.compile_plan(text).map_err(|report| ServiceError::compile(&report, text))?;
+    let text = crate::amounts::in_base_units(&service.chain, &catalog, &request).await?.to_string();
+    let compiled = catalog.compile_plan(&text).map_err(|report| ServiceError::compile(&report, &text))?;
     let plan_request = PlanRequest {
         intents: compiled
             .intents

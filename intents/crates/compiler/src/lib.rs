@@ -30,6 +30,7 @@
 mod borsh;
 mod catalog;
 mod circuit;
+mod decimal;
 mod decompile;
 pub mod diagnostic;
 mod encoding;
@@ -57,6 +58,7 @@ mod test_support;
 
 pub use catalog::Catalog;
 pub use circuit::CompiledCircuit;
+pub use decimal::{decimal_mints, mint_decimals, with_base_units, MintAccount, MintDecimals};
 pub use decompile::{decompile_circuit, decompile_implementation, decompile_interface, DecompileError, Organizations};
 pub use id::{format_version, parse_version, Id, IdRange};
 pub use implementation::CompiledImplementation;
