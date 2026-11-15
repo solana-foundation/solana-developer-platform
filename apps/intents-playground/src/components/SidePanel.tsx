@@ -3,7 +3,6 @@ import { recipeOf } from "@/api";
 import { Code, hexDump, Snippets } from "@/components/Code";
 import { InterfaceTab } from "@/components/InterfaceTab";
 import { Loop } from "@/components/Loop";
-import { OnchainChecks } from "@/components/OnchainChecks";
 import { AddressRow, Row } from "@/components/Plan";
 import { describe } from "@/errors";
 import type { IntentOptions, Output } from "@/intent";
@@ -76,11 +75,11 @@ export function SidePanel(props: Props) {
 function IntentTab(props: Props) {
   return (
     <>
-      <OnchainChecks options={props.options} onOptions={props.onOptions} />
       <Code text={JSON.stringify(props.intent, null, 2)} />
+      <Options {...props} />
       <div className="section-sub">
-        The plan request holds the intent with its payers. Every intent starts the same way, for one
-        transaction or many.
+        The plan request holds the intent with its payers and options. Every intent starts the same
+        way, for one transaction or many.
       </div>
       <Snippets snippets={startSnippets(props.request)} />
       <PrepareControls {...props} />
@@ -122,43 +121,29 @@ function Switch(props: {
   );
 }
 
-function PrepareControls(props: Props) {
-  const remote = props.recipe === "remote";
-  const shielded = props.recipe === "shielded";
-  const flow = props.recipe === "flow";
+/// The request's options in one place: what the chain checks, what the plan returns, and the
+/// switches that attack a plan to show the checks.
+function Options(props: Props) {
   const frozen = props.recipe === "remote transaction";
+  const attackable = props.recipe !== "shielded" && props.recipe !== "flow";
+  const check = (key: "verifyIntent" | "assertions") => (checked: boolean) =>
+    props.onOptions({ ...props.options, [key]: checked });
 
   return (
-    <div className="side-actions">
-      {flow && (
-        <div className="callout callout-gray">
-          This implementation is a flow: each step is its own transaction, and the loop below plans
-          one step at a time.
-        </div>
-      )}
-      {shielded && (
-        <div className="callout callout-amber">
-          The spender's client builds and proves this spend, so verify_intent cannot rebuild it. It
-          limits the spend to the pool, and the assertions bound its public effects. The notes
-          inside stay hidden. The verifier reports the statement, and the wallet signs only a spend
-          that it built from that statement.
-        </div>
-      )}
-      {frozen && (
-        <div className="callout callout-amber">
-          The provider signs this transaction, so nothing onchain checks it. Turn both onchain
-          checks off to accept it. The service's simulation checks every guarantee, and the verifier
-          proves none of them.
-        </div>
-      )}
-      {remote && (
-        <Switch
-          label="Malicious endpoint"
-          sub="The Jupiter wrapper also approves an attacker. The assertions refuse it."
-          checked={props.malicious}
-          onChange={props.onMalicious}
-        />
-      )}
+    <div className="options">
+      <div className="section-title">Options</div>
+      <Switch
+        label="verify_intent"
+        sub="The registry checks the built instructions against the intent, or limits them to the implementation's programs when it cannot rebuild them."
+        checked={props.options.verifyIntent}
+        onChange={check("verifyIntent")}
+      />
+      <Switch
+        label="Lighthouse assertions"
+        sub="Each guarantee becomes an assertion after the segment."
+        checked={props.options.assertions}
+        onChange={check("assertions")}
+      />
       {!frozen && (
         <Switch
           label="Instructions only"
@@ -167,7 +152,15 @@ function PrepareControls(props: Props) {
           onChange={(checked) => props.onOutput(checked ? "instructions" : "transaction")}
         />
       )}
-      {!shielded && !flow && (
+      {props.recipe === "remote" && (
+        <Switch
+          label="Malicious endpoint"
+          sub="The Jupiter wrapper also approves an attacker. The assertions refuse it."
+          checked={props.malicious}
+          onChange={props.onMalicious}
+        />
+      )}
+      {attackable && (
         <Switch
           label="Tamper with the plan"
           sub="The service changes one built byte. verify_intent refuses it onchain."
@@ -178,6 +171,31 @@ function PrepareControls(props: Props) {
     </div>
   );
 }
+
+/// What the recipe means for planning: a flow plans one step at a time, a shielded spend is built
+/// and proved by the spender, and a provider's transaction is checked by simulation only.
+function PrepareControls(props: Props) {
+  const callout = RECIPE_CALLOUTS[props.recipe ?? ""];
+
+  return callout === undefined ? null : (
+    <div className={`callout ${callout.tone}`}>{callout.text}</div>
+  );
+}
+
+const RECIPE_CALLOUTS: Record<string, { tone: string; text: string }> = {
+  flow: {
+    tone: "callout-gray",
+    text: "This implementation is a flow: each step is its own transaction, and the loop below plans one step at a time.",
+  },
+  shielded: {
+    tone: "callout-amber",
+    text: "The spender's client builds and proves this spend, so verify_intent cannot rebuild it. It limits the spend to the pool, and the assertions bound its public effects. The notes inside stay hidden. The verifier reports the statement, and the wallet signs only a spend that it built from that statement.",
+  },
+  "remote transaction": {
+    tone: "callout-amber",
+    text: "The provider signs this transaction, so nothing onchain checks it. Turn both onchain checks off to accept it. The service's simulation checks every guarantee, and the verifier proves none of them.",
+  },
+};
 
 /// The default address means that the index follows its organization's authority.
 const FOLLOWS_ORGANIZATION = "11111111111111111111111111111111";

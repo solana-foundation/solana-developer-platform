@@ -345,8 +345,7 @@ function AutoSwitch({ auto, onAuto }: { auto: boolean; onAuto: (auto: boolean) =
 function StartPanel(props: Props & { busy: string | null; onStart: () => void }) {
   return (
     <div className="loop-call">
-      <div className="section-sub">The first call starts the flow with the plan request.</div>
-      <Code text={startCurl(props.request)} />
+      <div className="section-sub">The first call sends the plan request above.</div>
       <button
         type="button"
         className="btn btn-pri"

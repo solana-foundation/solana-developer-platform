@@ -359,7 +359,7 @@
   color: var(--emph-m);
 }
 
-.onchain-checks {
+.options {
   display: flex;
   flex-direction: column;
   gap: 8px;
