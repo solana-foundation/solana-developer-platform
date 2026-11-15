@@ -148,6 +148,8 @@ pub mod registry {
         ctx.accounts.set(false, major, minor, patch)
     }
 
+    // The arguments are the instruction's data as clients encode it.
+    #[allow(clippy::too_many_arguments)]
     pub fn verify_intent(
         ctx: &mut Context<VerifyIntent>,
         intent: &[u8],
@@ -156,9 +158,10 @@ pub mod registry {
         bumps: &[u8],
         builder_bumps: &[u8],
         layout: SegmentLayout,
+        flow: &[u8],
     ) -> Result<()> {
         let passed = ctx.remaining_accounts();
-        let args = verify::VerifyArgs { intent, builder_roles, outputs, bumps, builder_bumps, layout };
+        let args = verify::VerifyArgs { intent, builder_roles, outputs, bumps, builder_bumps, layout, flow };
 
         verify::verify_intent(&ctx.accounts, &passed, args)
     }

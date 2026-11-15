@@ -4,6 +4,7 @@ use sdp_intents_engine::{Chain, Payers, Recipe};
 use sdp_intents_spec::builder::Ready;
 use sdp_intents_spec::{Address, Implementation, IntentOptions, RecipeKind, ValueRef, ValueSource};
 
+use crate::flow_step::FlowPart;
 use crate::render::{base58, Column};
 use crate::time::utc_time;
 use crate::values::{Table, Values};
@@ -90,10 +91,13 @@ pub(crate) struct MessageHeader<'h> {
     pub(crate) expires_at: Option<u64>,
     pub(crate) payers: Payers<'h>,
     pub(crate) priority_fee_lamports: u64,
+    /// The flow that the plan is a step of.
+    pub(crate) flow: Option<&'h FlowPart>,
 }
 
 /// The plan message, outcome first: `<outcomes> || intents on <cluster> | expires <UTC time> |
-/// paid by <payer> | priority fee <SOL> SOL || <details>`. A zero priority fee is left out. With more than one intent, each
+/// paid by <payer> | priority fee <SOL> SOL || <details>`. A zero priority fee is left out. A flow's
+/// step starts `step <i> of <n>: <outcome> || flow <id>: <the flow's outcome>`. With more than one intent, each
 /// outcome and each detail starts with `<number>: `, and `||` separates them.
 pub(crate) fn plan_message(header: &MessageHeader<'_>, parts: &[MessagePart]) -> String {
     let numbered = |texts: Vec<&str>| match texts.as_slice() {
@@ -101,6 +105,16 @@ pub(crate) fn plan_message(header: &MessageHeader<'_>, parts: &[MessagePart]) ->
         _ => (1usize..).zip(texts).map(|(number, text)| format!("{number}: {text}")).collect::<Vec<_>>().join(" || "),
     };
     let outcomes = numbered(parts.iter().map(|part| part.outcome.as_str()).collect());
+    let outcomes = match header.flow {
+        Some(flow) => format!(
+            "step {} of {}: {outcomes} || flow {}: {}",
+            u16::from(flow.step).saturating_add(1),
+            flow.steps,
+            flow.id,
+            flow.outcome
+        ),
+        None => outcomes,
+    };
     let details = numbered(parts.iter().map(|part| part.details.as_str()).collect());
 
     let cluster = header.cluster.map_or_else(String::new, |cluster| {
@@ -299,7 +313,7 @@ impl<C: Chain> Values<'_, '_, C> {
 }
 
 /// Text that the message can hold: printable ASCII only, so that no character looks like another.
-fn printable(bytes: &[u8]) -> Result<&str, PlanError> {
+pub(crate) fn printable(bytes: &[u8]) -> Result<&str, PlanError> {
     let text = core::str::from_utf8(bytes).map_err(|_| PlanError::UnsafeText)?;
 
     match text.bytes().all(|byte| (b' '..=b'~').contains(&byte)) {

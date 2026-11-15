@@ -15,6 +15,7 @@ use sdp_intents_engine::{Chain, Payers, Recipe, Resolution};
 use sdp_intents_spec::wire::DocumentKind;
 use sdp_intents_spec::{Address, Intent, RecipeKind};
 
+use crate::flow_step::{FlowPart, FlowRender, FlowStep};
 use crate::plan::{plan_message, MessageHeader, MessagePart};
 use crate::registry::{verify_intent_discriminator, version_address, REGISTRY_PROGRAM, VERSION_HEADER_LEN};
 use crate::shielded::{self, ShieldedSpend};
@@ -81,6 +82,8 @@ pub enum VerifyError {
     PayersDiffer,
     /// The `verify_intent` instructions name different expiries.
     ExpiriesDiffer,
+    /// The `verify_intent` instructions name different flows, or a flow step holds more than one.
+    FlowsDiffer,
     /// The account is not the registry's version account of the document that the intent names.
     NotAVersion(Address),
 }
@@ -105,6 +108,7 @@ impl core::fmt::Display for VerifyError {
             Self::WrongFeePayer(position) => write!(f, "the verify_intent at {position} names another fee payer"),
             Self::PayersDiffer => f.write_str("the verify_intent instructions name different rent payers"),
             Self::ExpiriesDiffer => f.write_str("the verify_intent instructions name different expiries"),
+            Self::FlowsDiffer => f.write_str("the verify_intent instructions name different flows"),
             Self::NotAVersion(address) => write!(f, "{} is not the version account of its document", base58(address)),
         }
     }
@@ -122,6 +126,8 @@ struct DecodedVerify<'t> {
     bumps: &'t [u8],
     rent_cap: u64,
     expires_at: u64,
+    /// A flow step's position and the flow's intent, or empty.
+    flow: &'t [u8],
     segment: Range<usize>,
     built: Range<usize>,
 }
@@ -165,13 +171,23 @@ pub fn verify_transaction<C: Chain>(transaction: &Transaction, chain: &C) -> Res
     let payers = Payers { fee: &transaction.fee_payer, rent: &rent_payer };
     let parts = verifies.iter().map(|verify| part(verify, payers, chain)).collect::<Result<Vec<_>, _>>()?;
 
-    let missing: Vec<Address> = parts.iter().fold(Vec::new(), |mut missing, part| {
-        if let Part::Missing(addresses) = part {
-            missing.extend(addresses.iter().filter(|address| !missing.contains(address)).copied().collect::<Vec<_>>());
-        }
+    let flow = resolve_flow(&verifies, payers, chain)?;
+    let flow_missing = match &flow {
+        FlowResolved::Missing(addresses) => addresses.as_slice(),
+        _ => &[],
+    };
+    let missing: Vec<Address> = parts
+        .iter()
+        .filter_map(|part| if let Part::Missing(addresses) = part { Some(addresses.as_slice()) } else { None })
+        .chain([flow_missing])
+        .flatten()
+        .fold(Vec::new(), |mut missing, address| {
+            if !missing.contains(address) {
+                missing.push(*address);
+            }
 
-        missing
-    });
+            missing
+        });
 
     if !missing.is_empty() {
         return Ok(VerifyStep::Fetch(missing));
@@ -203,6 +219,7 @@ pub fn verify_transaction<C: Chain>(transaction: &Transaction, chain: &C) -> Res
         expires_at,
         payers,
         priority_fee_lamports: transaction.priority_fee_lamports,
+        flow: if let FlowResolved::Part(part) = &flow { Some(part) } else { None },
     };
     let in_segment = |position: &usize| verifies.iter().any(|verify| verify.segment.contains(position));
     let unverified = (0..transaction.instructions.len())
@@ -224,6 +241,60 @@ pub fn verify_transaction<C: Chain>(transaction: &Transaction, chain: &C) -> Res
             .collect(),
         unverified,
     })))
+}
+
+/// The flow that a transaction is a step of, as its `verify_intent` states it.
+enum FlowResolved {
+    None,
+    Missing(Vec<Address>),
+    Part(FlowPart),
+}
+
+/// Every `verify_intent` names the same flow context. A flow step holds one intent, which must be
+/// the flow's step at its position with the inputs that the flow binds.
+fn resolve_flow<C: Chain>(
+    verifies: &[DecodedVerify<'_>],
+    payers: Payers<'_>,
+    chain: &C,
+) -> Result<FlowResolved, VerifyError> {
+    let Some(first) = verifies.first() else { return Ok(FlowResolved::None) };
+
+    if verifies.iter().any(|verify| verify.flow != first.flow) {
+        return Err(VerifyError::FlowsDiffer);
+    }
+
+    let Some((&step, intent)) = first.flow.split_first() else { return Ok(FlowResolved::None) };
+
+    if verifies.len() != 1 {
+        return Err(VerifyError::FlowsDiffer);
+    }
+
+    let bad = || VerifyError::BadVerifyIntent(first.position);
+    let outer = Intent::parse(intent).map_err(|_| bad())?;
+    let [interface_address, implementation_address] = FlowStep::version_addresses(&outer)?;
+    let (Some(interface), Some(implementation)) =
+        (chain.account(&interface_address), chain.account(&implementation_address))
+    else {
+        return Ok(FlowResolved::Missing(vec![interface_address, implementation_address]));
+    };
+    let flow = FlowStep {
+        interface: document(&interface_address, &interface, DocumentKind::Interface, outer.interface())?,
+        implementation: document(
+            &implementation_address,
+            &implementation,
+            DocumentKind::Implementation,
+            outer.implementation(),
+        )?,
+        intent,
+        step,
+    };
+
+    flow.check_binding(&Intent::parse(first.intent).map_err(|_| bad())?, payers)?;
+
+    Ok(match flow.render(payers, chain)? {
+        FlowRender::Missing(addresses) => FlowResolved::Missing(addresses),
+        FlowRender::Rendered(part) => FlowResolved::Part(part),
+    })
 }
 
 /// Every `verify_intent` of the transaction, in order. No segment may hold another `verify_intent`.
@@ -261,13 +332,18 @@ fn decode<'t>(
     let outputs = data.bytes().ok_or_else(bad)?;
     let bumps = data.bytes().ok_or_else(bad)?;
     data.bytes().ok_or_else(bad)?;
-    let Some((rent_cap, [_guarded, snapshots, built, checks, expires_at @ ..])) = data.0.split_first_chunk::<8>()
-    else {
+    let Some((rent_cap, [_guarded, snapshots, built, checks, rest @ ..])) = data.0.split_first_chunk::<8>() else {
         return Err(bad());
     };
     let rent_cap = u64::from_le_bytes(*rent_cap);
-    let expires_at: [u8; 8] = expires_at.try_into().map_err(|_| bad())?;
+    let (expires_at, rest) = rest.split_first_chunk::<8>().ok_or_else(bad)?;
     let (snapshots, built, checks) = (*snapshots, *built, *checks);
+    let mut flow_reader = Reader(rest);
+    let flow = flow_reader.bytes().ok_or_else(bad)?;
+
+    if !flow_reader.0.is_empty() {
+        return Err(bad());
+    }
 
     if instruction.accounts.get(FEE_PAYER).map(|meta| meta.address) != Some(transaction.fee_payer) {
         return Err(VerifyError::WrongFeePayer(position));
@@ -289,7 +365,8 @@ fn decode<'t>(
         outputs,
         bumps,
         rent_cap,
-        expires_at: u64::from_le_bytes(expires_at),
+        expires_at: u64::from_le_bytes(*expires_at),
+        flow,
         segment: position..end,
         built: built_start..built_end,
     })

@@ -39,6 +39,7 @@
 
 mod accounts;
 mod error;
+mod flow_step;
 mod instruction;
 pub mod json;
 mod onchain;
@@ -62,6 +63,7 @@ mod test_support;
 
 pub use accounts::{Account, AccountMap};
 pub use error::{Limit, PlanError};
+pub use flow_step::FlowStep;
 pub use instruction::{AccountMeta, Instruction};
 pub use plan::{Digests, Plan, PlannedIntent};
 pub use planner::{PlanRequest, Planner, Step};

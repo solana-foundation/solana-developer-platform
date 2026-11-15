@@ -19,7 +19,7 @@ pub(crate) const PAYER: &str = "5ZWj7a1f8tWkjBESHKgrLmXshuXxqeY9SYcfbshpAqPG";
 /// The organization that publishes every test document.
 const ORGANIZATION: &str = "solana.org";
 
-fn organization_address() -> Address {
+pub(crate) fn organization_address() -> Address {
     sdp_intents_registry_client::organization_address(ORGANIZATION).unwrap()
 }
 
@@ -143,6 +143,7 @@ pub(crate) fn request<'a>(intents: &[&'a Compiled], priority_fee_lamports: u64) 
         payers: Payers { fee: &first.payer, rent: &first.rent_payer },
         priority_fee_lamports,
         valid_for_seconds: sdp_intents_compiler::DEFAULT_VALID_FOR_SECONDS,
+        flow: None,
     }
 }
 

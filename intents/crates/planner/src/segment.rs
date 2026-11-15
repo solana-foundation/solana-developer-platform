@@ -81,6 +81,8 @@ pub(crate) struct SegmentPlanner<'a> {
     /// The Unix time after which `verify_intent` refuses to run. The planner sets it before the
     /// segment plans.
     pub(crate) expires_at: u64,
+    /// The flow context that `verify_intent` carries, or nothing when the plan is no flow step.
+    pub(crate) flow: Vec<u8>,
     scratch: Address,
     extra_accounts: Vec<Address>,
     builder_simulations: usize,
@@ -142,6 +144,7 @@ impl<'a> SegmentPlanner<'a> {
             memory_id,
             funder,
             expires_at: 0,
+            flow: Vec::new(),
             scratch,
             extra_accounts: Vec::new(),
             builder_simulations: 0,
@@ -420,6 +423,7 @@ impl<'a> SegmentPlanner<'a> {
             before,
             rent_cap,
             expires_at: self.expires_at,
+            flow: &self.flow,
             memory_id: self.memory_id,
         };
 

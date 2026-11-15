@@ -126,8 +126,8 @@ fn refuses_a_bump_that_is_not_canonical() {
     set_token_account(&mut setup.svm, &source, &mint, &setup.from.pubkey(), 500_000_000).unwrap();
     let plan = plan(&setup, "spl-token-transfer", &mint, 100_000_000, &setup.from.pubkey()).unwrap();
     let verify_position = plan.intents[0].verify.unwrap();
-    // The layout is 20 bytes. Before it are the empty builder bumps, 4 bytes, then the two bumps.
-    let first_bump = plan.transaction.instructions[verify_position].data.len() - 20 - 4 - 2;
+    // The layout is 20 bytes, and the empty flow context 4. Before it are the empty builder bumps, 4 bytes, then the two bumps.
+    let first_bump = plan.transaction.instructions[verify_position].data.len() - 4 - 20 - 4 - 2;
 
     for offset in [0, 1] {
         for change in [1u8, 255] {
@@ -166,8 +166,8 @@ fn a_builder_refuses_a_bump_that_it_does_not_use() {
 
     let mut extra = plan.clone();
     let data = &mut extra.transaction.instructions[verify_position].data;
-    // The empty builder bumps, a 4-byte length, end 20 bytes before the end.
-    let builder_bumps = data.len() - 20 - 4;
+    // The empty builder bumps, a 4-byte length, end 24 bytes before the end, before the layout and the empty flow context.
+    let builder_bumps = data.len() - 4 - 20 - 4;
     let layout = data.split_off(builder_bumps + 4);
     data.truncate(builder_bumps);
     data.extend([&1u32.to_le_bytes()[..], &[255], &layout].concat());

@@ -341,19 +341,22 @@ async fn plan_step(
     built: Option<Built>,
     tamper: bool,
 ) -> Result<Value, ServiceError> {
-    let text = match steps {
-        Steps::Single => progress.request.to_string(),
+    let (text, outer) = match steps {
+        Steps::Single => (progress.request.to_string(), None),
         Steps::Flow(flow) => {
             let step: &FlowStep = flow.get(position).ok_or_else(|| ServiceError::refused("flow", "no such step"))?;
+            let bindings = Bindings { progress };
 
-            Bindings { progress }.step_request(step)?
+            (bindings.step_request(step)?, Some(bindings.pinned_request()))
         }
     };
+    let step_position = u8::try_from(position).map_err(|_| ServiceError::refused("flow", "a flow holds at most 255 steps"))?;
+    let flow = outer.as_ref().map(|request| crate::flows::FlowRequest { request, step: step_position });
     let (built, nullifier_accounts) = match built {
         Some(Built { answer, nullifier_accounts }) => (Some(answer), nullifier_accounts),
         None => (None, Vec::new()),
     };
-    let prepared = match prepare_step(service, &text, tamper, built).await? {
+    let prepared = match prepare_step(service, &text, flow, tamper, built).await? {
         Prepared::Step(prepared) => prepared,
         Prepared::Build(spend) => return Ok(build(name, &spend)),
     };

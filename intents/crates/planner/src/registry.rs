@@ -37,6 +37,8 @@ pub(crate) struct VerifyIntent<'v> {
     pub(crate) rent_cap: u64,
     /// The Unix time after which `verify_intent` refuses to run.
     pub(crate) expires_at: u64,
+    /// A flow step's position and the flow's intent, or empty.
+    pub(crate) flow: &'v [u8],
     /// The accounts that the span can change, which the assertions guard.
     pub(crate) guarded: &'v [Address],
     pub(crate) counts: SegmentCounts,
@@ -87,7 +89,7 @@ impl VerifyIntent<'_> {
 
     /// The Anchor discriminator, then each argument in borsh: the intent, the builder roles, and the
     /// outputs as a `u32` length and the bytes, then the layout: the rent cap, the count of guarded
-    /// accounts, the counts of the segment, and the expiry.
+    /// accounts, the counts of the segment, and the expiry, then the flow context as a `Vec<u8>`.
     fn data(&self) -> Result<Vec<u8>, PlanError> {
         let length = |bytes: &[u8]| {
             u32::try_from(bytes.len()).map_err(|_| PlanError::DoesNotFit {
@@ -118,6 +120,8 @@ impl VerifyIntent<'_> {
             &self.rent_cap.to_le_bytes(),
             &[guarded, self.counts.snapshots, self.counts.built, self.counts.checks],
             &self.expires_at.to_le_bytes(),
+            &length(self.flow)?.to_le_bytes(),
+            self.flow,
         ]
         .concat())
     }

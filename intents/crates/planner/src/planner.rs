@@ -6,6 +6,7 @@ use sdp_intents_engine::{Chain, Payers};
 use sdp_intents_spec::Address;
 
 use crate::accounts::Overlay;
+use crate::flow_step::{FlowPart, FlowRender, FlowStep};
 use crate::plan::{plan_message, MessageHeader, MessagePart, PlannedIntent};
 use crate::programs::{CLOCK_SYSVAR, CLOCK_UNIX_TIMESTAMP};
 use crate::segment::{Earlier, Segment, SegmentPlanner, SegmentStep};
@@ -19,6 +20,8 @@ pub struct PlanRequest<'a> {
     pub priority_fee_lamports: u64,
     /// How long after the planner reads the clock the transaction can still land.
     pub valid_for_seconds: u64,
+    /// The flow that this plan is a step of. Such a plan holds one intent.
+    pub flow: Option<FlowStep<'a>>,
 }
 use crate::{FrozenTransaction, RemoteAnswer, RemoteCall, ShieldedCall, SimulationResult, Transaction};
 
@@ -58,6 +61,8 @@ pub struct Planner<'a> {
     valid_for_seconds: u64,
     /// The Unix time after which no `verify_intent` of the plan runs, once the clock is read.
     expires_at: Option<u64>,
+    flow: Option<FlowStep<'a>>,
+    flow_part: Option<FlowPart>,
 
     intents: Vec<PlannedIntent>,
     messages: Vec<MessagePart>,
@@ -82,7 +87,7 @@ impl<'a> Planner<'a> {
     /// A fresh random address keeps others from creating an account there first.
     ///
     pub fn new(request: &PlanRequest<'a>, scratch: Address) -> Result<Self, PlanError> {
-        let segments = request
+        let mut segments = request
             .intents
             .iter()
             .zip(0u8..)
@@ -105,12 +110,21 @@ impl<'a> Planner<'a> {
             return Err(PlanError::ShieldedNotAlone);
         }
 
+        if let Some(flow) = request.flow {
+            let [step] = request.intents.as_slice() else { return Err(PlanError::NotTheFlowStep(flow.step)) };
+            flow.check_binding(&sdp_intents_spec::Intent::parse(step.intent)?, request.payers)?;
+            let data = flow.data();
+            segments.iter_mut().for_each(|segment| segment.flow = data.clone());
+        }
+
         Ok(Self {
             payers: request.payers,
             cluster,
             priority_fee_lamports: request.priority_fee_lamports,
             valid_for_seconds: request.valid_for_seconds,
             expires_at: None,
+            flow: request.flow,
+            flow_part: None,
             segments,
             intents: Vec::new(),
             messages: Vec::new(),
@@ -140,6 +154,13 @@ impl<'a> Planner<'a> {
                 clock_unix_seconds(clock.data)?.checked_add(self.valid_for_seconds).ok_or(PlanError::BadClock)?;
             self.expires_at = Some(expires_at);
             self.segments.iter_mut().for_each(|segment| segment.expires_at = expires_at);
+        }
+
+        if let (Some(flow), None) = (self.flow, &self.flow_part) {
+            match flow.render(self.payers, chain)? {
+                FlowRender::Missing(addresses) => return Ok(Step::Fetch(addresses)),
+                FlowRender::Rendered(part) => self.flow_part = Some(part),
+            }
         }
 
         loop {
@@ -235,6 +256,7 @@ impl<'a> Planner<'a> {
             },
             payers: self.payers,
             priority_fee_lamports: transaction.priority_fee_lamports,
+            flow: self.flow_part.as_ref(),
         };
         let message = plan_message(&header, &messages);
 

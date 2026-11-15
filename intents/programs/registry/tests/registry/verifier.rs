@@ -123,7 +123,7 @@ fn verify_intent_refuses_a_layout_or_outputs_that_lie() {
 
     let mut longer = plan.clone();
     let data = &mut longer.transaction.instructions[verify_position].data;
-    let built = data.len() - 10;
+    let built = data.len() - 14;
     data[built] += 1;
     let failed = send_plan(&mut setup.svm, &longer, &signers).unwrap_err();
     assert!(failed.is(RegistryError::WrongSegmentLayout), "{failed}");
@@ -131,8 +131,8 @@ fn verify_intent_refuses_a_layout_or_outputs_that_lie() {
     let mut other_outputs = plan.clone();
     let data = &mut other_outputs.transaction.instructions[verify_position].data;
     // The SOL transfer's implementation has no program address and no builder, so both bump vectors are
-    // empty: 4 bytes each before the 20-byte layout.
-    let bumps = data.len() - 20 - 4 - 4;
+    // empty: 4 bytes each before the 20-byte layout and the 4-byte empty flow context.
+    let bumps = data.len() - 4 - 20 - 4 - 4;
     let outputs = bumps - 4;
     let rest = data.split_off(bumps);
     data.truncate(outputs);
@@ -163,7 +163,7 @@ fn verify_intent_refuses_an_expired_intent() {
     let plan = plan(&setup, &[(SOL, "{}")]).unwrap();
     let signers = [&setup.fee_payer, &setup.from];
     let data = &plan.transaction.instructions[plan.intents[0].verify.unwrap()].data;
-    let expires_at = u64::from_le_bytes(data[data.len() - 8..].try_into().unwrap());
+    let expires_at = u64::from_le_bytes(data[data.len() - 12..data.len() - 4].try_into().unwrap());
     assert!(plan.message.contains(&format!(" | expires {} | ", sdp_intents_planner::utc_time(expires_at))));
 
     let clock: Address = "SysvarC1ock11111111111111111111111111111111".parse().unwrap();

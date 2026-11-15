@@ -703,6 +703,16 @@ try {
     "the answer lists the flow's steps and which one is current",
   );
   expect(shieldSigning.next.then === "continue", "the shield's sign says the caller continues after it lands");
+  const shieldMessage = shieldSigning.next.steps[0].message;
+  expect(
+    shieldMessage.startsWith("step 1 of 2: ") &&
+      shieldMessage.includes(" || flow solana.org/privacy-rings-shield-and-transfer@1.0.0: privately send "),
+    `the shield's message names its place in the flow: ${shieldMessage.slice(0, 160)}`,
+  );
+  expect(
+    await typescriptProves(shieldSigning.next.steps[0].transaction.messageBytes, shieldSigning.next.steps[0]),
+    "the verifier proves the step's place in the flow",
+  );
   const again = await service("/v1/intents/continue", JSON.stringify({ progress: shieldSigning.progress }));
   expect(
     again.next.steps?.[0].transaction.messageBytes === shieldSigning.next.steps?.[0].transaction.messageBytes,

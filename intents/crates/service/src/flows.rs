@@ -9,7 +9,7 @@ use sdp_intents_client::message::{read_transaction, LookupTable, WireMessage};
 use sdp_intents_client::{fresh_address, instructions_only, json as plan_json, prepared, remote};
 use sdp_intents_compiler::{IdRange, PlanOutput};
 use sdp_intents_planner::{
-    verify_transaction, AccountMap, IntentDocuments, Payers, Plan, PlanRequest, Planner, ProviderSignature,
+    verify_transaction, AccountMap, FlowStep, IntentDocuments, Payers, Plan, PlanRequest, Planner, ProviderSignature,
     RemoteAnswer, RemoteCall, ShieldedCall, Step, VerifiedTransaction, VerifyStep,
 };
 use sdp_intents_spec::Address;
@@ -26,7 +26,7 @@ const MAX_VERIFY_ROUNDS: usize = 8;
 /// With `tamper`, the transaction differs from the plan, as `tamper` says. A request for the
 /// instructions alone reads no blockhash.
 pub async fn prepare(service: &Service, text: &str, tamper: bool) -> Result<Value, ServiceError> {
-    match prepare_step(service, text, tamper, None).await? {
+    match prepare_step(service, text, None, tamper, None).await? {
         Prepared::Step(step) => Ok(step.json),
         Prepared::Build(_) => Err(needs_build()),
     }
@@ -57,11 +57,12 @@ pub(crate) struct StepFacts {
 pub(crate) async fn prepare_step(
     service: &Service,
     text: &str,
+    flow: Option<FlowRequest<'_>>,
     tamper: bool,
     built: Option<RemoteAnswer>,
 ) -> Result<Prepared, ServiceError> {
     let request: Value = serde_json::from_str(text)?;
-    let (mut plan, output) = match planned(service, text, built).await? {
+    let (mut plan, output) = match planned(service, text, flow, built).await? {
         Planning::Planned(planned) => (planned.plan, planned.output),
         Planning::Build(call) => return Ok(Prepared::Build(call)),
     };
@@ -122,16 +123,54 @@ pub async fn check_request(service: &Service, request: &Value) -> Result<(), Ser
     })
 }
 
-/// Plans `text` with the registry's documents. A remote call or a shielded spend takes `answer`
-/// when it is set.
-async fn planned(service: &Service, text: &str, answer: Option<RemoteAnswer>) -> Result<Planning, ServiceError> {
-    let request: Value = serde_json::from_str(text)?;
-    let references = references(&request)?;
-    let documents = Registry { chain: &service.chain }.intent_documents(&references).await?;
+/// The flow that a step's plan request is a step of: the flow's own request, at its pinned
+/// versions, and the step's position.
+#[derive(Clone, Copy)]
+pub(crate) struct FlowRequest<'r> {
+    pub(crate) request: &'r Value,
+    pub(crate) step: u8,
+}
 
-    let catalog = catalog(documents.iter().flat_map(|intent| [&intent.interface, &intent.implementation]))?;
+/// Plans `text` with the registry's documents. A remote call or a shielded spend takes `answer`
+/// when it is set. A flow's step names its flow, so that its `verify_intent` carries it.
+async fn planned(
+    service: &Service,
+    text: &str,
+    flow: Option<FlowRequest<'_>>,
+    answer: Option<RemoteAnswer>,
+) -> Result<Planning, ServiceError> {
+    let request: Value = serde_json::from_str(text)?;
+    let registry = Registry { chain: &service.chain };
+    let documents = registry.intent_documents(&references(&request)?).await?;
+    let flow_documents = match flow {
+        Some(flow) => registry.intent_documents(&references(flow.request)?).await?,
+        None => Vec::new(),
+    };
+
+    let catalog = catalog(
+        documents.iter().chain(&flow_documents).flat_map(|intent| [&intent.interface, &intent.implementation]),
+    )?;
     let text = crate::amounts::in_base_units(&service.chain, &catalog, &request).await?.to_string();
     let compiled = catalog.compile_plan(&text).map_err(|report| ServiceError::compile(&report, &text))?;
+    let flow_text = match flow {
+        Some(flow) => Some(crate::amounts::in_base_units(&service.chain, &catalog, flow.request).await?.to_string()),
+        None => None,
+    };
+    let flow_compiled =
+        flow_text.as_deref().map(|text| catalog.compile_plan(text).map_err(|report| ServiceError::compile(&report, text))).transpose()?;
+    let flow_step = match (flow, &flow_compiled, flow_documents.as_slice()) {
+        (Some(flow), Some(compiled), [documents]) => match compiled.intents.as_slice() {
+            [intent] => Some(FlowStep {
+                interface: &documents.interface.bytes,
+                implementation: &documents.implementation.bytes,
+                intent: &intent.bytes,
+                step: flow.step,
+            }),
+            _ => return Err(ServiceError::refused("flow", "a flow request holds one intent")),
+        },
+        (None, ..) => None,
+        _ => return Err(ServiceError::refused("flow", "a flow request holds one intent")),
+    };
     let plan_request = PlanRequest {
         intents: compiled
             .intents
@@ -145,6 +184,7 @@ async fn planned(service: &Service, text: &str, answer: Option<RemoteAnswer>) ->
         payers: Payers { fee: &compiled.payers.fee, rent: &compiled.payers.rent },
         priority_fee_lamports: compiled.priority_fee_lamports,
         valid_for_seconds: compiled.valid_for_seconds,
+        flow: flow_step,
     };
 
     Ok(match plan(service, &plan_request, answer).await? {
@@ -174,7 +214,7 @@ pub async fn verify(service: &Service, body: &Value) -> Result<Value, ServiceErr
         .ok_or_else(|| ServiceError::invalid_request("a provider's transaction needs its `request`"))?;
     let frozen = remote::frozen_from_parts(&message, presigned, &tables)?;
     let answer = RemoteAnswer { frozen: Some(frozen), ..RemoteAnswer::default() };
-    let replanned = match planned(service, &request.to_string(), Some(answer)).await? {
+    let replanned = match planned(service, &request.to_string(), None, Some(answer)).await? {
         Planning::Planned(planned) => planned.plan,
         Planning::Build(_) => return Err(needs_build()),
     };

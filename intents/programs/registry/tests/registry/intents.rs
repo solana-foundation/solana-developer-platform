@@ -105,6 +105,7 @@ impl Published {
             bumps: &bumps,
             builder_bumps: &[],
             layout,
+            flow: &[],
         });
 
         Ok(Instruction {

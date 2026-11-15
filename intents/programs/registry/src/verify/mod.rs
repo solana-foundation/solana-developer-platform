@@ -62,6 +62,10 @@ pub struct VerifyArgs<'a> {
     /// builder as `{builder.bumps}`. The builder refuses any bump that is not canonical.
     pub builder_bumps: &'a [u8],
     pub layout: SegmentLayout,
+    /// A flow step's position, then the flow's intent, or empty. The signer's verifier checks that
+    /// the segment is that step of that flow. `verify_intent` carries it so that the signature
+    /// covers it, and checks only that the intent reads.
+    pub flow: &'a [u8],
 }
 
 /// The rent cap, the counts of the accounts and the instructions of the segment, and the expiry.
@@ -88,6 +92,7 @@ pub fn verify_intent(accounts: &VerifyIntent, passed: &[AccountView], args: Veri
     require!(now <= args.layout.expires_at, RegistryError::IntentExpired);
 
     let options = check_options(args.intent)?;
+    check_flow(args.flow)?;
 
     let interface_data = version::load(accounts.interface_version.account(), DocumentKind::Interface)?;
     let implementation_data = version::load(accounts.implementation_version.account(), DocumentKind::Implementation)?;
@@ -229,6 +234,15 @@ fn check_options(intent: &[u8]) -> Result<IntentOptions> {
     require!(options.verify_intent, RegistryError::VerificationOff);
 
     Ok(options)
+}
+
+/// A flow context is a step's position and an intent that reads. The signer's verifier checks the
+/// rest: that the flow names this step, with the inputs that it binds.
+fn check_flow(flow: &[u8]) -> Result<()> {
+    match flow.split_first() {
+        None => Ok(()),
+        Some((_, intent)) => Intent::parse(intent).map(|_| ()).map_err(|error| refused(error.into())),
+    }
 }
 
 /// One `resolve` completes, because every account is in the instruction. Each resolved address

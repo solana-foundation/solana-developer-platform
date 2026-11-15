@@ -33,6 +33,7 @@ pub(crate) struct OnchainInputs<'o, 'a> {
     pub(crate) before: &'o [Account],
     pub(crate) rent_cap: u64,
     pub(crate) expires_at: u64,
+    pub(crate) flow: &'o [u8],
     /// The segment's position in the plan, which names its Lighthouse memory.
     pub(crate) memory_id: u8,
 }
@@ -80,6 +81,7 @@ impl OnchainInputs<'_, '_> {
             builder_bumps: &self.built.builder_bumps,
             rent_cap: self.rent_cap,
             expires_at: self.expires_at,
+            flow: self.flow,
             guarded,
             counts,
         };

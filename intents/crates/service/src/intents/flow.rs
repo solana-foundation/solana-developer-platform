@@ -130,6 +130,27 @@ impl Bindings<'_> {
         rendered
     }
 
+    /// The flow's own request, with its intent at the pinned versions.
+    pub fn pinned_request(&self) -> Value {
+        let mut request = self.progress.request.clone();
+        let pin = |range: &Value| {
+            let range = range.as_str().unwrap_or_default();
+            let id = range.split_once('@').map_or(range, |(id, _)| id);
+
+            Value::from(self.progress.pinned(id).unwrap_or(range))
+        };
+
+        if let Some(intent) = request.pointer_mut("/intents/0").and_then(Value::as_object_mut) {
+            for key in ["interface", "implementation"] {
+                if let Some(range) = intent.get(key).map(pin) {
+                    intent.insert(key.to_owned(), range);
+                }
+            }
+        }
+
+        request
+    }
+
     /// The plan request of one step: the outer request with the step's intent, at the pinned
     /// versions, and the outer intent's options.
     pub fn step_request(&self, step: &FlowStep) -> Result<String, ServiceError> {

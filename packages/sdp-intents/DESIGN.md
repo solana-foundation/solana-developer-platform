@@ -337,8 +337,9 @@ transaction with the message that it proves. The design calls a step's content a
    place of `instructions` when an endpoint or the spender built them, and `not checked onchain,
    only simulated` with both checks off. The message never says "tier", because a signer reads it
    without knowing the system. With more than one intent, each outcome and each detail
-   starts with `<n>: `, and `||` separates them. The flow part (design only) is
-   `flow: <id>@<version> step <i> of <n>: <the flow's message>`.
+   starts with `<n>: `, and `||` separates them. A flow's step starts
+   `step <i> of <n>: <the step's outcome> || flow <id>: <the flow's outcome>`, so its signer sees
+   the whole operation that the step belongs to.
 2. `expires` is a UTC time, from the plan request's `validForSeconds` (default 60) after the
    planner reads the Clock sysvar. Every `verify_intent` states it, and refuses to run when the
    cluster's clock is past it. A plan without `verify_intent` states no expiry. A wallet can
@@ -589,8 +590,12 @@ all readonly, are the instructions sysvar, the payers, both indexes, both versio
 implementation's accounts, a builder's extra accounts, and the guarded accounts. Its data is the intent, the
 builder's roles, the outputs, the implementation's bumps, and the builder's bumps, each a borsh `Vec<u8>`,
 then the layout: the rent cap, the counts of guarded accounts, snapshots, built instructions, and
-checks, and the expiry. It refuses an output or a count that differs from what it derives, and any
-call after the expiry.
+checks, and the expiry, then a flow step's context: its position and the flow's intent, as a borsh
+`Vec<u8>`. It refuses an output or a count that differs from what it derives, any call after the
+expiry, and a flow context whose intent does not read. The signer's verifier checks the rest of
+the context: the flow names this step's interface and implementation at that position, and each
+step input equals what the flow binds from its own inputs, payers, or literals. Only then does it
+render the flow part of the message.
 
 It checks:
 
@@ -1439,7 +1444,8 @@ approvals, what the chain checks of its weakest step, and each stopping point:
 `deposit 100 USDC into Acme by request, then claim the shares | 2 steps, 2 approvals | checked
 onchain: instructions and guarantees | if stopped after step 1: cancel the request to get the 100
 USDC back`. Each step's message
-starts with the flow part of 4.1, so a signer of step 2 sees the flow that it continues. A program
+starts with the flow part of 4.1, so a signer of step 2 sees the flow that it continues. Built
+today: each step names its position and the flow's id and outcome, and the verifier proves it. A program
 or remote flow names its builder or endpoint instead, because its steps are not known at the
 start.
 
@@ -1714,10 +1720,10 @@ Not built:
 7. The postconditions and clusters that SDP's other modules need (4.18).
 8. Of flows (4.19): program and remote flows, running `recover`, step inputs from earlier steps'
    outputs, the `data`, `balance`, and `committed` conditions, named terminal outcomes, the
-   recoverable check, the flow part of each step's message, the signer's check that each step it
-   signs is a step of the flow that it started, packing several intents into several
-   transactions, Jito bundles, `check_intent`, `execute_step`, and `verify_intent`'s check of a
-   step's flow.
+   recoverable check, the flow's step count, approvals, and stopping points in each step's
+   message, packing several intents into several transactions, Jito bundles, `check_intent`,
+   `execute_step`, and `verify_intent`'s onchain check of a step's flow binding, which a PDA wallet
+   that runs a flow needs. The signer's verifier checks it today.
 9. A limit on the spends that the local wallet records and never signs. It is a development
    wallet, and it keeps them in memory until it restarts.
 
