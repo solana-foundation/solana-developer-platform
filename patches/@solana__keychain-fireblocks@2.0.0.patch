@@ -197,10 +197,18 @@ index a9f2c17602797418c5f713f21e13631bf6a08b60..2363e38c5125cc350739c05aa8422070
      status: string;
      txHash?: string;
 diff --git a/src/fireblocks-signer.ts b/src/fireblocks-signer.ts
-index 6b1931589841c2483bce4a57169bdc98d55bd416..5ede706dbd5c0ca490fa647adbd0b93b92db254b 100644
+index 6b1931589841c2483bce4a57169bdc98d55bd416..554a9d181a06b3bd3853149031bf820be3472284 100644
 --- a/src/fireblocks-signer.ts
 +++ b/src/fireblocks-signer.ts
-@@ -69,6 +69,10 @@ const DEFAULT_API_BASE_URL = 'https://api.fireblocks.io';
+@@ -9,6 +9,7 @@ import {
+     fetchSignerJson,
+     normalizeBaseUrl,
+     normalizeMessageBytes,
++    providerStatus,
+     signBatchSequential,
+     signBatchStaggered,
+     SignerErrorCode,
+@@ -69,6 +70,10 @@ const DEFAULT_API_BASE_URL = 'https://api.fireblocks.io';
  const DEFAULT_ASSET_ID = 'SOL';
  const DEFAULT_POLL_INTERVAL_MS = 1000;
  const DEFAULT_MAX_POLL_ATTEMPTS = 60;
@@ -211,7 +219,7 @@ index 6b1931589841c2483bce4a57169bdc98d55bd416..5ede706dbd5c0ca490fa647adbd0b93b
  /**
   * Fireblocks-based signer for Solana transactions
   *
-@@ -99,6 +103,10 @@ class FireblocksSigner<TAddress extends string = string>
+@@ -99,6 +104,10 @@ class FireblocksSigner<TAddress extends string = string>
      private readonly maxPollAttempts: number;
      private readonly requestDelayMs: number;
      private readonly useProgramCall: boolean;
@@ -222,7 +230,7 @@ index 6b1931589841c2483bce4a57169bdc98d55bd416..5ede706dbd5c0ca490fa647adbd0b93b
      private initialized = false;
  
      /**
-@@ -131,6 +139,10 @@ class FireblocksSigner<TAddress extends string = string>
+@@ -131,6 +140,10 @@ class FireblocksSigner<TAddress extends string = string>
              });
          }
  
@@ -233,7 +241,7 @@ index 6b1931589841c2483bce4a57169bdc98d55bd416..5ede706dbd5c0ca490fa647adbd0b93b
          this.useProgramCall = config.useProgramCall === true;
          this.apiKey = config.apiKey;
          this.privateKeyPem = config.privateKeyPem;
-@@ -293,13 +305,7 @@ class FireblocksSigner<TAddress extends string = string>
+@@ -293,13 +306,7 @@ class FireblocksSigner<TAddress extends string = string>
              },
          };
  
@@ -248,7 +256,7 @@ index 6b1931589841c2483bce4a57169bdc98d55bd416..5ede706dbd5c0ca490fa647adbd0b93b
      }
  
      /**
-@@ -334,34 +340,90 @@ class FireblocksSigner<TAddress extends string = string>
+@@ -334,34 +341,92 @@ class FireblocksSigner<TAddress extends string = string>
              },
          };
  
@@ -294,12 +302,14 @@ index 6b1931589841c2483bce4a57169bdc98d55bd416..5ede706dbd5c0ca490fa647adbd0b93b
 +            // their original error. An aborted create may have succeeded remotely.
 +            if (!abortSignal?.aborted) {
 +                // A create the provider never recorded leaves no transaction to
-+                // reconcile; the failure hook lets persistence close the row. Anything
-+                // the provider still serves stays with polling and reconciliation.
-+                const found = await this.request<TransactionResponse>(
++                // reconcile; the failure hook lets persistence close the row. Only a
++                // 404 confirms that absence: a lookup that itself fails (outage,
++                // timeout, 5xx) proves nothing, and the proposal may still await
++                // approval, so it stays with polling and reconciliation.
++                const lookupError = await this.request<TransactionResponse>(
 +                    'GET', `/v1/transactions/external_tx_id/${encodeURIComponent(externalTxId)}`, undefined, AbortSignal.timeout(5_000),
-+                ).catch(() => undefined);
-+                if (found === undefined) {
++                ).then(() => undefined, (lookupCause: unknown) => lookupCause);
++                if (providerStatus(lookupError) === 404) {
 +                    try { await this.onSigningFailure?.({ externalTxId, providerTransactionId: transactionId, cause }); } catch { /* diagnostics cannot change signing */ }
 +                }
 +                throw cause;
@@ -353,7 +363,7 @@ index 6b1931589841c2483bce4a57169bdc98d55bd416..5ede706dbd5c0ca490fa647adbd0b93b
  
              if (operation === 'PROGRAM_CALL') {
                  if (status === 'SIGNED') {
-@@ -381,16 +443,15 @@ class FireblocksSigner<TAddress extends string = string>
+@@ -381,16 +446,15 @@ class FireblocksSigner<TAddress extends string = string>
              if (isTerminalStatus(status)) {
                  throwSignerError(SignerErrorCode.SIGNING_FAILED, {
                      message: `Transaction failed with status: ${txResponse.status}`,

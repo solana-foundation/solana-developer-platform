@@ -10,6 +10,10 @@
   "pnpm": {
     "peerDependencyRules": {
       "allowedVersions": {
+        "@solana/keychain-fireblocks>@solana/addresses": "^7.0.0",
+        "@solana/keychain-fireblocks>@solana/keys": "^7.0.0",
+        "@solana/keychain-fireblocks>@solana/signers": "^7.0.0",
+        "@solana/keychain-fireblocks>@solana/transactions": "^7.0.0",
         "@solana/pay>@solana/kit": "^7.0.0",
         "@solana/pay>@solana/keys": "^7.0.0",
         "@solana/pay>@solana/rpc-subscriptions-api": "^7.0.0",
