@@ -294,6 +294,8 @@ describe("docs follow the release channel", () => {
     const files = readdirSync(contentDir, { recursive: true, encoding: "utf8" }).filter((file) =>
       file.endsWith(".mdx")
     );
+    // An empty scan cannot tell "clean" from "scanned nothing".
+    assert.ok(files.length > 0, `no .mdx files found under ${contentDir}`);
     const gated = files.filter((file) =>
       /<(InChannel|ChannelRow)\b/.test(readFileSync(path.join(contentDir, file), "utf8"))
     );

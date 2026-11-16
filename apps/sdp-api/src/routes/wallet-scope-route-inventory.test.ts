@@ -420,7 +420,9 @@ describe("wallet-scope route inventory", () => {
     const source = readFileSync(path.join(SRC, file), "utf8");
     const block = testBlock(source, test);
     expect(block, `${file} has no test named "${test}"`).not.toBeNull();
-    expect(block).toMatch(/wallet_?out_?of_?scope/i);
+    // The mention must be live code: a commented-out assertion asserts nothing.
+    const live = block?.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(live).toMatch(/wallet_?out_?of_?scope/i);
     expect(isDisabledTest(source, test), `${file} skips "${test}"`).toBe(false);
   });
 

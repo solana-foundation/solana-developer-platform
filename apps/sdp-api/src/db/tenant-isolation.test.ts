@@ -114,6 +114,7 @@ describe("database-enforced tenant isolation", () => {
         `SELECT current_setting('app.tenant_isolation_identity', true) AS identity`
       )
     );
+    expect(bare).not.toBeNull();
     expect(bare?.identity ?? "").toBe("");
   });
 
