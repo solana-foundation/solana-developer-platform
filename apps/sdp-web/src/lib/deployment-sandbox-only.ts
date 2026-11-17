@@ -1,6 +1,7 @@
 import useSWR from "swr";
 import { z } from "zod";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { deploymentQueryKeys } from "@/lib/deployment-query-key";
 
 // Older API revisions omit it; they serve both environments.
 const sandboxOnlySchema = z.object({
@@ -25,9 +26,14 @@ async function fetchSandboxOnly(organizationId: string): Promise<boolean> {
  */
 export function useDeploymentSandboxOnly(organizationId: string | null): boolean {
   const { data } = useSWR(
-    organizationId === null ? null : ["deployment-sandbox-only", organizationId],
+    organizationId === null ? null : deploymentQueryKeys.sandboxOnly({ organizationId }),
     ([, id]) => fetchSandboxOnly(id),
-    { revalidateOnFocus: false, revalidateIfStale: false, shouldRetryOnError: false }
+    {
+      revalidateOnFocus: false,
+      revalidateIfStale: false,
+      revalidateOnReconnect: false,
+      shouldRetryOnError: false,
+    }
   );
   return data === true;
 }

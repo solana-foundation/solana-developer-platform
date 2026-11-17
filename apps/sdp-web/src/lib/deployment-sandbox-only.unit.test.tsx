@@ -20,7 +20,7 @@ describe("useDeploymentSandboxOnly", () => {
   it("answers true once the organization's mainnet access says the deployment is sandbox-only", async () => {
     const read = vi
       .spyOn(dashboardFetchModule, "dashboardFetch")
-      .mockResolvedValue({ ok: true, data: { data: { sandboxOnly: true } } } as never);
+      .mockResolvedValue({ ok: true, status: 200, data: { data: { sandboxOnly: true } } });
     const { result } = renderHook(() => useDeploymentSandboxOnly("org_sdp"), {
       wrapper: freshCache,
     });
@@ -34,8 +34,9 @@ describe("useDeploymentSandboxOnly", () => {
   it("answers false when the API omits the field or the read fails", async () => {
     vi.spyOn(dashboardFetchModule, "dashboardFetch").mockResolvedValue({
       ok: true,
+      status: 200,
       data: { data: {} },
-    } as never);
+    });
     const omitted = renderHook(() => useDeploymentSandboxOnly("org_sdp"), { wrapper: freshCache });
     await waitFor(() => expect(dashboardFetchModule.dashboardFetch).toHaveBeenCalled());
     expect(omitted.result.current).toBe(false);
@@ -43,7 +44,9 @@ describe("useDeploymentSandboxOnly", () => {
     vi.spyOn(dashboardFetchModule, "dashboardFetch").mockResolvedValue({
       ok: false,
       error: "unavailable",
-    } as never);
+      status: 503,
+      body: null,
+    });
     const failed = renderHook(() => useDeploymentSandboxOnly("org_other"), {
       wrapper: freshCache,
     });
