@@ -97,10 +97,23 @@ function matchesRoute(pattern: string, method: string, path: string): boolean {
   );
 }
 
+/**
+ * Dashboard money routes the API replays from its own movement ledger rather
+ * than the shared `idempotent()` step, so they are absent from the shared
+ * `IdempotencyRequiredRoute` list yet move money all the same (an earn
+ * program's custodial payout). The refusal below protects them identically: a
+ * reload must never mint a fresh key for a payout that may have landed.
+ */
+const DASHBOARD_MONEY_ROUTES = [
+  "POST /api/dashboard/markets/earn/programs/:programId/withdrawals",
+] as const;
+
 /** Whether this mutation moves money, so it must never send under a key that cannot be kept. */
 function requiresPersistedKey(method: string, path: string): boolean {
-  return Object.values(DASHBOARD_REQUIRED_ROUTES).some((pattern) =>
-    matchesRoute(pattern, method, path)
+  return (
+    Object.values(DASHBOARD_REQUIRED_ROUTES).some((pattern) =>
+      matchesRoute(pattern, method, path)
+    ) || DASHBOARD_MONEY_ROUTES.some((pattern) => matchesRoute(pattern, method, path))
   );
 }
 

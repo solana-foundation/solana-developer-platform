@@ -15,6 +15,7 @@ import {
   appendVaultPositionsRead,
   createEarnVaultDeposit,
   createEarnVaultWithdrawalRequest,
+  createEarnWithdrawal,
   type EarnVaultPositionsRead,
   earnExternalWalletSummaryRefreshInterval,
   earnLedgerRefreshInterval,
@@ -959,6 +960,39 @@ describe("fetchEarnProgramWithdrawals", () => {
       "Earn withdrawal ledger pagination exceeded its safety limit"
     );
     expect(fetchMock).toHaveBeenCalledTimes(20);
+  });
+});
+
+describe("createEarnWithdrawal", () => {
+  // The payout rides the shared action key's money guard (`dashboardFetch`'s
+  // persisted-key refusal): when the browser refuses the key's write, nothing
+  // is sent, so a reload can never mint a fresh key and pay twice.
+  it("refuses to send when storage refuses the action key's write", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "sessionStorage", {
+      value: {
+        getItem: () => null,
+        setItem: () => {
+          throw new DOMException("quota exceeded", "QuotaExceededError");
+        },
+        removeItem: () => undefined,
+      },
+      configurable: true,
+    });
+
+    const result = await createEarnWithdrawal("program_1", {
+      amountUsd: "10",
+      token: "usdc",
+      destinationAddress: "11111111111111111111111111111111",
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 428,
+      code: "IDEMPOTENCY_KEY_NOT_PERSISTED",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

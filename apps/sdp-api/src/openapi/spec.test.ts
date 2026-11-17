@@ -962,9 +962,9 @@ describe("OpenAPI spec", () => {
       "privy",
     ]);
     // Prose too: no description names a provider stable does not offer.
-    const unpublishedLabels = CUSTODY_PROVIDERS.filter((provider) => provider !== "privy").map(
-      (provider) => CUSTODY_PROVIDER_CATALOG_BY_ID[provider].label
-    );
+    const unpublishedLabels = CUSTODY_PROVIDERS.filter(
+      (provider) => provider !== "privy" && provider !== "fireblocks"
+    ).map((provider) => CUSTODY_PROVIDER_CATALOG_BY_ID[provider].label);
     expect(unpublishedLabels.filter((label) => serialized.includes(label))).toEqual([]);
     expect(serialized).not.toMatch(/fireblocks|coinbase/i);
     expect(createPublicSurfaceManifest("stable").custodyProviders).toEqual(["privy"]);
@@ -976,8 +976,16 @@ describe("OpenAPI spec", () => {
       .object({ properties: z.object({ provider: z.object({ enum: z.array(z.string()) }) }) })
       .parse(z.object({ anyOf: z.array(z.unknown()) }).parse(createBody).anyOf[0]);
     expect(managedOwner.properties.provider.enum).toEqual(["privy"]);
+    expect(serialized).not.toContain("x-sdp-custody-mode");
     // Session-only (wallets.configure), so no channel publishes it.
     expect(paths?.["/v1/wallets/initialize"]).toBeUndefined();
+    for (const path of [
+      "/internal/dashboard/custody/fireblocks/proposals",
+      "/internal/dashboard/custody/fireblocks/proposals/{kind}/{proposalId}/cancel",
+    ]) {
+      expect(paths?.[path]).toBeUndefined();
+      expect(createOpenApiDocument().paths?.[path]).toBeDefined();
+    }
     expect(createOpenApiDocument().paths?.["/v1/wallets/initialize"]?.post?.security).toEqual([
       { clerkBearerAuth: [] },
     ]);

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { SOL_MINT, type SolanaCluster, wellKnownMint } from "./well-known-tokens";
 
 /** The native TRANSFER path supports only SOL and this cluster's canonical USDC mint. */
@@ -55,3 +56,72 @@ export function fireblocksPaymentStatus(
       return isFireblocksTransactionFailed(status) ? "failed" : "processing";
   }
 }
+
+/** Signing and provider-broadcast proposals cannot be cancelled once they start broadcasting. */
+export const FIREBLOCKS_CANCELLABLE_PROPOSAL_STATUSES = [
+  "SUBMITTED",
+  "QUEUED",
+  "PENDING_AML_SCREENING",
+  "PENDING_AUTHORIZATION",
+  "PENDING_SIGNATURE",
+  "PENDING_3RD_PARTY_MANUAL_APPROVAL",
+  "PENDING_3RD_PARTY",
+] as const;
+const cancellableProposals: ReadonlySet<string> = new Set(FIREBLOCKS_CANCELLABLE_PROPOSAL_STATUSES);
+export function isFireblocksProposalCancellable(status: string): boolean {
+  return cancellableProposals.has(status);
+}
+
+/**
+ * The status column of a sign-only proposal: SDP's pre-acceptance state, then the provider
+ * transaction statuses it can observe (the cancellable set, the advancing signature states, the
+ * documented pending states and the failed set). Pinned by the table's CHECK in
+ * `0229_fireblocks_signing_proposals.sql`.
+ */
+export const FIREBLOCKS_SIGNING_PROPOSAL_STATUSES = [
+  "SUBMITTING",
+  ...FIREBLOCKS_CANCELLABLE_PROPOSAL_STATUSES,
+  "PENDING_STATUS_UPDATE",
+  "SIGNED",
+  "BROADCASTING",
+  "CONFIRMING",
+  "COMPLETED",
+  ...FIREBLOCKS_FAILED_TRANSACTION_STATUSES,
+] as const;
+export type FireblocksSigningProposalStatus = (typeof FIREBLOCKS_SIGNING_PROPOSAL_STATUSES)[number];
+
+/** A recovered signature that must never reach a broadcaster the moment it is cancelled. */
+export const FIREBLOCKS_SIGNATURE_ACCEPTED_STATUSES = ["SIGNED", "COMPLETED"] as const;
+const signatureAccepted: ReadonlySet<string> = new Set(FIREBLOCKS_SIGNATURE_ACCEPTED_STATUSES);
+export function isFireblocksSignatureAccepted(status: string): boolean {
+  return signatureAccepted.has(status);
+}
+
+/** Sign-only proposals stop polling once the signature is accepted or the transaction failed. */
+const signingFinished: ReadonlySet<string> = new Set([
+  "SIGNED",
+  "BROADCASTING",
+  "CONFIRMING",
+  "COMPLETED",
+  ...FIREBLOCKS_FAILED_TRANSACTION_STATUSES,
+]);
+export function isFireblocksSigningFinished(status: string): boolean {
+  return signingFinished.has(status);
+}
+
+/** The provider's two spellings of a confirmed cancellation. */
+export function isFireblocksCancellationConfirmed(status: string): boolean {
+  return status === "CANCELLED" || status === "CANCELED";
+}
+
+export const fireblocksProposalSummarySchema = z.object({
+  id: z.string(),
+  kind: z.enum(["signing", "transfer"]),
+  operation: z.string(),
+  status: z.string(),
+  transactionId: z.string().nullable(),
+  createdAt: z.string(),
+  cancellationRequestedAt: z.string().nullable(),
+  canCancel: z.boolean(),
+});
+export type FireblocksProposalSummary = z.infer<typeof fireblocksProposalSummarySchema>;

@@ -53,6 +53,18 @@ describe("CRON_DEFINITIONS", () => {
     expect(byName.get("expire-payment-requests")?.schedule).toBe("* * * * *");
   });
 
+  it("runs Fireblocks reads independently every 30 seconds in each environment on stable", () => {
+    const cron = CRON_DEFINITIONS.find(
+      (definition) => definition.name === "reconcile-fireblocks-proposals"
+    );
+    expect(cron).toMatchObject({
+      schedule: "*/30 * * * * *",
+      scope: "cluster",
+      effect: "observes",
+    });
+    expect(cron?.enabled({ ...env, SDP_RELEASE_CHANNEL: "stable" })).toBe(true);
+  });
+
   it("gives every definition a schedule node-cron accepts", () => {
     const invalid = CRON_DEFINITIONS.filter((definition) => !validate(definition.schedule)).map(
       (definition) => definition.name

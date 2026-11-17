@@ -4,7 +4,6 @@ import {
   isPositiveUsdAmount,
   laneCeilingFromErrorBody,
   liquidityWriteWins,
-  withdrawalRequestSignature,
 } from "./earn-withdraw-modal";
 
 describe("exact USD amount checks", () => {
@@ -16,35 +15,6 @@ describe("exact USD amount checks", () => {
     expect(isPositiveUsdAmount("1.0000001")).toBe(false);
     expect(isPositiveUsdAmount("1e3")).toBe(false);
     expect(isPositiveUsdAmount(" 1 ")).toBe(false);
-  });
-});
-
-describe("withdrawalRequestSignature", () => {
-  const base = ["earn_program_1", "12.50", "usdc", "11111111111111111111111111111111"] as const;
-
-  it("changes whenever the intended withdrawal changes", () => {
-    const signature = withdrawalRequestSignature(...base);
-    expect(withdrawalRequestSignature("earn_program_2", base[1], base[2], base[3])).not.toBe(
-      signature
-    );
-    expect(withdrawalRequestSignature(base[0], "12.51", base[2], base[3])).not.toBe(signature);
-    expect(withdrawalRequestSignature(base[0], base[1], "usdt", base[3])).not.toBe(signature);
-    expect(
-      withdrawalRequestSignature(base[0], base[1], base[2], "22222222222222222222222222222222")
-    ).not.toBe(signature);
-  });
-
-  it("keeps every spelling of one amount on one key", () => {
-    // "12.50", "12.5" and "012.50" are the same intended withdrawal. A cosmetic
-    // edit after an ambiguous failure — a 5xx that may already be recorded —
-    // must replay the original key (the provider collapses the duplicate), not
-    // mint a fresh one and pay the withdrawal a second time.
-    const signature = withdrawalRequestSignature(...base);
-    expect(withdrawalRequestSignature(base[0], "12.5", base[2], base[3])).toBe(signature);
-    expect(withdrawalRequestSignature(base[0], "012.50", base[2], base[3])).toBe(signature);
-    expect(withdrawalRequestSignature(base[0], "12.500", base[2], base[3])).toBe(signature);
-    // Only a VALUE change may mint a new key.
-    expect(withdrawalRequestSignature(base[0], "12.5001", base[2], base[3])).not.toBe(signature);
   });
 });
 

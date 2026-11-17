@@ -10,6 +10,10 @@
   "pnpm": {
     "peerDependencyRules": {
       "allowedVersions": {
+        "@solana/keychain-fireblocks>@solana/addresses": "^7.0.0",
+        "@solana/keychain-fireblocks>@solana/keys": "^7.0.0",
+        "@solana/keychain-fireblocks>@solana/signers": "^7.0.0",
+        "@solana/keychain-fireblocks>@solana/transactions": "^7.0.0",
         "@solana/pay>@solana/kit": "^7.0.0",
         "@solana/pay>@solana/keys": "^7.0.0",
         "@solana/pay>@solana/rpc-subscriptions-api": "^7.0.0",
@@ -45,7 +49,7 @@
       "next-themes@0.4.6": "patches/next-themes@0.4.6.patch",
       "brace-expansion@5.0.12": "patches/brace-expansion@5.0.12.patch",
       "@solana/keychain-core@1.4.0": "patches/@solana__keychain-core@1.4.0.patch",
-      "@solana/keychain-fireblocks@1.4.0": "patches/@solana__keychain-fireblocks@1.4.0.patch"
+      "@solana/keychain-fireblocks@2.0.0": "patches/@solana__keychain-fireblocks@2.0.0.patch"
     },
     "packageExtensions": {
       "@solana/keychain-core@1.4.0": {

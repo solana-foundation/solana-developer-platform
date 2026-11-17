@@ -1,4 +1,6 @@
+import { createHash, randomUUID } from "node:crypto";
 import { createDfnsApiClient, createIbmHavenApiClient } from "@sdp/custody/dfns/client";
+import type { FireblocksProposalTracking } from "@sdp/custody/fireblocks-proposals";
 import { KeychainCoinbaseAdapter } from "@sdp/custody/keychain/keychain-coinbase.adapter";
 import { KeychainDfnsAdapter } from "@sdp/custody/keychain/keychain-dfns.adapter";
 import { KeychainFireblocksAdapter } from "@sdp/custody/keychain/keychain-fireblocks.adapter";
@@ -26,6 +28,7 @@ import {
   isTransactionSendingSigner,
   type TransactionSigner,
 } from "@solana/kit";
+import { getLogContext, getLogger } from "@/runtime/logger";
 import {
   instrumentVendorPort,
   logVendorCallFailure,
@@ -389,6 +392,7 @@ export function createFireblocksAdapterFromCredential(
     assetId: "SOL" | "SOL_TEST";
     walletId: string;
     requestDelayMs?: number;
+    proposalTracking?: FireblocksProposalTracking;
   }
 ): SigningPort {
   assertCustodyProviderAvailable(env, "fireblocks", "byok");
@@ -411,6 +415,29 @@ export function createFireblocksAdapterFromCredential(
       apiSecretPem: input.apiSecretPem,
       vaultAccountId: input.walletId.startsWith("fb_") ? input.walletId.slice(3) : input.walletId,
       assetId: input.assetId,
+      // BYOK transactions use sign-only program calls; SDP owns broadcast.
+      useProgramCall: true,
+      createExternalTxId: () => {
+        const requestId = getLogContext().request_id ?? randomUUID();
+        const requestHash = createHash("sha256").update(requestId).digest("hex").slice(0, 24);
+        return `sdp-sign-${requestHash}-${randomUUID()}`;
+      },
+      ...input.proposalTracking,
+      onSigningCleanup: async (event) => {
+        try {
+          await input.proposalTracking?.onSigningCleanup?.(event);
+        } finally {
+          getLogger().warn(
+            {
+              event: "sdp_fireblocks_signing_timeout",
+              external_tx_id: event.externalTxId,
+              fireblocks_transaction_id: event.providerTransactionId,
+              cancel_requested: event.cancelRequested,
+            },
+            "Fireblocks signing timed out; inspect the proposal's cancellation status"
+          );
+        }
+      },
       apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
       requestDelayMs: input.requestDelayMs,
     })

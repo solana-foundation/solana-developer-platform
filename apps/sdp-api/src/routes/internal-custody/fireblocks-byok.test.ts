@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { verify } from "node:crypto";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { type Context, Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -10,8 +11,10 @@ import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { createCredentialSecretStore } from "@/services/credential-secret-store";
+import { trackFireblocksProposals } from "@/services/custody/fireblocks-proposal-tracking";
 import { eraseExpiredFireblocksCsrs } from "@/services/custody/fireblocks-registration.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import { reconcileFireblocksProposals } from "@/services/jobs/reconcile-fireblocks-proposals";
 import { ProviderCredentialSecretCleanupStore } from "@/services/stores/provider-credential-secret-cleanup.store";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { inSandboxScope } from "@/test/helpers/cluster-rpc";
@@ -148,50 +151,7 @@ beforeEach(async () => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-describe("Fireblocks BYOK lifecycle", () => {
-  it("refuses stable CSR, discovery, installation and rotation before provider calls or writes", async () => {
-    const fetch = providerResponse();
-    const connected = await connect();
-    const registration = await newRegistration();
-    const pending = await request("/provider-credentials", {
-      ...body,
-      fields: { ...body.fields, ...registration },
-    });
-    expect(pending.status).toBe(201);
-    const pendingId = (await pending.json()).data.connectionId;
-    const before = await getDb(env).queryMany(
-      "SELECT id, status FROM provider_credentials WHERE organization_id = ? ORDER BY id",
-      [ORGANIZATION_ID]
-    );
-    testEnv.SDP_RELEASE_CHANNEL = "stable";
-    fetch.mockClear();
-    const discoveryFields = { apiKey: fields.apiKey, signingKeyId: fields.signingKeyId };
-    for (const [path, payload] of [
-      ["/fireblocks/csr", undefined],
-      ["/fireblocks/csr", {}],
-      ["/fireblocks/vaults", discoveryFields],
-      ["/provider-credentials", body],
-      [`/connections/${pendingId}/complete`, {}],
-      [
-        `/provider-credentials/${connected.providerCredential.id}/rotate`,
-        { provider: "fireblocks", fields: registration },
-      ],
-    ] as const) {
-      const response = await request(path, payload);
-      expect(response.status, await response.clone().text()).toBe(403);
-      expect(await response.text()).toContain("custody_provider_not_in_release_channel");
-    }
-    expect(fetch).not.toHaveBeenCalled();
-    expect(
-      await getDb(env).queryMany(
-        "SELECT id, status FROM provider_credentials WHERE organization_id = ? ORDER BY id",
-        [ORGANIZATION_ID]
-      )
-    ).toEqual(before);
-    // Channel changes must leave cancellation available for existing installations.
-    expect((await request(`/connections/${pendingId}/cancel`, {})).status).toBe(200);
-  });
-
+describe("Fireblocks BYOK lifecycle on beta", () => {
   it("encrypts credentials, attaches the vault with one read and replays completion", async () => {
     const fetch = providerResponse();
     const connected = await connect();
@@ -1065,5 +1025,204 @@ describe("Fireblocks vault discovery and selection", () => {
       ).status
     ).toBe(400);
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("manual Fireblocks signing-proposal cancellation", () => {
+  async function tracked() {
+    const fetch = providerResponse();
+    const connection = await connect();
+    const binding = await getDb(env).queryOne<{
+      provider_account_fingerprint: string;
+      wallet_id: string;
+    }>(
+      `SELECT c.provider_account_fingerprint, w.id AS wallet_id FROM custody_connections c
+       JOIN custody_wallets w ON w.custody_connection_id = c.id WHERE c.id = ?`,
+      [connection.connectionId]
+    );
+    if (!binding) throw new Error("Expected Fireblocks wallet");
+    const tracking = trackFireblocksProposals(
+      getDb(env),
+      { organizationId: ORGANIZATION_ID, projectId: PROJECT_ID },
+      {
+        connectionId: connection.connectionId,
+        walletId: "fb_0",
+        sourceAddress: ADDRESS,
+        accountFingerprint: binding.provider_account_fingerprint,
+      }
+    );
+    if (!tracking.createExternalTxId || !tracking.onSigningStatus)
+      throw new Error("Expected proposal tracking");
+    const id = await tracking.createExternalTxId({
+      operation: "PROGRAM_CALL",
+      assetId: "SOL_TEST",
+    });
+    await tracking.onSigningStatus({
+      externalTxId: id,
+      providerTransactionId: "proposal-1",
+      status: "PENDING_AUTHORIZATION",
+    });
+    let status = "PENDING_AUTHORIZATION";
+    fetch.mockReset().mockImplementation(async (url, init) => {
+      if (String(url).endsWith("/cancel") && init?.method === "POST") {
+        status = "CANCELLED";
+        return Response.json({ success: true });
+      }
+      return Response.json({
+        id: "proposal-1",
+        externalTxId: id,
+        operation: "PROGRAM_CALL",
+        assetId: "SOL_TEST",
+        source: { type: "VAULT_ACCOUNT", id: "0" },
+        status,
+      });
+    });
+    return {
+      id,
+      walletId: binding.wallet_id,
+      connectionId: connection.connectionId,
+      fetch,
+      tracking,
+    };
+  }
+
+  it("lists and cancels an exact project proposal, replaying without another provider POST", async () => {
+    const fixture = await tracked();
+    const listed = await request(`/fireblocks/proposals?walletId=${fixture.walletId}&kind=signing`);
+    expect(listed.status, await listed.clone().text()).toBe(200);
+    expect((await listed.json()).data.proposals).toMatchObject([
+      { id: fixture.id, canCancel: true },
+    ]);
+    const key = crypto.randomUUID();
+    const path = `/fireblocks/proposals/signing/${fixture.id}/cancel`;
+    const response = await request(path, {}, PROJECT_ID, key);
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect((await response.json()).data).toMatchObject({
+      acknowledged: true,
+      proposal: { status: "CANCELLED", canCancel: false },
+    });
+    expect((await request(path, {}, PROJECT_ID, key)).status).toBe(200);
+    expect(fixture.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    const audits = await getDb(env).queryMany<{ action: string }>(
+      "SELECT action FROM audit_logs WHERE resource_id = ? AND action = 'revoke'",
+      [fixture.id]
+    );
+    expect(audits.length).toBeGreaterThan(0);
+    await getDb(env).execute(
+      "UPDATE organization_members SET role = 'viewer' WHERE organization_id = ? AND user_id = ?",
+      [ORGANIZATION_ID, USER_ID]
+    );
+    fixture.fetch.mockClear();
+    expect((await request(path, {}, PROJECT_ID, key)).status).toBe(403);
+    expect(fixture.fetch).not.toHaveBeenCalled();
+  });
+
+  it("preserves an accepted signature when an older poll or cancellation arrives later", async () => {
+    const fixture = await tracked();
+    if (!fixture.tracking.onSigningStatus) throw new Error("Expected status tracking");
+    await fixture.tracking.onSigningStatus({
+      externalTxId: fixture.id,
+      providerTransactionId: "proposal-1",
+      status: "SIGNED",
+    });
+    await fixture.tracking.onSigningStatus({
+      externalTxId: fixture.id,
+      providerTransactionId: "proposal-1",
+      status: "PENDING_AUTHORIZATION",
+    });
+    const response = await request(`/fireblocks/proposals/signing/${fixture.id}/cancel`, {});
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect((await response.json()).data).toMatchObject({
+      acknowledged: false,
+      proposal: { status: "SIGNED", canCancel: false, cancellationRequestedAt: null },
+    });
+    expect(fixture.fetch).not.toHaveBeenCalled();
+  });
+
+  it("reconciles signing status without returning signatures, broadcasting or cancelling", async () => {
+    const fixture = await tracked();
+    fixture.fetch.mockResolvedValue(
+      Response.json({
+        id: "proposal-1",
+        externalTxId: fixture.id,
+        operation: "PROGRAM_CALL",
+        assetId: "SOL_TEST",
+        source: { type: "VAULT_ACCOUNT", id: "0" },
+        status: "SIGNED",
+      })
+    );
+    await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      reconcileFireblocksProposals(testEnv)
+    );
+    const listed = await request(`/fireblocks/proposals?walletId=${fixture.walletId}&kind=signing`);
+    expect((await listed.json()).data.proposals).toMatchObject([
+      { id: fixture.id, status: "SIGNED", canCancel: false },
+    ]);
+    expect(fixture.fetch).toHaveBeenCalledTimes(1);
+    expect(fixture.fetch.mock.calls[0]?.[1]?.method).toBe("GET");
+    expect(fixture.fetch.mock.calls[0]?.[0]).toContain(`/external_tx_id/${fixture.id}`);
+  });
+
+  it("keeps cleanup available after connection execution is disabled", async () => {
+    const fixture = await tracked();
+    await getDb(env).execute(
+      "UPDATE custody_connections SET status = 'failed', activated_at = NULL, last_check_status = 'failed' WHERE id = ?",
+      [fixture.connectionId]
+    );
+    const response = await request(`/fireblocks/proposals/signing/${fixture.id}/cancel`, {});
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect((await response.json()).data.proposal.status).toBe("CANCELLED");
+  });
+
+  it("refuses another project's proposal before any provider access", async () => {
+    const fixture = await tracked();
+    const response = await request(
+      `/fireblocks/proposals/signing/${fixture.id}/cancel`,
+      {},
+      `${PROJECT_ID}_production`
+    );
+    expect(response.status).toBe(404);
+    expect(fixture.fetch).not.toHaveBeenCalled();
+  });
+
+  it("never cancels a provider response with a different vault", async () => {
+    const fixture = await tracked();
+    fixture.fetch.mockResolvedValue(
+      Response.json({
+        id: "proposal-1",
+        externalTxId: fixture.id,
+        operation: "PROGRAM_CALL",
+        assetId: "SOL_TEST",
+        source: { type: "VAULT_ACCOUNT", id: "other-vault" },
+        status: "PENDING_AUTHORIZATION",
+      })
+    );
+    expect((await request(`/fireblocks/proposals/signing/${fixture.id}/cancel`, {})).status).toBe(
+      409
+    );
+    expect(fixture.fetch.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+  });
+
+  it("discards a late signature when cancellation is requested but not acknowledged", async () => {
+    const fixture = await tracked();
+    const original = fixture.fetch.getMockImplementation();
+    if (!original || !fixture.tracking.onSigningStatus)
+      throw new Error("Expected proposal tracking transport");
+    fixture.fetch.mockImplementation(async (url, init) =>
+      String(url).endsWith("/cancel") ? Response.json({ success: false }) : original(url, init)
+    );
+    const response = await request(`/fireblocks/proposals/signing/${fixture.id}/cancel`, {});
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect((await response.json()).data).toMatchObject({
+      acknowledged: false,
+      proposal: { status: "PENDING_AUTHORIZATION" },
+    });
+    await expect(
+      fixture.tracking.onSigningStatus({
+        externalTxId: fixture.id,
+        providerTransactionId: "proposal-1",
+        status: "SIGNED",
+      })
+    ).rejects.toThrow("Cancellation was requested");
   });
 });

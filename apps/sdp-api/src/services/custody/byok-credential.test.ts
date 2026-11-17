@@ -1,6 +1,4 @@
 import { generateKeyPairSync } from "node:crypto";
-import { SignerError, SignerErrorCode } from "@solana/keychain-core";
-import { FireblocksSigner } from "@solana/keychain-fireblocks";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { env as testEnv } from "@/test/helpers/env";
 import {
@@ -138,9 +136,7 @@ describe("Fireblocks BYOK credentials", () => {
   );
 
   it("keeps malformed or transient responses retryable", async () => {
-    vi.spyOn(FireblocksSigner, "create").mockRejectedValue(
-      new SignerError(SignerErrorCode.IO_ERROR)
-    );
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("network unavailable"));
     expect(
       await checkByokCredential(
         env,

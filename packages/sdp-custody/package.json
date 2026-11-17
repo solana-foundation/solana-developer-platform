@@ -118,6 +118,11 @@
       "types": "./src/provisioning/fireblocks-credential.ts",
       "import": "./src/provisioning/fireblocks-credential.ts",
       "default": "./src/provisioning/fireblocks-credential.ts"
+    },
+    "./fireblocks-proposals": {
+      "types": "./src/fireblocks-proposals.ts",
+      "import": "./src/fireblocks-proposals.ts",
+      "default": "./src/fireblocks-proposals.ts"
     }
   },
   "imports": {
@@ -139,7 +144,7 @@
     "@solana/codecs": "catalog:",
     "@solana/keychain-cdp": "1.4.0",
     "@solana/keychain-core": "1.4.0",
-    "@solana/keychain-fireblocks": "1.4.0",
+    "@solana/keychain-fireblocks": "2.0.0",
     "@solana/keychain-para": "1.4.0",
     "@solana/keychain-privy": "1.4.0",
     "@solana/keychain-turnkey": "1.4.0",

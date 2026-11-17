@@ -1761,8 +1761,6 @@ export function previewEarnWithdrawal(
 }
 
 export interface EarnWithdrawalCreateInput extends EarnWithdrawalPreviewInput {
-  /** Client-minted UUIDv4 so a retried confirm can never double-withdraw. */
-  requestId: string;
   destinationAddress: string;
 }
 
@@ -1770,7 +1768,27 @@ export function createEarnWithdrawal(
   programId: string,
   input: EarnWithdrawalCreateInput
 ): Promise<DashboardFetchResult<{ data: EarnProgramWithdrawalResponse }>> {
-  return dashboardFetch(programPath(programId, "/withdrawals"), { method: "POST", body: input });
+  // Rebuild the body field-by-field so even an untyped caller cannot smuggle a
+  // body `requestId` into this value-moving request. This POST already carries
+  // exactly one idempotency key — the shared action key `dashboardRequest`
+  // mints for it (`sendUnderActionKey`), claimed in sessionStorage before the
+  // send and kept there across an unanswered attempt — and sdp-api REFUSES a
+  // withdrawal that carries both key sources (a body key on top of the
+  // header), because it cannot tell which one a client's retry keeps stable
+  // and following the varying one is a second payout. The header key is the
+  // replay protection: the retry after an ambiguous failure re-sends the same
+  // (Project, method, path, body), so it resolves the same kept key and the
+  // API replays the first payout instead of paying twice — including across a
+  // reload, which is exactly where the flow's former ref-held `requestId`
+  // died. Callers keep the body amount canonical (the modal sends
+  // `canonicalDecimalAmount`) so a cosmetic re-spell of the same value still
+  // resolves the same kept key.
+  const body: EarnWithdrawalCreateInput = {
+    amountUsd: input.amountUsd,
+    token: input.token,
+    destinationAddress: input.destinationAddress,
+  };
+  return dashboardFetch(programPath(programId, "/withdrawals"), { method: "POST", body });
 }
 
 function fetchEarnWithdrawal(
