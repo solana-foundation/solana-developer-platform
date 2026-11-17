@@ -68,8 +68,10 @@ jobs:
             echo "No SDP Deploy run found for ${IMAGE_SHA}; stage has not deployed it." >&2
             exit 1
           fi
+          # TEMPORARY (PRO-2519): the second prefix is the stage job's name in runs that started
+          # before the worker was renamed to cron. Delete it once no such run awaits approval.
           stage_green="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs?per_page=100" \
-            --jq '[.jobs[] | select(.name | startswith("sdp-api + worker + cron — stage + smoke"))] | length > 0 and all(.conclusion == "success")')"
+            --jq '[.jobs[] | select(.name | (startswith("sdp-api + cron — stage + smoke") or startswith("sdp-api + worker + cron — stage + smoke")))] | length > 0 and all(.conclusion == "success")')"
           if [[ "${stage_green}" != "true" ]]; then
             echo "Stage deploy or smoke did not succeed for ${IMAGE_SHA} (SDP Deploy run ${run_id}); fix stage before approving prod." >&2
             exit 1
@@ -140,7 +142,7 @@ jobs:
         run: echo "Approved prod deploy with migrations for ${IMAGE_SHA}" >> "${GITHUB_STEP_SUMMARY}"
 
   deploy:
-    name: sdp-api + worker + cron — prod
+    name: sdp-api + cron — prod
     needs: approve
     # Cancelling the run must not take the prod workflow's rollback job down with this caller.
     if: always() && needs.approve.result == 'success'

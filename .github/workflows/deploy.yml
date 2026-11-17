@@ -62,7 +62,7 @@ jobs:
               ;;
           esac
           echo "api=$api" >> "$GITHUB_OUTPUT"
-          echo "Services to deploy: api=$api (api carries the worker and the migrate job — one image)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Services to deploy: api=$api (api carries the cron service and the migrate job — one image)" >> "$GITHUB_STEP_SUMMARY"
 
           prod=false
           if [ "$api" = true ] && [ "$EVENT_NAME" = push ] && [ "$CONTINUOUS_PROD_DEPLOY" = true ]; then
@@ -193,7 +193,7 @@ jobs:
           curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data "$PAYLOAD" "$SLACK" || true
 
   deploy-api-stage:
-    name: sdp-api + worker + cron — stage + smoke
+    name: sdp-api + cron — stage + smoke
     needs: changes
     if: needs.changes.outputs.api == 'true' && vars.STAGE_DEPLOY_WIF_PROVIDER != '' && vars.STAGE_DEPLOY_SA != ''
     permissions:
@@ -271,7 +271,7 @@ jobs:
           fi
 
   deploy-api-prod:
-    name: sdp-api + worker + cron — prod
+    name: sdp-api + cron — prod
     needs: [changes, deploy-api-stage, schema]
     # Explicit results instead of the implicit success(), so cancelling the run
     # cannot take the prod workflow's rollback job down with this caller.

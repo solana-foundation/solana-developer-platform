@@ -71,12 +71,13 @@ function runBlock(step) {
     .join("\n");
 }
 
-function runScript(script, { stubs, env, cwd }) {
+function runScript(script, { stubs, env, cwd = path.resolve(here, "..") }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "beta-deploy-"));
   const output = path.join(dir, "output");
   const summary = path.join(dir, "summary.md");
   const calls = path.join(dir, "calls.log");
-  for (const file of [output, summary, calls]) fs.writeFileSync(file, "");
+  const githubEnv = path.join(dir, "github-env");
+  for (const file of [output, summary, calls, githubEnv]) fs.writeFileSync(file, "");
   for (const [name, body] of Object.entries({ sleep: "exit 0", ...stubs })) {
     fs.writeFileSync(
       path.join(dir, name),
@@ -90,6 +91,7 @@ function runScript(script, { stubs, env, cwd }) {
     env: {
       PATH: `${dir}:${process.env.PATH}`,
       GITHUB_OUTPUT: output,
+      GITHUB_ENV: githubEnv,
       GITHUB_STEP_SUMMARY: summary,
       ...env,
     },
@@ -100,6 +102,7 @@ function runScript(script, { stubs, env, cwd }) {
     stdout: result.stdout,
     stderr: result.stderr,
     output: fs.readFileSync(output, "utf8"),
+    githubEnv: fs.readFileSync(githubEnv, "utf8"),
     summary: fs.readFileSync(summary, "utf8"),
     calls: fs
       .readFileSync(calls, "utf8")
@@ -116,7 +119,6 @@ test("the beta workflow runs the beta steps in order", () => {
   assertLine(beta, "      PROJECT_ID: solana-developer-platform-beta");
   assertLine(beta, "      REPO: sdp-beta");
   assertLine(beta, "      BETA_SERVICE: sdp-beta-api-public");
-  assertLine(beta, "      BETA_WORKER_SERVICE: sdp-beta-worker");
   assertLine(beta, "      BETA_MIGRATE_JOB: sdp-beta-api-public-migrate");
   assertLine(beta, "      BETA_ORIGIN: https://api-beta.solana.com");
   assert.deepEqual(
@@ -137,7 +139,7 @@ test("the beta workflow runs the beta steps in order", () => {
       "Deploy beta service",
       "Verify beta revision readiness",
       "Check the beta release channel",
-      "Update beta worker image",
+      "Update beta cron image",
       "Post the sdp-web beta gate status",
       "Install Doppler CLI",
       "Doppler OIDC login",
@@ -159,8 +161,8 @@ test("the beta workflow runs the beta steps in order", () => {
     ["Deploy beta service", "steps.migrate.outcome == 'success'"],
     ["Verify beta revision readiness", "steps.service.outcome == 'success'"],
     ["Check the beta release channel", "steps.ready.outcome == 'success'"],
-    ["Update beta worker image", "steps.channel.outcome == 'success'"],
-    ["Post the sdp-web beta gate status", "steps.worker.outcome == 'success'"],
+    ["Update beta cron image", "steps.channel.outcome == 'success'"],
+    ["Post the sdp-web beta gate status", "steps.cron.outcome == 'success'"],
   ];
   for (const [stepName, condition] of chain) {
     assertLine(stepBlock(beta, stepName), `        if: ${condition}`);
@@ -168,7 +170,7 @@ test("the beta workflow runs the beta steps in order", () => {
   for (const stepName of [
     "Run beta database migrations",
     "Deploy beta service",
-    "Update beta worker image",
+    "Update beta cron image",
   ]) {
     assertLine(
       stepBlock(beta, stepName),
@@ -323,20 +325,34 @@ const findEnv = {
   REGION: "us-central1",
   PROJECT_ID: "example-project",
   BETA_SERVICE: "sdp-beta-api-public",
-  BETA_WORKER_SERVICE: "sdp-beta-worker",
   BETA_MIGRATE_JOB: "sdp-beta-api-public-migrate",
 };
 
+const missingServices = (...names) =>
+  `case "$4" in ${names.join("|")}) echo "ERROR: (gcloud.run.services.describe) Cannot find service [$4]" >&2; exit 1 ;; esac; exit 0`;
+
 test("the beta deploy skips without failing while a beta resource is not found", () => {
   const run = runScript(findScript(), {
-    stubs: {
-      gcloud: `if [[ "$4" == sdp-beta-worker ]]; then echo "ERROR: (gcloud.run.services.describe) Cannot find service [sdp-beta-worker]" >&2; exit 1; fi; exit 0`,
-    },
+    stubs: { gcloud: missingServices("sdp-beta-cron", "sdp-beta-worker") },
     env: findEnv,
   });
   assert.equal(run.code, 0, run.stderr);
   assert.equal(run.output, "present=false\n");
-  assert.match(run.stdout, /missing: sdp-beta-worker/);
+  assert.equal(run.githubEnv, "");
+  assert.match(run.stdout, /missing: sdp-beta-cron/);
+});
+
+// TEMPORARY (PRO-2519): delete with the fallback in .github/scripts/resolve-cron-service.sh.
+test("the beta deploy finds the cron service under its new name or its old one", () => {
+  for (const [stub, name] of [
+    ["exit 0", "sdp-beta-cron"],
+    [missingServices("sdp-beta-cron"), "sdp-beta-worker"],
+  ]) {
+    const run = runScript(findScript(), { stubs: { gcloud: stub }, env: findEnv });
+    assert.equal(run.code, 0, run.stderr);
+    assert.equal(run.output, "present=true\n");
+    assert.equal(run.githubEnv, `BETA_CRON_SERVICE=${name}\n`);
+  }
 });
 
 test("the beta deploy refuses an image_sha that is not a full commit SHA", () => {

@@ -22,7 +22,6 @@ jobs:
       REGION: us-central1
       REPO: sdp-dev
       SERVICE: sdp-dev-api-public
-      WORKER_SERVICE: sdp-dev-worker
       MIGRATE_JOB: sdp-dev-api-public-migrate
     steps:
       - name: Checkout
@@ -63,9 +62,13 @@ jobs:
           gcloud run services update "${SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
 
-      - name: Update worker image
+      - name: Update cron image
         run: |
-          # The Worker is the only scheduler (ADR 0011): a missing service means no Money Exit
-          # runs, so this fails the deploy instead of skipping.
-          gcloud run services update "${WORKER_SERVICE}" \
+          # The cron service is the only scheduler (ADR 0011): a missing service means no Money
+          # Exit runs, so this fails the deploy instead of skipping.
+          set -euo pipefail
+          # TEMPORARY (PRO-2519): sdp-dev-worker is being renamed to sdp-dev-cron. Once it is, set
+          # CRON_SERVICE: sdp-dev-cron in this job's env and delete the next line.
+          CRON_SERVICE="$(.github/scripts/resolve-cron-service.sh sdp-dev)"
+          gcloud run services update "${CRON_SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"

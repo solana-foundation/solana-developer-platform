@@ -4,7 +4,7 @@
 #   ephemeral-env.sh deploy <pr-number> <image>
 #   ephemeral-env.sh teardown <pr-number>
 #
-# deploy clones the dev migrate job and the dev API/worker services into
+# deploy clones the dev migrate job and the dev API and cron services into
 # per-PR copies that share dev's secrets but land on their own database
 # (EPHEMERAL_DB_NAME) and redis keyspace (EPHEMERAL_REDIS_DB). teardown
 # drops the database, flushes the redis db, and deletes the clones.
@@ -13,7 +13,6 @@ set -euo pipefail
 PROJECT="${PROJECT_ID:-solana-developer-platform-dev}"
 REGION="${REGION:-us-central1}"
 BASE_API_SERVICE="sdp-dev-api-public"
-BASE_WORKER_SERVICE="sdp-dev-worker"
 BASE_MIGRATE_JOB="sdp-dev-api-public-migrate"
 
 cmd="${1:?usage: ephemeral-env.sh <deploy|teardown> <pr-number> [image]}"
@@ -21,7 +20,10 @@ pr="${2:?pr number is required}"
 [[ "${pr}" =~ ^[0-9]+$ ]] || { echo "pr number must be numeric" >&2; exit 1; }
 
 api_service="sdp-dev-api-pr-${pr}"
-worker_service="sdp-dev-worker-pr-${pr}"
+cron_service="sdp-dev-cron-pr-${pr}"
+# TEMPORARY (PRO-2519): the name of the cron clone of a PR deployed before the
+# rename. Delete it, and its two uses, once no such clone is left on dev.
+legacy_cron_service="sdp-dev-worker-pr-${pr}"
 db_job="sdp-dev-api-pr-${pr}-db"
 db_name="sdp_api_pr_${pr}"
 
@@ -76,6 +78,20 @@ export_json() { # <services|jobs> <name>
   run "$1" describe "$2" --format=export | yaml_to_json
 }
 
+# TEMPORARY (PRO-2519): dev's cron service is sdp-dev-worker until its Terraform
+# apply renames it. Once it is sdp-dev-cron, replace this with
+# BASE_CRON_SERVICE="sdp-dev-cron" beside the other two.
+base_cron_service() {
+  PROJECT_ID="${PROJECT}" REGION="${REGION}" \
+    "$(dirname "${BASH_SOURCE[0]}")/resolve-cron-service.sh" sdp-dev
+}
+
+delete_service_if_present() {
+  if run services describe "$1" >/dev/null 2>&1; then
+    run services delete "$1" --quiet
+  fi
+}
+
 ephemeral_env_json() {
   jq -n --arg db "${db_name}" --arg redis "${redis_db}" \
     '[{name: "EPHEMERAL_DB_NAME", value: $db}, {name: "EPHEMERAL_REDIS_DB", value: $redis}]'
@@ -84,6 +100,7 @@ ephemeral_env_json() {
 deploy() {
   local image="${1:?image is required}"
   local tmp; tmp="$(mktemp -d)"
+  local base_cron; base_cron="$(base_cron_service)"
 
   redis_db="$(allocate_redis_db)"
 
@@ -131,8 +148,10 @@ deploy() {
   run services add-iam-policy-binding "${api_service}" \
     --member allUsers --role roles/run.invoker >/dev/null
 
-  export_json services "${BASE_WORKER_SERVICE}" | jq \
-    --arg name "${worker_service}" --arg pr "${pr}" --arg image "${image}" \
+  # Two clones would run every cron twice against the PR's database.
+  delete_service_if_present "${legacy_cron_service}" >/dev/null
+  export_json services "${base_cron}" | jq \
+    --arg name "${cron_service}" --arg pr "${pr}" --arg image "${image}" \
     --argjson extra "$(ephemeral_env_json)" \
     '.metadata.name = $name
      | .metadata.labels["sdp-ephemeral-pr"] = $pr
@@ -140,8 +159,8 @@ deploy() {
      | .spec.template.spec.containers[0].image = $image
      | .spec.template.spec.containers[0].env =
          ((.spec.template.spec.containers[0].env // []) + $extra)
-    ' >"${tmp}/${worker_service}.json"
-  run services replace "${tmp}/${worker_service}.json" >/dev/null
+    ' >"${tmp}/${cron_service}.json"
+  run services replace "${tmp}/${cron_service}.json" >/dev/null
 
   run services describe "${api_service}" --format='value(status.url)'
 }
@@ -158,10 +177,8 @@ teardown() {
     run jobs execute "${db_job}" --args "${drop_args}" --wait || echo "database drop failed; dropping resources anyway" >&2
     run jobs delete "${db_job}" --quiet
   fi
-  for service in "${api_service}" "${worker_service}"; do
-    if run services describe "${service}" >/dev/null 2>&1; then
-      run services delete "${service}" --quiet
-    fi
+  for service in "${api_service}" "${cron_service}" "${legacy_cron_service}"; do
+    delete_service_if_present "${service}"
   done
 }
 
