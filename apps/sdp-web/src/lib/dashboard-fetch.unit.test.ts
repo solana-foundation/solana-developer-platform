@@ -569,6 +569,29 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  // An earn program payout moves money without being a payments route, so it
+  // is registered for the same refusal: a reload must never mint a fresh key
+  // for a payout that may have landed.
+  it("refuses to send an earn program withdrawal when storage refuses its key", async () => {
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/markets/earn`);
+    installSessionStorage(true);
+    const fetchMock = statusFetchMock(201);
+    vi.stubGlobal("fetch", fetchMock);
+    const createWithdrawal = () =>
+      dashboardRequest("/api/dashboard/markets/earn/programs/prog_1/withdrawals", {
+        method: "POST",
+        body: '{"amountUsd":"1","token":"usdc","destinationAddress":"addr"}',
+      });
+
+    const response = await createWithdrawal();
+
+    expect(response.status).toBe(428);
+    expect(await response.json()).toMatchObject({
+      error: { code: "IDEMPOTENCY_KEY_NOT_PERSISTED" },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   // Editing an active schedule signs and broadcasts a replacement subscription.
   it("keys a recurring edit, and refuses it when storage refuses its key", async () => {
     openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
