@@ -26,7 +26,7 @@ describe("GET /api/dashboard/markets/earn/vault-positions", () => {
     expect(mocks.proxyToSdpApi).toHaveBeenCalledWith({
       request,
       traceSource: "route.dashboard.earn.vault_positions.list",
-      path: "/v1/earn/vault-positions?limit=100&before=abc_DEF-123",
+      path: "/v1/earn/positions/provider-signed?limit=100&before=abc_DEF-123",
     });
   });
 
@@ -37,7 +37,7 @@ describe("GET /api/dashboard/markets/earn/vault-positions", () => {
     await GET(request);
     expect(mocks.proxyToSdpApi).toHaveBeenCalledWith(
       expect.objectContaining({
-        path: "/v1/earn/vault-positions?afterMovementIds=earn_one%2Cearn_two",
+        path: "/v1/earn/positions/provider-signed?afterMovementIds=earn_one%2Cearn_two",
       })
     );
   });

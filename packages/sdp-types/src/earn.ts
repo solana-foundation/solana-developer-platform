@@ -453,7 +453,7 @@ export interface EarnExternalWalletPositionSummaryResponse {
   summary: EarnExternalWalletPositionSummary;
 }
 
-/** JSON body for POST /v1/earn/vault-deposits. Idempotency is header-only. */
+/** JSON body for POST /v1/earn/deposits/execute. Idempotency is header-only. */
 export interface EarnVaultDepositRequest {
   strategyId: string;
   custodyWalletId: string;
@@ -553,13 +553,13 @@ export interface EarnVaultDepositRecord {
   confirmedAt: string | null;
 }
 
-/** Response body of GET /v1/earn/vault-deposits/:movementId. */
+/** Response body of GET /v1/earn/deposits/provider-signed/:movementId. */
 export interface EarnVaultDepositResponse {
   deposit: EarnVaultDepositRecord;
 }
 
 /**
- * Response body of GET /v1/earn/vault-deposits — one workspace's recorded
+ * Response body of GET /v1/earn/deposits/provider-signed — one workspace's recorded
  * deposits, newest first.
  *
  * A bounded window, not a complete history: it exists so a client can re-derive
@@ -573,10 +573,10 @@ export interface EarnVaultDepositsPage {
   nextCursor: string | null;
 }
 
-/** JSON body for POST /v1/earn/vault-withdrawals. Idempotency is header-only. */
+/** JSON body for POST /v1/earn/withdrawals/execute. Idempotency is header-only. */
 export interface EarnVaultWithdrawalRequest {
   redemptionMode?: "standard" | "instant";
-  /** The vault position being exited — from GET /v1/earn/vault-positions. */
+  /** The vault position being exited — from GET /v1/earn/positions/provider-signed. */
   positionId: string;
   /** Shares to redeem; the position's `withdrawableShares` is the observed ceiling. */
   shares: string;
@@ -614,12 +614,12 @@ export interface EarnVaultWithdrawal {
   replayed?: boolean;
 }
 
-/** Response body of GET /v1/earn/vault-withdrawals/:movementId and POST. */
+/** Response body of GET /v1/earn/withdrawals/provider-signed/:movementId and POST. */
 export interface EarnVaultWithdrawalResponse {
   withdrawal: EarnVaultWithdrawal;
 }
 
-/** Response body of GET /v1/earn/vault-withdrawals: logical withdrawals, newest first. */
+/** Response body of GET /v1/earn/withdrawals/provider-signed: logical withdrawals, newest first. */
 export interface EarnVaultWithdrawalsPage {
   withdrawals: EarnVaultWithdrawal[];
   hasMore: boolean;
@@ -840,7 +840,7 @@ export interface EarnExternalWalletTransaction {
   shareMint: string;
 }
 
-/** Response body of POST /v1/earn/external-wallet/deposit-transactions. */
+/** Response body of POST /v1/earn/deposits/build-unsigned-transaction. */
 export interface EarnExternalWalletDepositTransactionResponse {
   transaction: EarnExternalWalletTransaction & {
     /** Deposit amount encoded in the transaction, vault-token units. */
@@ -864,7 +864,7 @@ export interface EarnExternalWalletDepositTransactionResponse {
 }
 
 /**
- * Response body of POST /v1/earn/external-wallet/deposit-transactions when a
+ * Response body of POST /v1/earn/deposits/build-unsigned-transaction when a
  * swap-funded deposit could not fit in ONE Solana transaction (the packet
  * limit is 1,232 bytes and some Jupiter routes leave no room for the vault
  * instructions). No CONSUMABLE build is persisted for this answer: SDP hands
@@ -918,7 +918,7 @@ interface EarnExternalWalletExitReference {
   positionId: string;
 }
 
-/** Response body of POST /v1/earn/external-wallet/withdrawal-transactions. */
+/** Response body of POST /v1/earn/withdrawals/build-unsigned-transaction. */
 export interface EarnExternalWalletWithdrawalTransactionResponse {
   transaction: EarnExternalWalletTransaction &
     EarnExternalWalletExitReference & {
@@ -991,12 +991,12 @@ export interface EarnExternalWalletMovement {
   replayed?: boolean;
 }
 
-/** Response body of POST /v1/earn/external-wallet/deposits. */
+/** Response body of POST /v1/earn/deposits/submit-signed-transaction. */
 export interface EarnExternalWalletDepositResponse {
   deposit: EarnExternalWalletMovement;
 }
 
-/** Response body of POST /v1/earn/external-wallet/withdrawals. */
+/** Response body of POST /v1/earn/withdrawals/submit-signed-transaction. */
 export interface EarnExternalWalletWithdrawalResponse {
   withdrawal: EarnExternalWalletMovement;
 }
@@ -1009,7 +1009,7 @@ export interface EarnExternalWalletMovementsPage {
   nextCursor: string | null;
 }
 
-/** Response body of GET /v1/earn/external-wallet/movements/:movementId. */
+/** Response body of GET /v1/earn/movements/caller-signed/:movementId. */
 export interface EarnExternalWalletMovementResponse {
   movement: EarnExternalWalletMovement;
 }
@@ -1079,7 +1079,7 @@ export interface EarnExternalWalletEarnings {
   totalsByToken: EarnExternalWalletTokenEarnings[];
 }
 
-/** Response body of GET /v1/earn/external-wallet/earnings?ownerAddress=…. */
+/** Response body of GET /v1/earn/earnings/caller-signed?ownerAddress=…. */
 export interface EarnExternalWalletEarningsResponse {
   earnings: EarnExternalWalletEarnings;
 }
@@ -1665,7 +1665,7 @@ export interface EarnMovementRecord {
   settledAt?: string;
 }
 
-/** Response body of GET /v1/earn/movements — newest first, keyset-paged. */
+/** Response body of GET /v1/earn/treasury/movements — newest first, keyset-paged. */
 export interface EarnMovementsPage {
   movements: EarnMovementRecord[];
   hasMore: boolean;

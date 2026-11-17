@@ -147,7 +147,7 @@ describe("Earn guide examples", () => {
           earnRequest: async (route: string, body?: Record<string, unknown>) => {
             assert.doesNotMatch(route, /\/strategies/);
             calls.push({ route, body });
-            if (route.startsWith("/v1/earn/external-wallet/positions?")) {
+            if (route.startsWith("/v1/earn/positions/caller-signed?")) {
               const query = new URL(route, "https://test.example").searchParams;
               if (query.get("before") === null) {
                 return {
@@ -174,8 +174,11 @@ describe("Earn guide examples", () => {
         finalizedMovementSchema
       );
       assert.equal(movement.status, "finalized");
-      assert.equal(calls.filter(({ route }) => route.includes("/positions?")).length, 2);
-      const build = calls.find(({ route }) => route.endsWith("/withdrawal-transactions"));
+      assert.equal(
+        calls.filter(({ route }) => route.includes("/positions/caller-signed?")).length,
+        2
+      );
+      const build = calls.find(({ route }) => route.endsWith("/build-unsigned-transaction"));
       assert.ok(build?.body);
       assert.equal(build.body.positionId, savedPosition.positionId);
       assert.equal(build.body.minAmountOut, withdrawalSlippage ? "9.99" : undefined);

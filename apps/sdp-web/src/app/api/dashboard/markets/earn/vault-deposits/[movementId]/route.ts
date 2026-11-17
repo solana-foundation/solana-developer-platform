@@ -13,6 +13,6 @@ export async function GET(
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.vault_deposits.get",
-    path: `/v1/earn/vault-deposits/${encodeURIComponent(movementId)}`,
+    path: `/v1/earn/deposits/provider-signed/${encodeURIComponent(movementId)}`,
   });
 }
