@@ -19,11 +19,21 @@ import { productionProjectsAllowed, sandboxProjectsAllowed } from "@/lib/product
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { createSystemAuditService } from "@/services/audit.service";
 import {
+  type MainnetAccessCorrectionEmail,
   type MainnetAccessRequestEmail,
   mainnetAccessEmailConfig,
   sendMainnetAccessCorrectionEmail,
   sendMainnetAccessRequestEmail,
 } from "@/services/mainnet-access-email";
+import {
+  mainnetAccessCorrectionSlackMessage,
+  mainnetAccessRequestSlackMessage,
+} from "@/services/mainnet-access-slack";
+import {
+  postSlackMessage,
+  requestsSlackWebhookUrl,
+  type SlackMessage,
+} from "@/services/slack-webhook";
 import type { Env } from "@/types/env";
 
 export function readMainnetAccessRow(
@@ -115,11 +125,10 @@ export async function notifyMainnetAccessRequest(
   if (!claim) {
     throw conflict("This organization's request is already being sent; try again in a minute");
   }
+  let request: MainnetAccessRequestEmail;
   try {
-    await sendMainnetAccessRequestEmail(
-      env,
-      requestEmail(claim.row, await repository.emailContext(claim.row))
-    );
+    request = requestEmail(claim.row, await repository.emailContext(claim.row));
+    await sendMainnetAccessRequestEmail(env, request);
   } catch (error) {
     logEvent("warn", {
       event: "sdp_api_mainnet_access_request_notify_failed",
@@ -129,6 +138,10 @@ export async function notifyMainnetAccessRequest(
     await repository.releaseSend(claim);
     throw error;
   }
+  // Posted while the send claim still holds the request, so a correction (which waits for the
+  // claim) can never reach the channel before the request it corrects. Bounded by the post's 5 s
+  // deadline, well inside the claim's lease.
+  await postToRequestsChannel(env, organizationId, mainnetAccessRequestSlackMessage(request));
 
   const notified = await repository.markNotified(claim);
   if (!notified) throw conflict("The mainnet access request changed while it was being sent");
@@ -137,6 +150,29 @@ export async function notifyMainnetAccessRequest(
     organization_id: organizationId,
   });
   return notified;
+}
+
+/**
+ * Posts an operator email's Slack counterpart to #sdp-requests, once the email is sent (or, for
+ * a correction on a deployment without email, once the change is saved). Never throws: the email and the saved
+ * request are the record, so a Slack failure is logged and nothing else.
+ */
+async function postToRequestsChannel(
+  env: Env,
+  organizationId: string,
+  message: SlackMessage
+): Promise<void> {
+  const webhookUrl = requestsSlackWebhookUrl(env);
+  if (!webhookUrl) return;
+  try {
+    await postSlackMessage(webhookUrl, message);
+  } catch (error) {
+    logEvent("warn", {
+      event: "sdp_api_mainnet_access_slack_post_failed",
+      organization_id: organizationId,
+      ...describeError(error),
+    });
+  }
 }
 
 function requestEmail(
@@ -248,27 +284,38 @@ export async function correctMainnetAccess(
     };
   });
 
-  if (!mainnetAccessEmailConfig(env)) return { request, operatorEmail: "not_configured" };
+  const correctionEmail: MainnetAccessCorrectionEmail = {
+    request: earlier,
+    correction:
+      input.operation === "set-country"
+        ? {
+            operation: "set-country",
+            countryCode: input.countryCode,
+            countryName: countryByCode(input.countryCode).name,
+          }
+        : { operation: "reset" },
+    operator: input.operator,
+    reason: input.reason,
+    ticket: input.ticket,
+  };
+  const posted = postToRequestsChannel(
+    env,
+    input.organizationId,
+    mainnetAccessCorrectionSlackMessage(correctionEmail)
+  );
+  if (!mainnetAccessEmailConfig(env)) {
+    await posted;
+    return { request, operatorEmail: "not_configured" };
+  }
   try {
-    await sendMainnetAccessCorrectionEmail(env, {
-      request: earlier,
-      correction:
-        input.operation === "set-country"
-          ? {
-              operation: "set-country",
-              countryCode: input.countryCode,
-              countryName: countryByCode(input.countryCode).name,
-            }
-          : { operation: "reset" },
-      operator: input.operator,
-      reason: input.reason,
-      ticket: input.ticket,
-    });
+    await sendMainnetAccessCorrectionEmail(env, correctionEmail);
   } catch (error) {
     throw new Error(
       `The ${input.operation} is saved, but emailing the operator address failed; tell it by hand.`,
       { cause: error }
     );
+  } finally {
+    await posted;
   }
   return { request, operatorEmail: "sent" };
 }

@@ -118,6 +118,12 @@ export interface Env extends ManagedRpcEnv {
    * not an address), the deployment takes no mainnet access requests.
    */
   SDP_OPERATOR_EMAIL?: string;
+  /**
+   * Slack incoming webhook for #sdp-requests (`services/slack-webhook.ts`): each mainnet access
+   * request and correction email is copied there. Prod sets it in Doppler `prd`. Unset, or not a
+   * `https://hooks.slack.com/…` URL, the deployment posts nothing; email is unaffected.
+   */
+  SDP_REQUESTS_SLACK_WEBHOOK_URL?: string;
 
   // Allowlist configuration
   ALLOWLIST_ADMIN_KEY?: string;
