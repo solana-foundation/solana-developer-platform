@@ -23,7 +23,9 @@ and so does setting both to `false`.
 
 Each Vercel flag is decided by Vercel Flags when the project defines a flag with that key, and
 otherwise by its environment fallback (`SDP_FLAG_SANDBOX_ON_BETA`, `SDP_FLAG_BETA_LABEL`,
-`SDP_FLAG_HOMEPAGE_OPEN_SIGNUP`), which defaults to off. Defining the flag in Vercel Flags lets it flip without a redeploy; the
+`SDP_FLAG_HOMEPAGE_OPEN_SIGNUP`), which defaults to off. A flag the code defines is not listed in a
+project's Flags tab until someone creates it there: create it with the exact key, as a boolean,
+and set it for the Production environment. A flag in Vercel Flags flips without a redeploy; the
 environment fallback needs one.
 
 ## Before the window
