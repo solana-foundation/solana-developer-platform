@@ -55,6 +55,12 @@ describe("message helpers", () => {
     );
   });
 
+  it("escapes the message's own text, which Slack shows beside the attachment", () => {
+    expect(slackMessage("Acme <!channel>", SLACK_COLORS.pending, []).text).toBe(
+      "Acme &lt;!channel&gt;"
+    );
+  });
+
   it("keeps text within Slack's limits", () => {
     const [field] = (fieldsSection(["x".repeat(2500)]) as { fields: { text: string }[] }).fields;
     expect(field?.text).toHaveLength(2000);

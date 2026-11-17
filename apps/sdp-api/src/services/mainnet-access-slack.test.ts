@@ -31,7 +31,7 @@ describe("mainnet access Slack posts", () => {
     const message = mainnetAccessRequestSlackMessage(REQUEST);
     const [attachment] = message.attachments;
     expect(attachment.color).toBe(SLACK_COLORS.pending);
-    expect(message.text).toBe("Mainnet access request: Acme <!channel>");
+    expect(message.text).toBe("Mainnet access request: Acme &lt;!channel&gt;");
     const body = JSON.stringify(attachment.blocks);
     for (const text of [
       "*Acme &lt;!channel&gt;* wants to go live on mainnet.",
@@ -90,7 +90,7 @@ describe("mainnet access Slack posts", () => {
       ...OPERATOR,
     });
     expect(reset.attachments[0].color).toBe(SLACK_COLORS.reset);
-    expect(reset.text).toBe("Mainnet access request reset: Acme <!channel>");
+    expect(reset.text).toBe("Mainnet access request reset: Acme &lt;!channel&gt;");
     const body = JSON.stringify(reset);
     expect(body).toContain("Don't approve from the earlier post");
     expect(body).toContain("*Ticket*\\nHOO-1");

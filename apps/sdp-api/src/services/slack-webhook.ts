@@ -102,8 +102,16 @@ export function linkButton(label: string, url: string, style?: "primary"): Slack
   };
 }
 
+/**
+ * One message. `text` is plain and escaped here: with the blocks inside an attachment, Slack
+ * renders it as the message's visible mrkdwn line, so raw customer text in it could mention the
+ * channel or disguise a link.
+ */
 export function slackMessage(text: string, color: string, blocks: SlackBlock[]): SlackMessage {
-  return { text: truncate(text, SECTION_TEXT_MAX), attachments: [{ color, blocks }] };
+  return {
+    text: escapeSlackText(truncate(text, SECTION_TEXT_MAX)),
+    attachments: [{ color, blocks }],
+  };
 }
 
 export class SlackWebhookError extends Error {
