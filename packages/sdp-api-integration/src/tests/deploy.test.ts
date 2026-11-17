@@ -53,7 +53,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
     const tokenId = created.data.token.id;
     expect(created.data.token.status).toBe("pending");
 
-    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy/execute`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
@@ -100,7 +100,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
     const created = (await createRes.json()) as TokenApiResponse;
     const tokenId = created.data.token.id;
 
-    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy/execute`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
@@ -130,9 +130,12 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
     const created = (await createRes.json()) as TokenApiResponse;
     const tokenId = created.data.token.id;
 
-    const prepareRes = await request(`/v1/issuance/tokens/${tokenId}/deploy/prepare`, {
-      method: "POST",
-    });
+    const prepareRes = await request(
+      `/v1/issuance/tokens/${tokenId}/deploy/build-unsigned-transaction`,
+      {
+        method: "POST",
+      }
+    );
 
     expect(prepareRes.status).toBe(200);
     const prepared = (await prepareRes.json()) as DeployPrepareApiResponse;
@@ -165,13 +168,13 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
     const created = (await createRes.json()) as TokenApiResponse;
     const tokenId = created.data.token.id;
 
-    await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+    await request(`/v1/issuance/tokens/${tokenId}/deploy/execute`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
     });
 
-    const secondDeployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+    const secondDeployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy/execute`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),

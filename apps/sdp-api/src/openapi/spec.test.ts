@@ -574,13 +574,13 @@ describe("OpenAPI spec", () => {
   it("documents allowlist search/label filters and the labels endpoint", () => {
     const doc = createOpenApiDocument();
 
-    const listPath = doc.paths?.["/v1/issuance/tokens/{tokenId}/allowlist"]?.get;
+    const listPath = doc.paths?.["/v1/issuance/tokens/{tokenId}/control-list"]?.get;
     const queryParamNames = listPath?.parameters
       ?.filter((parameter) => "in" in parameter && parameter.in === "query")
       .map((parameter) => ("name" in parameter ? parameter.name : undefined));
     expect(queryParamNames).toEqual(expect.arrayContaining(["search", "label"]));
 
-    const labelsPath = doc.paths?.["/v1/issuance/tokens/{tokenId}/allowlist/labels"]?.get;
+    const labelsPath = doc.paths?.["/v1/issuance/tokens/{tokenId}/control-list/labels"]?.get;
     expect(labelsPath).toBeDefined();
     expect(labelsPath?.operationId).toBe("listTokenAllowlistLabels");
   });
@@ -690,7 +690,7 @@ describe("OpenAPI spec", () => {
     // cannot answer SIGNING_REJECTED until SDP sponsors them (PRO-1744).
     const sponsored = [
       ["/v1/payments/transfers/execute", "post"],
-      ["/v1/issuance/tokens/{tokenId}/mint", "post"],
+      ["/v1/issuance/tokens/{tokenId}/mint/execute", "post"],
       ["/v1/dvp/trades/{tradeId}/settle", "post"],
     ] as const;
     for (const [path, method] of sponsored) {
@@ -830,7 +830,7 @@ describe("OpenAPI spec", () => {
 
     expect(doc.paths?.["/v1/organizations/{orgId}"]).toBeUndefined();
     expect(doc.paths?.["/v1/members"]).toBeUndefined();
-    expect(doc.paths?.["/admin/allowlist"]).toBeUndefined();
+    expect(doc.paths?.["/admin/onboarding-allowlist"]).toBeUndefined();
     expect(doc.paths?.["/v1/onboarding/status"]).toBeUndefined();
     expect(doc.components?.securitySchemes?.adminKey).toBeUndefined();
 
