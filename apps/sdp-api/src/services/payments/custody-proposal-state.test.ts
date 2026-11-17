@@ -19,6 +19,7 @@ import {
   hasUnalertedCustodyProposalRefusal,
   isCancellableCustodyProposalPhase,
   isCustodyProposalCancellationInFlight,
+  isMissingCustodyProposalPhase,
   isTerminalCustodyProposalPhase,
   transitionCustodyProposal,
 } from "@sdp/types/custody-proposals";
@@ -80,7 +81,7 @@ function productState(
   };
   if (CUSTODY_PROPOSAL_PROVIDER_PHASE_PROPERTIES[phase].identity === "required")
     state.providerTransactionId = "provider-transaction-1";
-  if (phase === "absent" || phase === "never_accepted") state.firstMissingAt = START;
+  if (isMissingCustodyProposalPhase(phase)) state.firstMissingAt = START;
   if (phase === "submitting") state.submissionStartedAt = START;
   if (authorization !== "authorized") state.refusal = refused().refusal;
   switch (authorization) {

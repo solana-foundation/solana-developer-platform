@@ -2,6 +2,7 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { createCustodyProposalState } from "@sdp/types/custody-proposals";
 import {
   PAYMENT_TRANSFER_STATUSES,
+  PAYMENT_TRANSFER_STATUSES_WITHOUT_EXECUTION_OUTCOME,
   SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
 } from "@sdp/types/payments";
 import { DatabaseError } from "pg";
@@ -21,6 +22,9 @@ export const CUSTODY_PROPOSAL_DISCOVERY_GRACE_MS = 2 * 60 * 1000;
 const SUCCESSFUL_SQL = SUCCESSFUL_PAYMENT_TRANSFER_STATUSES.map((status) => `'${status}'`).join(
   ", "
 );
+const WITHOUT_EXECUTION_OUTCOME_SQL = PAYMENT_TRANSFER_STATUSES_WITHOUT_EXECUTION_OUTCOME.map(
+  (status) => `'${status}'`
+).join(", ");
 const INITIAL = createCustodyProposalState();
 const legacyPaymentSchema = z.object({
   id: z.string().min(1),
@@ -107,7 +111,7 @@ export async function adoptLegacyCustodyProposals(
         WHERE ${clauses.join(" AND ")}
           AND cp.status = 'active' AND cp.provider_phase = '${INITIAL.providerPhase}'
           AND cp.authorization_state = '${INITIAL.authorizationState}'
-          AND (pt.status = 'failed' OR pt.status IN (${SUCCESSFUL_SQL}))
+          AND pt.status NOT IN (${WITHOUT_EXECUTION_OUTCOME_SQL})
         ORDER BY pt.created_at, pt.id ${limitClause}
      ), legacy AS (
        SELECT * FROM missing UNION ALL SELECT * FROM advanced

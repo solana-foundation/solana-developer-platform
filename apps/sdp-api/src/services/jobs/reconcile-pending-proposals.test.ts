@@ -1,6 +1,7 @@
 import type { FireblocksTransferResult } from "@sdp/custody/provisioning/fireblocks-transfers";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import {
+  CUSTODY_PROPOSAL_ACCEPTED_ACTIVE_PHASES,
   createCustodyProposalState,
   hasUnalertedCustodyProposalRefusal,
   isTerminalCustodyProposalPhase,
@@ -266,7 +267,7 @@ function refuse(h: ReturnType<typeof harness>) {
 
 function observeDuringCancellation(
   h: ReturnType<typeof harness>,
-  phase: "pending" | "executing" = "pending"
+  phase: (typeof CUSTODY_PROPOSAL_ACCEPTED_ACTIVE_PHASES)[number] = "pending"
 ) {
   const row = h.state();
   return h.apply({
@@ -482,7 +483,7 @@ describe("reconcilePendingProposals", () => {
     }
   );
 
-  it.each(["pending", "executing"] as const)(
+  it.each(CUSTODY_PROPOSAL_ACCEPTED_ACTIVE_PHASES)(
     "persists ambiguous cancellation after a competing %s observation, preserving the error",
     async (phase) => {
       const h = harness();

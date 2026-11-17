@@ -23,6 +23,18 @@ export const CUSTODY_PROPOSAL_ACTIVE_PHASES = [
   "executing",
 ] as const satisfies readonly CustodyProposalProviderPhase[];
 
+/** Provider acceptance was recorded and observation can still advance the proposal. */
+export const CUSTODY_PROPOSAL_ACCEPTED_ACTIVE_PHASES = [
+  "pending",
+  "executing",
+] as const satisfies readonly CustodyProposalProviderPhase[];
+
+/** Missing-provider progress retains its first authenticated absence observation. */
+export const CUSTODY_PROPOSAL_MISSING_PHASES = [
+  "absent",
+  "never_accepted",
+] as const satisfies readonly CustodyProposalProviderPhase[];
+
 /** Terminal observations cannot be replaced by a later observation. */
 export const CUSTODY_PROPOSAL_TERMINAL_PHASES = [
   "completed",
@@ -67,6 +79,10 @@ export const CUSTODY_PROPOSAL_CANCELLATION_READY_AUTHORIZATION_STATES = [
   "cancel_retry_requested",
   "cancel_retry_ambiguous",
 ] as const satisfies readonly CustodyProposalAuthorizationState[];
+
+/** Authorization states that can stage a cancellation after their retry cooldown. */
+export type CustodyProposalCancellationReadyAuthorizationState =
+  (typeof CUSTODY_PROPOSAL_CANCELLATION_READY_AUTHORIZATION_STATES)[number];
 
 /** A definitive result can still arrive for the current cancellation attempt. */
 export const CUSTODY_PROPOSAL_CANCELLATION_IN_FLIGHT_AUTHORIZATION_STATES = [
@@ -231,7 +247,13 @@ type AuthorizationTransitions = Readonly<
     CustodyProposalAuthorizationState,
     Partial<Record<EventType, readonly CustodyProposalAuthorizationState[]>>
   >
->;
+> &
+  Readonly<
+    Record<
+      CustodyProposalCancellationReadyAuthorizationState,
+      { cancel_requested: readonly [CustodyProposalAuthorizationState] }
+    >
+  >;
 type ProviderTransitions = Readonly<
   Record<
     CustodyProposalProviderPhase,
@@ -305,7 +327,9 @@ export const CUSTODY_PROPOSAL_AUTHORIZATION_TRANSITIONS = {
   refusal_alerted: { observed: ["refusal_alerted"], alert_delivered: ["refusal_alerted"] },
 } as const satisfies AuthorizationTransitions;
 
-function acceptedProviderTransitions<Phase extends "pending" | "executing">(phase: Phase) {
+function acceptedProviderTransitions<
+  Phase extends (typeof CUSTODY_PROPOSAL_ACCEPTED_ACTIVE_PHASES)[number],
+>(phase: Phase) {
   return {
     observed: CUSTODY_PROPOSAL_OBSERVED_PHASES,
     observed_absent: [phase],
@@ -331,7 +355,7 @@ export const CUSTODY_PROPOSAL_PROVIDER_TRANSITIONS = {
   absent: {
     submission_refused: ["not_sent"],
     observed: CUSTODY_PROPOSAL_OBSERVED_PHASES,
-    observed_absent: ["absent", "never_accepted"],
+    observed_absent: CUSTODY_PROPOSAL_MISSING_PHASES,
   },
   pending: {
     ...acceptedProviderTransitions("pending"),
@@ -448,6 +472,13 @@ export function isTerminalCustodyProposalPhase(phase: CustodyProposalProviderPha
   return CUSTODY_PROPOSAL_PROVIDER_PHASE_PROPERTIES[phase].terminal;
 }
 
+/** Reports whether a proposal records an authenticated missing-provider observation. */
+export function isMissingCustodyProposalPhase(
+  phase: CustodyProposalProviderPhase
+): phase is (typeof CUSTODY_PROPOSAL_MISSING_PHASES)[number] {
+  return CUSTODY_PROPOSAL_MISSING_PHASES.some((candidate) => candidate === phase);
+}
+
 /** Reports whether an adapter explicitly proved cancellation is still possible. */
 export function isCancellableCustodyProposalPhase(phase: CustodyProposalProviderPhase): boolean {
   return CUSTODY_PROPOSAL_PROVIDER_PHASE_PROPERTIES[phase].cancellable;
@@ -479,7 +510,9 @@ export function isCustodyProposalCancellationInFlight(state: CustodyProposalStat
 export function canRequestCustodyProposalCancellation(
   state: CustodyProposalState,
   at: string
-): boolean {
+): state is CustodyProposalState & {
+  authorizationState: CustodyProposalCancellationReadyAuthorizationState;
+} {
   if (
     !isCancellableCustodyProposalPhase(state.providerPhase) ||
     state.cancelAttempt >= CUSTODY_PROPOSAL_MAX_CANCEL_ATTEMPT
@@ -584,13 +617,8 @@ function cancellation(
     case "cancel_requested": {
       if (!canRequestCustodyProposalCancellation(state, event.at))
         return rejected("Cancellation requires a pending refusal and an elapsed retry cooldown");
-      const transitions: AuthorizationTransitions = CUSTODY_PROPOSAL_AUTHORIZATION_TRANSITIONS;
-      const targets = transitions[state.authorizationState].cancel_requested;
-      if (targets === undefined || targets.length !== 1)
-        throw new Error("Cancellation request has no unique authorization target");
-      const authorizationState = targets[0];
-      if (authorizationState === undefined)
-        throw new Error("Cancellation request has no authorization target");
+      const authorizationState =
+        CUSTODY_PROPOSAL_AUTHORIZATION_TRANSITIONS[state.authorizationState].cancel_requested[0];
       return {
         next: {
           ...state,
