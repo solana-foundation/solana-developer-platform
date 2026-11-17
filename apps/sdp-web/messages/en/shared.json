@@ -396,6 +396,7 @@
     "environmentProduction": "Production",
     "environmentProductionDetail": "Mainnet · real funds",
     "environmentProductionLockedDetail": "Mainnet · after review",
+    "environmentProductionHostedDetail": "Mainnet · {host}",
     "mainnetAccessAdminOnly": "Only an admin can request mainnet access.",
     "requestMainnetAccess": "Request access",
     "organizationSettings": "Organization settings"
