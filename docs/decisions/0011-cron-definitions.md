@@ -1,16 +1,20 @@
-# ADR 0011: Background jobs are Cron Definitions run by the worker
+# ADR 0011: Background jobs are Cron Definitions run by the cron service
+
+> **Note (2026-11-17):** The always-on service this ADR first called the worker
+> is now the cron service, `sdp-<env>-cron` (PRO-2519). Only the name changed;
+> the decision stands as written.
 
 - **Status:** Accepted
 - **Date:** 2026-10-19
 - **Deciders:** SDP engineering
-- **Related:** HOO-2145; `apps/sdp-api/src/cron/`; ADR 0003 (superseded); ADR 0007 (Jobs); sdp-infra `sdp-<env>-worker`
+- **Related:** HOO-2145; `apps/sdp-api/src/cron/`; ADR 0003 (superseded); ADR 0007 (Jobs); sdp-infra `sdp-<env>-cron`
 
 ## Context
 
 Recurring background work ran through two schedulers with one tick list. The
-always-on `sdp-<env>-worker` Cloud Run service runs node-cron in process; the
+always-on `sdp-<env>-cron` Cloud Run service runs node-cron in process; the
 `sdp-<env>-api-public-cron` Cloud Run Job runs `job.ts` on Cloud Scheduler. The
-job has been paused in every environment since the worker shipped, yet both
+job has been paused in every environment since the cron service shipped, yet both
 paths stayed in the code with different ordering, fatality, and gating rules.
 Gates lived in three places (at registration in `runner.ts`, inside the job, per
 row), cluster fan-out ran inside one tick against ADR 0007's per-cluster
@@ -19,7 +23,7 @@ names and a no-op `Observability` layer.
 
 ## Decision
 
-- **The worker is the only scheduler.** `job.ts` and the paused Cloud Run Jobs
+- **The cron service is the only scheduler.** `job.ts` and the paused Cloud Run Jobs
   and Schedulers are deleted, not kept as break-glass: an unexercised fallback
   drifts and is one more dependency to trust.
 - **Each Cron Definition lives in its own file**, built with `defineCron`: a
@@ -48,7 +52,7 @@ names and a no-op `Observability` layer.
 
 ## Considered options
 
-- **Keep `job.ts` as break-glass.** Rejected: paused since the worker shipped,
+- **Keep `job.ts` as break-glass.** Rejected: paused since the cron service shipped,
   already out of step with it, and a second ordering policy to maintain.
 - **A central table of all crons.** Rejected for per-file definitions: each
   cron's facts live beside its work.

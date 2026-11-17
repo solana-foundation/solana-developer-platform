@@ -6,14 +6,14 @@
 
 | Event                                                             | Target              | Result                                                                                                                                                                                                                                                                                                               |
 | ----------------------------------------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Push to `main`                                                    | Stage               | Builds a SHA-tagged image, runs migrations, updates the stage service and worker, then runs the stage smoke                                                                                                                                                                                                          |
-| Push to `main`                                                    | Beta                | After the stage smoke passes, as its own run alongside production: copies the signed merge image into its own project, runs the beta migrations, updates the beta service and worker, posts the `sdp-web beta gate` status and smokes beta. Never gates production or the next merge's deploy                        |
+| Push to `main`                                                    | Stage               | Builds a SHA-tagged image, runs migrations, updates the stage service and cron service, then runs the stage smoke                                                                                                                                                                                                          |
+| Push to `main`                                                    | Beta                | After the stage smoke passes, as its own run alongside production: copies the signed merge image into its own project, runs the beta migrations, updates the beta service and cron service, posts the `sdp-web beta gate` status and smokes beta. Never gates production or the next merge's deploy                        |
 | Push to `main` with repo variable `CONTINUOUS_PROD_DEPLOY=true`   | Production API      | After the stage smoke passes, runs migrations and promotes the signed per-merge image. When `main` carries migrations production has not applied yet, the merge deploy is held instead and dispatches `Apply pending migrations to prod`, which deploys that commit once a `release-production` reviewer approves it |
 | `chore(main): release X.Y.Z` commit on `main`                     | Release publication | Creates the `vX.Y.Z` tag, publishes the GitHub release, and triggers release-image/checksum workflows. Deploys nothing itself: the commit reaches production through the per-merge pipeline like any other push                                                                                                      |
 | Push to `main`                                                    | Production web      | Vercel's git integration builds sdp-web from that commit and holds it until the `sdp-web production gate` commit status passes, which the production API deploy of that same commit posts once it serves traffic                                                                                                     |
 | Manual dev workflow dispatch                                      | Dev                 | Rebuilds and deploys the selected workflow revision                                                                                                                                                                                                                                                                  |
 | Manual production workflow dispatch from `main`                   | Production API      | Resolves an existing 40-character Git SHA image tag and redeploys its immutable digest without running migrations. Holds merge and approval deploys afterwards unless `clear_hold` is checked                                                                                                                        |
-| Manual dispatch of `Roll back sdp-api prod to the previous build` | Production API      | Moves traffic and the worker back to the revision that served before the last promotion, then holds production                                                                                                                                                                                                       |
+| Manual dispatch of `Roll back sdp-api prod to the previous build` | Production API      | Moves traffic and the cron service back to the revision that served before the last promotion, then holds production                                                                                                                                                                                                       |
 | Vercel dashboard redeploy, instant rollback, or force promote     | Production web      | Redeploys, restores, or releases an sdp-web production deployment                                                                                                                                                                                                                                                    |
 
 Vercel's git integration builds previews for pull-request branches and a production build for every merge to `main`. The sdp-web project requires the `sdp-web production gate` status under Settings → Deployment Checks, so each production build waits. Every push to `main` runs the stage and production pipeline, and the `release-web` job in [`deploy-sdp-api-gcp-prod.yml`](../../.github/workflows/deploy-sdp-api-gcp-prod.yml) posts the status for the deployed commit after a per-merge or approved-migration deploy succeeds, on the run's first attempt only. Web therefore goes live only for a commit whose API production already serves, seconds after it. No GitHub workflow deploys sdp-web, and no Vercel token is involved.
@@ -32,7 +32,7 @@ flowchart TD
   HD -- yes --> H4["Deploy refused: web X stays held"]
   HD -- no --> PD["Prod API deploy X<br/>traffic moves to X, then up to 3 canary runs"]
   PD -- "rollout fails before the canary" --> BR{"Run applied a breaking migration?"}
-  BR -- no --> H2["Traffic and worker restored, prod held<br/>web stays on its previous deployment"]
+  BR -- no --> H2["Traffic and cron image restored, prod held<br/>web stays on its previous deployment"]
   BR -- yes --> H3["Nothing restored, prod held: fix forward<br/>web X stays held"]
   PD -- "canary fails 3 runs in a row" --> H5["API X stays live, prod held, on-call paged<br/>a person rolls back or fixes forward"]
   PD -- succeeds --> RW["release-web posts<br/>sdp-web production gate = success for X"]
@@ -46,7 +46,7 @@ A held build stays held until a later push releases a newer one: a failed or rol
 
 Rollout prerequisite: configure the `sdp-web production gate` Deployment Check before the first merge that relies on it; without it, Vercel promotes every `main` build immediately. If the check picker only lists contexts GitHub has seen, post the status once on a pull-request commit, which has no production deployment to release.
 
-The hosted API runs as a Node.js container on Cloud Run. Dev and production use separate GCP projects, Artifact Registry repositories, API services, migration jobs, and Worker services. The Worker service (`sdp-<env>-worker`, `DISABLE_CRON=false`) is the only scheduler: it runs every Cron Definition in process ([ADR 0011](../decisions/0011-cron-definitions.md)).
+The hosted API runs as a Node.js container on Cloud Run. Dev and production use separate GCP projects, Artifact Registry repositories, API services, migration jobs, and cron services. The cron service (`sdp-<env>-cron`, `DISABLE_CRON=false`) is the only scheduler: it runs every Cron Definition in process ([ADR 0011](../decisions/0011-cron-definitions.md)).
 
 ## GitHub and GCP Setup
 
@@ -81,14 +81,16 @@ The release GitHub App needs `contents: write` and `pull_requests: write`, and i
 
 ### Cloud Run resources
 
-| Environment | Project                          | Artifact repository | Service                | Migration job                  | Worker service     |
+| Environment | Project                          | Artifact repository | Service                | Migration job                  | Cron service       |
 | ----------- | -------------------------------- | ------------------- | ---------------------- | ------------------------------ | ------------------ |
-| Dev         | `solana-developer-platform-dev`  | `sdp-dev`           | `sdp-dev-api-public`   | `sdp-dev-api-public-migrate`   | `sdp-dev-worker`   |
-| Stage       | `solana-developer-platform-stg`  | `sdp-stage`         | `sdp-stage-api-public` | `sdp-stage-api-public-migrate` | `sdp-stage-worker` |
-| Beta        | `solana-developer-platform-beta` | `sdp-beta`          | `sdp-beta-api-public`  | `sdp-beta-api-public-migrate`  | `sdp-beta-worker`  |
-| Production  | `solana-developer-platform`      | `sdp-prod`          | `sdp-prod-api-public`  | `sdp-prod-api-public-migrate`  | `sdp-prod-worker`  |
+| Dev         | `solana-developer-platform-dev`  | `sdp-dev`           | `sdp-dev-api-public`   | `sdp-dev-api-public-migrate`   | `sdp-dev-cron`     |
+| Stage       | `solana-developer-platform-stg`  | `sdp-stage`         | `sdp-stage-api-public` | `sdp-stage-api-public-migrate` | `sdp-stage-cron`   |
+| Beta        | `solana-developer-platform-beta` | `sdp-beta`          | `sdp-beta-api-public`  | `sdp-beta-api-public-migrate`  | `sdp-beta-cron`    |
+| Production  | `solana-developer-platform`      | `sdp-prod`          | `sdp-prod-api-public`  | `sdp-prod-api-public-migrate`  | `sdp-prod-cron`    |
 
 All resources currently use `us-central1`.
+
+The cron service was named `sdp-<env>-worker` before PRO-2519. Until an environment's Terraform apply renames it, the deploy, rollback and restore steps find it under either name (`.github/scripts/resolve-cron-service.sh`), and a command run by hand needs the name that environment has at the time.
 
 The workflows update images only. Runtime environment variables, Secret Manager references, service accounts, networking, and scaling must already exist on the Cloud Run resources.
 
@@ -117,7 +119,7 @@ The workflow:
 2. Builds the API Docker image and pushes a `GITHUB_SHA` tag.
 3. Updates and executes the migration job.
 4. Updates the API service.
-5. Updates the Worker service image.
+5. Updates the cron service image.
 
 Verify the dev deployment before approving a release:
 
@@ -129,7 +131,7 @@ Also exercise the affected authenticated, webhook, or provider flow; `/health` o
 
 ### Ramp webhook inbox
 
-Verified ramp deliveries are stored before acknowledgement. The worker parses
+Verified ramp deliveries are stored before acknowledgement. The cron service parses
 and applies them, then clears the body while retaining the discharged outcome
 for seven days.
 After seven days the row is archived without a delivery ID or outcome. A row
@@ -139,7 +141,7 @@ deployments, while a retryable park is rearmed once on a new build.
 
 Before enabling production ramp webhooks, confirm the Cloud Logging alert on
 `jsonPayload.event="sdp_api_ramp_webhook_event_exhausted"` covers both the API
-and Worker services and routes to the money movement on-call. The event includes
+and cron services and routes to the money movement on-call. The event includes
 the inbox row id, provider, environment, attempt count, and failure reason; it
 does not include the signed body. An alert on
 `sdp_api_ramp_webhook_event_discarded` is optional for sandbox diagnostics.
@@ -189,14 +191,14 @@ The production deploy workflow:
 2. Refuses a commit that is behind the schema production last applied, and, outside an approved-migration run, one that adds migrations production has not applied. Merge and approval deploys also refuse while `sdp_prod_hold` is set (unless an approval run was dispatched with `clear_hold`), and refuse a `breaking` migration until production serves the commit before its last pending edit.
 3. Verifies the signed per-merge image built by `release-images.yml`, copies that digest to Artifact Registry, and resolves it to an immutable digest.
 4. Runs the migration job with that image.
-5. Captures the current service traffic and worker image for rollback.
+5. Captures the current service traffic and cron image for rollback.
 6. Deploys a no-traffic candidate revision and verifies its immutable digest.
 7. Polls the candidate's `/health/ready` endpoint until Postgres and Redis are ready and the instance has working egress. A fresh instance reports `checks.egress: "pending"` (503) until it can reach Clerk, which is also its Cloud Run startup probe.
-8. Records the revision it is replacing for the quick rollback, sends production traffic to the candidate, verifies `https://api.solana.com/health/ready`, and updates `sdp-prod-worker` to the same digest.
+8. Records the revision it is replacing for the quick rollback, sends production traffic to the candidate, verifies `https://api.solana.com/health/ready`, and updates `sdp-prod-cron` to the same digest.
 9. Runs the production canary, up to three times. Three failures in a row hold production on the new revision (see [Production Rollback](#production-rollback)).
 10. In `release-web`, confirms `/health/ready` still reports the promoted revision and posts the `sdp-web production gate` status for the commit.
 
-If a step from the candidate deploy through the promotion fails, or the run is cancelled before the canary, the workflow restores the previous traffic and worker image, as it always has, and holds production. Treat an incomplete restore as an incident and reconcile both resources immediately.
+If a step from the candidate deploy through the promotion fails, or the run is cancelled before the canary, the workflow restores the previous traffic and cron image, as it always has, and holds production. Treat an incomplete restore as an incident and reconcile both resources immediately.
 
 ### 4. Verify production
 
@@ -205,7 +207,7 @@ Check:
 1. The production GitHub Actions job completed successfully.
 2. The `sdp_schema_sha` label on `sdp-prod-api-public-migrate` is at or ahead of the deployed commit's last migration.
 3. The candidate and canonical `/health/ready` checks passed for the deployed revision, including Postgres, Redis and egress. `checks.egress: "unverified"` means the instance stopped waiting for egress and served anyway; look for `sdp_api_egress_unverified` in the API logs.
-4. The Worker service references the same image as the API service.
+4. The cron service references the same image as the API service.
 5. `https://api.solana.com/health` succeeds.
 6. Cloud Run error rate, latency, logs, and Sentry remain healthy.
 7. At least one representative authenticated API flow succeeds.
@@ -219,7 +221,7 @@ Manual dispatch of the production workflow redeploys an image that already exist
 
 Before dispatch, confirm that the SHA came from a successful, trusted production release workflow and that the resolved digest matches the expected release or incident record. The presence of a tag in Artifact Registry is not sufficient provenance on its own.
 
-The workflow validates the SHA, resolves its tag to an immutable digest, verifies a no-traffic candidate, and then promotes the API service and Worker service under the same guard as a normal production release. It does not check out or rebuild source, and it never updates or executes the migration job during a manual deployment. It runs while production is held, and holds production itself (`sdp_prod_hold=<sha>`) before it changes anything, so the next merge cannot replace it. With `clear_hold` checked it does not, and lifts any hold once its canary passes.
+The workflow validates the SHA, resolves its tag to an immutable digest, verifies a no-traffic candidate, and then promotes the API service and cron service under the same guard as a normal production release. It does not check out or rebuild source, and it never updates or executes the migration job during a manual deployment. It runs while production is held, and holds production itself (`sdp_prod_hold=<sha>`) before it changes anything, so the next merge cannot replace it. With `clear_hold` checked it does not, and lifts any hold once its canary passes.
 
 ## Beta
 
@@ -230,20 +232,20 @@ Beta (`https://api-beta.solana.com`) is a devnet-only environment in its own GCP
 Once the stage deploy and smoke pass, the merge deploy's `Dispatch the beta deploy` job starts [`deploy-sdp-api-gcp-beta.yml`](../../.github/workflows/deploy-sdp-api-gcp-beta.yml) as its own run with `image_sha` set to the merge commit. It runs in parallel with production, including while production is held for pending migrations (beta migrates its own database). Its `Deploy beta` job:
 
 1. Authenticates as the beta deployer (`BETA_DEPLOY_WIF_PROVIDER`, `BETA_DEPLOY_SA`); the merge deploy skips beta while those variables are unset.
-2. Finds `sdp-beta-api-public-migrate`, `sdp-beta-api-public` and `sdp-beta-worker`. While any of them does not exist, the job skips with a notice. It records the revision and digest beta served before this deploy in the run summary.
+2. Finds `sdp-beta-api-public-migrate`, `sdp-beta-api-public` and `sdp-beta-cron`. While any of them does not exist, the job skips with a notice. It records the revision and digest beta served before this deploy in the run summary.
 3. Verifies the merge image's signature in GHCR and copies that digest into the `sdp-beta` registry, the same way the production deploy promotes it.
 4. Refuses a migration marked `-- sdp:migration-compat: breaking` until beta serves the commit before its last edit, as the production deploy does. It reads that commit from the serving image's `SDP_BUILD_SHA`, not from `/health/ready`, so a beta that fails readiness can still be repaired. A beta run can skip merges (a failed or queued run), so the serving build may still read what the migration drops; deploy that parent to beta first. While beta serves no image from `sdp-beta`, nothing reads its schema and the check passes.
 5. Updates and executes the beta migration job with that image.
 6. Updates `sdp-beta-api-public` and waits for the revision to be Ready.
 7. Checks that `https://api-beta.solana.com/health` reports `releaseChannel: beta`.
-8. Updates `sdp-beta-worker`.
+8. Updates `sdp-beta-cron`.
 9. Posts the `sdp-web beta gate` commit status once `/health/ready` reports the deployed revision, the same way `release-web` posts the production gate.
 
 Each step runs only after the previous one succeeded, and each continues on error within a timeout: a beta failure posts `[FAILED] Deploy sdp-api (beta)` to the deploy Slack channel and fails nothing else. Because beta is a separate run, no production job waits on it and it does not hold the merge deploy's concurrency slot: a slow beta delays neither production nor the next merge. Newer beta runs queue behind the current one, and the dispatch job's name sits outside the stage prefix the `Apply pending migrations to prod` approval checks. Once the deploy has found beta, `Beta API smoke` checks that `/health` reports the `beta` channel and `/health/ready` is ready. That pass is reported to Loki with `target="beta"` and never fails the run.
 
 ### Beta rollback
 
-Beta has no automatic restore and no hold. To go back, re-pin the beta service and worker to the digest beta served before the bad deploy: the `Deploy beta` run summary names that revision and digest, or read it from the revision list.
+Beta has no automatic restore and no hold. To go back, re-pin the beta service and cron service to the digest beta served before the bad deploy: the `Deploy beta` run summary names that revision and digest, or read it from the revision list.
 
 ```bash
 gcloud run revisions list --service sdp-beta-api-public \
@@ -262,7 +264,7 @@ gcloud run services update sdp-beta-api-public \
 ```
 
 ```bash
-gcloud run services update sdp-beta-worker \
+gcloud run services update sdp-beta-cron \
   --region us-central1 --project solana-developer-platform-beta --image "${DIGEST}"
 ```
 
@@ -274,7 +276,7 @@ Production never rolls back on its own after a promotion: going back is a delibe
 
 ### When a deploy fails
 
-- **Before the canary** (candidate, readiness, the traffic switch or its health check, the worker update, or a cancel): the run restores the traffic split and worker image it captured, as it always has, sets `sdp_prod_hold=<sha>` on `sdp-prod-api-public-migrate`, and Slack reports `ROLLED BACK, PROD HELD`. If that restore fails partway, run the quick rollback to finish it.
+- **Before the canary** (candidate, readiness, the traffic switch or its health check, the cron update, or a cancel): the run restores the traffic split and cron image it captured, as it always has, sets `sdp_prod_hold=<sha>` on `sdp-prod-api-public-migrate`, and Slack reports `ROLLED BACK, PROD HELD`. If that restore fails partway, run the quick rollback to finish it.
 - **At the canary**: the canary runs up to three times. Three failures in a row, or a cancel during it, leave API X serving and set the hold, and Slack reports `CANARY FAILED, PROD HELD`. The workflow cannot page anyone itself; those runs count toward `sdp-smoke-consecutive-failures-prod`, which pages once production has three failed runs and no passing one in 20 minutes. Then decide: the quick rollback below, or a fix forward.
 - **After a `breaking` migration**: nothing is restored, because the previous image cannot run on the contracted schema. The run fails and holds production, and the quick rollback refuses. Fix forward through an approval run with `clear_hold` (below).
 
@@ -282,7 +284,7 @@ The restore and the hold run in their own job under `always()` once the deploy j
 
 ### Quick rollback
 
-Dispatch `Roll back sdp-api prod to the previous build` from `main`. In a couple of minutes it moves traffic and the worker back to the revision that served before the last promotion, with no rebuild and no migrations, and keeps production held. It refuses when there is no previous build to return to (a breaking migration ran since, a failed rollout was restored, or a rollback already ran), when traffic is split across revisions, or when that revision is not Ready. If a step fails, run it again: it finishes what is left. Web has the same shape: Instant Rollback on sdp-web in Vercel. Then fix `main` and resume deploys.
+Dispatch `Roll back sdp-api prod to the previous build` from `main`. In a couple of minutes it moves traffic and the cron service back to the revision that served before the last promotion, with no rebuild and no migrations, and keeps production held. It refuses when there is no previous build to return to (a breaking migration ran since, a failed rollout was restored, or a rollback already ran), when traffic is split across revisions, or when that revision is not Ready. If a step fails, run it again: it finishes what is left. Web has the same shape: Instant Rollback on sdp-web in Vercel. Then fix `main` and resume deploys.
 
 ### Resuming deploys
 
@@ -308,7 +310,7 @@ Use the quick rollback for the previous build. For an older one, or when no prev
 3. Open `Deploy sdp-api to Cloud Run (prod)` in GitHub Actions and choose **Run workflow** from `main`.
 4. Enter the full SHA as `image_sha`.
 5. Approve the `production` environment gate if configured.
-6. Follow the run until both the API service and Worker service reference the resolved digest. If it fails, run `gcloud run services describe sdp-prod-api-public --region us-central1 --project solana-developer-platform` to see which revision serves traffic before touching web.
+6. Follow the run until both the API service and cron service reference the resolved digest. If it fails, run `gcloud run services describe sdp-prod-api-public --region us-central1 --project solana-developer-platform` to see which revision serves traffic before touching web.
 7. Resume web only for the commit the serving API was built from: in Vercel, promote that commit's production deployment (this also undoes the rollback). Later merges release web normally again.
 8. Repeat the production verification checklist and record the SHA, digest, reason, and operator in the incident timeline.
 
@@ -354,13 +356,13 @@ This repository no longer contains a Cloudflare runtime or deployment path. The 
 After this change is merged, a maintainer with access to every historical Cloudflare account and environment must complete the teardown:
 
 1. Open a tracked change with an owner, rollback window, and approvals. Inventory every account and environment, including any legacy QA account. Resolve whether the Workers named `sdp-api`, `sdp-api-dev`, or `sdp-api-production` still exist and enumerate their scheduled triggers, custom-domain routes, `workers.dev` exposure, Hyperdrive configurations, API-key/rate-limit/cache/session KV namespaces, and credentials. Mark every dependency as dedicated or shared before changing it.
-2. Verify both Cloud Run environments, migrations, Worker services, certificates, `https://api.solana.com/health/ready`, `https://api-dev.solana.com/health/ready`, and representative authenticated flows. Confirm the API DNS records resolve to the current GCP ingress, and document any Worker route still associated with those hostnames without changing the DNS records. Record the current production SHA and immutable service/worker digest.
-3. Exercise the production rollback before the old platform is removed: deploy a known schema-compatible image from a successful, trusted production release, verify it, then redeploy the recorded current SHA. Do not continue until the API service and Worker service are healthy and restored to the recorded current digest.
+2. Verify both Cloud Run environments, migrations, cron services, certificates, `https://api.solana.com/health/ready`, `https://api-dev.solana.com/health/ready`, and representative authenticated flows. Confirm the API DNS records resolve to the current GCP ingress, and document any Worker route still associated with those hostnames without changing the DNS records. Record the current production SHA and immutable service/cron digest.
+3. Exercise the production rollback before the old platform is removed: deploy a known schema-compatible image from a successful, trusted production release, verify it, then redeploy the recorded current SHA. Do not continue until the API service and cron service are healthy and restored to the recorded current digest.
 4. Observe the legacy Worker routes and direct `workers.dev` endpoints for the agreed rollback window. That window must cover the longest relevant DNS/client cache TTL plus the team's monitoring period. Confirm that no application traffic reaches the Workers; do not delete them before this observation completes.
 5. Remove only the SDP API Worker triggers, custom-domain routes, and `workers.dev` exposure, then delete the inventoried API Workers. Preserve the shared DNS zone, nameservers, API DNS records, and unrelated Cloudflare resources.
 6. After a fresh dependency and retention check, delete only the dedicated Hyperdrive configurations and API-key, rate-limit, cache, and session KV namespaces. Those namespaces held transient state; Postgres remains authoritative, so no normal data migration is required.
 7. Remove the retired `CLOUDFLARE_*` resource IDs and credentials from Doppler and GitHub. Revoke a token only if the inventory proves it was dedicated to the API Workers; otherwise remove its API Worker access or rotate it with the owners of its remaining consumers. If no external consumer remains, also remove the obsolete production `DOPPLER_TOKEN` secret, `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`, and `CLOUD_SQL_INSTANCE_CONNECTION_NAME` variables, and the unused `dev` GitHub environment. Preserve the `production` and `release-production` environments, `DEPLOY_WIF_PROVIDER`, `DEPLOY_SA`, and `DOPPLER_CI_IDENTITY_ID`.
-8. Re-run the GCP and application checks, confirm no retired Worker route or runtime remains and no traffic reaches it, and verify that the API service and Worker service still reference the intended production digest. Record every resource identifier, action, timestamp, operator, and verification artifact in the access-controlled change record.
+8. Re-run the GCP and application checks, confirm no retired Worker route or runtime remains and no traffic reaches it, and verify that the API service and cron service still reference the intended production digest. Record every resource identifier, action, timestamp, operator, and verification artifact in the access-controlled change record.
 
 Do not copy old resource IDs into this repository. Resolve deletion targets from the secret manager and provider dashboards immediately before each action, and store credentials and other sensitive evidence in the approved secret-bearing system.
 
@@ -382,9 +384,9 @@ Inspect the Cloud Run job execution and application logs. Do not deploy the serv
 
 ### Service update fails after migrations
 
-In production, a candidate that fails readiness receives no production traffic and leaves the worker image unchanged. Inspect startup logs, required environment and secret references, Cloud SQL/Redis connectivity, and health checks. If promotion fails later, verify that the workflow restored the previous traffic split and worker image and set `sdp_prod_hold`; escalate immediately if the restore was incomplete. A failed canary leaves the new revision serving and held for a deliberate rollback. In dev, inspect the Cloud Run rollout directly and restore the previous revision when the backward-compatible schema permits it.
+In production, a candidate that fails readiness receives no production traffic and leaves the cron image unchanged. Inspect startup logs, required environment and secret references, Cloud SQL/Redis connectivity, and health checks. If promotion fails later, verify that the workflow restored the previous traffic split and cron image and set `sdp_prod_hold`; escalate immediately if the restore was incomplete. A failed canary leaves the new revision serving and held for a deliberate rollback. In dev, inspect the Cloud Run rollout directly and restore the previous revision when the backward-compatible schema permits it.
 
-### Worker and API service use different images
+### Cron and API service use different images
 
 Resolve each resource's image reference, choose the intended release SHA/digest, and update the stale resource. Do not leave reconciliation running on code that is incompatible with the serving revision.
 

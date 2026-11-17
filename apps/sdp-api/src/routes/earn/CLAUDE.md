@@ -1028,7 +1028,7 @@ registered-client path (or equivalent durable contract), or switching the flag
 off would misclassify an atomic movement as a provider order.
 
 The every-minute vault reconciliation worker consumes
-`idx_earn_movements_unsettled` in bounded pages. The Worker's Cron Definition uses the same transition service as the
+`idx_earn_movements_unsettled` in bounded pages. The cron service's Cron Definition uses the same transition service as the
 interactive detail reads. The sweep additionally rebroadcasts the recorded signed bytes while
 the blockhash remains valid and marks an expired, unlanded movement failed.
 Never rebuild a transaction during recovery.
@@ -1059,12 +1059,12 @@ that money had stopped settling. Now a completed tick emits
 `sdp_api_sponsorship_reconciliation_tick` precedent) carrying the batch outcome
 counts plus the backlog gauges read AFTER the tick, and any failure (a status
 read, a block-height read, or a per-movement error) marks the tick
-error-level and THROWS so the Worker's run event records `status: "error"`.
+error-level and THROWS so the cron service's run event records `status: "error"`.
 Per-movement errors count too, deliberately: reads can answer perfectly while
 the write side is down (pool exhaustion, a send-side RPC outage), and an ok
 tick over a batch where nothing settled is the same silence. The sponsorship
 reconciler takes the identical posture, emitting its tick and then throwing
-when any item failed. The Worker absorbs the throw: it logs the `error` run
+when any item failed. The cron service absorbs the throw: it logs the `error` run
 event and `NodeBackgroundRunner.run` attaches its own catch, so later slots
 still run. Do not "helpfully" swallow it.
 
@@ -1237,7 +1237,7 @@ request before broadcast and can guarantee durable status and recovery
   refuse, and a blind advisory could only ever page on any wallet that held
   the deposit token. `services/jobs/detect-orphaned-earn-split-swaps.ts` then
   judges each open advisory every minute, once per environment (a `cluster`
-  Cron Definition run by the Worker): an in-flight deposit or
+  Cron Definition run by the cron service): an in-flight deposit or
   an unconsumed follow-up BUILD inside a 30-minute window is the partner still
   working; once the swap's blockhash is dead and a 30-minute grace has run, the
   intended follow-up is checked first and is DEFINITIVE: a `confirmed`/`finalized`
