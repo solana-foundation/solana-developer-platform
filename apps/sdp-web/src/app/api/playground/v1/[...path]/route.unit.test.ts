@@ -163,7 +163,7 @@ describe("/api/playground/v1/[...path]", () => {
   // request to the route, so these arrive outside `/api/playground/v1/`.
   it.each<[string, Method, string]>([
     ["an internal mount", "POST", "/internal/dashboard/custody/wallets"],
-    ["an admin mount", "POST", "/admin/allowlist"],
+    ["an admin mount", "POST", "/admin/onboarding-allowlist"],
     ["a non-versioned path", "GET", "/health"],
     ["a dashboard-only family", "GET", "/v1/api-keys"],
     ["an undocumented public route", "POST", "/v1/places/autocomplete"],
