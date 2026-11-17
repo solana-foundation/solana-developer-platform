@@ -436,8 +436,8 @@ horizon as ambiguous submissions.
 Key revocation and member removal try to enqueue affected proposals in a
 savepoint inside their database transaction. A failed wake rolls back only its
 adoption and flags; authority withdrawal still commits. The error event
-`proposal_recovery_wake_failed` records tenant scope and SQLSTATE without raw
-provider data. The minute worker retries discovery and continues checking known
+`proposal_recovery_wake_failed` records tenant scope and available SQLSTATE
+without raw provider data. The minute worker retries discovery and continues checking known
 proposals even when legacy adoption fails; it still reports that failure.
 A nonempty recovery page where every proposal fails marks the cron run failed;
 successful proposals and terminal-alert delivery remain independent. Mixed pages
@@ -475,11 +475,34 @@ admission. Backlog, upstream timeouts and credential availability extend recover
 latency; a one-minute schedule is not a cancellation guarantee. HTTP handlers do
 not run recovery. Provider webhooks are deferred.
 
-During rolling deployment, a bounded bridge adopts pending payments written by
-the previous API revision, including writes after migration. Existing payment
-JSON remains a compatibility projection until that revision drains; the legacy
-submission claim still participates in the new transaction to prevent a second
-create attempt. Removing those keys is a later contract migration.
+**Remove the rollout bridge after old revisions drain.**
+
+[PRO-2520](https://linear.app/solana-fndn/issue/PRO-2520/remove-the-custody-proposal-rollout-bridge-after-old-revisions-drain)
+tracks the contract migration. Keep the bridge until old serving and rollback
+revisions have drained, every pending payment and unalerted refusal has a
+canonical proposal, and race/crash tests pass with compatibility disabled.
+Include payment rows written after the expansion migration in that inventory.
+
+Remove these together in that contract change:
+
+- Bounded legacy adoption and unsent advancement in
+  `proposal-recovery.repository.ts`, including the legacy queue indexes.
+- The old JSON decoder in `lib/fireblocks-proposal-compatibility.ts` and
+  transition projection in `services/payments/fireblocks-proposal-compatibility.ts`,
+  the legacy submission claim in
+  `custody-proposal-ledger.ts`, and legacy poll timestamp reads.
+- Payment-status decision guards in `custody-proposal-ledger.ts`,
+  `pollFireblocksTransfer` (including viewer refresh),
+  `reconcileRecordedProposalOutcome`, and
+  `requestPendingProposalRecovery`. Replace them with proposal-phase gates;
+  retain payment updates as the public projection.
+
+Until then, the viewer and adoption bridge share one legacy lifecycle decoder.
+Adoption checks the selected payment snapshot again while locking the parent
+before its proposal, so an overlapping old writer cannot import stale state.
+Legacy JSON remains a projection for old readers; its submission claim joins
+the new transaction to prevent a second create attempt. Keep refusal,
+cancellation and alert evidence during backfill and removal.
 
 Recovery reads the proposal, validates its recorded account and intent, and
 rechecks live admission while the provider reports a known cancellable state.
@@ -659,15 +682,15 @@ the remaining launch gates require separate approval and operational evidence.
 | [PRO-2363](https://linear.app/solana-fndn/issue/PRO-2363) | Updated existing customer setup/rotation/teardown guide with program-call policies, approval deadlines, manual cancellation and cancellation limits; publishes with the beta channel. Annotated workspace screenshots remain outstanding.                                                     |
 | [HOO-2478](https://linear.app/solana-fndn/issue/HOO-2478) | Existing policy-refusal normalization retained across the SDK upgrade; tests include PROGRAM_CALL and RAW. Pending/unknown/non-policy failures remain distinct.                                                                                                                               |
 | [PRO-2356](https://linear.app/solana-fndn/issue/PRO-2356) | Design and operational boundaries documented above; manual enablement remains. The issue discussion records a STRIDE-session waiver; this change does not supply an independent security sign-off.                                                                                            |
-| [PRO-2435](https://linear.app/solana-fndn/issue/PRO-2435) | Bounded sign-only requests, the shared native-transfer waist, durable native proposal state and authority recovery included. Generic durable async signing and recurring workflows remain separate. |
+| [PRO-2435](https://linear.app/solana-fndn/issue/PRO-2435) | Bounded sign-only requests, the shared native-transfer waist, durable native proposal state and authority recovery included. Generic durable async signing and recurring workflows remain separate.                                                                                           |
 | [PRO-2474](https://linear.app/solana-fndn/issue/PRO-2474) | Mocked regressions and a manual sandbox matrix provided; live cancellation/lookup/blockhash evidence remains outstanding.                                                                                                                                                                     |
 | [PRO-2466](https://linear.app/solana-fndn/issue/PRO-2466) | Direct-transfer-only API restriction deliberately excluded: it conflicts with this branch's arbitrary stable proposal scope.                                                                                                                                                                  |
 | [PRO-2467](https://linear.app/solana-fndn/issue/PRO-2467) | Direct-transfer-only dashboard filtering excluded for the same reason.                                                                                                                                                                                                                        |
-| [PRO-2468](https://linear.app/solana-fndn/issue/PRO-2468) | Native transfers persist the initiating money principal; recovery restores only that recorded principal. |
-| [PRO-2469](https://linear.app/solana-fndn/issue/PRO-2469) | The one-minute authority worker re-admits pending native transfers and requests cancellation after refusal. Status-only polls never restore execution authority. |
-| [PRO-2470](https://linear.app/solana-fndn/issue/PRO-2470) | Key/member authority withdrawal durably prioritizes proposal recovery. Queues and provider delays prevent an immediate-cancellation guarantee. |
-| [PRO-2471](https://linear.app/solana-fndn/issue/PRO-2471) | Independent 30-second, per-environment status lane for both proposal kinds, with batch limit 100 and concurrency five. Native authority recovery has its own one-minute registration. |
-| [PRO-2472](https://linear.app/solana-fndn/issue/PRO-2472) | 180-second polling-age target, backlog/age/duration/outcome metrics and companion dashboard/alerts included. Live p99 settlement measurements and revocation-to-cancel metrics remain outstanding. |
+| [PRO-2468](https://linear.app/solana-fndn/issue/PRO-2468) | Native transfers persist the initiating money principal; recovery restores only that recorded principal.                                                                                                                                                                                      |
+| [PRO-2469](https://linear.app/solana-fndn/issue/PRO-2469) | The one-minute authority worker re-admits pending native transfers and requests cancellation after refusal. Status-only polls never restore execution authority.                                                                                                                              |
+| [PRO-2470](https://linear.app/solana-fndn/issue/PRO-2470) | Key/member authority withdrawal durably prioritizes proposal recovery. Queues and provider delays prevent an immediate-cancellation guarantee.                                                                                                                                                |
+| [PRO-2471](https://linear.app/solana-fndn/issue/PRO-2471) | Independent 30-second, per-environment status lane for both proposal kinds, with batch limit 100 and concurrency five. Native authority recovery has its own one-minute registration.                                                                                                         |
+| [PRO-2472](https://linear.app/solana-fndn/issue/PRO-2472) | 180-second polling-age target, backlog/age/duration/outcome metrics and companion dashboard/alerts included. Live p99 settlement measurements and revocation-to-cancel metrics remain outstanding.                                                                                            |
 | [PRO-2473](https://linear.app/solana-fndn/issue/PRO-2473) | Pending-approval expiry remains deliberately omitted, including the proposed seven-day limit.                                                                                                                                                                                                 |
 | [PRO-2364](https://linear.app/solana-fndn/issue/PRO-2364) | Policy-absence detection, audit and alert remain outstanding. Editor credentials cannot read active policies; a dismissible reminder is not detection.                                                                                                                                        |
 | [PRO-2365](https://linear.app/solana-fndn/issue/PRO-2365) | Dependency-register verification, sandbox/production workspace setup and contacts require operational follow-through.                                                                                                                                                                         |

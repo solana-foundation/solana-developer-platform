@@ -18,6 +18,7 @@ import { assertIsSignature } from "@solana/kit";
 import type { CustodyProposalRow } from "@/db/repositories/custody-proposals.repository";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { AppError, badRequest, conflict, custodyPolicyRefusalMessage } from "@/lib/errors";
+import { legacyFireblocksProposalState } from "@/lib/fireblocks-proposal-compatibility";
 import { getLogger } from "@/runtime/logger";
 import { describeError } from "@/runtime/money-path-events";
 import {
@@ -36,10 +37,7 @@ import {
   type ProposalEventResult,
   type ProposalLedger,
 } from "./custody-proposal-ledger";
-import {
-  fireblocksProposalBindingSchema,
-  legacyFireblocksProposalState,
-} from "./fireblocks-proposal-compatibility";
+import { fireblocksProposalBindingSchema } from "./fireblocks-proposal-compatibility";
 
 /** Adopt legacy facts once; subsequent state belongs to the proposal repository. */
 export async function ensureTransferProposal(

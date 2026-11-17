@@ -21,6 +21,12 @@ const MEMBER = organizationMember("proposal_recovery", "admin");
 const FOREIGN_MEMBER = organizationMember("proposal_recovery_foreign", "admin");
 const KEY = { kind: "api_key", apiKeyId: "key_proposal_recovery" } as const;
 const NOW = "2026-11-11T10:00:00.000Z";
+const LEGACY_BINDING = {
+  connectionId: "connection_recovery",
+  accountFingerprint: "account_recovery",
+  vaultAccountId: "vault_recovery",
+  assetId: "SOL_TEST",
+};
 let sandboxProjectId: string;
 let productionProjectId: string;
 let foreignProjectId: string;
@@ -48,7 +54,7 @@ async function seedTransfer(input: {
       input.status ?? "processing",
       input.createdAt ?? NOW,
       input.createdAt ?? NOW,
-      JSON.stringify(input.native === false ? {} : { fireblocksTransfer: {} }),
+      JSON.stringify(input.native === false ? {} : { fireblocksTransfer: LEGACY_BINDING }),
       input.principal === null ? null : JSON.stringify(input.principal),
       KEY.apiKeyId,
     ]
@@ -177,6 +183,60 @@ describe("requestPendingProposalRecovery", () => {
       expect(await queuedIds()).toEqual(["concurrent_adoption"]);
     }
   );
+
+  it("does not adopt a stale payment snapshot after an older writer advances it", async () => {
+    await seedTransfer({ id: "changed_during_adoption", principal: KEY });
+    const db = getDb(env);
+    await db.execute(
+      "UPDATE payment_transfers SET provider_reference = 'original_provider_id' WHERE id = ?",
+      ["changed_during_adoption"]
+    );
+    const lock = await holdTransaction(db, async (tx) => {
+      await tx.execute(
+        "UPDATE payment_transfers SET provider_reference = 'newer_provider_id' WHERE id = ?",
+        ["changed_during_adoption"]
+      );
+    });
+    const adopting = adoptLegacyCustodyProposals(db, {
+      environment: "sandbox",
+      now: NOW,
+      limit: 50,
+    });
+    try {
+      await untilLockWaiters(db, { fragment: "WITH clock AS", count: 1 });
+    } finally {
+      await lock.commit();
+    }
+    expect(await adopting).toBe(0);
+    expect(await db.queryMany("SELECT id FROM custody_proposals")).toEqual([]);
+    expect(
+      await adoptLegacyCustodyProposals(db, { environment: "sandbox", now: NOW, limit: 50 })
+    ).toBe(1);
+    expect(
+      await db.queryOne(
+        "SELECT provider_transaction_id FROM custody_proposals WHERE payment_transfer_id = ?",
+        ["changed_during_adoption"]
+      )
+    ).toEqual({ provider_transaction_id: "newer_provider_id" });
+  });
+
+  it("validates the whole adoption page before importing malformed refusal evidence", async () => {
+    await seedTransfer({ id: "a_valid", principal: KEY });
+    await seedTransfer({ id: "z_malformed", principal: KEY });
+    await getDb(env).execute(
+      `UPDATE payment_transfers SET provider_data = provider_data || ?::jsonb
+        WHERE id = 'z_malformed'`,
+      [JSON.stringify({ proposalRefusal: { at: NOW, reason: "revoked" } })]
+    );
+    await expect(
+      adoptLegacyCustodyProposals(getDb(env), {
+        organizationId: ORGANIZATION.id,
+        now: NOW,
+        limit: 50,
+      })
+    ).rejects.toThrow();
+    expect(await getDb(env).queryMany("SELECT id FROM custody_proposals")).toEqual([]);
+  });
 
   it("rolls the enqueue back with its authority transaction", async () => {
     await seedTransfer({ id: "transaction", principal: KEY });

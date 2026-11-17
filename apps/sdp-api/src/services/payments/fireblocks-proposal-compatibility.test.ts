@@ -7,7 +7,7 @@ import {
 } from "@sdp/types/payments";
 import { describe, expect, it } from "vitest";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
-import { legacyFireblocksProposalState } from "./fireblocks-proposal-compatibility";
+import { legacyFireblocksProposalState } from "@/lib/fireblocks-proposal-compatibility";
 
 const STARTED = "2026-11-12T10:00:00.000Z";
 const MISSING = "2026-11-12T10:01:00.000Z";

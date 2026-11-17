@@ -274,7 +274,7 @@ describe("API key lifecycle", () => {
   });
 
   it.each(["adoption", "wake"] as const)(
-    "keeps a key revocable when proposal %s fails in PostgreSQL",
+    "keeps a key revocable when proposal %s fails",
     async (failure) => {
       await insertKey({ id: TARGET_KEY_ID });
       const db = getDb(env);
@@ -309,7 +309,7 @@ describe("API key lifecycle", () => {
           organizationId: ORGANIZATION_ID,
           projectId: PROJECT_ID,
           principal: `api_key:${TARGET_KEY_ID}`,
-          sqlstate: "23514",
+          sqlstate: failure === "wake" ? "23514" : undefined,
         },
         expect.any(String)
       );

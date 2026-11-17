@@ -1,13 +1,16 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
-  FIREBLOCKS_CANCELLABLE_TRANSACTION_STATUSES,
-  FIREBLOCKS_CANCELLED_TRANSACTION_STATUSES,
-  FIREBLOCKS_FAILED_TRANSACTION_STATUSES,
-} from "@sdp/types/fireblocks";
-import { SUCCESSFUL_PAYMENT_TRANSFER_STATUSES } from "@sdp/types/payments";
+  createCustodyProposalState,
+  custodyProposalStateSchema,
+} from "@sdp/types/custody-proposals";
+import {
+  PAYMENT_TRANSFER_STATUSES,
+  SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
+} from "@sdp/types/payments";
 import { DatabaseError } from "pg";
 import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
+import { legacyFireblocksProposalState } from "@/lib/fireblocks-proposal-compatibility";
 import {
   describeMoneyPrincipal,
   type MoneyPrincipal,
@@ -21,13 +24,20 @@ export const CUSTODY_PROPOSAL_DISCOVERY_GRACE_MS = 2 * 60 * 1000;
 const SUCCESSFUL_SQL = SUCCESSFUL_PAYMENT_TRANSFER_STATUSES.map((status) => `'${status}'`).join(
   ", "
 );
-const CANCELLABLE_SQL = FIREBLOCKS_CANCELLABLE_TRANSACTION_STATUSES.map(
-  (status) => `'${status}'`
-).join(", ");
-const CANCELLED_SQL = FIREBLOCKS_CANCELLED_TRANSACTION_STATUSES.map((status) => `'${status}'`).join(
-  ", "
-);
-const FAILED_SQL = FIREBLOCKS_FAILED_TRANSACTION_STATUSES.map((status) => `'${status}'`).join(", ");
+const INITIAL = createCustodyProposalState();
+const legacyPaymentSchema = z.object({
+  id: z.string().min(1),
+  organization_id: z.string().min(1),
+  project_id: z.string().min(1),
+  custody_wallet_id: z.string().nullable(),
+  status: z.enum(PAYMENT_TRANSFER_STATUSES),
+  provider_reference: z.string().nullable(),
+  provider_data: z.record(z.string(), z.unknown()),
+  legacy_binding: z.record(z.string(), z.unknown()),
+  initiated_by_principal: moneyPrincipalSchema.nullable(),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime(),
+});
 
 /** Internal bridge shared by the sweep and transactional authority-change enqueue. */
 export async function adoptLegacyCustodyProposals(
@@ -84,63 +94,105 @@ export async function adoptLegacyCustodyProposals(
     limitClause = "LIMIT ?";
     limitValues.push(z.number().int().positive().max(1000).parse(input.limit));
   }
-  return db.execute(
-    `WITH clock AS (SELECT ?::text AS now), missing AS MATERIALIZED (
+  const rows = await db.queryMany(
+    `WITH missing AS MATERIALIZED (
        SELECT pt.* FROM payment_transfers pt JOIN projects p ON p.id = pt.project_id
         WHERE ${clauses.join(" AND ")} AND ${legacyStatus}
           AND (${missingProposal} OR (pt.status = 'processing' AND EXISTS (
             SELECT 1 FROM custody_proposals cp WHERE cp.payment_transfer_id = pt.id
-              AND cp.status = 'active' AND cp.provider_phase = 'unsent'
-              AND cp.authorization_state = 'authorized' AND ${attemptedSubmission})))
+              AND cp.status = 'active' AND cp.provider_phase = '${INITIAL.providerPhase}'
+              AND cp.authorization_state = '${INITIAL.authorizationState}' AND ${attemptedSubmission})))
         ORDER BY pt.created_at, pt.id ${limitClause}
      ), advanced AS MATERIALIZED (
        SELECT pt.* FROM custody_proposals cp
          JOIN payment_transfers pt ON pt.id = cp.payment_transfer_id
          JOIN projects p ON p.id = pt.project_id
         WHERE ${clauses.join(" AND ")}
-          AND cp.status = 'active' AND cp.provider_phase = 'unsent'
-          AND cp.authorization_state = 'authorized'
+          AND cp.status = 'active' AND cp.provider_phase = '${INITIAL.providerPhase}'
+          AND cp.authorization_state = '${INITIAL.authorizationState}'
           AND (pt.status = 'failed' OR pt.status IN (${SUCCESSFUL_SQL}))
         ORDER BY pt.created_at, pt.id ${limitClause}
      ), legacy AS (
        SELECT * FROM missing UNION ALL SELECT * FROM advanced
        ORDER BY created_at, id ${limitClause}
+     ) SELECT legacy.*, jsonb_build_object('version', 1, 'provider', 'fireblocks',
+         'connectionId', provider_data #> '{fireblocksTransfer,connectionId}',
+         'accountFingerprint', provider_data #> '{fireblocksTransfer,accountFingerprint}',
+         'vaultAccountId', provider_data #> '{fireblocksTransfer,vaultAccountId}',
+         'assetId', provider_data #> '{fireblocksTransfer,assetId}') AS legacy_binding
+       FROM legacy ORDER BY created_at, id`,
+    [...values, ...limitValues, ...values, ...limitValues, ...limitValues]
+  );
+  // Decode the complete page before writing. The viewer and adoption bridge use
+  // one lifecycle mapping; malformed legacy evidence never imports partially.
+  const legacy = rows.map((value) => {
+    const payment = legacyPaymentSchema.parse(value);
+    const state = custodyProposalStateSchema.parse(legacyFireblocksProposalState(payment));
+    return {
+      payment_transfer_id: payment.id,
+      organization_id: payment.organization_id,
+      project_id: payment.project_id,
+      custody_wallet_id: payment.custody_wallet_id,
+      payment_status: payment.status,
+      payment_reference: payment.provider_reference,
+      payment_data: payment.provider_data,
+      payment_principal: payment.initiated_by_principal,
+      payment_updated_at: payment.updated_at,
+      binding: payment.legacy_binding,
+      provider_phase: state.providerPhase,
+      authorization_state: state.authorizationState,
+      provider_transaction_id: state.providerTransactionId,
+      provider_status: state.providerStatus,
+      provider_sub_status: state.providerSubStatus,
+      submission_started_at: state.submissionStartedAt,
+      first_missing_at: state.firstMissingAt,
+      refused_at: state.refusal?.at ?? null,
+      refusal_reason: state.refusal?.reason ?? null,
+      refusal_message: state.refusal?.message ?? null,
+      cancel_requested_at: state.cancelRequestedAt,
+      cancel_declined_at: state.cancelDeclinedAt,
+      cancel_acknowledged_at: state.cancelAcknowledgedAt,
+      alerted_at: state.alertedAt,
+      created_at: payment.created_at,
+    };
+  });
+  if (legacy.length === 0) return 0;
+  return db.execute(
+    `WITH clock AS (SELECT ?::text AS now), snapshots AS (
+       SELECT * FROM jsonb_to_recordset(?::jsonb) AS snapshot(
+         payment_transfer_id text, organization_id text, project_id text, custody_wallet_id text,
+         payment_status text, payment_reference text, payment_data jsonb, payment_principal jsonb,
+         payment_updated_at text, binding jsonb, provider_phase text, authorization_state text,
+         provider_transaction_id text, provider_status text, provider_sub_status text,
+         submission_started_at text, first_missing_at text, refused_at text, refusal_reason text,
+         refusal_message text, cancel_requested_at text,
+         cancel_declined_at text, cancel_acknowledged_at text, alerted_at text, created_at text
+       )
+     ), legacy AS MATERIALIZED (
+       SELECT snapshot.* FROM snapshots snapshot
+       JOIN payment_transfers pt ON pt.id = snapshot.payment_transfer_id
+         AND pt.organization_id = snapshot.organization_id AND pt.project_id = snapshot.project_id
+       WHERE pt.status = snapshot.payment_status
+         AND pt.provider_reference IS NOT DISTINCT FROM snapshot.payment_reference
+         AND pt.provider_data = snapshot.payment_data
+         AND pt.initiated_by_principal IS NOT DISTINCT FROM snapshot.payment_principal
+         AND pt.custody_wallet_id IS NOT DISTINCT FROM snapshot.custody_wallet_id
+         AND pt.updated_at = snapshot.payment_updated_at
+       ORDER BY pt.id FOR UPDATE OF pt
      ) INSERT INTO custody_proposals (
        id, organization_id, project_id, custody_wallet_id, payment_transfer_id, provider,
        binding, provider_phase, authorization_state, provider_transaction_id,
        provider_status, provider_sub_status, submission_started_at, first_missing_at,
        refused_at, refusal_reason, refusal_message, cancel_requested_at,
-       cancel_acknowledged_at, alerted_at, next_check_at, created_at, updated_at
+       cancel_declined_at, cancel_acknowledged_at, alerted_at, next_check_at, created_at, updated_at
      ) SELECT
-       'cproposal_legacy_' || gen_random_uuid()::text, pt.organization_id, pt.project_id, pt.custody_wallet_id,
-       pt.id, 'fireblocks', jsonb_build_object('version', 1, 'provider', 'fireblocks',
-         'connectionId', pt.provider_data #> '{fireblocksTransfer,connectionId}',
-         'accountFingerprint', pt.provider_data #> '{fireblocksTransfer,accountFingerprint}',
-         'vaultAccountId', pt.provider_data #> '{fireblocksTransfer,vaultAccountId}',
-         'assetId', pt.provider_data #> '{fireblocksTransfer,assetId}'),
-       CASE
-         WHEN pt.status IN (${SUCCESSFUL_SQL}) THEN 'completed'
-         WHEN pt.status = 'failed' OR pt.provider_data->>'fireblocksStatus' IN (${FAILED_SQL})
-           THEN CASE WHEN pt.provider_data->>'fireblocksStatus' IN (${CANCELLED_SQL}) THEN 'cancelled' ELSE 'failed' END
-         WHEN pt.provider_reference IS NOT NULL
-           THEN CASE WHEN pt.provider_data->>'fireblocksStatus' IN (${CANCELLABLE_SQL}) THEN 'pending' ELSE 'executing' END
-         WHEN pt.provider_data->>'fireblocksFirstMissingAt' IS NOT NULL THEN 'absent'
-         WHEN pt.provider_data->>'fireblocksSubmissionStartedAt' IS NOT NULL THEN 'submitting'
-         ELSE 'unsent'
-       END,
-       CASE
-         WHEN pt.provider_data->'proposalRefusal' IS NULL THEN 'authorized'
-         WHEN pt.status IN (${SUCCESSFUL_SQL}) THEN 'committed_after_refusal'
-         WHEN pt.provider_data->>'proposalCancellationAcceptedAt' IS NOT NULL THEN 'cancel_acknowledged'
-         ELSE 'refused'
-       END,
-       pt.provider_reference, pt.provider_data->>'fireblocksStatus', pt.provider_data->>'fireblocksSubStatus',
-       pt.provider_data->>'fireblocksSubmissionStartedAt', pt.provider_data->>'fireblocksFirstMissingAt',
-       pt.provider_data #>> '{proposalRefusal,at}', pt.provider_data #>> '{proposalRefusal,reason}',
-       pt.provider_data #>> '{proposalRefusal,message}',
-       pt.provider_data->>'proposalCancellationAcceptedAt', pt.provider_data->>'proposalCancellationAcceptedAt',
-       pt.provider_data->>'proposalRefusalAlertedAt', clock.now, pt.created_at, clock.now
-       FROM legacy pt CROSS JOIN clock
+       'cproposal_legacy_' || gen_random_uuid()::text, legacy.organization_id,
+       legacy.project_id, legacy.custody_wallet_id, legacy.payment_transfer_id, 'fireblocks',
+       legacy.binding, legacy.provider_phase, legacy.authorization_state, legacy.provider_transaction_id,
+       legacy.provider_status, legacy.provider_sub_status, legacy.submission_started_at, legacy.first_missing_at,
+       legacy.refused_at, legacy.refusal_reason, legacy.refusal_message, legacy.cancel_requested_at,
+       legacy.cancel_declined_at, legacy.cancel_acknowledged_at, legacy.alerted_at,
+       clock.now, legacy.created_at, clock.now FROM legacy CROSS JOIN clock
        ON CONFLICT (payment_transfer_id) DO UPDATE SET
          provider_phase = EXCLUDED.provider_phase,
          authorization_state = EXCLUDED.authorization_state,
@@ -153,18 +205,19 @@ export async function adoptLegacyCustodyProposals(
          refusal_reason = EXCLUDED.refusal_reason,
          refusal_message = EXCLUDED.refusal_message,
          cancel_requested_at = EXCLUDED.cancel_requested_at,
+         cancel_declined_at = EXCLUDED.cancel_declined_at,
          cancel_acknowledged_at = EXCLUDED.cancel_acknowledged_at,
          alerted_at = EXCLUDED.alerted_at,
          version = custody_proposals.version + 1,
          updated_at = EXCLUDED.updated_at
        WHERE custody_proposals.status = 'active'
-         AND custody_proposals.provider_phase = 'unsent'
-         AND custody_proposals.authorization_state = 'authorized'
-         AND EXCLUDED.provider_phase <> 'unsent'
+         AND custody_proposals.provider_phase = '${INITIAL.providerPhase}'
+         AND custody_proposals.authorization_state = '${INITIAL.authorizationState}'
+         AND EXCLUDED.provider_phase <> '${INITIAL.providerPhase}'
          AND custody_proposals.provider = EXCLUDED.provider
          AND custody_proposals.binding = EXCLUDED.binding
          AND custody_proposals.custody_wallet_id IS NOT DISTINCT FROM EXCLUDED.custody_wallet_id`,
-    [now, ...values, ...limitValues, ...values, ...limitValues, ...limitValues]
+    [now, JSON.stringify(legacy)]
   );
 }
 
