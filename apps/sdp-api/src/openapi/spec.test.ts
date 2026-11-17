@@ -695,12 +695,18 @@ describe("OpenAPI spec", () => {
       ["/v1/dvp/trades/{tradeId}/settle", "post"],
     ] as const;
     for (const [path, method] of sponsored) {
-      expect(doc.paths?.[path]?.[method]?.responses, path).toHaveProperty("422");
+      const responses = doc.paths?.[path]?.[method]?.responses;
+      expect(responses, path).toHaveProperty("422");
+      // The 422's own envelope must allow SIGNING_REJECTED: the code enum lives
+      // inline on each error response, and no shared component schema holds it.
+      const envelope = errorEnvelopeResponseSchema.safeParse(responses?.["422"]);
+      expect(envelope.success, `${path} 422 must be a JSON error envelope`).toBe(true);
+      if (!envelope.success) continue;
+      expect(
+        envelope.data.content["application/json"].schema.properties.error.properties.code.enum,
+        path
+      ).toContain("SIGNING_REJECTED");
     }
-    const codes = (doc.components?.schemas?.ApiErrorCode ?? doc.components?.schemas?.ErrorCode) as
-      | { enum?: string[] }
-      | undefined;
-    if (codes?.enum) expect(codes.enum).toContain("SIGNING_REJECTED");
   });
 
   it("documents exact-one wallet ownership and request-time runtime admission", () => {
@@ -886,6 +892,18 @@ describe("OpenAPI spec", () => {
     for (const doc of documents) {
       const lists = errorEnvelopeCodes(doc);
       expect(lists.length).toBeGreaterThan(0);
+      // The 501 rule needs a 501 to police: a document that publishes Earn
+      // operations must carry at least one, or the narrowing below would pass
+      // with nothing to check. Stable hides Earn, so this is per document.
+      const publishesEarn = Object.keys(doc.paths ?? {}).some((path) =>
+        path.startsWith("/v1/earn")
+      );
+      if (publishesEarn) {
+        expect(
+          lists.some(({ status }) => status === "501"),
+          "a 501 envelope exists"
+        ).toBe(true);
+      }
       for (const { status, codes } of lists) {
         if (status === "501") expect(codes).toEqual(["NOT_IMPLEMENTED"]);
         else expect(codes).toEqual(ERROR_CODES);
