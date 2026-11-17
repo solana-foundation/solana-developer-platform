@@ -209,9 +209,9 @@
       {
         "id": "list-wallet-configs",
         "operationId": "listWalletConfigs",
-        "title": "List wallet signing configs",
+        "title": "List managed signing configurations",
         "method": "GET",
-        "path": "/v1/wallets/configs",
+        "path": "/v1/wallets/managed-signing/configurations",
         "pathFields": [],
         "bodyFields": [],
         "expectedResponse": {
@@ -241,7 +241,7 @@
         "operationId": "aggregateWalletBalances",
         "title": "Aggregate wallet balances",
         "method": "GET",
-        "path": "/v1/wallets/aggregate?provider={provider}",
+        "path": "/v1/wallets/balances/aggregate?provider={provider}",
         "pathFields": [
           {
             "key": "provider",
@@ -433,7 +433,7 @@
         },
         "takesIdempotencyKey": false,
         "releaseModule": "custody",
-        "shadowedBy": ["/v1/wallets/aggregate", "/v1/wallets/configs", "/v1/wallets/public-key"]
+        "shadowedBy": ["/v1/wallets/public-key"]
       },
       {
         "id": "update-wallet",
@@ -9906,12 +9906,12 @@
         },
         "takesIdempotencyKey": false
       },
-      "GET /v1/wallets/aggregate": {
+      "GET /v1/wallets/balances/aggregate": {
         "id": "aggregate-wallet-balances",
         "operationId": "aggregateWalletBalances",
         "title": "Aggregate wallet balances",
         "method": "GET",
-        "path": "/v1/wallets/aggregate?provider={provider}",
+        "path": "/v1/wallets/balances/aggregate?provider={provider}",
         "pathFields": [
           {
             "key": "provider",

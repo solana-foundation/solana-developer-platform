@@ -104,7 +104,9 @@ describe("/api/playground/v1/[...path]", () => {
   it("rejects an unauthenticated caller before creating an API client", async () => {
     mocks.getSdpAuth.mockResolvedValue({ userId: null, orgId: null });
 
-    const response = await GET(playgroundRequest("GET", "/v1/wallets/configs"));
+    const response = await GET(
+      playgroundRequest("GET", "/v1/wallets/managed-signing/configurations")
+    );
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({
@@ -114,7 +116,9 @@ describe("/api/playground/v1/[...path]", () => {
   });
 
   it("requires the calling tab's project, like every other dashboard route", async () => {
-    const response = await GET(new Request(`${ORIGIN}/api/playground/v1/wallets/configs`));
+    const response = await GET(
+      new Request(`${ORIGIN}/api/playground/v1/wallets/managed-signing/configurations`)
+    );
 
     expect(response.status).toBe(400);
     expect(mocks.createSdpApiClient).not.toHaveBeenCalled();
@@ -218,12 +222,14 @@ describe("/api/playground/v1/[...path]", () => {
     const request = upstreamRequest().mockResolvedValue(upstreamOk());
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
-    const response = await GET(playgroundRequest("GET", "/v1/wallets/configs"));
+    const response = await GET(
+      playgroundRequest("GET", "/v1/wallets/managed-signing/configurations")
+    );
 
     expect(response.status).toBe(200);
     expect(mocks.logRouteResult).toHaveBeenLastCalledWith(expect.anything(), 200, {
       method: "GET",
-      operation: "/v1/wallets/configs",
+      operation: "/v1/wallets/managed-signing/configurations",
       ok: true,
     });
   });
@@ -292,7 +298,9 @@ describe("/api/playground/v1/[...path]", () => {
       const request = upstreamRequest();
       mocks.createSdpApiClient.mockResolvedValue({ request });
 
-      const response = await GET(playgroundRequest("GET", "/v1/wallets/configs", { headers }));
+      const response = await GET(
+        playgroundRequest("GET", "/v1/wallets/managed-signing/configurations", { headers })
+      );
 
       expect(response.status).toBe(400);
       expect(mocks.createSdpApiClient).not.toHaveBeenCalled();
@@ -334,7 +342,9 @@ describe("/api/playground/v1/[...path]", () => {
     );
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
-    const response = await GET(playgroundRequest("GET", "/v1/wallets/configs"));
+    const response = await GET(
+      playgroundRequest("GET", "/v1/wallets/managed-signing/configurations")
+    );
 
     expect(Object.fromEntries(response.headers)).toEqual({
       "cache-control": "private, no-store",
@@ -350,7 +360,9 @@ describe("/api/playground/v1/[...path]", () => {
     const request = upstreamRequest().mockRejectedValue(new Error("socket hang up"));
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
-    const response = await GET(playgroundRequest("GET", "/v1/wallets/configs"));
+    const response = await GET(
+      playgroundRequest("GET", "/v1/wallets/managed-signing/configurations")
+    );
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({

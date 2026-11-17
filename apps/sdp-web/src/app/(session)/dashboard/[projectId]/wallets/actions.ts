@@ -121,11 +121,14 @@ async function initializeCustodyWallet(formData: FormData): Promise<string> {
   }
 
   const client = await createSdpApiClient();
-  const { walletId } = await client.fetch<InitializeSigningResponse>("/v1/wallets/initialize", {
-    method: "POST",
-    body: JSON.stringify(payload),
-    headers: actionIdempotencyHeaders(formData.get("idempotencyKey")),
-  });
+  const { walletId } = await client.fetch<InitializeSigningResponse>(
+    "/v1/wallets/managed-signing/initialize-with-wallet",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: actionIdempotencyHeaders(formData.get("idempotencyKey")),
+    }
+  );
   return walletId;
 }
 
