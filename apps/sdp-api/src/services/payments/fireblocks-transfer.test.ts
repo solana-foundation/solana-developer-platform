@@ -15,11 +15,14 @@ import type { MoneyPrincipal } from "@/lib/money-principal";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { internalCustody } from "@/routes/internal-custody";
 import { rootLogger } from "@/runtime/logger";
+import * as moneyPathEvents from "@/runtime/money-path-events";
 import { AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { systemProposalLedger } from "@/services/jobs/proposal-recovery-ledger";
+import { reconcileFireblocksProposals } from "@/services/jobs/reconcile-fireblocks-proposals";
 import { reconcilePendingProposals } from "@/services/jobs/reconcile-pending-proposals";
+import { applyProposalEvent } from "@/services/payments/custody-proposal-ledger";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { deferred } from "@/test/helpers/deferred";
@@ -422,6 +425,39 @@ describe("native Fireblocks BYOK payment routes", () => {
       expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
     }
   );
+
+  it("reports provider outages as failed cron reads while preserving the pending transfer", async () => {
+    const mock = await ready();
+    const response = await send();
+    expect(response.status).toBe(200);
+    const transfer = (await response.json()).data.transfer;
+    mock.mockClear().mockRejectedValue(new Error("Provider unavailable"));
+    const log = vi.spyOn(moneyPathEvents, "logEvent");
+    await expect(
+      runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+        reconcileFireblocksProposals(testEnv)
+      )
+    ).rejects.toThrow("Fireblocks proposal reconciliation failed");
+    expect(log).toHaveBeenLastCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_fireblocks_reconciliation_tick",
+        failed: 1,
+        polled: 0,
+        pending: 1,
+      })
+    );
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock.mock.calls[0]?.[1]?.method).toBe("GET");
+    expect(
+      await getDb(env).queryOne(
+        `SELECT pt.status, cp.last_polled_at AS last_poll
+           FROM payment_transfers pt JOIN custody_proposals cp ON cp.payment_transfer_id = pt.id
+          WHERE pt.id = ?`,
+        [transfer.id]
+      )
+    ).toMatchObject({ status: "processing", last_poll: expect.any(String) });
+  });
 
   it("blocks new payments in stable but still reconciles a payment submitted in beta", async () => {
     const mock = await ready();
@@ -1578,4 +1614,113 @@ describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
     ]);
     expect(schedule?.last_checked_at).toBeNull();
   });
+});
+
+describe("manual native Fireblocks cancellation", () => {
+  it.each(["before cancellation", "after cancellation"] as const)(
+    "preserves a competing observation %s",
+    async (race) => {
+      const mock = await ready();
+      const submitted = await send();
+      const transfer = (await submitted.json()).data.transfer;
+      const original = mock.getMockImplementation();
+      if (!original) throw new Error("Expected provider transport");
+      let reads = 0;
+      mock.mockClear().mockImplementation(async (url, init) => {
+        const response = await original(url, init);
+        if (init?.method === "GET" && String(url).includes("/external_tx_id/")) {
+          reads += 1;
+          if (reads === (race === "before cancellation" ? 1 : 2)) {
+            await runWithSystemDatabaseIdentity("cron:reconcile-custody-proposals", async () => {
+              const ledger = systemProposalLedger(testEnv);
+              const identity = {
+                transferId: transfer.id,
+                organizationId: ORGANIZATION_ID,
+                projectId: PROJECT_ID,
+              };
+              const row = await ledger.repo.getTransferById(identity);
+              const proposal = await ledger.proposals.getForTransfer(identity);
+              if (row === null || proposal === null) throw new Error("Missing proposal");
+              await applyProposalEvent(ledger, row, proposal, {
+                type: "observed",
+                at: new Date().toISOString(),
+                phase: "executing",
+                providerTransactionId: "fb-proposal",
+                providerStatus: "BROADCASTING",
+                providerSubStatus: null,
+              });
+            });
+          }
+        }
+        return response;
+      });
+      const response = await request(`/fireblocks/proposals/transfer/${transfer.id}/cancel`, {});
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect((await response.json()).data).toMatchObject({
+        acknowledged: race === "after cancellation",
+        proposal: { status: "BROADCASTING" },
+      });
+      expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(
+        race === "before cancellation" ? 0 : 1
+      );
+      const stored = await recordedProposal(transfer.id);
+      expect(stored.status).toBe("processing");
+      expect(stored.provider_data.proposalRefusal).toBeUndefined();
+    }
+  );
+
+  it.each(["CANCELLED", "PENDING_AUTHORIZATION", "COMPLETED"] as const)(
+    "records %s without treating an acknowledgement as a final verdict",
+    async (resultStatus) => {
+      const mock = await ready();
+      const submitted = await send();
+      const transfer = (await submitted.json()).data.transfer;
+      const original = mock.getMockImplementation();
+      if (!original) throw new Error("Expected provider transport");
+      mock.mockImplementation(async (url, init) => {
+        if (String(url).endsWith("/cancel")) {
+          providerStatus = resultStatus;
+          return Response.json({ success: true });
+        }
+        return original(url, init);
+      });
+      const listed = await request(`/fireblocks/proposals?walletId=${walletId}&kind=transfer`);
+      expect(listed.status, await listed.clone().text()).toBe(200);
+      expect((await listed.json()).data.proposals).toMatchObject([
+        { id: transfer.id, kind: "transfer", canCancel: true },
+      ]);
+      const key = crypto.randomUUID();
+      const path = `/fireblocks/proposals/transfer/${transfer.id}/cancel`;
+      const response = await request(path, {}, PROJECT_ID, key);
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect((await response.json()).data).toMatchObject({
+        acknowledged: true,
+        proposal: { status: resultStatus },
+      });
+      expect((await request(path, {}, PROJECT_ID, key)).status).toBe(200);
+      expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(1);
+      const final = await getDb(env).queryOne<{ status: string; signature: string | null }>(
+        "SELECT status, signature FROM payment_transfers WHERE id = ?",
+        [transfer.id]
+      );
+      let expectedTransferStatus: string;
+      switch (resultStatus) {
+        case "CANCELLED":
+          expectedTransferStatus = "failed";
+          break;
+        case "PENDING_AUTHORIZATION":
+          expectedTransferStatus = "processing";
+          break;
+        case "COMPLETED":
+          expectedTransferStatus = "confirmed";
+          break;
+        default: {
+          const exhaustive: never = resultStatus;
+          throw new Error(`Unexpected Fireblocks proposal status: ${String(exhaustive)}`);
+        }
+      }
+      expect(final?.status).toBe(expectedTransferStatus);
+      if (resultStatus === "COMPLETED") expect(final?.signature).toBe(SIG);
+    }
+  );
 });

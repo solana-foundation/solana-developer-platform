@@ -377,6 +377,52 @@ test("recorded principals are a separate capability restricted to the recovery w
   ]);
 });
 
+for (const { id, names, allowed } of [
+  {
+    id: "fireblocks-transfer-cancellation",
+    names: ["cancelFireblocksTransfer", "cancelFireblocksTransaction"],
+    allowed: "apps/sdp-api/src/services/domain/signing/admitted-proposer.ts",
+  },
+  {
+    id: "custody-proposal-recovery-construction",
+    names: ["proposalRecovery", "proposalCanceller"],
+    allowed: "apps/sdp-api/src/services/domain/signing/custody-runtime-target.ts",
+  },
+]) {
+  test(`${id} pins both worker and manual cancellation entry points`, () => {
+    const capability = CAPABILITIES.find((candidate) => candidate.id === id);
+    assert.ok(capability);
+    assert.deepEqual(capability.symbols.map((symbol) => symbol.name).sort(), [...names].sort());
+    assert.deepEqual(capability.allow, [allowed]);
+    const found = violations(
+      {
+        "src/lib/cap.ts": names.map((name) => `export function ${name}(): void {}`).join("\n"),
+        "src/allowed.ts": `import { ${names.join(", ")} } from "./lib/cap";
+${names.map((name) => `${name}();`).join("\n")}
+`,
+        ...Object.fromEntries(
+          names.map((name) => [
+            `src/routes/${name}.ts`,
+            `import { ${name} as cancel } from "../lib/cap";\ncancel();\n`,
+          ])
+        ),
+      },
+      [
+        {
+          ...capability,
+          symbols: capability.symbols.map((symbol) => ({ ...symbol, file: "src/lib/cap.ts" })),
+          owners: ["src/lib/cap.ts"],
+          allow: ["src/allowed.ts"],
+        },
+      ]
+    );
+    assert.deepEqual(
+      [...new Set(found.map((violation) => violation.split(":")[0]))].sort(),
+      names.map((name) => `src/routes/${name}.ts`).sort()
+    );
+  });
+}
+
 for (const id of [
   "fireblocks-transfer-cancellation",
   "custody-proposal-recovery",

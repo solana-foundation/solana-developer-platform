@@ -93,11 +93,15 @@ export const CAPABILITIES = [
   },
   {
     id: "fireblocks-transfer-cancellation",
-    why: "Cancels a provider transfer; only the account-bound recovery waist may (PRO-2435 D4).",
+    why: "Cancels a provider transaction; only the account-bound custody waist may (PRO-2435 D4).",
     symbols: [
       {
         file: "packages/sdp-custody/src/provisioning/fireblocks-transfers.ts",
         name: "cancelFireblocksTransfer",
+      },
+      {
+        file: "packages/sdp-custody/src/provisioning/fireblocks-transfers.ts",
+        name: "cancelFireblocksTransaction",
       },
     ],
     owners: [CUSTODY_PACKAGE],
@@ -117,6 +121,7 @@ export const CAPABILITIES = [
     why: "Builds cancellation authority from retained access; only the custody runtime waist may.",
     symbols: [
       { file: `${API}/services/domain/signing/admitted-proposer.ts`, name: "proposalRecovery" },
+      { file: `${API}/services/domain/signing/admitted-proposer.ts`, name: "proposalCanceller" },
     ],
     owners: [`${API}/services/domain/signing/admitted-proposer.ts`],
     allow: [`${API}/services/domain/signing/custody-runtime-target.ts`],

@@ -3,6 +3,7 @@ import {
   readFireblocksAddressBook,
 } from "@sdp/custody/provisioning/fireblocks-address-book";
 import {
+  cancelFireblocksTransaction,
   cancelFireblocksTransfer,
   createFireblocksTransfer,
   type FireblocksTransferAccess,
@@ -333,6 +334,30 @@ export function proposalRecovery(
         throw conflict("Fireblocks transaction does not match the payment intent");
       if (!isFireblocksTransactionCancellable(transaction.status)) return false;
       return cancelFireblocksTransfer(runtime, access, transaction.id);
+    },
+  };
+}
+
+/** Read-and-cancel recovery for a recorded proposal. It can never create or resubmit a transfer. */
+export interface CustodyProposalCanceller {
+  read(externalId: string): Promise<FireblocksTransferResult | null>;
+  cancel(transactionId: string): Promise<boolean>;
+}
+
+/**
+ * Cancellation for a recorded proposal, bound to the access the waist resolved for its intent.
+ * An acknowledgement is not a final status: the next read settles the row either way.
+ */
+export function proposalCanceller(
+  loadAccess: () => Promise<ProposalAccess>,
+  runtime: CustodyProvisioningRuntime = proposalRuntime
+): CustodyProposalCanceller {
+  return {
+    async read(externalId) {
+      return readFireblocksTransfer(runtime, await loadAccess(), externalId);
+    },
+    async cancel(transactionId) {
+      return cancelFireblocksTransaction(runtime, await loadAccess(), transactionId);
     },
   };
 }

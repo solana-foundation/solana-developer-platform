@@ -50,10 +50,6 @@ import {
   type PaymentTransferRow as TransferRow,
 } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
-import {
-  createCustodyProposalsRepository,
-  createTransactionalCustodyProposalsRepository,
-} from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import {
@@ -95,6 +91,7 @@ import {
   type AppContext,
   getCounterpartyAccountsRepository,
   getPaymentsRepository,
+  requestProposalLedger,
 } from "@/routes/payments/context";
 import { mapTransferRow } from "@/routes/payments/mappers";
 import { transferIdParamsSchema } from "@/routes/payments/schemas";
@@ -129,7 +126,6 @@ import {
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
 import { readSolanaCryptoWalletAddress } from "@/services/payments/counterparty-account-resolution";
-import type { ProposalLedger } from "@/services/payments/custody-proposal-ledger";
 import {
   isFireblocksTransfer,
   refreshFireblocksTransfer,
@@ -1085,27 +1081,6 @@ function compareTransferRows(
 
   const createdAtComparison = right.created_at.localeCompare(left.created_at);
   return createdAtComparison || right.id.localeCompare(left.id);
-}
-
-/**
- * The request's ledger for proposed-transfer row state: a settle commits with its audit outcome
- * in the request's own ledger transaction.
- */
-function requestProposalLedger(
-  c: AppContext,
-  auditService: AuditService = new AuditService(getDb(c.env))
-): ProposalLedger {
-  return {
-    repo: getPaymentsRepository(c),
-    proposals: createCustodyProposalsRepository(c.env, getRequestTenantScope(c)),
-    audited: (work) =>
-      auditService.logWithin(c, (tx) =>
-        work(
-          createPostgresPaymentsRepository(tx, getRequestTenantScope(c)),
-          createTransactionalCustodyProposalsRepository(tx, getRequestTenantScope(c))
-        )
-      ),
-  };
 }
 
 async function executeProposedTransfer(

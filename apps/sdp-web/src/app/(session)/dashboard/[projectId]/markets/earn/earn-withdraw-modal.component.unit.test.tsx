@@ -131,5 +131,17 @@ describe("EarnWithdrawModal submit lock", () => {
     await screen.findByText("Withdrawal submitted");
     expect(mocks.createEarnWithdrawal).toHaveBeenCalledTimes(2);
     expect(onWithdrawalCreated).toHaveBeenCalledWith("wref_1");
+
+    // The wire contract, pinned by the treasury security audit: the body
+    // carries NO `requestId` — the dashboard's shared action-key layer already
+    // sends the one Idempotency-Key header sdp-api honors, and sdp-api refuses
+    // a withdrawal that carries both key sources (a 400 on every confirm). The
+    // amount goes out canonical, so re-spelling "12.50" as "12.5" after an
+    // ambiguous failure keys the same retry instead of a second payout.
+    expect(mocks.createEarnWithdrawal).toHaveBeenLastCalledWith("earn_program_1", {
+      amountUsd: "12.5",
+      token: "usdc",
+      destinationAddress: DESTINATION,
+    });
   });
 });

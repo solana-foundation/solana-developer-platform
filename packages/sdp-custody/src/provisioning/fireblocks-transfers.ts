@@ -34,7 +34,7 @@ const optionalAmount = z
   .transform((value) => value ?? undefined);
 const transferResultSchema = z.object({
   id: z.string().min(1).max(256),
-  status: z.string().regex(/^[A-Z_]{1,100}$/),
+  status: z.string().regex(/^[A-Z0-9_]{1,100}$/),
   subStatus: optionalText,
   txHash: optionalText,
   externalTxId: optionalText,
@@ -173,7 +173,7 @@ export async function readFireblocksTransfer(
  * Request cancellation of a known transaction before broadcast. Acknowledgment is not a
  * terminal outcome: callers must keep reading the original external transaction id.
  */
-export async function cancelFireblocksTransfer(
+export async function cancelFireblocksTransaction(
   runtime: CustodyProvisioningRuntime,
   access: FireblocksTransferAccess,
   transactionId: string
@@ -191,4 +191,13 @@ export async function cancelFireblocksTransfer(
     throw new SigningError("Invalid Fireblocks cancellation response", "NETWORK_ERROR");
   }
   return parsed.data.success;
+}
+
+/** Request cancellation of a native transfer through the shared transaction endpoint. */
+export function cancelFireblocksTransfer(
+  runtime: CustodyProvisioningRuntime,
+  access: FireblocksTransferAccess,
+  transactionId: string
+): Promise<boolean> {
+  return cancelFireblocksTransaction(runtime, access, transactionId);
 }

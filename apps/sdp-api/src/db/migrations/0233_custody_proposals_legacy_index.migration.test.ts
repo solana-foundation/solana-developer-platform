@@ -9,7 +9,7 @@ import { adminDatabaseUrl } from "@/test/helpers/env";
 const migrationSql = readFileSync(
   path.join(
     path.dirname(fileURLToPath(import.meta.url)),
-    "postgres/0231_custody_proposals_legacy_index.sql"
+    "postgres/0233_custody_proposals_legacy_index.sql"
   ),
   "utf8"
 );
@@ -33,7 +33,7 @@ afterEach(async () => {
   await client.query("ROLLBACK");
 });
 
-describe("0231 rolling proposal bridge index", () => {
+describe("0233 rolling proposal bridge index", () => {
   it("is nonblocking and covers pending old writes plus every terminal refusal alert", async () => {
     expect(migrationSql).toContain("-- sdp:migration-mode: non-transactional");
     expect(migrationSql).toContain("CREATE INDEX CONCURRENTLY IF NOT EXISTS");

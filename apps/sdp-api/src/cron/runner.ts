@@ -15,6 +15,7 @@ import { earnCatalogueSyncCron } from "@/cron/earn-catalogue-sync";
 import { earnMetricsRefreshCron } from "@/cron/earn-metrics-refresh";
 import { earnSplitSwapsCron } from "@/cron/earn-split-swaps";
 import { earnVaultMovementsCron } from "@/cron/earn-vault-movements";
+import { fireblocksProposalsCron } from "@/cron/fireblocks-proposals";
 import { idempotencyKeyPruneCron } from "@/cron/idempotency-keys";
 import { paymentRequestsCron } from "@/cron/payment-requests";
 import { paymentRequestsExpiryCron } from "@/cron/payment-requests-expiry";
@@ -54,6 +55,7 @@ export interface CronHandle {
 export const CRON_DEFINITIONS: readonly CronDefinition[] = [
   pendingTransfersCron,
   custodyProposalsCron,
+  fireblocksProposalsCron,
   paymentRequestsHotCron,
   paymentRequestsCron,
   paymentRequestsExpiryCron,

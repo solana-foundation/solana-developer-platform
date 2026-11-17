@@ -42,6 +42,7 @@ import {
   assertCustodyProviderCanDeleteWallet,
 } from "@/services/custody-provider-lifecycle.service";
 import type {
+  CustodyProposalCanceller,
   CustodyProposalReader,
   CustodyProposalRecovery,
   CustodyTransferProposer,
@@ -1335,6 +1336,21 @@ export class SigningService {
       custodyWalletId,
       binding,
       movement
+    );
+  }
+
+  /** Read-and-cancel recovery for a recorded proposal; it can never create a transfer. */
+  async getTransferProposalCancellerForWalletRecord(
+    orgId: string,
+    projectId: string,
+    custodyWalletId: string,
+    binding: TransferProposalIntent & { sourceAddress: string | null }
+  ): Promise<CustodyProposalCanceller> {
+    return this.runtimeTargets.getTransferProposalCancellerForWalletRecord(
+      orgId,
+      projectId,
+      custodyWalletId,
+      binding
     );
   }
 
