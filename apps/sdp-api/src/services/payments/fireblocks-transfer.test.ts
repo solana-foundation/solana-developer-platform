@@ -1425,7 +1425,8 @@ describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
         "UPDATE custody_connections SET status = ?, last_check_status = ?, activated_at = NULL WHERE organization_id = ?",
         [check === "running" ? "checking" : "failed", check, ORGANIZATION_ID]
       );
-      const pending = await recoverPendingProposal(transfer.id);
+      await expect(recoverPendingProposal(transfer.id)).rejects.toThrow();
+      const pending = await recordedProposal(transfer.id);
       expect(pending.status).toBe("processing");
       expect(pending.provider_data.proposalRefusal).toBeUndefined();
       expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(0);
@@ -1447,7 +1448,8 @@ describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
     expect(response.status, await response.clone().text()).toBe(200);
     const transfer = (await response.json()).data.transfer;
     testEnv.SDP_RELEASE_CHANNEL = "stable";
-    const pending = await recoverPendingProposal(transfer.id);
+    await expect(recoverPendingProposal(transfer.id)).rejects.toThrow();
+    const pending = await recordedProposal(transfer.id);
     expect(pending.status).toBe("processing");
     expect(pending.provider_data.proposalRefusal).toBeUndefined();
     expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(0);

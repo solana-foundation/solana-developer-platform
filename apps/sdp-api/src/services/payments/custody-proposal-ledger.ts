@@ -222,7 +222,17 @@ function assertPendingDecision(current: PaymentTransferRow, event: CustodyPropos
       if (current.status !== "processing")
         throw conflict("The payment already has a recorded outcome");
       break;
-    default:
+    case "submission_claimed":
+    case "submission_refused":
+    case "observed":
+    case "observed_absent":
+    case "cancel_accepted":
+    case "cancel_declined":
+    case "alert_delivered":
       break;
+    default: {
+      const exhaustive: never = event;
+      throw new Error(`Unhandled custody proposal event: ${String(exhaustive)}`);
+    }
   }
 }

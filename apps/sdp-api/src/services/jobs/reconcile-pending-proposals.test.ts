@@ -17,6 +17,7 @@ import { createPostgresPaymentsRepository } from "@/db/repositories/payments.rep
 import { AppError } from "@/lib/errors";
 import { currentMoneyPrincipal, type MoneyPrincipal } from "@/lib/money-principal";
 import { rootLogger } from "@/runtime/logger";
+import type { AuditLogEntry } from "@/services/audit.service";
 import {
   type CustodyProposalRecovery,
   ProposalAdmissionRefusedError,
@@ -197,10 +198,15 @@ function harness(initialRows: PaymentTransferRow[] = [transfer()]) {
   const transition = vi
     .spyOn(proposals, "transition")
     .mockImplementation(async (input) => apply(input));
+  const entries: AuditLogEntry[] = [];
   const ledger: ProposalLedger = {
     repo,
     proposals,
-    audited: async (work) => (await work(repo, proposals)).result,
+    audited: async (work) => {
+      const { entry, result } = await work(repo, proposals);
+      if (entry !== null) entries.push(entry);
+      return result;
+    },
   };
   vi.spyOn(ledgerFactory, "systemProposalLedger").mockReturnValue(ledger);
   const recovery = {
@@ -229,6 +235,7 @@ function harness(initialRows: PaymentTransferRow[] = [transfer()]) {
     factory,
     alert,
     warn,
+    entries,
   };
 }
 
@@ -253,6 +260,27 @@ function refuse(h: ReturnType<typeof harness>) {
       ...row.state,
       authorizationState: "refused",
       refusal: { at: NOW, reason: "principal_not_live", message: "Original authority was revoked" },
+    },
+  });
+}
+
+function observeDuringCancellation(
+  h: ReturnType<typeof harness>,
+  phase: "pending" | "executing" = "pending"
+) {
+  const row = h.state();
+  return h.apply({
+    transferId: row.payment_transfer_id,
+    organizationId: row.organization_id,
+    projectId: row.project_id,
+    expectedVersion: row.version,
+    event: {
+      type: "observed",
+      at: new Date().toISOString(),
+      phase,
+      providerTransactionId: "fb_recovery",
+      providerStatus: phase === "pending" ? "PENDING_AUTHORIZATION" : "BROADCASTING",
+      providerSubStatus: null,
     },
   });
 }
@@ -304,13 +332,181 @@ describe("reconcilePendingProposals", () => {
     expect(h.payment().status).toBe("processing");
   });
 
+  it.each([
+    { accepted: true, phase: "pending" },
+    { accepted: false, phase: "pending" },
+    { accepted: true, phase: "executing" },
+    { accepted: false, phase: "executing" },
+  ] as const)(
+    "persists cancellation accepted=$accepted when a $phase observation wins during provider I/O",
+    async ({ accepted, phase }) => {
+      const h = harness();
+      h.recovery.admit.mockRejectedValue(revoke());
+      h.recovery.cancel.mockImplementation(async () => {
+        expect(observeDuringCancellation(h, phase)).not.toBeNull();
+        return accepted;
+      });
+      await runRecovery();
+      expect(h.recovery.cancel).toHaveBeenCalledOnce();
+      expect(h.state().state).toMatchObject({
+        providerPhase: phase,
+        authorizationState: accepted ? "cancel_acknowledged" : "refused",
+      });
+      expect(h.entries.map((entry) => entry.metadata?.eventType)).toEqual([
+        "proposal_refused",
+        "proposal_cancellation_requested",
+        accepted ? "proposal_cancellation_accepted" : "proposal_cancellation_declined",
+      ]);
+      expect(h.payment().status).toBe("processing");
+    }
+  );
+
+  it("retries lost result writes without repeating cancellation or its audit", async () => {
+    const h = harness();
+    h.recovery.admit.mockRejectedValue(revoke());
+    let conflicts = 0;
+    h.transition.mockImplementation(async (input) => {
+      if (input.event.type === "cancel_accepted" && conflicts < 2) {
+        conflicts += 1;
+        observeDuringCancellation(h);
+        return null;
+      }
+      return h.apply(input);
+    });
+    await runRecovery();
+    expect(conflicts).toBe(2);
+    expect(h.recovery.cancel).toHaveBeenCalledOnce();
+    expect(h.state().state.authorizationState).toBe("cancel_acknowledged");
+    const accepted = h.transition.mock.calls
+      .map(([input]) => input.event)
+      .filter((event) => event.type === "cancel_accepted");
+    expect(accepted).toHaveLength(3);
+    expect(new Set(accepted.map((event) => event.at)).size).toBe(1);
+    expect(
+      h.entries.filter((entry) => entry.metadata?.eventType === "proposal_cancellation_accepted")
+    ).toHaveLength(1);
+  });
+
+  it.each([true, false])(
+    "does not attach cancellation accepted=%s to a newer attempt",
+    async (accepted) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NOW);
+      const h = harness();
+      h.recovery.admit.mockRejectedValue(revoke());
+      const newerAttemptAt = "2026-11-12T00:05:00.000Z";
+      h.recovery.cancel.mockImplementation(async () => {
+        const row = h.state();
+        expect(
+          h.apply({
+            transferId: row.payment_transfer_id,
+            organizationId: row.organization_id,
+            projectId: row.project_id,
+            expectedVersion: row.version,
+            event: { type: "cancel_requested", at: newerAttemptAt },
+          })
+        ).not.toBeNull();
+        return accepted;
+      });
+      await runRecovery();
+      expect(h.state().state).toMatchObject({
+        authorizationState: "cancel_requested",
+        cancelRequestedAt: newerAttemptAt,
+        cancelAcknowledgedAt: null,
+        cancelDeclinedAt: null,
+      });
+      expect(h.recovery.cancel).toHaveBeenCalledOnce();
+      expect(h.entries).toHaveLength(2);
+    }
+  );
+
+  it.each([true, false])(
+    "preserves a terminal outcome over cancellation accepted=%s",
+    async (accepted) => {
+      const h = harness();
+      h.recovery.admit.mockRejectedValue(revoke());
+      h.recovery.cancel.mockImplementation(async () => {
+        const row = h.state();
+        h.states.set(row.payment_transfer_id, {
+          ...row,
+          version: row.version + 1,
+          state: { ...row.state, providerPhase: "cancelled" },
+        });
+        h.payments.set(row.payment_transfer_id, { ...h.payment(), status: "failed" });
+        return accepted;
+      });
+      await runRecovery();
+      expect(h.state().state).toMatchObject({
+        providerPhase: "cancelled",
+        cancelAcknowledgedAt: null,
+        cancelDeclinedAt: null,
+      });
+      expect(h.payment().status).toBe("failed");
+      expect(h.entries).toHaveLength(2);
+    }
+  );
+
+  it.each([true, false])(
+    "preserves an already recorded cancellation accepted=%s",
+    async (accepted) => {
+      const h = harness();
+      h.recovery.admit.mockRejectedValue(revoke());
+      h.recovery.cancel.mockImplementation(async () => {
+        const row = h.state();
+        expect(
+          h.apply({
+            transferId: row.payment_transfer_id,
+            organizationId: row.organization_id,
+            projectId: row.project_id,
+            expectedVersion: row.version,
+            event: { type: accepted ? "cancel_accepted" : "cancel_declined", at: NOW },
+          })
+        ).not.toBeNull();
+        return !accepted;
+      });
+      await runRecovery();
+      expect(h.state().state.authorizationState).toBe(accepted ? "cancel_acknowledged" : "refused");
+      expect(h.entries).toHaveLength(2);
+      expect(h.recovery.cancel).toHaveBeenCalledOnce();
+    }
+  );
+
+  it.each([true, false])(
+    "bounds result writes when terminalOnLastConflict=%s",
+    async (terminalOnLastConflict) => {
+      const h = harness();
+      h.recovery.admit.mockRejectedValue(revoke());
+      let conflicts = 0;
+      h.transition.mockImplementation(async (input) => {
+        if (input.event.type !== "cancel_accepted") return h.apply(input);
+        conflicts += 1;
+        observeDuringCancellation(h);
+        if (terminalOnLastConflict && conflicts === 5) {
+          const row = h.state();
+          h.states.set(row.payment_transfer_id, {
+            ...row,
+            version: row.version + 1,
+            state: { ...row.state, providerPhase: "cancelled" },
+          });
+        }
+        return null;
+      });
+      if (terminalOnLastConflict) await runRecovery();
+      else await expect(runRecovery()).rejects.toThrow("cancellation result changed concurrently");
+      expect(conflicts).toBe(5);
+      expect(h.recovery.cancel).toHaveBeenCalledOnce();
+      expect(h.state().state.cancelAcknowledgedAt).toBeNull();
+      expect(h.entries).toHaveLength(2);
+    }
+  );
+
   it("keeps sticky refusal and backs off ambiguous cancellation retries", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);
     const h = harness();
     h.recovery.admit.mockRejectedValueOnce(revoke()).mockResolvedValue(undefined);
     h.recovery.cancel.mockRejectedValueOnce(new Error("Ambiguous cancellation timeout"));
-    await runRecovery();
+    await expect(runRecovery()).rejects.toThrow("Ambiguous cancellation timeout");
     const first = h.state().state;
     expect(first.authorizationState).toBe("cancel_requested");
     vi.setSystemTime("2026-11-12T00:01:00.000Z");
@@ -450,12 +646,54 @@ describe("reconcilePendingProposals", () => {
   it("never cancels on a temporary admission failure or provider read failure", async () => {
     const h = harness();
     h.recovery.admit.mockRejectedValue(new Error("Admission database unavailable"));
-    await runRecovery();
+    await expect(runRecovery()).rejects.toThrow("Admission database unavailable");
     h.recovery.read.mockRejectedValue(new Error("Provider unavailable"));
-    await runRecovery();
+    await expect(runRecovery()).rejects.toThrow("Provider unavailable");
     expect(h.state().state.refusal).toBeNull();
     expect(h.recovery.cancel).not.toHaveBeenCalled();
     expect(h.warn).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails the run when every selected proposal fails", async () => {
+    const h = harness([transfer(), transfer({ id: "xfr_second" })]);
+    const firstError = new Error("First provider unavailable");
+    const secondError = new Error("Second provider unavailable");
+    h.recovery.read.mockImplementation(async (id) => {
+      throw id === "xfr_recovery" ? firstError : secondError;
+    });
+    await expect(runRecovery()).rejects.toMatchObject({ errors: [firstError, secondError] });
+    expect(h.recovery.read).toHaveBeenCalledTimes(2);
+    expect(h.warn).toHaveBeenCalledTimes(2);
+    expect(h.recovery.cancel).not.toHaveBeenCalled();
+  });
+
+  it("keeps a mixed recovery page successful while recording individual failures", async () => {
+    const h = harness([transfer(), transfer({ id: "xfr_second" })]);
+    h.recovery.read.mockRejectedValueOnce(new Error("First provider unavailable"));
+    h.recovery.admit.mockRejectedValue(revoke());
+    await runRecovery();
+    expect(h.state().state.refusal).toBeNull();
+    expect(h.state("xfr_second").state.authorizationState).toBe("cancel_acknowledged");
+    expect(h.recovery.cancel).toHaveBeenCalledExactlyOnceWith("xfr_second");
+    expect(h.warn).toHaveBeenCalledOnce();
+  });
+
+  it("drains terminal alerts even when every selected recovery fails", async () => {
+    const h = harness([transfer(), transfer({ id: "xfr_alert" })]);
+    const terminal = h.state("xfr_alert");
+    h.states.set(terminal.payment_transfer_id, {
+      ...terminal,
+      state: {
+        ...terminal.state,
+        providerPhase: "completed",
+        authorizationState: "committed_after_refusal",
+        refusal: { at: NOW, reason: "principal_not_live", message: "Authority revoked" },
+      },
+    });
+    h.recovery.read.mockRejectedValue(new Error("Provider unavailable"));
+    await expect(runRecovery()).rejects.toThrow("Provider unavailable");
+    expect(h.alert).toHaveBeenCalledOnce();
+    expect(h.state("xfr_alert").state.alertedAt).toEqual(expect.any(String));
   });
 
   it("keeps terminal alerts durable across a failed emission", async () => {

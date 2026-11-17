@@ -391,7 +391,9 @@ adoption and flags; authority withdrawal still commits. The error event
 `proposal_recovery_wake_failed` records tenant scope and SQLSTATE without raw
 provider data. The minute worker retries discovery and continues checking known
 proposals even when legacy adoption fails; it still reports that failure.
-Malformed legacy records need repair before they can be adopted.
+A nonempty recovery page where every proposal fails marks the cron run failed;
+successful proposals and terminal-alert delivery remain independent. Mixed pages
+keep per-payment warnings. Malformed legacy records need repair before adoption.
 
 The dedicated `reconcile-custody-proposals` cron runs every minute,
 claims at most 50 rows per environment and makes five concurrent provider calls.
@@ -426,9 +428,11 @@ cancellation acknowledgment and critical event acknowledgment each commit with
 a system audit entry in the same database transaction. Ambiguous attempts do
 not consume the first-decline audit; later declines keep that original marker
 without appending another entry. Cancellation intent commits before provider
-I/O. A failed audit write rolls back its marker so recovery can retry. These
-intermediate events do not close the original payment audit intent; only
-terminal settlement does.
+I/O. Cancellation results retry version conflicts against the same recorded
+attempt without another provider call. Terminal outcomes and newer attempts win;
+five consecutive write conflicts fail that recovery check. A failed audit write
+rolls back its marker so recovery can retry. These intermediate events do not
+close the original payment audit intent; only terminal settlement does.
 
 A payment that completes after a recorded refusal emits the CRITICAL structured
 event `fireblocks_transfer_committed_after_refusal`. The row remains an alert

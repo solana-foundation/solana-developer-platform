@@ -3,6 +3,7 @@ import {
   canRequestCustodyProposalCancellation,
   hasUnalertedCustodyProposalRefusal,
   isCancellableCustodyProposalPhase,
+  isTerminalCustodyProposalPhase,
 } from "@sdp/types/custody-proposals";
 import type {
   ClaimCustodyProposalsInput,
@@ -31,6 +32,7 @@ import type { Env } from "@/types/env";
 
 const RECOVERY_PAGE_SIZE = 50;
 const RECOVERY_CONCURRENCY = 5;
+const CANCELLATION_RESULT_WRITE_ATTEMPTS = 5;
 
 function identity(proposal: CustodyProposalRow) {
   return {
@@ -108,11 +110,26 @@ async function recoverProposal(env: Env, ledger: ProposalLedger, snapshot: Custo
   if (!current.written) return;
   // Only the durable CAS winner calls cancel. A timeout retains retry work; acknowledgment
   // does not settle the payment.
+  const cancellationProposalId = current.proposal.id;
   const accepted = await recovery.cancel(current.transfer.id);
-  await applyProposalEvent(ledger, current.transfer, current.proposal, {
+  const event = {
     type: accepted ? "cancel_accepted" : "cancel_declined",
     at: new Date().toISOString(),
-  });
+  } as const;
+  // Observations may advance the version during cancel. Retry only this attempt's
+  // result, without repeating provider I/O or overwriting a newer decision.
+  for (let attempt = 0; attempt < CANCELLATION_RESULT_WRITE_ATTEMPTS; attempt += 1) {
+    current = await applyProposalEvent(ledger, current.transfer, current.proposal, event);
+    if (current.written) return;
+    if (
+      current.proposal.id !== cancellationProposalId ||
+      current.proposal.state.cancelRequestedAt !== cancellationAt ||
+      current.proposal.state.authorizationState !== "cancel_requested" ||
+      isTerminalCustodyProposalPhase(current.proposal.state.providerPhase)
+    )
+      return;
+  }
+  throw internalError("Custody proposal cancellation result changed concurrently");
 }
 
 async function recoverDue(env: Env, ledger: ProposalLedger, scope: CustodyProposalRecoveryScope) {
@@ -137,24 +154,32 @@ async function recoverClaimedProposals(
   input: ClaimCustodyProposalsInput
 ) {
   const proposals = await ledger.proposals.claimDue(input);
-  await mapSettledWithConcurrency(proposals, RECOVERY_CONCURRENCY, async (proposal) => {
-    try {
-      await recoverProposal(env, ledger, proposal);
-    } catch (error) {
-      getLogger().warn(
-        {
-          event: "proposal_recovery_unavailable",
-          ...identity(proposal),
-          pending_age_seconds: Math.max(
-            0,
-            Math.floor((Date.now() - Date.parse(proposal.created_at)) / 1000)
-          ),
-          ...describeError(error),
-        },
-        "proposal_recovery_unavailable"
-      );
+  const outcomes = await mapSettledWithConcurrency(
+    proposals,
+    RECOVERY_CONCURRENCY,
+    async (proposal) => {
+      try {
+        await recoverProposal(env, ledger, proposal);
+      } catch (error) {
+        getLogger().warn(
+          {
+            event: "proposal_recovery_unavailable",
+            ...identity(proposal),
+            pending_age_seconds: Math.max(
+              0,
+              Math.floor((Date.now() - Date.parse(proposal.created_at)) / 1000)
+            ),
+            ...describeError(error),
+          },
+          "proposal_recovery_unavailable"
+        );
+        throw error;
+      }
     }
-  });
+  );
+  if (outcomes.length > 0 && outcomes.every((outcome) => outcome.status === "rejected")) {
+    rethrowFailures(outcomes);
+  }
 }
 
 async function emitRefusalAlert(
