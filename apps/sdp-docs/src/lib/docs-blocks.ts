@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { ApiMethod } from "@sdp/api-catalog/reference";
 import { embedSource } from "fumadocs-core/mdx-plugins/stringifier";
-import type { Parent, Root, RootContent } from "mdast";
+import type { Code, Parent, Root, RootContent } from "mdast";
 import remarkGfm from "remark-gfm";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
@@ -447,19 +447,7 @@ export function remarkDocsBlocks(
           };
           return [child];
         }
-        if (child.type === "code") {
-          // Every page's code calls this deployment's API (beta docs show api-beta); the Markdown
-          // agents get and the llms files keep the canonical host.
-          child.value = child.value.replaceAll(canonicalSite.apiUrl, apiUrl);
-        }
-        if (child.type === "code" && earnPage && pagePublished) {
-          // Code identifiers are useful Earn queries too. Fumadocs keeps the
-          // enclosing heading, so a hit opens the correct stage or example.
-          child.data = {
-            ...child.data,
-            structuredData: { contents: [{ heading: undefined, content: child.value }] },
-          };
-        }
+        if (child.type === "code") prepareCode(child, earnPage && pagePublished);
         const referenceContent = referencePage ? referenceNodes(child, parent) : undefined;
         if (referenceContent !== undefined) return referenceContent;
         if ("children" in child) walk(child);
@@ -491,6 +479,25 @@ function referenceNodes(child: RootContent, parent: Parent): RootContent[] | und
     return [methodBadge(child.value)];
   }
   return undefined;
+}
+
+/**
+ * A code block as the page shows it: calling this deployment's API (beta docs show api-beta) where
+ * the Markdown agents get and the llms files keep the canonical host, and, on a published Earn
+ * page, searchable by its identifiers.
+ *
+ * @param code - The code block, changed in place.
+ * @param searchable - Whether search indexes the code (a published Earn page).
+ */
+function prepareCode(code: Code, searchable: boolean): void {
+  code.value = code.value.replaceAll(canonicalSite.apiUrl, apiUrl);
+  if (!searchable) return;
+  // Code identifiers are useful Earn queries too. Fumadocs keeps the enclosing heading, so a hit
+  // opens the correct stage or example.
+  code.data = {
+    ...code.data,
+    structuredData: { contents: [{ heading: undefined, content: code.value }] },
+  };
 }
 
 /** What separates a field's facts on a generated reference page (scripts/lib/api-reference-page.ts). */
