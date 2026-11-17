@@ -41,6 +41,8 @@ describe("mainnet access Slack posts", () => {
       "*Building*\\n>Payouts\\n>in USDC",
       ":warning: *gmail.com* is a free email provider",
       "`org_acme` · `user_jane` · requested 17 Nov 2026, 16:32 UTC",
+      // SDP reads the approval only under `sdp`; a top-level key leaves the org locked
+      '`{\\"sdp\\": {\\"enableProductionProject\\": true}}`',
     ]) {
       expect(body).toContain(text);
     }

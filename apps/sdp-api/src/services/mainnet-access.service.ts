@@ -1,8 +1,9 @@
 /**
  * An organization's one-time request for mainnet (HOO-2427). An admin declares the organization's
  * jurisdiction and accepts the SDP Terms and Conditions in the same submit; SDP records both and
- * emails its alias. Approval is not here: an operator sets `enableProductionProject` in Clerk, the
- * webhook syncs it into the organization's settings, and `state` reads `approved` from that alone.
+ * emails its alias. Approval is not here: an operator sets `enableProductionProject` under `sdp` in
+ * the organization's Clerk private metadata (a top-level key is ignored), the webhook syncs it into
+ * the organization's settings, and `state` reads `approved` from that alone.
  */
 import { COUNTRY_CODES, countryByCode } from "@sdp/types/countries";
 import { type MainnetAccess, type MainnetAccessState, SDP_TERMS } from "@sdp/types/mainnet-access";
