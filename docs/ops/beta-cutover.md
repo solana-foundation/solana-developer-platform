@@ -16,13 +16,14 @@ Nothing changes until the switches below are set, so the code ships ahead of the
 | `SDP_ALLOW_PRODUCTION_PROJECTS` | Beta API env                               | `"false"` (already)  | Beta serves the sandbox only and refuses mainnet requests.                                                                                                                                         |
 | `sandbox-on-beta`               | Production `sdp-web` Vercel project        | on                   | "Try the sandbox" links to beta on the homepage, the sign-in page, the workspace switcher and the mainnet request page.                                                                            |
 | `beta-label`                    | Beta `sdp-web` Vercel project              | on                   | A Beta badge beside the product name on the homepage and the sign-in, sign-up, terms and mainnet request pages.                                                                                    |
+| `homepage-open-signup`          | Beta `sdp-web` Vercel project              | on                   | The beta homepage offers "Create account" instead of "Join the waitlist". Off by default on a Vercel production deployment, which beta is; production already has it on.                         |
 
 Unset means allowed for both API switches. Any value other than `true` or `false` fails at boot,
 and so does setting both to `false`.
 
 Each Vercel flag is decided by Vercel Flags when the project defines a flag with that key, and
-otherwise by its environment fallback (`SDP_FLAG_SANDBOX_ON_BETA`, `SDP_FLAG_BETA_LABEL`), which
-defaults to off. Defining the flag in Vercel Flags lets it flip without a redeploy; the
+otherwise by its environment fallback (`SDP_FLAG_SANDBOX_ON_BETA`, `SDP_FLAG_BETA_LABEL`,
+`SDP_FLAG_HOMEPAGE_OPEN_SIGNUP`), which defaults to off. Defining the flag in Vercel Flags lets it flip without a redeploy; the
 environment fallback needs one.
 
 ## Before the window
@@ -47,8 +48,10 @@ on the mainnet request page, which offers the sandbox on beta, so no separate no
 
 Each step can be undone on its own.
 
-1. **Open beta sign-up** in the beta Clerk instance, so the production links in step 4 never point
-   at a closed door.
+1. **Open beta sign-up:** set the beta Clerk instance's sign-up mode to public and turn on
+   `homepage-open-signup` on the beta `sdp-web` project, so the production links in step 4 never
+   point at a closed door. Then sign up on beta end to end: a new organization gets a sandbox
+   project and can create an API key.
 2. **Turn on `beta-label`** on the beta `sdp-web` project.
 3. **Make production mainnet-only:** set `SDP_ALLOW_SANDBOX_PROJECTS = "false"` in the sdp-infra
    prod tfvars and apply. Wait for the new API revision to serve, then check:
