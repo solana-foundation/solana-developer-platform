@@ -13,7 +13,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
     );
 
     const response = await apiClient.request(
-      `/v1/issuance/tokens/${encodeURIComponent(tokenId)}/allowlist/labels`
+      `/v1/issuance/tokens/${encodeURIComponent(tokenId)}/control-list/labels`
     );
 
     if (!response.ok) {

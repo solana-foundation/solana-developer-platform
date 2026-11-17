@@ -93,7 +93,7 @@ describe("Issuance routes — metered quota", () => {
     await seedRateLimit(env, PREPARE_ACTOR_COUNTER, ISSUANCE_PREPARE_QUOTA.actorMax);
 
     const res = await app.request(
-      `/v1/issuance/tokens/${TEST_ACTIVE_TOKEN.id}/mint/prepare`,
+      `/v1/issuance/tokens/${TEST_ACTIVE_TOKEN.id}/mint/build-unsigned-transaction`,
       {
         method: "POST",
         headers: {

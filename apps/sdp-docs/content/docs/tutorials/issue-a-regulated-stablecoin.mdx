@@ -180,7 +180,7 @@ The deploy call creates the Token-2022 mint, signed by your custody wallet, and 
 ```javascript title="deploy-token.js"
 const deployKey = idempotencyKey("deploy");
 const deployed = await sdp.post(
-  `/v1/issuance/tokens/${tokenId}/deploy`,
+  `/v1/issuance/tokens/${tokenId}/deploy/execute`,
   { signingCustodyWalletId },
   { idempotencyKey: deployKey }
 );
@@ -276,7 +276,7 @@ Freezing stops one holder's account without touching any other. Token-2022 enfor
 ```javascript title="freeze-account.js"
 const holderFreezeKey = idempotencyKey("freeze");
 await sdpAdmin.post(
-  `/v1/issuance/tokens/${tokenId}/freeze`,
+  `/v1/issuance/tokens/${tokenId}/freeze-account`,
   {
     signingCustodyWalletId,
     accountAddress: holderAddress,
@@ -295,7 +295,7 @@ Seize moves tokens out of a holder's account without their signature, through th
 ```javascript title="seize-tokens.js"
 const seizeKey = idempotencyKey("seize");
 await sdpAdmin.post(
-  `/v1/issuance/tokens/${tokenId}/seize`,
+  `/v1/issuance/tokens/${tokenId}/seize/execute`,
   {
     signingCustodyWalletId,
     seize: {
@@ -318,7 +318,7 @@ Force burn destroys tokens in a holder's account, with the same authority as sei
 ```javascript title="force-burn.js"
 const forceBurnKey = idempotencyKey("force-burn");
 await sdpAdmin.post(
-  `/v1/issuance/tokens/${tokenId}/force-burn`,
+  `/v1/issuance/tokens/${tokenId}/force-burn/execute`,
   {
     signingCustodyWalletId,
     forceBurn: {
@@ -346,7 +346,7 @@ Minting needs `issuance.execute`, which the Developer key holds:
 ```javascript title="mint-tokens.js"
 const mintKey = idempotencyKey("mint");
 const minted = await sdp.post(
-  `/v1/issuance/tokens/${tokenId}/mint`,
+  `/v1/issuance/tokens/${tokenId}/mint/execute`,
   {
     signingCustodyWalletId,
     mint: {
@@ -430,7 +430,7 @@ Transfers use `POST /v1/payments/transfers`, which needs `transfers.execute` (th
 await screenDestination(destinationAddress);
 
 const transfer = await sdp.post(
-  "/v1/payments/transfers",
+  "/v1/payments/transfers/execute",
   {
     sourceCustodyWalletId: signingCustodyWalletId,
     destination: destinationAddress,
@@ -478,7 +478,7 @@ Freeze the destination's TPUSD account with the Admin key; the Developer key lac
 ```javascript title="freeze-destination.js"
 const transferFreezeKey = idempotencyKey("freeze");
 await sdpAdmin.post(
-  `/v1/issuance/tokens/${tokenId}/freeze`,
+  `/v1/issuance/tokens/${tokenId}/freeze-account`,
   {
     signingCustodyWalletId,
     accountAddress: destinationAddress,
@@ -499,7 +499,7 @@ Run the same transfer. This time it fails:
 ```javascript title="transfer-blocked.js"
 try {
   await sdp.post(
-    "/v1/payments/transfers",
+    "/v1/payments/transfers/execute",
     {
       sourceCustodyWalletId: signingCustodyWalletId,
       destination: destinationAddress,
@@ -528,7 +528,7 @@ In production, unfreeze only after the compliance review resolves. In the sandbo
 
 ```javascript title="unfreeze-account.js"
 await sdpAdmin.post(
-  `/v1/issuance/tokens/${tokenId}/unfreeze`,
+  `/v1/issuance/tokens/${tokenId}/unfreeze-account`,
   {
     signingCustodyWalletId,
     accountAddress: destinationAddress,
