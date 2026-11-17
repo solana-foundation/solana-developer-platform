@@ -2,7 +2,7 @@
 
 > **Maintainers only.**
 
-SDP sends email through Iterable, the Foundation's sender for its email domains. Today that covers the mainnet access request email to SDP operators (HOO-2427) and admin alerts (HOO-2299).
+SDP sends email through Iterable, the Foundation's sender for its email domains. Today that covers the mainnet access request email to SDP operators (HOO-2427), copied to Slack, and admin alerts (HOO-2299).
 
 ## How it works
 
@@ -20,6 +20,14 @@ SDP sends email through Iterable, the Foundation's sender for its email domains.
   Never put an SDP email on a marketing message type. A marketing unsubscribe would silently drop it, and Gmail files those under Promotions.
 - **Off unless configured.** `iterableEmailConfig` reads `ITERABLE_API_URL`, `ITERABLE_API_KEY` and `ITERABLE_TRANSACTIONAL_CAMPAIGN_ID`. If any is missing or a placeholder, nothing is sent, mainnet access requests answer 503, and alerts are skipped without retrying.
 - **No idempotency key.** Iterable has none, so a caller that must not send twice keeps its own record of what it sent. Admin alerts keep one per recipient.
+
+## Slack copies in #sdp-requests
+
+Each mainnet access request email, and each correction or reset, is also posted to #sdp-requests through a Slack incoming webhook (`apps/sdp-api/src/services/slack-webhook.ts`). The post is built from the email's own `EmailContent`, so it carries the same details and the "Open Clerk" button. Customer text is escaped, so it can't mention the channel or hide a link.
+
+- **Best-effort.** A request posts only after its email is sent. A post that fails logs `sdp_api_mainnet_access_slack_post_failed` and changes nothing: the request still answers 201, and the email stays the record.
+- **Off unless configured.** `SDP_REQUESTS_SLACK_WEBHOOK_URL` must be an `https://hooks.slack.com/…` URL; anything else posts nothing. Prod sets it in Doppler `prd`. Leave it unset in `dev` and stage, so test requests don't reach the channel.
+- **The URL is a secret.** Anyone holding it can post to the channel. Rotate it in Slack (the app's Incoming Webhooks page) if it leaks.
 
 ## Admin alerts
 
@@ -39,6 +47,7 @@ Alerts about a project (money, API keys, custody) cover mainnet projects only. O
 | `ITERABLE_API_KEY`                   | prod key                                   | dev key                                          | empty: CI never sends |
 | `ITERABLE_TRANSACTIONAL_CAMPAIGN_ID` | prod campaign                              | dev campaign ("SDP Dev" sender)                  | inherited             |
 | `SDP_OPERATOR_EMAIL`                 | the operator alias                         | unset; set your own in `apps/sdp-api/.env.local` | unset                 |
+| `SDP_REQUESTS_SLACK_WEBHOOK_URL`     | the #sdp-requests webhook                  | unset                                            | unset                 |
 
 Stage has no Iterable key, so it sends nothing.
 

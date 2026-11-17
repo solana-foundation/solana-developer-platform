@@ -18,12 +18,21 @@ import { conflict } from "@/lib/errors";
 import { productionProjectsAllowed, sandboxProjectsAllowed } from "@/lib/production-entitlement";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { createSystemAuditService } from "@/services/audit.service";
+import type { EmailContent } from "@/services/email-layout";
 import {
+  type MainnetAccessCorrectionEmail,
   type MainnetAccessRequestEmail,
+  mainnetAccessCorrectionEmailContent,
   mainnetAccessEmailConfig,
+  mainnetAccessRequestEmailContent,
   sendMainnetAccessCorrectionEmail,
   sendMainnetAccessRequestEmail,
 } from "@/services/mainnet-access-email";
+import {
+  postSlackMessage,
+  requestsSlackWebhookUrl,
+  slackMessageFromEmail,
+} from "@/services/slack-webhook";
 import type { Env } from "@/types/env";
 
 export function readMainnetAccessRow(
@@ -115,11 +124,9 @@ export async function notifyMainnetAccessRequest(
   if (!claim) {
     throw conflict("This organization's request is already being sent; try again in a minute");
   }
+  const request = requestEmail(claim.row, await repository.emailContext(claim.row));
   try {
-    await sendMainnetAccessRequestEmail(
-      env,
-      requestEmail(claim.row, await repository.emailContext(claim.row))
-    );
+    await sendMainnetAccessRequestEmail(env, request);
   } catch (error) {
     logEvent("warn", {
       event: "sdp_api_mainnet_access_request_notify_failed",
@@ -136,7 +143,31 @@ export async function notifyMainnetAccessRequest(
     event: "sdp_api_mainnet_access_request_notified",
     organization_id: organizationId,
   });
+  await postToRequestsChannel(env, organizationId, mainnetAccessRequestEmailContent(request));
   return notified;
+}
+
+/**
+ * Copies an operator email into #sdp-requests, once the email is sent (or, for a correction on a
+ * deployment without email, once the change is saved). Never throws: the email and the saved
+ * request are the record, so a Slack failure is logged and nothing else.
+ */
+async function postToRequestsChannel(
+  env: Env,
+  organizationId: string,
+  content: EmailContent
+): Promise<void> {
+  const webhookUrl = requestsSlackWebhookUrl(env);
+  if (!webhookUrl) return;
+  try {
+    await postSlackMessage(webhookUrl, slackMessageFromEmail(content));
+  } catch (error) {
+    logEvent("warn", {
+      event: "sdp_api_mainnet_access_slack_post_failed",
+      organization_id: organizationId,
+      ...describeError(error),
+    });
+  }
 }
 
 function requestEmail(
@@ -248,27 +279,38 @@ export async function correctMainnetAccess(
     };
   });
 
-  if (!mainnetAccessEmailConfig(env)) return { request, operatorEmail: "not_configured" };
+  const correctionEmail: MainnetAccessCorrectionEmail = {
+    request: earlier,
+    correction:
+      input.operation === "set-country"
+        ? {
+            operation: "set-country",
+            countryCode: input.countryCode,
+            countryName: countryByCode(input.countryCode).name,
+          }
+        : { operation: "reset" },
+    operator: input.operator,
+    reason: input.reason,
+    ticket: input.ticket,
+  };
+  const posted = postToRequestsChannel(
+    env,
+    input.organizationId,
+    mainnetAccessCorrectionEmailContent(correctionEmail)
+  );
+  if (!mainnetAccessEmailConfig(env)) {
+    await posted;
+    return { request, operatorEmail: "not_configured" };
+  }
   try {
-    await sendMainnetAccessCorrectionEmail(env, {
-      request: earlier,
-      correction:
-        input.operation === "set-country"
-          ? {
-              operation: "set-country",
-              countryCode: input.countryCode,
-              countryName: countryByCode(input.countryCode).name,
-            }
-          : { operation: "reset" },
-      operator: input.operator,
-      reason: input.reason,
-      ticket: input.ticket,
-    });
+    await sendMainnetAccessCorrectionEmail(env, correctionEmail);
   } catch (error) {
     throw new Error(
       `The ${input.operation} is saved, but emailing the operator address failed; tell it by hand.`,
       { cause: error }
     );
+  } finally {
+    await posted;
   }
   return { request, operatorEmail: "sent" };
 }
