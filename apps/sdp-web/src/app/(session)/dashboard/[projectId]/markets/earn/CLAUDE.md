@@ -261,6 +261,13 @@ nothing else; the program create still sends the body `requestId` form.
   state with a default stablecoin would make every read below depend on
   remembering to fail closed, and the provider-unavailable case would silently
   hold a lane that cannot pay out.
+  Its retry protection is the dashboard's shared action key
+  (`dashboardRequest`'s `sendUnderActionKey`), NOT a body `requestId`: the API
+  refuses a withdrawal carrying both key sources, and a ref- or session-held
+  body UUID dies on reload. The create body's `amountUsd` goes out canonical
+  (`canonicalDecimalAmount`) so a cosmetic re-spell of the same value after an
+  ambiguous failure resolves the same kept key — a replay, never a second
+  payout.
 - `earn-vault-deposit-modal.tsx` — the `vault_direct` deposit: one SDP custody
   wallet funds one strategy, and that same wallet signs on chain and holds the
   shares. A vault address is never presented as a funding address. The
