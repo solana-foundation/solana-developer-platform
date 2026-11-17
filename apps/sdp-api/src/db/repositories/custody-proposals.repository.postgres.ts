@@ -282,6 +282,9 @@ export function createPostgresCustodyProposalsRepository(
       if (!current || current.version !== input.expectedVersion) return null;
       const result = transitionCustodyProposal(current.state, input.event);
       if ("rejected" in result) return null;
+      if (result.next === current.state && result.effects.length === 0) {
+        return { proposal: current, effects: result.effects };
+      }
       const row = await db.queryOne(
         `UPDATE custody_proposals
             SET ${STATE_COLUMNS.map((column) => `${column} = ?`).join(", ")},

@@ -395,6 +395,30 @@ A nonempty recovery page where every proposal fails marks the cron run failed;
 successful proposals and terminal-alert delivery remain independent. Mixed pages
 keep per-payment warnings. Malformed legacy records need repair before adoption.
 
+Set `organization_id` and `project_id` as psql variables. This read-only query
+lists suspicious legacy refusal rows oldest first, including already-adopted rows:
+
+```sql
+SELECT pt.id, pt.organization_id, pt.project_id, pt.created_at
+  FROM payment_transfers pt
+ WHERE pt.organization_id = :'organization_id'
+   AND pt.project_id = :'project_id'
+   AND jsonb_typeof(pt.provider_data->'fireblocksTransfer') = 'object'
+   AND pt.provider_data->'proposalRefusal' IS NOT NULL
+   AND (
+     jsonb_typeof(pt.provider_data->'proposalRefusal') IS DISTINCT FROM 'object'
+     OR NULLIF(btrim(pt.provider_data #>> '{proposalRefusal,at}'), '') IS NULL
+     OR NULLIF(btrim(pt.provider_data #>> '{proposalRefusal,reason}'), '') IS NULL
+     OR NULLIF(btrim(pt.provider_data #>> '{proposalRefusal,message}'), '') IS NULL
+   )
+ ORDER BY pt.created_at, pt.id
+ LIMIT 50;
+```
+
+Inspect each row's proposal before choosing a repair. Preserve refusal evidence;
+do not clear it to unblock adoption. Invalid nonblank timestamps and malformed
+bindings need separate inspection.
+
 The dedicated `reconcile-custody-proposals` cron runs every minute,
 claims at most 50 rows per environment and makes five concurrent provider calls.
 Flagged revocations take priority with capacity reserved for ordinary progress.
@@ -437,7 +461,10 @@ close the original payment audit intent; only terminal settlement does.
 A payment that completes after a recorded refusal emits the CRITICAL structured
 event `fireblocks_transfer_committed_after_refusal`. The row remains an alert
 outbox until emission is acknowledged, including completions first observed by a
-viewer. Delivery is at least once: deduplicate on transfer ID. Configure on-call
+viewer. The event requires an already-recorded refusal. Transfers first observed
+outside the cancellable window remain observation-only; without a prior refusal,
+their completion raises no critical event even if the initiating principal was
+revoked. Delivery is at least once: deduplicate on transfer ID. Configure on-call
 routing for this event before rollout; this repository does not deploy that rule.
 Monitor `proposal_recovery_unavailable` for stalled mitigation. Each recovery
 failure includes `pending_age_seconds` from the durable payment creation time,

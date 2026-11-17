@@ -243,6 +243,65 @@ describe("CustodyProposalsRepository", () => {
     ).toBeNull();
   });
 
+  it("keeps repeated refusal unchanged while rejecting a stale version", async () => {
+    const { proposal } = await seedProposal("noop_refusal");
+    const refused = await repo.transition({
+      ...identity("noop_refusal"),
+      expectedVersion: proposal.version,
+      event: { type: "admission_refused", at: BEFORE, reason: "revoked", message: "Revoked" },
+    });
+    assert(refused);
+    const event = {
+      type: "admission_refused",
+      at: NOW,
+      reason: "grant_removed",
+      message: "Grant removed",
+    } as const;
+    expect(
+      await repo.transition({
+        ...identity("noop_refusal"),
+        expectedVersion: refused.proposal.version,
+        event,
+      })
+    ).toEqual({ proposal: refused.proposal, effects: [] });
+    expect(
+      await repo.transition({
+        ...identity("noop_refusal"),
+        expectedVersion: proposal.version,
+        event,
+      })
+    ).toBeNull();
+    expect(await repo.getForTransfer(identity("noop_refusal"))).toEqual(refused.proposal);
+  });
+
+  it("advances repeated active observations so stale recovery work stays fenced", async () => {
+    const { proposal } = await seedProposal("repeated_observation");
+    let current = proposal;
+    for (const at of [NOW, "2026-11-11T10:00:01.000Z"]) {
+      const observed = await repo.transition({
+        ...identity("repeated_observation"),
+        expectedVersion: current.version,
+        event: {
+          type: "observed",
+          at,
+          phase: "pending",
+          providerTransactionId: "fireblocks_tx",
+          providerStatus: "PENDING_AUTHORIZATION",
+          providerSubStatus: null,
+        },
+      });
+      assert(observed);
+      expect(observed.effects).toEqual([{ type: "payment_status", status: "processing" }]);
+      expect(observed.proposal).toMatchObject({
+        version: current.version + 1,
+        state: current.state,
+        updated_at: at,
+      });
+      current = observed.proposal;
+    }
+    expect(await repo.getForTransfer(identity("repeated_observation"))).toEqual(current);
+  });
+
   it("enforces the cancellation cooldown and allows only one concurrent retry", async () => {
     const { proposal } = await seedProposal("cancel_retry");
     const refused = await repo.transition({
