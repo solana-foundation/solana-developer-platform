@@ -1,3 +1,4 @@
+import type { FireblocksSigningProposalStatus } from "@sdp/types/fireblocks";
 import type { DatabaseExecutor } from "@/db/client";
 import { conflict, notFound } from "@/lib/errors";
 
@@ -17,7 +18,7 @@ export interface FireblocksSigningProposalRow {
   asset_id: string;
   operation: "RAW" | "PROGRAM_CALL";
   provider_transaction_id: string | null;
-  status: string;
+  status: FireblocksSigningProposalStatus;
   cancel_requested_at: string | null;
   finished_at: string | null;
   created_at: string;
@@ -94,7 +95,10 @@ export class FireblocksProposalsRepository {
     status: string,
     terminal: boolean
   ): Promise<boolean> {
-    const row = await this.db.queryOne<{ cancel_requested_at: string | null; status: string }>(
+    const row = await this.db.queryOne<{
+      cancel_requested_at: string | null;
+      status: FireblocksSigningProposalStatus;
+    }>(
       `UPDATE fireblocks_signing_proposals SET provider_transaction_id = ?, status = CASE WHEN finished_at IS NULL THEN ? ELSE status END,
        finished_at = CASE WHEN ?::boolean THEN COALESCE(finished_at, sdp_iso_now()) ELSE finished_at END,
        updated_at = sdp_iso_now()

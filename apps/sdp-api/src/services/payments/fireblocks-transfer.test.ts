@@ -1264,7 +1264,7 @@ describe("native Fireblocks BYOK payment routes", () => {
 });
 
 describe("manual native Fireblocks cancellation", () => {
-  it.each(["CANCELLED", "PENDING_AUTHORIZATION", "COMPLETED"])(
+  it.each(["CANCELLED", "PENDING_AUTHORIZATION", "COMPLETED"] as const)(
     "records %s without treating an acknowledgement as a final verdict",
     async (resultStatus) => {
       const mock = await ready();
@@ -1298,13 +1298,23 @@ describe("manual native Fireblocks cancellation", () => {
         "SELECT status, signature FROM payment_transfers WHERE id = ?",
         [transfer.id]
       );
-      expect(final?.status).toBe(
-        resultStatus === "CANCELLED"
-          ? "failed"
-          : resultStatus === "COMPLETED"
-            ? "confirmed"
-            : "processing"
-      );
+      let expectedTransferStatus: string;
+      switch (resultStatus) {
+        case "CANCELLED":
+          expectedTransferStatus = "failed";
+          break;
+        case "PENDING_AUTHORIZATION":
+          expectedTransferStatus = "processing";
+          break;
+        case "COMPLETED":
+          expectedTransferStatus = "confirmed";
+          break;
+        default: {
+          const exhaustive: never = resultStatus;
+          throw new Error(`Unexpected Fireblocks proposal status: ${String(exhaustive)}`);
+        }
+      }
+      expect(final?.status).toBe(expectedTransferStatus);
       if (resultStatus === "COMPLETED") expect(final?.signature).toBe(SIG);
     }
   );
