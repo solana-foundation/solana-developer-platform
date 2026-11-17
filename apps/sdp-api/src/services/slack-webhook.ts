@@ -1,10 +1,10 @@
 /**
- * Posts to the operators' Slack channel (#sdp-requests) through an incoming webhook. A post copies
- * an operator email into the channel, built from the same `EmailContent`, so the two never drift.
- * Email stays the record: a post is best-effort, and a deployment without the webhook posts nothing.
+ * Posts to the operators' Slack channel (#sdp-requests) through an incoming webhook. Each message
+ * is one attachment: a colored bar down its left edge and Block Kit blocks inside. Email stays the
+ * record for mainnet access; a post is best-effort, and a deployment without the webhook posts
+ * nothing.
  */
 import { z } from "zod";
-import type { EmailContent } from "@/services/email-layout";
 import type { Env } from "@/types/env";
 
 /**
@@ -23,11 +23,17 @@ export function requestsSlackWebhookUrl(env: Env): string | null {
   return parsed.success ? parsed.data : null;
 }
 
-/** Slack's limits (Block Kit reference): header text, section text and one field's text. */
-const HEADER_MAX = 150;
-const SECTION_TEXT_MAX = 3000;
-const FIELD_TEXT_MAX = 2000;
-const FIELDS_PER_SECTION = 10;
+/** The bar colors, one per kind of post, so the channel reads at a glance. */
+export const SLACK_COLORS = {
+  /** A new mainnet access request, waiting on an operator. */
+  pending: "#F2A93B",
+  /** A request whose details an operator corrected. */
+  corrected: "#4A90E2",
+  /** A request an operator reset; the earlier post no longer stands. */
+  reset: "#E01E5A",
+  /** The daily growth summary, in Solana purple. */
+  daily: "#9945FF",
+} as const;
 
 /**
  * The three characters Slack reads as markup. Escaped, customer text can't write a mention
@@ -37,76 +43,67 @@ export function escapeSlackText(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function truncate(text: string, max: number): string {
+/** Cuts text to `max` characters with an ellipsis. Cut before escaping, so no entity is split. */
+export function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
 
-type SlackText = { type: "plain_text" | "mrkdwn"; text: string };
-type SlackBlock =
-  | { type: "header"; text: SlackText }
+/** Slack's limits (Block Kit reference) for a section's text and one field's text. */
+const SECTION_TEXT_MAX = 3000;
+const FIELD_TEXT_MAX = 2000;
+
+export type SlackText = { type: "plain_text" | "mrkdwn"; text: string };
+export type SlackButton = {
+  type: "button";
+  text: SlackText;
+  url: string;
+  style?: "primary" | "danger";
+};
+export type SlackBlock =
   | { type: "section"; text?: SlackText; fields?: SlackText[] }
-  | {
-      type: "actions";
-      elements: { type: "button"; text: SlackText; url: string; style: "primary" }[];
-    }
-  | { type: "context"; elements: SlackText[] };
+  | { type: "actions"; elements: SlackButton[] }
+  | { type: "context"; elements: SlackText[] }
+  | { type: "divider" };
 
 export interface SlackMessage {
   /** What notifications and clients without blocks show. */
   text: string;
-  blocks: SlackBlock[];
+  attachments: [{ color: string; blocks: SlackBlock[] }];
 }
 
-/**
- * The email as a Slack message: its heading, its summary, each detail as a labelled field, its
- * button and its note. Every value is escaped and cut to Slack's limits.
- */
-export function slackMessageFromEmail(content: EmailContent): SlackMessage {
-  const mrkdwn = (text: string, max: number): SlackText => ({
-    type: "mrkdwn",
-    text: truncate(text, max),
-  });
-  const fields = (content.details ?? []).map(({ label, value }) =>
-    mrkdwn(`*${escapeSlackText(label)}*\n${escapeSlackText(value)}`, FIELD_TEXT_MAX)
-  );
-  const fieldSections: SlackBlock[] = [];
-  for (let start = 0; start < fields.length; start += FIELDS_PER_SECTION) {
-    fieldSections.push({
-      type: "section",
-      fields: fields.slice(start, start + FIELDS_PER_SECTION),
-    });
-  }
+/** A mrkdwn section; `text` is already escaped and is cut to Slack's limit. */
+export function mrkdwnSection(text: string): SlackBlock {
+  return { type: "section", text: { type: "mrkdwn", text: truncate(text, SECTION_TEXT_MAX) } };
+}
+
+/** A row of mrkdwn fields, two to a line; each is already escaped and is cut to Slack's limit. */
+export function fieldsSection(fields: string[]): SlackBlock {
   return {
-    text: truncate(content.preheader, SECTION_TEXT_MAX),
-    blocks: [
-      { type: "header", text: { type: "plain_text", text: truncate(content.heading, HEADER_MAX) } },
-      { type: "section", text: mrkdwn(escapeSlackText(content.summary), SECTION_TEXT_MAX) },
-      ...fieldSections,
-      ...(content.action
-        ? [
-            {
-              type: "actions" as const,
-              elements: [
-                {
-                  type: "button" as const,
-                  text: { type: "plain_text" as const, text: content.action.label },
-                  url: content.action.url,
-                  style: "primary" as const,
-                },
-              ],
-            },
-          ]
-        : []),
-      ...(content.note
-        ? [
-            {
-              type: "context" as const,
-              elements: [mrkdwn(escapeSlackText(content.note), SECTION_TEXT_MAX)],
-            },
-          ]
-        : []),
-    ],
+    type: "section",
+    fields: fields.map((text) => ({ type: "mrkdwn", text: truncate(text, FIELD_TEXT_MAX) })),
   };
+}
+
+/** A small grey line; `text` is already escaped. */
+export function contextLine(text: string): SlackBlock {
+  return {
+    type: "context",
+    elements: [{ type: "mrkdwn", text: truncate(text, SECTION_TEXT_MAX) }],
+  };
+}
+
+/** A link button; the label is plain text, so it needs no escaping, and is cut to Slack's 75. */
+export function linkButton(label: string, url: string, style?: "primary"): SlackButton {
+  return {
+    type: "button",
+    text: { type: "plain_text", text: truncate(label, 75) },
+    url,
+    ...(style ? { style } : {}),
+  };
+}
+
+export function slackMessage(text: string, color: string, blocks: SlackBlock[]): SlackMessage {
+  return { text: truncate(text, SECTION_TEXT_MAX), attachments: [{ color, blocks }] };
 }
 
 export class SlackWebhookError extends Error {

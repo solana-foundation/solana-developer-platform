@@ -611,11 +611,11 @@ describe("Organization mainnet access (HOO-2427)", () => {
       const [posted, ...others] = slackPosts();
       expect(others).toHaveLength(0);
       for (const text of [
-        "Mainnet access requested",
-        `*Organization*\\n${TEST_ORG.name}`,
-        `*Organization ID*\\n${ORGANIZATION_ID}`,
-        `*Requested by*\\nAda Admin (${TEST_USER.email})`,
-        "*Jurisdiction*\\nSingapore (SG), self-declared",
+        "Mainnet access request",
+        `wants to go live on mainnet.`,
+        `*Requested by*\\nAda Admin\\n${TEST_USER.email}`,
+        "*Jurisdiction*\\n🇸🇬 Singapore\\n_self-declared_",
+        `\`${ORGANIZATION_ID}\``,
         "https://dashboard.clerk.com",
       ]) {
         expect(posted).toContain(text);
@@ -657,7 +657,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
         countryCode: "GB",
         ...operator,
       });
-      expect(slackPosts().at(-1)).toContain("*Corrected jurisdiction*\\nUnited Kingdom (GB)");
+      expect(slackPosts().at(-1)).toContain("~🇸🇬 Singapore~ → 🇬🇧 United Kingdom");
 
       env.SDP_OPERATOR_EMAIL = undefined;
       await expect(

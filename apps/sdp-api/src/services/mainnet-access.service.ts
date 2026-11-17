@@ -18,20 +18,21 @@ import { conflict } from "@/lib/errors";
 import { productionProjectsAllowed, sandboxProjectsAllowed } from "@/lib/production-entitlement";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { createSystemAuditService } from "@/services/audit.service";
-import type { EmailContent } from "@/services/email-layout";
 import {
   type MainnetAccessCorrectionEmail,
   type MainnetAccessRequestEmail,
-  mainnetAccessCorrectionEmailContent,
   mainnetAccessEmailConfig,
-  mainnetAccessRequestEmailContent,
   sendMainnetAccessCorrectionEmail,
   sendMainnetAccessRequestEmail,
 } from "@/services/mainnet-access-email";
 import {
+  mainnetAccessCorrectionSlackMessage,
+  mainnetAccessRequestSlackMessage,
+} from "@/services/mainnet-access-slack";
+import {
   postSlackMessage,
   requestsSlackWebhookUrl,
-  slackMessageFromEmail,
+  type SlackMessage,
 } from "@/services/slack-webhook";
 import type { Env } from "@/types/env";
 
@@ -143,24 +144,24 @@ export async function notifyMainnetAccessRequest(
     event: "sdp_api_mainnet_access_request_notified",
     organization_id: organizationId,
   });
-  await postToRequestsChannel(env, organizationId, mainnetAccessRequestEmailContent(request));
+  await postToRequestsChannel(env, organizationId, mainnetAccessRequestSlackMessage(request));
   return notified;
 }
 
 /**
- * Copies an operator email into #sdp-requests, once the email is sent (or, for a correction on a
+ * Posts an operator email's Slack counterpart to #sdp-requests, once the email is sent (or, for a correction on a
  * deployment without email, once the change is saved). Never throws: the email and the saved
  * request are the record, so a Slack failure is logged and nothing else.
  */
 async function postToRequestsChannel(
   env: Env,
   organizationId: string,
-  content: EmailContent
+  message: SlackMessage
 ): Promise<void> {
   const webhookUrl = requestsSlackWebhookUrl(env);
   if (!webhookUrl) return;
   try {
-    await postSlackMessage(webhookUrl, slackMessageFromEmail(content));
+    await postSlackMessage(webhookUrl, message);
   } catch (error) {
     logEvent("warn", {
       event: "sdp_api_mainnet_access_slack_post_failed",
@@ -296,7 +297,7 @@ export async function correctMainnetAccess(
   const posted = postToRequestsChannel(
     env,
     input.organizationId,
-    mainnetAccessCorrectionEmailContent(correctionEmail)
+    mainnetAccessCorrectionSlackMessage(correctionEmail)
   );
   if (!mainnetAccessEmailConfig(env)) {
     await posted;

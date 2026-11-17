@@ -6,6 +6,7 @@ import {
   previousUtcDay,
   readDailyGrowth,
 } from "@/services/daily-growth-summary";
+import { SLACK_COLORS } from "@/services/slack-webhook";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -83,31 +84,65 @@ describe("daily growth summary", () => {
     expect(previousUtcDay(new Date("2026-03-01T00:30:00Z"))).toBe("2026-02-28");
   });
 
-  it("reads the day's organizations with their admin, and its signups, leaving erased ones out", async () => {
+  it("reads the day's organizations and signups, each signup's organization, and the totals around them", async () => {
+    await seedUser("usr_grow_li", "li@acme.example", "2026-11-16 11:00:00");
+    await getDb(env)
+      .prepare(
+        "INSERT INTO organization_members (id, organization_id, user_id, role, status, created_at) VALUES ('mem_grow_li', 'org_grow_acme', 'usr_grow_li', 'admin', 'active', '2999-01-01 00:00:00')"
+      )
+      .run();
+    await getDb(env)
+      .prepare(
+        `UPDATE organizations SET mainnet_requested_at = ?, mainnet_requested_by_user_id = ?,
+                jurisdiction_country_code = 'SG', terms_accepted_version = '2026-11-03'
+          WHERE id = ?`
+      )
+      .bind("2026-11-12T08:00:00.000Z", "usr_grow_old", "org_grow_old")
+      .run();
+
     const growth = await readDailyGrowth(env, DAY);
     expect(growth.organizations).toEqual([
       { id: "org_grow_acme", name: "Acme <!channel>", adminEmail: "ada@acme.example" },
     ]);
     expect(growth.signups).toEqual([
-      { email: "ada@acme.example", name: "Ada Lovelace" },
-      { email: "bob@other.example", name: null },
+      {
+        email: "ada@acme.example",
+        name: "Ada Lovelace",
+        organization: { name: "Acme <!channel>", relation: "created" },
+      },
+      {
+        email: "li@acme.example",
+        name: null,
+        organization: { name: "Acme <!channel>", relation: "joined" },
+      },
+      { email: "bob@other.example", name: null, organization: null },
     ]);
+    expect(growth.previousDay).toEqual({ organizations: 1, signups: 1 });
+    expect(growth.lastSevenDays).toEqual({ organizations: 2, signups: 4, mainnetRequests: 1 });
   });
 
-  it("escapes names and caps each list", () => {
+  it("escapes names, caps each list, and shows the change from the day before", () => {
     const message = dailyGrowthMessage({
       day: DAY,
       organizations: [{ id: "org_1", name: "Acme <!channel>", adminEmail: null }],
-      signups: Array.from({ length: 30 }, (_, index) => ({
+      signups: Array.from({ length: 20 }, (_, index) => ({
         email: `u${index}@x.example`,
         name: null,
+        organization: null,
       })),
+      previousDay: { organizations: 3, signups: 20 },
+      lastSevenDays: { organizations: 9, signups: 41, mainnetRequests: 1 },
     });
+    expect(message.attachments[0].color).toBe(SLACK_COLORS.daily);
     const body = JSON.stringify(message);
     expect(body).not.toContain("<!channel>");
-    expect(body).toContain("Acme &lt;!channel&gt;");
-    expect(body).toContain("…and 5 more");
-    expect(message.text).toBe("SDP daily: 1 new organization, 30 signups on Mon, 16 Nov 2026");
+    expect(body).toContain("*Acme &lt;!channel&gt;*");
+    expect(body).toContain("_…and 5 more_");
+    expect(body).toContain("*1*  ↓ 2 vs Sun");
+    expect(body).toContain("*20*  same as Sun");
+    expect(body).toContain("*41* signups · *1* mainnet request ·");
+    expect(body).toContain("u0@x.example · _no organization yet_");
+    expect(message.text).toBe("SDP daily: 1 new organization, 20 signups on Mon 16 Nov");
   });
 
   it("posts the day once, however many slots fire", async () => {
@@ -115,8 +150,8 @@ describe("daily growth summary", () => {
     await expect(postDailyGrowthSummary(env, NOW)).resolves.toBe(false);
     const [posted, ...others] = posts();
     expect(others).toHaveLength(0);
-    expect(posted).toContain("1 new organization, 2 signups");
-    expect(posted).toContain("Ada Lovelace · ada@acme.example");
+    expect(posted).toContain("SDP daily: 1 new organization, 2 signups on Mon 16 Nov");
+    expect(posted).toContain("Ada Lovelace · ada@acme.example · _created Acme &lt;!channel&gt;_");
     expect(posted).not.toContain("old@acme.example");
   });
 
