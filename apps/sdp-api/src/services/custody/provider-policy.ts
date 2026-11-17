@@ -88,10 +88,6 @@ async function inspectBatch(
       // Presence of a native Transfer rule. RAW signing is not proven by this check.
       if ("error" in policy) return policy.error;
       const vaultId = denormalizeFireblocksWalletId(target.wallet_id);
-      const native = inspectFireblocksPolicy(policy.value, vaultId, [credential.assetId]);
-      if (native.status !== "missing") return native;
-      // No rule for this vault at all: the token catalogue cannot change that answer.
-      if (inspectFireblocksPolicy(policy.value, vaultId, null).status === "missing") return native;
       const mint = wellKnownMint("USDC", currentClusterScope().cluster);
       if (!mint) throw new Error("No canonical USDC mint for this cluster");
       const usdc = await resolveFireblocksTransferAsset(
@@ -100,6 +96,9 @@ async function inspectBatch(
         credential.assetId,
         mint
       );
+      // The native and USDC rules must be judged together: an allow rule without
+      // approvers on either asset means the credential can move funds alone, and a
+      // gated rule on one asset must not hide an ungated rule on the other.
       return inspectFireblocksPolicy(policy.value, vaultId, [credential.assetId, usdc.id]);
     } catch {
       // Do not log provider bodies, credentials, secrets, or policy contents.
@@ -110,6 +109,7 @@ async function inspectBatch(
   // a slow provider from holding the whole batch open for minutes.
   const settled = await mapSettledWithConcurrency(targets, PROVIDER_READ_CONCURRENCY, inspect);
   return settled.map((outcome, index) => ({
+    // SAFETY: mapSettledWithConcurrency returns one settled result per target in input order.
     target: targets[index] as PolicyCheckTarget,
     result:
       outcome.status === "fulfilled"

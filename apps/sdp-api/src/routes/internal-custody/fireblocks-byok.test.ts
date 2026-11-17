@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { verify } from "node:crypto";
 import { runInClusterScope } from "@sdp/rpc/scope";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { type Context, Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -77,14 +78,26 @@ function request(
   );
 }
 
+/** The token-catalogue entry resolveFireblocksTransferAsset matches for the sandbox USDC mint. */
+function usdcCatalogueEntry() {
+  const mint = wellKnownMint("USDC", "devnet");
+  if (!mint) throw new Error("The devnet USDC mint is missing from the well-known tokens");
+  return {
+    id: "USDC_TEST",
+    type: "SOL_ASSET",
+    nativeAsset: "SOL_TEST",
+    issuerAddress: mint,
+    decimals: 6,
+  };
+}
+
 function providerResponse(address = ADDRESS) {
-  return vi
-    .spyOn(globalThis, "fetch")
-    .mockImplementation(async (url) =>
-      String(url).endsWith("/v1/tap/active_policy")
-        ? Response.json({ policy: { rules: [] } })
-        : Response.json({ addresses: [{ address }] })
-    );
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/v1/tap/active_policy") return Response.json({ policy: { rules: [] } });
+    if (path === "/v1/supported_assets") return Response.json([usdcCatalogueEntry()]);
+    return Response.json({ addresses: [{ address }] });
+  });
 }
 
 async function connect(projectId = PROJECT_ID) {
@@ -186,7 +199,7 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
     const connected = await connect();
     // The observation follows setup in the background; the periodic queue does the same work.
     await inSandboxScope(() => checkDueProviderPolicies(testEnv));
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(3);
     expect(fetch).toHaveBeenCalledWith(
       `${testEnv.FIREBLOCKS_API_BASE_URL}/v1/vault/accounts/0/SOL_TEST/addresses_paginated`,
       expect.objectContaining({
@@ -228,7 +241,7 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
       {}
     );
     expect(replay.status).toBe(200);
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(3);
     const listed = await request("/connections?provider=fireblocks");
     expect(listed.status).toBe(200);
     const serialized = JSON.stringify(await listed.json());
@@ -240,6 +253,74 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
       [connected.connectionId]
     );
     expect(wallet).toEqual({ wallet_id: "fb_0", public_key: ADDRESS });
+  });
+
+  it("reports missing coverage when the USDC rule lets the credential move funds alone", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/v1/tap/active_policy")
+        return Response.json({
+          policy: {
+            rules: [
+              {
+                type: "TRANSFER",
+                asset: "SOL_TEST",
+                src: { ids: [["*", "VAULT", "*"]] },
+                action: "2-TIER",
+              },
+              {
+                type: "TRANSFER",
+                asset: "USDC_TEST",
+                src: { ids: [["*", "VAULT", "*"]] },
+                action: "ALLOW",
+              },
+            ],
+          },
+        });
+      if (path === "/v1/supported_assets") return Response.json([usdcCatalogueEntry()]);
+      return Response.json({ addresses: [{ address: ADDRESS }] });
+    });
+    const connected = await connect();
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
+    const detail = await request(`/connections/${connected.connectionId}`);
+    expect((await detail.json()).data.connection.providerPolicy).toMatchObject({
+      status: "missing",
+      reason: "no_policy",
+    });
+  });
+
+  it("detects a gated USDC rule despite an unrelated asset's allow rule", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/v1/tap/active_policy")
+        return Response.json({
+          policy: {
+            rules: [
+              {
+                type: "TRANSFER",
+                asset: "ETH",
+                src: { ids: [["*", "VAULT", "*"]] },
+                action: "ALLOW",
+              },
+              {
+                type: "TRANSFER",
+                asset: "USDC_TEST",
+                src: { ids: [["*", "VAULT", "*"]] },
+                action: "2-TIER",
+              },
+            ],
+          },
+        });
+      if (path === "/v1/supported_assets") return Response.json([usdcCatalogueEntry()]);
+      return Response.json({ addresses: [{ address: ADDRESS }] });
+    });
+    const connected = await connect();
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
+    const detail = await request(`/connections/${connected.connectionId}`);
+    expect((await detail.json()).data.connection.providerPolicy).toMatchObject({
+      status: "present",
+      reason: "policy_detected",
+    });
   });
 
   it("pins production to SOL and rejects browser URL or asset overrides", async () => {
@@ -726,6 +807,7 @@ describe("Fireblocks vault discovery and selection", () => {
       expect(init?.method).toBe("GET");
       const path = new URL(String(input)).pathname;
       if (path === "/v1/tap/active_policy") return Response.json({ policy: { rules: [] } });
+      if (path === "/v1/supported_assets") return Response.json([usdcCatalogueEntry()]);
       if (path.endsWith("/addresses_paginated"))
         return Response.json({
           addresses: [{ address: path.includes("/7/") ? OTHER_ADDRESS : ADDRESS }],
