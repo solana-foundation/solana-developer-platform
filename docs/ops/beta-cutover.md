@@ -16,7 +16,7 @@ Nothing changes until the switches below are set, so the code ships ahead of the
 | `SDP_ALLOW_PRODUCTION_PROJECTS` | Beta API env                               | `"false"` (already)  | Beta serves the sandbox only and refuses mainnet requests.                                                                                                                                         |
 | `sandbox-on-beta`               | Production `sdp-web` Vercel project        | on                   | "Try the sandbox" links to beta on the homepage, the sign-in page, the workspace switcher and the mainnet request page.                                                                            |
 | `beta-label`                    | Beta `sdp-web` Vercel project              | on                   | A Beta badge beside the product name on the homepage and the sign-in, sign-up, terms and mainnet request pages.                                                                                    |
-| `homepage-open-signup`          | Beta `sdp-web` Vercel project              | on                   | The beta homepage offers "Create account" instead of "Join the waitlist". Off by default on a Vercel production deployment, which beta is; production already has it on.                         |
+| `homepage-open-signup`          | Beta `sdp-web` Vercel project              | on                   | The beta homepage offers "Create account" instead of "Join the waitlist". Off by default on a Vercel production deployment, which beta is; production already has it on.                           |
 
 Unset means allowed for both API switches. Any value other than `true` or `false` fails at boot,
 and so does setting both to `false`.
